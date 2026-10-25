@@ -11087,6 +11087,14 @@ requirement names is not this profile's: **not asked**, `not_a_target`";
 and the target-alone rule only "with no revision of the interface in hand
 that declares the resource".
 
+**Status at desired.v1 0.6:** resolved: a role whose author's revision
+in hand, named or held, declares no desired resource the requirement
+names is not asked, `not_a_target`. The target alone is read only with
+no revision in hand at all. zk2py read the named revision so already.
+For the held one it now does too, where it read the requirement, as the
+reference then did. `slices.json`'s three cases pass. Live, both tools
+answer the held shape `not_a_target`, their rows alike.
+
 ### F-218 · contradiction · desired.v1 0.5 §2.17: a requirement naming two desired resources
 
 > §2.17 (0.5): "The kind token and the target parameters are the author's
@@ -11124,6 +11132,17 @@ target's contract, and gives no slice", or "with the author's contract
 in hand, each desired resource the requirement names is a candidate, as
 from the target alone, the report's key choosing".
 
+**Status at desired.v1 0.6:** resolved, by the first of the two
+wordings proposed: one document type per role. A requirement naming two
+or more desired resources, as the author's declaration shows, is an
+invalid binding, `two_documents`, after `required_unbound` and alone. A
+target MUST refuse such a role at its start. From the target alone every
+template stays a candidate. zk2py took the revision's first. Its `bind`
+and `take_slice` now read `two_documents`, and the four `bindings.json`
+cases and four `slices.json` ones pass. Live, both tools answer
+`no_report`, `two_documents` beside, with the revision in hand. Both
+targets refuse their start (F-224 says what evidence that MUST has).
+
 ### F-219 · minor · the reference tool's help: `zenctl desired --help` says 0.4's rules
 
 > `zenctl desired --help` (built from `main` after PR #859): "The slice
@@ -11143,6 +11162,11 @@ says 0.4's rules:
 **zk2py:** nothing to do; its own driver documents neither.
 
 **Wording that would remove the guess:** the help in 0.5's words.
+
+**Status at desired.v1 0.6:** resolved: `zenctl desired --help` says 0.5's
+rules (every template under either kind token from the target alone, a
+version dated at its slice GET's answer) and 0.6's (`not_a_target`,
+`two_documents`).
 
 **Counts at desired.v1 0.5:** 219 entries. Open:
 - F-214 to F-216, against redundancy.v1 0.2, F-214 and F-216 minor
@@ -11333,5 +11357,86 @@ the answer, the two riding two priorities".
 - F-217 to F-219, against desired.v1 0.5, F-219 minor (answered on #840,
   for its text 0.6);
 - F-220 to F-223, F-222 and F-223 minor.
+
+Every other entry is resolved.
+
+## At desired.v1 0.6 (#609)
+
+Round 61 read `desired.v1` text 0.6 cold, end to end, from PR #864's
+head, and checked each MUST against the evidence it names. zk2py
+implemented the two changes from §2.1, §2.3 and §2.17 before running the
+fixtures:
+- `bind`'s `also`, so that two or more desired resources of the
+  author's declaration are `two_documents`, after `required_unbound` and
+  alone;
+- `take_slice`'s `not_a_target`, for a revision in hand, named or held,
+  that declares no desired resource the requirement names.
+
+zk2py's target now refuses a role on two documents at its start, and its
+driver takes contract files in place of the scenarios', as the owner
+example does.
+
+**Round 59's findings at 0.6:** F-217 to F-219 are all resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 2970 of 2970.** `desired` passes 400.
+`bindings.json`'s four new cases, with the input `also`, and
+`slices.json`'s seven passed the first time they ran.
+
+**Live:** every check passes, against `owner-df` and `zenctl-df`.
+- **§9:** 29 of 29 in each of the eight runs.
+- **The shapes:** 69 of 69. Three expectations moved to 0.6's answers,
+  and the two rows agree member by member on all twenty-three. The
+  reference's row now says `unreadable` of two reports that differ, as
+  zk2py's did.
+- **`two-documents`** (zk2py's own, §2.1): 2 of 2 in each pairing. Both
+  targets refuse their start on `desired-two`'s contracts, with exit 1
+  and no instance token, and both start with only the worker given.
+- **§1 to §8, §10, the edges and the re-mint:** zk2py's parties, 54 of 54
+  after the target's change.
+
+**Where the two tools disagree:** nowhere: not in an answer, not in a
+row, on any shape or step. `check conform`'s `desired-binding` finds a
+two-documents role.
+
+**The text, read end to end.** Every MUST names evidence. All but one
+can be tested by it (F-224).
+
+### F-224 · minor · desired.v1 0.6 §2.1: the refusal at a target's start has no evidence of its own
+
+> §2.1 (0.6): "A target MUST refuse such a role at its start, with
+> nothing of it declared, as core §8.2 step 2 refuses an invalid
+> declaration. `[F: bindings.json]`"
+
+`bindings.json` states the reading, `two_documents`. It cannot state the
+act: a target that reads its binding right and starts all the same, or
+starts with the role left unbound, passes every case. No scenario starts
+a target on two documents. The text's scenarios did not change at 0.6.
+Core §8.2 step 2's refusals are each observed by a scenario
+(`presence.md` §2, `redundancy.v1` §11), by no instance token appearing.
+
+The wording also leaves a choice. "Refuse such a role" could mean that
+the target starts without that role. "As core §8.2 step 2 refuses" means
+that the start is refused. Both targets refuse the start:
+- zk2py's says `not started: role "task": its binding is invalid
+  (two_documents): …`;
+- the owner example says `role "task": its binding is invalid
+  (two_documents) (desired.v1 §2.3)`, without the `not started:` its other
+  refusals carry.
+
+zk2py's `two-documents` section observes both.
+
+**zk2py:** refuses the start, nothing declared.
+
+**Wording that would remove the guess:** "A target MUST refuse to start
+(core §8.2 step 2): no instance token appears. `[Sc: §n]`", with a
+scenario step: the target given a role on two desired resources of its
+author's declaration, and no instance token of it within 5 s against a
+control.
+
+**Counts at desired.v1 0.6:** 224 entries. Open:
+- F-220 to F-223, against redundancy.v1 0.3 and its tools, F-222 and
+  F-223 minor;
+- F-224, minor.
 
 Every other entry is resolved.

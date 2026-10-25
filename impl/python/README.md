@@ -108,18 +108,22 @@ config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
-desired       389 passed     0 failed
+desired       400 passed     0 failed
 redundancy    180 passed     0 failed
-total        2959 passed     0 failed
+total        2970 passed     0 failed
 ```
 
 The figures are against `core.md` 0.40, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
-`telemetry.v1` 0.5, `desired.v1` 0.5 and `redundancy.v1` 0.3.
+`telemetry.v1` 0.5, `desired.v1` 0.6 and `redundancy.v1` 0.3.
 `redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
 `poll_read` passed the first time they ran. Its round 58 reading, a first
 poll as a baseline and a withdrawal only with no holder left, would have
 failed five of them. The seven readings of that reading went with it.
+`desired.v1` 0.6 added four `bindings.json` cases, with the input `also`,
+and seven `slices.json` cases (400). zk2py's `bind` and `take_slice`,
+changed from §2.1, §2.3 and §2.17 first, passed all eleven the first time
+they ran.
 `desired.v1` 0.5 added `slices.json`, 22 cases (389), which zk2py's
 `take_slice` and `which_report`, written from §2.10 and §2.17 before the
 file was run, passed the first time they ran.
@@ -310,8 +314,13 @@ fixtures:
   0.5").
 - F-217 to F-219 were found reading 0.5 cold, end to end, and asking both
   tools about shapes it does not state, in round 59. F-217 and F-218 are
-  §2.17's; F-219, minor, is against the reference tool's help. All three
-  are open. On every shape the two tools agree.
+  §2.17's; F-219, minor, is against the reference tool's help. On every
+  shape the two tools agree.
+- `desired.v1` 0.6 resolved all three (`SPEC-FINDINGS.md`, "At desired.v1
+  0.6").
+- F-224 was found reading 0.6 cold, end to end, every MUST against its
+  evidence, in round 61. §2.1's refusal at a target's start has only a
+  fixture of the binding behind it. It is open, and minor.
 - F-199 to F-209 were found against `redundancy.v1` 0.1, core 0.39 and
   `hostid.v1` 0.6, read cold and run live, zk2py against itself, in round
   56 (`SPEC-FINDINGS.md`, "At redundancy.v1 0.1 and core 0.39"). Five
@@ -1378,7 +1387,7 @@ confirmed the tool after TG and TH.
   - **The example's raw** takes an attachment's JSON only. §7's zero-byte
     and `x` attachments therefore run against zk2py's owner alone.
 
-## desired.v1 (profile text 0.5, core 0.39)
+## desired.v1 (profile text 0.6, core 0.39)
 
 `desired.v1` is the eighth profile (`spec/profiles/desired/`), and the
 second whose first point is a standard schema, `desired.v1.json`, typing a
@@ -1467,6 +1476,21 @@ round 52's twenty findings, with `config.v1` 0.4, in round 53.
     or no slice;
   - `slices.json`'s 22 cases pass on them, and the tool reads through
     them. A version's age on a trusted clock is taken at its GET's answer.
+- **0.6 (round 61):**
+  - `bind` takes `also`, the other desired resources the requirement
+    names. Any is `two_documents`, after `required_unbound` and the kill
+    switch, and alone (F-218);
+  - `take_slice` reads every desired resource the revision in hand names.
+    None is no target's role, `not_a_target`, whether the revision is
+    named or held. Two or more is `two_documents`, no slice. The target
+    alone is read only with no revision in hand (F-217). `find_report`
+    answers `not_a_target` for such a role;
+  - the target (`desired_live.Target`) reads its role's requirement
+    against its author's declaration at its start. A role naming two or
+    more desired resources refuses the start, `not started: … two_documents`,
+    nothing declared (§2.1). Its driver takes a `tasking.v1` or
+    `worker.v1` file in place of the scenarios', as the owner example
+    does.
 
 **The live half (round 55).**
 
@@ -1547,7 +1571,10 @@ zk2py's unless a path to the owner example is given.
   - `zk2py_watcher.v1`, a role on no desired resource (F-217);
     `zk2py_tasking2.v1` and `zk2py_worker4.v1`, a role naming two desired
     resources (F-218); and `zk2py_workerall.v1`, a role naming every
-    resource.
+    resource;
+  - `interop/desired-two/` (0.6): `tasking.v1` with two desired
+    resources, and `worker.v1` whose role names both, which a target
+    refuses at its start (F-218).
 
 Results at 0.4 (round 57): every check passes in all eight runs. The
 runs are four pairs of parties, each with targets on a watch session and
@@ -1603,6 +1630,27 @@ does not state included. Their rows differ in one member, on the two
 shapes where two reports claim the slice and differ. There zenctl's row
 carries no report, and zk2py's says `unreadable`, as §2.10 does. Both
 answer `report_invalid`.
+
+Results at 0.6 (round 61): the owner example and zenctl built from PR
+#864's head. Every check passes:
+- §9, 29 of 29 in each of the eight runs;
+- the shapes, 69 of 69. 0.6 moves three expectations, to `not_a_target`
+  for a held revision's plain resource and to `two_documents` twice (no
+  slice, `no_report`). The two rows now agree member by member on every
+  shape, the reference's row saying `unreadable` of two reports that
+  differ;
+- `two-documents` (zk2py's own, §2.1), 2 of 2 in each of the four
+  pairings. Each target, zk2py's and the owner example, given
+  `desired-two`'s contracts, refuses its start: exit 1, no instance
+  token, `two_documents` said. Each starts with only the worker given, its
+  author's declaration holding one of the two;
+- §1 to §8, §10, the edges and the re-mint, zk2py's parties, 54 of 54
+  after the target's change.
+
+Asked beyond the shapes, `zenctl check conform`'s `desired-binding` finds
+a two-documents role, `two_documents`. The doctor, which holds no
+contract offline, reads it unobservable over the shapes' test sessions,
+which serve no bundle.
 
 ## redundancy.v1 (profile text 0.3, core 0.40)
 
