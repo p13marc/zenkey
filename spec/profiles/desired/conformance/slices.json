@@ -1646,6 +1646,139 @@
         },
         "target": "lab/worker"
       }
+    },
+    {
+      "expect": {
+        "binding": [
+          "two_documents"
+        ],
+        "declaration": [],
+        "from": null,
+        "report": {
+          "found": "no_slice"
+        },
+        "slice": []
+      },
+      "note": "a requirement naming no resource names every one (core §3.1), as a manifest's role does: on the named revision's two desired resources, two_documents, no slice (0.7)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "plans/{system}/{service}"
+              },
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": null
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "a requirement naming no resource, on a revision with one desired resource beside a plain one: the one is the slice (core §3.1; 0.7)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              },
+              {
+                "annotations": {},
+                "kind": "state",
+                "params": {},
+                "template": "status"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": null
+        },
+        "target": "lab/worker"
+      }
     }
   ],
   "description": "desired.v1 §2.10, §2.17 (0.5): a tool's reading of one target's role before §2.17 answers -> the slice and which reply is the report. reading.target is the target's address; reading.iface the required interface, the author's; reading.requirement the target's requirement as its descriptor lists it and its contract declares it: resources, the templates it names (null for every resource), bindings, params and optional, as bindings.json gives them. reading.author is the author's contract as the tool holds it: named, the revision the author's descriptor names, in hand (its resources, each as declarations.json gives one, explicit true for @state), or null; held, the revisions of the interface held offline (core §8.5), each its resources. Its slice is §2.3's: with named, from named's desired resources the requirement names: none, and the role is not a target (0.6, F-217); two or more, two_documents (§2.3, 0.6, F-218), no slice; one, by its declaration (§2.2) and the binding (from author_contract). Else from the held revisions: the first declaring a desired resource the requirement names, read as named's (offline_contract); with revisions held and none declaring one, not a target (0.6, F-217). Else, with no revision in hand, from the requirement alone (requirement): each template it names, in its order, each parameter bound as params say, under state then @state, every one a candidate. reading.replies are the replies of every report resource of the target to S4's GET: each its key and its payload's text, read as reports.json reads one. expect.slice is the candidates, in that order, one when from a contract, none when the binding or the declaration is invalid; expect.from the source, null with no slice; expect.binding and expect.declaration §2.3's problems and §2.2's reasons, in order, empty when none; expect.report: {found: one, claims}, the readable reply whose key is a candidate, claims that key (two such that are equal are one); {found: unreadable, why: two_differ}, two readable ones claiming candidates and differing (0.5, F-212); {found: unreadable, why: unreadable_reply}, none readable claiming one and a reply that does not read, which may be the slice's (0.4); {found: none}, none (no_report); {found: no_slice}, no slice to find one of; {found: not_a_target} (0.6, F-217), a revision in hand declaring no desired resource the requirement names, with no slice and no problem. A report that reads with a §2.10 finding is found, and §2.17 step 3 then answers report_invalid."

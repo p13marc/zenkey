@@ -4,6 +4,54 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-25: round 61 (#840, DF; #609)
+
+zk2py read 0.6 cold in round 61, at PR #864's head, and found every
+earlier finding resolved. It filed one, F-224 (minor), which #840's
+coordinator accepted. It is answered here, beside review-bot's points on
+PR #864, which settle what a requirement naming no resource names. 0.6
+stays as the round read it.
+
+The evidence, counted from the files: `conformance/declarations.json` (43
+cases), `conformance/bindings.json` (29), `conformance/order.json` (88),
+`conformance/reports.json` (80), `conformance/conclusions.json` (35),
+`conformance/schema.json` (3) and `conformance/slices.json` (31), 309 in
+all; and `scenarios.md`'s eleven sections, §11 new. No case that existed
+changes. `slices.json` gains two cases.
+
+**Answered.**
+- **F-224, the target's refusal had no evidence of its own** (§2.1). 0.6's
+  "A target MUST refuse such a role at its start" cited `bindings.json`,
+  which states the reading, `two_documents`, not the act: a target that
+  reads the binding right and starts anyway passed every case, and
+  "refuse such a role" could be read as "start without it". Now, in
+  zk2py's words: a target given a role on two or more desired resources of
+  its author's declaration MUST refuse to start, as core §8.2 step 2
+  refuses an invalid declaration: nothing is declared and no instance
+  token of it appears. `[Sc: §11]`: the target given such a role shows no
+  instance token within 5 s, by liveliness at S, against a control whose
+  requirement names one of the two, which starts. The reference refuses
+  the start, not the role alone: a builder whose role was refused refuses
+  `start()` too, `not started: …`, as the owner example says on exit
+  (`zenkey/tests/profile_desired.rs`'s `s11_…`, and the owner example's
+  test).
+- **What a requirement naming no resource names** (§2.1, review of PR
+  #864). Core §3.1's default is every resource, and a role a component's
+  manifest declares has no `resources` a tool can read, its descriptor
+  naming no declaring contract (core §3.3). Both name every resource of
+  the interface, so on an author with two desired resources either is
+  `two_documents`; with one desired resource beside plain ones, the one is
+  the slice. The reference's runtime reads a manifest's role so too, and a
+  lookup that fails is an error, never every resource. `[F: slices.json]`:
+  a requirement naming none on two desired resources, and on one beside a
+  plain one.
+
+**Deliberately not changed.**
+- **§2.3's order.** `two_documents` left unbound reads as the kill switch
+  (optional) or `required_unbound` (required), as `bindings.json`'s two
+  cases of 0.6 already state.
+- **§2.17 and §5**, their tokens, and every fixture that existed.
+
 ## 0.6 — 2026-10-25: round 59 (#840, DF; #609)
 
 zk2py read 0.5 cold in round 59 (PR #861): every case passed, and the two

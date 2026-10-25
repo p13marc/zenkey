@@ -2,7 +2,7 @@
 
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
-a setup, steps, and expected observations. §1 to §8 and §10 are the
+a setup, steps, and expected observations. §1 to §8, §10 and §11 are the
 runtime's: the reference runs them as tests of `zenkey`
 (`zenkey/tests/profile_desired.rs`, one test per section, named after it;
 #840, DC). §9 is a tool's: the reference tool runs it as a test of zenctl
@@ -114,9 +114,10 @@ the doctor's `desired-*` checks beside it; #840, DD).
 - **Documents.** `v<n>` is a `Task` with `revision` *n*, `mode` `run` and
   `rate_hz` 10 unless a step says otherwise, put by the author on `D`;
   `s<n>` is the stamp its put carries.
-- **S** subscribes to `zk2/lab/**` before anything starts, and records
-  each delivery's arrival on its monotonic clock, its key, its kind, its
-  payload and its stamp. Where a section cuts a link, S is a client of R1,
+- **S** subscribes to `zk2/lab/**` before anything starts, and to the
+  tokens under `zk2/lab/*/@zk/**` by liveliness (core §1.3: `**` never
+  crosses `@zk`; 0.7, F-224), and records each delivery's arrival on its
+  monotonic clock, its key, its kind, its payload and its stamp. Where a section cuts a link, S is a client of R1,
   and **S2**, a client of R2, subscribes to `Rp` and `Run` before anything
   starts and records as S does (0.2): it sees the target's side while the
   link is cut, which S cannot, and zenoh replays nothing at the heal.
@@ -436,3 +437,47 @@ converged on it, and the archive recorded it.
 4. The author's instance token appears on R2; the target seeds, the
    author answers v2 under `s2`, and the target acts on it: its report is
    converged on v2, without `last_known`. X's withdrawal moves nothing.
+
+## §11 A role on two documents refuses the start (§2.1, §2.3, 0.7)
+
+**Setup.** One router, R1, and no author: the refusal reads the author's
+declaration, which the target holds, the contract it is compiled against
+(core R4). Two copies of the contracts (F-224):
+- **tasking.v1, two documents**: `tasking.v1.toml` with a second desired
+  resource, declared as the first is:
+
+  ```toml
+  [resources."plans/{system}/{service}"]
+  kind        = "state"
+  type        = "json:Task"
+  params      = { system = "string", service = "string" }
+  cardinality = 16
+  annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }
+  ```
+
+- **worker.v1, both**: `worker.v1.toml` whose `[requires.task]` names
+  both, `resources = ["tasks/{system}/{service}",
+  "plans/{system}/{service}"]`.
+
+**Steps.**
+1. The target, `lab/worker`, implements worker.v1, both, its role `task`
+   bound as "The target" says, against tasking.v1, two documents, and
+   starts. The test waits 5 s.
+2. The control: the target implements the scenarios' worker.v1, its
+   requirement naming `tasks/{system}/{service}` alone, against
+   tasking.v1, two documents, and starts.
+
+**Expected.**
+1. The role is `two_documents` (§2.3), and the target refuses to start,
+   as core §8.2 step 2 refuses an invalid declaration: nothing of it is
+   declared. S sees no instance token of `lab/worker` within the 5 s, and
+   no report on `Rp`. The reference's start returns the refusal, `not
+   started: role "task": its binding is invalid (two_documents)
+   (desired.v1 §2.3)`, and the owner example given the two copies stops
+   with it, exit 1. A target that starts without the role fails this
+   step: S sees its instance token.
+2. S sees the target's instance token: a requirement naming one of the
+   author's two desired resources is a role on one document type, and
+   the target starts (§2.1). Its report on `Rp` is
+   `{key: zk2/lab/author/tasking.v1/state/tasks/lab/worker, source:
+   baseline}` (§2.10).
