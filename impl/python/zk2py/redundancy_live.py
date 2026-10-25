@@ -227,7 +227,8 @@ _OP = "@op"
 
 def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str, Any],
           timeout: float = live.GET_TIMEOUT_S,
-          others: Iterable[dict[str, Any]] = ()) -> tuple[dict[str, list[str]], dict[str, str]]:
+          others: dict[str, dict[str, Any]] | Iterable[dict[str, Any]] = (),
+          fingerprint: str | None = None) -> tuple[dict[str, list[str]], dict[str, str]]:
     """§2.15 (0.3), "A standby's exposure, probed" (a MAY): "a GET, target All
     and consolidation None, over a wildcard of each of the interface's
     operations whose fan-out is forbidden: every operation queryable at the
@@ -237,12 +238,16 @@ def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str,
     template-less operation's wildcard (``append$*``) reaches every
     operation whose name begins with its own (F-221). ``others`` are the
     interface's other revisions in hand, whose allowed operations other
-    candidates may serve, so a probe reaching one is not made either.
+    candidates may serve, so a probe reaching one is not made either; by
+    fingerprint, so that the reason names the revision (scenarios §12 step
+    9, 0.5: "naming appendall and the revision held offline").
     Returns, by the probe's key, the zid of every replier zenoh attributes a
     reply to; and, by operation, why it was not probed, a probe that failed
     included."""
     ops = [r for r in canonical.get("resources") or [] if r.get("kind") == "operation"]
-    allowed = [(_op_key(address, iface, r), r) for c in (canonical, *others)
+    revs = [(fingerprint, canonical)] + (list(others.items()) if isinstance(others, dict)
+                                         else [(None, c) for c in others])
+    allowed = [(_op_key(address, iface, r), r, fp) for fp, c in revs
                for r in c.get("resources") or [] if r.get("kind") == "operation" and r.get("fanout") == "allowed"]
     out: dict[str, list[str]] = {}
     skipped: dict[str, str] = {}
@@ -252,7 +257,12 @@ def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str,
             skipped[name] = "fanout = \"allowed\": a call over its wildcard would run it"
             continue
         key = _probe_key(address, iface, r)
-        reach = [f"{_OP}/{a['template']}" for k, a in allowed if zenoh.KeyExpr(key).intersects(zenoh.KeyExpr(k))]
+        reach = []
+        for k, a, fp in allowed:
+            if zenoh.KeyExpr(key).intersects(zenoh.KeyExpr(k)):
+                what = f"{_OP}/{a['template']}" + (f" (revision {fp})" if fp else "")
+                if what not in reach:
+                    reach.append(what)
         if reach:
             skipped[name] = f"its probe {key} would reach {', '.join(reach)}, whose fan-out is allowed, and run it"
             continue
@@ -311,6 +321,18 @@ class ToolReading:
     #: by operation, why the probe left it out (F-221)
     not_probed: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def exposure(self) -> str | None:
+        """The standbys' exposure, beside §5's answers (§2.15): ``finding``
+        on a reply from one, ``unobservable`` when no operation was probed
+        (0.4: "a case whose only probes were not made is unobservable, never
+        a pass"), ``none`` when probed and nothing found; None unprobed."""
+        if self.probed is None:
+            return None
+        if self.findings:
+            return "finding"
+        return "none" if self.probed else "unobservable"
+
 
 def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float = 2.0,
               across_face: bool = False, contracts: Iterable[Any] = (), with_probe: bool = False) -> ToolReading:
@@ -355,8 +377,8 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
             revisions[fp] = canonical
         guards = {**revisions, **held}
         for fp, canonical in revisions.items():
-            got_answers, got_skipped = probe(session, address, iface, canonical,
-                                             others=[c for f, c in guards.items() if f != fp])
+            got_answers, got_skipped = probe(session, address, iface, canonical, fingerprint=fp,
+                                             others={f: c for f, c in guards.items() if f != fp})
             for key, zids in got_answers.items():
                 answered.setdefault(key, zids)
             for name, why in got_skipped.items():

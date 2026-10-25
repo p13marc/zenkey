@@ -1628,9 +1628,10 @@ def section12(rp: Report, runs: int) -> None:
                      not asked and after == before, f"exit {rc}; asked {asked}; executions A, B {before} -> {after}")
     finally:
         bus.close()
-    # beyond step 8 (0.4, F-221's "or that it holds offline"): A and B run
-    # ledger.v1, and the tool also holds ledger-appendall, a revision no
-    # descriptor names that adds appendall: append$* is not asked
+    # 9 (0.5, F-226): A and B run ledger.v1, all the address's descriptors
+    # name; T also holds ledger-appendall offline, a revision no instance
+    # runs that adds appendall: no append$* probe, the reason naming
+    # appendall and that revision, the standbys' exposure unobservable
     bus = Bus()
     try:
         a = bus.inst(IMPL["a"], "A", A_ID)
@@ -1638,10 +1639,12 @@ def section12(rp: Report, runs: int) -> None:
         b = bus.inst(IMPL["b"], "B", B_ID)
         _wait(b.stands, 8.0)
         t = read_tool(bus.g, LEDGER, "ledger.v1", grace_s=2.0, contracts=[ledger, variant], with_probe=True)
-        rp.check(sec, "beyond: ledger.v1 running, ledger-appendall held offline and named by no descriptor: "
-                      "zk2py's tool does not ask append$*, which would reach that revision's appendall (0.4, F-221)",
-                 not t.probed and "appendall" in t.not_probed.get("@op/append", ""),
-                 f"probed {t.probed}; not probed {t.not_probed}")
+        why = t.not_probed.get("@op/append", "")
+        rp.check(sec, "9. ledger.v1 running, ledger-appendall held offline: zk2py's tool asks no append$*, its "
+                      "reason naming appendall and the revision held offline; the standbys' exposure unobservable "
+                      "(0.5, F-226)",
+                 not t.probed and "appendall" in why and variant.fingerprint in why and t.exposure == "unobservable",
+                 f"probed {t.probed}; not probed {t.not_probed}; exposure {t.exposure}")
         if use_z:
             skips = [x for c in CONFORM_OTHERS for x in ("--skip", c)]
             rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts", lpath, "--contracts",
@@ -1649,10 +1652,11 @@ def section12(rp: Report, runs: int) -> None:
                                    "--for", "1", *skips])
             rows = {r.get("case"): r for r in (doc or {}).get("rows") or [] if isinstance(r, dict)}
             st = rows.get("redundancy-standby") or {}
-            rp.check(sec, "beyond: zenctl check conform, the same: append not probed, the held revision named, "
-                          "unobservable, exit 2",
-                     rc == 2 and (st.get("verdict") or {}).get("answer") == "unobservable"
-                     and variant.fingerprint in json.dumps(st), f"exit {rc}; {st}")
+            text = json.dumps(st)
+            rp.check(sec, "9. zenctl check conform: no append$* probe, the reason naming appendall and the revision "
+                          "held offline, redundancy-standby unobservable, exit 2",
+                     rc == 2 and (st.get("verdict") or {}).get("answer") == "unobservable" and "appendall" in text
+                     and variant.fingerprint in text, f"exit {rc}; {st}")
     finally:
         bus.close()
     if use_z:
