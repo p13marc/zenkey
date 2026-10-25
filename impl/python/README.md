@@ -115,7 +115,7 @@ total        2972 passed     0 failed
 
 The figures are against `core.md` 0.40, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
-`telemetry.v1` 0.5, `desired.v1` 0.7 and `redundancy.v1` 0.3.
+`telemetry.v1` 0.5, `desired.v1` 0.7 and `redundancy.v1` 0.4.
 `redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
 `poll_read` passed the first time they ran. Its round 58 reading, a first
 poll as a baseline and a withdrawal only with no holder left, would have
@@ -349,7 +349,12 @@ fixtures:
   template-less operation. F-222, minor, is against `check conform`'s
   `--skip`, outside this profile. F-223, minor, is §3's "unless its
   interface token beat that GET", which S cannot read on a fast
-  takeover. All four are open.
+  takeover.
+- `redundancy.v1` 0.4 resolved all four (`SPEC-FINDINGS.md`, "At
+  redundancy.v1 0.4").
+- F-226 was found reading 0.4 cold, end to end, in round 63. It is §12's
+  evidence for half of §2.15's new MUST, a revision held offline that no
+  descriptor names. It is open, and minor.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -1679,13 +1684,13 @@ a two-documents role, `two_documents`. The doctor, which holds no
 contract offline, reads it unobservable over the shapes' test sessions,
 which serve no bundle.
 
-## redundancy.v1 (profile text 0.3, core 0.40)
+## redundancy.v1 (profile text 0.4, core 0.40)
 
 ```bash
 PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.redundancy_scenarios \
   [--a zk2py|<owner-example>] [--b zk2py|<owner-example>] [--owner <owner-example>] \
   [--only 1 … 12|remint|poll|poll-miss|heal-retry|heal-retry-pause|remint-campaign]... [--runs 20] \
-  [--zenctl <zenctl>] [--rust-spawn-at-go]
+  [--zenctl <zenctl>]
 ```
 
 §12's Rust tool comes from `--zenctl <zenctl>` or `ZK2PY_ZENCTL`, and has
@@ -1794,16 +1799,41 @@ from the text:
   standard input does not show: a put by its stamp (its `put` writes
   `ok`), and a step-down from its tokens.
 
-  §3 (0.3, F-216) holds both candidates at `--wait-go` and sends both
-  `go`. Each run's start is measured at S, by its two instance tokens'
-  arrival. A run more than 10 ms apart is made again, and counted apart.
-  The owner example's own `--wait-go` never starts (F-220). So
-  `--rust-spawn-at-go` spawns it at `go` instead, calibrated against the
-  other, as in round 58.
+  §3 (0.3, F-216) holds both candidates at their own `--wait-go` and
+  sends both `go`. Each run's start is measured at S, by its two instance
+  tokens' arrival. A run more than 10 ms apart is made again, and counted
+  apart. Since 0.4 the owner example's `--wait-go` starts at `go`
+  (F-220), and `--rust-spawn-at-go` is gone. §1's and §3's "before the
+  token" reads an interface token at S within the GET's own round trip of
+  its unmarked answer as the takeover's (0.4, F-223).
 
   §12 asks zk2py's tool and zenctl's `redundancy`, `doctor` and `check
   conform` of each shape, both holding `ledger.v1` offline, and compares
   their answers.
+
+**Results at 0.4 (round 63):** every check passes in all four pairings.
+The Rust side is `owner-rd` and `zenctl-rd`. §3 ran 20 measured runs in
+each, both candidates at their own `--wait-go`.
+
+| Pairing (A, B) | §1–§12 | of it §12 | zk2py's own | All |
+|---|---|---|---|---|
+| zk2py, zk2py | 90 | 33 | 15 | 105 |
+| Rust, Rust | 89 | 33 | 13 | 102 |
+| zk2py, Rust | 90 | 33 | 14 | 104 |
+| Rust, zk2py | 89 | 33 | 14 | 103 |
+
+- **§3:** the tokens' median skew at S 0.6, 0.4, 0.7 and 1.1 ms, at most
+  3.9 ms. No run was made again. B kept serving in 1, 0, 0 and 8 runs,
+  and the heal ended it in 2, 0, 0 and 2.
+- **§12 step 8's `ledger-appendall` half**, both tools. Neither asks
+  `append$*` nor `appendall`, and each says why. `check conform`'s
+  `redundancy-standby` is unobservable, exit 2. `appendall`'s handler
+  runs 0 times, counted by each owner's executions.
+- **Beyond step 8**, both tools on `ledger.v1`, with `ledger-appendall`
+  held offline and named by no descriptor: neither asks `append$*`
+  (F-226).
+- **F-222's shape:** `check conform` with every case skipped asks no
+  case and runs no handler.
 
 **Results at 0.3 (round 60):** every check passes in all four pairings.
 The Rust side is the owner example and zenctl built from PR #862's head

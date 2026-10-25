@@ -11274,6 +11274,13 @@ sessions first, and its runs' median skew is 0.2 ms.
 **Wording that would remove the guess:** none in the text. The owner
 example would start at `go`.
 
+**Status at redundancy.v1 0.4:** resolved: the owner example reads its
+standard input from its own start, so `--wait-go` starts at `go`; it
+needs `--standby` beside it on a governed contract. zk2py's runner drops
+`--rust-spawn-at-go`, and §3 holds both candidates at their own
+`--wait-go`: 20 measured runs in each pairing, the median skew under
+1.2 ms, none made again.
+
 ### F-221 · gap · redundancy.v1 0.3 §2.15 "A standby's exposure, probed": a template-less operation's wildcard
 
 > §2.15 (0.3): "by a GET, target `All` and consolidation `None`, over a
@@ -11309,6 +11316,14 @@ call would run it. A template-less operation's wildcard is its name
 followed by `$*`, which reaches every operation whose name begins with
 it".
 
+**Status at redundancy.v1 0.4:** resolved, as proposed and wider:
+§2.15's "Its wildcards" states `append$*`, and "Never a call that
+would run" is a MUST of a tool that probes. The guard is every revision
+of the interface the tool holds, named by the address's descriptors or
+held offline, and a probe not made is said. §12 step 8 gains the
+`ledger-appendall` half. zk2py now guards by every revision held offline
+too. Both tools ask neither probe there, and `appendall` runs 0 times.
+
 ### F-222 · minor · `zenctl check conform --skip`: an idempotent operation called with every case skipped
 
 > `zenctl check conform --help`: "`--skip <CASE>` Do not ask this case
@@ -11326,6 +11341,10 @@ profile: core §5.1's tool.
 
 **Wording that would remove the guess:** none in the text; a skipped
 case would make no call.
+
+**Status at redundancy.v1 0.4:** resolved, in the tool: `zenctl check
+conform --skip` sends nothing for a skipped case. With every case
+skipped, it asks none and runs no handler.
 
 ### F-223 · minor · redundancy.v1 scenarios.md §1 and §3 Expected 1: "unless its interface token beat that GET"
 
@@ -11352,6 +11371,13 @@ after the GET's answer as having beaten it.
 **Wording that would remove the guess:** "unless it took over before
 that GET was answered: its interface token at S within a round trip of
 the answer, the two riding two priorities".
+
+**Status at redundancy.v1 0.4:** resolved: §1's and §3's Expected 1
+read "unless it took over before that GET was answered: its interface
+token at S within a round trip of the answer, the two riding two
+priorities". zk2py reads the round trip as that GET's own, from S
+hearing the instance token to the answer, where round 60's runner took
+50 ms. Every §1 and §3 run passes.
 
 **Counts at redundancy.v1 0.3:** 223 entries. Open:
 - F-217 to F-219, against desired.v1 0.5, F-219 minor (answered on #840,
@@ -11516,5 +11542,71 @@ binding problem is read from it, and the role answers unobservable,
 - F-220 to F-223, against redundancy.v1 0.3 and its tools, F-222 and
   F-223 minor;
 - F-225, minor.
+
+Every other entry is resolved.
+
+## At redundancy.v1 0.4 (#609)
+
+Round 63 read `redundancy.v1` text 0.4 cold, end to end, from PR #867's
+head, its fixtures unchanged, and ran §1 to §12 in every pairing
+against `owner-rd` and `zenctl-rd`. zk2py's tool now guards each probe
+wildcard by every revision of the interface it holds offline, named or
+not. Its runner holds both candidates at their own `--wait-go`, and reads
+F-223's round trip as the GET's own.
+
+**Round 60's findings at 0.4:** F-220 to F-223 are all resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 2972 of 2972.** No fixture changed.
+
+**Live:** every check passes.
+
+| Pairing (A, B) | §1–§12 | of it §12 | zk2py's own | All |
+|---|---|---|---|---|
+| zk2py, zk2py | 90 | 33 | 15 | 105 |
+| Rust, Rust | 89 | 33 | 13 | 102 |
+| zk2py, Rust | 90 | 33 | 14 | 104 |
+| Rust, zk2py | 89 | 33 | 14 | 103 |
+
+- **§3**, 20 measured runs each, both at their own `--wait-go`: the
+  median skew 0.6, 0.4, 0.7 and 1.1 ms, none made again.
+- **§12 step 8's `ledger-appendall` half**, both tools. Neither asks
+  `append$*` nor `appendall`, and each says why; `appendall` runs 0
+  times. With `ledger.v1` running and `ledger-appendall` held offline,
+  named by no descriptor, neither asks `append$*` either.
+- **F-222's shape:** every case skipped, no case asked, 0 handler runs.
+
+**Where the two tools disagree:** nowhere, on any shape or step in any
+pairing.
+
+**The text, read end to end.** It holds, and every MUST names its
+evidence. One half of the new MUST has none that tests it (F-226).
+
+### F-226 · minor · redundancy.v1 0.4 §2.15 "Never a call that would run": a revision held offline and named by no descriptor
+
+> §2.15 (0.4): "A tool that probes MUST NOT ask a wildcard that
+> intersects the key of an operation whose fan-out is allowed, in any
+> revision of the interface it holds that the address's descriptors name
+> or that it holds offline … `[Sc: §12]`"
+
+§12 step 8's new half runs A and B on `ledger-appendall`, so the
+revision that adds `appendall` is the one the descriptors name. The MUST's
+second half, a revision held offline that no descriptor names, has no
+step. The changelog gives #862's reason for it: "a minor can add such an
+operation". A tool that guards only by the named revision passes every
+step. Both tools guard by both: zk2py's runner asks it as a shape beyond
+step 8, with A and B on `ledger.v1` and the tool holding
+`ledger-appendall` too. Neither asks `append$*`.
+
+**zk2py:** guards by both, as the reference does.
+
+**Wording that would remove the guess:** a step: "A and B run
+`ledger.v1`; T holds `ledger-appendall` offline besides, and probes them.
+Expected: T does not ask `append$*`, which that revision's `appendall`
+intersects, and says why".
+
+**Counts at redundancy.v1 0.4:** 226 entries. Open:
+- F-225, against desired.v1 0.7, minor;
+- F-226, minor.
 
 Every other entry is resolved.

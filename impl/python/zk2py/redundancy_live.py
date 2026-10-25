@@ -320,8 +320,17 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
     probe between the two reads, over every revision of the interface the
     first read's descriptors name: each one in hand probed, each key once,
     and a revision not in hand, or a probe that failed, in ``not_probed``
-    with why."""
+    with why. §2.15 (0.4, F-221), "Never a call that would run": each
+    wildcard is guarded by every revision in hand, those the descriptors
+    name and every one of the interface held offline; "an operation a
+    revision it does not hold declares can still be reached", which a
+    revision named and not in hand says."""
+    contracts = list(contracts)
     offline = {c.fingerprint: c.canonical for c in contracts}
+    #: 0.4 (F-221): every revision of the interface held offline guards a
+    #: probe, named by the address's descriptors or not: "a minor can add
+    #: such an operation"
+    held = {c.fingerprint: c.canonical for c in contracts if c.interface == iface}
     r1, p1, d1 = read_address(session, address, iface)
     t = time.monotonic()
     answered = None
@@ -341,12 +350,13 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
                 canonical = got.verified.contract if got.verified else None
             if canonical is None:
                 skipped[f"revision {fp}"] = ("not in hand: not held offline, and no holder served it verified "
-                                             "(core §8.4)")
+                                             "(core §8.4); an operation it declares may still be reached")
                 continue
             revisions[fp] = canonical
+        guards = {**revisions, **held}
         for fp, canonical in revisions.items():
             got_answers, got_skipped = probe(session, address, iface, canonical,
-                                             others=[c for f, c in revisions.items() if f != fp])
+                                             others=[c for f, c in guards.items() if f != fp])
             for key, zids in got_answers.items():
                 answered.setdefault(key, zids)
             for name, why in got_skipped.items():
