@@ -879,7 +879,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `poll`, each read compared with the last's, a read not complete removing
   no holder, `polls.json`; text 0.4, F-220 to F-223, #841 RD: a standby
   probe's wildcards and the MUST never to ask one that would run an
-  operation, `[Sc: §12]`).
+  operation, `[Sc: §12]`; text 0.5, F-226: §12 step 9, the MUST's
+  offline half).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
