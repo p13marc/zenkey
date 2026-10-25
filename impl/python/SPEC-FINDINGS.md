@@ -10908,6 +10908,11 @@ example's as a known deviation.
 **Wording that would remove the guess:** none in the text; the owner
 example would check the declaration, by starting, before it writes.
 
+**Status at redundancy.v1 0.3:** resolved: the owner example "now
+writes nothing of a contract listing `redundancy.v1` before its start",
+and §11 Expected 2 says `not started: … invalid: value`. Live, §11's
+reason check passes in every pairing; the known deviation is gone.
+
 ### F-215 · ambiguity · redundancy.v1 0.2 §2.7 "A poll": the last read's holders, or the last complete read's
 
 > §2.7 (0.2): "A candidate without one reads the address every period
@@ -10940,6 +10945,19 @@ there.
 **Wording that would remove the guess:** "compared with the last's,
 where a read not complete removes no holder from the last's: …".
 
+**Status at redundancy.v1 0.3:** resolved, in zk2py's wording, and a
+MUST: a read not complete removes no holder from the last's, a holder it
+shows that is new is an appearance, and only a complete read can show one
+gone. `polls.json` states it, 7 cases. Two of zk2py's other readings went
+the other way:
+- the first read is compared with no holder, not a baseline;
+- each holder a complete read shows gone is a withdrawal, not only the
+  last one.
+
+zk2py's `poll_read`, rewritten from the text and the file's description,
+passed all seven the first time they ran. Its round 58 code would have
+failed five. `poll-miss` passes live in every pairing.
+
 ### F-216 · minor · redundancy.v1 scenarios.md §3 step 1: "within 10 ms" with nothing to hold a start at
 
 > scenarios.md §3 step 1: "A and B start within 10 ms of each other."
@@ -10963,6 +10981,14 @@ against it. It records each run's skew at S.
 **Wording that would remove the guess:** "start" measured as the
 instance token reaching S, a run outside 10 ms made again and counted
 apart, and the owner example given a start hold.
+
+**Status at redundancy.v1 0.3:** resolved: §3's start is measured at S by
+each instance token's arrival, and a run more than 10 ms apart is made
+again and counted apart. The owner example gains `--wait-go`. zk2py's
+candidate now opens its sessions before `go` too, and measured runs pass
+in every pairing. The owner example's `--wait-go` never starts (F-220),
+so its runs spawned it at `go`, calibrated, and were measured the same
+way.
 
 **Counts at redundancy.v1 0.2 and core 0.40:** 216 entries. Open:
 - F-210 to F-213, against desired.v1 0.4, F-212 minor;
@@ -11123,5 +11149,189 @@ says 0.4's rules:
   (answered on #841, for its text 0.3);
 - F-217 to F-219, against desired.v1 0.5, F-219 minor (answered on #840,
   for its text 0.6).
+
+Every other entry is resolved.
+
+## At redundancy.v1 0.3 (#609)
+
+Round 60 read `redundancy.v1` text 0.3 cold, end to end, with its
+scenarios and its new fixture `polls.json`, from PR #862's head (core
+0.40 and `hostid.v1` 0.7 unchanged). It ran §1 to §11 again in every
+pairing, and §12 against the Rust tools for the first time.
+
+zk2py implemented each change from the text:
+- §2.7's poll comparison (`poll_read`);
+- §2.15's invalid declaration read `no_contract`, its reasons beside;
+- governance from a contract held offline;
+- "one split, one finding" (`split_findings`);
+- the standby's exposure probe (`read_tool(with_probe=True)`);
+- the recognised standby, named.
+
+Its candidate driver gained `--wait-go`, which opens every session
+before `go`, `redundancy zid`, the poll's `poll_log` and `--hostid-root`.
+
+**Round 58's findings at 0.3:** F-214 to F-216 are all resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 2959 of 2959.** `redundancy` passes 180:
+`polls.json`'s 7 cases passed the first time they ran. `readings` passes
+347, without the seven readings of round 58's poll, which `polls.json`
+now decides, two of them the other way.
+
+**Live:** every check passes. The Rust side is `owner-rc` and `zenctl-rc`.
+
+| Pairing (A, B) | §1–§12 | of it §12 | zk2py's own | All |
+|---|---|---|---|---|
+| zk2py, zk2py | 87 | 30 | 15 | 102 |
+| Rust, Rust | 86 | 30 | 13 | 99 |
+| zk2py, Rust | 87 | 30 | 14 | 101 |
+| Rust, zk2py | 86 | 30 | 14 | 100 |
+
+- **§3**, 20 measured runs each: the tokens' median skew at S 0.2, 1.2,
+  3.7 and 2.5 ms, and runs made again 0, 5, 1 and 1. One mixed run per
+  pairing came in at 238 ms, the first, before calibration.
+- **§12**, steps 1 to 8, each asked of zk2py's tool and of zenctl's
+  `redundancy`, `doctor` and `check conform`, both holding `ledger.v1`
+  offline, with zenctl's exit codes. Beyond the text, two more shapes:
+  - an invalid declaration on the bus;
+  - a probe that would reach an allowed operation (F-221).
+
+**Where the two tools disagree:** nowhere in an answer, on any shape, in
+any pairing. They differed in one behaviour before zk2py changed. zk2py's
+first probe of `append`'s wildcard ran an allowed operation whose name
+begins with `append`; the reference did not probe it (F-221). Two
+observations, neither a finding of the profile's:
+- The doctor takes no `--contracts`. Over X's lasting vacancy, which
+  serves no bundle, its `redundancy-vacancy` is unobservable, where
+  `zenctl redundancy --contracts` answers. Real standbys serve their
+  bundle (§2.4), so this bites only a test's shapes.
+- `check conform` calls an idempotent operation with every case skipped
+  (F-222).
+
+**The text, read end to end.** It holds together, its rules and its
+fixtures agreeing in every pairing. §2.15's probe is the one place a
+careful reader can still do harm (F-221). The review's fixes made zk2py
+probe every revision in hand, guarding each one's wildcard against every
+revision's allowed operations. They also record a probe not made, a
+failed one among them, in `not_probed`. One §3 run then failed the
+before-the-token check on a race the scenario's wording does not cover
+(F-223).
+
+### F-220 · bug · the owner example's `--wait-go`: never starts after `go`
+
+> `owner --help` (round 60's `owner-rc`): "`--wait-go` open every
+> session, say waiting go, and start the service at a go line on
+> standard input (scenarios.md §3)"
+
+> scenarios.md §3 (0.3): "With `--wait-go` it starts only at a `go` line
+> on stdin, so that a runner holds two starts together"
+
+The owner example prints `connected …` and `waiting go`. After a `go`
+line it does nothing more:
+- no `ready`;
+- no instance token at the router;
+- no answer to `redundancy role` or any other command;
+- standard input's close does not end it, and it is killed.
+
+Ten tries in six configurations, waiting up to 12 s after `go`:
+- `ledger.v1` governed, with `--standby`, with and without `--poll-ms`,
+  with `--election claim`, and with the flags in either order;
+- a contract that is not governed (`worker.v1`), with no `--standby`;
+- a `go` line sent once, twice, and followed by a command.
+
+The same commands without `--wait-go` start it at once. zk2py's runner
+with it times out on §3.
+
+**zk2py:** `--rust-spawn-at-go` spawns the owner example at `go`, as in
+round 58, calibrated against the other candidate, and every run is
+measured at S as §3 says. zk2py's own `--wait-go` opens its three
+sessions first, and its runs' median skew is 0.2 ms.
+
+**Wording that would remove the guess:** none in the text. The owner
+example would start at `go`.
+
+### F-221 · gap · redundancy.v1 0.3 §2.15 "A standby's exposure, probed": a template-less operation's wildcard
+
+> §2.15 (0.3): "by a GET, target `All` and consolidation `None`, over a
+> wildcard of each of the interface's operations whose fan-out is
+> forbidden: every operation queryable at the address answers it before
+> any handler runs (core O2) … and an operation whose fan-out is allowed
+> is never probed this way, since the call would run it"
+
+A templated operation's wildcard is its template with `*` for each
+parameter. A template-less one, `append`, has no wildcard of its own.
+Any key expression that is not concrete and intersects `@op/append`
+intersects other keys too: `append$*`, which both tools use, reaches
+every operation whose name begins with `append`.
+
+So the probe of a forbidden operation can reach an allowed one, and run
+it, which the rule's own reason forbids. The text guards only the
+allowed operation's own probe. zk2py's first reading probed
+`append$*` on a contract that also declares `appendall`, fan-out
+allowed, and `appendall`'s handler ran, once per probe.
+
+The reference does not probe it: "@op/append not probed: its probe …
+append$* would reach … @op/appendall, an operation whose fanout is
+"allowed", and run it", and `redundancy-standby` reads unobservable.
+`ledger-appendall.v1`, in §12's own shapes, runs it live.
+
+**zk2py:** now the reference's: a wildcard that would reach an
+operation whose fan-out is allowed is not probed, and the probe says
+why.
+
+**Wording that would remove the guess:** "a wildcard that intersects
+the key of an operation whose fan-out is allowed is never asked: the
+call would run it. A template-less operation's wildcard is its name
+followed by `$*`, which reaches every operation whose name begins with
+it".
+
+### F-222 · minor · `zenctl check conform --skip`: an idempotent operation called with every case skipped
+
+> `zenctl check conform --help`: "`--skip <CASE>` Do not ask this case
+> (repeatable): every row of it reads `not_asked`" … "Only operations
+> declared idempotent are called"
+
+With every case skipped, `operation` and the two `redundancy-*` cases
+among them, `check conform lab/ledger ledger.v1` still sends one
+concrete call of `@op/appendall`, an idempotent operation, and its
+handler runs, once per run. The rows all read `not_asked`. An idempotent
+call is allowed, but a case skipped should send nothing. Outside this
+profile: core §5.1's tool.
+
+**zk2py:** nothing to do; it has no such tool.
+
+**Wording that would remove the guess:** none in the text; a skipped
+case would make no call.
+
+### F-223 · minor · redundancy.v1 scenarios.md §1 and §3 Expected 1: "unless its interface token beat that GET"
+
+> scenarios.md §3 Expected 1: "S's GET at each instance's instance token
+> answers its descriptor marked standby, unless its interface token beat
+> that GET (F-202)"
+
+A candidate that claims and takes over within its GET's round trip puts
+its descriptor unmarked at the takeover's step 3, then declares its
+token. S's GET, made on hearing the instance token, can then be answered
+unmarked before S hears the interface token. The answer and the token
+ride two priorities, as F-202 found of a put and a token. So "beat that
+GET", read at S, misses a takeover whose step 3 lands within the round
+trip.
+
+This happened once in 60 measured mixed runs, review fixes included. A,
+zk2py's, has its sessions open before `go` since round 60, and took over
+19 ms after it. S heard A's interface token at +0.019 s, just after the
+GET's unmarked answer. Two reruns of 20 passed.
+
+**zk2py:** the runner reads an interface token reaching S within 50 ms
+after the GET's answer as having beaten it.
+
+**Wording that would remove the guess:** "unless it took over before
+that GET was answered: its interface token at S within a round trip of
+the answer, the two riding two priorities".
+
+**Counts at redundancy.v1 0.3:** 223 entries. Open:
+- F-217 to F-219, against desired.v1 0.5, F-219 minor (answered on #840,
+  for its text 0.6);
+- F-220 to F-223, F-222 and F-223 minor.
 
 Every other entry is resolved.

@@ -591,6 +591,18 @@ class Owner:
         self.resolve_system()  # hostid.v1 §2.7: before the session, and before step 1
         self.resolve_bindings()  # core R1 (0.20): from the same system
         plan = self._plan()  # step 2 first: a refusal declares nothing
+        if self.session is None:
+            self.open_session()
+        try:
+            self._bring_up(plan)
+        except Exception:
+            self.close()
+            raise
+
+    def open_session(self) -> None:
+        """The zenoh session, opened and nothing declared on it: :meth:`start`
+        opens it itself, and a runner that holds two starts together opens
+        it first (``redundancy.v1`` scenarios §3's ``--wait-go``)."""
         conf = zenoh.Config()
         if self.connect:
             conf.insert_json5("mode", json.dumps("client"))
@@ -610,11 +622,6 @@ class Owner:
         if self.lease_ms is not None:
             conf.insert_json5("transport/link/tx/lease", str(int(self.lease_ms)))
         self.session = zenoh.open(conf)
-        try:
-            self._bring_up(plan)
-        except Exception:
-            self.close()
-            raise
 
     def _bring_up(self, plan: dict[str, list[tuple[dict[str, Any], str]]]) -> None:
         s = self.session

@@ -1121,6 +1121,23 @@ def _redundancy_heals(path: Path) -> list[Result]:
     return out
 
 
+def _redundancy_polls(path: Path) -> list[Result]:
+    """redundancy.v1 §2.7 (0.3, F-215): a poll's reads in order -> each read's
+    appearances and withdrawals against the last's
+    (zk2py.redundancy.poll_read)."""
+    from . import redundancy as rd
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        last: set[str] | None = None
+        got = []
+        for r in c["reads"]:
+            cmp, last = rd.poll_read(last, r["holders"], bool(r["complete"]))
+            got.append(cmp.as_json())
+        out.append(_check(f"polls #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 def _redundancy_lifecycle(path: Path) -> list[Result]:
     """redundancy.v1 §2.5 to §2.11: one candidate's events -> each step,
     and its role after the last."""
@@ -1170,7 +1187,8 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                 "conclusions.json": _desired_conclusions, "slices.json": _desired_slices},
     "redundancy": {"declarations.json": _redundancy_declarations, "descriptors.json": _redundancy_descriptors,
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
-                   "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions},
+                   "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions,
+                   "polls.json": _redundancy_polls},
 }
 
 
@@ -2360,38 +2378,7 @@ def _presence_view() -> list[tuple[str, Any, Any]]:
           live.Presence(complete=True).kind, live.Presence().kind,
           live.Presence(complete=False, cut_off_during=True).kind],
          [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
-    ] + _live_guards() + _desired_tool_readings() + _poll_readings() + _settle_readings()
-
-
-def _poll_readings() -> list[tuple[str, Any, Any]]:
-    """redundancy.v1 0.2 §2.7's poll (zk2py.redundancy.poll_step), over
-    sequences of polls, the reading F-215 asks about among them."""
-    from . import redundancy as rd
-
-    a, b = "000000000000000a", "000000000000000b"
-
-    def run(polls: list[tuple[set[str], bool]]) -> list[Any]:
-        last: set[str] | None = None
-        out: list[Any] = []
-        for others, complete in polls:
-            ev, last = rd.poll_step(last, others, complete)
-            out += ev
-        return out
-
-    label = "redundancy.v1 0.2 §2.7, a poll's events"
-    return [
-        (f"{label}: the first poll is the baseline", run([({a}, True)]), []),
-        (f"{label}: a holder new to it is an appearance", run([(set(), True), ({a}, True)]), [{"appeared": a}]),
-        (f"{label}: a complete read with no other holder, after one with some, a withdrawal",
-         run([({a}, True), (set(), True)]), [rd.WITHDRAWN]),
-        (f"{label}: a read not complete establishes no absence", run([({a}, True), (set(), False)]), []),
-        (f"{label}: a read not complete between leaves the last's whole: the next complete read without the "
-         "holder is a withdrawal (F-215)", run([({a}, True), (set(), False), (set(), True)]), [rd.WITHDRAWN]),
-        (f"{label}: … and a holder it missed is no new holder at the next read (F-215)",
-         run([({a}, True), (set(), False), ({a}, True)]), []),
-        (f"{label}: a read not complete still shows what it saw: a holder new to it appears",
-         run([({a}, True), ({a, b}, False)]), [{"appeared": b}]),
-    ]
+    ] + _live_guards() + _desired_tool_readings() + _settle_readings()
 
 
 def _settle_readings() -> list[tuple[str, Any, Any]]:

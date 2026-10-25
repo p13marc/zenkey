@@ -518,23 +518,41 @@ class Machine:
         return dict(NOTHING)
 
 
-def poll_step(last: set[str] | None, others: set[str], complete: bool) -> tuple[list[Any], set[str] | None]:
-    """§2.7 (0.2), "A poll, where no watch session can be held": one poll's
-    holders other than its own, against the last's -> the events it hands
-    its machine, and what it keeps as the last's. "A holder new to it is an
-    appearance, and a complete read with no other holder, after one with
-    some, a withdrawal (a read not complete establishes no absence)". The
-    first poll is the baseline, and hands nothing. A read not complete
-    removes nothing from the last's, so a holder it missed is neither gone
-    from it nor new at the next read (F-215)."""
-    if last is None:
-        return [], set(others)
-    events: list[Any] = [{"appeared": h} for h in sorted(others - last, key=id_key)]
-    if complete:
-        if last and not others:
-            events.append(WITHDRAWN)
-        return events, set(others)
-    return events, last | others
+@dataclass(frozen=True)
+class PollRead:
+    """One poll's read compared with the last's (§2.7, 0.3): the holders it
+    shows that the last's did not, and the last's holders it shows gone,
+    each lowest first."""
+
+    appeared: tuple[str, ...]
+    withdrawn: tuple[str, ...]
+
+    def as_json(self) -> dict[str, Any]:
+        return {"appeared": list(self.appeared), "withdrawn": list(self.withdrawn)}
+
+
+def poll_read(last: set[str] | None, holders: Iterable[str], complete: bool) -> tuple[PollRead, set[str]]:
+    """§2.7 (0.3, F-215), "A poll, where no watch session can be held":
+    "compare each read's holders with the last's …, where a read not
+    complete removes no holder from the last's: a holder it shows that is
+    new is an appearance, and only a complete read can show one gone, a
+    withdrawal (core §8.1: a read not complete can miss a token, never
+    invent one)". ``last`` is the last's holders, None before the first
+    read, which is compared with no holder. Returns the comparison and what
+    is kept as the last's: a complete read's holders, or after a read not
+    complete the last's with the new ones added."""
+    before = set(last or ())
+    shown = set(holders)
+    appeared = tuple(sorted(shown - before, key=id_key))
+    withdrawn = tuple(sorted(before - shown, key=id_key)) if complete else ()
+    return PollRead(appeared, withdrawn), (shown if complete else before | shown)
+
+
+def poll_events(read: PollRead) -> list[Any]:
+    """What one poll's comparison hands the machine: an appearance per holder
+    new to it, and a withdrawal when any holder is gone (``lifecycle.json``'s
+    events, which name no holder gone)."""
+    return [{"appeared": h} for h in read.appeared] + ([WITHDRAWN] if read.withdrawn else [])
 
 
 # -- §2.15, §5 what a tool concludes ---------------------------------------------------
