@@ -379,3 +379,85 @@ fn config_acts_under_allow() {
     );
     pinned("config.allow.json5", &plan);
 }
+
+/// #875: a tool's watch session is in no namespace, and spells its
+/// selectors and its barrier key on the wire, the namespace in front. Every
+/// grant `acl gen` writes is a full key under the namespace (§1.6, §11.1),
+/// so each of them is inside the presence grant of the walkthrough's tool,
+/// zenwatch: the presence monitor's three token selectors, the alarm and
+/// telemetry readers' instance and member tokens, and the round trip's
+/// `…/@zk/settle`, for the bus root, whose plan is pinned
+/// (`walkthrough.deny.json5`), and under a namespace.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_watch_sessions_wire_keys_are_inside_a_tools_presence_grant() {
+    use zenkey_fleet::report::{AclFlow, AclGrantKind, AclMessage};
+    use zenoh::key_expr::KeyExpr;
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", r#""peer""#),
+        ("listen/endpoints", "[]"),
+        ("scouting/multicast/enabled", "false"),
+        ("scouting/gossip/enabled", "false"),
+    ] {
+        c.insert_json5(k, v).expect("a fixed key");
+    }
+    let session = zenoh::open(c).await.expect("a session in no namespace");
+    let scope = zenkey_fleet::PresenceScope::all();
+    let selectors: Vec<String> = scope
+        .token_selectors()
+        .into_iter()
+        .chain([zenkey_fleet::AlarmScope::all().instance_selector()])
+        .collect();
+    for namespace in ["", "fleet-a"] {
+        let plan = plan_acl(
+            &enrollment("walkthrough"),
+            &contracts("walkthrough"),
+            &AclOptions {
+                namespace: namespace.to_owned(),
+                default_permission: AclPermission::Deny,
+                face_policy: None,
+            },
+        )
+        .expect("the walkthrough's plan");
+        let grants: Vec<&zenkey_fleet::report::AclRule> = plan
+            .rules
+            .iter()
+            .filter(|r| {
+                r.holder.as_deref() == Some("tool.zenwatch")
+                    && r.grant == AclGrantKind::Presence
+                    && r.flows.contains(&AclFlow::Ingress)
+            })
+            .collect();
+        assert!(
+            !grants.is_empty(),
+            "{namespace:?}: zenwatch's presence grant"
+        );
+        let granted = |key: &str, message: AclMessage| {
+            let wanted = KeyExpr::try_from(key).expect("a key expression");
+            grants.iter().any(|r| {
+                r.messages.contains(&message)
+                    && r.key_exprs
+                        .iter()
+                        .any(|k| KeyExpr::try_from(k.as_str()).is_ok_and(|g| g.includes(&wanted)))
+            })
+        };
+        let watch = zenkey_fleet::WatchSession::new(&session, namespace).expect("a watch session");
+        for sel in &selectors {
+            let wire = watch.wire(sel);
+            assert!(
+                granted(&wire, AclMessage::DeclareLivelinessSubscriber),
+                "{namespace:?}: subscribing to {wire} is outside {grants:#?}"
+            );
+            let barrier = watch
+                .barrier(sel, std::time::Duration::from_secs(1))
+                .await
+                .expect("a barrier");
+            assert!(
+                granted(barrier.key(), AclMessage::LivelinessQuery),
+                "{namespace:?}: the round trip on {} is outside {grants:#?}",
+                barrier.key()
+            );
+        }
+    }
+    session.close().await.expect("close");
+}
