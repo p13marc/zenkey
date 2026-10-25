@@ -132,10 +132,15 @@ pub struct ConformSpec {
     pub skip: Skipped,
 }
 
-/// The cases a run skips, as a set over [`CaseId::ALL`]: `Copy`, as
-/// [`ConformSpec`] is.
+/// The cases a run skips, as a set over [`CaseId`]: `Copy`, as
+/// [`ConformSpec`] is. One bit per case, indexed by the case itself, so
+/// the lookup is total (review on PR #867).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Skipped(u64);
+
+// Every case has a bit of a `u64`: `CaseId::ALL` lists every case (its
+// pinned-shape test), so at most 64 fit, and a 65th fails the build.
+const _: () = assert!(CaseId::ALL.len() <= u64::BITS as usize);
 
 impl Skipped {
     /// The set of `cases`.
@@ -144,12 +149,10 @@ impl Skipped {
         Skipped(cases.iter().fold(0, |m, c| m | Self::bit(*c)))
     }
 
+    /// The case's bit: its discriminant, which a fieldless enum numbers
+    /// from 0 in declaration order, below `ALL.len()`, so below 64.
     fn bit(c: CaseId) -> u64 {
-        let i = CaseId::ALL
-            .iter()
-            .position(|x| *x == c)
-            .expect("every case is in ALL");
-        1 << i
+        1u64 << (c as u32)
     }
 
     /// Whether `c` is asked: not skipped.
@@ -1586,10 +1589,12 @@ pub type ExposurePlan = (
 pub fn exposure_plan(addr: &Addr, rev: &Revision, guard: &[&Revision]) -> ExposurePlan {
     use zenoh::key_expr::KeyExpr;
     let iface = rev.iface().clone();
-    let allowed: Vec<(String, KeyExpr<'static>)> = guard
-        .iter()
-        .chain(std::iter::once(&rev))
-        .filter(|g| g.iface() == &iface)
+    // The revisions guarding, each once by fingerprint: `guard` may hold
+    // the one under test too, when it is held offline (review on PR #867).
+    let mut seen = std::collections::BTreeSet::new();
+    let allowed: Vec<(String, KeyExpr<'static>)> = std::iter::once(&rev)
+        .chain(guard.iter())
+        .filter(|g| g.iface() == &iface && seen.insert(g.fingerprint().clone()))
         .flat_map(|g| {
             g.contract()
                 .resources
@@ -1785,11 +1790,42 @@ mod probe_tests {
         assert_eq!(refused, ["@op/append", "@op/appendall"]);
     }
 
+    /// The revision under test held offline too guards once, and a reason
+    /// names it once (review on PR #867).
+    #[test]
+    fn a_revision_in_hand_twice_guards_once() {
+        let addr: Addr = "lab/ledger".parse().unwrap();
+        let appendall = revision("ledger-appendall.v1");
+        let (_, not_probed) = exposure_plan(&addr, &appendall, &[&appendall, &appendall]);
+        let why = &not_probed
+            .iter()
+            .find(|(n, _)| n == "@op/append")
+            .expect("append not probed")
+            .1;
+        assert_eq!(
+            why.matches(&appendall.fingerprint().to_string()).count(),
+            1,
+            "{why}"
+        );
+        assert_eq!(not_probed.len(), 2, "{not_probed:?}");
+    }
+
     #[test]
     fn a_skipped_set_asks_every_case_but_its_own() {
         let s = Skipped::of(&[CaseId::Operation, CaseId::RedundancyStandby]);
         assert!(!s.asks(CaseId::Operation) && !s.asks(CaseId::RedundancyStandby));
         assert!(s.asks(CaseId::FanoutRefused) && s.asks(CaseId::ContractServed));
         assert!(CaseId::ALL.iter().all(|c| Skipped::default().asks(*c)));
+        // One bit per case: skipping every case asks none.
+        let every = Skipped::of(&CaseId::ALL);
+        assert!(CaseId::ALL.iter().all(|c| !every.asks(*c)));
+        for c in CaseId::ALL {
+            let one = Skipped::of(&[c]);
+            assert_eq!(
+                CaseId::ALL.iter().filter(|x| !one.asks(**x)).count(),
+                1,
+                "{c}"
+            );
+        }
     }
 }

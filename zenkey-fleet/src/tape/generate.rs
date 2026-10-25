@@ -1087,6 +1087,13 @@ const MEMBER_RETRY: Duration = Duration::from_millis(500);
 /// made again: the members declared before it stay, never declared twice,
 /// since [`zenkey::Service::declare_member`] of a member held cycles it to
 /// a new epoch.
+///
+/// **Bounded, inside the run's `select!` arm** (review on PR #867): each
+/// `declare_member` is a local liveliness declaration (and, cycling, an
+/// undeclaration) whose `.await` returns once zenoh has queued it; no
+/// reply is awaited. At worst, its control priority's queue full, it waits
+/// for room, which the link's `wait_before_close` bounds by closing it.
+/// The run's entries go on meanwhile, on their own tasks.
 async fn declare_members(
     service: &mut zenkey::Service,
     red: &zenkey::redundancy::Redundancy,

@@ -96,11 +96,18 @@ pub(crate) fn redundancy_soon(
         return Task::none();
     }
     let due = v.nodes.due_redundancy(addr.clone());
-    Task::perform(tokio::time::sleep(REDUNDANCY_SETTLE), move |()| {
-        Message::Pane(crate::message::PaneMsg::Nodes(NodesMsg::RedundancySettled(
-            addr, due,
-        )))
-    })
+    // The timer is made inside the task, on iced's tokio executor, never
+    // here: `update` runs outside any runtime, and `tokio::time::sleep`
+    // made outside one panics (review on PR #867). A test that drives
+    // `update` and never runs the task makes none.
+    Task::perform(
+        async { tokio::time::sleep(REDUNDANCY_SETTLE).await },
+        move |()| {
+            Message::Pane(crate::message::PaneMsg::Nodes(NodesMsg::RedundancySettled(
+                addr, due,
+            )))
+        },
+    )
 }
 
 /// One `redundancy.v1` reading of `addr` on the session in the namespace,

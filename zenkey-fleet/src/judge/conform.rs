@@ -4194,6 +4194,40 @@ mod tests {
         assert_eq!(judgement_exit_code(&r.judgement()), 0, "{r:#?}");
     }
 
+    /// F-222 and the review on PR #867: `operation` skipped, `fanout-refused`
+    /// asked. The concrete call is not made, which reaches the `operation`
+    /// row alone, `--skip` then reading it `not_asked`; `fanout-refused`
+    /// reads only the probe, and is judged.
+    #[test]
+    fn a_skipped_operation_leaves_its_fanout_judged() {
+        let mut o = conforming();
+        o.spec.skip = crate::bus::conform::Skipped::of(&[CaseId::Operation]);
+        o.calls.insert(
+            "@op/set/{dev}".into(),
+            OpObserved::Called {
+                call: Err("not made: the operation case is skipped".into()),
+                fanout: Some(Ok(FanoutSeen {
+                    selector: "zk2/lab/m/m.v1/@op/set/*".into(),
+                    codes: vec!["fanout_forbidden".into()],
+                    ..FanoutSeen::default()
+                })),
+            },
+        );
+        let mut r = judge(&o);
+        r.skip(&[CaseId::Operation]);
+        assert_eq!(
+            case(&r, CaseId::Operation, "@op/set/{dev}").verdict,
+            Judgement::NotAsked
+        );
+        assert!(
+            matches!(
+                &case(&r, CaseId::FanoutRefused, "@op/set/{dev}").verdict,
+                Judgement::NotEstablished { reason } if reason.contains("fanout_forbidden")
+            ),
+            "{r:#?}"
+        );
+    }
+
     /// What could not be observed: a stream silent in the window, a state
     /// no `meta.zid` attributes, the service absent, a revision it does not
     /// claim — unobservable, exit 2, never a pass. A bundle no holder
