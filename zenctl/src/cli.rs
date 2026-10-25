@@ -1287,6 +1287,23 @@ pub(crate) enum CheckCmd {
     ///                    one that does not; a document put again unchanged
     ///                    in the window with no horizon passes, naming
     ///                    §2.11's SHOULD (desired.v1 §2.2, §2.11)
+    ///   redundancy-declaration
+    ///                    when its revision uses redundancy.v1, the
+    ///                    declaration is valid and no descriptor puts the
+    ///                    interface in a tokenless set: one running under
+    ///                    an invalid one is the violation, since a runtime
+    ///                    refuses to start it (redundancy.v1 §2.2, §2.14)
+    ///   redundancy-standby
+    ///                    when a descriptor marks the interface standby,
+    ///                    every instance so marked in two presence reads
+    ///                    holds none of its tokens and answers none of the
+    ///                    GETs between them over each state resource's and
+    ///                    each fan-out-forbidden operation's wildcard, by
+    ///                    replier zid; a pass needs an operation probed,
+    ///                    since every operation queryable answers such a
+    ///                    call before any handler runs, and a state one
+    ///                    holding nothing answers nothing (redundancy.v1
+    ///                    §2.4)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no

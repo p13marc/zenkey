@@ -180,11 +180,27 @@ pub enum CaseId {
     /// the window, without a horizon, is §2.11's SHOULD broken, named in a
     /// pass.
     DesiredAuthor,
+    /// The claimed revision's `redundancy.v1` declaration is valid, and no
+    /// descriptor puts the governed interface in a tokenless set
+    /// (`redundancy.v1` §2.2, §2.14; #841): a runtime refuses to start an
+    /// instance of an invalid one, so one running is the violation, its
+    /// reasons named. Not asked of a revision that does not use the
+    /// profile and carries no `redundancy.election`.
+    RedundancyDeclaration,
+    /// Every instance marked standby, in two presence reads with probes
+    /// between them, holds none of the interface's tokens and answers
+    /// none of its queryables (`redundancy.v1` §2.4; #841): a reply from
+    /// its session to a GET over a state resource's or a fan-out-forbidden
+    /// operation's wildcard, or its token while marked, is the violation.
+    /// Clean only where an operation was probed, since every operation
+    /// queryable answers a call over its wildcard and a state queryable
+    /// holding nothing answers nothing.
+    RedundancyStandby,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 27] = [
+    pub const ALL: [CaseId; 29] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -212,6 +228,8 @@ impl CaseId {
         CaseId::DesiredReport,
         CaseId::DesiredBinding,
         CaseId::DesiredAuthor,
+        CaseId::RedundancyDeclaration,
+        CaseId::RedundancyStandby,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -244,6 +262,8 @@ impl CaseId {
             CaseId::DesiredReport => "desired-report",
             CaseId::DesiredBinding => "desired-binding",
             CaseId::DesiredAuthor => "desired-author",
+            CaseId::RedundancyDeclaration => "redundancy-declaration",
+            CaseId::RedundancyStandby => "redundancy-standby",
         }
     }
 
@@ -283,6 +303,8 @@ impl CaseId {
             CaseId::DesiredReport => "desired.v1 §2.10",
             CaseId::DesiredBinding => "desired.v1 §2.3",
             CaseId::DesiredAuthor => "desired.v1 §2.2",
+            CaseId::RedundancyDeclaration => "redundancy.v1 §2.2",
+            CaseId::RedundancyStandby => "redundancy.v1 §2.4",
         }
     }
 }
@@ -488,6 +510,8 @@ mod tests {
                 "desired-report",
                 "desired-binding",
                 "desired-author",
+                "redundancy-declaration",
+                "redundancy-standby",
             ]
         );
         for c in CaseId::ALL {

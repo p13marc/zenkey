@@ -314,6 +314,11 @@ pub struct ConformObservation {
     /// requirement and no `desired.v1.Report` resource, or the presence
     /// read failed.
     pub desired: Option<crate::model::desired::DesiredRead>,
+    /// The service's standbys probed (#841, RC), after the suite and the
+    /// desired.v1 reading, when its claimed revision is one `redundancy.v1`
+    /// governs and a descriptor in the presence read marks the interface
+    /// standby; `None` otherwise.
+    pub redundancy: Option<StandbyConform>,
 }
 
 impl ConformObservation {
@@ -531,6 +536,17 @@ pub async fn observe(
             crate::bus::desired::observe(session, Some(&obs.address), &ds, &store, offline).await,
         );
     }
+    // redundancy.v1 (#841, RC): a governed revision with an instance
+    // marked standby has its standbys probed, then presence read again.
+    if let (Ok(first), Some(rev)) = (&obs.presence, obs.revision.clone())
+        && matches!(
+            zenkey_model::redundancy::declaration_of(rev.contract(), false),
+            zenkey_model::redundancy::Declaration::Governed(_)
+        )
+        && marks_standby(first, &obs.iface)
+    {
+        obs.redundancy = Some(standby_suite(session, &obs.address, &rev, t).await);
+    }
     obs
 }
 
@@ -570,6 +586,7 @@ async fn suite(
         alarms: None,
         telemetry: None,
         desired: None,
+        redundancy: None,
     };
     let Ok(fp) = obs.claimed() else {
         return obs;
@@ -1411,4 +1428,187 @@ mod watch_tests {
         assert!(!zenkey::presence::watching(&s), "nothing declared");
         s.close().await.unwrap();
     }
+}
+
+// ─── redundancy.v1 (#841, RC) ───────────────────────────────────────────────
+
+/// One probe of what a standby must not expose (`redundancy.v1` §2.4): a
+/// GET over one resource's wildcard at the address, target `All`,
+/// consolidation `None`, every reply attributed by its replier's zid, a
+/// value and an envelope alike.
+#[derive(Debug, Clone, Default)]
+pub struct ExposureProbe {
+    /// The resource probed, `<kind token>/<template>`.
+    pub resource: String,
+    /// Whether it is an operation: every operation queryable answers a
+    /// call over its wildcard before any handler runs (core O2, O3), where
+    /// a state queryable holding nothing answers nothing.
+    pub operation: bool,
+    /// The key expression asked, base-relative.
+    pub selector: String,
+    /// Each reply's replier zid, as zenoh states it.
+    pub repliers: Vec<String>,
+    /// Replies zenoh named no replier of.
+    pub unattributed: usize,
+    /// Why the GET did not run to its final reply: an error reply with no
+    /// replier, a timeout among them; `None` when it did.
+    pub incomplete: Option<String>,
+}
+
+/// The standbys' probes of one `check conform` run (`redundancy.v1` §2.4).
+#[derive(Debug, Clone)]
+pub struct StandbyConform {
+    /// Each state resource's and each operation's probe, or why it could
+    /// not be made.
+    pub probes: Vec<std::result::Result<ExposureProbe, String>>,
+    /// The operations not probed, each with why.
+    pub not_probed: Vec<(String, String)>,
+    /// The second presence read, after the probes, with its descriptors: a
+    /// standby is one in both reads.
+    pub second: std::result::Result<Observed, String>,
+}
+
+/// Whether a descriptor in `o` lists `iface` marked standby.
+fn marks_standby(o: &Observed, iface: &IfaceId) -> bool {
+    let want = iface.to_string();
+    o.descriptors
+        .iter()
+        .flatten()
+        .filter_map(|(_, r)| r.descriptor())
+        .flat_map(|d| d.interfaces.iter())
+        .any(|e| e.iface == want && e.standby)
+}
+
+/// A resource's key expression at `addr`, base-relative, each parameter a
+/// `*` and a rest parameter `**`.
+fn wildcard_of(addr: &Addr, iface: &IfaceId, r: &Resource) -> Vec<String> {
+    let mut chunks: Vec<String> = vec![
+        GRAMMAR.to_owned(),
+        addr.system.to_string(),
+        addr.service.to_string(),
+        iface.to_string(),
+        r.token.to_string(),
+    ];
+    for seg in r.template.segments() {
+        chunks.push(match seg {
+            Segment::Literal(l) => l.clone(),
+            Segment::Param(_) => "*".to_owned(),
+            Segment::Rest(_) => "**".to_owned(),
+        });
+    }
+    chunks
+}
+
+/// The probes of §2.4: every state resource of the revision, and every
+/// operation that forbids fan-out, over a key expression that is a
+/// wildcard (a concrete operation's last chunk followed by `$*`), unless
+/// it would reach an operation that allows fan-out, whose handler a call
+/// over a wildcard runs: a write. Then presence again.
+async fn standby_suite(
+    session: &Session,
+    addr: &Addr,
+    rev: &Revision,
+    timeout: Duration,
+) -> StandbyConform {
+    use zenoh::key_expr::KeyExpr;
+    let c = rev.contract();
+    let iface = rev.iface().clone();
+    let allowed: Vec<KeyExpr<'static>> = c
+        .resources
+        .iter()
+        .filter(|r| matches!(&r.body, Body::Operation(op) if op.fanout == Fanout::Allowed))
+        .filter_map(|r| KeyExpr::autocanonize(wildcard_of(addr, &iface, r).join("/")).ok())
+        .collect();
+    let mut probes = Vec::new();
+    let mut not_probed = Vec::new();
+    for r in &c.resources {
+        let name = zenkey::implementation::resource_name(r);
+        let mut chunks = wildcard_of(addr, &iface, r);
+        let operation = match (&r.kind, &r.body) {
+            (Kind::State, _) => false,
+            (Kind::Operation, Body::Operation(op)) if op.fanout == Fanout::Allowed => {
+                not_probed.push((
+                    name,
+                    "fanout = \"allowed\": a call over its wildcard would run it, a write".into(),
+                ));
+                continue;
+            }
+            (Kind::Operation, _) => {
+                if !r.template.has_params()
+                    && let Some(last) = chunks.last_mut()
+                {
+                    last.push_str("$*");
+                }
+                true
+            }
+            _ => continue,
+        };
+        let selector = chunks.join("/");
+        let ke = match KeyExpr::autocanonize(selector.clone()) {
+            Ok(k) => k,
+            Err(e) => {
+                probes.push(Err(format!(
+                    "{name}: {selector:?} is no key expression: {e}"
+                )));
+                continue;
+            }
+        };
+        if operation && let Some(other) = allowed.iter().find(|a| a.intersects(&ke)) {
+            not_probed.push((
+                name,
+                format!(
+                    "its probe {selector} would reach {other}, an operation whose fanout is \
+                     \"allowed\", and run it"
+                ),
+            ));
+            continue;
+        }
+        probes.push(exposure_probe(session, name, operation, ke, timeout).await);
+    }
+    let second = crate::bus::presence::observe(session, &Scope::service(addr), timeout)
+        .await
+        .map_err(|e| crate::one_line(&e));
+    StandbyConform {
+        probes,
+        not_probed,
+        second,
+    }
+}
+
+async fn exposure_probe(
+    session: &Session,
+    resource: String,
+    operation: bool,
+    ke: zenoh::key_expr::KeyExpr<'static>,
+    timeout: Duration,
+) -> std::result::Result<ExposureProbe, String> {
+    let selector = ke.to_string();
+    let replies = session
+        .get(ke)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .await
+        .map_err(|e| format!("GET {selector}: {e}"))?;
+    let mut seen = ExposureProbe {
+        resource,
+        operation,
+        selector,
+        ..ExposureProbe::default()
+    };
+    while let Ok(reply) = replies.recv_async().await {
+        match reply.replier_id() {
+            Some(id) => seen.repliers.push(id.zid().to_string()),
+            None => match reply.result() {
+                Err(e) => {
+                    seen.incomplete = Some(format!(
+                        "an error reply no replier sent: {}",
+                        String::from_utf8_lossy(&e.payload().to_bytes())
+                    ))
+                }
+                Ok(_) => seen.unattributed += 1,
+            },
+        }
+    }
+    Ok(seen)
 }
