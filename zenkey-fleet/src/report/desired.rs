@@ -585,7 +585,11 @@ mod tests {
 
     /// Two readable reports, of two report resources, that claim the slice
     /// and differ are unreadable (§2.10, text 0.5, F-212): the row names
-    /// both keys and says why, never as if no report were read.
+    /// both keys and says why, never as if no report were read. `key`
+    /// stays, the first claimant's in reply order, so a report seen always
+    /// has the one key it came on; `document` is absent, since neither is
+    /// the report; `unreadable` is `two_differ`; `differing` holds the
+    /// others' keys, in reply order (review of #864).
     #[test]
     fn two_reports_that_differ_pin_their_shape() {
         let mut r = row(

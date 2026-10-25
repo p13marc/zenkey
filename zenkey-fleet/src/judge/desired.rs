@@ -339,7 +339,8 @@ fn row(
             freshness,
         }),
         // Two that claim the slice and differ are unreadable, each named
-        // (§2.10, text 0.5, F-212), never as if none were read.
+        // (§2.10, text 0.5, F-212), never as if none were read: `key` the
+        // first claimant's, `document` none, the others in `differing`.
         (None, Some((first, rest))) => Some(DesiredReportSeen {
             key: first.key.clone(),
             document: None,
