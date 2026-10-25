@@ -220,9 +220,12 @@ async fn the_token_ledger_reads_beside_a_monitor_of_its_own() {
         stats_tick: Duration::from_secs(3600),
         ..zenkey_fleet::MonitorSpec::default()
     };
-    let monitor = zenkey_fleet::Monitor::start(&watch, spec)
-        .await
-        .expect("a monitor");
+    let monitor = zenkey_fleet::Monitor::start_watch(
+        &zenkey_fleet::WatchSession::new(&watch, "").expect("a watch session"),
+        spec,
+    )
+    .await
+    .expect("a monitor");
     let refused = TokenFeed::open(&watch, &monitor, vec![FOREIGN.to_owned()], zk2::T)
         .await
         .expect_err("refused");
@@ -343,9 +346,12 @@ async fn the_token_ledger_is_incomplete_while_its_round_trip_does_not_stand() {
         ..zenkey_fleet::MonitorSpec::default()
     };
     stalled.store(true, Ordering::SeqCst);
-    let monitor = zenkey_fleet::Monitor::start(&watch, spec)
-        .await
-        .expect("a monitor");
+    let monitor = zenkey_fleet::Monitor::start_watch(
+        &zenkey_fleet::WatchSession::new(&watch, "").expect("a watch session"),
+        spec,
+    )
+    .await
+    .expect("a monitor");
     assert_eq!(monitor.settled(), Some(false));
     let mut feed = TokenFeed::open(&raw, &monitor, vec![FOREIGN.to_owned()], zk2::T)
         .await

@@ -361,12 +361,13 @@ pub struct Publish<'a> {
 /// bus tests drive directly.
 pub struct Engine<'a> {
     /// The two sessions: in the deployment's namespace, and in none; and
-    /// the namespaced watch session, when a rule follows presence live
-    /// (#830).
+    /// the deployment's watch session, in no namespace on its wire keys,
+    /// when a rule follows presence live (#830, #875).
     pub bus: &'a DoctorBus,
     /// The raw watch session the foreign-token ledger's monitor holds
-    /// (#830), when a `liveliness-gone` rule names a foreign token.
-    pub raw_watch: Option<&'a zenoh::Session>,
+    /// (#830), when a `liveliness-gone` rule names a foreign token: the bus
+    /// root's, whose keys are the wire's.
+    pub raw_watch: Option<&'a zenkey_fleet::WatchSession>,
     /// The contract store, seeded with `contracts`: a revision held
     /// offline is never retrieved (spec §8.5).
     pub store: &'a BundleStore,
@@ -571,22 +572,23 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let mut watchdog_done = watchdog.is_none();
 
     // Presence, live (#614): one projection of the whole deployment, its
-    // own monitor on the namespaced session, seeded before `ready`.
+    // own monitor on the deployment's watch session, seeded before `ready`.
     let mut presence_rules = PresenceRules::new(e.rules, namespace);
     let mut presence_monitor: Option<Monitor> = None;
     let mut presence_feed: Option<PresenceFeed> = None;
     if !presence_rules.is_empty() {
         let scope = PresenceScope::all();
-        // Its liveliness subscribers on the namespaced watch session, its
-        // reads on the namespaced session (#830, core §8.1, 0.37).
+        // Its liveliness subscribers on the deployment's watch session, in
+        // no namespace on the wire keys (#875), its reads on the namespaced
+        // session (#830, core §8.1, 0.37).
         let watch = e.bus.watch.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "the presence rules need a watch session in the namespace: no presence read \
+                "the presence rules need a watch session for the namespace: no presence read \
                  is made beside a liveliness subscriber (#830)"
             )
         })?;
         let monitor =
-            Monitor::start(watch, liveliness_spec(Vec::new()).with_presence("", &scope)).await?;
+            Monitor::start_watch(watch, liveliness_spec(Vec::new()).with_presence(&scope)).await?;
         let mut live = LivePresence::new(scope);
         presence_rules.track(&mut live, SystemTime::now());
         let (feed, _seeded) = PresenceFeed::open(&e.bus.session, &monitor, live, e.timeout).await?;
@@ -619,7 +621,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                  beside a liveliness subscriber (#830)"
             )
         })?;
-        let monitor = Monitor::start(watch, liveliness_spec(selectors.clone())).await?;
+        let monitor = Monitor::start_watch(watch, liveliness_spec(selectors.clone())).await?;
         let feed = TokenFeed::open(&e.bus.raw, &monitor, selectors, e.timeout).await?;
         let announced: BTreeMap<String, Vec<String>> = e
             .rules

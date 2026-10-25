@@ -406,14 +406,14 @@ impl AlarmRules {
 
     /// Opens every reader on `session` (in the deployment's namespace):
     /// subscribed, then seeded by S4's GET (core §4.2), the owners' instance
-    /// tokens followed on `watch`, a session of its own (#830). Returns, per
-    /// reader, the transitions its first reading made — each alarm found,
-    /// raised or resolved as a late reader reads it (§2.6) — for
-    /// [`Self::baseline`].
+    /// tokens followed on `watch`, a watch session of its own (#830, #875).
+    /// Returns, per reader, the transitions its first reading made — each
+    /// alarm found, raised or resolved as a late reader reads it (§2.6) —
+    /// for [`Self::baseline`].
     pub async fn open(
         &mut self,
         session: &zenoh::Session,
-        watch: Option<&zenoh::Session>,
+        watch: Option<&zenkey_fleet::WatchSession>,
         timeout: Duration,
         clocks_synced: bool,
     ) -> Vec<Vec<AlarmTransition>> {

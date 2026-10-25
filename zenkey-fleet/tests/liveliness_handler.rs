@@ -126,8 +126,8 @@ async fn round_trips_beside_a_subscriber() {
     let watch = client(&ep).await;
     let delivered = Arc::new(AtomicU64::new(0));
     let started = Instant::now();
-    let monitor = Monitor::start(
-        &watch,
+    let monitor = Monitor::start_watch(
+        &zenkey_fleet::WatchSession::new(&watch, "").expect("a watch session"),
         MonitorSpec {
             liveliness: vec!["demo/held/*/alive".to_owned()],
             ..MonitorSpec::default()

@@ -29,7 +29,7 @@ fn bus_of(session: &zenoh::Session, watch: Option<&zenoh::Session>) -> zenkey_fl
         session: session.clone(),
         raw: session.clone(),
         namespace: String::new(),
-        watch: watch.cloned(),
+        watch: watch.map(|w| zenkey_fleet::WatchSession::new(w, "").expect("a watch session")),
     }
 }
 

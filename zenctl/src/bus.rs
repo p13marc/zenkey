@@ -212,18 +212,32 @@ impl Deployment {
         .map_err(open_error)
     }
 
-    /// A **watch session** in the namespace (#830, core §8.1, 0.37): a
-    /// session of its own over the same connection, for a live reader's
-    /// liveliness subscribers — the `instance-gone` monitor of `watchdog`
-    /// and `record --on`, the owners' instance tokens of `alert-firing`,
-    /// `alarms --for` and `check conform`, a telemetry reading's tokens. It
-    /// makes no presence read: [`Deployment::session`] holds no liveliness
+    /// A **watch session** for the namespace (#830, core §8.1, 0.37; #875):
+    /// a session of its own over the same connection, in **no** namespace,
+    /// for a live reader's liveliness subscribers on the deployment's wire
+    /// keys — the `instance-gone` monitor of `watchdog` and `record --on`,
+    /// the owners' instance tokens of `alert-firing`, `alarms --for` and
+    /// `check conform`, a telemetry reading's tokens. Its subscribers have
+    /// no history, so its round trip is one round trip at any population;
+    /// in a namespace they would need history to hear an earlier token
+    /// withdrawn (zenoh 1.10.1, #872), and the round trip would wait for
+    /// it. It makes no read: [`Deployment::session`] holds no liveliness
     /// subscriber beside it and makes every read, since a liveliness GET
-    /// beside one can complete without a token that is live. The cost is
-    /// one more session per such run, with its router-side declarations;
-    /// a verb that follows no presence live opens none.
-    pub(crate) async fn watch_session(&self) -> Result<zenoh::Session> {
-        self.session().await
+    /// beside one can complete without a token that is live, and the type
+    /// hands out no session to read through. The cost is one more session
+    /// per such run, with its router-side declarations; a verb that follows
+    /// no presence live opens none.
+    pub(crate) async fn watch_session(&self) -> Result<zenkey_fleet::WatchSession> {
+        let t = &self.link.transport;
+        zenkey_fleet::open_watch(
+            &self.namespace,
+            t.file.as_deref(),
+            &t.connect,
+            &t.listen,
+            t.scouting,
+        )
+        .await
+        .map_err(open_error)
     }
 
     /// A session **in** the namespace that owns keys (#825): a mock

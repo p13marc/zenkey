@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 mod util;
-use util::zk2::{T, addr, client, config, eventually, router};
+use util::zk2::{T, addr, client, config, eventually, router, watch_of};
 
 use zenkey::presence::LivelinessGets;
 use zenkey::{Implementation, Service, ServiceBuilder};
@@ -63,7 +63,7 @@ fn presence_spec() -> MonitorSpec {
         stats_tick: Duration::from_secs(3600),
         ..MonitorSpec::default()
     }
-    .with_presence("", &PresenceScope::all())
+    .with_presence(&PresenceScope::all())
 }
 
 /// Whether `session`'s router shows it `key`, by one complete read.
@@ -265,7 +265,7 @@ async fn s7_a_read_cut_off_while_it_runs() {
             .is_ok_and(|r| r.complete && r.keys.len() == 2 && r.keys.contains(&key))
     })
     .await;
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     let p7 = addr("p7/a");
@@ -339,7 +339,7 @@ async fn s8_a_withdrawal_heard_live() {
         retrying_client(&link.endpoint).await,
         retrying_client(&link.endpoint).await,
     );
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     assert_eq!(monitor.settled(), Some(true), "the round trip");
@@ -548,7 +548,7 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
         zenkey::presence::liveliness_gets(&watch),
         LivelinessGets::default()
     );
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     assert_eq!(monitor.settled(), Some(true));
@@ -621,7 +621,7 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
         watch_link.stall();
         let starting = tokio::spawn({
             let watch = watch.clone();
-            async move { Monitor::start(&watch, presence_spec()).await }
+            async move { Monitor::start_watch(&watch_of(&watch, ""), presence_spec()).await }
         });
         tokio::time::sleep(STALL).await;
         assert!(
@@ -764,7 +764,7 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
 
     // No round trip stands: the link stalls while the monitor starts.
     watch_link.stall();
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     assert_eq!(monitor.settled(), Some(false), "the round trip ran out");

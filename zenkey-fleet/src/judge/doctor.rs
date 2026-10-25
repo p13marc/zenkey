@@ -235,14 +235,15 @@ pub struct DoctorBus {
     pub raw: Session,
     /// The namespace `session` is in; empty for the bus root.
     pub namespace: String,
-    /// A **watch session** in the namespace (#830, core §8.1, 0.37): a
-    /// session of its own that holds a live reader's liveliness
+    /// A **watch session** for the namespace (#830, core §8.1, 0.37; #875):
+    /// a session of its own, in no namespace on the deployment's wire keys
+    /// ([`crate::open_watch`]), that holds a live reader's liveliness
     /// subscribers — the watchdog's `instance-gone` monitor, `alert-firing`'s
     /// and `check conform`'s instance tokens, a telemetry reading's tokens —
-    /// and makes no presence read. `session` and `raw` then hold none, and
-    /// every read is made there. The doctor never uses it; `None` makes a
-    /// reader that needs one unobservable, or refused, saying why.
-    pub watch: Option<Session>,
+    /// without history, and makes no read. `session` and `raw` then hold
+    /// none, and every read is made there. The doctor never uses it; `None`
+    /// makes a reader that needs one unobservable, or refused, saying why.
+    pub watch: Option<crate::WatchSession>,
 }
 
 // ─── what one run read ──────────────────────────────────────────────────────

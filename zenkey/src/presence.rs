@@ -461,12 +461,19 @@ pub const FOREIGN_BARRIER: &str = "zk2/@zk/settle";
 /// the GET ran (zenoh's reply at the cut follows no declaration). The
 /// barrier is then not established.
 pub async fn settle(session: &zenoh::Session, scope: &str, timeout: Duration) -> Result<bool> {
+    settle_at(session, &barrier_key(scope), timeout).await
+}
+
+/// [`settle`], asking `key` itself: a watch session in no namespace that
+/// watches a deployment's wire keys asks its barrier key on the wire,
+/// `<namespace>/` + [`barrier_key`]`(scope)` (#875, core §8.1, 0.42).
+/// The checks are [`settle`]'s: no round trip through a session cut off,
+/// and none stands that was cut off while it ran (0.42, F-228).
+pub async fn settle_at(session: &zenoh::Session, key: &str, timeout: Duration) -> Result<bool> {
     if cut_off(session).await {
         return Ok(false);
     }
-    Ok(get(session, &barrier_key(scope), timeout, Kind::Settle)
-        .await?
-        .complete)
+    Ok(get(session, key, timeout, Kind::Settle).await?.complete)
 }
 
 /// A watch session's barrier, kept (#851, core §8.1, 0.41): [`settle`]'s
@@ -494,7 +501,9 @@ pub struct Barrier {
 
 struct BarrierInner {
     session: zenoh::Session,
-    scope: String,
+    /// The key its round trip asks: [`barrier_key`] of the scope, on the
+    /// wire when the session watches a deployment's wire keys (#875).
+    key: String,
     timeout: Duration,
     /// Bumped by every transport event of the session.
     moved: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -510,7 +519,7 @@ struct BarrierInner {
 impl std::fmt::Debug for Barrier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Barrier")
-            .field("scope", &self.inner.scope)
+            .field("key", &self.inner.key)
             .field("established", &self.established())
             .finish_non_exhaustive()
     }
@@ -519,8 +528,17 @@ impl std::fmt::Debug for Barrier {
 impl Barrier {
     /// A barrier for `session`'s subscribers to `scope`, each round trip
     /// bounded by `timeout`: it listens to the session's transport events,
-    /// and makes no round trip yet ([`Barrier::establish`]).
+    /// and makes no round trip yet ([`Barrier::establish`]). Its round trip
+    /// asks [`barrier_key`]`(scope)`.
     pub async fn new(session: &zenoh::Session, scope: &str, timeout: Duration) -> Result<Barrier> {
+        Barrier::at(session, &barrier_key(scope), timeout).await
+    }
+
+    /// [`Barrier::new`], its round trip asking `key` itself: a key no token
+    /// holds, as [`barrier_key`] spells one. A watch session in no
+    /// namespace that watches a deployment's wire keys asks
+    /// `<namespace>/` + [`barrier_key`]`(scope)` (#875, core §8.1, 0.42).
+    pub async fn at(session: &zenoh::Session, key: &str, timeout: Duration) -> Result<Barrier> {
         use std::sync::atomic::{AtomicU64, Ordering};
         let moved = std::sync::Arc::new(AtomicU64::new(0));
         let moves = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -537,7 +555,7 @@ impl Barrier {
         Ok(Barrier {
             inner: std::sync::Arc::new(BarrierInner {
                 session: session.clone(),
-                scope: scope.to_owned(),
+                key: key.to_owned(),
                 timeout,
                 moved,
                 at: AtomicU64::new(u64::MAX),
@@ -569,7 +587,7 @@ impl Barrier {
             return true;
         }
         let before = self.inner.moved.load(Ordering::SeqCst);
-        let came = settle(&self.inner.session, &self.inner.scope, self.inner.timeout)
+        let came = settle_at(&self.inner.session, &self.inner.key, self.inner.timeout)
             .await
             .unwrap_or(false);
         if came && self.inner.moved.load(Ordering::SeqCst) == before {
@@ -601,10 +619,10 @@ impl Barrier {
         }
     }
 
-    /// The scope the barrier orders.
+    /// The key its round trip asks.
     #[must_use]
-    pub fn scope(&self) -> &str {
-        &self.inner.scope
+    pub fn key(&self) -> &str {
+        &self.inner.key
     }
 }
 

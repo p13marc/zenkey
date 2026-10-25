@@ -204,7 +204,8 @@ impl SampleView {
 #[derive(Debug, Clone)]
 pub enum FleetEvent {
     Sample(Arc<SampleView>),
-    /// A liveliness token appeared (full wire key of the token).
+    /// A liveliness token appeared: its key, relative to the watch
+    /// session's namespace ([`crate::WatchSession`], #875).
     NodeUp(String),
     /// A liveliness token disappeared.
     NodeDown(String),
@@ -228,13 +229,16 @@ pub enum FleetEvent {
 pub struct MonitorSpec {
     /// Full wire selectors to subscribe to.
     pub selectors: Vec<String>,
-    /// Also watch these liveliness selectors, as wire selectors on the
-    /// monitor's session: each token's put and delete arrives as
-    /// [`FleetEvent::NodeUp`] and [`FleetEvent::NodeDown`], with its full key.
+    /// Also watch these liveliness selectors, on a watch session
+    /// ([`Monitor::start_watch`]; [`Monitor::start`] refuses them):
+    /// base-relative, declared on the wire with the watch session's
+    /// namespace in front, each token's put and delete arriving as
+    /// [`FleetEvent::NodeUp`] and [`FleetEvent::NodeDown`] with its key
+    /// relative to that namespace (#875).
     ///
-    /// **The seed is a read, and history only in a namespace** (#851, core
-    /// §8.1, 0.41). What is held is read, on another session, and these
-    /// events are folded after it, as
+    /// **The seed is a read, and no subscriber has history** (#851, #875,
+    /// core §8.1, 0.41, 0.42). What is held is read, on another session, and
+    /// these events are folded after it, as
     /// [`crate::bus::presence::PresenceFeed`] and zenwatch's token ledger
     /// do; liveliness history has no end-of-history mark anyway (spec
     /// §8.1, O5). So each subscriber is declared without history, and the
@@ -242,12 +246,10 @@ pub struct MonitorSpec {
     /// at any population (6 ms beside 10,000 tokens, debug build, where a
     /// history took 23 s). A token held before the subscriber and
     /// withdrawn after the barrier is still told: the router sends its
-    /// withdrawal by key. **In a namespace** zenoh 1.10.1 does not strip
-    /// the namespace from that key, and the withdrawal is never heard, so a
-    /// monitor on a namespaced session declares its subscribers with
-    /// history ([`zenkey::presence::subscriber_needs_history`]): its
-    /// barrier may then run out beside a large population, and a reader
-    /// makes it again before its next seed, when the history is in.
+    /// withdrawal by key. A namespaced session would not strip its
+    /// namespace from that key, and would never hear it (zenoh 1.10.1,
+    /// #872), which is why the watch session runs in no namespace and
+    /// watches the wire keys.
     ///
     /// **A list, because a zk2 presence selector names `@zk`.** `*` and
     /// `**` never cross a verbatim chunk (spec §1.3; RFC 03 §4 D2, carried
@@ -267,12 +269,12 @@ pub struct MonitorSpec {
     /// core §8.1, 0.37). On zenoh 1.10.1 a liveliness GET from a session
     /// that holds a liveliness subscriber, history or not, can complete
     /// without tokens that are live, so the subscribers are declared through
-    /// [`zenkey::presence::declare_subscriber`], which marks the session:
+    /// `zenkey::presence::declare_subscriber`, which marks the session:
     /// every liveliness read on it is refused from then on
     /// ([`crate::Error::NotAsked`]). Seed on another session — the
     /// deployment's — and give the reader this monitor, so it can refuse
-    /// one with the same zid ([`Monitor::zid`]). [`Monitor::start`] makes
-    /// the session's barrier before it returns
+    /// one with the same zid ([`Monitor::zid`]). [`Monitor::start_watch`]
+    /// makes the session's barrier before it returns
     /// ([`zenkey::presence::Barrier`]): its routers have read every
     /// subscriber by then, and a token withdrawn after a seed made on the
     /// other session is told here. A reader asks the barrier again before
@@ -306,17 +308,11 @@ impl Default for MonitorSpec {
 
 impl MonitorSpec {
     /// Also watch `scope`'s zk2 presence tokens: its three token selectors
-    /// ([`crate::bus::presence::Scope::token_selectors`]) as the wire spells
-    /// them in `namespace` — the deployment's when this monitor runs on a
-    /// session in no namespace, empty when it runs in the namespace.
+    /// ([`crate::bus::presence::Scope::token_selectors`]), base-relative,
+    /// which the watch session spells on the wire in its namespace (#875).
     /// Appended to [`MonitorSpec::liveliness`]; what was there stays.
-    pub fn with_presence(
-        mut self,
-        namespace: &str,
-        scope: &crate::bus::presence::Scope,
-    ) -> MonitorSpec {
-        self.liveliness
-            .extend(crate::bus::presence::presence_selectors(namespace, scope));
+    pub fn with_presence(mut self, scope: &crate::bus::presence::Scope) -> MonitorSpec {
+        self.liveliness.extend(scope.token_selectors());
         self
     }
 }
@@ -722,6 +718,9 @@ pub struct Monitor {
     /// The session's zid: a reader that seeds beside this monitor refuses a
     /// session with the same one (#830).
     zid: zenoh::session::ZenohId,
+    /// The watch session, when the monitor watches liveliness (#830, #875):
+    /// its subscribers' keys arrive stripped of its namespace.
+    watch: Option<crate::WatchSession>,
     /// The watch session's barrier, when the monitor watches liveliness
     /// (#830, #851).
     barrier: Option<zenkey::presence::Barrier>,
@@ -744,7 +743,37 @@ impl Monitor {
     /// Declare the spec's subscribers on `session` and start watching.
     /// `spec.selectors` are simply the *initial* watches — `[]` is the lazy
     /// start.
+    ///
+    /// No liveliness: a spec that names any is refused
+    /// ([`Error::Unaskable`]), since liveliness is watched on a watch
+    /// session, which knows the namespace of the keys it watches
+    /// ([`Monitor::start_watch`], #875).
     pub async fn start(session: &Session, spec: MonitorSpec) -> Result<Monitor> {
+        if !spec.liveliness.is_empty() {
+            return Err(Error::unaskable(
+                "a monitor's liveliness selectors",
+                "a liveliness subscriber is declared on a watch session, which knows the \
+                 namespace of the keys it watches: Monitor::start_watch (#875)",
+            ));
+        }
+        Monitor::start_on(session, None, spec).await
+    }
+
+    /// [`Monitor::start`] on a watch session (#830, #875): the spec's
+    /// liveliness selectors, base-relative, declared on the wire through
+    /// `watch` without history ([`crate::WatchSession::subscribe`]), each
+    /// token's key delivered relative to its namespace, and the barrier
+    /// made on its wire key before this returns. Its data watches, if any,
+    /// are wire selectors on the same session, in no namespace.
+    pub async fn start_watch(watch: &crate::WatchSession, spec: MonitorSpec) -> Result<Monitor> {
+        Monitor::start_on(watch.session(), Some(watch), spec).await
+    }
+
+    async fn start_on(
+        session: &Session,
+        watch: Option<&crate::WatchSession>,
+        spec: MonitorSpec,
+    ) -> Result<Monitor> {
         let core = MonitorCore::bounded(spec.capacity, spec.max_keys);
         let mut tasks = Vec::new();
 
@@ -761,33 +790,26 @@ impl Monitor {
         // Declared through the runtime, which marks the session a watch
         // session (#830): no liveliness read is made on it from now on.
         let mut liveliness = Vec::with_capacity(spec.liveliness.len());
-        for liveliness_sel in &spec.liveliness {
-            let core = Arc::clone(&core);
-            let subscriber = crate::bus::teardown::declared(
-                "liveliness subscribe",
-                liveliness_sel,
-                // No history unless the session is in a namespace (#851,
-                // core §8.1, 0.41): see `MonitorSpec::liveliness`.
-                zenkey::presence::declare_subscriber(session, liveliness_sel)
-                    .history(zenkey::presence::subscriber_needs_history(session))
-                    .callback(move |sample| {
-                        let key = sample.key_expr().as_str().to_string();
-                        core.node_event(key, sample.kind() == SampleKind::Put);
-                    }),
-            )
-            .await?;
-            liveliness.push((liveliness_sel.clone(), subscriber));
+        if let Some(watch) = watch {
+            for liveliness_sel in &spec.liveliness {
+                let core = Arc::clone(&core);
+                // On the wire, without history (#851, #875): see
+                // `MonitorSpec::liveliness`.
+                let subscriber = watch
+                    .subscribe("liveliness subscribe", liveliness_sel, move |h| {
+                        core.node_event(h.key, h.held);
+                    })
+                    .await?;
+                liveliness.push((liveliness_sel.clone(), subscriber));
+            }
         }
         // The barrier (#830, #851): its final reply follows every
         // declaration above on the session's link, so a reader that seeds on
         // another session after it misses no withdrawal. Kept, and asked
         // again by a reader before each seed.
-        let barrier = match spec.liveliness.first() {
-            None => None,
-            Some(sel) => {
-                let barrier = zenkey::presence::Barrier::new(session, sel, SETTLE_TIMEOUT)
-                    .await
-                    .map_err(|e| Error::bus("liveliness barrier", sel, e))?;
+        let barrier = match (watch, spec.liveliness.first()) {
+            (Some(watch), Some(sel)) => {
+                let barrier = watch.barrier(sel, SETTLE_TIMEOUT).await?;
                 if !barrier.establish().await {
                     tracing::warn!(
                         selector = sel.as_str(),
@@ -798,6 +820,7 @@ impl Monitor {
                 }
                 Some(barrier)
             }
+            _ => None,
         };
 
         {
@@ -821,6 +844,7 @@ impl Monitor {
             core,
             session: session.clone(),
             zid: session.zid(),
+            watch: watch.cloned(),
             barrier,
             watches: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             next_watch: AtomicU64::new(0),
@@ -1059,10 +1083,11 @@ impl Monitor {
         self.zid
     }
 
-    /// The session this monitor runs on: a watch session when it watches
-    /// liveliness, which makes no liveliness read (#830).
-    pub fn session(&self) -> &Session {
-        &self.session
+    /// The watch session its liveliness subscribers run on, when it
+    /// watches liveliness (#875): a reader beside the monitor asks it
+    /// whether it is cut off, and refuses to read through its zid.
+    pub fn watch_session(&self) -> Option<&crate::WatchSession> {
+        self.watch.as_ref()
     }
 
     /// Whether it watches liveliness.

@@ -1178,18 +1178,21 @@ async fn health_owner(
 }
 
 /// The window's presence link (its subscription's own stream) over a
-/// presence monitor on `watch`, a session of its own, reading through
-/// `session`, as the window starts one (#830).
+/// presence monitor on `watch`, a watch session of its own in no namespace
+/// on the deployment's wire keys, reading through `session`, as the window
+/// starts one (#830, #875).
 async fn presence_stream(
     session: &zenoh::Session,
-    watch: &zenoh::Session,
+    watch: &zenkey_fleet::WatchSession,
 ) -> impl iced::futures::Stream<Item = zengui::message::Message> {
     let spec = MonitorSpec {
         stats_tick: Duration::from_secs(3600),
         ..MonitorSpec::default()
     }
-    .with_presence("", &zenkey_fleet::PresenceScope::all());
-    let monitor = Monitor::start(watch, spec).await.expect("presence monitor");
+    .with_presence(&zenkey_fleet::PresenceScope::all());
+    let monitor = Monitor::start_watch(watch, spec)
+        .await
+        .expect("presence monitor");
     zengui::presence_link::stream(zengui::presence_link::PresenceKey {
         epoch: 1,
         session: session.clone(),
@@ -1273,8 +1276,10 @@ async fn an_owner_going_away_reads_down_and_coming_back_reads_up_with_a_new_inst
     )
     .await
     .expect("the window's session in the namespace");
-    // The presence monitor's watch session (#830).
-    let watch = zenkey_fleet::open_in_namespace(
+    // The presence monitor's watch session (#830): in no namespace, on the
+    // wire keys `acme/zk2/…` (#875), as the window opens it. The owner's
+    // token is declared before it, and its withdrawal is still heard.
+    let watch = zenkey_fleet::open_watch(
         "acme",
         None,
         std::slice::from_ref(&endpoint),

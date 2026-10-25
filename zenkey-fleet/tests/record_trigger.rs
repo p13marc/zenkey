@@ -530,7 +530,7 @@ async fn instance_gone_fires_a_capture_when_a_seen_address_goes() {
                 session: session.clone(),
                 raw: session.clone(),
                 namespace: String::new(),
-                watch: Some(watch),
+                watch: Some(zenkey_fleet::WatchSession::new(&watch, "").expect("a watch")),
             });
             record_on(
                 &session,

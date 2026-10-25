@@ -166,24 +166,26 @@ pub fn resolve(
 /// Which watch sessions a run's rules need (#830, core §8.1, 0.37): a
 /// session holds a live reader's liveliness subscribers, or makes presence
 /// reads, never both, since a liveliness GET beside a liveliness subscriber
-/// can complete without a token that is live.
+/// can complete without a token that is live. Both run in **no** namespace
+/// (#875), their subscribers without history.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Watches {
-    /// In the namespace: the presence projection's monitor (`instance-gone`,
-    /// `liveliness-gone` on the deployment's own zk2 tokens), and the owners'
-    /// instance tokens of `alerts` and `alert-firing`.
+    /// For the namespace, on its wire keys: the presence projection's
+    /// monitor (`instance-gone`, `liveliness-gone` on the deployment's own
+    /// zk2 tokens), and the owners' instance tokens of `alerts` and
+    /// `alert-firing`.
     pub namespaced: bool,
-    /// In none: the foreign-token ledger's monitor (`liveliness-gone` on any
-    /// other token).
+    /// For the bus root, on the wire keys as they are: the foreign-token
+    /// ledger's monitor (`liveliness-gone` on any other token).
     pub raw: bool,
 }
 
 /// The daemon's sessions: the fleet's [`DoctorBus`] — in the namespace, in
-/// none, and the namespaced watch session when a rule needs one — and the
-/// raw watch session (#830).
+/// none, and the deployment's watch session when a rule needs one — and the
+/// raw watch session (#830, #875).
 pub struct Sessions {
     pub bus: DoctorBus,
-    pub raw_watch: Option<zenoh::Session>,
+    pub raw_watch: Option<zenkey_fleet::WatchSession>,
 }
 
 impl BusSettings {
@@ -196,7 +198,9 @@ impl BusSettings {
     /// The two the daemon reads through always open; each watch session
     /// only when `watches` says a rule follows presence live through it
     /// (#830): one more session, with its router-side declarations, per
-    /// kind of live reader, and none that no rule needs.
+    /// kind of live reader, and none that no rule needs. Each watch session
+    /// is in no namespace, on the wire keys (#875): the deployment's with
+    /// its namespace in front, the raw one's as they are.
     pub async fn sessions(&self, watches: Watches) -> Result<Sessions> {
         let t = &self.transport;
         let raw = spend(
@@ -216,15 +220,27 @@ impl BusSettings {
             )
         };
         let session = namespaced().await?;
+        let watch_for = |namespace: &'_ str| {
+            let namespace = namespace.to_owned();
+            async move {
+                spend(
+                    zenkey_fleet::open_watch(
+                        &namespace,
+                        t.file.as_deref(),
+                        &t.connect,
+                        &t.listen,
+                        t.scouting,
+                    )
+                    .await,
+                )
+            }
+        };
         let watch = match watches.namespaced {
-            true => Some(namespaced().await?),
+            true => Some(watch_for(&self.namespace).await?),
             false => None,
         };
         let raw_watch = match watches.raw {
-            true => Some(spend(
-                zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
-                    .await,
-            )?),
+            true => Some(watch_for("").await?),
             false => None,
         };
         Ok(Sessions {
@@ -240,9 +256,7 @@ impl BusSettings {
 }
 
 /// An open's outcome, with the half that failed turned into an exit code.
-fn spend(
-    opened: std::result::Result<zenoh::Session, zenkey_fleet::OpenFailure>,
-) -> Result<zenoh::Session> {
+fn spend<T>(opened: std::result::Result<T, zenkey_fleet::OpenFailure>) -> Result<T> {
     match opened {
         Ok(s) => Ok(s),
         Err(zenkey_fleet::OpenFailure::Config(e)) => {

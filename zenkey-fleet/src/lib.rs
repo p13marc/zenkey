@@ -240,8 +240,10 @@ pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
     OPEN_TIMEOUT, OpenFailure, TOOL_INTERESTS_TIMEOUT, check_namespace, open, open_in_namespace,
-    open_owner_in_namespace, open_reporting, open_reporting_within, open_with_config,
+    open_owner_in_namespace, open_reporting, open_reporting_within, open_watch, open_with_config,
 };
+// A tool's watch session (#830, #875): in no namespace, on the wire keys.
+pub use bus::watch::{TokenHeard, WatchSession};
 pub use bus::write::{
     MatchingEvents, Publication, WireQos, WriteAct, check_concrete, check_retire,
     declare_publication,
@@ -345,7 +347,6 @@ pub use bus::presence::{
 // the feed that seeds it and keeps it current from a monitor.
 pub use bus::presence::{
     PresenceFeed, RESEED_BACKOFF, RESEED_BACKOFF_MAX, SeedOutcome, WITHDRAWAL_SETTLE,
-    presence_selectors,
 };
 pub use model::catalog::{
     Catalog, ContractSet, ContractState, Contracts, DescriptorRead, LoadProblem,

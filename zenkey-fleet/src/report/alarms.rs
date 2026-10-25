@@ -365,7 +365,9 @@ pub struct AlarmLoss {
     /// Deliveries its queue refused.
     pub dropped: u64,
     /// Its receive path stalled past the bound, or a transport of its
-    /// session closed: what a router held for it went (0.27).
+    /// session closed: what a router held for it went (0.27). Or its watch
+    /// session's transport moved, and its instance tokens' subscriber may
+    /// not have heard what moved meanwhile (core §8.1, 0.42, F-229).
     pub stalled: bool,
 }
 

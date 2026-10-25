@@ -18,7 +18,9 @@
 //! flight is folded into the seed in one step.
 //!
 //! **Two sessions** (#830, core §8.1, 0.37). The monitor holds its
-//! liveliness subscribers on a raw watch session of its own; the ledger is
+//! liveliness subscribers on a raw watch session of its own (a
+//! `zenkey_fleet::WatchSession` for the bus root, whose keys are the
+//! wire's, #875); the ledger is
 //! read through the daemon's raw session, which holds none, and
 //! [`TokenFeed::open`] refuses one with the monitor's zid. A read through
 //! either while it reaches no other zenoh node is not made
@@ -26,7 +28,10 @@
 //! read. The monitor's barrier is asked before every read and made again
 //! when it does not stand (#851, core §8.1, 0.41); a read made without it is
 //! possibly incomplete (`unsettled`), whatever stood before it, and the
-//! observer is unobservable until one made with it.
+//! observer is unobservable until one made with it. A move of the watch
+//! session's transport unconfirms the ledger at once
+//! ([`TokenBasis::Moved`], core §8.1, 0.42, F-229): its subscribers have no
+//! history, and may not have heard what moved while it was down.
 //!
 //! **A withdrawal heard live is not a token gone** (core §8.1, 0.37). A
 //! router's restart withdraws every token at once and its owners never
@@ -83,6 +88,11 @@ pub enum TokenBasis {
     /// The last read was not made: the daemon's session, or the monitor's,
     /// reaches no other zenoh node (core §8.1, 0.37).
     CutOff,
+    /// The watch session's transport moved since the last complete read
+    /// (core §8.1, 0.42, F-229): its subscribers may not have heard what
+    /// moved meanwhile, and every token is unconfirmed until a complete
+    /// read.
+    Moved,
 }
 
 /// One token's move, as the ledger folded it.
@@ -103,9 +113,9 @@ const RESEED_ATTEMPTS: usize = 3;
 /// `selectors` on a session in no namespace (see the module doc).
 pub struct TokenFeed {
     session: Session,
-    /// The monitor's session: a watch session, read only for whether it is
-    /// cut off (#830).
-    watch: Session,
+    /// The monitor's watch session, asked only whether it is cut off
+    /// (#830). `None` when the monitor watches no liveliness.
+    watch: Option<zenkey_fleet::WatchSession>,
     /// The monitor's barrier (#851): asked before each read, and a read
     /// made while it does not stand is possibly incomplete.
     barrier: Option<zenkey::presence::Barrier>,
@@ -169,7 +179,7 @@ impl TokenFeed {
         zenkey_fleet::refuse_beside(session, monitor, "the token ledger's read")?;
         let mut feed = TokenFeed {
             session: session.clone(),
-            watch: monitor.session().clone(),
+            watch: monitor.watch_session().cloned(),
             barrier: monitor.barrier().cloned(),
             moves_seen: monitor
                 .barrier()
@@ -228,10 +238,19 @@ impl TokenFeed {
                 // The watch session's transport moved (#851): a subscriber
                 // without history hears no withdrawal of a token it was
                 // never told of, and one that went meanwhile is in no
-                // history, so the barrier is made again and the ledger read.
+                // history. So the ledger is unconfirmed from now (0.42,
+                // F-229), said before the re-read lands, and the barrier is
+                // made again and the ledger read, at once.
                 Wake::Moved => {
                     self.moves_seen = barrier.as_ref().map_or(seen, |b| b.moves());
                     self.owe_within(Duration::ZERO);
+                    if !matches!(
+                        self.basis,
+                        TokenBasis::Moved | TokenBasis::Lost { .. } | TokenBasis::CutOff
+                    ) {
+                        self.basis = TokenBasis::Moved;
+                        return Some(Vec::new());
+                    }
                 }
                 Wake::Retry => {
                     // A basis change is a move too: hand it out, so the
@@ -309,7 +328,10 @@ impl TokenFeed {
             // included (core §8.1, 0.37).
             let cut = match zenkey_fleet::cut_off(&self.session).await {
                 Some(why) => Some(why),
-                None => zenkey_fleet::cut_off(&self.watch).await,
+                None => match &self.watch {
+                    Some(w) => w.cut_off().await,
+                    None => None,
+                },
             };
             if let Some(why) = cut {
                 tracing::warn!("the token ledger's read was not made: {why}");
@@ -694,6 +716,11 @@ impl ForeignRule {
             TokenBasis::CutOff => format!(
                 "this daemon's session reaches no router and no peer, so no liveliness read of \
                  {sel} is made: unobservable until a complete read (core §8.1)"
+            ),
+            TokenBasis::Moved => format!(
+                "the transport of the watch session that follows {sel} moved, and its \
+                 subscribers may not have heard what moved meanwhile: unobservable until a \
+                 complete re-read after its round trip (core §8.1)"
             ),
         };
         RuleNotice {

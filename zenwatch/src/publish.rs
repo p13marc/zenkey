@@ -296,6 +296,10 @@ pub enum Observer {
     /// The last read was not made: the daemon's session, or its monitor's,
     /// reaches no other zenoh node (core §8.1, 0.37).
     CutOff,
+    /// The monitor's watch session's transport moved since the last
+    /// complete read (core §8.1, 0.42, F-229): what it held is unconfirmed
+    /// until a complete re-read.
+    Moved,
     /// The monitor stopped: its rules see nothing more.
     Stopped,
 }
@@ -309,6 +313,7 @@ impl From<zenkey_fleet::PresenceBasis> for Observer {
             B::Complete => Observer::Complete,
             B::Lost { dropped } => Observer::Lost { dropped },
             B::CutOff => Observer::CutOff,
+            B::Moved => Observer::Moved,
         }
     }
 }
@@ -322,6 +327,7 @@ impl From<crate::liveliness::TokenBasis> for Observer {
             B::Complete => Observer::Complete,
             B::Lost { dropped } => Observer::Lost { dropped },
             B::CutOff => Observer::CutOff,
+            B::Moved => Observer::Moved,
         }
     }
 }
@@ -404,6 +410,14 @@ fn observer_check(name: &'static str, o: Observer, what: &str) -> Check {
                 "this daemon's session reaches no router and no peer, so no read of {what} is \
                  made: every identity its rules watch is unobservable until a complete read \
                  (core §8.1)"
+            ),
+        ),
+        Observer::Moved => (
+            Some(Level::Degraded),
+            format!(
+                "the transport of the watch session that follows {what} moved: what it held is \
+                 unconfirmed, and every identity its rules watch is unobservable until a \
+                 complete re-read after its round trip (core §8.1)"
             ),
         ),
         Observer::Stopped => (
@@ -1105,6 +1119,7 @@ mod tests {
             ),
             (Observer::Lost { dropped: 3 }, Some(Level::Degraded)),
             (Observer::CutOff, Some(Level::Degraded)),
+            (Observer::Moved, Some(Level::Degraded)),
             (Observer::Stopped, Some(Level::Degraded)),
         ] {
             let cs = checks(&HealthInputs {
