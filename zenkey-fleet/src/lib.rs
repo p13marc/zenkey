@@ -29,7 +29,9 @@
 //! ([`DoctorBus::watch`]), and makes every read on the others. That session
 //! is in **no** namespace, and watches the deployment's wire keys without
 //! history ([`WatchSession`], [`open_watch`]; #875, core §8.1, 0.42): its
-//! round trip is one round trip at any population, and it hears an earlier
+//! round trip is one round trip at any population until its transport
+//! moves (0.44, F-239: the reopen tells its subscribers every token, and
+//! the round trip after it waits for them), and it hears an earlier
 //! token withdrawn, which a namespaced subscriber without history never
 //! does. Every liveliness subscriber here is declared through it, and so
 //! through `zenkey::presence::declare_subscriber`, which marks its session,

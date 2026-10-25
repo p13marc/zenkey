@@ -85,7 +85,8 @@ async fn namespaced(namespace: &str, t: &Transport) -> ServiceResult<zenoh::Sess
 /// session of its own over the same connection, in **no** namespace, for
 /// the presence monitor's liveliness subscribers on the deployment's wire
 /// keys, without history, so its round trip is one round trip at any
-/// population. It makes no read, so the session in the namespace holds no
+/// population until its transport moves (core §8.1, 0.44, F-239). It makes
+/// no read, so the session in the namespace holds no
 /// liveliness subscriber and makes every read: a liveliness GET beside one
 /// can complete without a token that is live. One more session per window,
 /// reopened with the others on a namespace switch.

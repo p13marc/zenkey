@@ -25,6 +25,8 @@ struct Relay {
     endpoint: String,
     cut: Arc<AtomicBool>,
     conns: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+    /// When each connection it carries was accepted.
+    accepted: Arc<Mutex<Vec<Instant>>>,
 }
 
 impl Relay {
@@ -34,7 +36,8 @@ impl Relay {
         let endpoint = format!("tcp/{}", listener.local_addr().unwrap());
         let cut = Arc::new(AtomicBool::new(false));
         let conns: Arc<Mutex<Vec<tokio::task::AbortHandle>>> = Arc::default();
-        let (c, cs) = (Arc::clone(&cut), Arc::clone(&conns));
+        let accepted: Arc<Mutex<Vec<Instant>>> = Arc::default();
+        let (c, cs, at) = (Arc::clone(&cut), Arc::clone(&conns), Arc::clone(&accepted));
         tokio::spawn(async move {
             while let Ok((mut down, _)) = listener.accept().await {
                 if c.load(Ordering::SeqCst) {
@@ -47,13 +50,26 @@ impl Relay {
                     let _ = tokio::io::copy_bidirectional(&mut down, &mut up).await;
                 });
                 cs.lock().unwrap().push(h.abort_handle());
+                at.lock().unwrap().push(Instant::now());
             }
         });
         Relay {
             endpoint,
             cut,
             conns,
+            accepted,
         }
+    }
+
+    /// When the connections it accepted after `since` were, from `since`.
+    fn accepted_since(&self, since: Instant) -> Vec<Duration> {
+        self.accepted
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|a| **a >= since)
+            .map(|a| a.duration_since(since))
+            .collect()
     }
 
     fn cut(&self) {
@@ -137,6 +153,120 @@ async fn reopened(barrier: &zenkey::presence::Barrier, seen: u64, deadline: Dura
     Instant::now()
 }
 
+/// The regression (#882): a reader whose caller drops its `next()` far
+/// more often than a read lasts — every 20 ms here, as zenctl's watchdog
+/// dropped it every 250 ms beside 10,000 tokens — recovers after its watch
+/// session's transport and its reading session's are cut and healed beside
+/// a crowd in `ns`: its round trip stands again and its next read is
+/// complete, within a bound, and it asks no read and no round trip it does
+/// not fold. Before the fix each wake abandoned the read in flight, and
+/// asked another the router answered in full: no read was ever folded.
+///
+/// 2,000 tokens, a debug build's read of which lasts past the 20 ms; the
+/// measurement beside 10,000 is
+/// `wf_the_feed_after_a_reopen_beside_the_crowd_measured`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_feed_dropped_at_every_wake_recovers_after_a_reopen_beside_the_crowd() {
+    use zenkey_fleet::{
+        LivePresence, Monitor, MonitorSpec, PresenceFeed, PresenceScope, SeedOutcome,
+    };
+    const CROWD: usize = 2_000;
+    /// What the recovery after the reopen may take: the telling and one
+    /// read of the crowd, with a loaded CI runner's room to spare.
+    const RECOVERS_WITHIN: Duration = Duration::from_secs(30);
+    let (_router, ep) = router(None).await;
+    let (_holders, _tokens) = crowd(&ep, CROWD).await;
+    let relay = Relay::to(&ep).await;
+    let through = [relay.endpoint.clone()];
+    let session = zenkey_fleet::open_in_namespace("ns", None, &through, &[], Some(false))
+        .await
+        .expect("the deployment's session");
+    let watching = zenkey_fleet::open_reporting(None, &through, &[], Some(false))
+        .await
+        .expect("a session in no namespace");
+    let watch = util::zk2::watch_of(&watching, "ns");
+    let scope = PresenceScope::system("crowd").expect("a scope");
+    let spec = MonitorSpec {
+        stats_tick: Duration::from_secs(3600),
+        ..MonitorSpec::default()
+    }
+    .with_presence(&scope);
+    let monitor = Monitor::start_watch(&watch, spec).await.expect("a monitor");
+    let svc7 = util::zk2::addr("crowd/c7");
+    let mut live = LivePresence::new(scope);
+    live.track(&svc7, std::time::SystemTime::now());
+    let (mut feed, _) = PresenceFeed::open(&session, &monitor, live, Duration::from_secs(30))
+        .await
+        .expect("the feed opens");
+    assert_eq!(*feed.last_seed(), SeedOutcome::Complete);
+    assert_eq!(
+        feed.presence().status(&svc7),
+        zenkey_fleet::AddressStatus::Up
+    );
+
+    relay.cut();
+    let mut wake = tokio::time::interval(Duration::from_millis(20));
+    // The move, folded through the caller's loop.
+    let moved = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            tokio::select! {
+                _ = feed.next() => {}
+                _ = wake.tick() => {}
+            }
+            if feed.presence().status(&svc7) == zenkey_fleet::AddressStatus::Unobservable {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(moved.is_ok(), "the move unconfirms what was held");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let (reads, trips) = (
+        zenkey::presence::liveliness_gets(&session).reads,
+        zenkey::presence::liveliness_gets(&watching).settles,
+    );
+    relay.heal();
+    let healed = Instant::now();
+    let recovered = tokio::time::timeout(RECOVERS_WITHIN, async {
+        loop {
+            tokio::select! {
+                _ = feed.next() => {}
+                _ = wake.tick() => {}
+            }
+            if *feed.last_seed() == SeedOutcome::Complete && monitor.settled() == Some(true) {
+                return healed.elapsed();
+            }
+        }
+    })
+    .await;
+    let (reads, trips) = (
+        zenkey::presence::liveliness_gets(&session).reads - reads,
+        zenkey::presence::liveliness_gets(&watching).settles - trips,
+    );
+    eprintln!(
+        "#882: beside {CROWD}, complete again {recovered:?} after the heal; {reads} read(s) and \
+         {trips} round trip(s) asked since; the relay accepted the sessions again at {:?}",
+        relay.accepted_since(healed)
+    );
+    assert!(
+        recovered.is_ok(),
+        "no complete read within {RECOVERS_WITHIN:?} of the heal: {reads} read(s) asked, last \
+         seed {:?}",
+        feed.last_seed()
+    );
+    assert_eq!(
+        feed.presence().status(&svc7),
+        zenkey_fleet::AddressStatus::Up
+    );
+    // One read per re-read, and one more for each read whose window lost
+    // events (at most three a re-read); one round trip per transport
+    // state, a few for the moves around the heal.
+    assert!(reads <= 3, "{reads} reads asked: none abandoned");
+    assert!(trips <= 3, "{trips} round trips asked: none abandoned");
+    drop(feed);
+    monitor.shutdown().await.expect("shutdown");
+}
+
 /// F-239 in Rust: what a subscriber without history on a watch session in
 /// no namespace is told at a reopen, and what the round trip after it
 /// costs, beside the crowd in `ns`. Ignored: a measurement (`WF_CROWD`,
@@ -148,9 +278,15 @@ async fn wf_the_reopen_tells_every_token_and_the_round_trip_waits_measured() {
     let (_router, ep) = router(None).await;
     let (_holders, _tokens) = crowd(&ep, n).await;
     let relay = Relay::to(&ep).await;
-    let watch = zenkey_fleet::open_watch("ns", None, &[relay.endpoint.clone()], &[], Some(false))
-        .await
-        .expect("a watch session");
+    let watch = zenkey_fleet::open_watch(
+        "ns",
+        None,
+        std::slice::from_ref(&relay.endpoint),
+        &[],
+        Some(false),
+    )
+    .await
+    .expect("a watch session");
     let heard = Arc::new(AtomicU64::new(0));
     let last = Arc::new(Mutex::new(Instant::now()));
     let (h, l) = (Arc::clone(&heard), Arc::clone(&last));
@@ -218,7 +354,8 @@ fn link() -> Link {
 /// `zenctl watchdog --namespace ns --timeout 30` runs it (`--every` 5 s),
 /// beside the crowd; the relay cut for 3 s and healed. Prints how long
 /// after the heal the rule reads ok again. `WF_CROWD`, `WF_LINK`
-/// (`watch`, `deployment`, `all`), `WF_CAP` seconds (120).
+/// (`watch`, `deployment`, `all`), `WF_CAP` seconds (120), `WF_TICK`
+/// seconds (5, zenctl's `--every`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "a measurement (#882): WF_CROWD, WF_LINK, --nocapture"]
 async fn wf_the_watchdog_after_a_reopen_beside_the_crowd_measured() {
@@ -231,7 +368,7 @@ async fn wf_the_watchdog_after_a_reopen_beside_the_crowd_measured() {
             .unwrap_or(120),
     );
     let (_router, ep) = router(None).await;
-    let (_holders, _tokens) = crowd(&ep, n).await;
+    let (holders, mut tokens) = crowd(&ep, n).await;
     let relay = Relay::to(&ep).await;
     let via = |crosses: bool| {
         if crosses {
@@ -262,7 +399,12 @@ async fn wf_the_watchdog_after_a_reopen_beside_the_crowd_measured() {
     };
     let spec = WatchdogSpec {
         rules: vec![Condition::parse("instance-gone crowd/*").expect("rule")],
-        tick: Duration::from_secs(5),
+        tick: Duration::from_secs_f64(
+            std::env::var("WF_TICK")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5.0),
+        ),
         ticks: None,
         timeout: Duration::from_secs(30),
         clocks_synced: false,
@@ -292,25 +434,39 @@ async fn wf_the_watchdog_after_a_reopen_beside_the_crowd_measured() {
         ok.duration_since(started)
     );
     for cut in 0..2 {
+        let cut_at = Instant::now();
         relay.cut();
-        let down = until(
-            &mut rx,
-            started,
-            CondState::Unobservable,
-            Instant::now() + Duration::from_secs(30),
-        )
-        .await;
-        eprintln!(
-            "WF: n={n} link={link:?} cut {cut}: unobservable {:?} after the cut",
-            down.map(|d| d.elapsed())
+        // While the link is down, one address of the crowd restarts: its
+        // token withdrawn, a new one declared. Through a watch session cut
+        // off, neither is heard; through a deployment's session cut off,
+        // the withdrawal owes a read no session can make.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokens.remove(0).undeclare().await.expect("undeclare");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokens.insert(
+            0,
+            holders[0]
+                .liveliness()
+                .declare_token(format!(
+                    "zk2/crowd/c0/@zk/instance/{:016x}",
+                    1_000_000 + cut
+                ))
+                .await
+                .expect("a token"),
         );
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep_until((cut_at + Duration::from_secs(3)).into()).await;
         relay.heal();
         let healed = Instant::now();
+        eprintln!(
+            "WF: n={n} link={link:?} cut {cut}: healed after {:?}",
+            healed - cut_at
+        );
         let ok = until(&mut rx, started, CondState::Ok, healed + cap).await;
         eprintln!(
-            "WF: n={n} link={link:?} cut {cut}: ok {:?} after the heal (cap {cap:?})",
-            ok.map(|o| o.duration_since(healed))
+            "WF: n={n} link={link:?} cut {cut}: ok {:?} after the heal (cap {cap:?}); the relay \
+             accepted its sessions again at {:?}",
+            ok.map(|o| o.duration_since(healed)),
+            relay.accepted_since(healed)
         );
         if ok.is_none() {
             break;
@@ -446,6 +602,29 @@ async fn wf_the_feed_after_a_reopen_beside_the_crowd_measured() {
         let gets = zenkey::presence::liveliness_gets(&session);
         relay.heal();
         let healed = Instant::now();
+        // When each session reopened, and when the round trip stood.
+        let marks = {
+            let (session, barrier) = (session.clone(), barrier.clone());
+            let seen = barrier.moves();
+            tokio::spawn(async move {
+                let (mut dep, mut watch, mut stood) = (None, None, None);
+                while healed.elapsed() < Duration::from_secs(120)
+                    && (dep.is_none() || watch.is_none() || stood.is_none())
+                {
+                    if dep.is_none() && zenkey_fleet::cut_off(&session).await.is_none() {
+                        dep = Some(healed.elapsed());
+                    }
+                    if watch.is_none() && barrier.moves() > seen {
+                        watch = Some(healed.elapsed());
+                    }
+                    if stood.is_none() && barrier.established() {
+                        stood = Some(healed.elapsed());
+                    }
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+                (dep, watch, stood)
+            })
+        };
         let complete = tokio::time::timeout(cap, async {
             loop {
                 if compete == 0 {
@@ -464,6 +643,13 @@ async fn wf_the_feed_after_a_reopen_beside_the_crowd_measured() {
         .await
         .ok();
         let gets_after = zenkey::presence::liveliness_gets(&session);
+        let (dep, watch_open, stood) = marks.await.expect("the marks");
+        eprintln!(
+            "WF: n={n} link={link:?} cut {cut}: after the heal, the deployment's session reached \
+             its router at {dep:?}, the watch session's transport moved at {watch_open:?}, its \
+             round trip stood at {stood:?}; complete {:?} after the watch session reopened",
+            complete.zip(watch_open).map(|(c, w)| c.saturating_sub(w))
+        );
         eprintln!(
             "WF: n={n} link={link:?} compete={compete}ms cut {cut}: complete {complete:?} after \
              the heal (cap {cap:?}); {} read(s) folded, {} liveliness GET(s) asked on the \
@@ -596,9 +782,10 @@ async fn wf_zenctl_watchdog_after_a_reopen_beside_the_crowd_measured() {
     let healed = Instant::now();
     let ok = until(&mut rx, started, CondState::Ok, healed + cap).await;
     eprintln!(
-        "WF: zenctl n={n}: ok {:?} after the heal (cap {cap:?}); stderr: {} `Unknown interest`, \
-         {} `Didn't receive DeclareFinal`",
+        "WF: zenctl n={n}: ok {:?} after the heal (cap {cap:?}), its sessions accepted again at \
+         {:?}; stderr: {} `Unknown interest`, {} `Didn't receive DeclareFinal`",
         ok.map(|o| o.duration_since(healed)),
+        relay.accepted_since(healed),
         unknown.load(Ordering::Relaxed),
         no_final.load(Ordering::Relaxed)
     );

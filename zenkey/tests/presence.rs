@@ -1973,3 +1973,57 @@ async fn a_refused_barrier_still_orders_the_subscriber() {
     eprintln!("one router, the barrier refused: heard {heard} of {RUNS}");
     assert_eq!(heard, RUNS);
 }
+
+/// #882: a barrier's round trip runs on a task of its own, one per
+/// transport state, that every waiter shares. Through a stalled link,
+/// three waiters that stop waiting and one dropped at its await ask one
+/// round trip between them; when the stall ends that one stands, and
+/// nothing more is asked. A transport move loses it, and the next waiter
+/// asks a new one. Before, each waiter asked a GET of its own, and a GET
+/// its caller stops waiting for is still answered in full: zenoh 1.10.1
+/// tells the router nothing of it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_round_trip_in_flight_is_taken_up_not_asked_again() {
+    use std::time::Duration;
+    let (_r1, ep) = router(None).await;
+    let link = common::link_to(&ep).await;
+    let watch = client_waiting(link.endpoint(), 30_000).await;
+    let (_sub, _) = listen(&watch, false).await;
+    let barrier = presence::Barrier::new(&watch, INSTANCES, Duration::from_millis(50))
+        .await
+        .unwrap();
+    let asked = presence::liveliness_gets(&watch).settles;
+
+    link.stall();
+    for _ in 0..3 {
+        assert!(!barrier.establish().await, "not back while stalled");
+    }
+    let dropped =
+        tokio::time::timeout(Duration::from_millis(20), barrier.establish_within(T)).await;
+    assert!(dropped.is_err(), "dropped at its await");
+    assert!(barrier.in_flight(), "the round trip runs on");
+    assert_eq!(
+        presence::liveliness_gets(&watch).settles - asked,
+        1,
+        "one round trip between them"
+    );
+    link.heal();
+    assert!(
+        barrier.establish_within(Duration::from_secs(5)).await,
+        "the same round trip stands once the stall ends"
+    );
+    assert!(!barrier.in_flight());
+    assert_eq!(presence::liveliness_gets(&watch).settles - asked, 1);
+
+    // A move loses it; the next waiter asks a new one, which stands.
+    link.cut();
+    eventually("the watch session cut off", || presence::cut_off(&watch)).await;
+    link.heal();
+    eventually("the watch session reconnected", || async {
+        !presence::cut_off(&watch).await
+    })
+    .await;
+    assert!(!barrier.established(), "lost with the transport");
+    assert!(barrier.establish_within(Duration::from_secs(5)).await);
+    assert_eq!(presence::liveliness_gets(&watch).settles - asked, 2);
+}

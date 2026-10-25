@@ -244,7 +244,11 @@ pub struct MonitorSpec {
     /// §8.1, O5). So each subscriber is declared without history, and the
     /// barrier's final reply, which follows the history, is one round trip
     /// at any population (6 ms beside 10,000 tokens, debug build, where a
-    /// history took 23 s). A token held before the subscriber and
+    /// history took 23 s), until the watch session's transport moves: the
+    /// transport that opens again tells the subscribers every token they
+    /// match, and the round trip after it waits for them (core §8.1, 0.44,
+    /// F-239; 4 s beside 10,000 in a release build, 24 s in a debug one).
+    /// A token held before the subscriber and
     /// withdrawn after the barrier is still told: the router sends its
     /// withdrawal by key. A namespaced session would not strip its
     /// namespace from that key, and would never hear it (zenoh 1.10.1,
@@ -697,10 +701,14 @@ struct WatchEntry {
 
 /// How long [`Monitor::start`] waits for its liveliness subscribers to
 /// settle at their routers (#830) before it returns anyway, saying so, and
-/// how long each later round trip of its barrier waits. Without history the
-/// round trip carries nothing (#851), so this bounds a stalled link, never
-/// a population; the session's interests timeout bounds it too
-/// ([`zenkey::presence::interests_timeout`]).
+/// the least a reader beside it waits for a later round trip. Without
+/// history the round trip at the start carries nothing (#851), so this
+/// bounds a stalled link there. After a move of the watch session's
+/// transport the round trip waits for the population (core §8.1, 0.44,
+/// F-239), so a reader waits for it as long as for a read
+/// ([`crate::PresenceFeed`]); one not back by then runs on, until the
+/// session's interests timeout ([`zenkey::presence::interests_timeout`];
+/// [`zenkey::presence::Barrier::establish_within`], #882).
 pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The wired monitor: a runtime-mutable watch set + liveliness + tick task

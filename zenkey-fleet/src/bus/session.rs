@@ -216,7 +216,8 @@ pub async fn open_owner_in_namespace(
 /// [`open_reporting`]'s posture, that holds a live reader's liveliness
 /// subscribers on the deployment's wire keys, without history, and makes
 /// no read ([`crate::WatchSession`]). Its round trip is then one round trip
-/// at any population, where a namespaced session's subscribers would need
+/// at any population until its transport moves (core §8.1, 0.44, F-239),
+/// where a namespaced session's subscribers would need
 /// history to hear an earlier token withdrawn, and their round trip would
 /// wait for it. An **empty** namespace is the bus root, whose keys the wire
 /// spells as they are. A namespace that is not a concrete key-expression

@@ -63,7 +63,9 @@
 //! no namespace instead, on the wire keys, and ask their barrier key there
 //! ([`settle_at`], [`Barrier::at`]; `zenkey_fleet::WatchSession`, #875,
 //! core §8.1, 0.42). [`Barrier`] is the barrier a reader keeps: made once,
-//! lost when the watch session's transport moves, made again. No round
+//! lost when the watch session's transport moves, made again, its round
+//! trip on a task of its own that every waiter shares (#882), since the
+//! one after a move waits for the population (0.44, F-239). No round
 //! trip is asked through a session cut off, and none that was cut off
 //! while it ran stands (0.42, F-228).
 //!
@@ -392,8 +394,9 @@ pub async fn cut_off(session: &zenoh::Session) -> bool {
 ///
 /// The runtime's owner-side watches, on a session the application hands
 /// in (desired.v1's target), take history exactly when this says so:
-/// without, the round trip is one round trip at any population; with, it
-/// waits for the history, a handful of tokens of one author. The tools'
+/// without, the round trip is one round trip at any population until the
+/// session's transport moves (core §8.1, 0.44, F-239); with, it waits for
+/// the history, a handful of tokens of one author. The tools'
 /// watch sessions run in no namespace instead (`zenkey_fleet::WatchSession`,
 /// #875, core §8.1, 0.42), where this reads false and no history is
 /// needed: they subscribe to the wire keys, the namespace in front, and
@@ -459,7 +462,10 @@ pub const FOREIGN_BARRIER: &str = "zk2/@zk/settle";
 /// The GET matches no token, so it carries none: beside a subscriber
 /// without history it is one round trip at any population (measured, 6 ms
 /// beside 10,000 tokens in a debug build), and beside one with history it
-/// waits for the history (23 s there).
+/// waits for the history (23 s there). After the session's transport moves
+/// it waits for the population either way: the transport that opens again
+/// tells every subscriber each token it matches first (core §8.1, 0.44,
+/// F-239; [`Barrier`]).
 ///
 /// On a session that holds no subscriber it orders the session's token
 /// declarations the same way (`redundancy.v1`'s claim, F-204).
@@ -495,15 +501,36 @@ pub async fn settle_at(session: &zenoh::Session, key: &str, timeout: Duration) -
 /// each seed and reads a seed made without it as possibly incomplete
 /// ([`BARRIER_NOT_ESTABLISHED`]), never as one that stands.
 ///
-/// **A lost barrier is a reason to read again** ([`Barrier::moved_since`]). A
-/// subscriber without history hears no withdrawal of a token declared
-/// before it when its own link drops, since the session was never told of
-/// the token; and a token withdrawn while the link was down is in no
-/// history the router sends on reconnection. So a reader that follows
-/// presence reads again when its watch session's transport moves, as it
-/// reads again after a withdrawal.
+/// **A lost barrier is a reason to read again** ([`Barrier::moved_since`]).
+/// While the transport is down nothing is heard: a token withdrawn then is
+/// told to no subscriber, ever. When it opens again, zenoh 1.10.1's client
+/// declares each of its subscribers' interests again in `CurrentFuture`
+/// mode, whatever mode it was declared in (`hat/client/interests.rs`,
+/// `repropagate_interests`), so a subscriber without history is told every
+/// token its selector matches, one declared while the link was down
+/// included, unordered with any read on another session (core §8.1, 0.44,
+/// F-239). So a reader that follows presence reads again when its watch
+/// session's transport moves, as it reads again after a withdrawal.
 ///
-/// Cloning shares it.
+/// **The round trip after a move waits for the population** (0.44,
+/// F-239). The router answers the interests declared again first, every
+/// matching token of them, and the round trip's final reply follows: 4 s
+/// beside 10,000 tokens in a release build, 24 s in a debug one, where the
+/// one at the session's start carries nothing (measured,
+/// `zenkey-fleet/tests/watch_reopen.rs`). So the round trip runs **on a
+/// task of its own**, one per transport state, shared by every waiter
+/// (#882): a waiter that stops waiting ([`Barrier::establish_within`]) or
+/// is dropped at its await leaves it running, and the next waiter takes up
+/// the same one rather than asking another. Its GET waits as long as the
+/// session's runtime does ([`interests_timeout`]), which ends it there; a
+/// round trip that ended so does not stand (0.44, F-240). A liveliness GET
+/// its caller stops waiting for is still answered in full: zenoh 1.10.1's
+/// session sends its router nothing when one is dropped or cancelled
+/// (`docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`),
+/// which is why none is asked again while one is in flight.
+///
+/// Cloning shares it; the round trip in flight is ended with the last
+/// clone.
 #[derive(Clone)]
 pub struct Barrier {
     inner: std::sync::Arc<BarrierInner>,
@@ -514,16 +541,40 @@ struct BarrierInner {
     /// The key its round trip asks: [`barrier_key`] of the scope, on the
     /// wire when the session watches a deployment's wire keys (#875).
     key: String,
+    /// How long [`Barrier::establish`] waits for a round trip.
     timeout: Duration,
     /// Bumped by every transport event of the session.
     moved: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// The `moved` count a barrier was established at; `u64::MAX` for none.
-    at: std::sync::atomic::AtomicU64,
-    /// One round trip at a time.
-    making: tokio::sync::Mutex<()>,
+    at: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The round trip in flight, or the last one (#882).
+    trip: Mutex<Option<Trip>>,
     /// Woken at every transport event of the session.
     moves: std::sync::Arc<tokio::sync::Notify>,
     _events: zenoh::session::TransportEventsListener<()>,
+}
+
+/// One round trip of a [`Barrier`], on a task of its own (#882).
+struct Trip {
+    /// The `moved` count it was asked at: it can establish the barrier only
+    /// while the count is still this.
+    asked_at: u64,
+    /// `None` while it runs; whether it stood once it ended.
+    ended: tokio::sync::watch::Receiver<Option<bool>>,
+    task: tokio::task::AbortHandle,
+}
+
+impl Drop for BarrierInner {
+    fn drop(&mut self) {
+        if let Some(trip) = self
+            .trip
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            trip.task.abort();
+        }
+    }
 }
 
 impl std::fmt::Debug for Barrier {
@@ -536,10 +587,10 @@ impl std::fmt::Debug for Barrier {
 }
 
 impl Barrier {
-    /// A barrier for `session`'s subscribers to `scope`, each round trip
-    /// bounded by `timeout`: it listens to the session's transport events,
-    /// and makes no round trip yet ([`Barrier::establish`]). Its round trip
-    /// asks [`barrier_key`]`(scope)`.
+    /// A barrier for `session`'s subscribers to `scope`, a waiter waiting
+    /// `timeout` for a round trip ([`Barrier::establish`]): it listens to
+    /// the session's transport events, and makes no round trip yet. Its
+    /// round trip asks [`barrier_key`]`(scope)`.
     pub async fn new(session: &zenoh::Session, scope: &str, timeout: Duration) -> Result<Barrier> {
         Barrier::at(session, &barrier_key(scope), timeout).await
     }
@@ -568,8 +619,8 @@ impl Barrier {
                 key: key.to_owned(),
                 timeout,
                 moved,
-                at: AtomicU64::new(u64::MAX),
-                making: tokio::sync::Mutex::new(()),
+                at: std::sync::Arc::new(AtomicU64::new(u64::MAX)),
+                trip: Mutex::new(None),
                 moves,
                 _events: events,
             }),
@@ -584,26 +635,84 @@ impl Barrier {
         self.inner.at.load(Ordering::SeqCst) == self.inner.moved.load(Ordering::SeqCst)
     }
 
-    /// The barrier, made now unless it stands: one [`settle`], counted
-    /// against the transport events seen before it was asked. Returns
-    /// whether it stands.
+    /// [`Barrier::establish_within`] the barrier's own wait, the `timeout`
+    /// it was made with.
     pub async fn establish(&self) -> bool {
-        use std::sync::atomic::Ordering;
+        self.establish_within(self.inner.timeout).await
+    }
+
+    /// The barrier, made now unless it stands: the round trip in flight for
+    /// the session's transport as it is, else a new one (#882), waited for
+    /// at most `wait`. Returns whether the barrier stands. Cancel-safe: the
+    /// round trip runs on, and the next call takes it up.
+    ///
+    /// The round trip after a move waits for the population (core §8.1,
+    /// 0.44, F-239), so a reader that waits for it before a read waits as
+    /// long as it would for the read itself: a read of the population costs
+    /// about what the telling costs, every matching token sent once.
+    pub async fn establish_within(&self, wait: Duration) -> bool {
         if self.established() {
             return true;
         }
-        let _one = self.inner.making.lock().await;
-        if self.established() {
-            return true;
-        }
-        let before = self.inner.moved.load(Ordering::SeqCst);
-        let came = settle_at(&self.inner.session, &self.inner.key, self.inner.timeout)
-            .await
-            .unwrap_or(false);
-        if came && self.inner.moved.load(Ordering::SeqCst) == before {
-            self.inner.at.store(before, Ordering::SeqCst);
-        }
+        let mut ended = self.trip();
+        let _ = tokio::time::timeout(wait, ended.wait_for(Option::is_some)).await;
         self.established()
+    }
+
+    /// Whether a round trip is in flight (#882): asked, and not ended.
+    #[must_use]
+    pub fn in_flight(&self) -> bool {
+        self.inner
+            .trip
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|t| t.ended.borrow().is_none())
+    }
+
+    /// The round trip to wait for: the one in flight, when it was asked at
+    /// the session's transport as it is now; else a new one, on a task of
+    /// its own, the old one ended.
+    fn trip(&self) -> tokio::sync::watch::Receiver<Option<bool>> {
+        use std::sync::atomic::Ordering;
+        let mut slot = self
+            .inner
+            .trip
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = self.inner.moved.load(Ordering::SeqCst);
+        if let Some(trip) = slot.as_ref()
+            && trip.asked_at == now
+            && trip.ended.borrow().is_none()
+        {
+            return trip.ended.clone();
+        }
+        if let Some(old) = slot.take() {
+            old.task.abort();
+        }
+        let (tx, ended) = tokio::sync::watch::channel(None);
+        let (session, key) = (self.inner.session.clone(), self.inner.key.clone());
+        let (moved, at) = (
+            std::sync::Arc::clone(&self.inner.moved),
+            std::sync::Arc::clone(&self.inner.at),
+        );
+        // As long as the session's runtime waits for its routers: zenoh ends
+        // the GET there anyway, and a waiter waits as long as it chooses.
+        let bound = interests_timeout(&session).max(self.inner.timeout);
+        let task = tokio::spawn(async move {
+            let came = settle_at(&session, &key, bound).await.unwrap_or(false);
+            let stood = came && moved.load(Ordering::SeqCst) == now;
+            if stood {
+                at.store(now, Ordering::SeqCst);
+            }
+            let _ = tx.send(Some(stood));
+        });
+        *slot = Some(Trip {
+            asked_at: now,
+            ended: ended.clone(),
+            task: task.abort_handle(),
+        });
+        ended
     }
 
     /// How many transport events the session has had since this barrier

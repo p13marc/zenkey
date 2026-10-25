@@ -13,7 +13,8 @@
 //!    ([`crate::WatchSession`], #875): a token declared before it and
 //!    withdrawn later is heard, which a namespaced subscriber without
 //!    history never hears (#872), and the round trip is one round trip at
-//!    any population. Its barrier is kept and asked again before each
+//!    any population until the session's transport moves (0.44, F-239).
+//!    Its barrier is kept and asked again before each
 //!    refresh's presence read; a read made while it does not stand is
 //!    possibly incomplete (#851, 0.41), so the scope is not read whole and
 //!    nothing reads "no alarm fires". A move of its transport is a loss

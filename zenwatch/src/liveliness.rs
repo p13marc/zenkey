@@ -133,6 +133,54 @@ pub struct TokenFeed {
     basis: TokenBasis,
     retry: Option<(tokio::time::Instant, Duration)>,
     pending: Vec<TokenMove>,
+    /// The re-read's step in flight, on a task of its own (#882): a
+    /// [`TokenFeed::next`] dropped at its await leaves it running, and the
+    /// next call takes it up, as [`zenkey_fleet::PresenceFeed`]'s does.
+    /// The daemon's `select!` drops one whenever another branch wins.
+    step: Option<Step>,
+    /// The reads this re-read has made that lost events in their window.
+    overruns: usize,
+}
+
+/// A re-read's step in flight (#882), each on a task of its own.
+enum Step {
+    /// The cut-off checks and the monitor's round trip.
+    Settle(Task<Settle>),
+    /// The reads, the round trip's answer kept.
+    Read { settled: bool, task: Task<Reads> },
+}
+
+/// What a re-read's first step found.
+enum Settle {
+    /// A session reaches no other zenoh node: no read is made.
+    Cut(String),
+    /// Whether the monitor's round trip stands.
+    Settled(bool),
+}
+
+/// Every selector's read, together.
+struct Reads {
+    keys: BTreeSet<String>,
+    complete: bool,
+    cut_off_during: bool,
+}
+
+/// A task of the ledger's, ended when the ledger drops it.
+struct Task<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Task<T> {
+    /// Its result; cancel-safe, the task running on.
+    async fn join(&mut self) -> Result<T, String> {
+        (&mut self.0)
+            .await
+            .map_err(|e| format!("the re-read's task ended: {e}"))
+    }
+}
+
+impl<T> Drop for Task<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl std::fmt::Debug for TokenFeed {
@@ -192,6 +240,8 @@ impl TokenFeed {
             basis: TokenBasis::Unseeded,
             retry: None,
             pending: Vec::new(),
+            step: None,
+            overruns: 0,
         };
         feed.reseed().await;
         feed.pending.clear();
@@ -319,48 +369,131 @@ impl TokenFeed {
 
     /// Read every selector again and fold the reads, with what the
     /// subscription delivered meanwhile. Owed until a complete read lands.
+    ///
+    /// **Resumable** (#882): its round trip and its reads run on tasks of
+    /// their own ([`Step`]); a call dropped at either await leaves them
+    /// running, and the next call takes them up, so a re-read is asked once
+    /// and folded once however often the daemon's loop wakes.
     async fn reseed(&mut self) {
         if self.retry.is_none() {
             self.owe_now();
         }
-        for _ in 0..RESEED_ATTEMPTS {
-            // Not made through a session that reaches nobody, the monitor's
-            // included (core §8.1, 0.37).
-            let cut = match zenkey_fleet::cut_off(&self.session).await {
-                Some(why) => Some(why),
-                None => match &self.watch {
-                    Some(w) => w.cut_off().await,
-                    None => None,
-                },
-            };
-            if let Some(why) = cut {
-                tracing::warn!("the token ledger's read was not made: {why}");
-                self.basis = TokenBasis::CutOff;
-                self.back_off();
-                return;
+        loop {
+            match self.step.as_mut() {
+                None => self.step = Some(Step::Settle(self.settle())),
+                Some(Step::Settle(task)) => {
+                    let settle = task.join().await;
+                    self.step = None;
+                    match settle {
+                        // Not made through a session that reaches nobody,
+                        // the monitor's included (core §8.1, 0.37).
+                        Ok(Settle::Cut(why)) => {
+                            tracing::warn!("the token ledger's read was not made: {why}");
+                            self.basis = TokenBasis::CutOff;
+                            self.overruns = 0;
+                            // Never doubled (#882): a read not made asked
+                            // nothing, and waits for a transport to open.
+                            self.retry = Some((
+                                tokio::time::Instant::now() + RESEED_BACKOFF,
+                                Duration::ZERO,
+                            ));
+                            return;
+                        }
+                        Ok(Settle::Settled(settled)) => {
+                            if !settled {
+                                tracing::warn!(
+                                    "the token ledger's barrier is not established: its read is \
+                                     possibly incomplete"
+                                );
+                            }
+                            // What was delivered before the reads are asked
+                            // precedes them, and they decide it (#882): a
+                            // reopen's telling would otherwise read as a loss
+                            // in the first read's window.
+                            self.fold_delivered();
+                            self.step = Some(Step::Read {
+                                settled,
+                                task: self.reads(),
+                            });
+                        }
+                        Err(why) => {
+                            tracing::warn!("the token ledger's read was not made: {why}");
+                            self.overruns = 0;
+                            self.back_off();
+                            return;
+                        }
+                    }
+                }
+                Some(Step::Read { settled, task }) => {
+                    let settled = *settled;
+                    let reads = task.join().await;
+                    self.step = None;
+                    let reads = reads.unwrap_or_else(|why| {
+                        tracing::warn!("{why}; possibly incomplete");
+                        Reads {
+                            keys: BTreeSet::new(),
+                            complete: false,
+                            cut_off_during: false,
+                        }
+                    });
+                    if self.fold_reads(reads, settled) {
+                        self.overruns += 1;
+                        if self.overruns < RESEED_ATTEMPTS {
+                            continue;
+                        }
+                        self.back_off();
+                    }
+                    self.overruns = 0;
+                    return;
+                }
             }
-            // The monitor's barrier, before the reads (#851, core §8.1,
-            // 0.41): made again when it does not stand. Reads made without
-            // it are possibly incomplete, whatever came before them.
-            let settled = match &self.barrier {
-                Some(b) => b.establish().await,
+        }
+    }
+
+    /// A re-read's first step, on a task of its own (#882): the cut-off
+    /// checks, then the monitor's barrier before the reads (#851, core
+    /// §8.1, 0.41), made again when it does not stand, and waited for as
+    /// long as a read would be (0.44, F-239: after a move it waits for
+    /// what the watch session's subscribers match). Reads made without it
+    /// are possibly incomplete, whatever came before them.
+    fn settle(&self) -> Task<Settle> {
+        let session = self.session.clone();
+        let watch = self.watch.clone();
+        let barrier = self.barrier.clone();
+        let wait = self.timeout.max(zenkey_fleet::bus::monitor::SETTLE_TIMEOUT);
+        Task(tokio::spawn(async move {
+            if let Some(why) = zenkey_fleet::cut_off(&session).await {
+                return Settle::Cut(why);
+            }
+            if let Some(w) = &watch
+                && let Some(why) = w.cut_off().await
+            {
+                return Settle::Cut(why);
+            }
+            Settle::Settled(match &barrier {
+                Some(b) => b.establish_within(wait).await,
                 None => true,
+            })
+        }))
+    }
+
+    /// Every selector's read, on a task of its own (#882).
+    fn reads(&self) -> Task<Reads> {
+        let session = self.session.clone();
+        let selectors = self.selectors.clone();
+        let timeout = self.timeout;
+        Task(tokio::spawn(async move {
+            let mut reads = Reads {
+                keys: BTreeSet::new(),
+                complete: true,
+                cut_off_during: false,
             };
-            if !settled {
-                tracing::warn!(
-                    "the token ledger's barrier is not established: its read is possibly \
-                     incomplete"
-                );
-            }
-            let mut keys = BTreeSet::new();
-            let mut complete = settled;
-            let mut cut_off_during = false;
-            for sel in &self.selectors {
-                match zenkey_fleet::liveliness_read(&self.session, sel, self.timeout).await {
+            for sel in &selectors {
+                match zenkey_fleet::liveliness_read(&session, sel, timeout).await {
                     Ok(read) => {
-                        complete &= read.complete;
-                        cut_off_during |= read.cut_off_during;
-                        keys.extend(read.keys);
+                        reads.complete &= read.complete;
+                        reads.cut_off_during |= read.cut_off_during;
+                        reads.keys.extend(read.keys);
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -368,92 +501,126 @@ impl TokenFeed {
                             "liveliness read failed ({}); possibly incomplete",
                             zenkey_fleet::one_line(&e)
                         );
-                        complete = false;
+                        reads.complete = false;
                     }
                 }
             }
-            let mut then = Vec::new();
-            let mut lost = 0u64;
-            while let Some(item) = self.events.try_recv() {
-                match item {
-                    StreamItem::Event(FleetEvent::NodeUp(key)) => then.push((key, true)),
-                    StreamItem::Event(FleetEvent::NodeDown(key)) => then.push((key, false)),
-                    StreamItem::Event(_) => {}
-                    StreamItem::Dropped(n) => lost = lost.saturating_add(n),
+            reads
+        }))
+    }
+
+    /// Folds what the monitor has delivered so far, as [`TokenFeed::next`]
+    /// folds it one event at a time.
+    fn fold_delivered(&mut self) {
+        while let Some(item) = self.events.try_recv() {
+            match item {
+                StreamItem::Event(FleetEvent::NodeUp(key)) => {
+                    if !self.withdrawn.remove(&key) {
+                        self.fold(key, true, PresenceSource::Event, SystemTime::now());
+                    } else {
+                        self.held.insert(key);
+                    }
                 }
-            }
-            if lost > 0 {
-                self.lost(lost);
-                continue;
-            }
-            let at = SystemTime::now();
-            // What the rules were last told is held: the held tokens and
-            // those heard withdrawn, never said gone.
-            let told: BTreeSet<String> = self.held.union(&self.withdrawn).cloned().collect();
-            // Absence from a possibly incomplete read is not evidence: what
-            // is held stays, and a token withdrawn stays withdrawn unless
-            // the read shows it.
-            let (mut next, mut withdrawn): (BTreeSet<String>, BTreeSet<String>) = if complete {
-                (keys, BTreeSet::new())
-            } else {
-                let withdrawn = self.withdrawn.difference(&keys).cloned().collect();
-                (self.held.iter().cloned().chain(keys).collect(), withdrawn)
-            };
-            // A withdrawal heard while the read was in flight may follow
-            // it: withdrawn again, and the next read owed.
-            for (key, held) in then {
-                if held {
-                    withdrawn.remove(&key);
-                    next.insert(key);
-                } else if next.remove(&key) {
-                    withdrawn.insert(key);
+                StreamItem::Event(FleetEvent::NodeDown(key)) => {
+                    self.held.remove(&key);
+                    self.withdrawn.insert(key);
                 }
+                StreamItem::Event(_) => {}
+                StreamItem::Dropped(n) => self.lost(n),
             }
-            let gone: Vec<String> = told
-                .difference(&next)
-                .filter(|k| !withdrawn.contains(*k))
-                .cloned()
-                .collect();
-            let back: Vec<String> = next.difference(&told).cloned().collect();
-            // A token heard withdrawn and never seen held is gone too, once
-            // a read says so: its delete was positive evidence it existed.
-            for key in gone {
-                self.pending.push(TokenMove {
-                    at,
-                    source: PresenceSource::Seed,
-                    key,
-                    held: false,
-                });
-            }
-            for key in back {
-                self.pending.push(TokenMove {
-                    at,
-                    source: PresenceSource::Seed,
-                    key,
-                    held: true,
-                });
-            }
-            self.held = next;
-            self.withdrawn = withdrawn;
-            self.basis = match (complete, self.basis) {
-                (true, _) => TokenBasis::Complete,
-                (false, b @ (TokenBasis::Lost { .. } | TokenBasis::Complete)) if settled => b,
-                (false, _) => TokenBasis::Incomplete {
-                    cut_off_during,
-                    unsettled: !settled,
-                },
-            };
-            if complete {
-                self.retry = None;
-                if !self.withdrawn.is_empty() {
-                    self.owe_within(zenkey_fleet::WITHDRAWAL_SETTLE);
-                }
-            } else {
-                self.back_off();
-            }
-            return;
         }
-        self.back_off();
+    }
+
+    /// Folds a re-read's reads with what the subscription delivered while
+    /// they were in flight. Returns `true` when the subscription lost events
+    /// in that window, so the reads could not stand and are made again.
+    fn fold_reads(&mut self, reads: Reads, settled: bool) -> bool {
+        let Reads {
+            keys,
+            complete,
+            cut_off_during,
+        } = reads;
+        let complete = complete && settled;
+        let mut then = Vec::new();
+        let mut lost = 0u64;
+        while let Some(item) = self.events.try_recv() {
+            match item {
+                StreamItem::Event(FleetEvent::NodeUp(key)) => then.push((key, true)),
+                StreamItem::Event(FleetEvent::NodeDown(key)) => then.push((key, false)),
+                StreamItem::Event(_) => {}
+                StreamItem::Dropped(n) => lost = lost.saturating_add(n),
+            }
+        }
+        if lost > 0 {
+            self.lost(lost);
+            return true;
+        }
+        let at = SystemTime::now();
+        // What the rules were last told is held: the held tokens and
+        // those heard withdrawn, never said gone.
+        let told: BTreeSet<String> = self.held.union(&self.withdrawn).cloned().collect();
+        // Absence from a possibly incomplete read is not evidence: what
+        // is held stays, and a token withdrawn stays withdrawn unless
+        // the read shows it.
+        let (mut next, mut withdrawn): (BTreeSet<String>, BTreeSet<String>) = if complete {
+            (keys, BTreeSet::new())
+        } else {
+            let withdrawn = self.withdrawn.difference(&keys).cloned().collect();
+            (self.held.iter().cloned().chain(keys).collect(), withdrawn)
+        };
+        // A withdrawal heard while the read was in flight may follow
+        // it: withdrawn again, and the next read owed.
+        for (key, held) in then {
+            if held {
+                withdrawn.remove(&key);
+                next.insert(key);
+            } else if next.remove(&key) {
+                withdrawn.insert(key);
+            }
+        }
+        let gone: Vec<String> = told
+            .difference(&next)
+            .filter(|k| !withdrawn.contains(*k))
+            .cloned()
+            .collect();
+        let back: Vec<String> = next.difference(&told).cloned().collect();
+        // A token heard withdrawn and never seen held is gone too, once
+        // a read says so: its delete was positive evidence it existed.
+        for key in gone {
+            self.pending.push(TokenMove {
+                at,
+                source: PresenceSource::Seed,
+                key,
+                held: false,
+            });
+        }
+        for key in back {
+            self.pending.push(TokenMove {
+                at,
+                source: PresenceSource::Seed,
+                key,
+                held: true,
+            });
+        }
+        self.held = next;
+        self.withdrawn = withdrawn;
+        self.basis = match (complete, self.basis) {
+            (true, _) => TokenBasis::Complete,
+            (false, b @ (TokenBasis::Lost { .. } | TokenBasis::Complete)) if settled => b,
+            (false, _) => TokenBasis::Incomplete {
+                cut_off_during,
+                unsettled: !settled,
+            },
+        };
+        if complete {
+            self.retry = None;
+            if !self.withdrawn.is_empty() {
+                self.owe_within(zenkey_fleet::WITHDRAWAL_SETTLE);
+            }
+        } else {
+            self.back_off();
+        }
+        false
     }
 
     /// Owe a re-read within `wait`: sooner than one already owed, never
