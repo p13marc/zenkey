@@ -324,7 +324,11 @@
 //!   report `…/worker.v1/state/desired/task`, what it runs
 //!   `…/worker.v1/state/running`, its baseline `{"revision": 0, "mode":
 //!   "idle", "rate_hz": 1}`. `--desired-unbound` implements `worker.v1`
-//!   with the role unbound, the kill switch (§2.12).
+//!   with the role unbound, the kill switch (§2.12). A runner's copies
+//!   whose requirement names two or more desired resources of the author's
+//!   declaration stop the owner with the start's refusal, `not started:
+//!   role "task": its binding is invalid (two_documents) (desired.v1
+//!   §2.3)`, exit 1, before any token (§2.1, text 0.7, F-224).
 //! - `--desired-archive <system>/<service>` is the archive the target reads
 //!   its slice's last-known from (§2.9), within 1 s, when a seed draws
 //!   nothing and a complete presence read shows the author absent (core

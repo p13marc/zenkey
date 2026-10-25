@@ -27,7 +27,8 @@
 //! | Rule | Here |
 //! |---|---|
 //! | §2.2 the declaration; a target SHOULD refuse to bind a role to an invalid one | [`ServiceBuilder::desired_author`] and [`ServiceBuilder::desired_target`] read it with [`model::declaration_of`], and refuse anything but a valid one ([`Error::Contract`]) |
-//! | §2.3 one author, each target parameter bound to `self.system` or `self.service`; the slice's key | [`model::binding`] over the role's configured binding: an invalid one refused, an optional one left unbound the kill switch |
+//! | §2.1 one document type per role: a target given a role on two or more desired resources MUST refuse to start (0.7, F-224) | [`ServiceBuilder::desired_target`] counts the author's desired resources the requirement names (every one for a requirement naming none, or a manifest's role, core §3.1); two or more are `two_documents`, refused ([`Error::NotExposed`]), and [`ServiceBuilder::start`] refuses too, nothing declared |
+//! | §2.3 one author, each target parameter bound to `self.system` or `self.service`; the slice's key | [`model::binding`] over the role's configured binding: an invalid one refused, the start with it ([`Error::NotExposed`]), an optional one left unbound the kill switch |
 //! | §2.4 the version is the author's stamp; a type MAY carry a revision | each sample's zenoh timestamp; the revision read by [`model::revision_of_text`] (a JSON payload, every number exact) or [`model::revision_of_value`] (CBOR, protobuf) |
 //! | §2.5 subscribe, then seed, at start and each time the author's instance token appears | [`Target`]: the subscription on the slice's key, then S4's GET (target `All`, consolidation `Latest`), every sample and reply judged in the order it arrives on one task |
 //! | §2.5 the author's instance token, never an interface token | the watch reads `zk2/<author>/@zk/instance/*` |
@@ -1430,8 +1431,10 @@ impl Target {
         };
         // One role per document type (§2.1, text 0.6, F-218): the
         // requirement names one desired resource of the author's
-        // declaration; two or more refuse the role, nothing declared.
-        let names = b.role_resources(role);
+        // declaration; two or more refuse the role and the start, nothing
+        // declared (text 0.7, F-224). A requirement naming none names every
+        // resource (core §3.1), and so does a manifest's role.
+        let names = b.role_resources(role)?;
         let documents = contract
             .resources
             .iter()
@@ -1452,13 +1455,18 @@ impl Target {
             model::Binding::Bound { key } => Some(key.to_string()),
             model::Binding::Unbound => None,
             model::Binding::Invalid(why) => {
-                return Err(Error::Contract(format!(
+                // Refused at the start, as core §8.2 step 2 refuses an
+                // invalid declaration: `start()` refuses too, so a service
+                // never starts without the role (§2.1, text 0.7, F-224).
+                let why = format!(
                     "role {role:?}: its binding is invalid ({}) (desired.v1 §2.3)",
                     why.iter()
                         .map(|w| w.as_str())
                         .collect::<Vec<_>>()
                         .join(", ")
-                )));
+                );
+                b.refused.push(why.clone());
+                return Err(Error::NotExposed(why));
             }
         };
         let author_addr = key

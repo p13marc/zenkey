@@ -167,6 +167,11 @@ pub struct ServiceBuilder {
     pub(crate) desired_authors: Vec<crate::desired::Author>,
     /// `desired.v1`'s roles this service holds as a target.
     pub(crate) desired_targets: Vec<crate::desired::Target>,
+    /// Why a role was refused at its declaration (`desired.v1` §2.1, text
+    /// 0.7, F-224): [`ServiceBuilder::start`] then refuses to start, as
+    /// §8.2 step 2 refuses an invalid declaration, so a service never
+    /// starts without the role it was given.
+    pub(crate) refused: Vec<String>,
     /// `redundancy.v1`, once [`ServiceBuilder::redundancy`] configured it.
     redundancy: Option<crate::redundancy::Redundancy>,
 }
@@ -287,6 +292,7 @@ impl ServiceBuilder {
             alarms: None,
             desired_authors: Vec::new(),
             desired_targets: Vec::new(),
+            refused: Vec::new(),
             redundancy: None,
         }
     }
@@ -895,7 +901,12 @@ impl ServiceBuilder {
         // Before step 1 (hostid.v1 §2.7): a service whose minted system
         // could not be had declared nothing, and starts nothing (§2.6).
         let addr = self.address()?.clone();
-        // 2. Exposure.
+        // 2. A role refused at its declaration refuses the start, nothing
+        // declared (desired.v1 §2.1, text 0.7, F-224).
+        if let Some(why) = self.refused.first() {
+            return Err(Error::NotExposed(why.clone()));
+        }
+        // Exposure.
         check_exposure(&self.impls, &self.config)?;
         // §4.4, §8.2 step 2 (0.17): an archive is never tokenless. The set
         // is the deployment's configuration, so naming the archive in it is
@@ -1888,18 +1899,35 @@ impl ServiceBuilder {
         &self.ops
     }
 
-    /// A role this service holds (§3.1): its interface, and whether it is
-    /// optional.
-    /// The templates the requirement of `role` names, as the contract
-    /// declaring it lists them: `None` for every resource, or for a role
-    /// the component's manifest declares.
-    pub(crate) fn role_resources(&self, role: &str) -> Option<Vec<String>> {
-        let r = self.roles.iter().find(|r| r.role == role)?;
-        let by = r.declared_by.as_ref()?;
-        let s = find(&self.impls, by).ok()?;
-        s.imp.contract().requires.get(role)?.resources.clone()
+    /// The templates the requirement of `role` names (core §3.1):
+    /// `Ok(None)` for every resource, the default, which a requirement
+    /// naming none names, and so does a role the component's manifest
+    /// declares: its descriptor names no declaring contract (core §3.3),
+    /// so every resource of its interface is what a tool reads it to
+    /// name, and the runtime reads it so too (desired.v1 §2.1, text 0.7).
+    /// A lookup that fails, a role this service does not hold or a
+    /// declaring contract without the requirement, is an error, never
+    /// every resource.
+    pub(crate) fn role_resources(&self, role: &str) -> Result<Option<Vec<String>>> {
+        let r = self
+            .roles
+            .iter()
+            .find(|r| r.role == role)
+            .ok_or_else(|| Error::Contract(format!("this service has no role {role:?}")))?;
+        let Some(by) = r.declared_by.as_ref() else {
+            return Ok(None);
+        };
+        let req = find(&self.impls, by)?
+            .imp
+            .contract()
+            .requires
+            .get(role)
+            .ok_or_else(|| Error::Contract(format!("{by} declares no role {role:?}")))?;
+        Ok(req.resources.clone())
     }
 
+    /// A role this service holds (§3.1): its interface, and whether it is
+    /// optional.
     pub(crate) fn role_of(&self, role: &str) -> Result<(IfaceId, bool)> {
         self.roles
             .iter()

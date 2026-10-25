@@ -1647,81 +1647,184 @@ fn the_examples_contracts_are_the_scenarios() {
     );
 }
 
-/// One role per document type (desired.v1 §2.1, §2.3, text 0.6, F-218):
-/// `worker_two.v1`'s role `task` names two desired resources of
-/// `tasking_two.v1`, `plans/…` and `tasks/…`, and the target refuses
-/// the role at its declaration, `two_documents`, nothing declared: no
-/// report is put, and the service never starts.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_role_on_two_documents_is_refused() {
-    struct Never;
-    impl desired::Handler for Never {
-        fn apply<'a>(
-            &'a self,
-            _: &'a desired::Document,
-        ) -> zenkey::call::BoxFuture<'a, desired::Ended> {
-            Box::pin(async { desired::Ended::Done })
-        }
-        fn revert<'a>(&'a self, _: &'a Version) -> zenkey::call::BoxFuture<'a, desired::Ended> {
-            Box::pin(async { desired::Ended::Done })
-        }
+// --- §11: one document type per role --------------------------------------------
+
+/// A drive that never runs: §11's roles are refused before any act.
+struct Never;
+
+impl desired::Handler for Never {
+    fn apply<'a>(
+        &'a self,
+        _: &'a desired::Document,
+    ) -> zenkey::call::BoxFuture<'a, desired::Ended> {
+        Box::pin(async { desired::Ended::Done })
     }
-    let load = |text: &str| {
-        let l = zenkey::model::contract::load_str(text, std::path::Path::new("."), None);
-        Implementation::new(l.contract.unwrap_or_else(|| panic!("{text}\n{}", l.report)))
-    };
-    let desired_resource = |template: &str| {
-        format!(
-            "[resources.\"{template}\"]\nkind = \"state\"\n\
-             type = {{ raw = \"application/octet-stream\" }}\n\
-             params = {{ system = \"string\", service = \"string\" }}\ncardinality = 16\n\
-             annotations = {{ \"desired.target_param\" = [\"system\", \"service\"] }}\n"
-        )
-    };
-    let author = load(&format!(
-        "[interface]\nname = \"tasking_two\"\nmajor = 1\nminor = 0\nuses = [\"desired.v1\"]\n{}{}",
-        desired_resource("plans/{system}/{service}"),
-        desired_resource("tasks/{system}/{service}")
-    ));
-    let worker = load(
-        "[interface]\nname = \"worker_two\"\nmajor = 1\nminor = 0\n\
-         [resources.running]\nkind = \"state\"\ntype = { raw = \"application/octet-stream\" }\n\
-         [requires.task]\ninterface = \"tasking_two.v1\"\n\
-         resources = [\"plans/{system}/{service}\", \"tasks/{system}/{service}\"]\noptional = true\n",
-    );
+    fn revert<'a>(&'a self, _: &'a Version) -> zenkey::call::BoxFuture<'a, desired::Ended> {
+        Box::pin(async { desired::Ended::Done })
+    }
+}
+
+/// A copy of a scenarios' contract, edited by `edit`, read from
+/// `tests/contracts/` so that its schemas resolve (§11's Setup).
+fn copy_of(name: &str, edit: impl Fn(String) -> String) -> Implementation {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts");
+    let file = format!("{name}.toml");
+    let text = edit(std::fs::read_to_string(dir.join(&file)).unwrap());
+    let l = zenkey::model::contract::load_str(&text, &dir, Some(file.as_str()));
+    Implementation::new(l.contract.unwrap_or_else(|| panic!("{text}\n{}", l.report)))
+}
+
+/// §11's tasking.v1, two documents: a second desired resource,
+/// `plans/{system}/{service}`, declared as `tasks/…` is.
+fn tasking_two() -> Implementation {
+    copy_of("tasking.v1", |t| {
+        t + "\n[resources.\"plans/{system}/{service}\"]\nkind        = \"state\"\n\
+             type        = \"json:Task\"\n\
+             params      = { system = \"string\", service = \"string\" }\n\
+             cardinality = 16\n\
+             annotations = { \"desired.target_param\" = [\"system\", \"service\"], \
+             \"freshness.ttl_s\" = 0 }\n"
+    })
+}
+
+/// worker.v1 with its requirement's `resources` line replaced by `line`
+/// (removed when empty), or with no `[requires.task]` at all (`None`).
+fn worker_with(line: Option<&str>) -> Implementation {
+    copy_of("worker.v1", |t| {
+        let at = t.find("[requires.task]").unwrap();
+        match line {
+            None => t[..at].to_owned(),
+            Some(l) => t.replace("resources = [\"tasks/{system}/{service}\"]\n", l),
+        }
+    })
+}
+
+/// `lab/worker`'s builder, its role bound as "The target" says, given
+/// `worker`, with a role of the manifest's when `manifest`, and the role
+/// given against `tasking`.
+async fn given_the_role(
+    session: &zenoh::Session,
+    worker: Implementation,
+    manifest: bool,
+    tasking: &Implementation,
+) -> (ServiceBuilder, zenkey::Result<desired::Target>) {
     let wi = worker.iface().clone();
-    let bus = one_router().await;
-    let session = client(&bus.ep1).await;
     let mut cfg = config(WORKER).bind(ROLE, &[AUTHOR]);
     cfg.bindings.get_mut(ROLE).unwrap().params = [
         ("system".to_owned(), "self.system".to_owned()),
         ("service".to_owned(), "self.service".to_owned()),
     ]
     .into();
-    let mut b = ServiceBuilder::new(&session, cfg);
+    let mut b = ServiceBuilder::new(session, cfg);
     b.implement(worker).unwrap();
-    let refused = b
+    if manifest {
+        b.require(ROLE, tasking.iface().clone(), true);
+    }
+    let r = b
         .desired_target(
             ROLE,
-            &author,
-            "state/tasks/{system}/{service}",
-            ReportAt::new(wi, "state/running"),
+            tasking,
+            TASKS,
+            ReportAt::new(wi, REPORT),
             Arc::new(Never) as Arc<dyn desired::Handler>,
             TargetStartup::default(),
         )
         .await;
-    match refused {
-        Err(zenkey::Error::Contract(why)) => {
-            assert!(why.contains("two_documents"), "{why}");
+    (b, r)
+}
+
+/// A start's refusal by its reason: `not started: …` (core §8.2 step 2).
+fn refused_two_documents<T>(r: zenkey::Result<T>, what: &str) {
+    match r {
+        Err(e @ zenkey::Error::NotExposed(_)) => {
+            let why = e.to_string();
+            assert!(why.starts_with("not started: "), "{what}: {why}");
+            assert!(why.contains("(two_documents)"), "{what}: {why}");
         }
-        Err(other) => panic!("not a contract's refusal: {other}"),
-        Ok(_) => panic!("a role on two documents is refused"),
+        Err(other) => panic!("{what}: not the start's refusal: {other}"),
+        Ok(_) => panic!("{what}: a role on two documents is refused"),
     }
+}
+
+/// S's instance tokens of `lab/worker`, put (appeared).
+fn worker_tokens(s: &Recorder) -> usize {
+    s.all()
+        .iter()
+        .filter(|r| r.token && !r.delete && r.key.starts_with("zk2/lab/worker/@zk/instance/"))
+        .count()
+}
+
+/// §11 A role on two documents refuses the start (§2.1, §2.3, text 0.7,
+/// F-224): the target given worker.v1, both, against tasking.v1, two
+/// documents, refuses the role and the start, nothing declared: S sees no
+/// instance token of it in 5 s, and no report. The control, worker.v1
+/// naming one of the two, starts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s11_a_role_on_two_documents_refuses_the_start() {
+    let bus = one_router().await;
+    let s = record(&bus.ep1).await;
     let g = client(&bus.ep1).await;
-    assert!(
-        get(&g, "zk2/lab/worker/worker_two.v1/state/running")
-            .await
-            .is_empty(),
-        "nothing declared: no report put"
+    let tasking = tasking_two();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // 1. worker.v1, both: the role refused, and the start.
+    let session = client(&bus.ep2).await;
+    let both = worker_with(Some(
+        "resources = [\"tasks/{system}/{service}\", \"plans/{system}/{service}\"]\n",
+    ));
+    let (b, given) = given_the_role(&session, both, false, &tasking).await;
+    refused_two_documents(given, "the role");
+    refused_two_documents(b.start().await, "the start");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(
+        worker_tokens(&s),
+        0,
+        "no instance token of lab/worker in 5 s"
     );
+    assert!(s.on(RP, 0).is_empty(), "no report on Rp");
+    assert!(get(&g, RP).await.is_empty(), "nothing answers on Rp");
+
+    // 2. The control: the scenarios' worker.v1, naming one of the two.
+    let session = client(&bus.ep2).await;
+    let (mut b, given) = given_the_role(&session, imp("worker.v1"), false, &tasking).await;
+    let _target = given.expect("a role on one document type");
+    let wi = imp("worker.v1").iface().clone();
+    let run = b
+        .declare_state_writer(&wi, RUNNING, &Bindings::new())
+        .await
+        .unwrap();
+    run.put_value(&drive::baseline()).await.unwrap();
+    let svc = b.start().await.expect("the control starts");
+    eventually("the control's instance token at S", || async {
+        worker_tokens(&s) == 1
+    })
+    .await;
+    s.until("its baseline report (§2.10)", |r| {
+        *r == Report::baseline(Some(D.to_owned()))
+    })
+    .await;
+    svc.close().await.unwrap();
+}
+
+/// What a requirement names (core §3.1; desired.v1 §2.1, text 0.7): one
+/// naming no resource names every one, and so does a role of the
+/// component's manifest, whose descriptor names no declaring contract:
+/// against tasking.v1, two documents, either is `two_documents`, refused
+/// with the start; against the scenarios' tasking.v1, one document, a
+/// manifest's role is given; and a requirement naming one of two is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_requirement_names_every_resource_or_those_it_lists() {
+    let bus = one_router().await;
+    let session = client(&bus.ep1).await;
+    let two = tasking_two();
+    let (b, given) = given_the_role(&session, worker_with(Some("")), false, &two).await;
+    refused_two_documents(given, "a requirement naming none");
+    refused_two_documents(b.start().await, "its start");
+    let (b, given) = given_the_role(&session, worker_with(None), true, &two).await;
+    refused_two_documents(given, "a manifest's role");
+    refused_two_documents(b.start().await, "its start");
+    let (_b, given) = given_the_role(&session, worker_with(None), true, &imp("tasking.v1")).await;
+    let _ = given.expect("a manifest's role on one desired resource");
+    let (_b, given) = given_the_role(&session, imp("worker.v1"), false, &two).await;
+    let _ = given.expect("a requirement naming one of two");
 }
