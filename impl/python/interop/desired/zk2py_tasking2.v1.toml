@@ -1,0 +1,25 @@
+# zk2py_tasking2.v1.toml: an author's interface with two desired resources
+# (desired.v1 §2.17, F-218). zk2py's own, for its tool's shapes; it must
+# load with no finding at all.
+[interface]
+name  = "zk2py_tasking2"
+major = 1
+minor = 0
+uses  = ["desired.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["tasking.json"]
+
+[resources."plans/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

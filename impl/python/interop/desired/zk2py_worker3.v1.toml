@@ -1,0 +1,31 @@
+# zk2py_worker3.v1.toml: a worker whose role names two templates of its
+# author's interface, with two report resources, so that a tool taking the
+# slice from the target alone has four candidates (desired.v1 §2.17, 0.5,
+# F-210: "each template its requirement names … under either kind token
+# … is a candidate"). zk2py's own, for its tool's shapes; it must load
+# with no finding at all.
+[interface]
+name  = "zk2py_worker3"
+major = 1
+minor = 0
+uses  = ["desired.v1"]
+
+[schemas]
+jsonschema = ["../../../../spec/profiles/desired/desired.v1.json", "tasking.json"]
+
+[resources.running]
+kind = "state"
+type = "json:Task"
+
+[resources."desired/task"]
+kind = "state"
+type = "json:desired.v1.Report"
+
+[resources."desired/again"]
+kind = "state"
+type = "json:desired.v1.Report"
+
+[requires.task]
+interface = "tasking.v1"
+resources = ["plans/{system}/{service}", "tasks/{system}/{service}"]
+optional  = true

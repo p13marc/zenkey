@@ -1039,6 +1039,27 @@ def _desired_reports(path: Path) -> list[Result]:
     return out
 
 
+def _desired_slices(path: Path) -> list[Result]:
+    """desired.v1 §2.10, §2.17 (0.5): a tool's reading of one role before
+    §2.17 answers -> its candidate slices, where they came from, §2.3's and
+    §2.2's problems, and which reply is the report
+    (zk2py.desired.take_slice, which_report)."""
+    from . import desired as ds
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        rd = c["reading"]
+        author = rd.get("author") or {}
+        taken = ds.take_slice(rd["target"], rd["iface"], rd["requirement"], author.get("named"),
+                              author.get("held") or [])
+        replies = [(x["key"], x["text"].encode("utf-8", "surrogatepass")) for x in rd.get("replies") or []]
+        found = ds.which_report(replies, taken.candidates)
+        got = {"slice": list(taken.candidates), "from": taken.source, "binding": list(taken.binding),
+               "declaration": list(taken.declaration), "report": found.expect()}
+        out.append(_check(f"slices #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 def _desired_conclusions(path: Path) -> list[Result]:
     """desired.v1 §2.17, §5: one reading of one target's role -> §5's four
     questions, each an answer and a reason."""
@@ -1146,7 +1167,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                   "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity},
     "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
                 "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
-                "conclusions.json": _desired_conclusions},
+                "conclusions.json": _desired_conclusions, "slices.json": _desired_slices},
     "redundancy": {"declarations.json": _redundancy_declarations, "descriptors.json": _redundancy_descriptors,
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
                    "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions},
@@ -2498,16 +2519,23 @@ def _desired_tool_readings() -> list[tuple[str, Any, Any]]:
          pick(b"{x", rep("1/a")), (True, {"stamp": "1/a"})),
         (f"{label}: none claiming it, every one readable: none read", pick(rep("2/a", other)), None),
     ]
-    label = "desired.v1 0.4 §2.17, the slice from the target alone"
-    for name, r, explicit, want in (
-            ("its requirement's template, each parameter its binding's self", req, False, (ds.BOUND, key)),
-            ("the kind token its report's key carries, @state", req, True,
-             (ds.BOUND, key.replace("/state/", "/@state/"))),
-            ("a parameter its binding leaves unbound: no slice, target_unbound",
-             {**req, "params": {"system": "self.system"}}, False, (ds.INVALID, None))):
-        b = dt._slice_from_requirement("lab/worker", r, "tasks/{system}/{service}", "lab/author", "tasking.v1",
-                                       explicit)
-        out.append((f"{label}: {name}", (b.binding, b.key), want))
+    label = "desired.v1 0.5 §2.17, the slice from the target alone (F-210)"
+    req5 = {"resources": ["tasks/{system}/{service}"], "bindings": ["lab/author"],
+            "params": {"system": "self.system", "service": "self.service"}, "optional": True}
+    at = key.replace("/state/", "/@state/")
+
+    def taken(r: dict[str, Any]) -> Any:
+        t = ds.take_slice("lab/worker", "tasking.v1", r, None, [])
+        return list(t.candidates), t.source, list(t.binding)
+
+    out += [
+        (f"{label}: its requirement's template under either kind token, each parameter its binding's self",
+         taken(req5), ([key, at], ds.REQUIREMENT, [])),
+        (f"{label}: the report's key choosing the kind token, @state",
+         ds.which_report([("r", rep("1/a", at))], [key, at]).expect(), {"found": "one", "claims": at}),
+        (f"{label}: a parameter its binding leaves unbound: no slice, target_unbound",
+         taken({**req5, "params": {"system": "self.system"}}), ([], None, ["target_unbound"])),
+    ]
     out += _desired_window_readings()
     return out
 
