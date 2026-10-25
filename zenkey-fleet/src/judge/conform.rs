@@ -94,6 +94,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.extend(alarm_cases(obs));
         report.cases.extend(telemetry_cases(obs));
         report.cases.extend(desired_cases(obs));
+        report.cases.extend(redundancy_cases(obs));
         report.unobservable = Some(why);
         report
     };
@@ -157,6 +158,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.extend(alarm_cases(obs));
         report.cases.extend(telemetry_cases(obs));
         report.cases.extend(desired_cases(obs));
+        report.cases.extend(redundancy_cases(obs));
         return report;
     };
     let owners: BTreeSet<String> = match &obs.presence {
@@ -245,6 +247,12 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
     report.cases.extend(alarm_cases(obs));
     report.cases.extend(telemetry_cases(obs));
     report.cases.extend(desired_cases(obs));
+    report.cases.extend(redundancy_cases(obs));
+    if let Some(r) = &obs.redundancy {
+        report
+            .asked
+            .extend(r.probes.iter().flatten().map(|p| p.selector.clone()));
+    }
     if let Some(t) = &obs.telemetry {
         report.asked.extend(t.asked.iter().cloned());
     }
@@ -1477,6 +1485,299 @@ fn alarm_cases(obs: &ConformObservation) -> [ConformCase; 2] {
         )
     };
     [key, document]
+}
+
+// ─── redundancy.v1 (#841, RC) ───────────────────────────────────────────────
+
+/// `redundancy-declaration` (§2.2, §2.14) and `redundancy-standby` (§2.4).
+///
+/// Left out, each with why: an operation runs on the incumbent alone
+/// (§2.4: no standby holds a queryable, which `redundancy-standby` probes,
+/// and the incumbent's calls are the suite's own `operation` cases); a
+/// standby writes nothing of the interface (§2.4), which no reader can
+/// tell from the incumbent's writes by key, and its stamp id is checked by
+/// `state-stamp` against every instance's `meta.zid`; claim before read,
+/// the takeover's order and the heal (§2.5, §2.6, §2.9) are a candidate's
+/// own sequence, which one run's reads cannot order (`[Sc: §1–§7]` tests
+/// them); a standby's publishers, which no reader can see.
+fn redundancy_cases(obs: &ConformObservation) -> Vec<ConformCase> {
+    vec![redundancy_declaration(obs), redundancy_standby(obs)]
+}
+
+fn redundancy_declaration(obs: &ConformObservation) -> ConformCase {
+    use zenkey_model::redundancy::{Declaration, Invalid, declaration_of};
+    const C: CaseId = CaseId::RedundancyDeclaration;
+    let subject = obs.iface.to_string();
+    let Some(rev) = &obs.revision else {
+        return ConformCase::unobservable(
+            C,
+            subject,
+            "its claimed revision is not in hand: its declaration cannot be read",
+        );
+    };
+    let Ok(o) = &obs.presence else {
+        return ConformCase::unobservable(C, subject, "the presence read could not be made");
+    };
+    let want = obs.iface.to_string();
+    let tokenless: Vec<String> = o
+        .descriptors
+        .iter()
+        .flatten()
+        .filter_map(|((a, i), r)| r.descriptor().map(|d| (a, i, d)))
+        .filter(|(_, _, d)| d.interfaces.iter().any(|e| e.iface == want && !e.token))
+        .map(|(a, i, _)| format!("{a}@{i}"))
+        .collect();
+    let d = declaration_of(rev.contract(), !tokenless.is_empty());
+    match d {
+        Declaration::NotGoverned => ConformCase::not_asked(
+            C,
+            subject,
+            "its revision lists no redundancy.v1 in uses and carries no redundancy.election: \
+             not this profile's (§2.2)",
+        ),
+        Declaration::Governed(e) => ConformCase::passed(
+            C,
+            subject,
+            format!(
+                "governed, election {e}, every resource resolving to it; no descriptor puts the \
+                 interface in a tokenless set"
+            ),
+        ),
+        Declaration::Invalid(why) => {
+            let contract: Vec<&str> = why
+                .iter()
+                .filter(|w| **w != Invalid::Tokenless)
+                .map(|w| w.as_str())
+                .collect();
+            let mut said = Vec::new();
+            if !contract.is_empty() {
+                said.push(format!(
+                    "the contract's declaration is invalid ({}): a runtime refuses to start an \
+                     instance of it, and this one runs (§2.2)",
+                    contract.join(", ")
+                ));
+            }
+            if why.contains(&Invalid::Tokenless) {
+                said.push(format!(
+                    "the deployment's tokenless set names a governed interface (tokenless, \
+                     governed_tokenless), in the descriptor of {}: its incumbent is the holder \
+                     of its token, and a runtime refuses to start it (§2.14)",
+                    tokenless.join(", ")
+                ));
+            }
+            ConformCase::failed(C, subject, said.join("; "))
+        }
+    }
+}
+
+fn redundancy_standby(obs: &ConformObservation) -> ConformCase {
+    use zenkey_model::redundancy::{self as rm, Election, Governance, Listing};
+    const C: CaseId = CaseId::RedundancyStandby;
+    let subject = "service";
+    let Some(rev) = &obs.revision else {
+        return ConformCase::unobservable(
+            C,
+            subject,
+            "its claimed revision is not in hand: whether redundancy.v1 governs it cannot be read",
+        );
+    };
+    let election = match rm::declaration_of(rev.contract(), false) {
+        rm::Declaration::Governed(e) => e,
+        rm::Declaration::NotGoverned => {
+            return ConformCase::not_asked(
+                C,
+                subject,
+                "redundancy.v1 does not govern its revision: no instance of it stands by (§2.1)",
+            );
+        }
+        rm::Declaration::Invalid(_) => {
+            return ConformCase::not_asked(
+                C,
+                subject,
+                "its declaration is invalid, so it has no election to stand by in \
+                 (redundancy-declaration)",
+            );
+        }
+    };
+    let Ok(first) = &obs.presence else {
+        return ConformCase::unobservable(C, subject, "the presence read could not be made");
+    };
+    let Some(probed) = &obs.redundancy else {
+        return ConformCase::not_asked(
+            C,
+            subject,
+            "no descriptor in the presence read marks the interface standby: no instance \
+             stands by",
+        );
+    };
+    let second = match &probed.second {
+        Ok(o) => o,
+        Err(e) => {
+            return ConformCase::unobservable(
+                C,
+                subject,
+                format!("the presence read after the probes could not be made: {e}"),
+            );
+        }
+    };
+    let reading = crate::model::redundancy::reading(
+        Some(first),
+        Some(second),
+        &obs.address,
+        &obs.iface,
+        Governance::Governed(election),
+        false,
+    );
+    let reads = [Some(first), Some(second)];
+    let members = |o: &crate::model::catalog::Observed, id: &zenkey_model::grammar::InstanceId| {
+        o.tokens.iter().any(|t| {
+            matches!(t, zenkey_model::grammar::ZkKey::Member { addr, iface, epoch, .. }
+                if *addr == obs.address && *iface == obs.iface && epoch == id)
+        })
+    };
+    let mut violations = Vec::new();
+    let mut unseen = Vec::new();
+    let mut standing = Vec::new();
+    for s in reading
+        .second
+        .instances
+        .iter()
+        .filter(|s| s.descriptor == Listing::Listed { standby: true })
+    {
+        let at = format!("{}@{}", obs.address, s.id);
+        let twin = rm::twin(&reading, &s.id);
+        let marked_in_both = reading
+            .first
+            .get(&s.id)
+            .is_some_and(|f| f.descriptor == Listing::Listed { standby: true });
+        if twin.answer == rm::Answer::Yes && twin.reason == rm::Reason::MarkedHolding {
+            violations.push(format!(
+                "{at} holds the interface's token while its descriptor marks it standby, in \
+                 both reads (marked_holding)"
+            ));
+            continue;
+        }
+        if marked_in_both && !s.token && members(first, &s.id) && members(second, &s.id) {
+            violations.push(format!(
+                "{at} holds member tokens of the interface while its descriptor marks it \
+                 standby, in both reads"
+            ));
+            continue;
+        }
+        if !(twin.answer == rm::Answer::No && twin.reason == rm::Reason::Standby && marked_in_both)
+        {
+            unseen.push(format!(
+                "{at}: \"is this instance a standby, or a twin?\" answers {}, {}{}",
+                twin.answer.as_str(),
+                twin.reason.as_str(),
+                if marked_in_both {
+                    ""
+                } else {
+                    ", not marked in the first read"
+                }
+            ));
+            continue;
+        }
+        let Some(zid) = crate::model::redundancy::zid_of(&reads, &obs.address, &s.id) else {
+            unseen.push(format!(
+                "{at} states no meta.zid: its replies cannot be told apart"
+            ));
+            continue;
+        };
+        let zid = zid_value(&zid);
+        let answered: Vec<&str> = probed
+            .probes
+            .iter()
+            .flatten()
+            .filter(|p| p.repliers.iter().any(|r| zid_value(r) == zid))
+            .map(|p| p.resource.as_str())
+            .collect();
+        if !answered.is_empty() {
+            violations.push(format!(
+                "{at}, marked standby with no token in both reads, answered the probe of {} from \
+                 its session (zid {zid}): a standby exposes none of the interface's resources",
+                answered.join(", ")
+            ));
+            continue;
+        }
+        standing.push((at, zid));
+    }
+    if !violations.is_empty() {
+        return ConformCase::failed(C, subject, violations.join("; "));
+    }
+    let ops: Vec<&crate::bus::conform::ExposureProbe> = probed
+        .probes
+        .iter()
+        .flatten()
+        .filter(|p| p.operation && p.incomplete.is_none())
+        .collect();
+    let mut why: Vec<String> = unseen;
+    why.extend(
+        probed
+            .probes
+            .iter()
+            .filter_map(|p| p.as_ref().err().cloned()),
+    );
+    why.extend(probed.probes.iter().flatten().filter_map(|p| {
+        p.incomplete
+            .as_ref()
+            .map(|w| format!("{}: {w}", p.selector))
+    }));
+    if standing.is_empty() && why.is_empty() {
+        return ConformCase::not_asked(
+            C,
+            subject,
+            "no instance is marked standby in the second read",
+        );
+    }
+    if ops.is_empty() {
+        let mut said = vec![
+            "no operation that forbids fan-out was probed: a state queryable holding nothing \
+             answers nothing, so no reply is no proof of none"
+                .to_owned(),
+        ];
+        said.extend(
+            probed
+                .not_probed
+                .iter()
+                .map(|(n, w)| format!("{n} not probed: {w}")),
+        );
+        said.extend(why);
+        return ConformCase::unobservable(C, subject, said.join("; "));
+    }
+    if !why.is_empty() {
+        return ConformCase::unobservable(C, subject, why.join("; "));
+    }
+    let heard: BTreeSet<&str> = ops
+        .iter()
+        .flat_map(|p| p.repliers.iter().map(String::as_str))
+        .collect();
+    ConformCase::passed(
+        C,
+        subject,
+        format!(
+            "{} standby(s) ({}), marked with no token in both reads, answered none of {} probe(s) \
+             over the interface's wildcards ({}), every operation queryable answering such a call \
+             before any handler runs; {} session(s) answered them{}",
+            standing.len(),
+            standing
+                .iter()
+                .map(|(a, z)| format!("{a}, zid {z}"))
+                .collect::<Vec<_>>()
+                .join("; "),
+            probed.probes.iter().flatten().count(),
+            ops.iter()
+                .map(|p| p.resource.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            heard.len(),
+            if election == Election::External {
+                "; under external the lock elects, and a standby shows the same way (§2.11)"
+            } else {
+                ""
+            }
+        ),
+    )
 }
 
 /// The `desired.v1` cases (#840, DD), in [`CaseId::ALL`] order:
@@ -3617,6 +3918,7 @@ mod tests {
             alarms: None,
             telemetry: None,
             desired: None,
+            redundancy: None,
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -5359,5 +5661,249 @@ mod tests {
         let c = verdict(&desired_cases(&a), CaseId::DesiredAuthor);
         assert_eq!(c.verdict, Judgement::Established);
         assert!(c.detail.unwrap().contains("param_not_target"));
+    }
+
+    // ── redundancy.v1 (#841, RC) ────────────────────────────────────────
+
+    const A: &str = "000000000000000a";
+    const B: &str = "000000000000000b";
+
+    /// `ledger.v1` as `zenkey`'s scenarios hold it, governed (`claim`), or
+    /// with its `uses` and election taken out.
+    fn ledger(governed: bool) -> Arc<Revision> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/ledger.v1.toml");
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        if !governed {
+            text = text.replace("uses  = [\"redundancy.v1\"]\n", "").replace(
+                "[defaults]\nannotations = { \"redundancy.election\" = \"claim\" }\n",
+                "",
+            );
+        }
+        let l = zenkey_model::contract::load_str(&text, path.parent().unwrap(), None);
+        Arc::new(Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            crate::report::ContractSource::Bus,
+        ))
+    }
+
+    /// `lab/ledger`'s A and B: (holds its interface token, marked standby,
+    /// tokenless) each.
+    fn ledger_presence(rev: &Revision, a: (bool, bool, bool), b: (bool, bool, bool)) -> Observed {
+        let fp = rev.fingerprint().clone();
+        let mut keys = Vec::new();
+        let mut descriptors = BTreeMap::new();
+        for (id, (holds, standby, tokenless)) in [(A, a), (B, b)] {
+            keys.push(format!("zk2/lab/ledger/@zk/instance/{id}"));
+            if holds {
+                keys.push(format!(
+                    "zk2/lab/ledger/@zk/alive/ledger.v1/{id}/{}",
+                    fp.hex().fp16()
+                ));
+            }
+            let d = json!({
+                "format": "zk2-descriptor/0.1", "service": "lab/ledger", "instance": id,
+                "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(), "minor": 0,
+                                "standby": standby, "token": !tokenless}],
+                "meta": {"zid": format!("{id}0")},
+            });
+            descriptors.insert(
+                ("lab/ledger".parse().unwrap(), id.parse().unwrap()),
+                DescriptorRead::Served(Box::new(serde_json::from_value(d).unwrap())),
+            );
+        }
+        let mut o = Observed::from_keys("zk2/lab/ledger/@zk/**", &keys, true);
+        o.descriptors = Some(descriptors);
+        o
+    }
+
+    fn probe(
+        resource: &str,
+        operation: bool,
+        repliers: &[&str],
+    ) -> crate::bus::conform::ExposureProbe {
+        crate::bus::conform::ExposureProbe {
+            resource: resource.into(),
+            operation,
+            selector: format!("zk2/lab/ledger/ledger.v1/{resource}"),
+            repliers: repliers.iter().map(|r| (*r).to_owned()).collect(),
+            unattributed: 0,
+            incomplete: None,
+        }
+    }
+
+    /// The incumbent A and the standby B, both reads alike, A answering the
+    /// probes of `ledger.v1`'s state and its one operation.
+    fn ledger_obs(
+        rev: Arc<Revision>,
+        a: (bool, bool, bool),
+        b: (bool, bool, bool),
+        probes: Vec<crate::bus::conform::ExposureProbe>,
+    ) -> ConformObservation {
+        let mut o = conforming();
+        o.address = "lab/ledger".parse().unwrap();
+        o.iface = "ledger.v1".parse().unwrap();
+        o.presence = Ok(ledger_presence(&rev, a, b));
+        o.served = Some(Ok(ContractState::Held(Arc::clone(&rev))));
+        o.revision = Some(Arc::clone(&rev));
+        o.heard.clear();
+        o.gets.clear();
+        o.calls.clear();
+        o.redundancy = Some(crate::bus::conform::StandbyConform {
+            probes: probes.into_iter().map(Ok).collect(),
+            not_probed: vec![],
+            second: Ok(ledger_presence(&rev, a, b)),
+        });
+        o
+    }
+
+    const SERVING: (bool, bool, bool) = (true, false, false);
+    const STANDBY: (bool, bool, bool) = (false, true, false);
+
+    #[test]
+    fn a_standby_answering_a_probe_or_holding_its_token_is_the_violation() {
+        let rev = ledger(true);
+        let a0 = format!("{A}0");
+        let b0 = format!("{B}0");
+        let probes = |b_answers: bool| {
+            let mut op = vec![a0.as_str()];
+            if b_answers {
+                op.push(b0.as_str());
+            }
+            vec![
+                probe("state/balance", false, &[a0.as_str()]),
+                probe("@op/append", true, &op),
+            ]
+        };
+        // §2.4: marked, no token in both reads, silent to every probe.
+        let r = judge(&ledger_obs(
+            Arc::clone(&rev),
+            SERVING,
+            STANDBY,
+            probes(false),
+        ));
+        let c = case(&r, CaseId::RedundancyStandby, "service");
+        let Judgement::NotEstablished { reason } = &c.verdict else {
+            panic!("{c:#?}");
+        };
+        assert!(reason.contains("1 standby(s)"), "{reason}");
+        assert!(reason.contains("@op/append"), "{reason}");
+        // Its session answered the operation's probe: it holds a queryable.
+        let r = judge(&ledger_obs(
+            Arc::clone(&rev),
+            SERVING,
+            STANDBY,
+            probes(true),
+        ));
+        let c = case(&r, CaseId::RedundancyStandby, "service");
+        assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+        assert!(
+            c.detail
+                .as_deref()
+                .unwrap()
+                .contains("answered the probe of @op/append")
+        );
+        // It holds the interface's token while marked, in both reads.
+        let r = judge(&ledger_obs(
+            Arc::clone(&rev),
+            (false, false, false),
+            (true, true, false),
+            probes(false),
+        ));
+        let c = case(&r, CaseId::RedundancyStandby, "service");
+        assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+        assert!(c.detail.as_deref().unwrap().contains("marked_holding"));
+        // Only a state resource probed: a state queryable holding nothing
+        // answers nothing, so silence is no proof.
+        let r = judge(&ledger_obs(
+            Arc::clone(&rev),
+            SERVING,
+            STANDBY,
+            vec![probe("state/balance", false, &[a0.as_str()])],
+        ));
+        let c = case(&r, CaseId::RedundancyStandby, "service");
+        assert!(
+            matches!(&c.verdict, Judgement::Unobservable { reason } if reason.contains("no proof")),
+            "{c:#?}"
+        );
+        // Marked in the second read only: a step-down's or a start's shape.
+        let mut o = ledger_obs(Arc::clone(&rev), SERVING, STANDBY, probes(false));
+        o.presence = Ok(ledger_presence(&rev, SERVING, (false, false, false)));
+        let c = case(&judge(&o), CaseId::RedundancyStandby, "service").clone();
+        assert!(
+            matches!(c.verdict, Judgement::Unobservable { .. }),
+            "{c:#?}"
+        );
+        // No instance marked: not asked.
+        let mut o = ledger_obs(Arc::clone(&rev), SERVING, STANDBY, probes(false));
+        o.redundancy = None;
+        let c = case(&judge(&o), CaseId::RedundancyStandby, "service").clone();
+        assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
+        // Not governed: not asked either.
+        let plain = ledger(false);
+        let c = case(
+            &judge(&ledger_obs(plain, SERVING, STANDBY, probes(true))),
+            CaseId::RedundancyStandby,
+            "service",
+        )
+        .clone();
+        assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
+    }
+
+    #[test]
+    fn a_running_instance_of_an_invalid_or_tokenless_declaration_is_the_violation() {
+        let rev = ledger(true);
+        let c = case(
+            &judge(&ledger_obs(Arc::clone(&rev), SERVING, STANDBY, vec![])),
+            CaseId::RedundancyDeclaration,
+            "ledger.v1",
+        )
+        .clone();
+        assert!(
+            matches!(&c.verdict, Judgement::NotEstablished { reason } if reason.contains("election claim")),
+            "{c:#?}"
+        );
+        // §2.14: a governed interface in a tokenless set.
+        let c = case(
+            &judge(&ledger_obs(
+                Arc::clone(&rev),
+                SERVING,
+                (false, true, true),
+                vec![],
+            )),
+            CaseId::RedundancyDeclaration,
+            "ledger.v1",
+        )
+        .clone();
+        assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+        assert!(c.detail.as_deref().unwrap().contains("governed_tokenless"));
+        // §2.2: an election that is not a value of the vocabulary.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/ledger.v1.toml");
+        let text = std::fs::read_to_string(&path).unwrap().replace(
+            "\"redundancy.election\" = \"claim\"",
+            "\"redundancy.election\" = \"vote\"",
+        );
+        let l = zenkey_model::contract::load_str(&text, path.parent().unwrap(), None);
+        let vote = Arc::new(Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            crate::report::ContractSource::Bus,
+        ));
+        let r = judge(&ledger_obs(vote, SERVING, STANDBY, vec![]));
+        let c = case(&r, CaseId::RedundancyDeclaration, "ledger.v1");
+        assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+        assert!(c.detail.as_deref().unwrap().contains("(value)"));
+        assert_eq!(
+            case(&r, CaseId::RedundancyStandby, "service").verdict,
+            Judgement::NotAsked
+        );
+        // Not this profile's.
+        let c = case(
+            &judge(&ledger_obs(ledger(false), SERVING, STANDBY, vec![])),
+            CaseId::RedundancyDeclaration,
+            "ledger.v1",
+        )
+        .clone();
+        assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
     }
 }

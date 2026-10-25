@@ -7,6 +7,12 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the doctor reads `redundancy.v1` (#841, RC)
+
+| Before | Now | Notes |
+|---|---|---|
+| the scheduled doctor and a `doctor` rule: thirty checks | thirty-one: `redundancy-vacancy` (warning) | `split-brain` reads a governed interface by `redundancy.v1`'s first question, `token-missing` never finds a standby, `hostid-duplicate` does not count a recognised one; the `zenwatch.v1` schema's check id stays an open string |
+
 ## Unreleased (`main`, zk2) — presence reads where they can be complete (#830, #839, PS)
 
 A liveliness GET from a session that holds a liveliness subscriber, history

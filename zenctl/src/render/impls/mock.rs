@@ -146,6 +146,24 @@ impl Render for GenReport {
                 String::new()
             }
         ));
+        if !self.roles.is_empty() || self.standing_by > 0 {
+            t.line(format!(
+                "  redundancy.v1: {}{}",
+                self.roles
+                    .iter()
+                    .map(|(i, r)| format!("{i} {r}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if self.standing_by > 0 {
+                    format!(
+                        "; {} write(s) held back while it stood by",
+                        self.standing_by
+                    )
+                } else {
+                    String::new()
+                }
+            ));
+        }
         let mut g = Grid::unheaded(2);
         for e in &self.first_errors {
             g.row([Cell::text("  ✗"), Cell::text(e)]);

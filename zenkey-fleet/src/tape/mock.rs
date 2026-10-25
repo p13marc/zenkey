@@ -37,7 +37,7 @@ use std::time::Duration;
 use zenkey::operation::OperationServer;
 use zenkey::{Call, Implementation, OpError, ServiceBuilder, ServiceConfig};
 use zenkey_model::contract::{Body, Resource};
-use zenkey_model::grammar::{Addr, ZkKey, parse};
+use zenkey_model::grammar::{Addr, IfaceId, ZkKey, parse};
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::Session;
 
@@ -404,6 +404,12 @@ pub struct ServeSpec {
     pub bindings: BTreeMap<String, Vec<String>>,
     /// Stamped into the descriptor's marker.
     pub tool: String,
+    /// How the mock owner takes part in `redundancy.v1`'s election when
+    /// the interface is governed (#841, RC): its reader and its watch. It
+    /// serves the operation only once elected, and stands by otherwise,
+    /// declaring none of its queryables. `None`: a governed interface is
+    /// refused at start, as the runtime refuses it.
+    pub elect: Option<zenkey::redundancy::RedundancyStartup>,
 }
 
 /// A running `serve`: the mock owner, and the calls it has served.
@@ -414,6 +420,7 @@ pub struct Served {
     service: zenkey::Service,
     calls: tokio::sync::mpsc::UnboundedReceiver<ServedCall>,
     tally: Arc<AtomicU64>,
+    redundancy: Option<zenkey::redundancy::Redundancy>,
 }
 
 /// Brings up a mock owner at `spec.address` serving one operation (#612,
@@ -431,6 +438,7 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
         answer,
         bindings,
         tool,
+        elect,
     } = spec;
     check_roles(std::slice::from_ref(&revision), &bindings)?;
     let contract = revision.contract();
@@ -505,12 +513,22 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
         b.serve_state(&iface)
             .map_err(|e| runtime_error(&revision, e))?;
     }
+    let governed = zenkey_model::redundancy::declaration_of(contract, false)
+        != zenkey_model::redundancy::Declaration::NotGoverned;
+    let redundancy = match (elect, governed) {
+        (Some(startup), true) => Some(
+            b.redundancy(startup)
+                .map_err(|e| runtime_error(&revision, e))?,
+        ),
+        _ => None,
+    };
     let service = b.start().await.map_err(|e| runtime_error(&revision, e))?;
     Ok(Served {
         servers,
         service,
         calls,
         tally,
+        redundancy,
     })
 }
 
@@ -530,6 +548,13 @@ impl Served {
     #[must_use]
     pub fn calls(&self) -> u64 {
         self.tally.load(Ordering::SeqCst)
+    }
+
+    /// Its role on the interface when `redundancy.v1` governs it and it
+    /// elects: `serving`, `standby` or `unclaimed`; `None` otherwise.
+    #[must_use]
+    pub fn role(&self, iface: &IfaceId) -> Option<zenkey::redundancy::Role> {
+        self.redundancy.as_ref().map(|r| r.role(iface))
     }
 
     /// Undeclares the operation servers, then the service's tokens and

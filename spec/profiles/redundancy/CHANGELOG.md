@@ -4,6 +4,123 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-25: what the tools showed, and round 58's answers (#841, RC)
+
+The reference tools are built (#841, RC): `zenkey-fleet`'s
+`bus|model|judge|report::redundancy` (§5's four questions from two reads,
+every answer `zenkey_model::redundancy`'s), `zenctl redundancy`, the
+doctor's `split-brain`, `token-missing` and `hostid-duplicate` reading the
+profile and its new `redundancy-vacancy`, `check conform`'s
+`redundancy-declaration` and `redundancy-standby`, `gen` and `serve` as
+candidates, zengui's nodes card and Inspector, and `scenarios.md` §12 as
+`zenctl/tests/live_zk2.rs`'s `redundancy_s12_…`. zk2py round 58 (PR #860)
+ran 0.2 live against the runtime in every pairing, all passing, and filed
+F-214 to F-216, all accepted on #841. Core stays 0.40 and `hostid.v1` 0.7.
+
+**Changed: round 58's answers.**
+- **The owner example checks before it writes** (scenarios §11; F-214).
+  Its §11 refusal was the standby-write error, since it put its raw state
+  before the runtime read the declaration. It now writes nothing of a
+  contract listing `redundancy.v1` before its start, so the refusal is
+  `not started: … invalid: value`, as §11 Expected 2 now says.
+  `[Sc: §11]`
+- **A poll compares with the last's** (§2.7; F-215), in zk2py's wording:
+  a read not complete removes no holder from the last's; a holder it
+  shows that is new is an appearance, and only a complete read can show
+  one gone. 0.2's "a complete read with no other holder, after one with
+  some" left the last's undefined after a read not complete. It is a
+  MUST, stated by a new fixture. `[F: polls.json]`
+- **§3's start, measured** (scenarios §3; F-216): at S, by each instance
+  token's arrival; a run whose two tokens arrive more than 10 ms apart is
+  made again and counted apart. The owner example gains `--wait-go`, and
+  `redundancy zid` and its poll's log from the round's stdin gaps.
+  `[Sc: §3]`
+
+**Changed: what building the tools showed.**
+- **An invalid declaration on the bus** (§2.15 premise 3). An instance
+  running under one breaks §2.2's refusal, and the model's governance has
+  no token for it: it reads unobservable, `no_contract`, the reasons named
+  beside it. `[F: conclusions.json]` (the token) `[F: declarations.json]`
+  (the reasons)
+- **Governance from a contract held offline** (§2.15 premise 3). In a
+  vacancy whose standbys are gone, and in X's shapes, no instance serves
+  the bundle, so retrieval answers nothing (core §8.4) and the answer is
+  `no_contract`; a tool holding the contract offline reads it. §12's T
+  holds `ledger.v1` so. `[Sc: §12]`
+- **One split, one finding** (§2.15). The doctor judged core §6's
+  split-brain by exposure, and a governed split whose second holder was
+  marked standby (core 0.39: still a holder, exposing nothing) fell
+  between the two rules. On a governed interface the first question
+  decides, whatever the marks, and the finding is reported once.
+  `[Sc: §12]`
+- **A standby's exposure, probed** (§2.15, a MAY). A GET over a
+  fan-out-forbidden operation's wildcard reaches every operation
+  queryable before any handler runs (core O2), so its replies, attributed
+  by the replier's zid, find a queryable a marked instance holds; a state
+  queryable holding nothing answers nothing, so silence proves less.
+  Measured: across a router, zenoh 1.10.1 attributes each reply to the
+  answering session. `[Sc: §12]` (step 8, new)
+- **A recognised standby, named** (§2.15, `hostid.v1` §2.12). §12 step 6
+  said the tool speaks "beside that finding"; a recognised standby is not
+  counted, so there is no finding, and the tool names it beside its
+  answer. `[Sc: §12]`
+
+**The fixtures.** `polls.json` is new: 7 cases, each a poll's reads in
+order -> each read's appearances and withdrawals, F-215's two sequences
+among them. Its expectations were written by hand before
+`zenkey_model::redundancy::poll` ran them, and the runtime's poll now
+goes through that function. No other fixture changed.
+
+**Decided here, where the record was silent.**
+- **`zenctl redundancy`'s exit contract.** 1 is a finding: a split, a
+  twin (`unmarked`, `marked_holding`, `unlisted`, a split's holders), or
+  a lasting vacancy, §5's "Finding on" for each, since a vacancy in both
+  reads is the election stuck or no instance holding the lock, which an
+  operator acts on as on a split. 0: every governed interface asked has
+  exactly one incumbent, and every instance is the incumbent, a standby
+  or no candidate. 2 otherwise, `vacant` (a takeover due) included, and
+  an interface not governed asked by name.
+- **The doctor's `redundancy-vacancy`**, a warning: §2.15 asks for a
+  lasting vacancy's finding, and no core check had one. A twin needs no
+  check of its own: `split-brain` holds a split, `token-missing` a marked
+  holder or an unlisted one, and an unmarked listing with no token is
+  `token-missing`'s exposure no token covers. A vacancy in the second
+  read only is a takeover due, no finding. An interface whose governance
+  cannot be read is asked only when its shape would be the finding.
+- **`hostid-duplicate` and a standby question unobservable.** `hostid.v1`
+  0.6's unobservable case, applied: an instance listing only governed
+  interfaces, or ones whose governance cannot be read, for which the
+  question is unobservable, leaves the check unjudged unless the finding
+  is established anyway.
+- **`check conform`'s cases**, each a rule one run checks:
+  `redundancy-declaration` (§2.2, §2.14: a running instance of an
+  invalid or tokenless declaration) and `redundancy-standby` (§2.4: the
+  probe above, and a marked holder of an interface or member token in
+  both reads; a pass needs an operation probed). Left out: an operation
+  run on the incumbent alone (the probe covers a standby's queryable),
+  a standby writing nothing (no reader tells its writes from the
+  incumbent's by key; `state-stamp` reads the stamp id), the election's
+  own order (§2.5, §2.6, §2.9: a candidate's sequence, the scenarios'
+  §1 to §7), and publishers (no reader sees one).
+- **`gen` and `serve` elect.** A mock owner of a governed contract is a
+  candidate on a reader and a watch of its own; a governed state's first
+  value goes at its takeover, a write refused while it stands by is
+  counted apart, never a failure, and its members are declared at each
+  takeover. No `--standby` flag: no test needed one. The address guard is
+  unchanged: a candidate that takes over writes synthetic data at the
+  address, so a mock beside a live instance still needs `--i-know`.
+- **zengui** asks the reading on an address's selection, beside its
+  health, never polled; each role is a chip off the fleet's judge, and
+  the descriptor's mark is shown as the descriptor's word, apart from it.
+
+**Deliberately not changed.**
+- **`elections.json`, `heals.json`, `declarations.json`,
+  `descriptors.json`, `lifecycle.json`, `conclusions.json`.**
+- **Core and `hostid.v1`.** Their texts already say what the tools read:
+  core 0.39's marked holder, 0.40's complete read, hostid 0.7's reads.
+- **No probe of a state queryable as proof.** The text names it weaker;
+  making it a MUST would make every tool's silence a pass.
+
 ## 0.2 — 2026-10-25: what the runtime showed, and round 56's answers (#841, RB)
 
 The reference runtime is built (#841, RB): `zenkey::redundancy`, through

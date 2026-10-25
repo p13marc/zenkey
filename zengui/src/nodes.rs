@@ -13,7 +13,11 @@
 //!   catalog, indexed once per catalog the feed swaps in
 //!   ([`NodesState::describe`]), never per frame;
 //! - **health** — `health.v1`, read lazily for the one address selected
-//!   (the laziness ground rule, #84/#85), never polled: [`HealthState`].
+//!   (the laziness ground rule, #84/#85), never polled: [`HealthState`];
+//! - **redundancy** — `redundancy.v1`'s reading of the address selected
+//!   (#841, RC), on selection too: two presence reads a grace apart, each
+//!   instance's role on every governed interface the fleet's judge's,
+//!   never derived here: [`RedundancyState`].
 //!
 //! Plus the zero-cost join v1's roster made: for every address whose state
 //! an active watch covers, the age of its newest state sample, read from
@@ -29,7 +33,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::report::{Asked, DescriptorAnswer, HealthReport};
+use zenkey_fleet::report::{
+    Asked, DescriptorAnswer, HealthReport, RedundancyReport, RedundancyRow,
+};
 use zenkey_fleet::{Catalog, KeyTreeSnapshot, LivePresence};
 use zenkey_model::grammar::{Addr, GRAMMAR, KindToken};
 use zenoh::key_expr::keyexpr;
@@ -80,6 +86,9 @@ pub struct DescriptorFacts {
     /// Each interface it implements, with the first chunk of the
     /// fingerprint it names.
     pub interfaces: Vec<(String, String)>,
+    /// The interfaces its entries mark `"standby": true` (core §3.3, 0.39):
+    /// the descriptor's own word, which `redundancy.v1` reads (#841, RC).
+    pub standby: Vec<String>,
 }
 
 impl DescriptorFacts {
@@ -140,6 +149,60 @@ impl HealthState {
     }
 }
 
+/// `redundancy.v1` for the one address selected (#841, RC): asked on
+/// selection, never polled.
+#[derive(Debug, Clone, Default)]
+pub enum RedundancyState {
+    /// Nothing selected yet, or the selection is not an address.
+    #[default]
+    NotAsked,
+    /// The reading is in flight — two presence reads a grace apart.
+    Asking(Addr),
+    /// The engine's report, as `zenctl redundancy <address>` prints it.
+    Read(Addr, Arc<RedundancyReport>),
+}
+
+impl RedundancyState {
+    /// The address this state is about, if any.
+    pub fn address(&self) -> Option<&Addr> {
+        match self {
+            RedundancyState::NotAsked => None,
+            RedundancyState::Asking(a) | RedundancyState::Read(a, _) => Some(a),
+        }
+    }
+
+    /// The reading of `addr`, when it is the one landed.
+    pub fn report(&self, addr: &Addr) -> Option<&RedundancyReport> {
+        match self {
+            RedundancyState::Read(a, r) if a == addr => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Each governed interface's row of `addr` holding `instance`, with
+    /// that instance's entry: its role and its fourth answer, as the
+    /// fleet's judge gave them.
+    pub fn roles<'r>(
+        &'r self,
+        addr: &Addr,
+        instance: &str,
+    ) -> Vec<(
+        &'r RedundancyRow,
+        &'r zenkey_fleet::report::RedundancyInstance,
+    )> {
+        self.report(addr)
+            .into_iter()
+            .flat_map(|r| r.interfaces.iter())
+            .filter_map(|row| {
+                row.instances
+                    .iter()
+                    .find(|i| i.instance == instance)
+                    .map(|i| (row, i))
+            })
+            .collect()
+    }
+}
+
 /// The pane's whole state.
 #[derive(Debug, Default)]
 pub struct NodesState {
@@ -147,6 +210,8 @@ pub struct NodesState {
     freshness: BTreeMap<Addr, Freshness>,
     /// `health.v1` for the address selected.
     pub health: HealthState,
+    /// `redundancy.v1` for the address selected (#841, RC).
+    pub redundancy: RedundancyState,
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1). Off by default
     /// (D11): without it no reply's age can be judged, and health reads
@@ -288,6 +353,16 @@ impl NodesState {
         self.health = HealthState::Read(addr, report);
     }
 
+    /// A `redundancy.v1` reading was asked for `addr` (#841, RC).
+    pub fn asking_redundancy(&mut self, addr: Addr) {
+        self.redundancy = RedundancyState::Asking(addr);
+    }
+
+    /// A `redundancy.v1` reading landed, under the health reading's guard.
+    pub fn redundancy_read(&mut self, addr: Addr, report: Arc<RedundancyReport>) {
+        self.redundancy = RedundancyState::Read(addr, report);
+    }
+
     /// A namespace switch or reconnect: what was read described another
     /// deployment. The clock toggle is the operator's word, and stays.
     pub fn clear(&mut self) {
@@ -326,6 +401,12 @@ fn described(answer: &Asked<DescriptorAnswer>) -> Described {
                             .unwrap_or_else(|| e.contract.clone());
                         (e.iface.clone(), short)
                     })
+                    .collect(),
+                standby: descriptor
+                    .interfaces
+                    .iter()
+                    .filter(|e| e.standby)
+                    .map(|e| e.iface.clone())
                     .collect(),
             })
         }

@@ -62,6 +62,7 @@ Commands:
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   desired      Read desired.v1 targets: has each converged on its author's document?
+  redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion
@@ -134,6 +135,7 @@ Commands:
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   desired      Read desired.v1 targets: has each converged on its author's document?
+  redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion

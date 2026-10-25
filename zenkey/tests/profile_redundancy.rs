@@ -483,6 +483,18 @@ impl Spy {
             .collect()
     }
 
+    /// When S first heard `instance`'s instance token declared.
+    fn instance_at(&self, instance: &InstanceId) -> Option<Instant> {
+        self.snapshot().into_iter().find_map(|r| match r {
+            Rec::Token {
+                at,
+                key: ZkKey::Instance { instance: x, .. },
+                put: true,
+            } if x == *instance => Some(at),
+            _ => None,
+        })
+    }
+
     /// Whether S heard `instance`'s instance token declared.
     fn has_instance(&self, instance: &InstanceId) -> bool {
         self.snapshot().iter().any(|r| {
@@ -847,7 +859,11 @@ async fn s3_a_simultaneous_start() {
     let s = spy(&ep, LEDGER, &ledger()).await;
     let g = client(&ep).await;
     let (mut healed, mut b_kept) = (0, 0);
-    for run in 0..20u64 {
+    // F-216 (text 0.3): a start is measured at S, by its instance token's
+    // arrival; a run whose two tokens are more than 10 ms apart is made
+    // again, and counted apart.
+    let (mut run, mut apart) = (0u64, 0u64);
+    while run < 20 {
         let lo: u64 = rand_id();
         let (a_id, b_id) = (lo, lo + 1 + rand_id() % 1000);
         let (a, b) = tokio::join!(
@@ -855,6 +871,19 @@ async fn s3_a_simultaneous_start() {
             candidate(&ep, Opts::ledger("B", b_id)),
         );
         let (a, b) = (a.unwrap(), b.unwrap());
+        eventually("S heard both instance tokens", || async {
+            s.instance_at(&a.id).is_some() && s.instance_at(&b.id).is_some()
+        })
+        .await;
+        let (ta, tb) = (s.instance_at(&a.id).unwrap(), s.instance_at(&b.id).unwrap());
+        if ta.max(tb) - ta.min(tb) > Duration::from_millis(10) {
+            apart += 1;
+            assert!(apart < 200, "two hundred starts more than 10 ms apart");
+            a.close().await;
+            b.close().await;
+            quiet(&s, &g).await;
+            continue;
+        }
         let later = Instant::now();
         let bound = Duration::from_secs(5) + 2 * GRACE;
         let settled = loop {
@@ -916,18 +945,25 @@ async fn s3_a_simultaneous_start() {
         }
         a.close().await;
         b.close().await;
-        s.holders_are(&ledger(), &[]).await;
-        eventually("no instance token left", || async {
-            let r = presence::liveliness_read(&g, &format!("zk2/{LEDGER}/@zk/**"), T)
-                .await
-                .unwrap();
-            r.complete && r.keys.is_empty()
-        })
-        .await;
+        quiet(&s, &g).await;
+        run += 1;
     }
     println!(
-        "§3: {healed} of 20 runs needed the heal; in {b_kept} B kept serving, A standing by on it"
+        "§3: {healed} of 20 runs needed the heal; in {b_kept} B kept serving, A standing by on \
+         it; {apart} start(s) more than 10 ms apart made again"
     );
+}
+
+/// Waits until `lab/ledger` holds no token, at S and in G's read.
+async fn quiet(s: &Spy, g: &zenoh::Session) {
+    s.holders_are(&ledger(), &[]).await;
+    eventually("no instance token left", || async {
+        let r = presence::liveliness_read(g, &format!("zk2/{LEDGER}/@zk/**"), T)
+            .await
+            .unwrap();
+        r.complete && r.keys.is_empty()
+    })
+    .await;
 }
 
 /// A fresh instance id below 2^62, so that the next ones stay ids.

@@ -104,7 +104,11 @@ reference tool runs it as a test of zenctl and of the doctor
   answered by no queryable of A's.
 - **The owner example** (#841, RB). The reference's instances are
   `zenkey/examples/owner.rs` run with `--standby`, whose help is the
-  interface a black-box runner drives, as for `alarms.v1`.
+  interface a black-box runner drives, as for `alarms.v1`. With
+  `--wait-go` it starts only at a `go` line on stdin, so that a runner
+  holds two starts together (§3); `redundancy zid` answers its claim's,
+  reader's and watch's session zids, and `redundancy reads` what each of
+  its poll's reads found (0.3, F-216).
 
 ## §1 Takeover after a crash, seen at the lease (§2.4–§2.8; core §6, §8.1, §8.2)
 
@@ -155,9 +159,11 @@ reference tool runs it as a test of zenctl and of the doctor
 **Setup.** R1 up. Nothing of `lab/ledger` runs.
 
 **Steps.**
-1. A and B start within 10 ms of each other. The test runs this step 20
-   times, each with fresh ids, A's always the lower, stopping both cleanly
-   in between.
+1. A and B start within 10 ms of each other, measured at S as the arrival
+   of each instance's instance token (0.3, F-216). The test runs this step
+   20 times, each with fresh ids, A's always the lower, stopping both
+   cleanly in between; a run whose two instance tokens arrive more than
+   10 ms apart is made again, and counted apart.
 
 **Expected.**
 1. In every run, one serves and the other stands by within 5 s of the
@@ -352,15 +358,19 @@ within 3 s.
 **Expected.**
 1. A refuses to start (core §8.2 step 2, 0.39): no instance token of A's
    appears within 5 s, nothing of `lab/ledger` is declared or put.
-2. The same refusal: the declaration is invalid, `value` (§2.2).
+2. The same refusal: the declaration is invalid, `value` (§2.2). The
+   declaration is checked before anything of the interface is written:
+   the owner example says `not started: … invalid: value`, never a
+   standby's refused write (0.3, F-214).
 
 ## §12 A tool's questions (§2.15, §5; core §6; hostid.v1 §2.12)
 
 **Setup.** T is the tool under test, reading `lab/ledger` twice, 2 s apart,
-on a session that has never held a liveliness subscriber. X is a test
-session that
-can declare tokens under `lab/ledger` and serve a descriptor it writes, to
-build each shape.
+on a session that has never held a liveliness subscriber, and holding
+`ledger.v1` offline: in steps 3 and 5 no candidate serves its bundle, and
+without it T answers unobservable, `no_contract` (§2.15; 0.3). X is a test
+session that can declare tokens under `lab/ledger`, serve a descriptor it
+writes, and declare a queryable, to build each shape.
 
 **Steps.**
 1. A serves and B stands by, as §1 step 2.
@@ -376,6 +386,10 @@ build each shape.
 6. A serves and B stands by, on a system minted by `hostid.v1`, each
    descriptor listing `hostid.v1`.
 7. The doctor (`zenctl doctor`) runs against step 1's shape and step 2's.
+8. A serves and B stands by; T probes their exposure (§2.15; the
+   reference: `zenctl check conform`). Then X declares an instance token,
+   serves a descriptor marking `ledger.v1` standby, and declares a
+   queryable on `append`'s key, and T probes again.
 
 **Expected.** T answers as `conclusions.json` does for the same reading:
 1. Exactly one incumbent: yes, `one`; a vacancy: no, `held`; standbys:
@@ -385,8 +399,14 @@ build each shape.
 4. X: yes, `unmarked`.
 5. X: yes, `marked_holding`; exactly one incumbent: yes, `one`, since a
    holder is an incumbent whatever its mark (§2.3).
-6. `hostid.v1` §2.12's second process is B, recognised as a standby: the
-   tool says so beside that finding (§2.15).
+6. `hostid.v1` §2.12's second process is B, recognised as a standby and
+   not counted: no finding, and the tool names B a recognised standby
+   beside its answer (§2.15; 0.3).
 7. Step 1: no `split-brain` finding and no `token-missing` finding for B
-   (core §6, 0.39: its listing claims nothing exposed). Step 2: one
-   `split-brain` finding, naming A and B.
+   (core §6, 0.39: its listing claims nothing exposed), and no lasting
+   vacancy. Step 2: one `split-brain` finding, naming A and B, as this
+   profile's `split` (§2.15, "One split, one finding"; 0.3).
+8. The probe over `append`'s wildcard is answered by A's session alone,
+   attributed by its zid: B exposes nothing. Then X's session answers it
+   too: X, marked standby with no token in both reads, holds a queryable
+   of the interface, the finding (§2.4, §2.15; 0.3).

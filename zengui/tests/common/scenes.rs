@@ -72,6 +72,14 @@ pub const ALL: &[Scene] = &[
         landmark: "robot1/nav: up",
     },
     Scene {
+        name: "workbench-redundancy",
+        size: DESKTOP,
+        build: workbench_redundancy,
+        // redundancy.v1 (#841, RC): `lab/catalog` selected, its standby's
+        // role read off the fleet's judge, its descriptor's mark beside.
+        landmark: "standby on zs.catalog.v1 — marked, holding no token",
+    },
+    Scene {
         name: "workbench-admin",
         size: DESKTOP,
         build: workbench_admin,
@@ -763,6 +771,41 @@ fn workbench_nodes(theme: ThemeChoice) -> Zengui {
             nav,
             String::new(),
             World::new().health("robot1/nav"),
+        ))),
+    );
+    app
+}
+
+/// The nodes tool on a governed address (#841, RC): presence with
+/// `lab/catalog` beside the world, the address selected, and the
+/// `redundancy.v1` reading its selection asks for landed as the engine
+/// judged it — the incumbent serving, the standby marked and holding no
+/// token, each role a chip on its instance, §5's questions below.
+fn workbench_redundancy(theme: ThemeChoice) -> Zengui {
+    use zengui::view::nodes::NodesMsg;
+    let (mut app, world) = live_world(prefs(theme));
+    send(
+        &mut app,
+        Message::Bus(zengui::message::BusMsg::Presence(
+            0,
+            world.presence_update_with_catalog(),
+        )),
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Nodes)),
+    );
+    let catalog: zenkey_model::grammar::Addr = super::CATALOG.parse().expect("an address");
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Address(catalog.clone()))),
+    );
+    send(
+        &mut app,
+        Message::Pane(PaneMsg::Nodes(NodesMsg::RedundancyRead(
+            catalog,
+            String::new(),
+            world.catalog_redundancy(),
         ))),
     );
     app

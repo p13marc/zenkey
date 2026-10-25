@@ -266,6 +266,26 @@ pub const RF0: &str = "lab/rf0";
 /// Its instance; its tokens are `<instance>-<n>` (§2.6, the reference's).
 pub const RF0_INSTANCE: &str = "00000000000000a1";
 
+/// The `redundancy.v1` pair of the redundancy scene (#841, RC): ZenSight's
+/// catalog singleton, `zs.catalog.v1`, with an incumbent and its standby.
+pub const CATALOG: &str = "lab/catalog";
+/// Its incumbent, holding the interface's token, and its standby, marked
+/// and holding none.
+pub const CATALOG_SERVING: &str = "00000000000000c1";
+pub const CATALOG_STANDBY: &str = "00000000000000c2";
+
+/// `zs.catalog.v1`, as `examples/zk2/zensight` holds it: governed by
+/// `redundancy.v1` (election `claim`).
+pub fn catalog_revision() -> Arc<zenkey_fleet::model::catalog::Revision> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/zk2/zensight/zs.catalog.v1.toml");
+    let l = zenkey_model::contract::load_path(&path);
+    Arc::new(zenkey_fleet::model::catalog::Revision::from_contract(
+        l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+        zenkey_fleet::report::ContractSource::File,
+    ))
+}
+
 /// The instant a config reading of this world ended, on this host's clock:
 /// fixed, so a countdown renders the same twice.
 pub fn config_read_at() -> std::time::SystemTime {
@@ -839,6 +859,105 @@ impl World {
         );
         observed.descriptors = Some(descriptors);
         observed
+    }
+
+    /// This world's presence with `lab/catalog` beside it (#841, RC): the
+    /// incumbent holding `zs.catalog.v1`'s token, the standby holding its
+    /// instance token alone, its descriptor marking the interface standby.
+    pub fn observed_with_catalog(&self) -> zenkey_fleet::model::catalog::Observed {
+        use std::collections::BTreeMap;
+        use zenkey_fleet::model::catalog::DescriptorRead;
+        use zenkey_model::descriptor::{Descriptor, InterfaceEntry};
+        use zenkey_model::grammar::{Addr, InstanceId, ZkKey};
+        let addr: Addr = CATALOG.parse().expect("an address");
+        let rev = catalog_revision();
+        let mut observed = self.observed.clone();
+        let mut descriptors = observed.descriptors.clone().unwrap_or_default();
+        for (id, serving) in [(CATALOG_SERVING, true), (CATALOG_STANDBY, false)] {
+            let instance: InstanceId = id.parse().expect("an instance id");
+            observed.with_token(ZkKey::Instance {
+                addr: addr.clone(),
+                instance: instance.clone(),
+            });
+            if serving {
+                observed.with_token(ZkKey::Alive {
+                    addr: addr.clone(),
+                    iface: rev.iface().clone(),
+                    instance: instance.clone(),
+                    fp: rev.fingerprint().hex().fp16(),
+                });
+            }
+            descriptors.insert(
+                (addr.clone(), instance),
+                DescriptorRead::Served(Box::new(Descriptor {
+                    format: "zk2-descriptor/0.1".into(),
+                    service: CATALOG.into(),
+                    instance: id.into(),
+                    interfaces: vec![InterfaceEntry {
+                        iface: rev.iface().to_string(),
+                        contract: rev.fingerprint().to_string(),
+                        minor: 0,
+                        standby: !serving,
+                        token: true,
+                        unavailable: Vec::new(),
+                        cardinality: BTreeMap::new(),
+                    }],
+                    capabilities: Vec::new(),
+                    requires: Vec::new(),
+                    profiles: vec!["redundancy.v1".into(), "freshness.v1".into()],
+                    meta: BTreeMap::from([
+                        ("zid".to_owned(), serde_json::json!(format!("{id}0"))),
+                        ("host".to_owned(), serde_json::json!("catalog-01")),
+                    ]),
+                })),
+            );
+        }
+        observed.descriptors = Some(descriptors);
+        observed
+    }
+
+    /// A presence landing for this world with `lab/catalog` beside it. The
+    /// lens moves with it (generation 2).
+    pub fn presence_update_with_catalog(&self) -> Arc<zengui::presence_link::PresenceUpdate> {
+        let observed = self.observed_with_catalog();
+        let mut presence = zenkey_fleet::LivePresence::new(zenkey_fleet::PresenceScope::all());
+        let moved = presence.seed(&observed, std::time::SystemTime::now());
+        Arc::new(zengui::presence_link::PresenceUpdate {
+            presence: Arc::new(presence),
+            moved,
+            catalog: Some(Arc::new(zenkey_fleet::Catalog::new(&observed))),
+            generation: 2,
+            seed: zenkey_fleet::SeedOutcome::Complete,
+        })
+    }
+
+    /// `lab/catalog`'s `redundancy.v1` reading, judged by the engine from
+    /// two reads of [`World::observed_with_catalog`] a grace apart, the
+    /// catalog's revision in hand: one incumbent, one standby.
+    pub fn catalog_redundancy(&self) -> Arc<zenkey_fleet::report::RedundancyReport> {
+        use zenkey_fleet::model::catalog::ContractState;
+        let rev = catalog_revision();
+        let read = self.observed_with_catalog();
+        let mut contracts = std::collections::BTreeMap::new();
+        contracts.insert(
+            (rev.iface().clone(), rev.fingerprint().clone()),
+            Ok(ContractState::Held(Arc::clone(&rev))),
+        );
+        let obs = zenkey_fleet::RedundancyObservation {
+            cut_off: None,
+            first: Some(Ok(read.clone())),
+            second: Some(Ok(read)),
+            apart: Duration::from_secs(2),
+            contracts,
+            asked: vec!["zk2/lab/catalog/@zk/**".into()],
+        };
+        let addr: zenkey_model::grammar::Addr = CATALOG.parse().expect("an address");
+        Arc::new(zenkey_fleet::judge_redundancy(
+            "",
+            Some(&addr),
+            &zenkey_fleet::RedundancySpec::new(Duration::from_secs(2)),
+            &obs,
+        ))
     }
 
     /// A presence landing for this world with `lab/rf0` beside it, the

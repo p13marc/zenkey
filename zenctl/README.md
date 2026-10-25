@@ -193,7 +193,7 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `desired`, `watchdog`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `desired`, `redundancy`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -235,6 +235,10 @@ zenctl telemetry 'zk2/rf/modem/**' --namespace prod --across-face --contracts co
 # Desired state, desired.v1: exit 1 on a refused or failed act, or a target behind its author's version for the whole window.
 zenctl desired --namespace prod --for 30               # every target's roles, read again while an answer may move
 zenctl desired lab/worker --role task --namespace prod --clocks-synced   # one target's role, its report's age on the deployment's word
+
+# Who serves, redundancy.v1: exit 1 on a split, a twin or a lasting vacancy.
+zenctl redundancy --namespace prod                     # every governed interface, two reads 2 s apart
+zenctl redundancy fleet/catalog --iface zs.catalog.v1 --namespace prod --contracts contracts/   # one, its contract offline
 
 # One expectation over a zk2 resource, for CI or a cron job.
 zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 60 --at-least 1
@@ -281,7 +285,7 @@ reach further than one concrete thing:
 | `call` | a fan-out (a `*` in the address, or a template parameter not given) to an operation that does not declare `fanout = "allowed"` (spec §5.1 O2) | not overridable — call one address with every parameter |
 | `replay` | a zk2 service's own key replayed where it runs: as recorded, or into the namespace it was recorded in (refused and counted, exit 1) | `--namespace` of your own; or `--i-know` |
 | `replay` | a capture whose base differs from the target's, or empty onto empty | `--force-base` (always `--dry-run` first) |
-| `gen`, `serve` | an address whose instance token is already present: a mock owner beside it would be a second writer of its keys (P3) and a split-brain on every exclusive resource (spec §6) | `--i-know` |
+| `gen`, `serve` | an address whose instance token is already present: a mock owner beside it would be a second writer of its keys (P3) and a split-brain on every exclusive resource (spec §6). Of a contract `redundancy.v1` governs, the mock is a candidate and stands by on a live incumbent, but it takes over when that one goes, writing synthetic data at the address, so the guard holds | `--i-know` |
 | `gen`, `serve` | a contract's required role left unbound (R1: the runtime would not start the service) | `--bind ROLE=SYSTEM/SERVICE` |
 | `record`, `snapshot` | an `-o` file that already exists | `--overwrite` |
 | `record --on`, `watchdog` | a rule that judges v1 rather than zk2 (`origin-down` is `instance-gone` now; `alert-firing` reads `alarms.v1` under a base-relative `zk2/…` selector, so v1's selector is refused) | not overridable |
@@ -412,6 +416,11 @@ their authors' documents: has it converged on its author's current version,
 is its last act refused or failed, is what it acted on last-known, is a
 document in force — exit 1 on a refused or failed act or a target behind
 past `--for`, 0 every role asked converged, 2 otherwise) ·
+`zenctl redundancy [SYSTEM/SERVICE]` (each `redundancy.v1` governed
+interface: is it served by exactly one incumbent, is there a vacancy, how
+many stand by, and of each instance, a standby or a twin — exit 1 on a
+split, a twin or a lasting vacancy, 0 one incumbent each and every instance
+accounted for, 2 otherwise) ·
 `zenctl watchdog --rule …` (conditions, as transitions).
 
 **Router configuration — generated, then checked.**
@@ -448,7 +457,8 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > `alert-firing` rule back on `alarms.v1`, and added `alarms`. #819's TC
 > answered v1's `kind-mismatch` on `telemetry.v1`, as `telemetry` and the
 > `telemetry-*` checks. #840's DD added `desired`, the `desired-*` checks and
-> `check conform`'s `desired-*` cases.
+> `check conform`'s `desired-*` cases. #841's RC added `redundancy`, the
+> `redundancy-vacancy` check and `check conform`'s `redundancy-*` cases.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -726,12 +736,12 @@ none.
 
 | check | the question | spec |
 |---|---|---|
-| `split-brain` | do two instances of one service hold one interface's token past the grace period, with two exposing an exclusive resource? | §6 |
+| `split-brain` | do two instances of one service hold one interface's token past the grace period, with two exposing an exclusive resource? Of an interface `redundancy.v1` governs, two holders in both reads whatever their marks, its first question's `split` | §6, redundancy.v1 §2.15 |
 | `binding-unsatisfied` | does a role's binding select no provider visible to this reader? | §3.2 R5 |
 | `contract-drift` | do providers of one interface serve revisions the classifier calls review or breaking against each other? | §9.8 |
 | `contract-unavailable` | does a descriptor name a revision no holder serves verified? | §8.4 |
 | `descriptor-invalid` | does a descriptor fail the descriptor check (a D-code)? | §3.3 |
-| `token-missing` | do an instance's tokens disagree with its descriptor? | §8.1 |
+| `token-missing` | do an instance's tokens disagree with its descriptor? A standby exposes nothing, so never; a holder marked standby is named so | §8.1 |
 | `presence-over-budget` | does the presence domain hold more tokens than its budget? | §8.3 |
 | `storage-on-state` | does a router storage answer on an owner's state keys? | §4.2 S4 |
 | `archive-unaligned` | does an archive serve keys its alignment has not confirmed? | §4.4 |
@@ -743,7 +753,7 @@ none.
 | `health-degraded` | is a present service at DEGRADED, the same way? (warning) | health.v1 §2.1 |
 | `health-stale` | is a present service's status not confirmed within its 60 s horizon? Never a level, never down (warning) | health.v1 §2.4 |
 | `health-inconsistent` | does an owner hold a status better than a current check, in both of two readings? (error) | health.v1 §2.2 |
-| `hostid-duplicate` | do two sessions claim one address of a minted system, in both presence reads? The cause is undecided, and never named (warning) | hostid.v1 §2.12 |
+| `hostid-duplicate` | do two sessions claim one address of a minted system, in both presence reads? The cause is undecided, and never named; a recognised standby is not counted, and is named (warning) | hostid.v1 §2.12 |
 | `population-over-bound` | does an owner hold more live members of a templated state than its bound — its descriptor's lowered `cardinality`, else the contract's — by its own answer to a GET? (`--deep`; error) | §2.7 |
 | `config-projection` | does an owner's `config.v1` status disagree with its view's projection, in both of two readings? (error) | config.v1 §2.19 |
 | `config-overdue` | does an owner's view, by its own clock, stand more than 60 s past its pending change's deadline? (error) | config.v1 §2.11 |
@@ -756,6 +766,7 @@ none.
 | `desired-refused` | was a desired.v1 target's last act on its author's document refused, or did it fail partway, by its report? (warning) | desired.v1 §2.7 |
 | `desired-behind` | is a desired.v1 target not yet converged on a version its author stamped longer ago than `--desired-behind` (60 s)? (warning; `--clocks-synced` only: one reading never finds a target behind) | desired.v1 §2.17 |
 | `desired-last-known` | does a desired.v1 target run a document it read from an archive, its author not answering for it? (info) | desired.v1 §2.9 |
+| `redundancy-vacancy` | does an interface redundancy.v1 governs have candidates and no incumbent, in both of two complete presence reads? (warning; one read's vacancy is a takeover due) | redundancy.v1 §2.15 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -824,6 +835,13 @@ reading has only on a trusted clock: with `--clocks-synced`, a target not yet
 on a version its author stamped more than `--desired-behind` ago is the
 finding; without it, every target not yet converged is unjudged, never clean
 and never a finding. `zenctl desired --for` reads over a window instead.
+
+The `redundancy.v1` reading (#841) is the doctor's own two presence reads:
+`split-brain` asks a governed interface the profile's first question, so a
+split whose second holder is marked standby is still one finding, and
+`redundancy-vacancy` its second, a vacancy in both reads. `zenctl
+redundancy` reads the same questions of one address, with each instance's
+role.
 
 A `doctor health-*` rule of `watchdog` or `record --on`
 runs the same doctor, so it takes the same word: `watchdog --clocks-synced`,
@@ -1044,6 +1062,44 @@ asked converged on its author's current document, none refused; 2 no verdict
 run that could not start). The same reading is the doctor's `desired-*`
 checks and `check conform`'s `desired-report` and `desired-binding` of a
 target; `desired-author` checks an author's declaration.
+
+## `redundancy` — who serves each governed interface?
+
+`redundancy` (#841) reads `redundancy.v1` (`spec/profiles/redundancy/v1.md`)
+as its §2.15 tool does: two reads of each address's `@zk/**` a grace apart
+(`--grace`, 2 s), on a session that holds no liveliness subscriber and no
+claim, each with the descriptor of every instance it found, and the
+revisions they name, retrieved from their holders or held by `--contracts`
+— which a vacancy needs, since no instance then serves the bundle. An
+interface is governed when its contract lists `redundancy.v1` in `uses`;
+every one in scope is asked, one not governed only when `--iface` names it.
+Per address and interface, §5's four questions in the profile's tokens:
+exactly one incumbent (`one`; no: `split`, `vacant`), a vacancy (yes:
+`lasting`, or `vacant`, a takeover due), how many stand by (exact or a lower
+bound), and of each instance, a standby or a twin (`incumbent`, `standby`;
+yes: `split`, `split_lowest`, `marked_holding`, `unlisted`, `unmarked`).
+
+```console
+$ zenctl redundancy lab/ledger --namespace acme -c tcp/127.0.0.1:7447
+redundancy.v1 in namespace "acme", lab/ledger — 1 interface(s), two reads 2.0s apart
+✓  lab/ledger ledger.v1  exactly one incumbent: yes (one) — one holder of its token, the read complete
+    governance claim — ledger.v1's revision(s) sha256:… use redundancy.v1, election claim
+    vacancy: no (held) — a holder of its token in the second read
+    standbys: yes (standing_by, 1 exact) — marked standby, holding none of its tokens
+    000000000000000a the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
+    000000000000000b a standby: no (standby) — marked standby, no token, the read complete
+```
+
+Exit 1 a split, a twin or a lasting vacancy; 0 every governed interface
+asked served by exactly one incumbent, every instance the incumbent, a
+standby or no candidate; 2 no verdict (a read not complete where it
+decides, a shape in one read only, a contract not held, nothing governed in
+scope, or a run that could not start). `--across-face` (with an address and
+`--iface`) reads nothing: across a constrained face presence does not
+cross, and the deployment's word names the address, never who serves it.
+The doctor's `split-brain` and `redundancy-vacancy` ask the same questions;
+`check conform`'s `redundancy-declaration` and `redundancy-standby` check
+one service's declaration and probe its standbys.
 
 ## `acl gen` — access control from the contracts
 

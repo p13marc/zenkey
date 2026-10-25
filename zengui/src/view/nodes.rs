@@ -1,8 +1,9 @@
 //! The node dashboard (#61; zk2's since #614, FL9): one card per address,
 //! fed by presence (free — the presence link's own monitor) and the
 //! watched-only freshness join; health loads on selection, through one
-//! `health.v1` reading — the pane's only data-plane cost (the laziness
-//! ground rule).
+//! `health.v1` reading, and so does who serves each governed interface,
+//! through one `redundancy.v1` reading (#841, RC) — the pane's only
+//! data-plane costs (the laziness ground rule).
 //!
 //! v1's roster keyed alive tokens by origin and producer. zk2 has neither:
 //! a service is an **address**, `<system>/<service>`, run as instances that
@@ -15,13 +16,15 @@ use std::time::SystemTime;
 use iced::widget::{Column, column, row, scrollable};
 use iced::{Element, Length};
 use zenkey_fleet::report::{
-    ClockGround, HealthAnswer, HealthAnswerToken, HealthReport, HealthRow, HealthVerdict, LevelRead,
+    ClockGround, HealthAnswer, HealthAnswerToken, HealthReport, HealthRow, HealthVerdict,
+    LevelRead, RedundancyAnswer, RedundancyAnswerToken, RedundancyInstance, RedundancyReport,
+    RedundancyRole,
 };
 use zenkey_fleet::{AddressStatus, LiveAddress, PresenceBasis};
 use zenkey_model::grammar::Addr;
 
 use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
-use crate::nodes::{Described, HealthState, NodesState};
+use crate::nodes::{Described, HealthState, NodesState, RedundancyState};
 use crate::presence_link::PresenceUpdate;
 use crate::view::kit;
 use crate::view::theme::{PresenceTone, Tone};
@@ -36,6 +39,11 @@ pub enum NodesMsg {
     HealthRead(Addr, String, Arc<HealthReport>),
     /// Read the selected address's health again — one more reading, asked.
     AskHealth,
+    /// The selected address's `redundancy.v1` reading landed (#841, RC):
+    /// the address, the namespace it ran in, and the engine's report.
+    RedundancyRead(Addr, String, Arc<RedundancyReport>),
+    /// Read who serves the selected address again — one more reading.
+    AskRedundancy,
     /// The "clocks synced" toggle (D11): the operator's word that this
     /// host's clock and the owners' agree. Re-asks the selected address.
     ClocksSynced(bool),
@@ -215,9 +223,11 @@ fn presence_row<'a>(
         )),
         (1, _) => Some("1 instance".to_string()),
         // A re-mint's overlap, a redundant pair, or a split brain: telling
-        // them apart is the doctor's, not this row's.
+        // them apart is the doctor's and the redundancy reading's (#841,
+        // RC), not this row's.
         (n, _) => Some(format!(
-            "{} — an overlap, a pair or a split brain (the doctor tells them apart)",
+            "{} — an overlap, a pair or a split brain (the doctor and redundancy.v1 tell \
+             them apart)",
             kit::plural(n, "instance")
         )),
     };
@@ -345,6 +355,9 @@ pub fn detail_section<'a>(
             .and_then(|all| all.iter().find(|i| &i.instance == id))
             .map(|i| &i.described);
         col = col.push(descriptor_lines(facts, sp));
+        if let Some(roles) = role_chips(addr, id, nodes, sp) {
+            col = col.push(roles);
+        }
     }
     if let Some(l) = live
         && !l.members.is_empty()
@@ -354,7 +367,142 @@ pub fn detail_section<'a>(
             kit::plural(l.members.len(), "member token")
         )));
     }
-    col.push(health_section(addr, nodes, sp))
+    col.push(redundancy_section(addr, nodes, sp))
+        .push(health_section(addr, nodes, sp))
+}
+
+/// One instance's role on each governed interface of the address, read
+/// off the fleet's judge (`redundancy.v1` §2.15's fourth question, #841,
+/// RC): serving, a standby, a twin — or why it cannot be told. `None` when
+/// no reading of the address has landed, or it names the instance on no
+/// governed interface.
+fn role_chips<'a>(
+    addr: &Addr,
+    instance: &str,
+    nodes: &'a NodesState,
+    sp: Spacing,
+) -> Option<Element<'a, Message>> {
+    let roles = nodes.redundancy.roles(addr, instance);
+    if roles.is_empty() {
+        return None;
+    }
+    let mut r = row![].spacing(sp.xs).align_y(iced::Alignment::Center);
+    for (row, i) in roles {
+        if let Some(chip) = role_chip(&row.iface, i) {
+            r = r.push(chip);
+        }
+    }
+    Some(r.into())
+}
+
+/// One role, in the judge's words: the role, then the reason token.
+fn role_chip<'a>(iface: &str, i: &RedundancyInstance) -> Option<Element<'a, Message>> {
+    let reason = &i.twin.reason;
+    Some(match i.role {
+        RedundancyRole::Incumbent => {
+            kit::status_chip(Tone::Positive, format!("serving {iface} — the incumbent"))
+        }
+        RedundancyRole::Standby => kit::status_chip(
+            Tone::Neutral,
+            format!("standby on {iface} — marked, holding no token"),
+        ),
+        RedundancyRole::Twin => kit::status_chip(
+            Tone::Negative,
+            format!("TWIN on {iface} ({reason}) — {}", i.twin.says),
+        ),
+        RedundancyRole::Unknown => kit::status_chip(
+            Tone::Neutral,
+            format!("role on {iface} unobservable ({reason})"),
+        ),
+        RedundancyRole::NotACandidate => return None,
+    })
+}
+
+/// `redundancy.v1` for this address (#841, RC): asked on selection, never
+/// polled — §5's questions of each governed interface, in the engine's
+/// tokens and words.
+fn redundancy_section<'a>(addr: &Addr, nodes: &'a NodesState, sp: Spacing) -> Column<'a, Message> {
+    let mut ask = kit::secondary(kit::caption("read again")).padding([0.0, sp.xs]);
+    let mine = nodes.redundancy.address() == Some(addr);
+    if mine && !matches!(nodes.redundancy, RedundancyState::Asking(_)) {
+        ask = ask.on_press(msg(NodesMsg::AskRedundancy));
+    }
+    let mut col = column![
+        row![
+            kit::eyebrow("REDUNDANCY (REDUNDANCY.V1)"),
+            iced::widget::space::horizontal(),
+            ask
+        ]
+        .spacing(sp.sm)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(sp.xs);
+    let Some(report) = nodes.redundancy.report(addr) else {
+        return col.push(kit::muted(match &nodes.redundancy {
+            RedundancyState::Asking(a) if a == addr => {
+                "reading redundancy.v1 — two presence reads of the address a grace apart"
+            }
+            _ => "who serves it not asked — it is read on selection, never polled",
+        }));
+    };
+    if let Some(why) = &report.unobservable {
+        return col.push(kit::muted(format!("unobservable — {why}")));
+    }
+    if report.interfaces.is_empty() {
+        return col.push(kit::muted(
+            "no interface of it is governed by redundancy.v1: one instance or many, \
+             the profile does not say who serves it",
+        ));
+    }
+    for row in &report.interfaces {
+        let (tone, word) = match (row.one_incumbent.answer, row.is_finding()) {
+            (_, true) => (Tone::Negative, "a finding"),
+            (RedundancyAnswerToken::Yes, false) => (Tone::Positive, "one incumbent"),
+            _ => (Tone::Neutral, "not established"),
+        };
+        col = col.push(kit::status_chip(
+            tone,
+            format!("{} ({}): {word}", row.iface, row.governance),
+        ));
+        col = col.push(kit::muted(answer_words(
+            "served by exactly one incumbent",
+            &row.one_incumbent,
+        )));
+        col = col.push(kit::muted(answer_words("a vacancy", &row.vacancy)));
+        col = col.push(kit::muted(format!(
+            "stand by: {} ({}, {} {}) — {}",
+            token_word(row.standbys.answer),
+            row.standbys.reason,
+            row.standbys.count,
+            if row.standbys.exact {
+                "exact"
+            } else {
+                "at least"
+            },
+            row.standbys.says
+        )));
+    }
+    col
+}
+
+/// One of §5's questions, in the profile's tokens and the judge's words.
+fn answer_words(question: &str, a: &RedundancyAnswer) -> String {
+    format!(
+        "{question}: {} ({}) — {}",
+        token_word(a.answer),
+        a.reason,
+        a.says
+    )
+}
+
+fn token_word(t: RedundancyAnswerToken) -> &'static str {
+    match t {
+        RedundancyAnswerToken::Yes => "yes",
+        RedundancyAnswerToken::No => "no",
+        RedundancyAnswerToken::Unobservable => "unobservable",
+        RedundancyAnswerToken::NotAsked => "not asked",
+        RedundancyAnswerToken::NotThisProfiles => "not this profile's",
+    }
 }
 
 /// What one instance's descriptor says (§3.3) — host, process, build and
@@ -395,6 +543,11 @@ fn descriptor_lines<'a>(facts: Option<&Described>, sp: Spacing) -> Element<'a, M
     }
     for (iface, fp) in &f.interfaces {
         chips = chips.push(kit::data_chip(format!("{iface} @ {fp}")));
+    }
+    // The core's mark (§3.3, 0.39), as the descriptor writes it: whether
+    // the instance stands by is the redundancy reading's, below.
+    for iface in &f.standby {
+        chips = chips.push(kit::data_chip(format!("{iface} marked standby")));
     }
     col = col.push(chips);
     let others: Vec<&str> = f

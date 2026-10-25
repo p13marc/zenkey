@@ -615,6 +615,7 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
         duration: Duration::from_secs(600),
         seed: 7,
         tool: "zengui live test".into(),
+        elect: None,
     };
     let plan = zenkey_fleet::gen_plan(&spec).expect("the probe plans");
     let (up_tx, up_rx) = tokio::sync::oneshot::channel();
@@ -829,6 +830,7 @@ async fn a_call_keeps_value_envelope_and_silence_apart() {
                 .unwrap(),
             bindings: Default::default(),
             tool: "zengui live test".into(),
+            elect: None,
         },
     )
     .await

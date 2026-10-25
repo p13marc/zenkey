@@ -840,29 +840,30 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Thirty checks, each a question whose finding is the yes: split-brain
-    /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
-    /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
-    /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
-    /// archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep),
-    /// shm-memlock-low (§7.4), admin-unreachable, router-version-skew;
-    /// health.v1's health-failed and health-degraded (a service at that
-    /// level), health-stale (a status not confirmed within 60 s, never a
-    /// level) and health-inconsistent (a status better than a check, in both
-    /// readings), a status's age read only with --clocks-synced; and
-    /// hostid.v1's hostid-duplicate (two sessions claiming one minted
-    /// address, the cause undecided); population-over-bound (§2.7, with
-    /// --deep: an owner holding more live members of a templated state than
-    /// its bound, by its own GET); and config.v1's config-projection (a
-    /// status off its view's projection in both of two readings),
-    /// config-overdue (a view its owner's own clock put past its pending
-    /// change's deadline by more than 60 s), config-unpersisted (info: a
-    /// value a restart would not keep) and config-desired (a desired
-    /// document refused or failed), the last two read only with
-    /// --clocks-synced; and alarms.v1's alarm-key (a key that does not
-    /// re-derive from its document; a warning when it does only through the
-    /// sanitizing step) and alarm-stale (a present owner's firing alarm
-    /// unconfirmed beyond 900 s, read only with --clocks-synced); and
+    /// Thirty-one checks, each a question whose finding is the yes:
+    /// split-brain (§6; of an interface redundancy.v1 governs, its first
+    /// question's split, whatever the holders' marks), binding-unsatisfied
+    /// (§3.2), contract-drift (§9.8), contract-unavailable (§8.4),
+    /// descriptor-invalid (§3.3), token-missing (§8.1), presence-over-budget
+    /// (§8.3), storage-on-state (§4.2 S4), archive-unaligned (§4.4),
+    /// state-stamp-foreign (S1–S2, with --deep), shm-memlock-low (§7.4),
+    /// admin-unreachable, router-version-skew; health.v1's health-failed and
+    /// health-degraded (a service at that level), health-stale (a status not
+    /// confirmed within 60 s, never a level) and health-inconsistent (a
+    /// status better than a check, in both readings), a status's age read
+    /// only with --clocks-synced; and hostid.v1's hostid-duplicate (two
+    /// sessions claiming one minted address, the cause undecided);
+    /// population-over-bound (§2.7, with --deep: an owner holding more live
+    /// members of a templated state than its bound, by its own GET); and
+    /// config.v1's config-projection (a status off its view's projection in
+    /// both of two readings), config-overdue (a view its owner's own clock
+    /// put past its pending change's deadline by more than 60 s),
+    /// config-unpersisted (info: a value a restart would not keep) and
+    /// config-desired (a desired document refused or failed), the last two
+    /// read only with --clocks-synced; and alarms.v1's alarm-key (a key that
+    /// does not re-derive from its document; a warning when it does only
+    /// through the sanitizing step) and alarm-stale (a present owner's firing
+    /// alarm unconfirmed beyond 900 s, read only with --clocks-synced); and
     /// telemetry.v1's telemetry-declaration (a warning: a metric resource
     /// whose declaration is invalid, so no reader reads its members) and
     /// telemetry-sample (with --deep: a state metric member's reply that does
@@ -873,14 +874,17 @@ pub(crate) enum Command {
     /// author stamped longer ago than --desired-behind, read only with
     /// --clocks-synced: one reading never finds a target behind) and
     /// desired-last-known (info: a target running a document read from an
-    /// archive). The deployment is read through a
-    /// session in its namespace; the routers' admin space and the presence
-    /// domain through one in no namespace. A check whose input could not be
-    /// had is unobservable, with the reason — never clean — and so is every
-    /// check that reads presence when no zk2 token is visible. Exit 0 every
-    /// check asked is clean, 1 a finding at or above --fail-on (default
-    /// warning), 2 no verdict: a check left unobservable, an empty scope, or
-    /// a run that could not start.
+    /// archive); and redundancy.v1's redundancy-vacancy (a warning: a
+    /// governed interface with candidates and no incumbent in both of two
+    /// complete presence reads). A standby is never token-missing, and
+    /// hostid-duplicate does not count a recognised one. The deployment is
+    /// read through a session in its namespace; the routers' admin space and
+    /// the presence domain through one in no namespace. A check whose input
+    /// could not be had is unobservable, with the reason — never clean — and
+    /// so is every check that reads presence when no zk2 token is visible.
+    /// Exit 0 every check asked is clean, 1 a finding at or above --fail-on
+    /// (default warning), 2 no verdict: a check left unobservable, an empty
+    /// scope, or a run that could not start.
     Doctor(DoctorArgs),
     /// Read every service's health.v1, or one's: healthy, unhealthy, stale.
     ///
@@ -1054,6 +1058,45 @@ pub(crate) enum Command {
     /// `behind` (`version`, `since_s`, `by`: `window` or `clock`) when a
     /// target was behind past --for.
     Desired(DesiredArgs),
+    /// Read redundancy.v1: does exactly one instance serve each governed interface?
+    ///
+    /// redundancy.v1's tool (spec/profiles/redundancy/v1.md §2.15, §5),
+    /// through a session in the deployment's namespace that holds no
+    /// liveliness subscriber and no claim: two reads of the address's @zk/**
+    /// a grace apart (core §6), each with the descriptor of every instance
+    /// it found, and the revisions they name (retrieved, or held by
+    /// --contracts). An interface is governed when its contract lists
+    /// redundancy.v1 in uses; every one in scope is asked, an interface not
+    /// governed only when named by --iface. Per address and interface, §5's
+    /// four questions: is it served by exactly one incumbent (no: a split,
+    /// two or more holders of its token in both reads, or a vacancy in
+    /// both); is there a vacancy (yes, lasting: no holder in either read,
+    /// a candidate present); how many stand by (informative, exact or a
+    /// lower bound); and, of each instance, is it a standby or a twin (yes:
+    /// a holder of a split, a holder marked standby, a holder not listing
+    /// it, or a listing unmarked with no token, each in both reads). A read
+    /// not complete answers nothing it decides; a session cut off makes no
+    /// read. Exit 1 a split, a vacancy in both reads, or a twin (the
+    /// findings); 0 every governed interface asked served by exactly one
+    /// incumbent, each instance the incumbent, a standby or no candidate; 2
+    /// no verdict: an answer unobservable, nothing governed in scope, an
+    /// interface not this profile's, or a run that could not start.
+    ///
+    /// --format json is one document: `report` ("redundancy"), `namespace`,
+    /// `service` and `iface` when asked, `apart_s`, `across_face`, `asked`,
+    /// `reads` (each `complete`, `reason`, `instances`), `judgement`, `rows`
+    /// and `notes`, and `unobservable` when nothing could be read. An
+    /// `interface` row, one per governed interface: `address`, `iface`,
+    /// `governance` (`claim`, `external`, `not_governed`, `no_contract`,
+    /// `disagree`) and `governance_says`, `holders`, `one_incumbent`,
+    /// `vacancy` and `standbys` (each an `answer` — `yes`, `no`,
+    /// `unobservable`, `not_asked`, `not_this_profiles` — a `reason` in
+    /// conclusions.json's tokens and `says` in words; `standbys` with its
+    /// `count` and `exact`), and `instances` (each `instance`, `zid`, `first`
+    /// and `second` as the reads showed it — `token`, `listing` — its `twin`
+    /// answer and its `role`: `incumbent`, `standby`, `twin`,
+    /// `not_a_candidate`, `unknown`).
+    Redundancy(RedundancyArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -1245,6 +1288,23 @@ pub(crate) enum CheckCmd {
     ///                    one that does not; a document put again unchanged
     ///                    in the window with no horizon passes, naming
     ///                    §2.11's SHOULD (desired.v1 §2.2, §2.11)
+    ///   redundancy-declaration
+    ///                    when its revision uses redundancy.v1, the
+    ///                    declaration is valid and no descriptor puts the
+    ///                    interface in a tokenless set: one running under
+    ///                    an invalid one is the violation, since a runtime
+    ///                    refuses to start it (redundancy.v1 §2.2, §2.14)
+    ///   redundancy-standby
+    ///                    when a descriptor marks the interface standby,
+    ///                    every instance so marked in two presence reads
+    ///                    holds none of its tokens and answers none of the
+    ///                    GETs between them over each state resource's and
+    ///                    each fan-out-forbidden operation's wildcard, by
+    ///                    replier zid; a pass needs an operation probed,
+    ///                    since every operation queryable answers such a
+    ///                    call before any handler runs, and a state one
+    ///                    holding nothing answers nothing (redundancy.v1
+    ///                    §2.4)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
@@ -3201,6 +3261,41 @@ pub(crate) struct AlarmsArgs {
     pub(crate) across_face: Option<FaceGrant>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl redundancy`'s flags (#841, RC) — one struct the dispatcher hands
+/// over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct RedundancyArgs {
+    /// One address, `<system>/<service>`. Omitted, every governed interface
+    /// in the namespace.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: Option<zenkey_model::grammar::Addr>,
+    /// Only this interface, `<name>.v<major>`: asked even when its contract
+    /// does not use redundancy.v1, which answers not this profile's.
+    #[arg(long, value_name = "IFACE", value_parser = iface_arg)]
+    pub(crate) iface: Option<zenkey_model::grammar::IfaceId>,
+    /// Seconds between the two presence reads (core §6): longer than the
+    /// deployment's longest re-mint overlap. A positive number.
+    #[arg(long, value_name = "SECS", default_value_t = 2.0)]
+    pub(crate) grace: f64,
+    /// The address sits across a constrained face (spec §8.5), where
+    /// presence and descriptors do not cross: the deployment's word names
+    /// the address and --iface, nothing is read, and every answer is
+    /// unobservable, across_face (redundancy.v1 §2.13).
+    #[arg(long, requires_all = ["address", "iface"])]
+    pub(crate) across_face: bool,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// An interface id, `<name>.v<major>` — clap's refusal, exit 2, naming the
+/// argument.
+fn iface_arg(s: &str) -> Result<zenkey_model::grammar::IfaceId, String> {
+    s.parse().map_err(|e| format!("{e} (e.g. `ledger.v1`)"))
 }
 
 /// `zenctl desired`'s flags (#840, DD) — one struct the dispatcher hands

@@ -147,11 +147,16 @@ pub enum CheckId {
     /// last-known?" (`desired.v1` §2.9; #840). Worth knowing, never a
     /// defect.
     DesiredLastKnown,
+    /// A governed interface whose candidates hold no incumbent in both of
+    /// two complete presence reads a grace apart: §5's *yes*, `lasting`, to
+    /// "is there a vacancy?" (`redundancy.v1` §2.15; #841). The election
+    /// did not end, or, under `external`, no instance holds the lock.
+    RedundancyVacancy,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 30] = [
+    pub const ALL: [CheckId; 31] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -182,6 +187,7 @@ impl CheckId {
         CheckId::DesiredRefused,
         CheckId::DesiredBehind,
         CheckId::DesiredLastKnown,
+        CheckId::RedundancyVacancy,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -217,6 +223,7 @@ impl CheckId {
             CheckId::DesiredRefused => "desired-refused",
             CheckId::DesiredBehind => "desired-behind",
             CheckId::DesiredLastKnown => "desired-last-known",
+            CheckId::RedundancyVacancy => "redundancy-vacancy",
         }
     }
 
@@ -259,6 +266,7 @@ impl CheckId {
             CheckId::DesiredRefused => "desired.v1 §2.7",
             CheckId::DesiredBehind => "desired.v1 §2.17",
             CheckId::DesiredLastKnown => "desired.v1 §2.9",
+            CheckId::RedundancyVacancy => "redundancy.v1 §2.15",
         }
     }
 
@@ -268,7 +276,8 @@ impl CheckId {
         match self {
             CheckId::SplitBrain => {
                 "do two instances of one service hold one interface's token for longer than \
-                 the grace period, with at least two exposing an exclusive resource?"
+                 the grace period, with at least two exposing an exclusive resource, or, of an \
+                 interface redundancy.v1 governs, whatever their marks?"
             }
             CheckId::BindingUnsatisfied => {
                 "does a role's binding select no provider visible to this reader?"
@@ -367,6 +376,10 @@ impl CheckId {
             CheckId::DesiredLastKnown => {
                 "does a desired.v1 target run a document it read from an archive, its author not \
                  answering for it?"
+            }
+            CheckId::RedundancyVacancy => {
+                "does an interface redundancy.v1 governs have candidates and no incumbent, in both \
+                 of two complete presence reads a grace apart?"
             }
         }
     }
@@ -1065,6 +1078,7 @@ mod check_id_tests {
                 "desired-refused",
                 "desired-behind",
                 "desired-last-known",
+                "redundancy-vacancy",
             ]
         );
     }

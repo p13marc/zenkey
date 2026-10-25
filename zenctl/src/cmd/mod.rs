@@ -41,6 +41,7 @@ pub mod probe;
 pub mod publish;
 pub mod rate;
 pub mod record;
+pub mod redundancy;
 pub mod replay;
 pub mod sample;
 pub mod schema;

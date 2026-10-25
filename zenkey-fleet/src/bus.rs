@@ -42,6 +42,7 @@ pub mod monitor;
 pub mod operation;
 pub mod presence;
 pub mod query;
+pub mod redundancy;
 pub mod scout;
 pub mod seed;
 pub mod serve;

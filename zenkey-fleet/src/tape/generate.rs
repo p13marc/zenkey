@@ -26,6 +26,17 @@
 //! all the same is counted apart ([`GenReport::refused`]), never as a
 //! failure and never silently.
 //!
+//! **A governed interface elects** (`redundancy.v1`, #841, RC). With
+//! [`GenSpec::elect`], the mock owner is a candidate of every interface
+//! whose contract lists `redundancy.v1`: it claims, stands by and takes
+//! over through the runtime ([`zenkey::ServiceBuilder::redundancy`]), its
+//! writers and servers held undeclared while it stands by. A governed
+//! state's first value is put at the takeover (§2.6 step 3), never before
+//! start; a put refused while it stands by is counted apart
+//! ([`GenReport::standing_by`]); its member tokens are declared each time
+//! it comes to serve (§2.6 step 4). Without `elect`, the runtime refuses a
+//! governed interface at start.
+//!
 //! The plan ([`build_plan`]) is session-free and printed before anything
 //! is brought up, the replay dry-run precedent. It replaced v1's
 //! registry-driven generator: the registry walk, the schema ladder through
@@ -131,6 +142,11 @@ pub struct GenSpec {
     pub seed: u64,
     /// Stamped into the descriptor's marker.
     pub tool: String,
+    /// How the mock owner takes part in `redundancy.v1`'s election, for
+    /// every governed interface it implements: its reader and its watch
+    /// (§2.5 step 1, §2.7). `None`: a governed interface is refused at
+    /// start, as the runtime refuses it.
+    pub elect: Option<zenkey::redundancy::RedundancyStartup>,
 }
 
 /// An event's cap on occurrences over a run of `duration`: its declared
@@ -610,7 +626,7 @@ fn lookup<'a>(spec: &'a GenSpec, e: &GenPlanEntry) -> Result<(&'a Arc<Revision>,
 enum Out {
     /// Boxed: a publisher is the largest of the three.
     Stream(Box<zenkey::writer::Writer>),
-    State(zenkey::state::StateWriter),
+    State(Arc<zenkey::state::StateWriter>),
     Event(zenkey::writer::EventWriter),
 }
 
@@ -621,6 +637,9 @@ struct Tally {
     failed: u64,
     /// Writes the runtime's budget refused (core §2.7): apart from `failed`.
     refused: u64,
+    /// Writes refused while the instance stood by (`redundancy.v1` §2.4):
+    /// apart from both.
+    standing: u64,
     errors: Vec<String>,
 }
 
@@ -634,6 +653,7 @@ impl Tally {
     fn put(&mut self, key: &str, put: zenkey::Result<()>) {
         match put {
             Ok(()) => self.sent += 1,
+            Err(zenkey::Error::Standby(_)) => self.standing += 1,
             Err(e @ zenkey::Error::Budget(_)) => {
                 self.refused += 1;
                 self.example(format!("{key}: {e}"));
@@ -710,6 +730,21 @@ pub async fn run_gen(
         b.implement(implementation(rev)?)
             .map_err(|e| runtime_error(rev, e))?;
     }
+    // redundancy.v1 (#841, RC): every interface whose contract uses the
+    // profile, valid or not; the runtime refuses an invalid one at start.
+    let governed: BTreeSet<IfaceId> = spec
+        .revisions
+        .iter()
+        .filter(|r| {
+            zenkey_model::redundancy::declaration_of(r.contract(), false)
+                != zenkey_model::redundancy::Declaration::NotGoverned
+        })
+        .map(|r| r.iface().clone())
+        .collect();
+    let mut takeover = GenTakeover {
+        seed: spec.seed,
+        states: Vec::new(),
+    };
     let calls = Arc::new(AtomicU64::new(0));
     let mut servers = Vec::new();
     let mut outs: Vec<(usize, Out)> = Vec::new();
@@ -731,15 +766,35 @@ pub async fn run_gen(
         }
         let out = match r.kind {
             Kind::State => {
-                let w = b
-                    .declare_state_writer(iface, &e.resource, &e.values)
-                    .await
-                    .map_err(|err| runtime_error(rev, err))?;
-                // A state value held at start goes out before the tokens
-                // (§8.2), so a GET made when they appear finds it.
-                match synth.sample_at(rev, r, Member::Type, 0, Some(zenkey::telemetry::now_ms())) {
-                    Ok(s) => before.put(&e.key, w.put(s.bytes).await.map(|_| ())),
-                    Err(why) => before.fail(format!("{}: {why}", e.key)),
+                let w = Arc::new(
+                    b.declare_state_writer(iface, &e.resource, &e.values)
+                        .await
+                        .map_err(|err| runtime_error(rev, err))?,
+                );
+                if governed.contains(iface) {
+                    // A governed state's first value is put at the
+                    // takeover, before the interface's token (§2.6 step 3).
+                    takeover.states.push((
+                        iface.clone(),
+                        e.key.clone(),
+                        Arc::clone(&w),
+                        Arc::clone(rev),
+                        r.clone(),
+                    ));
+                } else {
+                    // A state value held at start goes out before the
+                    // tokens (§8.2), so a GET made when they appear finds
+                    // it.
+                    match synth.sample_at(
+                        rev,
+                        r,
+                        Member::Type,
+                        0,
+                        Some(zenkey::telemetry::now_ms()),
+                    ) {
+                        Ok(s) => before.put(&e.key, w.put(s.bytes).await.map(|_| ())),
+                        Err(why) => before.fail(format!("{}: {why}", e.key)),
+                    }
                 }
                 Out::State(w)
             }
@@ -755,13 +810,24 @@ pub async fn run_gen(
         };
         outs.push((i, out));
     }
+    let red = match (&spec.elect, governed.is_empty()) {
+        (_, true) => None,
+        (None, false) => None,
+        (Some(startup), false) => Some(
+            b.redundancy(startup.clone().with_takeover(Arc::new(takeover)))
+                .map_err(|e| runtime_error(&spec.revisions[0], e))?,
+        ),
+    };
     let mut service = b
         .start()
         .await
         .map_err(|e| runtime_error(&spec.revisions[0], e))?;
     // A member exists from its first declaration (§8.1): one token per
-    // value of the template that declares `epoch`.
+    // value of the template that declares `epoch`. A governed interface's
+    // only while the instance serves it, declared again at each takeover
+    // (redundancy.v1 §2.6 step 4, §2.12).
     let mut members = BTreeSet::new();
+    let mut governed_members: BTreeMap<IfaceId, Vec<String>> = BTreeMap::new();
     for e in plan.entries.iter().filter(|e| e.member_token) {
         let (rev, r) = lookup(spec, e)?;
         let Some(epoch) = &r.epoch else { continue };
@@ -769,6 +835,13 @@ pub async fn run_gen(
             continue;
         };
         if members.insert((rev.iface().clone(), value.clone())) {
+            if governed.contains(rev.iface()) {
+                governed_members
+                    .entry(rev.iface().clone())
+                    .or_default()
+                    .push(value.clone());
+                continue;
+            }
             service
                 .declare_member(rev.iface(), value)
                 .await
@@ -871,22 +944,61 @@ pub async fn run_gen(
             (i, tally)
         });
     }
-    // Joined in completion order, reported in plan order.
+    // Joined in completion order, reported in plan order; meanwhile a
+    // governed interface's members are declared each time it comes to
+    // serve.
     let mut done: BTreeMap<usize, Tally> = BTreeMap::new();
     let mut fatal = None;
-    while let Some(joined) = tasks.join_next().await {
-        match joined {
-            Ok((i, t)) => {
-                done.insert(i, t);
-            }
-            Err(e) => {
-                fatal = Some(Error::Internal(format!("a gen task did not join: {e}")));
-                break;
+    let mut serving: BTreeMap<IfaceId, bool> = BTreeMap::new();
+    let mut follow = tokio::time::interval(Duration::from_millis(100));
+    let watching = red.is_some() && !governed_members.is_empty();
+    loop {
+        tokio::select! {
+            joined = tasks.join_next() => match joined {
+                None => break,
+                Some(Ok((i, t))) => {
+                    done.insert(i, t);
+                }
+                Some(Err(e)) => {
+                    fatal = Some(Error::Internal(format!("a gen task did not join: {e}")));
+                    break;
+                }
+            },
+            _ = follow.tick(), if watching => {
+                let Some(red) = &red else { continue };
+                for (iface, values) in &governed_members {
+                    let now = red.role(iface) == zenkey::redundancy::Role::Serving;
+                    let was = serving.insert(iface.clone(), now).unwrap_or(false);
+                    if !now || was {
+                        continue;
+                    }
+                    for v in values {
+                        match service.declare_member(iface, v).await {
+                            Ok(_) => {}
+                            // Stepped down meanwhile: declared again at the
+                            // next takeover.
+                            Err(zenkey::Error::Standby(_)) => {
+                                serving.insert(iface.clone(), false);
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::warn!("a member token of {iface} was not declared: {e}");
+                            }
+                        }
+                    }
+                }
             }
         }
     }
     tasks.shutdown().await;
     let instance = service.instance().to_string();
+    let roles: BTreeMap<String, String> = match &red {
+        Some(red) => governed
+            .iter()
+            .map(|i| (i.to_string(), red.role(i).as_str().to_owned()))
+            .collect(),
+        None => BTreeMap::new(),
+    };
     // Down: the operation servers, then the tokens and queryables.
     for s in servers {
         if let Err(e) = s.undeclare().await {
@@ -902,12 +1014,14 @@ pub async fn run_gen(
         mut sent,
         mut failed,
         mut refused,
+        mut standing,
         errors: mut first_errors,
     } = before;
     for t in done.into_values() {
         sent += t.sent;
         failed += t.failed;
         refused += t.refused;
+        standing += t.standing;
         for e in t.errors {
             if first_errors.len() < 5 {
                 first_errors.push(e);
@@ -923,8 +1037,48 @@ pub async fn run_gen(
         calls: calls.load(Ordering::SeqCst),
         failed,
         refused,
+        standing_by: standing,
+        roles,
         first_errors,
     })
+}
+
+/// One governed state a takeover puts: its interface, its key, its
+/// writer, and what its value is synthesized from.
+type TakeoverState = (
+    IfaceId,
+    String,
+    Arc<zenkey::state::StateWriter>,
+    Arc<Revision>,
+    Resource,
+);
+
+/// What a takeover puts (`redundancy.v1` §2.6 step 3): each governed
+/// state's value at tick 0, synthesized when it takes over.
+struct GenTakeover {
+    seed: u64,
+    states: Vec<TakeoverState>,
+}
+
+impl zenkey::redundancy::Takeover for GenTakeover {
+    fn taking_over<'a>(&'a self, iface: &'a IfaceId) -> zenkey::call::BoxFuture<'a, ()> {
+        Box::pin(async move {
+            let synth = Synth::new(self.seed);
+            for (i, key, w, rev, r) in &self.states {
+                if i != iface {
+                    continue;
+                }
+                match synth.sample_at(rev, r, Member::Type, 0, Some(zenkey::telemetry::now_ms())) {
+                    Ok(s) => {
+                        if let Err(e) = w.put(s.bytes).await {
+                            tracing::warn!("{key}: a takeover's put failed: {e}");
+                        }
+                    }
+                    Err(why) => tracing::warn!("{key}: no value to put at the takeover: {why}"),
+                }
+            }
+        })
+    }
 }
 
 /// A low-discrepancy pseudo-random in [0,1): deterministic, no RNG.
@@ -969,6 +1123,7 @@ mod tests {
             duration: Duration::from_secs(10),
             seed: 42,
             tool: "zenctl gen".into(),
+            elect: None,
         }
     }
 

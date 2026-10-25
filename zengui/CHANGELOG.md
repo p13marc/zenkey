@@ -4,6 +4,14 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — who serves a governed address (#841, RC)
+
+| Before | Now | Notes |
+|---|---|---|
+| a selected address: its instances and its health | and its `redundancy.v1` reading, asked on selection beside its health, never polled: each instance's role on each governed interface (serving, standby, TWIN with its reason, or unobservable) as a chip, and §5's questions under REDUNDANCY (REDUNDANCY.V1), with "read again" | every role the fleet's judge's, from two presence reads a grace apart on the session in the namespace |
+| a descriptor's interfaces | and `<iface> marked standby`, the descriptor's own mark, in the card and the Inspector's address view | the mark is the descriptor's word; the role is the reading's |
+| "2 instances — … (the doctor tells them apart)" | "(the doctor and redundancy.v1 tell them apart)" | |
+
 ## Unreleased (`main`, zk2) — presence reads where they can be complete (#830, #839, PS)
 
 A liveliness GET from a session that holds a liveliness subscriber, history

@@ -25,6 +25,7 @@ mod fields;
 mod findings;
 pub mod observations;
 mod rate;
+mod redundancy;
 pub use rate::RateView;
 mod listings;
 pub mod local;

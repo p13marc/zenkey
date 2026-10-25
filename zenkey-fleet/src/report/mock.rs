@@ -131,9 +131,23 @@ pub struct GenReport {
     /// `gen` paces every event within its declared rate (#744), so a
     /// refusal here is a write it should not have attempted.
     pub refused: u64,
+    /// Writes refused while the mock owner stood by on a governed
+    /// interface (`redundancy.v1` §2.4, #841): another instance served it,
+    /// and nothing was published. Counted apart from both, never a
+    /// failure. Absent at zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub standing_by: u64,
+    /// Each governed interface's role at the end of the run: `serving`,
+    /// `standby` or `unclaimed`. Absent when none is governed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub roles: BTreeMap<String, String>,
     /// The first few of either, each naming its key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub first_errors: Vec<String>,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// One call a mock owner served, logged as it was answered (O7).
@@ -330,6 +344,8 @@ mod tests {
             calls: 1,
             failed: 0,
             refused: 0,
+            standing_by: 0,
+            roles: BTreeMap::new(),
             first_errors: vec![],
         };
         assert_eq!(
@@ -341,6 +357,8 @@ mod tests {
         // failures, with its example among the first errors (#744).
         let refused = GenReport {
             refused: 2,
+            standing_by: 0,
+            roles: BTreeMap::new(),
             first_errors: vec!["zk2/host-a/tc/tc.netem.v1/events/applied: refused".into()],
             ..r
         };

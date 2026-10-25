@@ -371,6 +371,42 @@ fn a_desired_report_keeps_every_answer_apart() {
     assert_eq!(judgement_exit_code(&r.judgement()), 1);
 }
 
+/// `redundancy.v1` (#841, RC): §5's four questions per governed interface
+/// in the fixture's tokens, each instance's role read off its fourth
+/// answer; a split, a twin and a lasting vacancy are the findings.
+#[test]
+fn a_redundancy_report_keeps_every_answer_apart() {
+    let r = fx::redundancy_report();
+    let v = serde_json::to_value(&r).unwrap();
+    let rows = v["interfaces"].as_array().unwrap();
+    let by = |addr: &str| {
+        rows.iter()
+            .find(|r| r["address"] == addr)
+            .unwrap_or_else(|| panic!("{addr}'s row"))
+    };
+    let ledger = by("lab/ledger");
+    assert_eq!(ledger["governance"], "claim");
+    assert_eq!(ledger["one_incumbent"]["answer"], "yes");
+    assert_eq!(ledger["standbys"]["count"], 1);
+    let roles: Vec<&str> = ledger["instances"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles, ["incumbent", "standby"]);
+    assert_eq!(
+        (
+            by("lab/split")["one_incumbent"]["reason"].as_str(),
+            by("lab/vacant")["vacancy"]["reason"].as_str(),
+        ),
+        (Some("split"), Some("lasting"))
+    );
+    assert_eq!(by("lab/twin")["instances"][1]["twin"]["reason"], "unmarked");
+    assert_eq!(v["reads"].as_array().unwrap().len(), 2);
+    assert_eq!(judgement_exit_code(&r.judgement()), 1);
+}
+
 /// Every enum in this surface, its wire spelling, behind an exhaustive
 /// `match`.
 ///
@@ -549,6 +585,43 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         AlarmLatest::Undecodable,
     ] {
         assert_eq!(wire(&v, ""), latest(&v));
+    }
+    // redundancy.v1 (#841, RC): the fixture's tokens, snake_case.
+    fn redundancy_answer(v: &RedundancyAnswerToken) -> &'static str {
+        match v {
+            RedundancyAnswerToken::Yes => "yes",
+            RedundancyAnswerToken::No => "no",
+            RedundancyAnswerToken::Unobservable => "unobservable",
+            RedundancyAnswerToken::NotAsked => "not_asked",
+            RedundancyAnswerToken::NotThisProfiles => "not_this_profiles",
+        }
+    }
+    fn redundancy_role(v: &RedundancyRole) -> &'static str {
+        match v {
+            RedundancyRole::Incumbent => "incumbent",
+            RedundancyRole::Standby => "standby",
+            RedundancyRole::Twin => "twin",
+            RedundancyRole::NotACandidate => "not_a_candidate",
+            RedundancyRole::Unknown => "unknown",
+        }
+    }
+    for v in [
+        RedundancyAnswerToken::Yes,
+        RedundancyAnswerToken::No,
+        RedundancyAnswerToken::Unobservable,
+        RedundancyAnswerToken::NotAsked,
+        RedundancyAnswerToken::NotThisProfiles,
+    ] {
+        assert_eq!(wire(&v, ""), redundancy_answer(&v));
+    }
+    for v in [
+        RedundancyRole::Incumbent,
+        RedundancyRole::Standby,
+        RedundancyRole::Twin,
+        RedundancyRole::NotACandidate,
+        RedundancyRole::Unknown,
+    ] {
+        assert_eq!(wire(&v, ""), redundancy_role(&v));
     }
 }
 

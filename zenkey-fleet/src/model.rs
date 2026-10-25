@@ -74,6 +74,7 @@ pub mod lens;
 pub mod namespace;
 pub mod presence_live;
 pub mod presence_watch;
+pub mod redundancy;
 pub mod render;
 pub mod retain;
 pub mod skeleton;

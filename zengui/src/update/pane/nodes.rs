@@ -30,7 +30,18 @@ pub(crate) fn update(v: &mut Verdicts, msg: NodesMsg, cx: Ctx) -> Task<Message> 
             }
             Task::none()
         }
+        NodesMsg::RedundancyRead(addr, ran_against, report) => {
+            // The health reading's guard (#109).
+            if cx.sub.follow.current.address() == Some(&addr) && ran_against == cx.dep.namespace() {
+                v.nodes.redundancy_read(addr, report);
+            }
+            Task::none()
+        }
         NodesMsg::AskHealth => ask(v, cx),
+        NodesMsg::AskRedundancy => match cx.sub.follow.current.address().cloned() {
+            Some(addr) => redundancy(v, cx.dep, addr),
+            None => Task::none(),
+        },
         NodesMsg::ClocksSynced(synced) => {
             v.nodes.clocks_synced = synced;
             // The word changes what a reading can judge: the address in
@@ -57,6 +68,27 @@ fn ask(v: &mut Verdicts, cx: Ctx) -> Task<Message> {
         return Task::none();
     };
     health(v, cx.dep, addr)
+}
+
+/// One `redundancy.v1` reading of `addr` on the session in the namespace,
+/// marked as asked — the subject handler's call too, on selection (#841,
+/// RC).
+pub(crate) fn redundancy(
+    v: &mut Verdicts,
+    dep: &crate::state::Deployment,
+    addr: zenkey_model::grammar::Addr,
+) -> Task<Message> {
+    let Some(session) = dep.session.clone() else {
+        return Task::none();
+    };
+    v.nodes.asking_redundancy(addr.clone());
+    services::sweep::redundancy(
+        session,
+        dep.namespace().to_string(),
+        addr,
+        dep.store.clone(),
+        dep.timeout(),
+    )
 }
 
 /// One `health.v1` reading of `addr` on the session in the namespace,
