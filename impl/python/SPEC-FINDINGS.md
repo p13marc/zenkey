@@ -11714,21 +11714,23 @@ transport events and unordered reads. The README's "What a complete
 presence read is" says where zk2py already did what 0.41 says and where
 it did not.
 
-**`just py-conformance`: 3007 of 3007.** `readings` gained 25 cases
-(376).
+**`just py-conformance`: 3010 of 3010.** `readings` gained 28 cases
+(379), three of them on review of PR #876.
 
 **Live:** `presence_scenarios` now runs §1 to §10 with either owner
 (zk2py's, or `owner-wb`) and either reader (zk2py's, or `zenctl-wb`).
 
 | Owner, reader | passed | not run |
 |---|---|---|
-| zk2py, zk2py | 78 | 1 |
-| Rust, zk2py | 73 | 2 |
+| zk2py, zk2py | 80 | 1 |
+| Rust, zk2py | 75 | 2 |
 | zk2py, zenctl | 31 | 5 |
 | Rust, zenctl | 30 | 6 |
 
-Every check passes. §10 ran beside 2,000 tokens, and step 4 beside
-10,000 too, which fits on this VM. The measurements are in the README.
+Every check passes. On review of PR #876, one run of the Rust owner's
+pairing failed §9 step 2: zenoh's race, which the README measures. §10
+ran beside 2,000 tokens, and step 4 beside 10,000 too, which fits on this
+VM. The measurements are in the README.
 
 **Where the two implementations disagree:** on no verdict.
 - zenctl words a read ended at the interests timeout as one that "ran to
@@ -11829,7 +11831,8 @@ and at its end, as `list_presence` does.
 - With no link before it, it makes no GET (`made` False, `CUT_OFF`).
 - With no link at its end, the round trip does not stand
   (`CUT_OFF_DURING`).
-- When the links cannot be read, it does not stand either.
+- When the links cannot be read before it, it makes no GET; at its end,
+  it does not stand (review of PR #876).
 
 **Wording that would remove the guess:** "A round trip through a watch
 session cut off, or cut off while it ran, does not stand, whatever its

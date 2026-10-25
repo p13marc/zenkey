@@ -2789,8 +2789,10 @@ def _round_trip_readings() -> list[tuple[str, Any, Any]]:
          (False, True)),
         (f"{label}: one ended at the interests timeout is not made",
          rt([up, up], delay=0.06, its=0.05), (False, False, live.AT_INTERESTS_TIMEOUT, [key])),
-        (f"{label}: links that cannot be read leave it not standing",
-         rt([RuntimeError("no links")])[:3], (False, True, live.LINKS_UNREADABLE)),
+        (f"{label}: links that cannot be read before it: no GET, not standing (review of PR #876)",
+         rt([RuntimeError("no links")]), (False, False, live.LINKS_UNREADABLE, [])),
+        (f"{label}: links that cannot be read at its end leave it not standing",
+         rt([up, RuntimeError("no links")]), (False, True, live.LINKS_UNREADABLE, [key])),
     ]
 
     label = "core 0.41 §8.1, zk2py's presence view"
@@ -2803,13 +2805,13 @@ def _round_trip_readings() -> list[tuple[str, Any, Any]]:
         return v.address(*addr), v.owes_read
 
     out += [
-        (f"{label}: a seed made while no round trip stands: what it shows is up",
-         at([("ask", None), ("read", ("complete", [I], False))]), ((pr.UP, ""), False)),
+        (f"{label}: a seed made while no round trip stands: what it shows is up, and an ordered read owed "
+         "(review of PR #876)", at([("ask", None), ("read", ("complete", [I], False))]), ((pr.UP, ""), True)),
         (f"{label}: and an address it does not show is unobservable, never down",
-         at([("ask", None), ("read", ("complete", [I], False))], ("lab", "p")), ((pr.UNOBSERVABLE, pr.NO_ROUND_TRIP), False)),
+         at([("ask", None), ("read", ("complete", [I], False))], ("lab", "p")), ((pr.UNOBSERVABLE, pr.NO_ROUND_TRIP), True)),
         (f"{label}: an unordered read not showing an address a complete read had held: unobservable, never down",
          at(seed + [("ask", None), ("read", ("complete", [I], False))], ("lab", "p")),
-         ((pr.UNOBSERVABLE, pr.NO_ROUND_TRIP), False)),
+         ((pr.UNOBSERVABLE, pr.NO_ROUND_TRIP), True)),
         (f"{label}: an unordered read does not settle a withdrawal: still unconfirmed, still owed",
          at(seed + [("delete", I), ("ask", None), ("read", ("complete", [K], False))]),
          ((pr.UNOBSERVABLE, pr.WITHDRAWN), True)),
@@ -2821,8 +2823,15 @@ def _round_trip_readings() -> list[tuple[str, Any, Any]]:
          [((pr.UNOBSERVABLE, pr.MOVED), True), ((pr.UNOBSERVABLE, pr.MOVED), True)]),
         (f"{label}: after a move, a read not made leaves it unobservable, still owed",
          at(seed + [("move", None), ("ask", None), ("read", ("not made", []))]), ((pr.UNOBSERVABLE, pr.MOVED), True)),
-        (f"{label}: after a move, an unordered read showing it: up",
-         at(seed + [("move", None), ("ask", None), ("read", ("complete", [I], False))]), ((pr.UP, ""), False)),
+        (f"{label}: after a move, an unordered read showing it: up, an ordered read still owed",
+         at(seed + [("move", None), ("ask", None), ("read", ("complete", [I], False))]), ((pr.UP, ""), True)),
+        (f"{label}: after a move, an unordered read not showing it: unobservable, its latest read unordered, an "
+         "ordered read still owed (review of PR #876)",
+         at(seed + [("move", None), ("ask", None), ("read", ("complete", [K], False))]),
+         ((pr.UNOBSERVABLE, pr.NO_ROUND_TRIP), True)),
+        (f"{label}: then a complete read, a round trip standing: down, nothing owed",
+         at(seed + [("move", None), ("ask", None), ("read", ("complete", [K], False)), ("ask", None),
+                    ("read", ("complete", [K]))]), ((pr.DOWN, ""), False)),
         (f"{label}: after a move, a token heard put again: up",
          at(seed + [("move", None), ("put", I)]), ((pr.UP, ""), True)),
         (f"{label}: a withdrawal heard keeps its reason across a move",

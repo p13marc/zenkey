@@ -1668,6 +1668,12 @@ def _s10_step_6(report: Report, sec: str, ep1: str, *, shared: bool) -> None:
                          bool(after_cut) and after_cut[0] == (live.COMPLETE, False)
                          and pr.DOWN not in {s for s, _ in states},
                          f"moves {[k for _, k in f.moves[n_moves:]]}, folds {after_cut}, states {sorted(set(states))}")
+        time.sleep(1.5)
+        after_cut = f.folds[n_folds:]
+        report.check(sec, f"6. ({which}) while the watch session stays cut off, 3 s in all, the reader makes no read "
+                          "beyond the one its move asked: no round trip can stand, so it waits for the transport to "
+                          "open (review of PR #876)", len(after_cut) == 1 and f.waited >= 1,
+                     f"{len(after_cut)} reads, {f.waited} attempts that waited")
         n_folds, n_moves = len(f.folds), len(f.moves)
         link.heal()
         opened = _wait(lambda: any(k == "open" for _, k in f.moves[n_moves:]), 20.0, 0.1)

@@ -383,9 +383,11 @@ class RoundTrip:
     **stands**: it ended at its routers' final reply (``finished``), with no
     error reply, before the session's interests timeout, through a session
     holding a link when it was asked and when it ended. ``why`` says why not;
-    ``made`` is False for one not made: through a session cut off before it,
-    or ended at the interests timeout ("a round trip … that ended there as
-    not made"). Truthy when it stands."""
+    ``made`` is False for one not made: no GET through a session cut off or
+    whose links cannot be read before it, or one ended at the interests
+    timeout, which the text reads "as not made". Only ``stands`` is
+    evidence of order; ``made`` follows the text's word, and no caller
+    reads it as more. Truthy when it stands."""
 
     stands: bool
     made: bool
@@ -411,12 +413,16 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
     interests timeout ("a round trip … that ended there as not made"), and
     the session held a link before it and at its end: a watch session cut
     off answers it at once, as it answers every liveliness GET (§8.1, 0.37),
-    so that answer orders nothing."""
+    so that answer orders nothing. Its answer is discarded, so a round trip
+    that could not stand is not asked: none through a session cut off, nor
+    through one whose links cannot be read (review of PR #876)."""
     key = settle_key(selector)
     asked = time.monotonic_ns()
     held = links_held(watch)
     if held is False:
         return RoundTrip(False, False, key, CUT_OFF, asked_ns=asked)
+    if held is None:
+        return RoundTrip(False, False, key, LINKS_UNREADABLE, asked_ns=asked)
     done = threading.Event()
     errors: list[Any] = []
     oks: list[Any] = []
@@ -439,7 +445,7 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
         return RoundTrip(False, False, why=AT_INTERESTS_TIMEOUT, **rt)
     if after is False:
         return RoundTrip(False, True, why=CUT_OFF_DURING, **rt)
-    if held is None or after is None:
+    if after is None:
         return RoundTrip(False, True, why=LINKS_UNREADABLE, **rt)
     return RoundTrip(True, True, **rt)
 

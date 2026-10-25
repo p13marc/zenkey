@@ -217,8 +217,9 @@ class PresenceView:
           trip stood: each holder holds what it showed, and what was heard
           put since, as for a complete one; one left with nothing is
           **unobservable**, never down ("an address it does not show is
-          unobservable, never down"), and a withdrawal it was asked for
-          stays owed.
+          unobservable, never down"); a withdrawal it was asked for keeps
+          its reason, and a read stays owed, an ordered one, whatever it
+          showed.
         - **Possibly incomplete, or not made:** a token it shows is
           positive evidence ("present when it shows one"); it removes
           nothing, and a withdrawal it was asked for stays unconfirmed, the
@@ -259,6 +260,11 @@ class PresenceView:
                 x.why = READ_NOT_MADE if read.kind == "not made" else READ_INCOMPLETE
         if not whole and self.owed_since is None and any(
                 x.why in (WITHDRAWN, MOVED) and not x.held for x in self.holders.values()):
+            self.owed_since = read.asked_ns
+        # An unordered read owes an ordered one, whatever it showed: "It reads
+        # again, making the round trip first, and once one stands a read is
+        # complete again" (presence.md §10 Expected 6; review of PR #876).
+        if unordered and self.owed_since is None:
             self.owed_since = read.asked_ns
 
     def _scoped(self, selector: str, h: tuple[str, ...]) -> bool:
@@ -327,7 +333,11 @@ class PresenceFollower:
     incomplete, unordered, or one that raised) is made again after
     ``retry_s``, doubling each time up to ``max_retry_s``, and back to
     ``retry_s`` after a complete one or a move: a session that stays cut off
-    is not asked five times a second forever."""
+    is not asked five times a second forever. While the watch session holds
+    no link, no round trip can stand: after the read its move asked, the
+    reading session is read again only for a token move heard, and
+    otherwise at the transport's opening (:meth:`_wait_for_watch`), so a
+    long watch-link outage costs a healthy reading session no reads."""
 
     def __init__(self, session: Any, watch: Any, selector: str = "zk2/*/*/@zk/**", *,
                  reread_delay_s: float = REREAD_DELAY_S, retry_s: float = 0.2, max_retry_s: float = 5.0,
@@ -367,6 +377,12 @@ class PresenceFollower:
         #: how many moves were heard; the round trip stands for the count it was made at
         self.gen = 0
         self._stood: int | None = None
+        #: the move count, and how many token moves were heard, when the last
+        #: read was asked: while the watch session holds no link, a read is
+        #: made only for a move or a withdrawal heard since (review of PR #876)
+        self._read_at: tuple[int, int] | None = None
+        #: attempts that made no read, the watch session cut off
+        self.waited = 0
 
         def got(sample: Any) -> None:
             kind = "delete" if sample.kind == zenoh.SampleKind.DELETE else "put"
@@ -385,14 +401,20 @@ class PresenceFollower:
                 self.backoff = self.retry_min
             self._schedule(self.delay)
 
+        # The subscriber first, then the listener, then the first attempt
+        # (review of PR #876): close() finds each declared or None, and a
+        # move heard before the first round trip only asks a read that waits
+        # on the constructor's (``_attempting``). A move before the listener
+        # needs no hearing: no round trip stands yet.
+        self.sub: Any = None
         self.listener: Any = None
+        self.sub = live.declare_liveliness_subscriber(watch, selector, got, history=self.history)
         if follow_moves:
             try:
                 self.listener = live._info(watch).declare_transport_events_listener(
                     zenoh.handlers.Callback(moved), history=False)
             except Exception:  # noqa: BLE001 - a binding without transport events
                 self.listener = None
-        self.sub = live.declare_liveliness_subscriber(watch, selector, got, history=self.history)
         self._attempt()
 
     @property
@@ -457,6 +479,8 @@ class PresenceFollower:
         from . import live
 
         with self._attempting:
+            if self._wait_for_watch():
+                return
             ok = False
             try:
                 self._make_round_trip()
@@ -476,9 +500,33 @@ class PresenceFollower:
         if again is not None:
             self._schedule(again)
 
+    def _wait_for_watch(self) -> bool:
+        """Core §8.1 (0.41): the reader reads again "when its watch session's
+        transport closes or opens", and soon after a withdrawal. While the
+        watch session holds no link no round trip can stand, so every read
+        is unordered and shows no more than the last one did: once one has
+        been made since the last move and the last token heard, the next
+        waits for the transport to open (its event asks it), checked every
+        ``max_retry_s`` without a read in case that event is lost. Never
+        for a follower without transport events, or without the round trip
+        (a control): they retry as before."""
+        from . import live
+
+        with self.lock:
+            quiet = (self.round_trip and self.listener is not None and self._closed is False
+                     and self._read_at == (self.gen, len(self.view.events)))
+        if not quiet or live.links_held(self.watch) is not False:
+            return False
+        with self.lock:
+            self.waited += 1
+        self._schedule(self.retry_max)
+        return True
+
     def _fire(self) -> None:
         with self.lock:
             self._timer, self._due = None, None
+            if self._closed:
+                return
         self._attempt()
 
     def read(self, unordered: bool = False, _after_round_trip: bool = False) -> Any:
@@ -491,6 +539,7 @@ class PresenceFollower:
         with self.lock:
             asked = self.view.asked()
             gen = self.gen
+            self._read_at = (gen, len(self.view.events))
             ordered = not unordered and self._stands_for_read(_after_round_trip)
         p = live.list_presence(self.session, self.selector, self.timeout)
         found = tuple(f"zk2/{x['system']}/{x['service']}/@zk/instance/{x['instance']}" for x in p.instances) + \
@@ -522,7 +571,7 @@ class PresenceFollower:
             self._closed = True
             if self._timer is not None:
                 self._timer.cancel()
-        for x in (self.sub, self.listener):
+        for x in (getattr(self, "sub", None), getattr(self, "listener", None)):
             try:
                 if x is not None:
                     x.undeclare()
