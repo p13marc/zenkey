@@ -249,6 +249,9 @@ class Candidate:
         self.executions = 0
         #: a failed act, after which it elects no more ("Decided here", 0.2)
         self.fault: str | None = None
+        #: §2.7's poll: the last's holders other than its own, None before
+        #: the first poll (set before any poll can run)
+        self._poll_last: set[str] | None = None
         self.owner: Owner | None = None
         self.watch: zenoh.Session | None = None
         #: the session its reads go on: neither the claim's nor the watch's
@@ -363,9 +366,13 @@ class Candidate:
                 print(f"zk2py redundancy: {step['step']} failed: {type(e).__name__}: {e}", file=sys.stderr,
                       flush=True)
                 if step["step"] in ("take_over", "step_down"):
-                    # "Decided here" (text 0.2): undone, the instance stands
-                    # by and elects no more, its standing saying why; a retry
-                    # would ask the same session again, and flap
+                    # main's "Decided here" (text 0.2): undone, the instance
+                    # stands by and elects no more, its standing saying why; a
+                    # retry would ask the same session again, and flap. The
+                    # owner made every undo step in §2.9's order (a marked
+                    # standby holding no interface token); the check below
+                    # makes them again should any have been left.
+                    self._ensure_stood_down()
                     with self.lock:
                         self.fault = f"{step['step']} failed: {type(e).__name__}: {e}"
                     return
@@ -393,6 +400,20 @@ class Candidate:
             assert self.owner is not None
             self.owner.step_down(self.iface)
             self.post(rd.FINISH)
+
+    def _ensure_stood_down(self) -> None:
+        """After a failed act: the interface stood by and its token gone,
+        whatever the act left (§2.9's order, every step made)."""
+        o = self.owner
+        if o is None:
+            return
+        with o._writes:
+            if self.iface in o.standing_by and self.iface not in o._iface_tokens:
+                return
+            err = o._step_down_steps(o._contract(self.iface))
+        if err is not None:
+            print(f"zk2py redundancy: standing down after a failed act: {type(err).__name__}: {err}",
+                  file=sys.stderr, flush=True)
 
     def _arm(self, seconds: float, heal: bool = False) -> None:
         with self.lock:
@@ -431,7 +452,6 @@ class Candidate:
         assert self.owner.session is not None
         live.settle(self.owner.session, self.timeout)
         if self.poll_s is not None:
-            self._poll_last: set[str] | None = None
             self._poll_once()  # the first poll, before its first read: "from before its first read"
             threading.Thread(target=self._poll_loop, daemon=True).start()
 
@@ -456,10 +476,11 @@ class Candidate:
             self.counts["reader_reads"] += 1
         holders = {a["instance"] for a in p.alive if a["system"] == self.system and a["service"] == self.service
                    and a["iface"] == self.iface}
-        others = {h for h in holders if not self.machine.mine(h)}
         with self.lock:
+            # under the lock: the worker re-mints (machine.remint) under it
+            others = {h for h in holders if not self.machine.mine(h)}
             self.heard = {h: {h} for h in holders}
-        events, self._poll_last = rd.poll_step(self._poll_last, others, p.kind == live.COMPLETE)
+            events, self._poll_last = rd.poll_step(self._poll_last, others, p.kind == live.COMPLETE)
         for ev in events:
             self.post(ev)
 

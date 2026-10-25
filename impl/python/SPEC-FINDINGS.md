@@ -10775,11 +10775,14 @@ read is asked while one it asked is unanswered, under both elections
 **Round 56's findings at 0.2:** F-199 to F-209 are all resolved. Each
 entry has its status line.
 
-**`just py-conformance`: 2932 of 2932.** `redundancy` passes 173:
+**`just py-conformance`: 2937 of 2937.** `redundancy` passes 173:
 `lifecycle.json`'s 13 new cases passed the first time they ran.
-`readings` passes 349: the nine readings of 0.1's dropped events and
-re-mint went with `given_back`, since `lifecycle.json` now holds them, and
-seven of §2.7's poll came. Round 57's six readings of F-211 had not been
+`readings` passes 354: the nine readings of 0.1's dropped events and
+re-mint went with `given_back`, since `lifecycle.json` now holds them.
+Seven of §2.7's poll came, and five of kept events decided partway.
+Those five show that no kept event moves the machine to taking over or
+stepping down, so the rest of a list is always re-entered in a state
+that keeps it. Round 57's six readings of F-211 had not been
 counted in the README; they are now.
 
 **Live:** every check passes in all four pairings (README, "redundancy.v1").

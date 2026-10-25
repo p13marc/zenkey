@@ -2339,7 +2339,7 @@ def _presence_view() -> list[tuple[str, Any, Any]]:
           live.Presence(complete=True).kind, live.Presence().kind,
           live.Presence(complete=False, cut_off_during=True).kind],
          [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
-    ] + _live_guards() + _desired_tool_readings() + _poll_readings()
+    ] + _live_guards() + _desired_tool_readings() + _poll_readings() + _settle_readings()
 
 
 def _poll_readings() -> list[tuple[str, Any, Any]]:
@@ -2370,6 +2370,97 @@ def _poll_readings() -> list[tuple[str, Any, Any]]:
          run([({a}, True), (set(), False), ({a}, True)]), []),
         (f"{label}: a read not complete still shows what it saw: a holder new to it appears",
          run([({a}, True), ({a, b}, False)]), [{"appeared": b}]),
+    ]
+
+
+def _settle_readings() -> list[tuple[str, Any, Any]]:
+    """redundancy.v1 0.2's kept events (F-199), where zk2py.redundancy's
+    ``_settle`` re-enters ``step`` for the events after the first that asks
+    something. What a list decided partway can do: no kept event moves the
+    machine to taking over or stepping down, since only a read's decision, a
+    finish and the lock do, and none of them is kept. A decision that does
+    is an act's phase, which keeps what it keeps. So the rest is re-entered
+    in a state that keeps it, and asks nothing."""
+    import copy as _copy
+
+    from . import redundancy as rd
+
+    own, low, high, high2 = "00000000000000b2", "00000000000000a1", "00000000000000c3", "00000000000000d4"
+    S = rd.Seen
+
+    def read(complete: bool, *held: str, claims: tuple[str, ...] = ()) -> dict[str, Any]:
+        return {"read": rd.Read(complete, tuple([S(own, own in held, "standby")]
+                                                + [S(i, True, "standby") for i in held if i != own]
+                                                + [S(i, False, "standby") for i in claims]))}
+
+    def run(events: list[Any]) -> tuple[list[str], str, list[str], bool]:
+        m = rd.Machine(own)
+        steps = [m.step(e)["step"] for e in events]
+        return steps, m.state, list(m.kept_appeared), m.kept_withdrawn
+
+    serving = [rd.START, rd.FINISH, read(True), rd.FINISH]
+    heal_second = serving + [{"appeared": low}, read(True, own, low), rd.TIMER]
+
+    class Probe(rd.Machine):
+        """A machine recording each step ``_settle`` re-enters, and what it gave."""
+
+        def step(self, event: Any) -> dict[str, Any]:
+            depth = self.__dict__.get("_depth", 0)
+            self.__dict__["_depth"] = depth + 1
+            try:
+                out = super().step(event)
+            finally:
+                self.__dict__["_depth"] = depth
+            if depth:
+                self.__dict__.setdefault("_re", set()).add((self.state, out["step"]))
+            return out
+
+    def explore() -> list[tuple[str, str]]:
+        reads = [read(c, *h, claims=cl) for c in (True, False)
+                 for h, cl in (((own,), ()), ((own, low), ()), ((own, high), ()), ((), ()), ((own,), (high,)))]
+        events = [rd.START, rd.TIMER, rd.FINISH, {"appeared": low}, {"appeared": high}, {"appeared": high2},
+                  rd.WITHDRAWN, {"lock": True}, {"lock": False}] + reads
+        found: set[tuple[str, str]] = set()
+        for election in (rd.CLAIM, rd.EXTERNAL):
+            seen: set[Any] = set()
+            todo = [Probe(own, election)]
+            while todo:
+                m = todo.pop()
+                k = (m.state, m.lock, m.retry, tuple(m.kept_appeared), m.kept_withdrawn, tuple(sorted(m.first)),
+                     m.again)
+                if k in seen:
+                    continue
+                seen.add(k)
+                for e in events:
+                    m2 = _copy.deepcopy(m)
+                    m2.__dict__["_re"] = set()
+                    m2.step(e)
+                    found |= m2.__dict__["_re"]
+                    if len(m2.kept_appeared) <= 3:
+                        todo.append(m2)
+        return sorted(found)
+
+    label = "redundancy.v1 0.2, kept events decided partway (F-199, zk2py's _settle)"
+    return [
+        (f"{label}: a campaign's read decides take_over: the appearance kept through the act, the withdrawal "
+         "nothing while taking over; at the finish the appearance asks a heal read",
+         run([rd.START, rd.FINISH, {"appeared": high}, rd.WITHDRAWN, read(True), rd.FINISH]),
+         (["claim", "read", "nothing", "nothing", "take_over", "read"], rd.HEAL_FIRST, [], False)),
+        (f"{label}: … the act's phase keeps the appearance and drops the withdrawal",
+         run([rd.START, rd.FINISH, {"appeared": high}, rd.WITHDRAWN, read(True)]),
+         (["claim", "read", "nothing", "nothing", "take_over"], rd.TAKING_OVER, [high], False)),
+        (f"{label}: a heal's second read decides step_down: the withdrawal kept through the act, the appearance "
+         "nothing while stepping down; at the finish the withdrawal campaigns",
+         run(heal_second + [{"appeared": high}, rd.WITHDRAWN, read(True, own, low), rd.FINISH]),
+         (["claim", "read", "take_over", "nothing", "read", "grace", "read", "nothing", "nothing", "step_down",
+           "read"], rd.CAMPAIGNING, [], False)),
+        (f"{label}: a heal read ending the heal, three kept: the first appearance asks a heal read, and the rest "
+         "is re-entered in heal_first, which keeps it",
+         run(serving + [{"appeared": low}, {"appeared": high}, {"appeared": high2}, rd.WITHDRAWN, read(True, own)]),
+         (["claim", "read", "take_over", "nothing", "read", "nothing", "nothing", "nothing", "read"], rd.HEAL_FIRST,
+          [high2], True)),
+        (f"{label}: over every state reached under both elections, each step re-entered is in heal_first and "
+         "asks nothing", explore(), [(rd.HEAL_FIRST, "nothing")]),
     ]
 
 

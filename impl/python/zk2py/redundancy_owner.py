@@ -216,6 +216,10 @@ def command(c: Candidate, words: list[str], line: str, begin: Any) -> Any:
 if __name__ == "__main__":
     rc = main()
     sys.stdout.flush()
+    sys.stderr.flush()
     import os
 
+    # zenoh-python can hang tearing down at interpreter exit, its runtime's
+    # threads outliving the sessions; every session here is closed (main's
+    # finally), and a runner waits on this process's exit code.
     os._exit(rc)

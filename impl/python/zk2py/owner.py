@@ -59,6 +59,7 @@ from __future__ import annotations
 import json
 import secrets
 import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -783,11 +784,19 @@ class Owner:
         values held (§8.2's SHOULD, and ``puts`` called with the owner: the
         application's own, ``redundancy.v1`` §2.6), then the descriptor put
         again without the mark; the interface token last. False when it was
-        not standing by on it."""
+        not standing by on it.
+
+        A step that fails is undone at once, every step made reversed in
+        §2.9's order (main's "Decided here", text 0.2: zenoh refuses one only
+        when its session is closing or broken), and its error raised: what
+        it declared, the token included, is found whichever step failed, and
+        an undo step's own failure is said, never raised over the first."""
         with self._writes:
             if iface not in self.standing_by or self.session is None or self._stop.is_set():
                 return False
             c = self._contract(iface)
+            start = len(self._entities)
+            tok = None
             try:
                 self._iface_entities[iface] = self._declare_resources(c, self._plan_made[iface])
                 self.standing_by.discard(iface)
@@ -801,11 +810,15 @@ class Owner:
                 self._instance_entities.append(tok)
                 self._entities.append(tok)
             except Exception:
-                # A step that fails is undone at once, every step made
-                # reversed in §2.9's order ("Decided here", text 0.2: zenoh
-                # refuses one only when its session is closing or broken)
-                self.standing_by.discard(iface)
-                self.step_down(iface)
+                # what it declared, whichever step failed: step 1's entities
+                # so far, and a token declared but not yet recorded
+                self._iface_entities.setdefault(iface, [e for e in self._entities[start:] if e is not tok])
+                if tok is not None:
+                    self._iface_tokens[iface] = tok
+                undo = self._step_down_steps(c)
+                if undo is not None:
+                    print(f"zk2py owner: undoing {iface}'s takeover: {type(undo).__name__}: {undo}",
+                          file=sys.stderr, flush=True)
                 raise
             if self.horizons:
                 self._ensure_refresher()
@@ -816,34 +829,64 @@ class Owner:
         tokens first, then its resources (publishers and queryables, members'
         included), then the descriptor put marked. It puts and deletes none
         of the interface's keys (``redundancy.v1`` §2.4, §2.9). False when it
-        was not serving it."""
+        was not serving it. Every step is made whatever one before it gave,
+        and the first error is raised after the last."""
         with self._writes:
             if iface in self.standing_by or self.session is None or self._stop.is_set():
                 return False
-            c = self._contract(iface)
-            gone: list[Any] = []
-            tok = self._iface_tokens.pop(iface, None)
-            if tok is not None:
-                gone.append(tok)
-                if tok in self._instance_entities:
-                    self._instance_entities.remove(tok)
-            self._undeclare(gone)
-            prefix = self.prefix(c) + "/"
-            pubs = [k for k in self._publishers if k.startswith(prefix)]
-            self._undeclare(self._iface_entities.pop(iface, []) + [self._publishers[k] for k in pubs])
-            for k in pubs:
-                self._publishers.pop(k, None)
-                self.horizons.pop(k, None)
-            # redundancy.v1 §2.6, §2.9 (0.2): "At step 2 the reference forgets
-            # what it put of them": a later takeover holds nothing of this
-            # incumbency it does not put again
-            for k in [k for k in self._held if k.startswith(prefix)]:
-                self._held.pop(k, None)
-            self.standing_by.add(iface)
-            # every step is made whatever one before it gave: the last
-            # raises, the others have been made
-            self._put_descriptor()
+            err = self._step_down_steps(self._contract(iface))
+            if err is not None:
+                raise err
             return True
+
+    def _step_down_steps(self, c: Contract) -> Exception | None:
+        """§2.9's steps for ``c``'s interface, each made whatever the one
+        before gave: the token withdrawn, the resources undeclared and their
+        state forgotten, marked standby, the descriptor put marked. Returns
+        the first error, raising none. Called under ``_writes``."""
+        iface = c.interface
+        first: Exception | None = None
+        tok = self._iface_tokens.pop(iface, None)
+        if tok is not None:
+            if tok in self._instance_entities:
+                self._instance_entities.remove(tok)
+            first = first or self._undeclare_all([tok])
+        prefix = self.prefix(c) + "/"
+        pubs = [k for k in self._publishers if k.startswith(prefix)]
+        # step 1's publishers are in both lists, a member's in _publishers
+        # alone: each undeclared once
+        gone: dict[int, Any] = {}
+        for e in self._iface_entities.pop(iface, []) + [self._publishers[k] for k in pubs]:
+            gone.setdefault(id(e), e)
+        first = first or self._undeclare_all(list(gone.values()))
+        for k in pubs:
+            self._publishers.pop(k, None)
+            self.horizons.pop(k, None)
+        # redundancy.v1 §2.6, §2.9 (0.2): "At step 2 the reference forgets
+        # what it put of them": a later takeover holds nothing of this
+        # incumbency it does not put again
+        for k in [k for k in self._held if k.startswith(prefix)]:
+            self._held.pop(k, None)
+        self.standing_by.add(iface)
+        try:
+            self._put_descriptor()
+        except Exception as e:  # noqa: BLE001 - its queryable answers the marked descriptor anyway
+            first = first or e
+        return first
+
+    def _undeclare_all(self, entities: list[Any]) -> Exception | None:
+        """Every entity undeclared, whatever one before gave; the first
+        error returned (the entity is withdrawn anyway when the session
+        closes)."""
+        first: Exception | None = None
+        for e in entities:
+            try:
+                e.undeclare()
+            except Exception as x:  # noqa: BLE001
+                first = first or x
+            if e in self._entities:
+                self._entities.remove(e)
+        return first
 
     def _undeclare(self, entities: list[Any]) -> None:
         for e in entities:
