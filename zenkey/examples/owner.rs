@@ -444,7 +444,8 @@
 //! ```
 //!
 //! A `<standing>` is `{"role": "unclaimed"|"standby"|"serving", "why"?,
-//! "instance"?}`: `why` the last stand-by's (`incumbent`, `incomplete`,
+//! "instance"?, "fault"?}`, `fault` saying why it elects no more after an
+//! act zenoh refused: `why` the last stand-by's (`incumbent`, `incomplete`,
 //! `own_claim_missing`, `descriptor_unread`, `lower_candidate`, `no_lock`,
 //! as `elections.json` writes them), with the instance it names. `reads`
 //! counts the election's reads (made, of them complete, not made: its
@@ -865,8 +866,9 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
     {\"redundancy\": \"wait\", \"iface\": <iface>, \"reached\": <bool>, \"standing\": <standing>}
     {\"redundancy\": \"new-epoch\", \"instance\": <id>}
     <standing>: {\"role\": \"unclaimed\"|\"standby\"|\"serving\", \"why\"?: <why>,
-      \"instance\"?: <id>}, <why> as elections.json writes it: incumbent, incomplete,
-      own_claim_missing, descriptor_unread, lower_candidate, no_lock
+      \"instance\"?: <id>, \"fault\"?: <words>}, <why> as elections.json writes it:
+      incumbent, incomplete, own_claim_missing, descriptor_unread, lower_candidate,
+      no_lock; fault: an act zenoh refused, undone, and no more elections
     refused <line>: <why>
 
   A crash is the process's: kill it (scenarios.md §1, §10).
@@ -2659,6 +2661,9 @@ fn standing_json(st: &zenkey::redundancy::Standing) -> serde_json::Value {
         if let Some(i) = why.instance() {
             v["instance"] = i.as_str().into();
         }
+    }
+    if let Some(f) = &st.fault {
+        v["fault"] = f.as_str().into();
     }
     v
 }

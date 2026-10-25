@@ -80,6 +80,12 @@ impl Inner {
     }
 }
 
+/// A write admitted by its writer's gate ([`Writer::serving`]), held until
+/// it is published: the proof every stamped put and delete takes, so that
+/// none reaches a governed interface's keys outside its gate
+/// (`redundancy.v1` §2.4, §2.9).
+pub(crate) struct Admitted<'a>(#[allow(dead_code)] Option<tokio::sync::RwLockReadGuard<'a, ()>>);
+
 /// A member's publisher, declared at once, or only while its governed
 /// interface serves ([`crate::gate`], `redundancy.v1` §2.4): a slot of its
 /// gate. Puts hold it for reading, so that undeclaring it waits for the
@@ -140,13 +146,12 @@ impl Slot for PubSlot {
         Box::pin(self.declare_now())
     }
 
-    fn unexpose(&self) -> BoxFuture<'_, ()> {
+    fn unexpose(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             let inner = self.inner.write().await.take();
-            if let Some(i) = inner
-                && let Err(e) = i.undeclare().await
-            {
-                tracing::warn!(key = %self.key, "redundancy.v1: a publisher was not undeclared: {e}");
+            match inner {
+                Some(i) => i.undeclare().await,
+                None => Ok(()),
             }
         })
     }
@@ -257,11 +262,15 @@ impl Writer {
 
     /// A write admitted by the governed interface's gate, held until it is
     /// published: always, on an interface that is not governed; while it
-    /// serves, on one that is (`redundancy.v1` §2.4).
-    pub(crate) async fn serving(&self) -> Result<Option<tokio::sync::RwLockReadGuard<'_, ()>>> {
+    /// serves, on one that is (`redundancy.v1` §2.4). Every publication of
+    /// the writer takes one: [`Writer::put_with`] itself, and the stamped
+    /// puts and deletes ([`Writer::put_stamped`], [`Writer::delete_stamped`])
+    /// from their caller, which needs it to call them. A step-down's
+    /// [`Gate::close_writes`] waits for every one held.
+    pub(crate) async fn serving(&self) -> Result<Admitted<'_>> {
         match &self.gate {
-            Some(g) => Ok(Some(g.write().await?)),
-            None => Ok(None),
+            Some(g) => Ok(Admitted(Some(g.write().await?))),
+            None => Ok(Admitted(None)),
         }
     }
 
@@ -397,10 +406,11 @@ impl Writer {
         }
     }
 
-    /// Puts with the owner's stamp (state, S1). A state writer holds the
-    /// gate's write guard around it ([`Writer::serving`]).
+    /// Puts with the owner's stamp (state, S1), under the write `admitted`
+    /// by [`Writer::serving`], held from the stamp's minting to here.
     pub(crate) async fn put_stamped(
         &self,
+        _admitted: &Admitted<'_>,
         payload: ZBytes,
         attachment: Option<ZBytes>,
         ts: zenoh::time::Timestamp,
@@ -423,9 +433,13 @@ impl Writer {
         }
     }
 
-    /// Deletes with the owner's stamp (state, S1), under the gate's write
-    /// guard as [`Writer::put_stamped`].
-    pub(crate) async fn delete_stamped(&self, ts: zenoh::time::Timestamp) -> Result<()> {
+    /// Deletes with the owner's stamp (state, S1), under the write
+    /// `admitted` as [`Writer::put_stamped`].
+    pub(crate) async fn delete_stamped(
+        &self,
+        _admitted: &Admitted<'_>,
+        ts: zenoh::time::Timestamp,
+    ) -> Result<()> {
         let held = self.slot.inner.read().await;
         match &*held {
             None => Err(self.standby()),

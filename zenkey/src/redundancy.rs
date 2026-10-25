@@ -67,6 +67,17 @@
 //! [`Takeover::taking_over`], between the resources and the token, so that
 //! a GET made at the token finds it.
 //!
+//! **An act that fails** (text 0.2, "Decided here"). zenoh refuses a
+//! declaration, a put or an undeclaration only when its session is closing
+//! or broken, so a takeover whose step fails is undone at once, every step
+//! it made reversed in §2.9's order (writes stopped, any token withdrawn,
+//! the resources undeclared and their state forgotten, the descriptor put
+//! marked), and a step-down makes every step whatever one before it gave.
+//! Either way the instance stands by and elects no more, and its
+//! [`Standing::fault`] says why: retrying on a session that cannot declare
+//! would flap, and the application restarts the service on a session that
+//! can.
+//!
 //! **What a governed interface's handles do while it stands by.** A
 //! [`crate::writer::Writer`], [`crate::state::StateWriter`] or
 //! [`crate::writer::EventWriter`] refuses every write,
@@ -77,7 +88,11 @@
 //! declared at once. A raw zenoh publisher or queryable is refused on a
 //! governed interface ([`crate::ServiceBuilder::declare_publisher`],
 //! [`crate::ServiceBuilder::declare_queryable`]): the runtime could not
-//! undeclare it.
+//! undeclare it. Every stamped put and delete takes its gate's admission,
+//! so none publishes around it, and a profile's owner whose writes go
+//! outside the gate or before any election (a `desired.v1` author or
+//! target's report, `alarms.v1`'s owner on a governed revision) is refused
+//! on a governed interface.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -367,6 +382,24 @@ pub struct Standing {
     /// Why it stands by, as its last stand-by said; `None` while it
     /// serves.
     pub why: Option<Why>,
+    /// Why it elects no more: a takeover or a step-down whose declaration,
+    /// put or undeclaration zenoh refused, undone in §2.9's order (the
+    /// module doc). `None` while it elects.
+    pub fault: Option<String>,
+}
+
+/// Where a test makes an act fail ([`Redundancy::fail_next`]).
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fail {
+    /// A takeover's step 1, the resources.
+    Resources,
+    /// A takeover's step 3, the descriptor put unmarked.
+    Descriptor,
+    /// A takeover's step 4, the token.
+    Token,
+    /// A step-down's step 3, the descriptor put marked.
+    StepDown,
 }
 
 /// The candidate's handle (the module doc): roles, reads, the lock.
@@ -449,6 +482,7 @@ impl Redundancy {
                 tokio::sync::watch::Sender::new(Standing {
                     role: Role::Unclaimed,
                     why: None,
+                    fault: None,
                 })
             })
             .clone()
@@ -524,6 +558,15 @@ impl Redundancy {
     /// a split lasts until released.
     pub fn hold_heal(&self, held: bool) {
         self.inner.heal_hold.send_replace(held);
+    }
+
+    /// A test's hook: `iface`'s next act fails at `at`, as if zenoh refused
+    /// that declaration or put, so that its undoing is observed.
+    #[doc(hidden)]
+    pub fn fail_next(&self, iface: &IfaceId, at: Fail) {
+        if let Some(d) = self.driver(iface) {
+            *d.fail.lock().expect("not poisoned") = Some(at);
+        }
     }
 
     fn driver(&self, iface: &IfaceId) -> Option<Arc<Driver>> {
@@ -624,6 +667,7 @@ impl Redundancy {
                 tx,
                 _watch: Mutex::new(watch),
                 task: Mutex::new(None),
+                fail: Mutex::new(None),
             });
             d.publish(&first, &*d.core.lock().await);
             let task = tokio::spawn(Arc::clone(&d).run(
@@ -663,10 +707,16 @@ impl Redundancy {
 
     /// After the tokens, at a close: every governed interface's resources
     /// undeclared.
-    pub(crate) async fn unexpose_all(&self) {
+    pub(crate) async fn unexpose_all(&self) -> Result<()> {
+        let mut first = Ok(());
         for d in self.drivers() {
-            d.gate.unexpose().await;
+            if let Err(e) = d.gate.unexpose().await
+                && first.is_ok()
+            {
+                first = Err(e);
+            }
         }
+        first
     }
 
     /// A drop without a close: the elections stop and the tokens go at
@@ -787,6 +837,8 @@ pub(crate) struct Driver {
     tx: tokio::sync::mpsc::UnboundedSender<Ev>,
     _watch: Mutex<Option<zenoh::pubsub::Subscriber<()>>>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// A test's injected failure ([`Redundancy::fail_next`]).
+    fail: Mutex<Option<Fail>>,
 }
 
 impl Driver {
@@ -799,7 +851,11 @@ impl Driver {
                 (_, Step::StandBy { why, .. }) => Some(why.clone()),
                 _ => s.why.clone(),
             };
-            let next = Standing { role, why };
+            let next = Standing {
+                role,
+                why,
+                fault: s.fault.clone(),
+            };
             if *s == next {
                 false
             } else {
@@ -848,21 +904,24 @@ impl Driver {
                 if *stop.borrow() {
                     return;
                 }
-                let acted = if step == Step::TakeOver {
-                    self.take_over(e.own()).await
+                let (act, acted) = if step == Step::TakeOver {
+                    ("takeover", self.take_over(e.own()).await)
                 } else {
-                    self.step_down().await;
-                    Ok(())
+                    ("step-down", self.step_down().await)
                 };
                 if let Err(err) = acted {
-                    tracing::error!(
-                        iface = %self.iface,
-                        "redundancy.v1: the takeover failed, so this instance stands by \
-                         and elects no more: {err}"
+                    // A declaration, a put or an undeclaration zenoh
+                    // refused: its session is closing, or broken. The act is
+                    // undone (§2.9's order), and the instance stands by and
+                    // elects no more, saying why (text 0.2, "Decided here").
+                    let fault = format!(
+                        "the {act} failed, was undone, and this instance elects no more: {err}"
                     );
+                    tracing::error!(iface = %self.iface, "redundancy.v1: {fault}");
                     self.role.send_modify(|s| {
                         s.role = Role::Standby;
                         s.why = None;
+                        s.fault = Some(fault);
                     });
                     return;
                 }
@@ -871,15 +930,23 @@ impl Driver {
                 after_withdrawal = false;
             }
             match &step {
+                // The model never asks a read while one it asked is
+                // unanswered (zenkey_model::redundancy's
+                // `a_read_asked_is_never_asked_again_before_its_answer`): a
+                // read in flight is never aborted, so no phase waiting on it
+                // is stranded.
+                Step::Read if reading.is_some() => {
+                    tracing::error!(
+                        iface = %self.iface,
+                        "redundancy.v1: a read asked while one runs; the one in flight is kept"
+                    );
+                }
                 Step::Read => {
                     let delay = if after_withdrawal {
                         st.burst
                     } else {
                         Duration::ZERO
                     };
-                    if let Some(r) = reading.take() {
-                        r.abort();
-                    }
                     reading = Some(tokio::spawn(
                         Arc::clone(&self).read_after(delay, heal_hold.clone()),
                     ));
@@ -1123,60 +1190,91 @@ impl Driver {
         }
     }
 
+    /// A test's injected failure at `at`, once (`Redundancy::fail_next`).
+    fn injected(&self, at: Fail) -> Result<()> {
+        let mut f = self.fail.lock().expect("not poisoned");
+        if *f == Some(at) {
+            *f = None;
+            return Err(Error::Zenoh(format!(
+                "a test's failure, injected at {at:?}"
+            )));
+        }
+        Ok(())
+    }
+
     /// §2.6: the resources, the application's state, the descriptor
-    /// unmarked, the token last.
+    /// unmarked, the token last. A step that fails undoes every step made
+    /// before it, in §2.9's order ([`Driver::step_down`]), and the failure
+    /// is returned, with the undoing's own failure if it had one.
     async fn take_over(&self, own: &InstanceId) -> Result<()> {
-        // 1.
+        // 1. The gate undoes its own declarations when one fails.
+        self.injected(Fail::Resources)?;
         self.gate.expose().await?;
-        // 3.
-        if let Some(t) = &self.startup.takeover {
-            t.taking_over(&self.iface).await;
+        let rest = async {
+            // 3.
+            if let Some(t) = &self.startup.takeover {
+                t.taking_over(&self.iface).await;
+            }
+            self.gate.set_marked(false);
+            self.injected(Fail::Descriptor)?;
+            self.served.publish()?;
+            // 4.
+            self.injected(Fail::Token)?;
+            let key = alive_key(&self.addr, &self.iface, own, &self.fp16)?;
+            let t = self
+                .session
+                .liveliness()
+                .declare_token(key.into_keyexpr())
+                .await
+                .map_err(zenoh)?;
+            *self.token.lock().expect("not poisoned") = Some(t);
+            Ok::<_, Error>(())
+        };
+        if let Err(e) = rest.await {
+            return Err(match self.step_down().await {
+                Ok(()) => e,
+                Err(undo) => Error::Zenoh(format!("{e}; and undoing it: {undo}")),
+            });
         }
-        self.gate.set_marked(false);
-        if let Err(e) = self.served.publish() {
-            self.gate.set_marked(true);
-            self.gate.unexpose().await;
-            return Err(e);
-        }
-        // 4.
-        let key = alive_key(&self.addr, &self.iface, own, &self.fp16)?;
-        let t = self
-            .session
-            .liveliness()
-            .declare_token(key.into_keyexpr())
-            .await
-            .map_err(zenoh)?;
-        *self.token.lock().expect("not poisoned") = Some(t);
         tracing::info!(iface = %self.iface, instance = %own, "redundancy.v1: took over (§2.6)");
         Ok(())
     }
 
     /// §2.9: writes stopped, the tokens, the resources and what it put,
-    /// the descriptor marked.
-    async fn step_down(&self) {
+    /// the descriptor marked. Every step is made, whatever one before it
+    /// gave; the first failure is returned.
+    async fn step_down(&self) -> Result<()> {
+        let mut first: Result<()> = Ok(());
+        let mut keep = |r: Result<()>| {
+            if let Err(e) = r
+                && first.is_ok()
+            {
+                first = Err(e);
+            }
+        };
         self.gate.close_writes().await;
         // 1.
         let token = self.token.lock().expect("not poisoned").take();
-        if let Some(t) = token
-            && let Err(e) = t.undeclare().await
-        {
-            tracing::warn!(iface = %self.iface, "redundancy.v1: the token was not undeclared: {e}");
+        if let Some(t) = token {
+            keep(t.undeclare().await.map_err(zenoh));
         }
         for t in self.gate.take_members() {
-            let _ = t.undeclare().await;
+            keep(t.undeclare().await.map_err(zenoh));
         }
         // 2.
-        self.gate.unexpose().await;
+        keep(self.gate.unexpose().await);
         self.store.forget_prefix(&format!(
             "zk2/{}/{}/{}/",
             self.addr.system, self.addr.service, self.iface
         ));
         // 3.
         self.gate.set_marked(true);
-        if let Err(e) = self.served.publish() {
-            tracing::warn!(iface = %self.iface, "redundancy.v1: the descriptor was not put marked: {e}");
+        match self.injected(Fail::StepDown) {
+            Err(e) => keep(Err(e)),
+            Ok(()) => keep(self.served.publish()),
         }
         tracing::info!(iface = %self.iface, "redundancy.v1: stepped down (§2.9)");
+        first
     }
 }
 

@@ -136,9 +136,30 @@ earlier cases changed, nor any other fixture.
 - **The round trips** (core §8.1, #851): the claim's is a liveliness GET
   of the instance's own key, a population of one; the watch's, of the
   address's `@zk/**`, whose few tokens cost nothing that matters.
-- **A takeover that fails** (a declaration refused) is undone: the
-  instance stays marked and elects no more, and its role says it stands
-  by. A runtime that cannot declare is closing, or broken.
+- **An act that fails.** zenoh refuses a declaration, a put or an
+  undeclaration only when its session is closing or broken. A takeover
+  whose step fails is undone at once, every step it made reversed in
+  §2.9's order (writes stopped, any token withdrawn, the resources
+  undeclared and their state forgotten, the descriptor put marked); a
+  step-down makes every step whatever one before it gave. Either way the
+  instance stands by and elects no more, and its standing says why
+  (`Standing::fault`). The text says nothing of a failed act, and the
+  election's machine has no event for one: a retry through it would ask
+  the same session to declare again, and would flap, so the reference
+  stops and leaves the restart to the application.
+- **No write gets around the fence.** Every publication of a governed
+  interface's keys goes through its gate: a writer's put, a stamped put or
+  delete (which takes the gate's admission as a proof), a state member's
+  refresh, an event. A profile's owner the runtime implements whose writes
+  go outside the gate or before any election (a desired.v1 author, a
+  desired.v1 target's report, alarms.v1's owner on a revision that lists
+  `redundancy.v1`) is refused on a governed interface at this version;
+  `health.v1` and `config.v1` are the standard contracts, never governed.
+- **One read at a time.** The election's machine never asks a read while
+  one it asked is unanswered, so a runtime never aborts one, and no phase
+  waiting on a read is stranded: `zenkey_model::redundancy`'s
+  `a_read_asked_is_never_asked_again_before_its_answer` explores every
+  state it reaches, under both elections.
 - **A test's hooks**: an instance's id chosen (`ServiceBuilder::set_instance_id`),
   and a heal's reads held (`Redundancy::hold_heal`, for §9 and §12).
 - **The owner example's surface**: `--standby` and its options, and its

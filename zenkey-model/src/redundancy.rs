@@ -964,7 +964,9 @@ impl Elector {
                 if id != self.own {
                     let old = std::mem::replace(&mut self.own, id);
                     self.former.insert(old);
-                    self.former.remove(&self.own.clone());
+                    // A re-mint back to a former id: that id is its own
+                    // again, never a former one beside itself.
+                    self.former.remove(&self.own);
                 }
                 Step::Nothing
             }
@@ -1664,6 +1666,105 @@ mod tests {
             e.observe(Event::Lock(false)),
             Step::StepDown(StepDownWhy::LockLost)
         );
+    }
+
+    /// A read asked is never asked again, nor dropped, before its answer
+    /// (#841 RB's review): from every state the machine reaches, while a
+    /// read it asked is unanswered, every event but that read's answer
+    /// returns `nothing`, so a runtime never holds two reads at once and no
+    /// phase waiting on a read (campaigning, a heal's first or second read)
+    /// is stranded. Explored breadth-first over every reachable state, for
+    /// both elections; after an act (a claim, a takeover, a step-down) the
+    /// runtime's next call is `finish`, as the reference's loop makes it.
+    #[test]
+    fn a_read_asked_is_never_asked_again_before_its_answer() {
+        use std::collections::{HashSet, VecDeque};
+        let own = id(0xb);
+        let reads = [
+            read(true, vec![seen(0xb, false, STANDBY)]),
+            read(
+                true,
+                vec![seen(0xa, true, SERVING), seen(0xb, false, STANDBY)],
+            ),
+            read(false, vec![]),
+            read(
+                true,
+                vec![seen(0xa, true, SERVING), seen(0xb, true, SERVING)],
+            ),
+            read(false, vec![seen(0xb, true, SERVING)]),
+            read(
+                true,
+                vec![seen(0x1, false, STANDBY), seen(0xb, false, STANDBY)],
+            ),
+            read(true, vec![seen(0xb, true, SERVING)]),
+        ];
+        let others = [
+            Event::Appeared(id(0xa)),
+            Event::Appeared(own.clone()),
+            Event::Withdrawn,
+            Event::Timer,
+            Event::Lock(true),
+            Event::Lock(false),
+            Event::Reminted(id(0xc)),
+        ];
+        for election in [Election::Claim, Election::External] {
+            let mut e = Elector::new(own.clone(), election);
+            assert_eq!(e.start(), Step::Claim);
+            // (machine, a read asked and unanswered, an act to finish)
+            let mut queue = VecDeque::from([(e.clone(), false, true)]);
+            let mut seen_states = HashSet::new();
+            let mut asked_states = 0;
+            while let Some((e, asked, acting)) = queue.pop_front() {
+                if !seen_states.insert(format!("{e:?} {asked} {acting}")) {
+                    continue;
+                }
+                let mut next = |e: Elector, step: Step, was_asked: bool| {
+                    let act = matches!(step, Step::Claim | Step::TakeOver | Step::StepDown(_));
+                    let asks = step == Step::Read;
+                    assert!(
+                        !(was_asked && asks),
+                        "{election}: a second read asked while one runs: {e:?}"
+                    );
+                    queue.push_back((e, was_asked || asks, act));
+                };
+                if acting {
+                    let mut e2 = e.clone();
+                    let step = e2.finish();
+                    next(e2, step, asked);
+                    continue;
+                }
+                if asked {
+                    asked_states += 1;
+                    for ev in &others {
+                        let mut e2 = e.clone();
+                        let step = e2.observe(ev.clone());
+                        assert_eq!(
+                            step,
+                            Step::Nothing,
+                            "{election}: {ev:?} while a read runs, in {e:?}"
+                        );
+                        assert_eq!(e2.finish(), Step::Nothing, "no act runs while a read does");
+                        next(e2, Step::Nothing, true);
+                    }
+                    for r in &reads {
+                        let mut e2 = e.clone();
+                        let step = e2.observe(Event::Read(r.clone()));
+                        // The answer is taken: a phase waiting on it moves on.
+                        next(e2, step, false);
+                    }
+                } else {
+                    for ev in &others {
+                        let mut e2 = e.clone();
+                        let step = e2.observe(ev.clone());
+                        next(e2, step, false);
+                    }
+                }
+            }
+            assert!(
+                asked_states > 0,
+                "{election}: the exploration reached reads asked"
+            );
+        }
     }
 
     #[test]

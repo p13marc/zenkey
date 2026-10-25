@@ -171,6 +171,18 @@ pub struct ServiceBuilder {
     redundancy: Option<crate::redundancy::Redundancy>,
 }
 
+/// Why a profile's owner the runtime implements is refused on a governed
+/// interface (`redundancy.v1` §2.4, #841): it writes its keys before the
+/// instance is elected, at its start or its re-mint, and outside the gate a
+/// standby's writes go through, so a standby would write them.
+fn not_elected(what: &str, iface: &IfaceId) -> String {
+    format!(
+        "{what} on {iface}, which redundancy.v1 governs: it writes the interface's keys before \
+         any election and outside its gate, so a standby would write them; not at this version \
+         (redundancy.v1 §2.4)"
+    )
+}
+
 fn mint() -> InstanceId {
     InstanceId::from_u64(rand::random())
 }
@@ -330,7 +342,8 @@ impl ServiceBuilder {
     fn not_governed(&self, iface: &IfaceId, what: &str) -> Result<()> {
         if self.gate_of(iface).is_some() {
             return Err(Error::Contract(format!(
-                "{iface} is governed by redundancy.v1: declare its {what} through the runtime's                  writers and servers, which a standby holds undeclared (redundancy.v1 §2.4)"
+                "{iface} is governed by redundancy.v1: declare its {what} through the runtime's \
+                 writers and servers, which a standby holds undeclared (redundancy.v1 §2.4)"
             )));
         }
         Ok(())
@@ -407,6 +420,9 @@ impl ServiceBuilder {
         if self.alarms.is_some() || self.implements(&iface) {
             return Err(Error::Duplicate(iface));
         }
+        if zenkey_model::redundancy::is_governed(imp.contract()) {
+            return Err(Error::Contract(not_elected("alarms.v1's owner", &iface)));
+        }
         crate::alarms::Alarms::declare(self, imp, startup).await
     }
 
@@ -434,6 +450,9 @@ impl ServiceBuilder {
                 "{iface} {resource:?} is authored twice (desired.v1 §2.11)"
             )));
         }
+        if self.gate_of(iface).is_some() {
+            return Err(Error::Contract(not_elected("a desired.v1 author", iface)));
+        }
         crate::desired::Author::declare(self, iface, resource, startup).await
     }
 
@@ -458,6 +477,12 @@ impl ServiceBuilder {
         startup: crate::desired::TargetStartup,
     ) -> Result<crate::desired::Target> {
         self.no_target_yet(role)?;
+        if self.gate_of(&report.iface).is_some() {
+            return Err(Error::Contract(not_elected(
+                "a desired.v1 target's report",
+                &report.iface,
+            )));
+        }
         crate::desired::Target::declare(
             self,
             role,
@@ -489,6 +514,14 @@ impl ServiceBuilder {
         startup: crate::desired::TargetStartup,
     ) -> Result<crate::desired::Target> {
         self.no_target_yet(role)?;
+        if let Some(r) = &report
+            && self.gate_of(&r.iface).is_some()
+        {
+            return Err(Error::Contract(not_elected(
+                "a desired.v1 target's report",
+                &r.iface,
+            )));
+        }
         let Some(cfg) = self.config_v1.clone() else {
             return Err(Error::Contract(
                 "desired.v1 §2.16: implement config.v1 (ServiceBuilder::config_v1) first"
@@ -889,13 +922,15 @@ impl ServiceBuilder {
                 .any(|(_, e, ..)| *e == crate::redundancy::Election::External);
             if external && r.startup().lock.is_none() {
                 return Err(Error::NotExposed(
-                    "redundancy.v1 §2.11: an interface's election is external, and                      RedundancyStartup gives no lock to ask"
+                    "redundancy.v1 §2.11: an interface's election is external, and \
+                     RedundancyStartup gives no lock to ask"
                         .to_owned(),
                 ));
             }
             if external && !r.may_start().await {
                 return Err(Error::NotExposed(
-                    "redundancy.v1 §2.11: the deployment's lock is not held, and this instance                      refuses to start without it"
+                    "redundancy.v1 §2.11: the deployment's lock is not held, and this instance \
+                     refuses to start without it"
                         .to_owned(),
                 ));
             }
@@ -1638,7 +1673,7 @@ impl Service {
             t.undeclare().await.map_err(zenoh)?;
         }
         if let Some(r) = &self.redundancy {
-            r.unexpose_all().await;
+            r.unexpose_all().await?;
         }
         // config.v1: its operations go with the tokens, so a restarted
         // instance never shares a key with this one (§2.12).

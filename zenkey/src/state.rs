@@ -373,9 +373,10 @@ impl crate::gate::Slot for Member {
         Box::pin(async { Ok(()) })
     }
 
-    fn unexpose(&self) -> crate::call::BoxFuture<'_, ()> {
+    fn unexpose(&self) -> crate::call::BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             self.held.lock().await.value = None;
+            Ok(())
         })
     }
 }
@@ -433,7 +434,7 @@ impl Refresher {
     /// One re-put, if it is still due, and only while its governed
     /// interface serves (`redundancy.v1` §2.4).
     async fn once(&self) {
-        let Ok(_write) = self.writer.serving().await else {
+        let Ok(admitted) = self.writer.serving().await else {
             return;
         };
         let mut h = self.member.held.lock().await;
@@ -458,7 +459,7 @@ impl Refresher {
                 h.at = tokio::time::Instant::now();
                 if let Err(e) = self
                     .writer
-                    .put_stamped(bytes.into(), attachment.map(Into::into), ts)
+                    .put_stamped(&admitted, bytes.into(), attachment.map(Into::into), ts)
                     .await
                 {
                     tracing::warn!(key = %self.key, "freshness.v1: a re-put failed: {e}");
@@ -624,7 +625,7 @@ impl StateWriter {
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<Timestamp> {
         // redundancy.v1 §2.4: a standby writes nothing of the interface.
-        let _write = self.writer.serving().await?;
+        let admitted = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
         // telemetry.v1 (#819): a metric sample is checked before anything
         // is minted, stored or published, its epoch written in.
@@ -645,7 +646,10 @@ impl StateWriter {
         held.at = tokio::time::Instant::now();
         self.store
             .put(&self.key, bytes, self.writer.encoding().clone(), kept, ts);
-        let sent = self.writer.put_stamped(payload, attachment, ts).await;
+        let sent = self
+            .writer
+            .put_stamped(&admitted, payload, attachment, ts)
+            .await;
         drop(held);
         self.member.wake.notify_one();
         sent?;
@@ -668,7 +672,7 @@ impl StateWriter {
     /// value over a newer one. `None`, nothing put, when the writer keeps no
     /// value: after a delete, or on a resource with no horizon above 0.
     pub(crate) async fn reput(&self) -> Result<Option<Timestamp>> {
-        let _write = self.writer.serving().await?;
+        let admitted = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
         let Some((bytes, attachment)) = held.value.clone() else {
             return Ok(None);
@@ -684,7 +688,7 @@ impl StateWriter {
         held.at = tokio::time::Instant::now();
         let sent = self
             .writer
-            .put_stamped(bytes.into(), attachment.map(Into::into), ts)
+            .put_stamped(&admitted, bytes.into(), attachment.map(Into::into), ts)
             .await;
         drop(held);
         self.member.wake.notify_one();
@@ -709,7 +713,7 @@ impl StateWriter {
     /// tombstone answered for what is left of the window (S3), not a window
     /// more.
     pub(crate) async fn delete_aged(&self, age: Duration) -> Result<Timestamp> {
-        let _write = self.writer.serving().await?;
+        let admitted = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
         let ts = self.minter.mint()?;
         // A deleted member is not re-put (`freshness.v1` §2.4).
@@ -718,7 +722,7 @@ impl StateWriter {
         self.store.delete_aged(&self.key, ts, age);
         // §2.7: a deleted key is not live, so it frees a member.
         self.writer.release();
-        let sent = self.writer.delete_stamped(ts).await;
+        let sent = self.writer.delete_stamped(&admitted, ts).await;
         drop(held);
         self.member.wake.notify_one();
         sent?;

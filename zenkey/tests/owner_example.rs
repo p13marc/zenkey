@@ -1799,7 +1799,8 @@ fn the_help_documents_the_redundancy_surface() {
         "redundancy new-epoch",
         "{\"redundancy\": \"role\", \"instance\": <id>, \"interfaces\": {<iface>: <standing>}}",
         "{\"redundancy\": \"lock\", \"held\": <bool>}",
-        "own_claim_missing, descriptor_unread, lower_candidate, no_lock",
+        "own_claim_missing, descriptor_unread, lower_candidate,",
+        "\"fault\"?: <words>",
         "refused <line>: <why>",
     ] {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");

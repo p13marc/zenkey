@@ -2021,3 +2021,238 @@ async fn a_re_mint_is_no_appearance() {
     a.close().await;
     b.close().await;
 }
+
+// --- Beyond the sections: the step-down's write fence, and an act that fails ------
+
+/// §2.9's step-down stops writes before step 1 (0.2): a write in flight
+/// while B steps down is published before B withdraws its token, or is
+/// refused, never after. B writes `balance` and `entries` as fast as it
+/// can across the heal of §7's split.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_write_in_flight_during_a_step_down_lands_before_its_token_goes() {
+    let Split {
+        _r1,
+        _r2,
+        link,
+        ep1: _ep1,
+        s,
+        s2,
+        a,
+        mut b,
+    } = split().await;
+    let b_zid = b.zid();
+    let state = Arc::clone(&b.state);
+    let stream = Arc::new(b.stream.take().expect("ledger.v1 has a stream"));
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Each write: when its call returned, and whether it was published.
+    type Writes = Arc<Mutex<Vec<(Instant, Result<(), String>)>>>;
+    let writes: Writes = Arc::default();
+    let hammer = {
+        let (stop, writes, state, stream) = (
+            Arc::clone(&stop),
+            Arc::clone(&writes),
+            Arc::clone(&state),
+            Arc::clone(&stream),
+        );
+        tokio::spawn(async move {
+            let mut n = 0u64;
+            while !stop.load(Ordering::SeqCst) {
+                n += 1;
+                let put = state.put(format!("b{n}")).await.map(|_| ());
+                let sent = stream.put(format!("e{n}")).await;
+                {
+                    let mut w = writes.lock().unwrap();
+                    for r in [put, sent] {
+                        w.push((Instant::now(), r.map_err(|e| e.to_string())));
+                        if let Err(e) = &w.last().unwrap().1 {
+                            assert!(e.contains("stands by"), "only Error::Standby: {e}");
+                        }
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    link.heal();
+    b.until(Role::Standby).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    stop.store(true, Ordering::SeqCst);
+    hammer.await.unwrap();
+    s2.holders_are(&ledger(), &[&a.id]).await;
+    let (withdrawn, _) = *s2
+        .alive_events(&ledger(), &b.id)
+        .iter()
+        .rev()
+        .find(|(_, put)| !put)
+        .expect("B's token withdrawn");
+    let withdrawn_wall = SystemTime::now() - withdrawn.elapsed();
+    let writes = writes.lock().unwrap().clone();
+    let first_refused = writes
+        .iter()
+        .position(|(_, r)| r.is_err())
+        .expect("writes refused once B stands by");
+    assert!(first_refused > 0, "writes published while B served");
+    assert!(
+        writes[first_refused..].iter().all(|(_, r)| r.is_err()),
+        "no write passes once one is refused"
+    );
+    for (at, _) in &writes[..first_refused] {
+        assert!(*at < withdrawn, "a write published after B's token went");
+    }
+    // What the subscribers received of B's: all of it dated before.
+    for spy in [&s, &s2] {
+        for (_, key, _, _, stamp) in spy.data_by(&b_zid) {
+            assert!(
+                stamp <= withdrawn_wall + Duration::from_millis(50),
+                "{key} stamped by B after its token went"
+            );
+        }
+    }
+    a.close().await;
+    b.close().await;
+}
+
+/// An act that fails (text 0.2, "Decided here"): a takeover whose step
+/// zenoh refuses (here a test's injected failure, at each of its three
+/// steps) is undone in §2.9's order, and the instance stands by, its
+/// standing saying why, and elects no more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_takeover_that_fails_is_undone() {
+    use zenkey::redundancy::Fail;
+    for at in [Fail::Resources, Fail::Descriptor, Fail::Token] {
+        let (_r1, ep) = router(None).await;
+        let s = spy(&ep, LEDGER, &ledger()).await;
+        let g = client(&ep).await;
+        let a = candidate(&ep, Opts::ledger("A", 0xa)).await.unwrap();
+        a.until(Role::Serving).await;
+        let b = candidate(&ep, Opts::ledger("B", 0xb)).await.unwrap();
+        eventually("B stands by on A", || async {
+            b.why() == Some(Why::Incumbent(a.id.clone()))
+        })
+        .await;
+        b.red.fail_next(&ledger(), at);
+        a.close().await;
+        eventually(&format!("{at:?}: B's takeover failed"), || async {
+            b.red.standing(&ledger()).fault.is_some()
+        })
+        .await;
+        let st = b.red.standing(&ledger());
+        assert_eq!(st.role, Role::Standby, "{at:?}");
+        assert!(
+            st.fault.as_deref().unwrap().contains("takeover failed"),
+            "{st:?}"
+        );
+        // Undone: no write passes, no queryable, no token, marked.
+        assert!(
+            matches!(b.state.put("x").await, Err(Error::Standby(_))),
+            "{at:?}"
+        );
+        assert!(
+            !b.servers[0].is_declared(),
+            "{at:?}: the queryable undeclared"
+        );
+        let found = presence::descriptor(&g, &LEDGER.parse().unwrap(), &b.id, T)
+            .await
+            .unwrap();
+        assert_eq!(
+            mark_of(&found, &ledger()),
+            Some(true),
+            "{at:?}: marked again"
+        );
+        let made = b.red.reads(&ledger()).made;
+        tokio::time::sleep(RETRY + Duration::from_secs(1)).await;
+        assert!(
+            s.alive_events(&ledger(), &b.id).is_empty(),
+            "{at:?}: no token of B's"
+        );
+        assert_eq!(
+            b.red.reads(&ledger()).made,
+            made,
+            "{at:?}: it elects no more"
+        );
+        assert_eq!(b.role(), Role::Standby);
+        b.close().await;
+    }
+}
+
+/// A step-down that fails is never swallowed: B's step-down at the heal of
+/// §7's split, its descriptor's put refused (a test's injected failure),
+/// still withdraws its token and undeclares its resources, and its
+/// standing says the step-down failed; it elects no more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_step_down_that_fails_is_reported() {
+    use zenkey::redundancy::Fail;
+    let Split {
+        _r1,
+        _r2,
+        link,
+        ep1: _ep1,
+        s: _s,
+        s2,
+        a,
+        b,
+    } = split().await;
+    b.red.fail_next(&ledger(), Fail::StepDown);
+    link.heal();
+    eventually("B's step-down failed", || async {
+        b.red.standing(&ledger()).fault.is_some()
+    })
+    .await;
+    let st = b.red.standing(&ledger());
+    assert_eq!(st.role, Role::Standby);
+    assert!(
+        st.fault.as_deref().unwrap().contains("step-down failed"),
+        "{st:?}"
+    );
+    s2.holders_are(&ledger(), &[&a.id]).await;
+    assert!(!b.servers[0].is_declared(), "its queryable undeclared");
+    assert!(matches!(b.state.put("x").await, Err(Error::Standby(_))));
+    let made = b.red.reads(&ledger()).made;
+    tokio::time::sleep(RETRY + Duration::from_secs(1)).await;
+    assert_eq!(b.red.reads(&ledger()).made, made, "it elects no more");
+    a.close().await;
+    b.close().await;
+}
+
+/// §2.4's write fence has no way around it: a profile's owner the runtime
+/// implements, whose writes go outside a governed interface's gate or
+/// before any election, is refused on a governed interface (#841 RB's
+/// review): a desired.v1 author of `ledger.v1`, and alarms.v1's owner on a
+/// revision that lists `redundancy.v1`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_profiles_owner_is_refused_on_a_governed_interface() {
+    let (_r1, ep) = router(None).await;
+    let claim = session(&ep, None).await;
+    let mut b = ServiceBuilder::new(&claim, ServiceConfig::new(LEDGER.parse::<Addr>().unwrap()));
+    b.implement(common::imp("ledger.v1")).unwrap();
+    let refused = b
+        .desired_author(
+            &ledger(),
+            "state/balance",
+            zenkey::desired::AuthorStartup::default(),
+        )
+        .await;
+    assert!(
+        matches!(&refused, Err(Error::Contract(why)) if why.contains("redundancy.v1 governs")),
+        "{:?}",
+        refused.err()
+    );
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/profiles/alarms/alarms.v1.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let governed = text.replace(
+        "uses    = [\"freshness.v1\"]",
+        "uses    = [\"freshness.v1\", \"redundancy.v1\"]",
+    );
+    assert_ne!(governed, text);
+    let l = zenkey::model::contract::load_str(&governed, path.parent().unwrap(), None);
+    let imp = Implementation::new(l.contract.unwrap_or_else(|| panic!("{}", l.report)));
+    let refused = b.alarms_with(imp, zenkey::alarms::Startup::default()).await;
+    assert!(
+        matches!(&refused, Err(Error::Contract(why)) if why.contains("redundancy.v1 governs")),
+        "{:?}",
+        refused.err()
+    );
+    claim.close().await.unwrap();
+}

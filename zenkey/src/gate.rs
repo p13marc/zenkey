@@ -36,7 +36,7 @@ pub(crate) trait Slot: Send + Sync {
     fn expose(&self) -> BoxFuture<'_, Result<()>>;
     /// Undeclares it (the step-down's step 2), waiting for what is in
     /// flight through it.
-    fn unexpose(&self) -> BoxFuture<'_, ()>;
+    fn unexpose(&self) -> BoxFuture<'_, Result<()>>;
 }
 
 /// A governed interface's gate (the module doc).
@@ -156,7 +156,9 @@ impl Gate {
         for (i, s) in slots.iter().enumerate() {
             if let Err(e) = s.expose().await {
                 for s in &slots[..i] {
-                    s.unexpose().await;
+                    if let Err(e) = s.unexpose().await {
+                        tracing::warn!(iface = %self.iface, "redundancy.v1: undoing a takeover's declaration failed: {e}");
+                    }
                 }
                 return Err(e);
             }
@@ -175,12 +177,19 @@ impl Gate {
     }
 
     /// The step-down's step 2: every slot undeclared, and the gate closed.
-    pub(crate) async fn unexpose(&self) {
+    /// Every slot is tried; the first failure is returned.
+    pub(crate) async fn unexpose(&self) -> Result<()> {
         let _t = self.transition.lock().await;
         self.open.store(false, Ordering::Release);
+        let mut first = Ok(());
         for s in self.live() {
-            s.unexpose().await;
+            if let Err(e) = s.unexpose().await
+                && first.is_ok()
+            {
+                first = Err(e);
+            }
         }
+        first
     }
 
     /// Holds a member token while the interface serves (§2.12): refused
@@ -298,11 +307,7 @@ impl Slot for QSlot {
         Box::pin(self.declare_now())
     }
 
-    fn unexpose(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            if let Err(e) = self.undeclare().await {
-                tracing::warn!(key = %self.ke, "redundancy.v1: a queryable was not undeclared: {e}");
-            }
-        })
+    fn unexpose(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(self.undeclare())
     }
 }

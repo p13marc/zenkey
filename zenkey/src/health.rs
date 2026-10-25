@@ -418,7 +418,11 @@ async fn publish_fault(
         detail,
         at_ns: ns(&stamp),
     };
-    w.put_stamped(f.encode_to_vec().into(), None, stamp).await
+    // health.v1's standard contract is never governed, so this admits it
+    // always; every stamped put goes through its writer's gate all the same.
+    let admitted = w.serving().await?;
+    w.put_stamped(&admitted, f.encode_to_vec().into(), None, stamp)
+        .await
 }
 
 /// §2.5: a `clock_ahead` fault when the guard first holds, again every
