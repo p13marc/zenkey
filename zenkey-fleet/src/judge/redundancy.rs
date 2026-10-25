@@ -53,7 +53,7 @@ fn says(j: Judged, governed: &Governed) -> String {
                        election did not end, or no instance holds the lock"
             .into(),
         R::StandingBy => "marked standby, holding none of its tokens".into(),
-        R::NoneStanding => "no instance marked standby".into(),
+        R::NoneStanding => "no instance marked standby and holding none of its tokens".into(),
         R::SplitLowest => "a holder of a split, the lowest, which the heal keeps".into(),
         R::NotACandidate => "it lists the interface nowhere and holds no token of it".into(),
         R::Unlisted => "it holds the token, and its descriptor does not list the interface, in \
@@ -261,49 +261,95 @@ pub fn judge(
     }
 }
 
-/// `hostid.v1` §2.12's recognised standby (its text 0.6, 0.7): an instance
-/// whose second-read descriptor lists only interfaces whose contracts use
-/// `redundancy.v1`, at least one, and of which the fourth question answers
-/// no, `standby`, of each, from the same two reads. `Err` says why it is
-/// not one.
+/// What `hostid.v1` §2.12 makes of one instance (its text 0.6, 0.7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Standby {
+    /// A recognised standby: its second-read descriptor lists only
+    /// interfaces whose contracts use `redundancy.v1`, at least one, and
+    /// the fourth question answers no, `standby`, of each, from the same
+    /// two reads. Not counted.
+    Recognised,
+    /// Counted, and why it is not a recognised standby: its descriptor
+    /// lists no interface or one not governed, or a twin, or its
+    /// descriptor did not read (which the caller reads as it reads any
+    /// unread descriptor).
+    Counted(String),
+    /// It lists only interfaces that are governed or whose governance
+    /// cannot be read, and for one of them the question cannot be
+    /// answered: hostid's §5 reads that unobservable, the finding not
+    /// established (0.6).
+    Unobservable(String),
+}
+
+/// `hostid.v1` §2.12's recognised standby (its text 0.6, 0.7), from the
+/// two reads a doctor or a reader holds.
 pub fn recognised_standby(
     first: Option<&Observed>,
     second: Option<&Observed>,
     contracts: &Contracts,
     addr: &Addr,
     instance: &InstanceId,
-) -> Result<(), String> {
+) -> Standby {
     let reads = [first, second];
     let Some(d) = second
         .and_then(|o| o.descriptors.as_ref())
         .and_then(|ds| ds.get(&(addr.clone(), instance.clone())))
         .and_then(|r| r.descriptor())
     else {
-        return Err("its descriptor in the second read was not read".to_owned());
+        return Standby::Counted("its descriptor in the second read was not read".to_owned());
     };
     if d.interfaces.is_empty() {
-        return Err("it lists no interface".to_owned());
+        return Standby::Counted("it lists no interface".to_owned());
     }
+    let mut unobservable = Vec::new();
     for e in &d.interfaces {
-        let iface = e
-            .iface
-            .parse::<IfaceId>()
-            .map_err(|err| format!("{:?} is not an interface id: {err}", e.iface))?;
+        let Ok(iface) = e.iface.parse::<IfaceId>() else {
+            return Standby::Counted(format!("{:?} is not an interface id", e.iface));
+        };
         let governed = projection::governance(&reads, addr, &iface, contracts);
-        if !matches!(governed.governance, Governance::Governed(_)) {
-            return Err(format!("{iface} is not governed: {}", governed.says));
+        match governed.governance {
+            Governance::NotGoverned => {
+                return Standby::Counted(format!("{iface} is not governed: {}", governed.says));
+            }
+            Governance::NoContract | Governance::Disagree => {
+                unobservable.push(format!(
+                    "whether {iface} is governed cannot be read: {}",
+                    governed.says
+                ));
+                continue;
+            }
+            Governance::Governed(_) => {}
         }
         let reading = projection::reading(first, second, addr, &iface, governed.governance, false);
         let t = model::twin(&reading, instance);
-        if role_of(t) != RedundancyRole::Standby {
-            return Err(format!(
+        match role_of(t) {
+            RedundancyRole::Standby => {}
+            RedundancyRole::Twin => {
+                return Standby::Counted(format!(
+                    "of {iface}, a twin: \"is this instance a standby, or a twin?\" answers yes, \
+                     {}",
+                    t.reason.as_str()
+                ));
+            }
+            RedundancyRole::Incumbent | RedundancyRole::NotACandidate => {
+                return Standby::Counted(format!(
+                    "of {iface}, not a standby: the question answers {}, {}",
+                    t.answer.as_str(),
+                    t.reason.as_str()
+                ));
+            }
+            RedundancyRole::Unknown => unobservable.push(format!(
                 "of {iface}, \"is this instance a standby, or a twin?\" answers {}, {}",
                 t.answer.as_str(),
                 t.reason.as_str()
-            ));
+            )),
         }
     }
-    Ok(())
+    if unobservable.is_empty() {
+        Standby::Recognised
+    } else {
+        Standby::Unobservable(unobservable.join("; "))
+    }
 }
 
 #[cfg(test)]

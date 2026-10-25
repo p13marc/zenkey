@@ -555,6 +555,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         CheckId::HostidDuplicate,
         CheckId::HealthInconsistent,
         CheckId::ConfigProjection,
+        CheckId::RedundancyVacancy,
     ]
     .into_iter()
     .any(|c| spec.asks(c))
@@ -1201,6 +1202,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::DesiredRefused => desired_refused(p, spec),
                 CheckId::DesiredBehind => desired_behind(p, spec),
                 CheckId::DesiredLastKnown => desired_last_known(p, spec),
+                CheckId::RedundancyVacancy => redundancy_vacancy(p),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -1504,9 +1506,89 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
         })
         .collect();
     let refs: Vec<&Contract> = held.iter().map(|c| &**c).collect();
-    let d = zenkey::ownership::compare(&before.tokens, &p.after.tokens, &descriptors, &refs);
-    let candidates = zenkey::ownership::candidates(&before.tokens, &p.after.tokens).len();
-    let findings = d
+    let mut d = zenkey::ownership::compare(&before.tokens, &p.after.tokens, &descriptors, &refs);
+    let candidates = zenkey::ownership::candidates(&before.tokens, &p.after.tokens);
+    // redundancy.v1 §2.15 (#841, RC): of a governed interface, a holder is
+    // an incumbent whatever its mark or its exposure, so the first
+    // question, the model's own judge over the same two reads, decides:
+    // its no, `split`, is the finding; core §6's exposure rule decides the
+    // rest.
+    use zenkey_model::redundancy::{self as rm, Election, Governance};
+    let governed: Vec<(zenkey::ownership::SplitBrain, Election, rm::Judged)> = candidates
+        .iter()
+        .filter_map(|c| {
+            let g = crate::model::redundancy::governance(
+                &[Some(before), Some(p.after)],
+                &c.service,
+                &c.iface,
+                &p.obs.contracts,
+            )
+            .governance;
+            let Governance::Governed(e) = g else {
+                return None;
+            };
+            let reading = crate::model::redundancy::reading(
+                Some(before),
+                Some(p.after),
+                &c.service,
+                &c.iface,
+                g,
+                false,
+            );
+            Some((c.clone(), e, rm::one_incumbent(&reading)))
+        })
+        .collect();
+    let is_governed = |svc: &Addr, iface: &IfaceId| {
+        governed
+            .iter()
+            .any(|(c, _, _)| c.service == *svc && c.iface == *iface)
+    };
+    d.findings.retain(|sb| !is_governed(&sb.service, &sb.iface));
+    d.undecided
+        .retain(|u| !is_governed(&u.holders.service, &u.holders.iface));
+    // The governed ones are the first question's, never core §6's.
+    let candidates = candidates.len() - governed.len();
+    let mut governed_undecided: Vec<Unjudged> = governed
+        .iter()
+        .filter(|(_, _, j)| j.answer == rm::Answer::Unobservable)
+        .map(|(sb, _, j)| {
+            unjudged(
+                format!("{} {}", sb.service, sb.iface),
+                format!(
+                    "redundancy.v1 governs it, and \"is the address served by exactly one \
+                     incumbent?\" is unobservable: {} (redundancy.v1 §2.15)",
+                    j.reason.as_str()
+                ),
+            )
+        })
+        .collect();
+    let mut findings: Vec<DoctorFinding> = governed
+        .iter()
+        .filter(|(_, _, j)| j.answer == rm::Answer::No && j.reason == rm::Reason::Split)
+        .map(|(sb, election, _)| {
+            let instances: Vec<String> = sb.instances.iter().map(ToString::to_string).collect();
+            finding(
+                C,
+                DoctorSeverity::Error,
+                format!("{} {}", sb.service, sb.iface),
+                format!(
+                    "{} instances hold its interface token in two presence reads {:.1}s apart \
+                     ({}), and redundancy.v1 governs it (election {election}): a split, \
+                     whatever their marks (redundancy.v1 §2.15). {}",
+                    instances.len(),
+                    p.grace_s(),
+                    instances.join(", "),
+                    if *election == Election::Claim {
+                        "Its heal leaves the lowest serving; until then a call runs on each side"
+                    } else {
+                        "Under external nothing heals it: a lock failed, or two hosts run one \
+                         address, and a person decides"
+                    }
+                ),
+            )
+        })
+        .collect();
+    let mut exposing: Vec<DoctorFinding> = d
         .findings
         .iter()
         .map(|sb| {
@@ -1526,6 +1608,7 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
             )
         })
         .collect();
+    findings.append(&mut exposing);
     let mut undecided: Vec<Unjudged> = d
         .undecided
         .iter()
@@ -1541,6 +1624,7 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
             )
         })
         .collect();
+    undecided.append(&mut governed_undecided);
     if !p.complete {
         undecided.push(incomplete(p, "no split-brain seen is not none"));
     }
@@ -2176,6 +2260,16 @@ fn token_missing(p: &Presence<'_>) -> CheckReport {
                 }
             };
             match (exposed, held) {
+                (Some(0), true) if held_then && e.standby => findings.push(finding(
+                    C,
+                    DoctorSeverity::Error,
+                    at,
+                    format!(
+                        "holds a token for {iface}, which its descriptor marks standby: a \
+                         standby exposes nothing and holds none of its tokens (core §6, \
+                         redundancy.v1 §2.15, marked_holding)"
+                    ),
+                )),
                 (Some(0), true) if held_then => findings.push(finding(
                     C,
                     DoctorSeverity::Error,
@@ -3110,10 +3204,12 @@ struct ZidRead {
 
 /// `hostid-duplicate` (`hostid.v1` §2.12, §5): an address whose instances
 /// on a minted system state at least two session zids in both presence
-/// reads, not necessarily the same instances. Only instances whose system
-/// is known to be minted are counted (§5's first question). The finding's
+/// reads of the scope's `@zk/**` (instance and interface tokens, 0.7), not
+/// necessarily the same instances. Only instances whose system is known to
+/// be minted are counted (§5's first question), and a recognised standby
+/// (0.6, `redundancy.v1` §2.15) is not. The finding's
 /// cause is undecided — a collision, a cloned machine id and a second
-/// process look alike on the bus, and a standby shows the same way — so
+/// process look alike on the bus, and so does a standby not recognised — so
 /// the evidence names none of them as the cause, and shows each instance's
 /// `meta.host`. A warning: the deployment may expect it (a standby), and a
 /// person decides. *No* is a read that ended at the routers' final reply,
@@ -3149,6 +3245,28 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
     let mut findings = Vec::new();
     let mut undecided = Vec::new();
     let (mut counted, mut literal) = (0usize, 0usize);
+    let mut recognised: Vec<String> = Vec::new();
+    // hostid.v1 §2.12 (0.6, 0.7): a recognised standby, `redundancy.v1`'s
+    // fourth question answering no, standby, of every interface it lists,
+    // all governed, from the same two reads of the address's @zk/**, is not
+    // counted.
+    use crate::judge::redundancy::Standby;
+    let standby = |addr: &Addr, id: &InstanceId| {
+        crate::judge::redundancy::recognised_standby(
+            Some(before),
+            Some(p.after),
+            &p.obs.contracts,
+            addr,
+            id,
+        )
+    };
+    let standbys_at = |addr: &Addr| -> Vec<String> {
+        p.now
+            .keys()
+            .filter(|(a, i)| a == addr && standby(a, i) == Standby::Recognised)
+            .map(|(a, i)| format!("{a}@{i}"))
+            .collect()
+    };
     for addr in addrs {
         let shaped = zenkey_model::hostid::is_minted_shape(addr.system.as_str());
         let mut lists = false;
@@ -3160,6 +3278,17 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
                 .filter(|((a, _), i)| a == addr && i.instance_token)
             {
                 let at = format!("{}@{}", key.0, key.1);
+                match standby(&key.0, &key.1) {
+                    Standby::Recognised => continue,
+                    Standby::Unobservable(why) => {
+                        r.impediments.push(format!(
+                            "{at} lists only governed interfaces, or ones whose governance \
+                             cannot be read, and whether it is a standby is unobservable: {why}"
+                        ));
+                        continue;
+                    }
+                    Standby::Counted(_) => {}
+                }
                 let d = match descriptor(key) {
                     Some(DescriptorRead::Served(d)) => d,
                     Some(other) => {
@@ -3213,6 +3342,7 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
             continue;
         }
         let (then, now) = (read_of(&p.then), read_of(&p.now));
+        let standbys = standbys_at(addr);
         let established = |r: &ZidRead| r.zids.len() >= 2;
         let settles_no =
             |r: &ZidRead, complete: bool| complete && r.impediments.is_empty() && r.zids.len() <= 1;
@@ -3240,7 +3370,7 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
                      descriptors declare minted state {} session zids, {} then and {} now: {} — \
                      two sessions claim one address, and the cause is undecided: a collision, a \
                      cloned machine id and a second process started as the same service look \
-                     alike on the bus, and a standby shows the same way (hostid.v1 §2.12)",
+                     alike on the bus, and so does a standby not recognised (hostid.v1 §2.12)",
                     p.grace_s(),
                     now.zids.len().max(then.zids.len()),
                     then.zids.len(),
@@ -3250,6 +3380,7 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
             ));
         } else if settles_no(&then, before.complete) || settles_no(&now, p.after.complete) {
             counted += 1;
+            recognised.extend(standbys);
         } else {
             let mut why: Vec<String> = Vec::new();
             for (name, r, complete) in [
@@ -3283,7 +3414,17 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
         undecided,
         format!(
             "{counted} address(es) on minted systems, each with its counted instances stating one \
-             session zid in a complete read with every descriptor read{}",
+             session zid in a complete read with every descriptor read{}{}",
+            if recognised.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; not counted, {} recognised standby(s), redundancy.v1 §2.15's \"no, \
+                     standby\" of every interface each lists: {}",
+                    recognised.len(),
+                    recognised.join(", ")
+                )
+            },
             if literal > 0 {
                 format!(
                     "; {literal} on systems in the minted shape whose descriptors do not list \
@@ -3292,6 +3433,94 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
             } else {
                 String::new()
             }
+        ),
+    )
+}
+
+// ─── redundancy.v1 (#841, RC) ───────────────────────────────────────────────
+
+/// `redundancy-vacancy` (`redundancy.v1` §2.15, §5): an address and
+/// governed interface whose candidates hold no incumbent in both of two
+/// complete reads a grace apart, §5's *yes*, `lasting`, from the model's
+/// own judge over the doctor's two reads. A warning: the election did not
+/// end, or, under `external`, no instance holds the lock, and a person
+/// decides. A vacancy in the second read only is a takeover due, and no
+/// finding. An interface whose governance cannot be read is asked only
+/// where its shape would be the finding were it governed, and then it is
+/// unjudged; one known not governed is not this profile's.
+fn redundancy_vacancy(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::RedundancyVacancy;
+    use zenkey_model::redundancy::{self as rm, Election, Governance};
+    let before = match &p.before {
+        Ok(b) => *b,
+        Err(why) => return CheckReport::unobservable(C, why.clone()),
+    };
+    let reads = [Some(before), Some(p.after)];
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let mut asked = 0usize;
+    for (addr, iface) in crate::model::redundancy::subjects(&reads, None, None) {
+        let governed =
+            crate::model::redundancy::governance(&reads, &addr, &iface, &p.obs.contracts);
+        let subject = format!("{addr} {iface}");
+        let reading = |g| {
+            crate::model::redundancy::reading(Some(before), Some(p.after), &addr, &iface, g, false)
+        };
+        let lasting =
+            |j: rm::Judged| j.answer == rm::Answer::Yes && j.reason == rm::Reason::Lasting;
+        match governed.governance {
+            Governance::NotGoverned => {}
+            Governance::Governed(e) => {
+                asked += 1;
+                let j = rm::vacancy(&reading(governed.governance));
+                if lasting(j) {
+                    findings.push(finding(
+                        C,
+                        DoctorSeverity::Warning,
+                        subject,
+                        format!(
+                            "no instance holds its token in two complete presence reads {:.1}s \
+                             apart, and a candidate lists it: a lasting vacancy (redundancy.v1 \
+                             §2.15). {}",
+                            p.grace_s(),
+                            if e == Election::Claim {
+                                "The election did not end: a candidate's reads may be refused, or \
+                                 not complete"
+                            } else {
+                                "Under external, no instance holds the lock"
+                            }
+                        ),
+                    ));
+                } else if j.answer == rm::Answer::Unobservable {
+                    undecided.push(unjudged(
+                        subject,
+                        format!("is there a vacancy? unobservable, {}", j.reason.as_str()),
+                    ));
+                }
+            }
+            Governance::NoContract | Governance::Disagree => {
+                if lasting(rm::vacancy(&reading(Governance::Governed(Election::Claim)))) {
+                    undecided.push(unjudged(
+                        subject,
+                        format!(
+                            "no holder in two complete reads and a candidate listing it, a \
+                             lasting vacancy were it governed, and whether it is cannot be read: \
+                             {}",
+                            governed.says
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{asked} interface(s) redundancy.v1 governs, none without an incumbent in both reads \
+             {:.1}s apart",
+            p.grace_s()
         ),
     )
 }
@@ -6083,5 +6312,182 @@ mod tests {
         let mut none = ReplyKeeper::default();
         none.offer(&mut out, total, 2, || panic!("telemetry-sample not asked"));
         assert_eq!(out.replies.len(), 1);
+    }
+
+    // ── redundancy.v1 (#841, RC) ────────────────────────────────────────
+
+    /// `ledger.v1`, which `redundancy.v1` governs (election `claim`), or
+    /// the same interface with no `uses`.
+    fn ledger(governed: bool) -> Contract {
+        let mut t = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../zenkey/tests/contracts/ledger.v1.toml"),
+        )
+        .unwrap();
+        if !governed {
+            t = t.replace("uses  = [\"redundancy.v1\"]\n", "").replace(
+                "[defaults]\nannotations = { \"redundancy.election\" = \"claim\" }\n",
+                "",
+            );
+        }
+        load(&t)
+    }
+
+    fn standby_entry(c: &Contract) -> serde_json::Value {
+        let mut e = entry(c);
+        e["standby"] = json!(true);
+        e
+    }
+
+    const LEDGER: &str = "lab/ledger";
+
+    /// `lab/ledger`'s A and B, A listing `ledger.v1` serving and B marked
+    /// standby, each holding its interface token when told.
+    fn candidates(l: &Contract, a_holds: bool, b_holds: bool) -> Observed {
+        let mut keys = vec![inst(LEDGER, A), inst(LEDGER, B)];
+        if a_holds {
+            keys.push(alive(LEDGER, "ledger.v1", A, l));
+        }
+        if b_holds {
+            keys.push(alive(LEDGER, "ledger.v1", B, l));
+        }
+        observed(
+            &keys,
+            vec![
+                ((LEDGER, A), descriptor(LEDGER, A, &[entry(l)], &[])),
+                ((LEDGER, B), descriptor(LEDGER, B, &[standby_entry(l)], &[])),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_split_of_a_governed_interface_is_the_first_questions_whatever_the_marks() {
+        // redundancy.v1 §2.15, scenarios §12 step 7: two holders in both
+        // reads, one marked standby, which exposes nothing.
+        let l = ledger(true);
+        let o = obs(candidates(&l, true, true), &[&l], &[]);
+        let r = check(&o, CheckId::SplitBrain);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/ledger ledger.v1", DoctorSeverity::Error)
+        );
+        assert!(f.evidence.contains("whatever their marks"), "{f:?}");
+        assert!(f.evidence.contains("heal"), "{f:?}");
+        // Not governed, core §6 decides (0.39): a holder marked standby is
+        // still a holder, and with no replicated resource every holder
+        // exposes an exclusive one.
+        let plain = ledger(false);
+        let o = obs(candidates(&plain, true, true), &[&plain], &[]);
+        let r = check(&o, CheckId::SplitBrain);
+        let f = found(&r);
+        assert!(f.evidence.contains("expose an exclusive resource"), "{f:?}");
+        assert!(!f.evidence.contains("redundancy.v1 governs"), "{f:?}");
+        // A holder of a governed interface and a standby holding nothing:
+        // no split.
+        let o = obs(candidates(&l, true, false), &[&l], &[]);
+        clean(&check(&o, CheckId::SplitBrain));
+    }
+
+    #[test]
+    fn token_missing_never_finds_a_standby_and_names_a_marked_holder() {
+        // Core §6 (0.39): a standby exposes nothing and holds no token.
+        let l = ledger(true);
+        let o = obs(candidates(&l, true, false), &[&l], &[]);
+        let r = check(&o, CheckId::TokenMissing);
+        assert!(
+            r.findings.iter().all(|f| !f.subject.contains(B)),
+            "a standby is never token-missing: {r:#?}"
+        );
+        // A holder marked standby is still a holder, and its token is one
+        // it must not hold (redundancy.v1 §2.15, marked_holding).
+        let o = obs(candidates(&l, false, true), &[&l], &[]);
+        let r = check(&o, CheckId::TokenMissing);
+        let f = r
+            .findings
+            .iter()
+            .find(|f| f.subject.contains(B))
+            .unwrap_or_else(|| panic!("{r:#?}"));
+        assert!(f.evidence.contains("marks standby"), "{f:?}");
+        assert!(f.evidence.contains("marked_holding"), "{f:?}");
+    }
+
+    #[test]
+    fn a_lasting_vacancy_of_a_governed_interface_is_a_warning() {
+        // redundancy.v1 §2.15's second question: no holder in two complete
+        // reads, and a candidate listing it.
+        let l = ledger(true);
+        let o = obs(candidates(&l, false, false), &[&l], &[]);
+        let r = check(&o, CheckId::RedundancyVacancy);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/ledger ledger.v1", DoctorSeverity::Warning)
+        );
+        assert!(f.evidence.contains("lasting vacancy"), "{f:?}");
+        // Held: no vacancy.
+        let o = obs(candidates(&l, true, false), &[&l], &[]);
+        let why = clean(&check(&o, CheckId::RedundancyVacancy));
+        assert!(why.starts_with("1 interface(s)"), "{why}");
+        // Held in the first read only: a takeover due, no finding.
+        let mut o = obs(candidates(&l, false, false), &[&l], &[]);
+        o.before = Some(Ok(candidates(&l, true, false)));
+        clean(&check(&o, CheckId::RedundancyVacancy));
+        // The second read not complete: not decided.
+        let mut o = obs(candidates(&l, false, false), &[&l], &[]);
+        after_mut(&mut o).complete = false;
+        assert!(unseen(&check(&o, CheckId::RedundancyVacancy)).contains("presence_incomplete"));
+        // Not governed: not this profile's, and no subject.
+        let plain = ledger(false);
+        let o = obs(candidates(&plain, false, false), &[&plain], &[]);
+        assert!(clean(&check(&o, CheckId::RedundancyVacancy)).starts_with("0 interface(s)"));
+        // The revision not in hand, the shape a vacancy's: undecided.
+        let o = obs(candidates(&l, false, false), &[], &[&l]);
+        assert!(unseen(&check(&o, CheckId::RedundancyVacancy)).contains("unavailable"));
+    }
+
+    #[test]
+    fn a_recognised_standby_is_not_counted_by_hostid_duplicate() {
+        // hostid.v1 §2.12 (0.6, 0.7), scenarios §12 step 6.
+        let on = |l: &Contract, b: serde_json::Value| -> Observed {
+            observed(
+                &[
+                    inst(SYSINFO, A),
+                    inst(SYSINFO, B),
+                    alive(SYSINFO, "ledger.v1", A, l),
+                ],
+                vec![
+                    (
+                        (SYSINFO, A),
+                        minted_descriptor(A, Some("aa01"), &[entry(l)]),
+                    ),
+                    ((SYSINFO, B), minted_descriptor(B, Some("bb02"), &[b])),
+                ],
+            )
+        };
+        let l = ledger(true);
+        let o = obs(on(&l, standby_entry(&l)), &[&l], &[]);
+        let why = clean(&check(&o, CheckId::HostidDuplicate));
+        assert!(why.contains("1 recognised standby"), "{why}");
+        // The interface not governed: B is counted, and two zids are the
+        // finding.
+        let plain = ledger(false);
+        let o = obs(on(&plain, standby_entry(&plain)), &[&plain], &[]);
+        found(&check(&o, CheckId::HostidDuplicate));
+        // B lists the governed interface serving and holds nothing, the
+        // same in both reads: unmarked, a twin, counted.
+        let mut o = obs(on(&l, entry(&l)), &[&l], &[]);
+        o.before = o.after.clone();
+        found(&check(&o, CheckId::HostidDuplicate));
+        // Read once, its listing may be moving: unobservable.
+        let o = obs(on(&l, entry(&l)), &[&l], &[]);
+        assert!(unseen(&check(&o, CheckId::HostidDuplicate)).contains("in_transition"));
+        // Whether it is governed cannot be read: unobservable, never clean.
+        let o = obs(on(&l, standby_entry(&l)), &[], &[&l]);
+        let why = unseen(&check(&o, CheckId::HostidDuplicate));
+        assert!(
+            why.contains("whether it is a standby is unobservable"),
+            "{why}"
+        );
     }
 }

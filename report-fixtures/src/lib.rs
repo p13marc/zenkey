@@ -349,6 +349,13 @@ pub fn doctor_report() -> DoctorReport {
                 vec![],
                 "2 desired.v1 role(s), none running a document read from an archive",
             ),
+            CheckReport::of(
+                CheckId::RedundancyVacancy,
+                vec![],
+                vec![],
+                "1 interface(s) redundancy.v1 governs, none without an incumbent in both reads \
+                 2.0s apart",
+            ),
         ],
         unobservable: None,
     }
@@ -3291,4 +3298,83 @@ pub fn desired_report() -> DesiredReport {
         services: 7,
     });
     report
+}
+
+/// `zenctl redundancy` (#841, RC): four addresses of `ledger.v1`, which
+/// `redundancy.v1` governs (election `claim`), judged by the engine from
+/// two reads a grace apart, so every word is the model's — one incumbent
+/// with its standby, a split whose second holder is marked standby, a
+/// lasting vacancy between two standbys, and an incumbent beside an
+/// unmarked twin.
+pub fn redundancy_report() -> RedundancyReport {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use zenkey_fleet::model::catalog::{ContractState, DescriptorRead, Observed, Revision};
+    let text = "[interface]\nname = \"ledger\"\nmajor = 1\nminor = 0\nuses = [\"redundancy.v1\"]\n\
+                [defaults]\nannotations = { \"redundancy.election\" = \"claim\" }\n\
+                [resources.balance]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+                [resources.append]\nkind = \"operation\"\nrequest = { raw = \"text/plain\" }\n\
+                response = { raw = \"text/plain\" }\n";
+    let l = zenkey_model::contract::load_str(text, std::path::Path::new("."), None);
+    let rev = Arc::new(Revision::from_contract(
+        l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+        ContractSource::Bus,
+    ));
+    let fp = rev.fingerprint().clone();
+    let a = "3fa9c2d41b7e0012";
+    let b = "3fa9c2d41b7e0013";
+    // (service, instance, holds, marked standby)
+    let shape: [(&str, &str, bool, bool); 8] = [
+        ("lab/ledger", a, true, false),
+        ("lab/ledger", b, false, true),
+        ("lab/split", a, true, false),
+        ("lab/split", b, true, true),
+        ("lab/vacant", a, false, true),
+        ("lab/vacant", b, false, true),
+        ("lab/twin", a, true, false),
+        ("lab/twin", b, false, false),
+    ];
+    let read = || {
+        let mut keys = Vec::new();
+        let mut descriptors = BTreeMap::new();
+        for (svc, id, holds, standby) in shape {
+            keys.push(format!("zk2/{svc}/@zk/instance/{id}"));
+            if holds {
+                keys.push(format!(
+                    "zk2/{svc}/@zk/alive/ledger.v1/{id}/{}",
+                    fp.hex().fp16()
+                ));
+            }
+            let d = serde_json::from_value(serde_json::json!({
+                "format": "zk2-descriptor/0.1", "service": svc, "instance": id,
+                "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(), "minor": 0,
+                                "standby": standby}],
+                "meta": {"zid": format!("{id}0")},
+            }))
+            .expect("a descriptor");
+            descriptors.insert(
+                (svc.parse().expect("an address"), id.parse().expect("an id")),
+                DescriptorRead::Served(Box::new(d)),
+            );
+        }
+        let mut o = Observed::from_keys("zk2/*/*/@zk/**", &keys, true);
+        o.descriptors = Some(descriptors);
+        o
+    };
+    let mut contracts = BTreeMap::new();
+    contracts.insert(
+        ("ledger.v1".parse().expect("an interface"), fp.clone()),
+        Ok(ContractState::Held(Arc::clone(&rev))),
+    );
+    let obs = zenkey_fleet::RedundancyObservation {
+        cut_off: None,
+        first: Some(Ok(read())),
+        second: Some(Ok(read())),
+        apart: Duration::from_secs(2),
+        contracts,
+        asked: vec!["zk2/*/*/@zk/**".into()],
+    };
+    let spec = zenkey_fleet::RedundancySpec::new(Duration::from_secs(1));
+    zenkey_fleet::judge_redundancy("acme", None, &spec, &obs)
 }

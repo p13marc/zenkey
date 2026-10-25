@@ -132,6 +132,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ?  desired-behind (desired.v1 §2.17)          unobservable — 1 subject(s) unjudged
     ? unjudged lab/w3 task: its report's observed 100/a1 is earlier than its author lab/author's current version, its put 300/a1, the same id: not yet — how long it has been so cannot be told from one reading without a trusted clock: pass --clocks-synced
 ✓  desired-last-known (desired.v1 §2.9)       clean — 2 desired.v1 role(s), none running a document read from an archive
+✓  redundancy-vacancy (redundancy.v1 §2.15)   clean — 1 interface(s) redundancy.v1 governs, none without an incumbent in both reads 2.0s apart
 
 "#]]
     );
@@ -679,6 +680,58 @@ desired.v1 in namespace "acme" — 5 role(s), 1 reading(s)
     assert!(said.contains("is behind"), "{said}");
 }
 
+/// `zenctl redundancy` (#841, RC): one row per governed interface, §5's
+/// four answers spelled apart — "served by exactly one incumbent?" as the
+/// mark and the word, the rest as lines — each instance's role, read off its
+/// fourth answer, and the run's judgement leading the envelope.
+#[test]
+fn a_redundancy_reading_spells_every_answer_apart_in_every_medium() {
+    let report = fx::redundancy_report();
+    assert_data_eq!(table(&report), str![[r#"
+redundancy.v1 in namespace "acme" — 4 interface(s), two reads 2.0s apart
+✓  lab/ledger ledger.v1  exactly one incumbent: yes (one) — one holder of its token, the read complete
+    governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
+    vacancy: no (held) — a holder of its token in the second read
+    standbys: yes (standing_by, 1 exact) — marked standby, holding none of its tokens
+    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
+    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
+✗  lab/split ledger.v1   exactly one incumbent: no (split) — two or more holders of its token in both reads a grace apart (core §6)
+    governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
+    vacancy: no (held) — a holder of its token in the second read
+    standbys: no (none, 0 exact) — no instance marked standby and holding none of its tokens
+    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) a TWIN: yes (split_lowest) — a holder of a split, the lowest, which the heal keeps
+    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a TWIN: yes (split) — two or more holders of its token in both reads a grace apart (core §6)
+✗  lab/twin ledger.v1    exactly one incumbent: yes (one) — one holder of its token, the read complete
+    governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
+    vacancy: no (held) — a holder of its token in the second read
+    standbys: no (none, 0 exact) — no instance marked standby and holding none of its tokens
+    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
+    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a TWIN: yes (unmarked) — it lists the interface unmarked and holds no token, in both reads: an exposure no token covers
+✗  lab/vacant ledger.v1  exactly one incumbent: no (vacant) — no holder, a candidate present
+    governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
+    vacancy: yes (lasting) — no holder in either read, both complete, a candidate present: the election did not end, or no instance holds the lock
+    standbys: yes (standing_by, 2 exact) — marked standby, holding none of its tokens
+    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) a standby: no (standby) — marked standby, no token, the read complete
+    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
+
+"#]]);
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "redundancy");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert!(envelope.get("interfaces").is_none(), "interfaces are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.interfaces.len());
+    let first: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .map(|r| r["one_incumbent"]["reason"].as_str().expect("a reason"))
+        .collect();
+    assert_eq!(first, ["one", "split", "vacant"].into());
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -705,6 +758,7 @@ fn no_family_emits_trailing_whitespace() {
         table(&fx::health_report()),
         table(&fx::alarms_report()),
         table(&fx::desired_report()),
+        table(&fx::redundancy_report()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -2118,6 +2172,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "probe",
         "rate",
         "record",
+        "redundancy",
         "replay",
         "schema-check",
         "schema-show",

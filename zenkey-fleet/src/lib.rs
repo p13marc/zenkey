@@ -311,7 +311,7 @@ pub use bus::redundancy::{
     DEFAULT_GRACE as REDUNDANCY_DEFAULT_GRACE, RedundancyObservation, RedundancySpec,
     observe as observe_redundancy, run_redundancy,
 };
-pub use judge::redundancy::{judge as judge_redundancy, recognised_standby};
+pub use judge::redundancy::{Standby, judge as judge_redundancy, recognised_standby};
 // `telemetry.v1` (#819, TC): a scope's metric members read as the
 // profile's reader reads them — the reads, the session-free book they fold
 // into, and the judge.
