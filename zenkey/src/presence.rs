@@ -56,10 +56,16 @@
 //! (#851, core §8.1, 0.41): its final reply follows the subscribers'
 //! registration whatever it matches, and their history too, which is why a
 //! watch session's subscribers are declared without history when their
-//! reader seeds by a read, unless the session is in a namespace
-//! ([`subscriber_needs_history`]). [`Barrier`] is the barrier a reader
-//! keeps: made once, lost when the watch session's transport moves, made
-//! again.
+//! reader seeds by a read. In a namespace a subscriber without history
+//! never hears an earlier token withdrawn (#872), so the runtime's
+//! owner-side watches, on a session the application hands in, keep history
+//! there ([`subscriber_needs_history`]); the tools' watch sessions run in
+//! no namespace instead, on the wire keys, and ask their barrier key there
+//! ([`settle_at`], [`Barrier::at`]; `zenkey_fleet::WatchSession`, #875,
+//! core §8.1, 0.42). [`Barrier`] is the barrier a reader keeps: made once,
+//! lost when the watch session's transport moves, made again. No round
+//! trip is asked through a session cut off, and none that was cut off
+//! while it ran stands (0.42, F-228).
 //!
 //! **A GET that runs to the session's interests timeout** (#851, core §8.1,
 //! 0.41) is possibly incomplete. zenoh 1.10.1's client and peer runtimes end
@@ -384,10 +390,14 @@ pub async fn cut_off(session: &zenoh::Session) -> bool {
 /// and is never heard (measured, `tests/presence.rs` §10 step 7). A
 /// session in no namespace hears it, a namespaced key included.
 ///
-/// A watch session's subscribers have history exactly when this says so:
+/// The runtime's owner-side watches, on a session the application hands
+/// in (desired.v1's target), take history exactly when this says so:
 /// without, the round trip is one round trip at any population; with, it
-/// waits for the history, and a reader that saw it run out makes it again
-/// before its next seed, when the history is in.
+/// waits for the history, a handful of tokens of one author. The tools'
+/// watch sessions run in no namespace instead (`zenkey_fleet::WatchSession`,
+/// #875, core §8.1, 0.42), where this reads false and no history is
+/// needed: they subscribe to the wire keys, the namespace in front, and
+/// hear the withdrawal there.
 #[must_use]
 pub fn subscriber_needs_history(session: &zenoh::Session) -> bool {
     session

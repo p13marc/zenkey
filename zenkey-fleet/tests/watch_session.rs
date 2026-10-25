@@ -824,6 +824,50 @@ async fn an_alarm_feed_whose_round_trip_does_not_stand_reads_the_scope_not_whole
     );
 }
 
+/// An alarms reader's watch session whose transport moves (core §8.1, 0.42,
+/// F-229): its subscriber, without history, may not have heard an owner
+/// leave or come while the link was down, so the move is a loss at once,
+/// the scope not read whole and nothing "no alarm fires"; a refresh after
+/// the link heals reads it whole again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_alarm_feed_counts_a_move_of_its_watch_session_as_a_loss() {
+    use zenkey_model::alarms::ScopeRead;
+
+    let (_router, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let link = Link::to(&ep).await;
+    let watch = retrying_client(&link.endpoint).await;
+    let (mut feed, _) = AlarmFeed::open(
+        &tool,
+        Some(&watch_of(&watch, "")),
+        AlarmScope::all(),
+        AlarmSpec::new(T),
+        true,
+    )
+    .await
+    .expect("the reader opens");
+    assert_eq!(feed.book().scope_read(), ScopeRead::Whole);
+    assert_eq!(feed.book().lost(), 0);
+    link.cut();
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while feed.book().lost() == 0 {
+        assert!(
+            tokio::time::timeout_at(deadline, feed.next())
+                .await
+                .is_ok_and(|d| d.is_some()),
+            "the move never folded"
+        );
+    }
+    assert_eq!(feed.book().scope_read(), ScopeRead::NotWhole, "a loss");
+    link.heal();
+    eventually("the watch session back", || async {
+        zenkey_fleet::cut_off(&watch).await.is_none()
+    })
+    .await;
+    feed.refresh().await;
+    assert_eq!(feed.book().scope_read(), ScopeRead::Whole, "healed");
+}
+
 // ─── in a namespace (#872, #875) ────────────────────────────────────────────
 
 /// More instance tokens than a reader's queue holds
