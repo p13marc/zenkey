@@ -1405,14 +1405,14 @@ mod tests {
         let a = InstanceId::from_u64(0xa);
         // complete {A}, then not complete {}, then complete {}: a withdrawal.
         let (first, last) = poll_step(&set(&[]), true, &set(&[0xa]));
-        assert_eq!(first.appeared, [a.clone()]);
+        assert_eq!(first.appeared, std::slice::from_ref(&a));
         let (second, last) = poll_step(&last, false, &set(&[]));
         assert!(second.appeared.is_empty() && second.withdrawn.is_empty());
         assert_eq!(last, set(&[0xa]), "A kept");
         let (third, last) = poll_step(&last, true, &set(&[]));
         assert_eq!(
             third.withdrawn,
-            [a.clone()],
+            std::slice::from_ref(&a),
             "only a complete read shows it gone"
         );
         assert!(last.is_empty());
