@@ -1505,3 +1505,251 @@ fn the_help_documents_the_desired_surface() {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
 }
+
+/// One JSON answer of a `redundancy` command.
+async fn ask_json(o: &Running, cmd: &str) -> serde_json::Value {
+    let answer = o.ask(cmd).await;
+    serde_json::from_str(&answer).unwrap_or_else(|e| panic!("{cmd}: not JSON ({e}): {answer}"))
+}
+
+/// The paths of the scenarios' governed contracts.
+fn governed(name: &str) -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/contracts")
+        .join(format!("{name}.toml"))
+        .display()
+        .to_string()
+}
+
+/// `redundancy.v1` in the owner example (#841, RB): `--standby` claims, and
+/// serves only once elected; a second owner stands by on the first, its id
+/// lower or not; each instance answers `append` with its `--name`, counted,
+/// and puts its name as `balance` when it takes over; killed (here its task
+/// dropped, as a kernel closes the links), the standby takes over; a re-mint
+/// keeps it serving under its new id (F-209).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_stands_by_and_takes_over() {
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let ledger = governed("ledger.v1");
+    let start = |name: &'static str, id: &'static str| {
+        spawn_owner(&[
+            "--connect",
+            &ep,
+            "--standby",
+            "--election",
+            "claim",
+            "--instance-id",
+            id,
+            "--name",
+            name,
+            "lab/ledger",
+            &ledger,
+        ])
+    };
+    let a = start("A", "000000000000000a");
+    assert_eq!(line(&a.lines).await, format!("connected {ep}"));
+    assert_eq!(
+        line(&a.lines).await,
+        "ready zk2/lab/ledger/@zk/instance/000000000000000a"
+    );
+    let waited = ask_json(&a, "redundancy wait ledger.v1 serving 10000").await;
+    assert_eq!(waited["reached"], true, "{waited}");
+    let b = start("B", "0000000000000009");
+    line(&b.lines).await;
+    line(&b.lines).await;
+    // B's id is the lower: a live incumbent wins whatever its id (§2.5).
+    let mut role = serde_json::Value::Null;
+    for _ in 0..200 {
+        role = ask_json(&b, "redundancy role").await;
+        if role["interfaces"]["ledger.v1"]["why"] == "incumbent" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        role,
+        serde_json::json!({
+            "redundancy": "role",
+            "instance": "0000000000000009",
+            "interfaces": {"ledger.v1": {
+                "role": "standby", "why": "incumbent", "instance": "000000000000000a"
+            }},
+        })
+    );
+    // A call finds no standby.
+    let call = |s: &zenoh::Session| {
+        let s = s.clone();
+        async move {
+            get(
+                &s,
+                "zk2/lab/ledger/ledger.v1/@op/append",
+                b"x",
+                QueryTarget::BestMatching,
+                ConsolidationMode::None,
+            )
+            .await
+            .into_iter()
+            .filter_map(|r| r.into_result().ok())
+            .map(|s| String::from_utf8_lossy(&s.payload().to_bytes()).into_owned())
+            .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(call(&tool).await, ["A"]);
+    assert_eq!(ask_json(&a, "redundancy calls").await["calls"], 1);
+    assert_eq!(ask_json(&b, "redundancy calls").await["calls"], 0);
+    assert_eq!(
+        state(&tool, "zk2/lab/ledger/ledger.v1/state/balance").await,
+        [b"A".to_vec()],
+        "A's name, put at its takeover"
+    );
+    let reads = ask_json(&b, "redundancy reads").await;
+    assert!(
+        reads["interfaces"]["ledger.v1"]["made"].as_u64().unwrap() >= 1,
+        "{reads}"
+    );
+    assert_eq!(reads["interfaces"]["ledger.v1"]["polls"], 0);
+    assert!(reads["sessions"]["reader"]["reads"].as_u64().unwrap() >= 1);
+    assert_eq!(
+        reads["sessions"]["watch"]["reads"], 0,
+        "the watch makes no read"
+    );
+    assert!(
+        a.ask("redundancy lock hold").await.starts_with("refused"),
+        "no lock under claim"
+    );
+
+    // A crashes: B takes over, and answers.
+    a.task.abort();
+    let waited = ask_json(&b, "redundancy wait ledger.v1 serving 10000").await;
+    assert_eq!(waited["reached"], true, "{waited}");
+    assert_eq!(call(&tool).await, ["B"]);
+    eventually("B's name, put at its takeover", || async {
+        state(&tool, "zk2/lab/ledger/ledger.v1/state/balance").await == [b"B".to_vec()]
+    })
+    .await;
+
+    // A re-mint in this session: still serving, under its new id.
+    let minted = ask_json(&b, "redundancy new-epoch").await;
+    let next = minted["instance"].as_str().unwrap().to_owned();
+    assert_ne!(next, "0000000000000009");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let role = ask_json(&b, "redundancy role").await;
+    assert_eq!(role["instance"], next.as_str());
+    assert_eq!(role["interfaces"]["ledger.v1"]["role"], "serving", "{role}");
+    let held = presence::liveliness_read(&tool, "zk2/lab/ledger/@zk/alive/**", T)
+        .await
+        .unwrap();
+    assert_eq!(held.keys.len(), 1, "{held:?}");
+    assert!(held.keys[0].contains(&next), "the token under the new id");
+    b.stop().await;
+}
+
+/// `--election external` with the commands' lock (#841, RB): an owner
+/// without the lock stands by, marked, whatever its id; `redundancy lock
+/// hold` takes over, `lose` steps down; `--refuse-without-lock` refuses
+/// to start; a governed contract without `--standby`, and `--standby`
+/// without one, refuse too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_under_external() {
+    let (_r1, ep) = router(None).await;
+    let valve = governed("valve.v1");
+    let start = |id: &'static str, extra: &[&str]| {
+        let mut args = vec![
+            "--connect",
+            &ep,
+            "--election",
+            "external",
+            "--instance-id",
+            id,
+        ];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["lab/valve", &valve]);
+        spawn_owner(&args)
+    };
+    let v1 = start("0000000000000002", &[]);
+    line(&v1.lines).await;
+    line(&v1.lines).await;
+    let v2 = start("0000000000000001", &[]);
+    line(&v2.lines).await;
+    line(&v2.lines).await;
+    for o in [&v1, &v2] {
+        let w = ask_json(o, "redundancy wait valve.v1 standby 5000").await;
+        assert_eq!(w["standing"]["why"], "no_lock", "{w}");
+    }
+    assert_eq!(ask_json(&v1, "redundancy lock hold").await["held"], true);
+    let w = ask_json(&v1, "redundancy wait valve.v1 serving 10000").await;
+    assert_eq!(w["reached"], true, "{w}");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(
+        ask_json(&v2, "redundancy role").await["interfaces"]["valve.v1"]["role"],
+        "standby",
+        "no election by ids moves V2"
+    );
+    assert_eq!(ask_json(&v1, "redundancy lock lose").await["held"], false);
+    let w = ask_json(&v1, "redundancy wait valve.v1 standby 10000").await;
+    assert_eq!(w["reached"], true, "the lock lost: a step-down");
+    assert_eq!(ask_json(&v2, "redundancy lock hold").await["held"], true);
+    let w = ask_json(&v2, "redundancy wait valve.v1 serving 10000").await;
+    assert_eq!(w["reached"], true, "{w}");
+
+    // Refusals at the start.
+    let refuse = |args: &[&str]| {
+        let o = spawn_owner(args);
+        async move { o.task.await.unwrap().unwrap_err() }
+    };
+    let why = refuse(&[
+        "--connect",
+        &ep,
+        "--refuse-without-lock",
+        "lab/valve",
+        &valve,
+    ])
+    .await;
+    assert!(why.contains("§2.11"), "{why}");
+    let why = refuse(&["--connect", &ep, "lab/valve", &valve]).await;
+    assert!(why.contains("ServiceBuilder::redundancy"), "{why}");
+    let plain = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/contracts/interop.v1.toml")
+        .display()
+        .to_string();
+    let why = refuse(&["--connect", &ep, "--standby", "ex/plain", &plain]).await;
+    assert!(why.contains("no interface"), "{why}");
+    let why = refuse(&["--connect", &ep, "--election", "claim", "lab/valve", &valve]).await;
+    assert!(why.contains("declares external"), "{why}");
+    v1.stop().await;
+    v2.stop().await;
+}
+
+/// `owner --help` documents the `redundancy.v1` surface a live runner
+/// drives (#841, RB): every option, command and answer.
+#[test]
+fn the_help_documents_the_redundancy_surface() {
+    for piece in [
+        "--standby",
+        "--election claim|external",
+        "--instance-id <id>",
+        "--name <word>",
+        "--retry-ms <ms>",
+        "--grace-ms <ms>",
+        "--poll-ms <ms>",
+        "--lease-ms <ms>",
+        "--lock-file <path>",
+        "--refuse-without-lock",
+        "--hold-heal",
+        "--peer",
+        "redundancy role",
+        "redundancy reads",
+        "redundancy lock hold|lose",
+        "redundancy calls",
+        "redundancy hold-heal on|off",
+        "redundancy wait <iface> serving|standby <ms>",
+        "redundancy new-epoch",
+        "{\"redundancy\": \"role\", \"instance\": <id>, \"interfaces\": {<iface>: <standing>}}",
+        "{\"redundancy\": \"lock\", \"held\": <bool>}",
+        "own_claim_missing, descriptor_unread, lower_candidate, no_lock",
+        "refused <line>: <why>",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}

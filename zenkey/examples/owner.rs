@@ -13,6 +13,9 @@
 //!     [--desired-author] [--desired-record <file>] [--desired-window <s>]
 //!     [--desired-target <system>/<service>] [--desired-unbound] [--desired-archive <system>/<service>]
 //!     [--desired-watch] [--desired-reread-ms <ms>] [--desired-hold]
+//!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
+//!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
+//!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer]
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -373,6 +376,69 @@
 //! <json>`, the `desired.v1.Report` as held now; `running` `desired running
 //! <json>`; `acts` `desired acts <n> seeds=<n> held=<true|false>`; every
 //! other command as it was asked.
+//!
+//! **`redundancy.v1`** (`spec/profiles/redundancy/v1.md`, #841) is the
+//! runtime's ([`zenkey::redundancy`]), for every contract given that lists
+//! `redundancy.v1` in `uses` (a governed interface: the scenarios'
+//! `ledger.v1` and `valve.v1`, `zenkey/tests/contracts/`). A governed
+//! contract needs `--standby`, implied by every option below but
+//! `--instance-id`, `--name`, `--lease-ms` and `--peer`, and `--standby`
+//! needs a governed contract: either alone refuses to start, exit 1. The
+//! owner claims at its start (its descriptor marks each governed interface
+//! `"standby": true`, its instance token), follows the address on a watch
+//! session of its own, reads on a reader of its own, and serves only once
+//! elected; the `ready` line says it claimed, not that it serves.
+//!
+//! - `--election claim|external` checks that every governed contract
+//!   declares that election (§2.2): the contract's word, never set here.
+//! - `--instance-id <16 hex>` is the first instance's id, a test's choice:
+//!   the scenarios order their instances by id.
+//! - `--name <word>`: a raw operation answers `<word>` instead of its echo,
+//!   and a raw state with no template parameters holds `<word>`, put at the
+//!   start, or at the takeover for a governed interface (§2.6 step 3).
+//!   Every execution of an operation is counted (`redundancy calls`).
+//! - `--retry-ms <ms>` (2000) is the retry interval (§2.5), `--grace-ms
+//!   <ms>` (2000) the grace of a heal's two reads (§2.9), `--poll-ms <ms>` a
+//!   poll of the address this often instead of a watch session (§2.7).
+//! - `--lease-ms <ms>` is every session's lease, which its router reads: a
+//!   silent link is seen that much later (§2.8).
+//! - `--lock-file <path>` is `external`'s lock, a `flock(LOCK_EX |
+//!   LOCK_NB)` taken when free, held until `redundancy lock lose` or the
+//!   process ends (§2.11). Without it, the lock is the commands':
+//!   `redundancy lock hold|lose`, not held at the start.
+//!   `--refuse-without-lock` refuses to start without the lock, exit 1,
+//!   with nothing declared, rather than stand by.
+//! - `--hold-heal` holds the heal's reads from the start (`scenarios.md`
+//!   §9's hook), until `redundancy hold-heal off`.
+//! - `--peer`, with `--connect`: every session a peer whose only endpoint
+//!   is the router's, listening on loopback and gossiping, since a peer
+//!   reads only what its routers' clients and its linked peers hold (core
+//!   §8.1, 0.40; F-206).
+//!
+//! Its commands, each answered by one JSON line, or `refused <line>:
+//! <why>`:
+//!
+//! ```text
+//! redundancy role                            {"redundancy": "role", "instance": <id>, "interfaces": {<iface>: <standing>}}
+//! redundancy reads                           {"redundancy": "reads", "interfaces": {<iface>: {"made", "complete", "not_made", "polls", "last"}}, "sessions": {"reader": {"reads", "settles"}, "watch"?: …}}
+//! redundancy lock hold|lose                  {"redundancy": "lock", "held": <bool>}
+//! redundancy calls                           {"redundancy": "calls", "calls": <n>}
+//! redundancy hold-heal on|off                {"redundancy": "hold-heal", "held": <bool>}
+//! redundancy wait <iface> serving|standby <ms>   {"redundancy": "wait", "iface", "reached": <bool>, "standing"}
+//! redundancy new-epoch                       {"redundancy": "new-epoch", "instance": <id>}
+//! ```
+//!
+//! A `<standing>` is `{"role": "unclaimed"|"standby"|"serving", "why"?,
+//! "instance"?}`: `why` the last stand-by's (`incumbent`, `incomplete`,
+//! `own_claim_missing`, `descriptor_unread`, `lower_candidate`, `no_lock`,
+//! as `elections.json` writes them), with the instance it names. `reads`
+//! counts the election's reads (made, of them complete, not made: its
+//! reader cut off) and the poll's, `last` the last one's reading, and each
+//! session's liveliness GETs. `lock` asks the lock again at once. `wait`
+//! answers once the role is reached, or at the deadline. `new-epoch` is a
+//! re-mint in this session (core §8.1): a serving interface's token is
+//! re-minted make-before-break, and the election knows its new id (F-209).
+//! **A crash is the process's**: kill it, as the scenarios' §1 and §10 do.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -393,6 +459,7 @@ use zenkey::model::schema::TypeId;
 use zenkey::model::telemetry as telemetry_model;
 use zenkey::model::template::{Bindings, Segment};
 use zenkey::operation::OperationServer;
+use zenkey::redundancy::{FileLock, Lock, ManualLock, RedundancyStartup, Role, Takeover};
 use zenkey::state::StateWriter;
 use zenkey::writer::{EventWriter, Writer};
 use zenkey::{Address, Implementation, OpError, Service, ServiceBuilder, ServiceConfig};
@@ -477,6 +544,38 @@ pub struct Options {
     /// `--desired-hold`: the drive holds its first act until `desired
     /// release`.
     pub desired_hold: bool,
+    /// `--standby`, or implied by a redundancy option: `redundancy.v1` for
+    /// every governed contract, on a reader and a watch session of the
+    /// owner's own (#841).
+    pub standby: bool,
+    /// `--election claim|external`: the election every governed contract
+    /// must declare (§2.2): the contract's word, checked, never set here.
+    pub election: Option<zenkey::redundancy::Election>,
+    /// `--instance-id <16 hex>`: the first instance's id, a test's choice
+    /// (`scenarios.md`: the test orders its instances by id).
+    pub instance_id: Option<zenkey::model::grammar::InstanceId>,
+    /// `--name <word>`: what a raw operation answers instead of its echo,
+    /// and the value of a raw state put at the start or the takeover.
+    pub name: Option<String>,
+    /// `--retry-ms <ms>`: the retry interval (§2.5), 2000 by default.
+    pub retry_ms: u64,
+    /// `--grace-ms <ms>`: the grace of a heal's two reads (§2.9), 2000.
+    pub grace_ms: u64,
+    /// `--poll-ms <ms>`: no watch session; a poll of the address this often.
+    pub poll_ms: Option<u64>,
+    /// `--lease-ms <ms>`: every session's lease, which its router reads.
+    pub lease_ms: Option<u64>,
+    /// `--lock-file <path>`: `external`'s lock, a `flock`; without it, the
+    /// lock is the commands' (`redundancy lock hold|lose`).
+    pub lock_file: Option<PathBuf>,
+    /// `--refuse-without-lock`: under `external`, refuse to start without
+    /// the lock (§2.11).
+    pub refuse_without_lock: bool,
+    /// `--hold-heal`: the heal's reads held from the start.
+    pub hold_heal: bool,
+    /// `--peer`: with `--connect`, every session a peer that listens on
+    /// loopback and gossips, rather than a client (core §8.1, 0.40).
+    pub peer: bool,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -511,6 +610,9 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--desired-target <system>/<service>] [--desired-unbound]
     [--desired-archive <system>/<service>] [--desired-watch] [--desired-reread-ms <ms>]
     [--desired-hold]
+    [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
+    [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
+    [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
 
 Standard output, first:
@@ -530,6 +632,7 @@ Command words:
   alarm ...                               alarms.v1 (--alarms), below
   telemetry ...                           telemetry.v1's writers, below
   desired ...                             desired.v1 (--desired-*), below
+  redundancy ...                          redundancy.v1 (--standby), below
 
 alarms.v1 (spec/profiles/alarms/v1.md)
   Implemented by the runtime with --alarms, implied by any --alarms-* option,
@@ -681,6 +784,63 @@ desired.v1 (spec/profiles/desired/v1.md)
 
   A restart is the process's: kill it, or close standard input, and start it
   again (an author with the same --desired-record).
+
+redundancy.v1 (spec/profiles/redundancy/v1.md)
+  For every contract given that lists redundancy.v1 in uses (a governed
+  interface; the scenarios' ledger.v1 and valve.v1). A governed contract needs
+  --standby (implied by every option here but --instance-id, --name,
+  --lease-ms and --peer), and --standby a governed contract: either alone
+  refuses to start, exit 1. The owner claims at its start (its descriptor marks
+  each governed interface \"standby\": true, its instance token), follows the
+  address on a watch session, reads on a reader of its own, and serves only
+  once elected: ready says it claimed, not that it serves.
+
+  --standby                       take part in redundancy.v1's election
+  --election claim|external       every governed contract must declare it (checked,
+                                  never set: the election is the contract's)
+  --instance-id <id>              the first instance's id, 16 lowercase hex digits
+  --name <word>                   a raw operation answers <word> instead of its echo;
+                                  a raw state with no parameters holds <word>, put at
+                                  the start, or at the takeover when governed
+  --retry-ms <ms>                 the retry interval, 2000 by default
+  --grace-ms <ms>                 the grace of a heal's two reads, 2000 by default
+  --poll-ms <ms>                  no watch session: a poll of the address this often
+  --lease-ms <ms>                 every session's lease, as its router reads it
+  --lock-file <path>              external's lock, a flock taken when free and held
+                                  until redundancy lock lose or the process ends;
+                                  without it the lock is redundancy lock hold|lose's,
+                                  not held at the start
+  --refuse-without-lock           under external, refuse to start without the lock,
+                                  exit 1, nothing declared
+  --hold-heal                     the heal's reads held until redundancy hold-heal off
+  --peer                          with --connect, every session a peer of that router,
+                                  listening on loopback and gossiping
+
+  redundancy role                 each governed interface's standing
+  redundancy reads                the election's reads, and each session's GETs
+  redundancy lock hold|lose       the lock (external), asked again at once
+  redundancy calls                the operations' executions so far
+  redundancy hold-heal on|off     the heal's reads held, or released
+  redundancy wait <iface> serving|standby <ms>
+                                  answered once the role is reached, or at <ms>
+  redundancy new-epoch            a re-mint in this session, the election told first
+
+  Answers, one JSON line each:
+    {\"redundancy\": \"role\", \"instance\": <id>, \"interfaces\": {<iface>: <standing>}}
+    {\"redundancy\": \"reads\", \"interfaces\": {<iface>: {\"made\": <n>, \"complete\": <n>,
+      \"not_made\": <n>, \"polls\": <n>, \"last\": <reading>}}, \"sessions\":
+      {\"reader\": {\"reads\": <n>, \"settles\": <n>}, \"watch\"?: {...}}}
+    {\"redundancy\": \"lock\", \"held\": <bool>}
+    {\"redundancy\": \"calls\", \"calls\": <n>}
+    {\"redundancy\": \"hold-heal\", \"held\": <bool>}
+    {\"redundancy\": \"wait\", \"iface\": <iface>, \"reached\": <bool>, \"standing\": <standing>}
+    {\"redundancy\": \"new-epoch\", \"instance\": <id>}
+    <standing>: {\"role\": \"unclaimed\"|\"standby\"|\"serving\", \"why\"?: <why>,
+      \"instance\"?: <id>}, <why> as elections.json writes it: incumbent, incomplete,
+      own_claim_missing, descriptor_unread, lower_candidate, no_lock
+    refused <line>: <why>
+
+  A crash is the process's: kill it (scenarios.md §1, §10).
 ";
 
 fn level_name(l: Option<Level>) -> String {
@@ -704,6 +864,9 @@ impl Options {
              [--desired-target <system>/<service>] [--desired-unbound] \
              [--desired-archive <system>/<service>] [--desired-watch] \
              [--desired-reread-ms <ms>] [--desired-hold] \
+             [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
+             [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
+             [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -736,6 +899,18 @@ impl Options {
             desired_watch: false,
             desired_reread_ms: None,
             desired_hold: false,
+            standby: false,
+            election: None,
+            instance_id: None,
+            name: None,
+            retry_ms: 2000,
+            grace_ms: 2000,
+            poll_ms: None,
+            lease_ms: None,
+            lock_file: None,
+            refuse_without_lock: false,
+            hold_heal: false,
+            peer: false,
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -919,6 +1094,79 @@ impl Options {
                     o.desired_hold = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--standby" => {
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--election" => {
+                    o.election = Some(match value.as_str() {
+                        "claim" => zenkey::redundancy::Election::Claim,
+                        "external" => zenkey::redundancy::Election::External,
+                        _ => return Err(format!("--election {value:?}: claim or external")),
+                    });
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--instance-id" => {
+                    o.instance_id = Some(value.parse().map_err(|e| {
+                        format!("--instance-id {value:?}: 16 lowercase hex digits: {e}")
+                    })?);
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--name" => {
+                    o.name = Some(value.clone());
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--retry-ms" => {
+                    o.retry_ms = value
+                        .parse()
+                        .map_err(|e| format!("--retry-ms {value:?}: {e}"))?;
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--grace-ms" => {
+                    o.grace_ms = value
+                        .parse()
+                        .map_err(|e| format!("--grace-ms {value:?}: {e}"))?;
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--poll-ms" => {
+                    o.poll_ms = Some(
+                        value
+                            .parse()
+                            .map_err(|e| format!("--poll-ms {value:?}: {e}"))?,
+                    );
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--lease-ms" => {
+                    o.lease_ms = Some(
+                        value
+                            .parse()
+                            .map_err(|e| format!("--lease-ms {value:?}: {e}"))?,
+                    );
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--lock-file" => {
+                    o.lock_file = Some(PathBuf::from(value));
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--refuse-without-lock" => {
+                    o.refuse_without_lock = true;
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--hold-heal" => {
+                    o.hold_heal = true;
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--peer" => {
+                    o.peer = true;
+                    rest = tail;
+                }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
                 _ => break,
             }
@@ -943,6 +1191,9 @@ impl Options {
                  the target's: give --desired-target or --desired-unbound"
                     .to_owned(),
             );
+        }
+        if o.peer && o.connect.is_none() {
+            return Err("--peer: give --connect, the peers' only endpoint".to_owned());
         }
         o.address = address.clone();
         o.contracts = files.iter().map(PathBuf::from).collect();
@@ -1074,6 +1325,9 @@ pub async fn run_with(
 
     let mut z = zenoh::Config::default();
     z.insert_json5("scouting/multicast/enabled", "false")?;
+    if let Some(ms) = opts.lease_ms {
+        z.insert_json5("transport/link/tx/lease", &ms.to_string())?;
+    }
     let (session, endpoint) = match &opts.connect {
         None => {
             z.insert_json5("mode", "\"router\"")?;
@@ -1091,8 +1345,7 @@ pub async fn run_with(
             (session, endpoint)
         }
         Some(endpoint) => {
-            z.insert_json5("mode", "\"client\"")?;
-            z.insert_json5("connect/endpoints", &serde_json::to_string(&[endpoint])?)?;
+            side(&mut z, &opts, endpoint)?;
             // §4.3: a session that serves state enables its HLC. A simulated
             // offset leaves it off (the module doc): the HLC would re-stamp
             // the offset clock's stamps before they leave.
@@ -1103,6 +1356,34 @@ pub async fn run_with(
             say(format!("connected {endpoint}"));
             (session, endpoint.clone())
         }
+    };
+    // redundancy.v1 §2.5 step 1, §2.7 (#841; text 0.2, F-204): a reader
+    // and, unless it polls, a watch session of the owner's own, beside the
+    // claim's.
+    let red = if opts.standby {
+        let open = || async {
+            let mut c = zenoh::Config::default();
+            c.insert_json5("scouting/multicast/enabled", "false")?;
+            if let Some(ms) = opts.lease_ms {
+                c.insert_json5("transport/link/tx/lease", &ms.to_string())?;
+            }
+            side(&mut c, &opts, &endpoint)?;
+            Ok::<_, BoxError>(zenoh::open(c).await?)
+        };
+        let reader = open().await?;
+        let watch = match opts.poll_ms {
+            Some(_) => None,
+            None => Some(open().await?),
+        };
+        let file = opts.lock_file.as_ref().map(|p| Arc::new(FileLock::new(p)));
+        Some(RedCtx {
+            reader,
+            watch,
+            manual: Arc::new(ManualLock::new(false)),
+            file,
+        })
+    } else {
+        None
     };
     // desired.v1 §2.5, core §8.1 (0.37): a watch session of the target's
     // own, a client of the same router, where it follows its author.
@@ -1137,6 +1418,9 @@ pub async fn run_with(
         configured,
         alarms_revision,
         desired: desired_ctx,
+        red,
+        calls: Arc::default(),
+        first_up: std::sync::atomic::AtomicBool::new(true),
     };
     let mut up = ctx.up(Vec::new()).await?;
     say(format!("ready {}", up.svc.instance_key()?));
@@ -1165,8 +1449,74 @@ pub async fn run_with(
     if let Some(w) = ctx.desired.as_ref().and_then(|d| d.watch.as_ref()) {
         w.close().await?;
     }
+    if let Some(r) = &ctx.red {
+        r.reader.close().await?;
+        if let Some(w) = &r.watch {
+            w.close().await?;
+        }
+    }
     session.close().await?;
     Ok(())
+}
+
+/// A session beside the claim's, or the claim's own with `--connect`: a
+/// client of `endpoint`, or with `--peer` a peer whose only endpoint it is,
+/// listening on loopback and gossiping (core §8.1, 0.40: a peer reads what
+/// its linked peers hold), retrying fast.
+fn side(c: &mut zenoh::Config, opts: &Options, endpoint: &str) -> Result<(), BoxError> {
+    c.insert_json5("connect/endpoints", &serde_json::to_string(&[endpoint])?)?;
+    c.insert_json5(
+        "connect/retry",
+        "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
+    )?;
+    if opts.peer {
+        c.insert_json5("mode", "\"peer\"")?;
+        c.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")?;
+        c.insert_json5("scouting/gossip/enabled", "true")?;
+    } else {
+        c.insert_json5("mode", "\"client\"")?;
+    }
+    Ok(())
+}
+
+/// `redundancy.v1`'s sessions and locks (#841), the process's.
+struct RedCtx {
+    reader: zenoh::Session,
+    watch: Option<zenoh::Session>,
+    /// The commands' lock (`redundancy lock hold|lose`), when no
+    /// `--lock-file` is given.
+    manual: Arc<ManualLock>,
+    file: Option<Arc<FileLock>>,
+}
+
+impl RedCtx {
+    fn lock(&self) -> Arc<dyn Lock> {
+        match &self.file {
+            Some(f) => Arc::clone(f) as Arc<dyn Lock>,
+            None => Arc::clone(&self.manual) as Arc<dyn Lock>,
+        }
+    }
+}
+
+/// What a takeover puts (§2.6 step 3): each raw state of the interface
+/// with no template parameters, its value `--name`'s, else `ok`.
+struct PutStates {
+    states: Vec<(IfaceId, Arc<StateWriter>)>,
+    value: String,
+}
+
+impl Takeover for PutStates {
+    fn taking_over<'a>(&'a self, iface: &'a IfaceId) -> zenkey::call::BoxFuture<'a, ()> {
+        Box::pin(async move {
+            for (i, w) in &self.states {
+                if i == iface
+                    && let Err(e) = w.put(self.value.clone()).await
+                {
+                    eprintln!("redundancy.v1: a takeover's put failed: {e}");
+                }
+            }
+        })
+    }
 }
 
 /// What every bring-up of the service is made from: the first, and each
@@ -1185,6 +1535,12 @@ struct Ctx<'a> {
     /// desired.v1's contracts and the target's watch session, with a
     /// `--desired-*` option.
     desired: Option<DesiredCtx>,
+    /// redundancy.v1's sessions and locks, with `--standby`.
+    red: Option<RedCtx>,
+    /// The operations' executions, every instance's.
+    calls: Arc<std::sync::atomic::AtomicU64>,
+    /// Whether the next bring-up is the first: `--instance-id` is its.
+    first_up: std::sync::atomic::AtomicBool,
 }
 
 /// desired.v1's part of every bring-up (#840).
@@ -1202,7 +1558,10 @@ struct DesiredCtx {
 struct Up {
     svc: Service,
     servers: Vec<OperationServer>,
-    _states: Vec<StateWriter>,
+    _states: Vec<(IfaceId, Arc<StateWriter>)>,
+    /// redundancy.v1's elections, with `--standby`, and the lock.
+    red: Option<(zenkey::redundancy::Redundancy, Option<Arc<dyn Lock>>)>,
+    calls: Arc<std::sync::atomic::AtomicU64>,
     health: Option<Health>,
     members: Members,
     config: Option<Configuration>,
@@ -1231,6 +1590,10 @@ impl Ctx<'_> {
             let answer = telemetry_command(line, &mut up, self.session)
                 .await
                 .unwrap_or_else(|why| format!("refused {}: {why}", words.join(" ")));
+            return Ok((answer, up));
+        }
+        if line.split_whitespace().next() == Some("redundancy") {
+            let answer = redundancy_command(line, &mut up, self.red.as_ref()).await;
             return Ok((answer, up));
         }
         if line.split_whitespace().collect::<Vec<_>>() != ["config", "restart"] {
@@ -1265,6 +1628,15 @@ impl Ctx<'_> {
         let opts = self.opts;
         let mut b = ServiceBuilder::with_hostid(self.session, self.config.clone(), self.minter);
         b.minter().simulate_offset(opts.clock_offset_ms);
+        if self
+            .first_up
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+            && let Some(id) = &opts.instance_id
+        {
+            b.set_instance_id(id.clone());
+        }
+        let value = opts.name.clone().unwrap_or_else(|| "ok".to_owned());
+        let mut governed = std::collections::BTreeSet::new();
         let mut states = Vec::new();
         let mut servers = Vec::new();
         let mut members = Members::default();
@@ -1272,6 +1644,21 @@ impl Ctx<'_> {
         for imp in self.imps.iter().cloned() {
             let iface = imp.iface().clone();
             let resources = imp.contract().resources.clone();
+            // redundancy.v1 §2.2 (#841): a governed interface is elected,
+            // and --election says which election it must declare.
+            if let zenkey::model::redundancy::Declaration::Governed(e) =
+                zenkey::model::redundancy::declaration_of(imp.contract(), false)
+            {
+                if let Some(want) = opts.election
+                    && want != e
+                {
+                    return Err(format!(
+                        "--election {want}: {iface}'s contract declares {e} (redundancy.v1 §2.2)"
+                    )
+                    .into());
+                }
+                governed.insert((iface.clone(), e));
+            }
             members
                 .contracts
                 .insert(iface.clone(), imp.contract().clone());
@@ -1283,29 +1670,41 @@ impl Ctx<'_> {
                     Body::Data(d)
                         if r.kind == Kind::State && !r.template.has_params() && raw(&d.type_) =>
                     {
-                        states.push(b.declare_state_writer(&iface, &name, &none).await?);
+                        let w = b.declare_state_writer(&iface, &name, &none).await?;
+                        states.push((iface.clone(), Arc::new(w)));
                     }
                     Body::Operation(o) => {
                         let echo = raw(&o.request) && raw(&o.response);
                         // Over the whole template when it has parameters (§5.1),
                         // else on the operation's one key.
                         let values = (!r.template.has_params()).then_some(&none);
+                        let calls = Arc::clone(&self.calls);
+                        let named = opts.name.clone();
                         servers.push(
-                            b.serve(&iface, &name, values, move |call| async move {
-                                if !echo {
-                                    // §5.2: `app` from any operation, and no detail
-                                    // where there is no `error` type to carry one.
-                                    return Err(OpError::app_without_detail(
-                                        "this interop owner decodes no schema",
-                                    ));
+                            b.serve(&iface, &name, values, move |call| {
+                                let calls = Arc::clone(&calls);
+                                let named = named.clone();
+                                async move {
+                                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                    if !echo {
+                                        // §5.2: `app` from any operation, and no detail
+                                        // where there is no `error` type to carry one.
+                                        return Err(OpError::app_without_detail(
+                                            "this interop owner decodes no schema",
+                                        ));
+                                    }
+                                    // --name: the instance answers with its name.
+                                    let body = match named {
+                                        Some(n) => n.into_bytes(),
+                                        None => call
+                                            .payload()
+                                            .map(|p| p.to_bytes().into_owned())
+                                            .unwrap_or_default(),
+                                    };
+                                    call.reply(body)
+                                        .await
+                                        .map_err(|e| OpError::internal(e.to_string()))
                                 }
-                                let body = call
-                                    .payload()
-                                    .map(|p| p.to_bytes().into_owned())
-                                    .unwrap_or_default();
-                                call.reply(body)
-                                    .await
-                                    .map_err(|e| OpError::internal(e.to_string()))
                             })
                             .await?,
                         );
@@ -1454,15 +1853,57 @@ impl Ctx<'_> {
             }
         }
         // §8.2 "State values" (F-68): the value is put before the tokens, so a
-        // GET made the moment they appear finds it.
-        for w in &states {
-            w.put("ok").await?;
+        // GET made the moment they appear finds it. A governed interface's at
+        // its takeover, before its token (redundancy.v1 §2.6).
+        let elected: std::collections::BTreeSet<&IfaceId> =
+            governed.iter().map(|(i, _)| i).collect();
+        for (iface, w) in &states {
+            if !elected.contains(iface) {
+                w.put(value.clone()).await?;
+            }
         }
+        let red = match &self.red {
+            Some(r) => {
+                let mut st = RedundancyStartup::new(r.reader.clone())
+                    .with_retry(Duration::from_millis(opts.retry_ms))
+                    .with_grace(Duration::from_millis(opts.grace_ms))
+                    .with_takeover(Arc::new(PutStates {
+                        states: states
+                            .iter()
+                            .filter(|(i, _)| elected.contains(i))
+                            .map(|(i, w)| (i.clone(), Arc::clone(w)))
+                            .collect(),
+                        value: value.clone(),
+                    }));
+                match (&r.watch, opts.poll_ms) {
+                    (Some(w), _) => st = st.with_watch(w.clone()),
+                    (None, Some(ms)) => st.poll = Duration::from_millis(ms),
+                    (None, None) => {}
+                }
+                let external = governed
+                    .iter()
+                    .any(|(_, e)| *e == zenkey::redundancy::Election::External);
+                let lock = external.then(|| r.lock());
+                if let Some(l) = &lock {
+                    st = st.with_lock(Arc::clone(l));
+                }
+                st.refuse_without_lock = opts.refuse_without_lock;
+                Some((b.redundancy(st)?, lock))
+            }
+            None => None,
+        };
         let svc = b.start().await?;
+        if let Some((r, _)) = &red
+            && opts.hold_heal
+        {
+            r.hold_heal(true);
+        }
         Ok(Up {
             svc,
             servers,
             _states: states,
+            red,
+            calls: Arc::clone(&self.calls),
             health,
             members,
             config,
@@ -2135,6 +2576,134 @@ async fn telemetry_command(
                 .to_owned(),
         ),
     }
+}
+
+/// An interface's standing as `redundancy role` answers it.
+fn standing_json(st: &zenkey::redundancy::Standing) -> serde_json::Value {
+    let mut v = serde_json::json!({"role": st.role.as_str()});
+    if let Some(why) = &st.why {
+        v["why"] = why.as_str().into();
+        if let Some(i) = why.instance() {
+            v["instance"] = i.as_str().into();
+        }
+    }
+    v
+}
+
+/// Answers a `redundancy` command (the module doc's), one JSON line, or
+/// `refused <line>: <why>`.
+async fn redundancy_command(line: &str, up: &mut Up, red: Option<&RedCtx>) -> String {
+    use serde_json::json;
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let refuse = |why: &str| format!("refused {}: {why}", words.join(" "));
+    let (Some((r, lock)), Some(ctx)) = (&up.red, red) else {
+        return refuse("redundancy.v1 takes part in no election here (--standby)");
+    };
+    let roles = || -> serde_json::Map<String, serde_json::Value> {
+        r.governed()
+            .iter()
+            .map(|i| (i.to_string(), standing_json(&r.standing(i))))
+            .collect()
+    };
+    let gets = |s: &zenoh::Session| {
+        let g = zenkey::presence::liveliness_gets(s);
+        json!({"reads": g.reads, "settles": g.settles})
+    };
+    let answer = match words.as_slice() {
+        ["redundancy", "role"] => json!({
+            "redundancy": "role",
+            "instance": up.svc.instance().as_str(),
+            "interfaces": roles(),
+        }),
+        ["redundancy", "reads"] => {
+            let reads: serde_json::Map<String, serde_json::Value> = r
+                .governed()
+                .iter()
+                .map(|i| {
+                    let x = r.reads(i);
+                    (
+                        i.to_string(),
+                        json!({"made": x.made, "complete": x.complete, "not_made": x.not_made,
+                               "polls": x.polls, "last": x.last}),
+                    )
+                })
+                .collect();
+            let mut sessions = json!({"reader": gets(&ctx.reader)});
+            if let Some(w) = &ctx.watch {
+                sessions["watch"] = gets(w);
+            }
+            json!({"redundancy": "reads", "interfaces": reads, "sessions": sessions})
+        }
+        ["redundancy", "lock", how @ ("hold" | "lose")] => {
+            let Some(_) = lock else {
+                return refuse("no interface here is elected by external (§2.11)");
+            };
+            let hold = *how == "hold";
+            let held = match &ctx.file {
+                Some(f) => {
+                    if hold {
+                        f.hold().await
+                    } else {
+                        f.release();
+                        false
+                    }
+                }
+                None => {
+                    ctx.manual.set(hold);
+                    hold
+                }
+            };
+            r.lock_changed();
+            json!({"redundancy": "lock", "held": held})
+        }
+        ["redundancy", "calls"] => json!({
+            "redundancy": "calls",
+            "calls": up.calls.load(std::sync::atomic::Ordering::SeqCst),
+        }),
+        ["redundancy", "hold-heal", on @ ("on" | "off")] => {
+            r.hold_heal(*on == "on");
+            json!({"redundancy": "hold-heal", "held": *on == "on"})
+        }
+        [
+            "redundancy",
+            "wait",
+            iface,
+            role @ ("serving" | "standby"),
+            ms,
+        ] => {
+            let Ok(iface) = iface.parse::<IfaceId>() else {
+                return refuse("not an interface id");
+            };
+            let Ok(ms) = ms.parse::<u64>() else {
+                return refuse("a wait in milliseconds");
+            };
+            let want = if *role == "serving" {
+                Role::Serving
+            } else {
+                Role::Standby
+            };
+            let reached = tokio::time::timeout(Duration::from_millis(ms), r.until(&iface, want))
+                .await
+                .is_ok();
+            json!({
+                "redundancy": "wait",
+                "iface": iface.to_string(),
+                "reached": reached,
+                "standing": standing_json(&r.standing(&iface)),
+            })
+        }
+        ["redundancy", "new-epoch"] => match up.svc.new_epoch().await {
+            Ok(id) => json!({"redundancy": "new-epoch", "instance": id.as_str()}),
+            Err(e) => return refuse(&e.to_string()),
+        },
+        _ => {
+            return refuse(
+                "usage: redundancy role | reads | lock hold|lose | calls | hold-heal on|off | \
+                 wait <iface> serving|standby <ms> | new-epoch",
+            );
+        }
+    };
+    answer.to_string()
 }
 
 /// Answers one command line (the module doc's) but `config restart`.
