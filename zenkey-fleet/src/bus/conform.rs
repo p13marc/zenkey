@@ -1558,6 +1558,13 @@ pub struct PlannedProbe {
     pub selector: zenoh::key_expr::KeyExpr<'static>,
 }
 
+/// [`exposure_plan`]'s answer: each probe to make (or why it cannot be
+/// put), and each resource not probed, with why.
+pub type ExposurePlan = (
+    Vec<std::result::Result<PlannedProbe, String>>,
+    Vec<(String, String)>,
+);
+
 /// The probes of §2.4 for `rev` at `addr` (`redundancy.v1` §2.15, text
 /// 0.4): every state resource, and every operation that forbids fan-out,
 /// over a key expression that is a wildcard — a templated operation's
@@ -1576,14 +1583,7 @@ pub struct PlannedProbe {
 /// outside the address and the interface's `@op` and `state` chunks: a
 /// state probe is a read, and a verbatim chunk is never crossed (core
 /// §1.3).
-pub fn exposure_plan(
-    addr: &Addr,
-    rev: &Revision,
-    guard: &[&Revision],
-) -> (
-    Vec<std::result::Result<PlannedProbe, String>>,
-    Vec<(String, String)>,
-) {
+pub fn exposure_plan(addr: &Addr, rev: &Revision, guard: &[&Revision]) -> ExposurePlan {
     use zenoh::key_expr::KeyExpr;
     let iface = rev.iface().clone();
     let allowed: Vec<(String, KeyExpr<'static>)> = guard
