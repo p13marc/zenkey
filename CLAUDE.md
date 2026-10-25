@@ -157,6 +157,24 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   reading to the model's four judges, never re-deriving one;
   `report::desired`'s `DesiredReport` finds a refused or failed act, or a
   target behind past the window.
+  `redundancy.v1` (#841, RC) runs through all four layers too.
+  `bus::redundancy` makes two presence reads of the scope's `@zk/**` a
+  grace apart (2 s) on a session with no liveliness subscriber, `cut_off`
+  first, each with its descriptors, and fetches the revisions they name
+  (an offline one held, never retrieved). `model::redundancy` projects
+  them into the model's `Reading` per address and interface; governance is
+  read from every listing revision, where one not held or invalid is
+  `no_contract`, with words, and a mix is `disagree`. `judge::redundancy`
+  asks §5's four questions through `zenkey_model::redundancy`'s judges,
+  reading each instance's `RedundancyRole` off its fourth answer, and
+  `recognised_standby` is hostid.v1 §2.12's (`Standby::{Recognised,
+  Counted, Unobservable}`). `report::redundancy` pins `RedundancyReport`
+  (`is_finding`: a split, a twin, a lasting vacancy). The doctor's
+  `split-brain` asks a governed interface the first question, whatever the
+  marks; `redundancy-vacancy` asks the second; `token-missing` never finds
+  a standby; `hostid-duplicate` skips a recognised one. `check conform`'s
+  `redundancy-standby` probes by `replier_id`. `tape::{generate, mock}`
+  elect through `GenSpec::elect` / `ServeSpec::elect`.
   `Lens::check_sample` and `sample_conformance` run the profile's `check`
   after the JSON Schema's, so a Point whose tag, unit, range or bounds
   disagree is `invalid`, its reasons named: what replaced v1's
@@ -240,7 +258,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `zenkey/tests/contracts/meter.v1.toml`, `site-a/rf0` on modem.v3) feeds
   seven scenes, and the spray runs `lab/meter` (`--meter`).
   **The Workbench**: nodes per address from presence (health read once per
-  selection, a "clocks synced" toggle), zk2's doctor, the admin pane's S4
+  selection, a "clocks synced" toggle), and `redundancy.v1` read beside
+  health once per selection (#841, RC: `nodes::RedundancyState`,
+  `services::sweep::redundancy` over `run_redundancy`, on the namespaced
+  session and the window's store): each instance's role a chip off the
+  fleet's judge, §5's questions under REDUNDANCY, and the descriptor's
+  standby mark shown apart as the descriptor's word (shots scene
+  `workbench-redundancy`); zk2's doctor, the admin pane's S4
   rows (`on_owner_state`), the mesh; Send publishes a foreign key only, on
   `WireQos` axes (P3 and wildcards refused, a tombstone behind
   `--i-know`), and calls an operation through its contract on `@op`
@@ -357,8 +381,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirty
-  checks since #840's DD (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: thirty-one
+  checks since #841's RC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
@@ -494,7 +518,15 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   conform`'s `desired-report` (a role covered only by its interface's own
   reports, DE), `desired-binding` and `desired-author` (27
   cases). Scenarios §9 run live in `tests/live_zk2.rs` on the owner
-  example's drive.
+  example's drive. #841's RC added `redundancy [SYSTEM/SERVICE] [--iface]
+  [--grace] [--across-face] [--contracts]`, a root judgement beside
+  `health`: exit 1 on a split, a twin or a lasting vacancy; 0 when each
+  governed interface has one incumbent and every instance is accounted
+  for; 2 otherwise. The doctor gains `redundancy-vacancy` and `check
+  conform` `redundancy-declaration` and `redundancy-standby` (29 cases).
+  `gen` and `serve` of a governed contract are candidates on a reader and
+  a watch session of their own (`cmd/serve.rs`'s `elect`), with the
+  address guard unchanged. §12 runs as `live_zk2.rs`'s `redundancy_s12_…`.
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
@@ -552,7 +584,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `serve`, `gen`, `scout`); `compat` compares two contract revisions
   offline, exit-coded like a judgement; a **judgement** is exit-coded
   (`check expect|probe|schema|face`, `doctor`, `health`, `alarms`,
-  `watchdog`).
+  `telemetry`, `desired`, `redundancy`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
@@ -654,7 +686,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   clean stop; and it caches no discovery: it is not the noun
   `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
   doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
-  (`deep`; top-level `clocks_synced` for the `health-*` checks, which a
+  (`deep`, thirty-one checks since #841's RC, `redundancy-vacancy` among
+  them; top-level `clocks_synced` for the `health-*` checks, which a
   `doctor` rule reads too) every few **hours** beside the drain, as a rule
   of its own (`RuleKind::ScheduledDoctor`, id `doctor`). The first run is a
   **baseline** (one `info` notification; every finding assumed); later runs
@@ -815,7 +848,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `Elector` keeps what its watch hears while a read runs, decided in the
   state that read leaves (F-199), retries a heal read that ends nothing
   (`Step::Retry`), and knows its own re-mint (`Event::Reminted`, F-209);
-  core 0.40 and hostid.v1 0.7 with it).
+  core 0.40 and hostid.v1 0.7 with it; text 0.3, F-214 to F-216, #841 RC:
+  `poll`, each read compared with the last's, a read not complete removing
+  no holder, `polls.json`).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -989,11 +1024,13 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   and `refuse_without_lock` refuses to start without it; `new_epoch` tells
   each elector first (F-209). A governed interface without
   `redundancy()`, an invalid declaration, or a governed interface in the
-  tokenless set is refused at start, nothing declared, so `zenctl gen` and
-  `serve` refuse a governed contract until #841's RC. Its scenarios §1–§11
+  tokenless set is refused at start, nothing declared; `zenctl gen` and
+  `serve` elect (RC). Its scenarios §1–§11
   are `tests/profile_redundancy.rs`, and the owner example's `--standby`
   drives it from stdin (`redundancy role|reads|lock|calls|hold-heal|wait|
-  new-epoch`, one JSON line each).
+  new-epoch|zid`, one JSON line each; `reads` gives each poll's `poll_log`;
+  `--wait-go` opens every session and starts at a `go` line, text 0.3,
+  F-216).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
