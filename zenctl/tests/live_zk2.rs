@@ -8505,3 +8505,92 @@ async fn redundancy_s12_a_standby_on_a_minted_system() {
     b.close().await;
     a.close().await;
 }
+
+/// `check conform`'s `redundancy-*` cases (#841, RC) against §12 step 1's
+/// pair: the declaration passes; B, marked standby with no token in both
+/// reads, answers none of the probes over `ledger.v1`'s wildcards — the
+/// `append` probe answered by A alone, by replier zid across the router —
+/// and the case passes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_check_conform_probes_a_standby() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, None).await;
+    let _ = t_until(&bus, LEDGER, |r| {
+        r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+    })
+    .await;
+    let path = ledger_path();
+    let args = [
+        "check",
+        "conform",
+        LEDGER,
+        "ledger.v1",
+        "--contracts",
+        &path,
+        "--for",
+        "1",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                rows_of(&d, "case")
+                    .iter()
+                    .any(|c| c["case"] == "redundancy-standby")
+            })
+        })
+        .await;
+    let doc = run.json();
+    let decl = conform_case(&doc, "redundancy-declaration", "ledger.v1");
+    assert_eq!(decl["verdict"]["answer"], "not_established", "{run}");
+    let standby = conform_case(&doc, "redundancy-standby", "service");
+    assert_eq!(standby["verdict"]["answer"], "not_established", "{run}");
+    let said = standby["verdict"]["reason"].as_str().unwrap_or_default();
+    assert!(said.contains(LEDGER_B), "{run}");
+    assert!(said.contains("@op/append"), "{run}");
+    assert!(said.contains("1 session(s) answered them"), "{run}");
+    // X marks itself standby and holds `append`'s queryable anyway: its
+    // session's reply to the probe is the violation, by its zid.
+    let x = Shape::up(&bus.endpoint, true, false).await;
+    let held = x
+        .session
+        .declare_queryable(format!("zk2/{LEDGER}/ledger.v1/@op/append"))
+        .callback(|q| {
+            use zenoh::Wait;
+            let _ = q.reply(q.key_expr().clone(), "X").wait();
+        })
+        .await
+        .expect("X's queryable");
+    let run = bus
+        .until(&args, |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                rows_of(&d, "case").iter().any(|c| {
+                    c["case"] == "redundancy-standby" && c["verdict"]["answer"] == "established"
+                })
+            })
+        })
+        .await;
+    let doc = run.json();
+    let standby = conform_case(&doc, "redundancy-standby", "service");
+    assert_eq!(standby["verdict"]["answer"], "established", "{run}");
+    let detail = standby["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains(LEDGER_X) && detail.contains("answered the probe of @op/append"),
+        "{run}"
+    );
+    assert!(
+        !detail.contains(LEDGER_B),
+        "B stands by as it should: {run}"
+    );
+    exits(&run, 1);
+    drop(held);
+    x.down().await;
+    b.close().await;
+    a.close().await;
+}
