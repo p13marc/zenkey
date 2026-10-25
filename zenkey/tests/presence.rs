@@ -1610,6 +1610,136 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
     drop(r1);
 }
 
+/// #872 (WC), measured to decide where a watch session belongs in a
+/// namespaced deployment. Beside 2,000 instance tokens declared in `ns`
+/// before it, three shapes of watch session, each timed over [`RUNS`]
+/// fresh sessions: its subscriber, its round trip ([`NO_TOKEN`] in its own
+/// key space), and one crowd token withdrawn after it.
+///
+/// - **In `ns`, with history**, what the readers do since #872: the round
+///   trip waits for 2,000 puts, and the withdrawal is heard.
+/// - **In no namespace, on the wire key `ns/zk2/…`, without history**: one
+///   round trip, and the withdrawal is heard, by its wire key, which the
+///   reader would strip of `ns/` itself.
+/// - **In `ns`, without history**, the control: one round trip, and the
+///   withdrawal is never heard (§10 step 7).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_watch_session_in_a_namespace_waits_for_its_history() {
+    const CROWD: usize = 2_000;
+    const RUNS: usize = 3;
+    let (_r, ep) = router(None).await;
+    let tool = common::client_ns(&ep, Some("ns")).await;
+    let holders = [
+        common::client_ns(&ep, Some("ns")).await,
+        common::client_ns(&ep, Some("ns")).await,
+    ];
+    let started = std::time::Instant::now();
+    let mut crowd: Vec<(String, zenoh::liveliness::LivelinessToken)> = Vec::new();
+    for i in 0..CROWD {
+        let key = format!("zk2/crowd/svc{i}/@zk/instance/{:016x}", i + 1);
+        let token = holders[i % 2]
+            .liveliness()
+            .declare_token(&key)
+            .await
+            .unwrap();
+        crowd.push((key, token));
+    }
+    eventually("the crowd is read", || async {
+        presence::liveliness_read(
+            &tool,
+            "zk2/crowd/*/@zk/instance/*",
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .is_ok_and(|r| r.complete && r.keys.len() == CROWD)
+    })
+    .await;
+    eprintln!("#872: the crowd's setup {:?}", started.elapsed());
+    let mut seen = Vec::new();
+    for (ns, history) in [(Some("ns"), true), (None, false), (Some("ns"), false)] {
+        let (mut took, mut by_end, mut gone) = (Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..RUNS {
+            let watch = watch_in(&ep, ns).await;
+            let wire = |k: &str| match ns {
+                Some(_) => k.to_owned(),
+                None => format!("ns/{k}"),
+            };
+            let heard: Heard = Arc::default();
+            let h = Arc::clone(&heard);
+            let sub = presence::declare_subscriber(&watch, wire(INSTANCES))
+                .history(history)
+                .callback(move |s: Sample| {
+                    h.lock().unwrap().push((
+                        s.key_expr().as_str().to_owned(),
+                        s.kind() == SampleKind::Put,
+                    ));
+                })
+                .await
+                .unwrap();
+            let (complete, tokens, t) =
+                raw_barrier(&watch, &wire(NO_TOKEN), std::time::Duration::from_secs(60)).await;
+            assert!(
+                complete && tokens == 0,
+                "{ns:?} {history}: {complete} {tokens}"
+            );
+            took.push(t);
+            by_end.push(heard.lock().unwrap().len());
+            let (key, token) = crowd.pop().expect("a crowd token");
+            token.undeclare().await.unwrap();
+            eventually("gone where the tool reads", || async {
+                raw_read(&tool, &key).await.1.is_empty()
+            })
+            .await;
+            gone.push(heard_gone(&heard, &wire(&key), std::time::Duration::from_secs(1)).await);
+            drop(sub);
+            let _ = watch.close().await;
+        }
+        eprintln!(
+            "#872: watch session in {ns:?}, history {history}: round trip {took:?}, heard by \
+             its end {by_end:?}, an earlier token's withdrawal heard {gone:?}"
+        );
+        seen.push((ns, history, took, by_end, gone));
+    }
+    let second = std::time::Duration::from_secs(1);
+    let [with, wire, without] = &seen[..] else {
+        panic!("three shapes")
+    };
+    assert!(
+        with.3.iter().all(|n| *n >= CROWD - RUNS) && with.4.iter().all(|g| *g),
+        "in ns with history: the round trip follows the history, and hears it go: {with:?}"
+    );
+    assert!(
+        wire.2.iter().all(|t| *t < second) && wire.3.iter().all(|n| *n == 0),
+        "in no namespace without history: one round trip: {wire:?}"
+    );
+    assert!(wire.4.iter().all(|g| *g), "and it hears it go: {wire:?}");
+    assert!(
+        without.2.iter().all(|t| *t < second) && without.4.iter().all(|g| !g),
+        "zenoh fixed the namespace's withdrawal by key: revisit `subscriber_needs_history` \
+         and #872: {without:?}"
+    );
+}
+
+/// A watch session for [`a_watch_session_in_a_namespace_waits_for_its_history`]:
+/// in `namespace` when given, its runtime waiting 120 s for its routers to
+/// finish a liveliness GET, as a tool's session does since #851.
+async fn watch_in(endpoint: &str, namespace: Option<&str>) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", "\"client\"".to_owned()),
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+        ("connect/endpoints", format!("[\"{endpoint}\"]")),
+        ("routing/interests/timeout", "120000".to_owned()),
+    ] {
+        c.insert_json5(k, &v).unwrap();
+    }
+    if let Some(ns) = namespace {
+        c.insert_json5("namespace", &format!("\"{ns}\"")).unwrap();
+    }
+    zenoh::open(c).await.unwrap()
+}
+
 /// #851, under load: the round trip, many at once beside 300 tokens a
 /// history subscriber carries, its link not stalled. With it no withdrawal
 /// is missed; without it some are, which is the race it closes, too narrow

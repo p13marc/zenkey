@@ -669,29 +669,36 @@ impl TelemetryBook {
     /// Every move delivered during the seed is a move of its instance's
     /// address, or of its member, whatever the seed's net change: a token
     /// that came and went while the seed was read is never "alone
-    /// throughout" across it.
+    /// throughout" across it. A put of a token held before the seed is no
+    /// move: a subscriber with history delivers one for every token it is
+    /// told of, a reconnection's included (#872).
     pub fn seed<'k>(&mut self, seed: &Observed, then: impl IntoIterator<Item = (&'k str, bool)>) {
         let Some(p) = &mut self.presence else {
             return;
         };
         let then: Vec<(&str, bool)> = then.into_iter().collect();
+        let (instances, members) = (self.held_instances.clone(), self.held_members.clone());
         p.seed_then(seed, then.iter().copied(), std::time::SystemTime::now());
         self.restate();
-        for (key, _) in then {
+        for (key, held) in then {
             match zenkey_model::grammar::parse(key) {
-                Ok(ZkKey::Instance { addr, .. }) => {
+                Ok(ZkKey::Instance { addr, instance }) => {
+                    if held && instances.get(&addr).is_some_and(|i| i.contains(&instance)) {
+                        continue;
+                    }
                     *self.instance_moves.entry(addr).or_default() += 1;
                 }
                 Ok(ZkKey::Member {
                     addr,
                     iface,
                     member,
-                    ..
+                    epoch,
                 }) => {
-                    *self
-                        .member_moves
-                        .entry((addr, MemberId { iface, member }))
-                        .or_default() += 1;
+                    let m = (addr, MemberId { iface, member });
+                    if held && members.get(&m).is_some_and(|e| e.contains(&epoch)) {
+                        continue;
+                    }
+                    *self.member_moves.entry(m).or_default() += 1;
                 }
                 _ => {}
             }
@@ -1361,5 +1368,37 @@ mod tests {
             Continuity::Reset,
             "assumed, never decreased"
         );
+    }
+    /// #872: a put of a token held before a seed, delivered while it was
+    /// read — a subscriber with history is told of every token it watches,
+    /// at a reconnection too — is no move, so a pair across it is still the
+    /// one instance's alone throughout, and a decrease within it is found.
+    #[test]
+    fn a_put_of_a_token_already_held_during_a_seed_is_no_move() {
+        let t0 = Instant::now();
+        let m = counter_metric(Kind::Stream);
+        let key = format!("zk2/{SVC}/meter.v1/stream/drops");
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut book = TelemetryBook::new(Some(Scope::all()), t0);
+        let held = instance_key("00000000000000aa");
+        let seed = Observed::from_keys("s", std::slice::from_ref(&held), true);
+        book.seed(&seed, std::iter::empty::<(&str, bool)>());
+        book.sample(&m, bare(&key, 5, at(0), None, SampleVia::Subscription));
+        book.seed(&seed, [(held.as_str(), true)]);
+        let p = book
+            .sample(&m, bare(&key, 3, at(500), None, SampleVia::Subscription))
+            .unwrap();
+        assert!(
+            matches!(
+                p.presence,
+                PairPresence::Observed {
+                    alone_throughout: true,
+                    ..
+                }
+            ),
+            "{:?}",
+            p.presence
+        );
+        assert_eq!(p.pair.continuity, Continuity::Decreased, "by presence");
     }
 }

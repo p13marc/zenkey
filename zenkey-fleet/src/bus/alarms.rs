@@ -8,7 +8,9 @@
 //!    its window, §2.15), on a **watch session** of its own and settled
 //!    there (#830, core §8.1, 0.37: no presence read is made beside a
 //!    liveliness subscriber, and the settle orders the subscription before
-//!    the reads on the other session). Its barrier is kept and asked again
+//!    the reads on the other session), with history when that session is
+//!    in a namespace, where zenoh drops the withdrawal of a token declared
+//!    before a subscriber without it (#872). Its barrier is kept and asked again
 //!    before each refresh's presence read; a read made while it does not
 //!    stand is possibly incomplete (#851, 0.41), so the scope is not read
 //!    whole and nothing reads "no alarm fires". Then a subscription to the scope's
@@ -449,27 +451,45 @@ impl AlarmFeed {
         };
         let scope = self.book.scope().clone();
         let q = queue.clone();
+        // With history in a namespace (#872): zenoh 1.10.1 tells a
+        // subscriber without history that a token declared before it went
+        // by a key a namespaced session does not strip, so an owner up
+        // before this reader was never heard leaving.
+        let history = zenkey::presence::subscriber_needs_history(watch);
+        // The history's puts are not queued: they come before the barrier's
+        // final reply, and the first refresh's presence read, asked after
+        // it, holds every token they name that is still held. So a history
+        // of more owners than the queue holds is no loss. Open from the
+        // barrier on, whatever it answered; a put from then on, a history's
+        // after a reconnection included, is folded as the book folds it, a
+        // token already held no move.
+        let opened = Arc::new(std::sync::atomic::AtomicBool::new(!history));
+        let gate = Arc::clone(&opened);
         let tokens = crate::bus::teardown::declared(
             "alarms' instance tokens",
             scope.instance_selector(),
-            zenkey::presence::declare_subscriber(watch, scope.instance_selector()).callback(
-                move |s: Sample| {
+            zenkey::presence::declare_subscriber(watch, scope.instance_selector())
+                .history(history)
+                .callback(move |s: Sample| {
+                    let held = s.kind() == SampleKind::Put;
+                    if held && !gate.load(Ordering::Acquire) {
+                        return;
+                    }
                     if let Ok(key @ ZkKey::Instance { .. }) =
                         zenkey_model::grammar::parse(s.key_expr().as_str())
                     {
                         q.send(Delivery::Instance {
                             key,
-                            held: s.kind() == SampleKind::Put,
+                            held,
                             at: Instant::now(),
                         });
                     }
-                },
-            ),
+                }),
         )
         .await?;
-        // Its routers have read the subscription before any presence read
-        // on the other session is answered (#830); kept, and asked again
-        // before each refresh's presence read (#851).
+        // Its routers have read the subscription, and sent its history,
+        // before any presence read on the other session is answered (#830);
+        // kept, and asked again before each refresh's presence read (#851).
         let barrier =
             zenkey::presence::Barrier::new(watch, &scope.instance_selector(), self.spec.timeout)
                 .await
@@ -483,6 +503,7 @@ impl AlarmFeed {
                  incomplete until their barrier stands"
             );
         }
+        opened.store(true, Ordering::Release);
         self.barrier = Some(barrier);
         let q = queue;
         let discarded = Arc::clone(&self.discarded);

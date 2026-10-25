@@ -5197,7 +5197,29 @@ fn pulses() -> Contract {
 /// into the window was not present throughout: unobservable, and said so.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
-    let mut bus = Bus::admin(None).await;
+    complete_window_then_an_absent_owner(None).await;
+}
+
+/// #872 (WC): [`check_conform_passes_a_complete_window_and_not_an_absent_owner`]
+/// in a namespace, where zenoh 1.10.1 never tells a liveliness subscriber
+/// without history that a token declared before it went: the router tells
+/// it by key, and a namespaced session leaves that key unstripped
+/// (`routing/namespace.rs`). The owner's instance token predates zenctl's
+/// watch session, as every owner's does, and goes half a second into the
+/// window. Without history that withdrawal was never heard, and the window
+/// read the owner present throughout: `not_established` with "the owner
+/// present throughout", a false clean. Its subscriber has history in a
+/// namespace, and hears it go.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_in_a_namespace_hears_its_owner_leave_the_window() {
+    complete_window_then_an_absent_owner(Some("ns")).await;
+}
+
+/// The two runs of the window's poles, in `namespace` when given: clean
+/// with the owner present throughout, then unobservable with the owner
+/// closed half a second into the window.
+async fn complete_window_then_an_absent_owner(namespace: Option<&str>) {
+    let mut bus = Bus::admin(namespace).await;
     let id = iface("pulse.v1");
     let start = |bus: &Bus| {
         let mut b = ServiceBuilder::new(
@@ -5226,8 +5248,7 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     })));
-    wait_for(&bus, &["host-a/pulse"]).await;
-    let args = [
+    let mut args = vec![
         "check",
         "conform",
         "host-a/pulse",
@@ -5241,6 +5262,13 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
         "--format",
         "json",
     ];
+    match namespace {
+        Some(ns) => {
+            wait_for_ns(&bus, ns, &["host-a/pulse"]).await;
+            args.extend(["--namespace", ns]);
+        }
+        None => wait_for(&bus, &["host-a/pulse"]).await,
+    }
     let events = "events/pulses/{src}";
     let run = bus
         .until(&args, |r| {
@@ -5281,10 +5309,34 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
     let pending = bus.spawn(&args);
     matching(true).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
+    let instance = owner
+        .instance_key()
+        .expect("its instance key")
+        .as_str()
+        .to_owned();
     owner.close().await.expect("close");
+    // Gone where the owners' session reads, before the window ends: the
+    // router has told every subscriber it tells.
+    let deadline = Instant::now() + SETTLE;
+    while !zenkey::presence::liveliness_read(&bus.owners, &instance, Duration::from_secs(1))
+        .await
+        .expect("a read")
+        .keys
+        .is_empty()
+    {
+        assert!(Instant::now() < deadline, "the owner's token never went");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let run = pending.await.expect("the zenctl runner");
     let doc = run.json();
     let w = conform_case(&doc, "budget-window", events);
+    eprintln!(
+        "#872 {namespace:?}: budget-window {} ({}); rate {} ({})",
+        w["verdict"]["answer"],
+        w["verdict"]["reason"],
+        conform_case(&doc, "rate", events)["verdict"]["answer"],
+        conform_case(&doc, "rate", events)["verdict"]["reason"],
+    );
     assert_eq!(w["verdict"]["answer"], "unobservable", "{run}");
     assert!(
         w["verdict"]["reason"]
@@ -6755,6 +6807,137 @@ async fn alarms_s10_anything_firing_for_a_tool_at_900_s() {
     bus.keep(alarms_b);
 }
 
+/// Polls `session`'s liveliness read of `key` until it holds no token: the
+/// router has told every subscriber it tells that the token went.
+async fn until_gone(session: &zenoh::Session, key: &str) {
+    let deadline = Instant::now() + SETTLE;
+    while !zenkey::presence::liveliness_read(session, key, Duration::from_secs(1))
+        .await
+        .expect("a read")
+        .keys
+        .is_empty()
+    {
+        assert!(Instant::now() < deadline, "{key} never went");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Polls `session`'s liveliness read of `key` until it holds the token.
+async fn until_held(session: &zenoh::Session, key: &str) {
+    let deadline = Instant::now() + SETTLE;
+    while zenkey::presence::liveliness_read(session, key, Duration::from_secs(1))
+        .await
+        .expect("a read")
+        .keys
+        .is_empty()
+    {
+        assert!(Instant::now() < deadline, "{key} never came");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// #872 (WC): in a namespace, an owner that leaves during `alarms --for`.
+/// `lab/a` holds A firing at warning, its instance token declared before
+/// T's watch session subscribes. Half a second into T's window it closes:
+/// a clean close resolves nothing (§2.9), so only its token's withdrawal
+/// says it went, and zenoh 1.10.1 never tells a namespaced subscriber
+/// without history of a token declared before it (`routing/namespace.rs`).
+/// Without history T read the owner present throughout and A firing now:
+/// yes, exit 1, of an owner gone. It hears the withdrawal, and the owner is
+/// possibly incomplete until a presence read says where it went: no
+/// verdict, exit 2. The watchdog's `alert-firing` holds the same reader and
+/// re-reads presence each tick, so it goes from firing to unobservable,
+/// never ok, either way.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_in_a_namespace_hear_an_owner_leave_the_window() {
+    use zenkey::alarms::Severity;
+    let bus = Bus::bare(Some("ns")).await;
+    let owning = client(&bus.endpoint, Some("ns")).await;
+    let (svc, alarms) = alarms_owner(&owning, "lab/a", false).await;
+    alarms
+        .raise(alarm_a(Severity::Warning))
+        .await
+        .expect("A raised");
+    wait_for_ns(&bus, "ns", &["lab/a"]).await;
+    let instance = svc
+        .instance_key()
+        .expect("its instance key")
+        .as_str()
+        .to_owned();
+    let watchdog = bus.spawn(&[
+        "watchdog",
+        "--rule",
+        "alert-firing zk2/lab/** warning",
+        "--every",
+        "1",
+        "--count",
+        "10",
+        "--namespace",
+        "ns",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+    ]);
+    // Its reader opens and its first ticks judge the owner holding A.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let (listening, t) = bus.spawn_on_line(
+        &[
+            "alarms",
+            LAB,
+            "--namespace",
+            "ns",
+            "--for",
+            "3",
+            "--lease",
+            "1",
+            "--at-least",
+            "warning",
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ],
+        "alarms: listening",
+    );
+    listening.await.expect("T says it listens");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(alarms);
+    svc.close().await.expect("the owner closes");
+    owning.close().await.expect("its session ends");
+    until_gone(&bus.owners, &instance).await;
+    let run = t.await.expect("the alarms run");
+    let ruled = watchdog.await.expect("the watchdog");
+    let doc = run.json();
+    let a = alarm_of(&run, "lab/a", A_KEY);
+    let lines = ndjson_lines(&ruled);
+    let to: Vec<&str> = lines
+        .iter()
+        .filter(|l| l["row"] == "transition")
+        .filter_map(|l| l["to"].as_str())
+        .collect();
+    eprintln!(
+        "#872 alarms --for: exit {}, any_firing {} ({}); lab/a {} ({}); A {:?}; \
+         alert-firing {to:?}",
+        run.code,
+        doc["any_firing"]["answer"],
+        doc["any_firing"]["reason"],
+        alarm_owner(&doc, "lab/a")["verdict"],
+        alarm_owner(&doc, "lab/a")["reason"],
+        a.as_ref().map(|a| a["firing"].clone()),
+    );
+    exits(&run, 2);
+    assert_ne!(doc["any_firing"]["answer"], "yes", "{run}");
+    assert_ne!(
+        a.as_ref().map(|a| a["firing"]["answer"].clone()),
+        Some(Value::from("yes")),
+        "A is never firing now of an owner heard gone: {run}"
+    );
+    assert_eq!(to.first(), Some(&"firing"), "{ruled}");
+    assert_eq!(to.last(), Some(&"unobservable"), "{ruled}");
+    assert!(!to.contains(&"ok"), "an owner gone is never ok: {ruled}");
+}
+
 // ─── telemetry.v1: scenarios.md §8, the tool's section (#819, TC) ──────────
 //
 // Common setup, the text's: R1 a router with timestamping on, the owner O
@@ -7059,6 +7242,81 @@ async fn telemetry_hears_a_decrease_put_right_after_its_listening_line() {
         "{run}"
     );
     drop(o);
+}
+
+/// #872 (WC): in a namespace, a pair across an owner's restart. O, as I1,
+/// is up before T, its instance token declared before T's watch session
+/// subscribes; once T listens, I1 puts `drops` (a bare counter, no epoch)
+/// at 20, then O's process ends and it starts again as I2, which puts 3
+/// and 8. zenoh 1.10.1 never tells a namespaced subscriber without history
+/// that a token declared before it went (`routing/namespace.rs`), so T
+/// held I1 and I2 both, and had no single instance on either side of a
+/// pair: 20 → 3 a reset and 3 → 8 the same epoch, each assumed, so of
+/// `drops` T could not tell, exit 2. It hears I1 go: 20 → 3 a reset and
+/// 3 → 8 the same epoch, both established by presence (I1 alone, then I2
+/// alone), exit 0.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_in_a_namespace_hears_an_owner_restart_between_a_pair() {
+    let bus = Bus::bare(Some("ns")).await;
+    let o1 = client(&bus.endpoint, Some("ns")).await;
+    let i1 = meter_owner_with(&o1, false).await;
+    let first = i1.svc.instance_key().expect("a key").as_str().to_owned();
+    wait_for_ns(&bus, "ns", &["lab/meter"]).await;
+    let contracts = meter_contract_path();
+    let contracts = contracts.to_str().expect("a UTF-8 path").to_owned();
+    let (listening, t) = bus.spawn_on_line(
+        &[
+            "telemetry",
+            DROPS,
+            "--namespace",
+            "ns",
+            "--contracts",
+            &contracts,
+            "--for",
+            "4",
+            "--format",
+            "json",
+        ],
+        "telemetry: listening",
+    );
+    listening.await.expect("T says it listens");
+    i1.drops.put_value(&20u64).await.expect("drops");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // O's process ends; its token is gone where the owners' session reads.
+    drop(i1);
+    o1.close().await.expect("O's process ends");
+    until_gone(&bus.owners, &first).await;
+    let o2 = client(&bus.endpoint, Some("ns")).await;
+    let i2 = meter_owner_with(&o2, false).await;
+    let second = i2.svc.instance_key().expect("a key").as_str().to_owned();
+    assert_ne!(second, first, "a new instance");
+    until_held(&bus.owners, &second).await;
+    for n in [3u64, 8] {
+        i2.drops.put_value(&n).await.expect("drops");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let run = t.await.expect("the telemetry run");
+    let doc = run.json();
+    let pairs = telemetry_pairs(&doc, DROPS);
+    eprintln!("#872 telemetry: exit {}, drops {pairs:?}", run.code);
+    let row = |a: u64, b: u64, c: &str| {
+        (
+            a,
+            b,
+            c.to_owned(),
+            "established".to_owned(),
+            "presence".to_owned(),
+            c == "same_epoch",
+        )
+    };
+    assert_eq!(
+        pairs,
+        [row(20, 3, "reset"), row(3, 8, "same_epoch")],
+        "I1 alone, then I2 alone: {run}"
+    );
+    exits(&run, 0);
+    drop(i2);
+    o2.close().await.expect("closes");
 }
 
 /// zk2py round 47's F-152 (telemetry.v1 0.4 §5, #819 TE): one conforming

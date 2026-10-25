@@ -24,7 +24,7 @@ observability shape.
 | [`codegen.md`](codegen.md) | The design note of `zenkey-build` 0.20 (#611): what a contract generates, and why. |
 | [`tooling-guide.md`](tooling-guide.md) | **The tooling guide** (non-normative for the core): what a tool owes the person reading it. It carries v1's observer conformance (RFC 13) over to zk2: the judgement shape, silence never being a verdict, the observer obligations, recording and replay (#612). |
 | [`migration.md`](migration.md) | **The migration note** (non-normative, #614): for a team on v1 weighing zk2. The concept map from v1 to zk2, the steps of a port, the tools' changes, what waits on #613's profiles, and each adopter's position. |
-| [`upstream/`](upstream/) | Four draft reports on zenoh behaviour (the storage manager, S5; ACL denies on router links, S3; since 2026-10-24, a liveliness GET beside a liveliness subscriber of its own session, #830, with its zenoh-only reproduction in `upstream/liveliness-get-repro/`; since 2026-10-25, a liveliness GET that ends "complete" at the interests timeout, #851). **Not filed** (maintainer, 2026-10-08; #830's and #851's likewise). They are kept as records. |
+| [`upstream/`](upstream/) | Five draft reports on zenoh behaviour (the storage manager, S5; ACL denies on router links, S3; since 2026-10-24, a liveliness GET beside a liveliness subscriber of its own session, #830, with its zenoh-only reproduction in `upstream/liveliness-get-repro/`; since 2026-10-25, a liveliness GET that ends "complete" at the interests timeout, #851, and a namespaced session that never hears a token withdrawn by key, #872). **Not filed** (maintainer, 2026-10-08; #830's, #851's and #872's likewise). They are kept as records. |
 
 ## Rules for this directory
 

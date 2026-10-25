@@ -9,18 +9,24 @@
 //!    crosses, the deployment's word stands for them: one owner, and the
 //!    contracts in hand (§2.14);
 //! 2. when the reader listens: a liveliness subscription to the owners'
-//!    instance and member tokens, on a **watch session** of its own and
-//!    settled there (#830, core §8.1, 0.37: no presence read is made beside
-//!    a liveliness subscriber, and the settle orders the subscription
-//!    before the seed on the other session), then a subscription to each
-//!    metric resource's members, then a watch of this reader's own receive
-//!    path
+//!    instance and member tokens, on a **watch session** of its own (#830,
+//!    core §8.1, 0.37: no presence read is made beside a liveliness
+//!    subscriber), with history when that session is in a namespace, where
+//!    zenoh drops the withdrawal of a token declared before a subscriber
+//!    without it (#872); then a subscription to each metric resource's
+//!    members, then a watch of this reader's own receive path
 //!    ([`crate::bus::stall`], core §2.7). Every subscription calls back into
 //!    **one** bounded queue, so samples and token moves are folded in the one
 //!    order they were received, and what the queue refuses is counted: a
 //!    loss, which leaves every pair across it without presence (§2.9);
 //! 3. a liveliness read of the owners' tokens, the seed presence stands on
-//!    ([`TelemetryBook::seed`]), read again after every loss;
+//!    ([`TelemetryBook::seed`]), read again after every loss. Before each
+//!    seed the watch session's barrier is made, unless it stands
+//!    ([`zenkey::presence::Barrier`], #851): it orders the token
+//!    subscriptions, and their history, before the read on the other
+//!    session. A seed made while it does not stand is possibly incomplete,
+//!    and owes the next one; a move of the watch session's transport loses
+//!    the barrier, and is a loss (#872);
 //! 4. **the window opens** (zk2py round 47's F-154): the caller's
 //!    `listening` runs with what it opened on ([`Opening`]), and
 //!    `spec.window` counts from that moment. The subscriptions are declared
@@ -61,10 +67,10 @@ use crate::model::telemetry::{
 /// broadcast capacity, as alarms' reader's.
 pub const QUEUE: usize = 1024;
 
-/// How many round trips a reading asks of its watch session's barrier,
-/// all within one `--timeout`, before it says presence is unobservable
-/// (#851).
-const SETTLE_ATTEMPTS: usize = 3;
+/// How long a reading waits after a seed made while its watch session's
+/// barrier did not stand before it makes the barrier and the seed again
+/// (#872): [`crate::bus::presence::RESEED_BACKOFF`], a presence feed's.
+const UNSETTLED_RESEED: Duration = crate::bus::presence::RESEED_BACKOFF;
 
 /// What a reading asks.
 #[derive(Debug, Clone, Copy)]
@@ -125,6 +131,9 @@ pub struct SeedSeen {
     pub complete: bool,
     /// The seed's session was cut off while it ran (core §8.1, 0.38).
     pub cut_off_during: bool,
+    /// The seed was made while the watch session's barrier did not stand
+    /// (#851, #872), so it is not complete.
+    pub unsettled: bool,
     /// Services in scope holding an instance token.
     pub services: usize,
 }
@@ -367,6 +376,10 @@ pub async fn observe(
         owed_seed: false,
         seed: None,
         seeded_instances: None,
+        barrier: None,
+        moves_seen: 0,
+        opened: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        retry_at: None,
     };
     let subscriptions: BTreeSet<String> = obs
         .resources
@@ -396,19 +409,39 @@ pub async fn observe(
             }
         };
         let [instances, _alive, members] = presence_scope_selectors;
+        // With history in a namespace (#872): zenoh 1.10.1 tells a
+        // subscriber without history that a token declared before it went
+        // by a key a namespaced session does not strip, so an owner up
+        // before this reader was never heard going.
+        let history = zenkey::presence::subscriber_needs_history(&watch);
+        // The history's puts are not queued: they come before the barrier's
+        // final reply, and the seed, asked after it, holds every token they
+        // name that is still held. So a history of more tokens than the
+        // queue holds is no loss. Open from the first seed's barrier on,
+        // whatever it answered ([`Reader::reseed`]); a put from then on, a
+        // reconnection's history included, is folded as the book folds it, a
+        // token already held no move.
+        reader
+            .opened
+            .store(!history, std::sync::atomic::Ordering::Release);
         for sel in [instances, members] {
             let q = queue.clone();
+            let gate = Arc::clone(&reader.opened);
             let declared = crate::bus::teardown::declared(
                 "telemetry's presence tokens",
                 &sel,
-                zenkey::presence::declare_subscriber(&watch, sel.clone()).callback(
-                    move |s: Sample| {
+                zenkey::presence::declare_subscriber(&watch, sel.clone())
+                    .history(history)
+                    .callback(move |s: Sample| {
+                        let held = s.kind() == SampleKind::Put;
+                        if held && !gate.load(std::sync::atomic::Ordering::Acquire) {
+                            return;
+                        }
                         q.send(Delivery::Token {
                             key: s.key_expr().as_str().to_owned(),
-                            held: s.kind() == SampleKind::Put,
+                            held,
                         });
-                    },
-                ),
+                    }),
             )
             .await;
             match declared {
@@ -423,33 +456,22 @@ pub async fn observe(
             }
             obs.asked.push(sel);
         }
-        // Its routers have read the subscriptions before the seed on the
-        // other session is answered (#830). A reading whose round trip never
-        // comes back may not hear an owner go after its seed, so it says
-        // nothing of presence: unobservable, asked a few times first (#851).
-        // The attempts share one `t`: a round trip that ran out is not asked
-        // again, and one cut short (a transport move) is, in what is left.
+        // Its routers have read the subscriptions, and sent their history,
+        // before a seed on the other session is answered (#830): the barrier,
+        // kept, and made before each seed while it does not stand (#851).
         let first = obs.asked.last().cloned().unwrap_or_default();
-        let deadline = Instant::now() + t;
-        let mut settled = false;
-        for _ in 0..SETTLE_ATTEMPTS {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                break;
+        match zenkey::presence::Barrier::new(&watch, &first, t).await {
+            Ok(b) => {
+                reader.moves_seen = b.moves();
+                reader.barrier = Some(b);
             }
-            settled = zenkey::presence::settle(&watch, &first, left)
-                .await
-                .unwrap_or(false);
-            if settled {
-                break;
+            Err(e) => {
+                obs.unobservable = Some(format!(
+                    "the presence subscriptions' barrier could not be kept: {}",
+                    crate::one_line(&e)
+                ));
+                return obs;
             }
-        }
-        if !settled {
-            obs.unobservable = Some(format!(
-                "the presence subscriptions' barrier was not established within {t:?}: a \
-                 withdrawal after the seed may not be heard (core §8.1)"
-            ));
-            return obs;
         }
     }
     for sel in &subscriptions {
@@ -863,6 +885,17 @@ struct Reader<'a> {
             zenkey_model::grammar::InstanceId,
         )>,
     >,
+    /// The watch session's barrier (#851): made before each seed while it
+    /// does not stand. `None` across a face, where no presence is read.
+    barrier: Option<zenkey::presence::Barrier>,
+    /// The watch session's transport events the reader has answered
+    /// ([`zenkey::presence::Barrier::moves`]).
+    moves_seen: u64,
+    /// Whether the token subscriptions queue a put: shut until the first
+    /// seed's barrier when they have history (#872).
+    opened: Arc<std::sync::atomic::AtomicBool>,
+    /// When a seed made while the barrier did not stand is made again.
+    retry_at: Option<tokio::time::Instant>,
 }
 
 impl Reader<'_> {
@@ -954,8 +987,14 @@ impl Reader<'_> {
             if tokio::time::Instant::now() >= deadline {
                 break;
             }
+            let (barrier, seen, retry) = (self.barrier.clone(), self.moves_seen, self.retry_at);
             tokio::select! {
                 () = tokio::time::sleep_until(deadline) => break,
+                () = watch_moved(barrier.as_ref(), seen) => self.watch_moved(book),
+                () = until(retry) => {
+                    self.retry_at = None;
+                    self.owed_seed = true;
+                }
                 d = rx.recv() => match d {
                     Some(d) => self.fold(book, d),
                     None => break,
@@ -964,6 +1003,34 @@ impl Reader<'_> {
         }
         self.drain(book, rx);
         self.losses(book);
+    }
+
+    /// The watch session's transport moved, and its barrier with it (#851,
+    /// #872): its subscriptions are declared again at a router that has to
+    /// read them, and a token that went meanwhile is in no history, so the
+    /// moves since are not known whole. A loss, which owes a seed.
+    fn watch_moved(&mut self, book: &mut TelemetryBook) {
+        if let Some(b) = &self.barrier {
+            self.moves_seen = b.moves();
+        }
+        book.lose(0);
+        self.owed_seed = true;
+    }
+
+    /// The watch session's barrier, made unless it stands, within
+    /// `deadline` when given; `true` with no barrier (across a face). The
+    /// transport events before it are answered by the seed it precedes.
+    async fn establish(&mut self, deadline: Option<tokio::time::Instant>) -> bool {
+        let Some(b) = self.barrier.clone() else {
+            return true;
+        };
+        self.moves_seen = b.moves();
+        match deadline {
+            Some(d) => tokio::time::timeout_at(d, b.establish())
+                .await
+                .unwrap_or(false),
+            None => b.establish().await,
+        }
     }
 
     /// A liveliness read of the owners' tokens, then what the queue
@@ -993,12 +1060,22 @@ impl Reader<'_> {
         let mut then: Vec<(String, bool)> = Vec::new();
         let failed = 'read: {
             for _ in 0..2 {
+                // The barrier first (#851): a seed made without it is
+                // possibly incomplete, since a token withdrawn after it may
+                // never be heard going. The token subscriptions queue puts
+                // from here on (#872).
+                let settled = self.establish(deadline).await;
+                self.opened
+                    .store(true, std::sync::atomic::Ordering::Release);
                 let read = match deadline {
                     Some(d) => tokio::time::timeout_at(d, self.seeder.read()).await,
                     None => Ok(self.seeder.read().await),
                 };
                 let observed: Observed = match read {
-                    Ok(Ok(o)) => o,
+                    Ok(Ok(mut o)) => {
+                        o.complete &= settled;
+                        o
+                    }
                     Ok(Err(e)) => break 'read crate::one_line(&e),
                     Err(_) => {
                         break 'read "the window ended before the presence seed was read"
@@ -1024,11 +1101,14 @@ impl Reader<'_> {
                 }
                 book.seed(&observed, then.iter().map(|(k, h)| (k.as_str(), *h)));
                 self.seeded_instances = Some(observed.instances());
+                // Made again, the barrier first, a while from now.
+                self.retry_at = (!settled).then(|| tokio::time::Instant::now() + UNSETTLED_RESEED);
                 let c = Catalog::new(&observed);
                 self.seed = Some(Ok(SeedSeen {
                     selector: observed.selector.clone(),
                     complete: observed.complete,
                     cut_off_during: observed.cut_off_during,
+                    unsettled: !settled,
                     services: c.addresses().filter(|a| c.has_instance(a)).count(),
                 }));
                 return;
@@ -1040,6 +1120,23 @@ impl Reader<'_> {
             book.token(k, *h);
         }
         self.seed = Some(Err(failed));
+    }
+}
+
+/// Resolves once the watch session has had a transport event since the
+/// reader last answered `seen`; never without a barrier.
+async fn watch_moved(barrier: Option<&zenkey::presence::Barrier>, seen: u64) {
+    match barrier {
+        Some(b) => b.moved_since(seen).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Resolves at `at`; never with none.
+async fn until(at: Option<tokio::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
     }
 }
 
@@ -1147,6 +1244,10 @@ mod tests {
             owed_seed: false,
             seed: None,
             seeded_instances: None,
+            barrier: None,
+            moves_seen: 0,
+            opened: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            retry_at: None,
         }
     }
 

@@ -443,6 +443,14 @@ pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
         .filter(|m| m.continuity.answer.is_unobservable())
         .count() as u64;
     let mut skipped = obs.skipped.clone();
+    if let Some(Ok(s)) = &obs.seed
+        && s.unsettled
+    {
+        skipped.push(format!(
+            "the last presence seed {}; the pairs since it have no presence",
+            crate::bus::presence::BARRIER_NOT_ESTABLISHED
+        ));
+    }
     let presence = match &obs.seed {
         Some(Ok(s)) => Some(TelemetryPresence {
             selector: s.selector.clone(),
