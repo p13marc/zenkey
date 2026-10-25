@@ -2060,7 +2060,7 @@ Liveliness tokens carry no payload; everything is in the key.
         final reply follows it, as a history's does. Beside 10,000 tokens
         in `ns` it took 3.9–4.1 s in a release build (zk2py: 3.2–4.7 s)
         and 24 s in a debug one, where the round trip at the session's
-        start took 49–66 ms; beside 2,000, 0.15 s and 0.75–1.1 s. So a
+        start took 49–66 ms; beside 2,000, 0.15 s and 0.75–1.5 s. So a
         watch session's round trip is one round trip at any population
         only until its transport first moves.
         - A reader SHOULD wait for the round trip after a move, and run

@@ -576,10 +576,11 @@ incomplete.*
 
 *Measured (0.44, #882) by the reference, debug builds: step 6 unchanged,
 the stall 606 ms, four round trips in all. Step 10 (`zenkey/tests/presence.rs`):
-the round trip at the start 1.9 ms, carrying none; after the reopen
-746 ms, the subscriber told 1,999 crowd tokens by its end, the one
+the round trip at the start 1.6–46 ms, carrying none; after the reopen
+0.75–1.5 s, the subscriber told 1,999 crowd tokens by its end, the one
 declared while the link was cut among them and the one withdrawn then
-not; one round trip asked for the four calls. Its reader under test
+not; one round trip asked for the four calls (17 runs, 16 of them eight
+at a time). Its reader under test
 (`zenkey-fleet/tests/watch_reopen.rs`'s
 `s10_step10_a_reader_after_a_reopen_beside_the_crowd`, a binary of its
 own, both sessions through one relay, the call dropped every 20 ms):
