@@ -608,8 +608,9 @@ async fn retrying_client(endpoint: &str) -> zenoh::Session {
 /// owner never left. Its watch session's subscribers have no history, so
 /// they were never told of the owner's token and hear no withdrawal of it
 /// (#851): the watch session's transport closing is the reader's reason to
-/// read again, and its barrier is lost with it. The read is not made
-/// through a session cut off, the address is unobservable, never down;
+/// read again, and its barrier is lost with it; what it held is unconfirmed
+/// from the move (0.42, F-229). The read is not made through a session cut
+/// off, the address is unobservable, never down;
 /// healed, the barrier is made again and the read finds the owner, up
 /// again. A real departure is down, a read after its withdrawal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -651,15 +652,16 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
             .count()
     };
 
-    // Cut: the watch session's transport closes, a read is owed and not
-    // made, and the address is unobservable.
+    // Cut: the watch session's transport closes, which unconfirms what is
+    // held at once (core §8.1, 0.42, F-229); the read it owes is not made,
+    // and the address stays unobservable.
     link.cut();
     until(&mut feed, &mut seen, "a read not made", |f| {
         matches!(f.last_seed(), SeedOutcome::CutOff(_))
     })
     .await;
     assert!(
-        seen.iter().any(|t| t.source == PresenceSource::CutOff
+        seen.iter().any(|t| t.source == PresenceSource::Moved
             && t.change
                 == PresenceChange::Status {
                     from: AddressStatus::Up,
@@ -667,6 +669,7 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
                 }),
         "{seen:#?}"
     );
+    assert_eq!(feed.presence().basis(), zenkey_fleet::PresenceBasis::CutOff);
     assert_eq!(
         monitor.settled(),
         Some(false),

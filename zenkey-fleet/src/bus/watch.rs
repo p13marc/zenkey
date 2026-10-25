@@ -240,7 +240,7 @@ mod tests {
     /// base-relative; one outside it is refused and counted, never handed
     /// on; the bus root strips nothing; and a selector and a barrier key
     /// carry the namespace on the wire.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_key_heard_reads_base_relative_and_one_outside_is_refused() {
         let session = crate::bus::session::standalone().await;
         let watch = WatchSession::new(&session, "site/a").expect("a watch session");
@@ -285,7 +285,7 @@ mod tests {
 
     /// Refused: a session in a namespace of its own, and a namespace that
     /// is not a concrete prefix.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_namespaced_session_or_a_wildcard_namespace_is_refused() {
         let mut c = zenoh::Config::default();
         for (k, v) in [

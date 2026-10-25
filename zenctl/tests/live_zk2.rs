@@ -5208,8 +5208,9 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
 /// watch session, as every owner's does, and goes half a second into the
 /// window. Without history that withdrawal was never heard, and the window
 /// read the owner present throughout: `not_established` with "the owner
-/// present throughout", a false clean. Its subscriber has history in a
-/// namespace, and hears it go.
+/// present throughout", a false clean. zenctl's watch session is in no
+/// namespace, on the wire keys, its subscriber without history (#875), and
+/// hears it go.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_in_a_namespace_hears_its_owner_leave_the_window() {
     complete_window_then_an_absent_owner(Some("ns")).await;
@@ -5330,13 +5331,6 @@ async fn complete_window_then_an_absent_owner(namespace: Option<&str>) {
     let run = pending.await.expect("the zenctl runner");
     let doc = run.json();
     let w = conform_case(&doc, "budget-window", events);
-    eprintln!(
-        "#872 {namespace:?}: budget-window {} ({}); rate {} ({})",
-        w["verdict"]["answer"],
-        w["verdict"]["reason"],
-        conform_case(&doc, "rate", events)["verdict"]["answer"],
-        conform_case(&doc, "rate", events)["verdict"]["reason"],
-    );
     assert_eq!(w["verdict"]["answer"], "unobservable", "{run}");
     assert!(
         w["verdict"]["reason"]
@@ -6843,7 +6837,8 @@ async fn until_held(session: &zenoh::Session, key: &str) {
 /// says it went, and zenoh 1.10.1 never tells a namespaced subscriber
 /// without history of a token declared before it (`routing/namespace.rs`).
 /// Without history T read the owner present throughout and A firing now:
-/// yes, exit 1, of an owner gone. It hears the withdrawal, and the owner is
+/// yes, exit 1, of an owner gone. T watches the wire keys from a watch
+/// session in no namespace (#875), hears the withdrawal, and the owner is
 /// possibly incomplete until a presence read says where it went: no
 /// verdict, exit 2. The watchdog's `alert-firing` holds the same reader and
 /// re-reads presence each tick, so it goes from firing to unobservable,
@@ -6916,16 +6911,6 @@ async fn alarms_in_a_namespace_hear_an_owner_leave_the_window() {
         .filter(|l| l["row"] == "transition")
         .filter_map(|l| l["to"].as_str())
         .collect();
-    eprintln!(
-        "#872 alarms --for: exit {}, any_firing {} ({}); lab/a {} ({}); A {:?}; \
-         alert-firing {to:?}",
-        run.code,
-        doc["any_firing"]["answer"],
-        doc["any_firing"]["reason"],
-        alarm_owner(&doc, "lab/a")["verdict"],
-        alarm_owner(&doc, "lab/a")["reason"],
-        a.as_ref().map(|a| a["firing"].clone()),
-    );
     exits(&run, 2);
     assert_ne!(doc["any_firing"]["answer"], "yes", "{run}");
     assert_ne!(
@@ -7252,7 +7237,8 @@ async fn telemetry_hears_a_decrease_put_right_after_its_listening_line() {
 /// that a token declared before it went (`routing/namespace.rs`), so T
 /// held I1 and I2 both, and had no single instance on either side of a
 /// pair: 20 → 3 a reset and 3 → 8 the same epoch, each assumed, so of
-/// `drops` T could not tell, exit 2. It hears I1 go: 20 → 3 a reset and
+/// `drops` T could not tell, exit 2. T watches the wire keys from a watch
+/// session in no namespace (#875), and hears I1 go: 20 → 3 a reset and
 /// 3 → 8 the same epoch, both established by presence (I1 alone, then I2
 /// alone), exit 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -7298,7 +7284,6 @@ async fn telemetry_in_a_namespace_hears_an_owner_restart_between_a_pair() {
     let run = t.await.expect("the telemetry run");
     let doc = run.json();
     let pairs = telemetry_pairs(&doc, DROPS);
-    eprintln!("#872 telemetry: exit {}, drops {pairs:?}", run.code);
     let row = |a: u64, b: u64, c: &str| {
         (
             a,
