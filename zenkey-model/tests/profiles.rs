@@ -2421,7 +2421,11 @@ fn desired_slices() {
             }
             continue;
         };
-        if documents.len() > 1 && !r["requirement"]["bindings"].as_array().is_none_or(Vec::is_empty) {
+        if documents.len() > 1
+            && !r["requirement"]["bindings"]
+                .as_array()
+                .is_none_or(Vec::is_empty)
+        {
             // One role per document type (0.6, F-218).
             assert_eq!(e["binding"], json!(["two_documents"]), "{what}");
             assert!(slice.is_empty(), "{what}");

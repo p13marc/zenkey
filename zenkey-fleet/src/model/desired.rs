@@ -743,7 +743,10 @@ impl RoleRead {
                             "{} readable reports, of {}, claim the slice and differ: the target \
                              says two things of one role (§2.10)",
                             all.len(),
-                            all.iter().map(|r| r.key.as_str()).collect::<Vec<_>>().join(", ")
+                            all.iter()
+                                .map(|r| r.key.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ));
                         differing = all;
                     }

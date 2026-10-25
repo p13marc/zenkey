@@ -682,9 +682,8 @@ fn across_face(a: &Addr, word: &FaceWord, spec: &DesiredSpec, offline: &Contract
             // A revision of the author's held offline that declares no
             // desired resource the requirement names shows the role is no
             // target's, whatever the deployment's word (text 0.6, F-217).
-            resolve_role(a, &entry, req.resources.as_deref(), author_c).unwrap_or_else(|| {
-                RoleResolution::bare(role.clone(), Some(Listing::NotListed))
-            })
+            resolve_role(a, &entry, req.resources.as_deref(), author_c)
+                .unwrap_or_else(|| RoleResolution::bare(role.clone(), Some(Listing::NotListed)))
         }
         None => RoleResolution::bare(role.clone(), Some(word.listing)),
     };
