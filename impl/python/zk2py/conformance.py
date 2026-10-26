@@ -3280,8 +3280,57 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
-        + _watch_wire_readings() + _one_at_a_time_readings()
+        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings()
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _admin_records_readings() -> list[tuple[str, Any, Any]]:
+    """Core 0.48 §4.2 "What a tool does not ask", in :mod:`zk2py.live`
+    (#609, round 73): which selectors reach a node's declaration records,
+    its ``linkstate/*`` or its ``route/successor/**``, by zenoh 1.10.1's own
+    intersection; S4's two selectors reach none and 0.11's reached them; and
+    :func:`zk2py.live._answers` refuses one before it is asked, no session
+    touched."""
+    from . import live
+
+    label = "core 0.48 §4.2, a selector reaching a node's declaration records"
+    kinds = {p.split("/")[3]: p for p in live.ADMIN_RECORDS}
+    cases = [
+        (live.S4_ROUTERS, []),
+        (live.S4_STORAGES, []),
+        (live.S4_STORAGES_011, ["subscriber", "publisher", "queryable", "querier", "token", "route"]),
+        ("@/*/router/queryable/**", ["queryable"]),
+        ("@/*/router/subscriber/load/**", ["subscriber"]),
+        ("@/*/router/**", list(kinds)),
+        ("@/**", list(kinds)),
+        ("@/*/router/linkstate/routers", ["linkstate"]),
+        ("@/*/router/route/successor/src/a1/dst/b2", ["route"]),
+        ("@/*/peer/token/**", ["token"]),  # Appendix B: a node's, not a router's alone
+        ("@/*/router/metrics", []),
+        ("@/*/*", []),  # every node's root document, as zenctl admin graph reads it
+        ("@/*/router/status/**", []),
+        ("@/*/router?_time=[now(-1s)..]", []),
+        # §1.3: `**` crosses no verbatim chunk, so a record of a zk2 token,
+        # `@/<zid>/router/token/zk2/…/@zk/…`, is reached by no `**` and is
+        # asked only by a selector the admin space never hears
+        ("@/*/router/token/zk2/*/*/@zk/**", []),
+        ("zk2/**", []),
+        ("**", []),
+    ]
+    out: list[tuple[str, Any, Any]] = []
+    for sel, want in cases:
+        got = sorted(k for k, p in kinds.items() if p in live.admin_records_reached(sel))
+        out.append((f"{label}: {sel} reaches {want or 'none'}", got, sorted(want)))
+    for sel in (live.S4_STORAGES_011, "@/*/router/queryable/**", "@/**"):
+        try:
+            next(iter(live._answers(None, sel, None, 1.0)))  # type: ignore[arg-type]
+            how = "asked"
+        except live.AdminRecordsRefused:
+            how = "refused"
+        except Exception as e:  # noqa: BLE001 - anything else reached the session
+            how = f"reached the session: {type(e).__name__}"
+        out.append((f"{label}: zk2py's GET refuses {sel} before anything is sent", how, "refused"))
+    return out
 
 
 def _desired_encoding() -> list[tuple[str, Any, Any]]:

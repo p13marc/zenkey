@@ -61,8 +61,11 @@ zenoh-python has no unbounded channel: its default handler and
   opened a session with (:func:`interests_timeout_of`); a session zk2py did
   not open is taken at zenoh's default, 10 s.
 - **Its sessions run with 120 s** (:data:`INTERESTS_TIMEOUT_S`), the
-  reference's tools' value: "a reader whose GETs may wait longer SHOULD run
-  its session with an interests timeout above their timeout".
+  reference's tools' value: "A reader whose reads may wait longer SHOULD
+  run its session with an interests timeout above the longest it waits for
+  one" (0.49, F-250). zk2py's readers wait 1 s by default and 30 s in
+  presence §10 step 10; its follower asks each GET with 121 s and bounds its
+  wait apart, which "meets this by it".
 - **The round trip's key** is ``…/@zk/settle`` under the subscribers'
   presence subtree (:func:`settle_key`): it matches no token, carries
   nothing, and a grant that admits the subscribers admits it. Before 0.41
@@ -145,9 +148,10 @@ GET_TIMEOUT_S = 1.0
 #: zenoh 1.10.1's ``routing/interests/timeout`` when a session's configuration
 #: does not set it (core §8.1, 0.41; Appendix B).
 ZENOH_INTERESTS_TIMEOUT_S = 10.0
-#: The interests timeout zk2py opens its sessions with (core §8.1, 0.41: "A
-#: reader whose GETs may wait longer SHOULD run its session with an interests
-#: timeout above their timeout"): the reference's tools run with 120 s.
+#: The interests timeout zk2py opens its sessions with (core §8.1, 0.41, worded
+#: by 0.49, F-250: "A reader whose reads may wait longer SHOULD run its session
+#: with an interests timeout above the longest it waits for one"): the
+#: reference's tools run with 120 s.
 INTERESTS_TIMEOUT_S = 120.0
 _DONE = object()
 
@@ -1014,7 +1018,7 @@ READ_REPLIER = True
 
 
 def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
-             timeout: float):
+             timeout: float, *, user_asked: bool = False):
     """Yield each reply *as it arrives* (an unbounded queue fed by a
     callback), until the GET completes.
 
@@ -1022,7 +1026,11 @@ def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
     retrieval attempts, and §3.3 sets for the descriptor GET: zenoh's
     default holds every reply until the query finalizes, and a slow corrupt
     reply can displace the valid one.
+
+    A selector that reaches a node's declaration records is refused before
+    it is asked (:func:`admin_guard`, §4.2, 0.48), unless ``user_asked``.
     """
+    admin_guard(selector, user_asked=user_asked)
     q: queue.Queue = queue.Queue()
     session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
                 target=target, consolidation=zenoh.ConsolidationMode.NONE, timeout=timeout)
@@ -1250,11 +1258,52 @@ def _zid_value(text: Any) -> int | None:
     return int(text, 16)
 
 
-# -- §4.2 S4, through the routers' admin space (0.10 to 0.12) ---------------------
+# -- §4.2 S4, through the routers' admin space (0.10 to 0.12, 0.48) ---------------
 
-#: §4.2 (0.11) "What the check reads".
+#: §4.2 (0.11; the second selector since 0.48) "What the check reads".
 S4_ROUTERS = "@/*/router"
-S4_STORAGES = "@/*/router/**/storage_manager/storages/**"
+S4_STORAGES = "@/*/router/status/plugins/storage_manager/storages/**"
+#: 0.11's second selector, which 0.48 retired: its ``**`` intersects a
+#: router's ``queryable/**`` and ``subscriber/**`` records. Named only so
+#: that zk2py's readings can show it reaches them; never asked.
+S4_STORAGES_011 = "@/*/router/**/storage_manager/storages/**"
+
+#: §4.2 (0.48) "What a tool does not ask": a router's declaration records,
+#: ``@/<zid>/router/{subscriber,publisher,queryable,querier,token}/**``, its
+#: ``linkstate/*`` and its ``route/successor/src/<zid>/dst/<zid>``, which
+#: zenoh 1.10.1 answers while it holds its routing tables' read lock
+#: (Appendix B). Appendix B states the fact of a node,
+#: ``@/<zid>/<whatami>/…``, so zk2py guards every whatami, a peer's and a
+#: client's admin space too, not a router's alone.
+ADMIN_RECORDS = tuple(f"@/*/*/{kind}/**" for kind in ("subscriber", "publisher", "queryable", "querier", "token")) \
+    + ("@/*/*/linkstate/*", "@/*/*/route/successor/**")
+
+
+class AdminRecordsRefused(ValueError):
+    """A selector that intersects a node's declaration records, its
+    ``linkstate/*`` or its ``route/successor/**`` (§4.2, 0.48): "A tool MUST
+    NOT ask a selector that intersects one of these keys unless its user
+    asks for that read"."""
+
+
+def admin_records_reached(selector: str) -> list[str]:
+    """The patterns of :data:`ADMIN_RECORDS` that ``selector``'s key
+    expression intersects, by zenoh 1.10.1's own intersection; empty when it
+    reaches none. The selector's parameters (``?…``) play no part."""
+    ke = zenoh.KeyExpr(selector.split("?", 1)[0])
+    return [p for p in ADMIN_RECORDS if ke.intersects(zenoh.KeyExpr(p))]
+
+
+def admin_guard(selector: str, *, user_asked: bool = False) -> None:
+    """Refuse, before anything is sent, a selector that reaches a node's
+    declaration records (§4.2, 0.48), unless the user asked for that read.
+    Every GET zk2py makes through :func:`_answers` passes here; no zk2py
+    reader asks one, and none takes a user's selector."""
+    reached = admin_records_reached(selector)
+    if reached and not user_asked:
+        raise AdminRecordsRefused(f"{selector} intersects {reached}: a router answers those records under its "
+                                  f"routing tables' read lock, and a declaration between two replies freezes it "
+                                  f"for good (§4.2, 0.48; Appendix B)")
 #: "an owner's state/** or @state/**", for every owner.
 S4_STATE = ("zk2/*/*/*/state/**", "zk2/*/*/*/@state/**")
 
@@ -1343,13 +1392,21 @@ def unverified_why(a: Answer, verified: set[int], storage: bool = False) -> str 
 
 
 def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool = False) -> S4Reading:
-    """§4.2 (0.11): "The reference reads two selectors: @/*/router, the
-    routers that answer; @/*/router/**/storage_manager/storages/**, one key
-    per storage a router's storage manager runs, its value the storage's
-    configuration with its key_expr. A storage whose key_expr intersects an
-    owner's state/** or @state/** breaks S4. A router that answers the
-    first selector and has nothing under the second runs no storage. When
-    no router answers the first, the check is unobservable."
+    """§4.2 (0.11; the second selector since 0.48): "The reference reads two
+    selectors: @/*/router, the routers that answer;
+    @/*/router/status/plugins/storage_manager/storages/**, one key per
+    storage a router's storage manager runs, its value the storage's
+    configuration with its key_expr. … A storage whose key_expr intersects
+    an owner's state/** or @state/** breaks S4. A router that answers the
+    first selector and has no storage answer runs no storage. When no router
+    answers the first, the check is unobservable."
+
+    0.48 "What a tool does not ask": neither selector intersects a router's
+    declaration records, its ``linkstate/*`` or its ``route/successor/**``
+    (:data:`ADMIN_RECORDS`), and :func:`_answers` refuses one that would.
+    0.11's ``@/*/router/**/storage_manager/storages/**`` did: a router's
+    ``router/queryable/<…/state/**>`` record answered it, under the read
+    lock (scenarios/state.md §12).
 
     0.12 "Who answered": each answer, router record or storage, counts only
     when :func:`unverified_why` finds nothing, against the routers verified
@@ -1394,9 +1451,10 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
             continue
         # §4.2 (0.15): "A storage is an answer to the second selector whose
         # key the selector includes, ending …/storage_manager/storages/<name>.
-        # Other answers arrive too, and are not storages": a router's
-        # `router/queryable/<key expr>` record of a `**` queryable (every
-        # owner's `state/**`, S2) intersects the selector.
+        # Any other answer is not a storage." Under 0.11's selector a
+        # router's `router/queryable/<key expr>` record of a `**` queryable
+        # answered it; under 0.48's none does, and a key beyond a storage's
+        # name, or a reply off the selector, is still no storage.
         chunks = a.key.split("/")
         if not storages_sel.includes(zenoh.KeyExpr(a.key)) or chunks[-3:-1] != ["storage_manager", "storages"]:
             continue
