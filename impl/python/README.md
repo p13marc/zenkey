@@ -614,10 +614,11 @@ which a principal owning a service may hold too. `acl.generate(principals,
   their `reply`. 0.15's `@/*/router` and `@/*/router/**` are compiled only
   for security.md §4 step 4 (`admin_read=acl.ADMIN_READ_015`,
   `hazard_ok=True`);
-- **no allowed query reaches a node's declaration records** (§11.1, 0.50):
-  `generate` refuses a block whose allow rules would (`HazardousGrant`),
-  and `acl.block_hazards(block)` finds one in any block (see "The admin
-  read under access control");
+- **no allowed ingress query reaches a node's declaration records**
+  (§11.1, 0.50; under `deny`, on an ingress `query`, 0.51): `generate`
+  refuses a block whose allow rules would (`HazardousGrant`), and
+  `acl.block_hazards(block)` finds one in any block (see "The admin read
+  under access control");
 - **an event's keys** are its occurrences, `…/events/<template>/<ulid>`
   (core §2.6): a binding or a resource of kind event grants its template
   and one chunk more (fixed in the `config.v1` round, which first granted
@@ -3090,6 +3091,14 @@ Round 74, on `zenctl-wl`, §3 and §12 with the three readers, two runs:
 slowest S4 answer 1.6–3.1, 1.6–2.2 and 1.7–1.8 ms; the queryable heard
 400, 400 and 200 GETs a run, as before.
 
+Round 75 (core 0.51), the same binary, two runs: 17 of 17 each. The
+slowest put took 1.7–2.0, 2.9–3.0 and 2.6 ms, and the slowest S4 answer
+2.6–3.4, 2.9–4.1 and 1.8–10.2 ms, beside 6,355 to 26,109 of the third
+client's cycles; the queryable heard 400, 400 and 200 GETs a run. Its
+recorder is a client's queryable: 0.51's Expected 3 says it "may never
+hear a read that freezes the router" (F-257), and the runner's count
+does not lean on hearing one.
+
 **The hazard, measured** (`zk2py.adminspace measure`, never in a suite).
 - **The setup.** Each trial runs one zenoh-python 1.10.1 node in a process
   of its own, the same load beside it, and the `@/**` recorder. A reader
@@ -3117,7 +3126,7 @@ slowest S4 answer 1.6–3.1, 1.6–2.2 and 1.7–1.8 ms; the queryable heard
 - **The `@/**` recorder** heard every GET before the freezing one, and
   never that one, in all 19 freezes (F-254).
 
-## The admin read under access control (core §11.1, §11.2, 0.50)
+## The admin read under access control (core §11.1, §11.2, 0.50 and 0.51)
 
 ```bash
 PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.security_scenarios [--zenctl <zenctl>]
@@ -3129,7 +3138,9 @@ PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.adminspace measure \
 
 Core 0.50 narrowed §11.1's admin read to the tools' three reads, and
 forbade a generator to allow a query that reaches a node's declaration
-records. zk2py read it cold in round 74.
+records. 0.51 scoped that MUST NOT to `deny` and to an ingress `query`,
+and said a router under `allow` is not protected (F-256). zk2py read 0.50
+cold in round 74, and 0.51 in round 75.
 - **The generator** (`acl.generate`) grants the tool `query` on
   `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**`
   and `@/*/*`, and their `reply`. A block whose allow rules name `query` on
@@ -3139,11 +3150,13 @@ records. zk2py read it cold in round 74.
   `zenctl acl gen`'s JSON5 (`acl.read_block_json5`, through zenoh's own
   loader). It returns:
   - `allowed_query`, under `deny`: an allow rule a policy lists names
-    `query` on such a key. The MUST NOT names no flow, so an egress
-    `query` counts too (F-256);
+    `query` on the ingress flow (named, or zenoh's default of both) and
+    on such a key. Since 0.51 an egress `query` alone is not one: "the
+    GET that freezes a node is the asker's, decided at the asker's face on
+    ingress";
   - `allow_posture`, under `allow`: a policy with no deny of `query` that
-    includes `@/**`, whose subjects' GETs reach the records ("This
-    protects a router under deny alone");
+    includes `@/**`, whose subjects' GETs reach the records ("a router
+    there is not protected", 0.51);
   - `disabled`: access control not enabled.
 - **The records' patterns** live in `admin_records.py`, plain strings, so
   `live`'s guard and `acl`'s check share them, and `import zk2py.acl`
@@ -3154,7 +3167,10 @@ records. zk2py read it cold in round 74.
   refusal, and the block check on hand-made blocks and on a JSON5 one.
   Under `allow`, only a deny of `query` that includes `@/**` keeps a
   policy off: one on `@/*/router`, `@/*/router/**`, `@/*/**` or `**`
-  does not, since `**` crosses no verbatim chunk.
+  does not, since `**` crosses no verbatim chunk. Round 75 (0.51) adds
+  two cases: a rule on both flows is found once, on ingress, and the
+  `allow` block holds no allow rule. An egress-only `query` allow is no
+  longer a hazard (469 readings).
 
 **security.md §4** (`zk2py.security_scenarios`, the live runner's
 `security4`). R1 is a zenoh-python router in the runner's process,
@@ -3176,9 +3192,17 @@ Step 4 compiles 0.15's admin read again: zk2py's generator with
 `hazard_ok`, zenctl's block with its admin-read rules' keys replaced.
 Beside the section, on each block:
 - the block check finds no hazard, and finds step 4's `@/*/router/**`;
+- with `--zenctl`, once step 3 is over, `zenctl get --no-decode` logs in
+  as the tool (a named context in a configuration directory of the run's
+  own, whose zenoh configuration carries the usrpwd credentials) and asks
+  `@/*/router/queryable/**` and `@/*/router/**`. §4.2 says such a tool
+  "reads nothing of them through it, and says the admin space did not
+  answer, never that nothing is declared". zenctl exits 2 (no verdict),
+  with no answer, its note "no replies to … within 3s", and the recorder
+  hears neither GET;
 - under the generator's `allow` block, the tool's GET of R1's queryable
   records is admitted and answered with the service principal's record:
-  0.50's defence holds under `deny` alone, as it says.
+  "a router there is not protected" (0.51).
 
 §11.2's inclusion facts run on a block of their own, each user allowed one
 key: under `@/*/router`, `@/*/*` is refused; under the status subtree,
@@ -3186,7 +3210,13 @@ key: under `@/*/router`, `@/*/*` is refused; under the status subtree,
 ms, and the recorder heard none.
 
 Round 74, on `zenctl-wl`: 30 of 30, 9 per block, the generators' grants
-compared, and the two inclusion facts.
+compared, and the two inclusion facts. Round 75, on the same binary: 33
+of 33, 10 per block with zenctl's `get`. Each refused `get` ran, process
+and all, in 12–16 ms. Round 75 was meant as the final cold read of the
+admin-space line. It resolved F-256 and F-257 and opened one point,
+F-258: §11.1's "The shapes compose" calls the admin read a query on the
+routers' answers, where `@/*/*` reaches every node's root document. That
+is wording only.
 
 **The freeze under access control** (`adminspace measure`'s `acl-…`
 cells, never in a suite). The router process runs zk2py's block for the
@@ -3311,8 +3341,8 @@ impl/python/
     live_interop.py             the live runner, with the Rust owner and consume examples
     acl.py            §11       the grant generator: a deployment → zenoh's access_control block
     acl_interop.py    §11       the access-control run (`--only acl`)
-    security_scenarios.py §11.1 §11.2 scenarios/security.md §4 (0.50) on zk2py's block and zenctl acl gen's,
-                                and §11.2's inclusion facts (`--only security4`)
+    security_scenarios.py §11.1 §11.2 scenarios/security.md §4 (0.50, 0.51) on zk2py's block and zenctl acl gen's,
+                                zenctl get as the tool (§4.2), and §11.2's inclusion facts (`--only security4`)
     hostid.py         hostid.v1 the derivation, the shape, the runtime over a root
     hostid_scenarios.py hostid.v1 scenarios.md §1–§6 in temporary roots
     freshness.py      freshness.v1 horizons, judgements, the clock trust, a subscriber, a tool's read

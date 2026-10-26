@@ -13924,6 +13924,20 @@ intersects one of those keys of any node … Under `allow`, the generator
 compiles no allow rule, and a GET wider than every deny is in none
 (§11.3), so a router there is not protected."
 
+**Status at core 0.51:** resolved, as proposed. §11.1 now reads "Under
+`deny`, a generator MUST NOT compile an allow rule for an ingress `query`
+on a key expression that intersects one of those keys of any node", and
+gives the reason: "the GET that freezes a node is the asker's, decided at
+the asker's face on ingress". The `allow` bullet keeps "compiles no admin
+read" where zk2py proposed "no allow rule", and adds "so a router there is
+not protected", citing round 74's measurement. Under `allow` no allow rule
+is evaluated, so the two say the same. Read cold, both guesses are gone:
+the posture is `deny`, and the flow is ingress. zk2py's block check now
+reports `allowed_query` only for a rule on the ingress flow, named or
+zenoh's default of both, and an egress-only `query` allow is no longer
+one. Neither generator compiles one under `@/`, so no verdict on either's
+block moves.
+
 ### F-257 · minor · scenarios/state.md §12 Expected 3 (0.50, F-254): "it never hears one that freezes the router"
 
 > Expected 3 (0.50): "The queryable hears a read only once the router
@@ -13960,8 +13974,151 @@ read that freezes the router: a client's queryable never did, though one
 on the router's own session under an access control block did. Expected
 2 fails that reader either way."
 
+**Status at core 0.51:** resolved, as proposed. Expected 3 now reads "The
+queryable may never hear a read that freezes the router: a client's
+queryable never did, though one on the router's own session under an
+access control block did (0.51, F-257). Expected 2 fails that reader
+either way." Wording only. zk2py's runner is unchanged. Its recorder is a
+client's queryable, and its count of what the recorder heard does not
+lean on hearing a freezing read. Its Expected 3 label now cites 0.51.
+
 **Counts at core 0.50:** 257 entries. Open: F-256 and F-257, against
 core §11.1 and `scenarios/state.md` §12: two minor points. F-256 changes
 how zk2py's block check reads an `allow` block, and F-257 is wording
 only. None changes a verdict on a `deny` block. Every other entry is
 resolved.
+
+## At core 0.51 (#609)
+
+Round 75 read core 0.51 cold, on main 98dd8989 (PR #899). It is meant as
+the final cold read of the admin-space line (#890 and #894, rounds 73 to
+75). It read, as a newcomer would:
+- the CHANGELOG's 0.51 entry;
+- core §4.2, from "What the check reads" through "Who answered";
+- §11.1's Tool row, its bullets on the admin read, and "The shapes
+  compose";
+- §11.2 and §11.3 where they touch the admin space;
+- Appendix B's admin-space facts;
+- `scenarios/security.md` §4 and `scenarios/state.md` §12, whole.
+
+**0.51 in zk2py.**
+- **The block check** (`acl.block_hazards`) reports `allowed_query` only
+  for an allow rule on the ingress flow, named or zenoh's default of both.
+  An egress-only `query` allow is no longer one.
+- **The generator** is unchanged. It compiles no ingress `query` under
+  `@/` but the admin read's three keys, and refuses a block that would.
+- **security.md §4** gains one check per block, beside the section. Once
+  step 3 is over, `zenctl get --no-decode` logs in as the tool and asks
+  `@/*/router/queryable/**` and `@/*/router/**`. That is §4.2's "a tool
+  its user asks", for which zk2py has no reader of its own.
+- **`readings`** gains two cases and rewrites one (469).
+
+**Round 74's findings at 0.51:** F-256 and F-257 are resolved, as
+proposed. Each entry has its status line.
+
+**`just py-conformance`: 3100 of 3100.**
+
+**Live,** on `owner-wl`, `zenctl-wl` and `consume-wl`:
+
+| Run | Pairing | Checks |
+|---|---|---|
+| security.md §4, under `deny` | zk2py's block | 10 of 10 |
+| security.md §4, under `deny` | `zenctl acl gen`, the section's two principals | 10 of 10 |
+| security.md §4, under `deny` | `zenctl acl gen`, the walkthrough's 13 principals | 10 of 10 |
+| the two generators' grants for §4's principals | zk2py and zenctl | 1 of 1 (19 of 19 equal) |
+| §11.2's inclusion facts | a block of one key per user | 2 of 2 |
+| the live runner's `acl` | under both postures, the narrowed admin read | 31 of 31 |
+| the live runner's `tool-rules` | zk2py's S4 and S1 checks, security.md §3 | 15 of 15 |
+| state.md §3 and §12, 200 rounds (two runs) | zk2py's reader, zenctl's doctor, `storage list` | 17 of 17 |
+
+- **§4 ran twice,** alone and as the live runner's `security4`: 33 of 33
+  each. The live runner's `acl`, `tool-rules` and `security4` together
+  passed 79 of 79.
+- **Each §4 block's 10:** round 74's 9 (the block check, Expected 1
+  twice, Expected 2 three times, Expected 3, Expected 4, the `allow`
+  block's admission), and zenctl's `get`.
+- **Every refused GET** ended complete and empty in 0.3–1.2 ms, and the
+  recorder heard none of them.
+- **zenctl's `get` as the tool** exited 2 with no answer, on each block,
+  in 12–16 ms for the whole process, and the recorder heard neither GET.
+- **§12's figures,** over two runs, for zk2py's reader, zenctl's doctor
+  and `storage list`: the slowest put took 1.7–2.0, 2.9–3.0 and 2.6 ms,
+  and the slowest S4 answer 2.6–3.4, 2.9–4.1 and 1.8–10.2 ms. The third
+  client cycled 6,355 to 26,109 times. The queryable heard 400, 400 and
+  200 GETs a run, every one of the two selectors.
+- **Not run this round:** `adminspace measure`. 0.51 moves no claim it
+  measured.
+
+**Where the two implementations disagree:** on no verdict.
+- For §4's two principals, the generators' `deny` blocks grant the same
+  keys on every principal, message and flow (19 of 19). Each passes §4 on
+  R1.
+- zk2py's block check no longer counts an egress `query` (0.51). Neither
+  generator compiles one under `@/`.
+- **zenctl's `get`, refused,** says "no replies to
+  `@/*/router/queryable/**` within 3s. Nothing may hold it, its holders
+  may be down, or the timeout was short — and the three are different".
+  The GET ended at once, and the note names no refusal among its causes.
+  It says that no reply came, and never that nothing is declared, as
+  §4.2 asks. The note's wording is the reference's, not the spec's.
+- **The `-wl` binaries predate 0.51's changes outside the text.** `acl
+  gen`'s admin-read comment and `get --help` still say "a router's
+  declaration records", where 0.51 names a node's. Their narrowed read
+  reaches no node's records, so no verdict hangs on the words.
+
+**The text, read cold.** One point, wording only:
+- F-258: "The shapes compose" calls the admin read a query on the
+  routers' answers, and since 0.50 it reaches every node's root document.
+
+It changes no verdict, no test and no implementation.
+- **Not a finding.** §4.2 says a tool its user asks "says the admin
+  space did not answer, never that nothing is declared". No tool can
+  observe the posture (§11.3), so a tool follows this by never reading an
+  empty answer to a records read as nothing declared. zenctl's `get` did
+  that.
+- **Not a finding.** §11.1's rule names `…/route/successor/**`, where
+  §4.2 and Appendix B name the key `route/successor/src/<zid>/dst/<zid>`.
+  The rule's pattern is the wider, so it refuses at least what the fact
+  needs. zk2py's guard and block check use the wider pattern.
+- **Not a finding.** §11.1 claims the refusal for a GET "from any
+  principal at its ingress". A GET that a router relays from a face no
+  generated block governs, a far router's face, is outside that claim.
+  §11 compiles no router-to-router face, and `link.v1` §2.6's `admin`
+  deny keeps `@/**` off a constrained one. zk2py ran no two routers
+  under a block.
+- **Not a finding.** security.md §4 step 4 compiles a block that breaks
+  §11.1's MUST NOT, on purpose and beside no writer. zk2py compiles it
+  with `hazard_ok`, and zenctl's block by replacing its admin-read rules'
+  keys.
+
+### F-258 · minor · core §11.1 "The shapes compose" (0.27, beside 0.50): "the admin read is a `query` on the routers' answers"
+
+> §11.1, "The shapes compose": "the admin read is a `query` on the
+> routers' answers, and every principal is still denied a queryable under
+> `@/**`."
+
+> §11.1 (0.50): "The admin read is the three selectors the reference's
+> tools read: S4's two (§4.2), which the doctor and the conformance suite
+> read, and every node's root document, which a mesh view reads."
+
+Since 0.50 the admin read includes `@/*/*`, and every node with its admin
+space on answers that, not only the routers. Measured once on
+zenoh-python 1.10.1, by hand outside every suite, with no block and
+beside no writer: a tool's `@/*/*` through a router was answered
+by the router's `@/<zid>/router`, a client's `@/<zid>/client` and a
+peer's `@/<zid>/peer`, each under its own replier id, complete in 1.4 ms.
+A reader of the composition bullet alone would take the admin read to
+reach the routers alone.
+
+No verdict, test or implementation moves. The bullet argues that the
+admin read writes nothing, which holds whoever answers. zk2py's generator
+grants the three keys, and its readers count only a router's own answer
+(§4.2, "Who answered"). Wording only.
+
+**Wording that would remove the guess:** "the admin read is a `query` on
+the nodes' admin space, and every principal is still denied a queryable
+under `@/**`."
+
+**Counts at core 0.51:** 258 entries. Open: F-258, against core §11.1:
+one minor point, wording only. It changes no verdict, no test and no
+implementation. Every other entry is resolved.
