@@ -2128,9 +2128,10 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
         three = [barrier.round_trip(0.0) for _ in range(3)]
         fourth = barrier.round_trip(30.0)
         told_by_end = list(heard)
-        # its final reply's hand-over, stamped in the GET's drop callback
-        # (round 72: asked + elapsed is off it by the links check and a
-        # thread's wake-up, and once fell 4.4 ms short)
+        # when its GET was dropped, stamped in its drop callback (round 72:
+        # asked + elapsed is off it by the links check and a thread's
+        # wake-up, and once fell 4.4 ms short); the check below asks how it
+        # ended apart
         rt_end = fourth.ended_ns / 1e9 if fourth.ended_ns else fourth.asked_ns / 1e9 + fourth.elapsed_s
         told = {k for t, kind, k in told_by_end if t >= t_heal and kind == "put"}
         want = {f"{NS}/{k}" for k in after}
@@ -2142,9 +2143,21 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
                      opened and want <= told and f"{NS}/{new_key}" in told and not victim_told,
                      f"told {len(told)} of {len(want)} since the heal, the new one {f'{NS}/{new_key}' in told}, the "
                      f"withdrawn one {victim_told[:1]}")
+        # No tolerance (review-bot on PR #892; the check allowed 1 ms before).
+        # The subscriber's callbacks are direct, on zenoh's receive thread,
+        # and stamp a token as they start. The round trip's final reply comes
+        # on the same link, after them in Appendix B's order, and its drop is
+        # stamped only after zenoh has read that reply, on another thread. So
+        # a token told before the final reply is stamped before the drop,
+        # however loaded the host: in every run of round 72 after the fix,
+        # 0.0 to 0.1 ms before it. The check is one-sided: a token told after
+        # the final reply but before the drop callback ran would pass. The
+        # fourth must also have ended at its routers' final reply, no error
+        # reply: its drop says when it ended, not how.
         report.check(sec, "10. the round trip after the reopen ends only after them: by its end the subscriber has "
                           "been told all of them",
-                     fourth.finished and want <= told and last_told is not None and last_told <= rt_end + 0.001,
+                     fourth.finished and fourth.errors == 0 and want <= told and last_told is not None
+                     and last_told <= rt_end,
                      f"{fourth.elapsed_s * 1000:.0f} ms, the last told {((last_told or 0) - rt_end) * 1000:.1f} ms "
                      f"from its end (its drop callback; asked + elapsed "
                      f"{(fourth.asked_ns / 1e9 + fourth.elapsed_s - rt_end) * 1000:.1f} ms from it)")
@@ -2581,7 +2594,9 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
     The window read is every transition after the cut up to the first ``ok``
     printed after the heal, which closes it; one before the heal is in it.
     Times are compared unrounded, all on ``time.monotonic()``."""
-    out: dict[str, Any] = {"every": every, "half_cut": every <= cut_s / 2}
+    # 0.47: "at most half the cut", compared in whole milliseconds, never as
+    # floats (review-bot on PR #892)
+    out: dict[str, Any] = {"every": every, "half_cut": 2 * round(every * 1000) <= round(cut_s * 1000)}
     wd = Watchdog(endpoint_link.endpoint, [rule], every=every, namespace=namespace, extra=extra)
     try:
         t0 = time.monotonic()

@@ -13338,6 +13338,13 @@ zenctl. Step 10 beside 10,000:
 - zenctl watchdog was unobservable 0.48 s after the cut, and ok again
   28.5 s after the heal.
 
+After review-bot's items on PR #892, step 10's check allows no tolerance
+between the last token told and the round trip's drop, where it allowed
+1 ms, and asks that the round trip end with no error reply. §10 ran again
+with the default crowd: three times with zk2py's owner and reader, 46 of
+46 each, the last token told 0.1 ms before the drop; and once with zk2py's
+owner and zenctl, 9 of 9.
+
 **Where the two implementations disagree:** on no verdict.
 - Step 6's round trips still differ, as 0.43 allows: one before the first
   seed for zk2py, and two for the reference.

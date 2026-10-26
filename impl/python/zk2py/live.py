@@ -576,12 +576,17 @@ class RoundTrip:
     #: default was taken: a round trip judged "before the interests
     #: timeout" rests on it (§8.1, 0.42, F-232)
     interests_timeout_assumed: bool = False
-    #: monotonic ns when its final reply was handed over (the GET's drop
-    #: callback ran), 0 when none came. ``asked_ns`` is taken before the
-    #: links are checked, and ``elapsed_s`` runs from just before the GET to
-    #: the asking thread's wake-up, so ``asked_ns + elapsed_s`` is off the
-    #: end by a few ms either way (round 72: at least 4.4 ms short beside a
-    #: reopen's telling, a runner's false failure)
+    #: monotonic ns when the GET was dropped (its drop callback ran),
+    #: whatever ended it: its routers' final reply, an error reply (its own
+    #: timeout), zenoh's interests timeout, or a cut. It says when, never
+    #: how: ``finished``, ``errors``, ``why`` and ``stands`` say that, and a
+    #: caller never reads a nonzero value as success. 0 when no GET was
+    #: asked, or its drop had not run by the wait's end. ``asked_ns`` is
+    #: taken before the links are checked, and ``elapsed_s`` runs from just
+    #: before the GET to the asking thread's wake-up, so ``asked_ns +
+    #: elapsed_s`` is off the drop by a few ms either way (round 72: at
+    #: least 4.4 ms short beside a reopen's telling, a runner's false
+    #: failure)
     ended_ns: int = 0
 
     def __bool__(self) -> bool:

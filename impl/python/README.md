@@ -124,10 +124,6 @@ Core 0.44 changed no fixture; `readings` gained its 15 cases (409).
 Core 0.43 changed no fixture and no rule, and no reading (394).
 Core 0.42 changed no fixture; `readings` gained its 15 cases (394).
 Core 0.41 changed no fixture; `readings` gained its 28 cases (379).
-`redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
-`poll_read` passed the first time they ran. Its round 58 reading, a first
-poll as a baseline and a withdrawal only with no holder left, would have
-failed five of them. The seven readings of that reading went with it.
 `desired.v1` 0.8 added six `slices.json` cases, with the input
 `requirement.unread` and the answer `requirement_unread` (408), which
 `take_slice`, changed from §2.17 first, passed the first time they ran.
@@ -138,6 +134,10 @@ resource already.
 and seven `slices.json` cases (400). zk2py's `bind` and `take_slice`,
 changed from §2.1, §2.3 and §2.17 first, passed all eleven the first time
 they ran.
+`redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
+`poll_read` passed the first time they ran. Its round 58 reading, a first
+poll as a baseline and a withdrawal only with no holder left, would have
+failed five of them. The seven readings of that reading went with it.
 `desired.v1` 0.5 added `slices.json`, 22 cases (389), which zk2py's
 `take_slice` and `which_report`, written from §2.10 and §2.17 before the
 file was run, passed the first time they ran.
@@ -188,7 +188,8 @@ directories that hold fixtures. The four ZenSight contracts' revision 1.1
 list the profile's file from `spec/profiles/telemetry/`, and `examples`
 loads, builds, publishes and classifies each against both revisions with no
 change. `link.v1` 0.8 changed wording only.
-`alarms.v1` 0.7 and 0.8 changed no fixture, and 0.6 only
+`alarms.v1` 0.7 and 0.8 changed no fixture, and core 0.34, with 0.8,
+added `contracts/w105-alarms-vocabulary`. `alarms.v1` 0.6 changed only
 `conclusions.json`'s description.
 `alarms.v1` 0.5 gave every `conclusions.json` reading `left_out` and every
 `any_firing` case `scope_whole`, and added twelve cases (107), and 0.4 none.
@@ -200,33 +201,33 @@ added 19 cases, nine of `documents.json` given as their
 fixture files, 281 checks, and moved its
 standard contract under `spec/profiles/`: one more `examples` check, its
 revision in both history roots. `layout` now checks the six profiles'
-directories that hold fixtures. Core 0.34 added
-`contracts/w105-alarms-vocabulary`, and 0.33 changed no fixture. Three
+directories that hold fixtures. Core 0.33 changed no fixture. Three
 `lints.json` cases came after `link.v1` 0.7, with no text change, and
 zk2py passed them unchanged. `link.v1` 0.7
-added 13 `lints.json` cases and changed three; 0.6, core 0.31 and core
-0.32 changed no fixture. `link.v1` 0.5 added ten `lints.json` cases
-and changed one. `link.v1` 0.4
+added 13 `lints.json` cases and changed three; core 0.32, and core 0.31
+with `link.v1` 0.6, changed no fixture. `link.v1` 0.5 added ten
+`lints.json` cases and changed one. `link.v1` 0.4
 added 18 `lints.json` cases, and 0.3 one `plan.json` case and eight
 `lints.json` cases. `link.v1` 0.2
 added the scenarios' radio as an example (`examples/zk2/link/radio.v1.toml`,
-4 more `examples` checks). `link.v1` 0.1 added its three fixture files, core 0.29 `contracts/w105-link-downsample`,
-and `config.v1` 0.3 seven `validation.json` cases and one `lifecycle.json`
-case. `config.v1` 0.1 added its five
-fixture files and its standard contract (4 more `examples` checks), and
-`layout` checks the four profiles' directories. Core 0.28 added three
-`errors` cases, and `config.v1` 0.2 eight `validation.json` cases and two
-`lifecycle.json` cases. 0.22 added `contracts/e002-two-majors`, 0.24
-the `budget/` family, 0.25 its `lossless.json`, which 0.27 reshaped, and
-0.27 the `seed/` family. `freshness.v1` 0.2 added `clock-trust.json` and four
-judgement cases. `health.v1` 0.1 added three fixture files, and 0.3
-`clock.json`. Five earlier releases added descriptor
-fixtures:
-- 0.10, `descriptors/ok-optional-role`;
-- 0.11, `ok-optional-unchecked`;
-- 0.17, `d011-tokenless-archive` and `ok-archive`;
+4 more `examples` checks). `link.v1` 0.1 added its three fixture files,
+core 0.29 `contracts/w105-link-downsample`, and `config.v1` 0.3 seven
+`validation.json` cases and one `lifecycle.json` case. Core 0.28 added
+three `errors` cases, and `config.v1` 0.2 eight `validation.json` cases
+and two `lifecycle.json` cases. `config.v1` 0.1 added its five fixture
+files and its standard contract (4 more `examples` checks), and `layout`
+checks the four profiles' directories. Core 0.27 added the `seed/` family
+and reshaped the `budget/` family's `lossless.json`, which 0.25 added.
+Core 0.24 added the `budget/` family, and `health.v1` 0.3, with it,
+`clock.json`. `health.v1` 0.1 added three fixture files, and
+`freshness.v1` 0.2, in the same round, `clock-trust.json` and four
+judgement cases. Core 0.22 added `contracts/e002-two-majors`. Five earlier
+releases added descriptor fixtures:
+- 0.19, `descriptors/ok-derivation-profile`;
 - 0.18, `d011-bad-fingerprint`;
-- 0.19, `ok-derivation-profile`.
+- 0.17, `d011-tokenless-archive` and `ok-archive`;
+- 0.11, `ok-optional-unchecked`;
+- 0.10, `ok-optional-role`.
 
 - Amendments 0.5 to 0.18 resolved F-01 to F-93. `hostid.v1` 0.2 resolved
   F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, `freshness.v1` 0.2
@@ -2892,9 +2893,14 @@ drop callback (`RoundTrip.ended_ns`). In the seven runs since, one of them
 beside 10,000, the last token told came 0.0–0.1 ms before it. The old sum
 was 0.0 and 1.1 ms off it in the two runs that printed both. Steps 1 to
 3's "still waiting when the stall ends" read the same sum, and now read
-the stamp. The first run cannot be judged again. The check is one-sided:
-a token told after the final reply, but before the drop callback ran,
-would go unseen.
+the stamp. The first run cannot be judged again. The stamp says when the
+GET was dropped, whatever ended it, so step 10's check also asks that the
+round trip end with no error reply. It allows no tolerance, where it
+allowed 1 ms: a token told before the final reply is stamped before the
+drop, since the subscriber's direct callbacks run on the receive thread
+that reads the final reply after them. The check is one-sided: a token
+told after the final reply, but before the drop callback ran, would go
+unseen.
 
 **`presence_scenarios`**, against `owner-wf` and `zenctl-wf` (main
 8880e3c6). §1–§8 ran once, with zk2py's owner and reader. §9 and §10 ran
@@ -2916,6 +2922,12 @@ after the fix passed 46 of 46. Not run:
 
 **Beside 10,000 tokens**, §10 ran whole once with each reader: 46 of 46
 with zk2py's, and 9 of 9 with zenctl, step 9 not run.
+
+After review-bot's items on PR #892, §10 ran again with the default
+crowd: three times with zk2py's owner and reader, 46 of 46 each, the last
+token told 0.1 ms before the drop with no tolerance; and once with zk2py's
+owner and zenctl, 9 of 9, unobservable 0.48 s after the cut and ok again
+1.49 s after the heal.
 
 §10 step 10 at 0.47, measured on zenoh-python 1.10.1 routers (a release
 build), the crowd in `ns`, beside a Rust agent's builds:
