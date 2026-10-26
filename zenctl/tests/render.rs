@@ -1952,7 +1952,7 @@ namespaces listed: (empty), prod
 /// A GET's coverage claim is exactly its selector and its window, and a silent
 /// one has to say so — three different silences, not one.
 #[test]
-fn a_get_with_no_replies_names_the_three_silences() {
+fn a_get_with_no_replies_names_the_four_silences() {
     let silent = zenctl::render::GetReport {
         selector: "acme/zk2/**".into(),
         timeout_s: 5.0,
@@ -1961,7 +1961,9 @@ fn a_get_with_no_replies_names_the_three_silences() {
     };
     let n = notes(&silent);
     assert!(n.contains("Nothing may hold it"), "{n}");
-    assert!(n.contains("the three are different"), "{n}");
+    // A refusal by a router's access control is silence too (core §11.2).
+    assert!(n.contains("access control may have refused it"), "{n}");
+    assert!(n.contains("the four are different"), "{n}");
     let doc: serde_json::Value =
         serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
     assert_eq!(doc["selector"], "acme/zk2/**");
