@@ -311,6 +311,9 @@ pub(crate) fn update(
             obs.link = LinkState::Failed(e);
             Task::none()
         }
+        // An answer to a question no longer asked is dropped (#890): the
+        // switch went off while the GET was out.
+        BusMsg::DeclaredRead(_) if !dep.settings.admin_declared => Task::none(),
         BusMsg::DeclaredRead(Ok(declared)) => {
             dep.admin_declared = declared;
             if dep.refresh_skeleton() {
@@ -604,7 +607,19 @@ pub(crate) fn restart_presence(obs: &mut Observation) {
 
 /// Ask the admin space what sessions declared (#614, FL6b): the
 /// skeleton's one input that costs a query, on the session in no namespace.
+///
+/// Only with `--admin-declared` (#890), and nothing otherwise: zenoh 1.10.1
+/// answers `@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`
+/// while it holds its routing tables' read lock, each reply takes that lock
+/// again, and a writer queued between the two — another client's
+/// declaration, interest or new session — deadlocks the router for good.
+/// Unasked, the skeleton reads `None` as "admin n/a", as it does for a
+/// silent admin space. Every path that asks — the boot, a reconnect, a
+/// namespace switch, the admin sweep, the Settings overlay — comes here.
 pub(crate) fn read_declared(dep: &Deployment) -> Task<Message> {
+    if !dep.settings.admin_declared {
+        return Task::none();
+    }
     let Some(raw) = dep.raw.clone() else {
         return Task::none();
     };

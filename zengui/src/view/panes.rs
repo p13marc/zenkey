@@ -433,9 +433,11 @@ fn workbench<'a>(
             selected: sub.follow.current.address(),
             sp,
         }),
-        RightPane::Admin => {
-            view::admin::pane(&work.verdicts.admin, dep.admin_declared.as_deref(), sp)
-        }
+        RightPane::Admin => view::admin::pane(
+            &work.verdicts.admin,
+            view::admin::Declared::of(dep.settings.admin_declared, dep.admin_declared.as_deref()),
+            sp,
+        ),
         RightPane::Mesh => view::mesh::pane(&work.verdicts.admin, sp),
         RightPane::Config => view::configure::pane(view::configure::ConfigData {
             state: &work.verdicts.config,

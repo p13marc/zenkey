@@ -468,6 +468,10 @@ pub struct Prefs {
     pub max_keys: Option<usize>,
     /// Whether to observe the scope immediately on connect (#188).
     pub eager: Option<bool>,
+    /// Whether to ask the admin space's declaration records (#890), as the
+    /// Settings overlay applied it last. `None` and `false` alike leave it
+    /// off: asking can freeze a zenoh 1.10.1 router.
+    pub admin_declared: Option<bool>,
     /// The global density mode (#192), toggled by Ctrl+Shift+D.
     pub density: Density,
     /// The namespace picked last (#614, FL6a): written when the location
@@ -498,6 +502,7 @@ impl Default for Prefs {
             history_entries: None,
             max_keys: None,
             eager: None,
+            admin_declared: None,
             density: Density::default(),
             namespace: None,
             contracts: Vec::new(),
@@ -644,6 +649,7 @@ mod tests {
             history_entries: Some(400),
             max_keys: Some(100_000),
             eager: Some(true),
+            admin_declared: Some(true),
             density: Density::Compact,
             namespace: Some("spray".into()),
             contracts: vec!["examples/zk2/walkthrough".into()],

@@ -4,6 +4,22 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the declared entities are asked only on opt-in (#890, WJ)
+
+zenoh 1.10.1 answers the admin space's declaration records,
+`@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`, while
+it holds its routing tables' read lock, and each reply takes that lock
+again. A declaration, an interest or a new session from any other client in
+between deadlocks the router for good (zenoh `main` too,
+`docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`). The window
+asked them at every boot.
+
+| Before | Now | Notes |
+|---|---|---|
+| the declared entities asked at boot, at every reconnect and namespace switch, and with each admin sweep | asked only with `--admin-declared`, or the Settings overlay's "ask the declared entities" switch (remembered in `zengui.toml` as `admin_declared`); off by default | off, the skeleton gets no admin answer ("admin n/a"), and the tree loses only the keys declared and never seen |
+| the admin pane's declared entities: "n/a — not read yet, or nothing answered" | off: "not asked — off by default, since asking can freeze a zenoh 1.10 router … (#890)"; on, as before | not asked is never "nothing declared" (O4) |
+| the admin sweep's storages read `@/*/router/**/storage_manager/storages/**` | `@/*/router/status/plugins/storage_manager/storages/**` | the old `**` reached the declaration records too; the engine's `STORAGES`, spec §4.2 |
+
 ## Unreleased (`main`, zk2) — the presence link after a reopen (#882, WF)
 
 | Before | Now | Notes |

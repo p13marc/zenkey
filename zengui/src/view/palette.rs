@@ -794,6 +794,7 @@ mod tests {
             scope: crate::scope::ScopePreset::Everything,
             selectors: vec![],
             eager: false,
+            admin_declared: false,
             echo_lines: 100,
             history_entries: 10,
             max_keys: 1000,

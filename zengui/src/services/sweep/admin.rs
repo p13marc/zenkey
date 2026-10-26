@@ -25,7 +25,11 @@ use crate::view::admin::AdminMsg;
 ///
 /// The declared entities are not read here: the window already holds them
 /// (`Deployment::admin_declared`, the skeleton's input), and the sweep's
-/// handler asks for them again beside this.
+/// handler asks for them again beside this, with `--admin-declared` only
+/// (#890). Nothing read here reaches the declaration records a zenoh 1.10.1
+/// router answers under its tables' read lock: `@/*/router` and `@/*/*`
+/// name root documents only, and the storages selector names the storage
+/// manager's status subtree (`zenkey_fleet::bus::admin::STORAGES`).
 pub fn admin(
     raw: zenoh::Session,
     deployment: Option<zenoh::Session>,

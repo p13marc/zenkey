@@ -52,13 +52,37 @@ fn msg(m: AdminMsg) -> Message {
     Message::Pane(PaneMsg::Admin(m))
 }
 
-/// The pane. `declared` is the deployment's own read of the declared
-/// entities (`Deployment::admin_declared`, the skeleton's input): `None`
-/// until an answer lands, or when no admin space answered — never "nothing
-/// declared" (O4).
+/// What the pane knows of the declared entities: the deployment's own read
+/// (`Deployment::admin_declared`, the skeleton's input), and whether it is
+/// asked at all (`--admin-declared`, #890).
+#[derive(Debug, Clone, Copy)]
+pub enum Declared<'a> {
+    /// Not asked: off by default, since asking can freeze a zenoh 1.10.1
+    /// router (#890). "Not asked", never "nothing declared" (O4).
+    Off,
+    /// Asked, and no answer held: not landed yet, or no admin space
+    /// answered (O4).
+    Unanswered,
+    /// The admin space's answer.
+    Answered(&'a DeclaredEntities),
+}
+
+impl<'a> Declared<'a> {
+    /// From the setting and the answer held. An answer held is shown
+    /// whatever the setting says now.
+    pub fn of(asked: bool, held: Option<&'a DeclaredEntities>) -> Declared<'a> {
+        match (held, asked) {
+            (Some(d), _) => Declared::Answered(d),
+            (None, true) => Declared::Unanswered,
+            (None, false) => Declared::Off,
+        }
+    }
+}
+
+/// The pane, beside the declared entities as [`Declared`] has them.
 pub fn pane<'a>(
     state: &'a AdminState,
-    declared: Option<&'a DeclaredEntities>,
+    declared: Declared<'a>,
     sp: Spacing,
 ) -> Element<'a, Message> {
     let run_label = if state.in_flight {
@@ -75,8 +99,9 @@ pub fn pane<'a>(
         kit::section_header("Admin & storage", None),
         row![run].spacing(sp.sm),
         kit::muted(
-            "the admin space is queried on demand — routers, the storage-manager subtree \
-             and the declared entities, one press, never ambient",
+            "the admin space is queried on demand — routers and the storage-manager \
+             subtree, one press, never ambient; the declared entities only with \
+             --admin-declared (#890)",
         ),
         kit::muted(
             "read through the un-namespaced session every explorer runs (RFC 09 §5): a \
@@ -299,18 +324,32 @@ fn s4_row(r: &S4Row, sp: Spacing) -> Element<'_, Message> {
     )
 }
 
-/// Declared entities — the `Option` here is the only thing separating "the
-/// admin space answered and declared nothing" from "no answer (yet)", which
-/// is #70's explicit reachability ask.
-fn entities(declared: Option<&DeclaredEntities>, sp: Spacing) -> Element<'_, Message> {
+/// The sentence a declared-entities sweep that is off renders (#890).
+pub const DECLARED_OFF: &str = "declared entities: not asked — off by default, since \
+     asking can freeze a zenoh 1.10 router: it answers them while holding its routing \
+     tables' read lock, and another client's declaration in between deadlocks it (#890). \
+     --admin-declared, or the Settings overlay, asks. This is \"not asked\", never \
+     \"nothing declared\" (RFC 09 §5.1 O4).";
+
+/// Declared entities — [`Declared`] separates "the admin space answered and
+/// declared nothing" from "no answer (yet)", which is #70's explicit
+/// reachability ask, and both from "not asked" (#890).
+fn entities<'a>(declared: Declared<'a>, sp: Spacing) -> Element<'a, Message> {
     let mut col = column![kit::section_header("Declared entities", None)].spacing(sp.xs);
-    let Some(declared) = declared else {
-        col = col.push(kit::muted(
-            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
-             adminspace.enabled defaults to false and a peer mesh has none, so this is \
-             \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4).",
-        ));
-        return col.into();
+    let declared = match declared {
+        Declared::Off => {
+            col = col.push(kit::muted(DECLARED_OFF));
+            return col.into();
+        }
+        Declared::Unanswered => {
+            col = col.push(kit::muted(
+                "declared entities: n/a — not read yet, or nothing answered. zenoh's \
+                 adminspace.enabled defaults to false and a peer mesh has none, so this is \
+                 \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4).",
+            ));
+            return col.into();
+        }
+        Declared::Answered(d) => d,
     };
     if declared.entities.is_empty() {
         col = col.push(kit::muted(

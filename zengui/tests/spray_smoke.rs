@@ -217,6 +217,7 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],
         eager: false,
+        admin_declared: false,
         echo_lines: 100,
         history_entries: 10,
         max_keys: 1000,

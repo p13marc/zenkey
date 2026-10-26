@@ -474,6 +474,7 @@ async fn a_late_joiners_seed_counts_its_state_leg() {
         scope: ScopePreset::Everything,
         selectors: vec![],
         eager: false,
+        admin_declared: false,
         echo_lines: 100,
         history_entries: 10,
         max_keys: 1000,
@@ -647,6 +648,7 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
         scope: ScopePreset::Everything,
         selectors: vec![],
         eager: false,
+        admin_declared: false,
         echo_lines: 100,
         history_entries: 10,
         max_keys: 1000,
@@ -753,6 +755,7 @@ async fn booted_at(
         // The scope observed from the start (`**`, in no namespace): what a
         // foreign publish needs to come back through the pump.
         eager: true,
+        admin_declared: false,
         echo_lines: 500,
         history_entries: 10,
         max_keys: 5000,

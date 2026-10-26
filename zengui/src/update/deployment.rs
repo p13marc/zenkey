@@ -158,6 +158,22 @@ pub(crate) fn update(
                     if t.eager { "on" } else { "off" }
                 ));
             }
+            // The declared entities (#890): asked at once when turned on,
+            // and forgotten when turned off, so "off" is what the tree shows
+            // too — the contract skeleton and what was observed.
+            let ask_declared = t.admin_declared && !dep.settings.admin_declared;
+            if t.admin_declared != dep.settings.admin_declared {
+                dep.settings.admin_declared = t.admin_declared;
+                if t.admin_declared {
+                    applied.push("declared entities on — asked now (#890)".to_string());
+                } else {
+                    applied.push("declared entities off — no longer asked (#890)".to_string());
+                    dep.admin_declared = None;
+                    if dep.refresh_skeleton() {
+                        tree.reflatten(dep, obs);
+                    }
+                }
+            }
             let contracts_changed = t.contracts != dep.settings.contracts;
             if contracts_changed {
                 dep.settings.contracts = t.contracts;
@@ -181,8 +197,14 @@ pub(crate) fn update(
             chrome.prefs.history_entries = Some(dep.settings.history_entries);
             chrome.prefs.max_keys = Some(dep.settings.max_keys);
             chrome.prefs.eager = Some(dep.settings.eager);
+            chrome.prefs.admin_declared = Some(dep.settings.admin_declared);
             chrome.prefs.contracts = dep.settings.contracts.clone();
             chrome.prefs_dirty = true;
+            let declared = if ask_declared {
+                super::bus::read_declared(dep)
+            } else {
+                Task::none()
+            };
             if contracts_changed {
                 // A load replaces the contracts whole, and its landing
                 // rebuilds the store and drops what was judged under the
@@ -191,9 +213,9 @@ pub(crate) fn update(
                 for slot in sub.all_mut() {
                     slot.decoded = None;
                 }
-                return super::bus::load_contracts(dep);
+                return Task::batch([super::bus::load_contracts(dep), declared]);
             }
-            Task::none()
+            declared
         }
         DeploymentMsg::Reconnect => {
             forget(dep, obs, tree, work);

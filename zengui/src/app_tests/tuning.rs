@@ -82,6 +82,7 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_reloads_contracts() {
         max_keys: 1000,
         timeout_secs: 5,
         eager: false,
+        admin_declared: false,
         contracts: vec![],
     };
 
@@ -210,4 +211,67 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_reloads_contracts() {
     assert_eq!(app.work.echo.echo.len(), 3);
     assert_eq!(app.work.echo.echo.evicted(), 6);
     assert_eq!(app.work.echo.echo.lagged(), 4);
+}
+
+/// The Settings overlay's declared-entities switch (#890): on, it is
+/// remembered and says it asks now; off, the answer held is forgotten, so
+/// the tree is the contract skeleton and what was observed, and an answer
+/// still in flight lands on nothing.
+#[test]
+fn the_declared_switch_asks_when_on_and_forgets_when_off() {
+    use crate::message::{BusMsg, DeploymentMsg};
+    use crate::view::settings::Tuning;
+
+    let mut app = test_app();
+    assert!(!app.dep.settings.admin_declared, "off by default");
+    let base = Tuning {
+        echo_lines: 100,
+        history_entries: 10,
+        max_keys: 1000,
+        timeout_secs: 5,
+        eager: false,
+        admin_declared: true,
+        contracts: vec![],
+    };
+    let status = |app: &Zengui| {
+        app.work
+            .bench
+            .settings_form
+            .status
+            .clone()
+            .expect("a verdict")
+            .expect("applied")
+    };
+    let _ = app.update(Message::Deployment(DeploymentMsg::TuningApplied(
+        base.clone(),
+    )));
+    assert!(app.dep.settings.admin_declared);
+    assert_eq!(app.chrome.prefs.admin_declared, Some(true), "remembered");
+    assert!(status(&app).contains("declared entities on — asked now (#890)"));
+
+    let held = Arc::new(zenkey_fleet::DeclaredEntities::default());
+    let _ = app.update(Message::Bus(BusMsg::DeclaredRead(Ok(Some(Arc::clone(
+        &held,
+    ))))));
+    assert!(
+        app.dep.admin_declared.is_some(),
+        "an answer while on is held"
+    );
+
+    let _ = app.update(Message::Deployment(DeploymentMsg::TuningApplied(Tuning {
+        admin_declared: false,
+        ..base
+    })));
+    assert!(!app.dep.settings.admin_declared);
+    assert_eq!(app.chrome.prefs.admin_declared, Some(false));
+    assert!(status(&app).contains("declared entities off — no longer asked (#890)"));
+    assert!(
+        app.dep.admin_declared.is_none(),
+        "forgotten when turned off"
+    );
+    let _ = app.update(Message::Bus(BusMsg::DeclaredRead(Ok(Some(held)))));
+    assert!(
+        app.dep.admin_declared.is_none(),
+        "an answer to a question no longer asked is dropped"
+    );
 }

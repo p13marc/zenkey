@@ -63,6 +63,7 @@ pub fn settings() -> Settings {
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],
         eager: false,
+        admin_declared: false,
         echo_lines: 500,
         history_entries: 50,
         max_keys: 50_000,
