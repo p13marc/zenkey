@@ -12967,6 +12967,17 @@ judged on what its output shows: every address it followed unobservable
 from the cut, never down, and its read complete within 30 s of the heal.
 The counts are not asked of it."
 
+**Status at core 0.46:** resolved, as proposed. Expected 10 now reads "A
+tool run as a black box is judged on what its output shows: every address
+it followed unobservable from the cut, never down, and its read complete
+within 30 s of the heal. The counts are not asked of it." zk2py's runner
+now judges zenctl on that as one check, where at 0.45 it was two. zenctl
+passes it in every run. Its first transition after the cut was
+unobservable, 0.45–0.50 s after the cut, its evidence naming every address
+under `crowd/*`. It never fired. It was ok again 1.47–1.50 s after the heal
+beside 2,000 tokens, and 24.6 s after it beside 10,000. What "from the
+cut" means for an output that comes once a period is F-249.
+
 ### F-246 · minor · core §8.1 (0.44, 0.45): "about what a read of the population costs", and F-243's figure, are a later read's
 
 > §8.1 (0.44): "A reader SHOULD wait for the round trip after a move, and
@@ -13026,6 +13037,22 @@ watch session's interests timeout, 120 s.
   session that had read them before, and 2.6–3.4 s after a session's
   first read (zk2py)."
 
+**Status at core 0.46:** resolved, in substance as proposed. §8.1 now
+sizes the wait after a move as "about what a session's first read of the
+population costs", with zk2py's figures. F-243's figure gives both cases,
+"258–280 ms after a read its own 0.2 s timeout ended on a session that had
+read them before, and 2.6–3.4 s after a session's first read". Measured
+again, beside 10,000 tokens:
+- a session's first read took 3.13–3.91 s on six fresh sessions, three of
+  them zk2py's follower's seeds, and a later read 0.47–0.50 s;
+- the round trip after a reopen took 3.43–4.54 s over three successive
+  reopens of each of two watch sessions, and 3.76 s in step 10. Every
+  reopen costs about a first read, not only a session's first reopen.
+
+0.46 adds a sentence of its own: "So a reader that times its own reads as
+it runs sees only later reads". A reader's seed is a session's first read
+(F-248).
+
 ### F-247 · minor · core §8.1 (0.45, F-243): "zk2py does so for its round trips and reads"
 
 > §8.1 (0.45): "A reader MAY ask each GET with its own timeout at or above
@@ -13052,6 +13079,163 @@ their texts, written against 0.40, ask.
 **Wording that would remove the guess:** "zk2py does so for its
 follower's round trips and reads."
 
+**Status at core 0.46:** resolved, as proposed: "zk2py's follower does so
+for its round trips and reads (0.46, F-247)".
+
 **Counts at core 0.45:** 247 entries. Open: F-245 to F-247, against §8.1
 and `scenarios/presence.md` §10: one gap and two minor points. Every
 other entry is resolved.
+
+## At core 0.46 (#609)
+
+Round 71 read core 0.46 cold, on main 0893c8fc (#888). It read:
+- the CHANGELOG's 0.46 entry;
+- §8.1's round trip bullets, from "In a namespace, a watch session in no
+  namespace" through "A reader whose watch session is cut off follows
+  nothing";
+- Appendix B's zenoh facts;
+- `scenarios/presence.md` §10, end to end.
+
+0.46 is wording only. It answers round 70's three findings, and changes
+no fixture, no verdict and no behaviour. zk2py's readers did not change,
+and `readings` is unchanged (411). Its runner follows the new Expected 10:
+zenctl's step 10 is now one check, where it was two. The check is
+unobservable from the cut, never firing, and ok again within 30 s of the
+heal.
+
+**Round 70's findings at 0.46:** F-245, F-246 and F-247 are resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 3042 of 3042.**
+
+**Live:** `presence_scenarios` against `owner-wf` and `zenctl-wf`. §1–§8
+ran once, with zk2py's owner and reader. §9 and §10 ran in every pairing:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 46 | 1 |
+| Rust, zk2py | – | 9 | 40 | 1 |
+| zk2py, zenctl | – | – | 9 | 2 |
+| Rust, zenctl | – | – | 8 | 3 |
+
+Every check passes. zenctl's §10 has one check fewer than at 0.45: its two
+step 10 checks are now one. §10 also ran whole once beside 10,000 tokens
+with each reader: 46 of 46 with zk2py's, and 9 of 9 with zenctl. Step 10
+beside 10,000:
+- the round trip after the reopen took 3.76 s, and the next 1.72 ms;
+- zk2py's follower was complete again 4.25 s after the heal, and 7.31 s
+  with every wait at 20 ms;
+- zenctl watchdog was unobservable 0.45 s after the cut, never fired, and
+  was ok again 24.6 s after the heal.
+
+**Where the two implementations disagree:** on no verdict.
+- Step 6's round trips still differ, as 0.43 allows: one before the first
+  seed for zk2py, and two for the reference.
+- Beside 10,000 tokens, after the heal, zk2py's follower recovered in
+  4.25–7.31 s and the debug zenctl in 24.6 s. Both are within step 10's
+  30 s.
+
+**The text, read cold.** 0.46's wording says what zk2py found, but for two
+points:
+- F-248: a minor point, in a sentence 0.46 added: a reader's seed is a
+  session's first read;
+- F-249: a gap, in F-245's wording: "from the cut", judged on a black
+  box's output, depends on how often that output comes.
+
+Nothing else was found ambiguous, contradictory or untestable. Measured
+for this read, beyond F-246's figures: over three successive reopens of
+each of two watch sessions beside 10,000 tokens, each round trip after a
+reopen took
+3.43–4.54 s and the next 1.6–1.9 ms. That is "the first after each reopen",
+as §8.1 says. Beside 2,000, at the second cut the subscriber was told
+every token withdrawn, since the first reopen had told it them, as
+Appendix B says of a transport that closes.
+
+### F-248 · minor · core §8.1 (0.46, F-246): "a reader that times its own reads as it runs sees only later reads"
+
+> §8.1 (0.46): "A reader SHOULD wait for the round trip after a move, and
+> run its interests timeout, above that time at its population: about
+> what a session's first read of the population costs, every matching
+> token sent once (0.46, F-246). Beside 10,000 tokens a session's first
+> read took 3.3–4.2 s and a later one 0.52–0.58 s (zk2py, release), and a
+> read after a reopen is a later read. So a reader that times its own
+> reads as it runs sees only later reads, and sizes this wait from them
+> too short."
+
+A reader's seed is a read of the population on its reading session. When
+that session has not read the population before, which is so at every
+reader's start, the seed is a session's first read. Measured on
+zenoh-python 1.10.1 routers, a release build, beside 10,000 tokens in
+`ns`:
+- zk2py's follower, started on fresh sessions, seeded in 3.13–3.91 s, in
+  3 of 3;
+- the next read on its reading session took 0.47–0.49 s;
+- a fresh session's first read took 3.48–3.77 s, and its next 0.49–0.50
+  s, in 3 of 3.
+
+So a reader that times its own reads sees a first read once, at its seed,
+and later reads after it. The cost the SHOULD names is the one it can time.
+"Only" says otherwise, and could lead a reader to drop the one measure it
+has. The SHOULD itself stands. The round trips after a reopen ran to 4.54
+s in the same runs, past the seeds' 3.91 s, so a wait sized from a seed
+needs a margin.
+
+**zk2py:** unchanged. It sizes nothing on a read's cost. After a move its
+follower waits until the round trip ends, at the latest at its watch
+session's interests timeout, 120 s.
+
+**Wording that would remove the guess:** "So a reader that sizes this wait
+from its own later reads sizes it too short. Its seed, on a session that
+has not read the population before, is a session's first read (zk2py's
+follower: 3.1–3.9 s, the next read 0.47–0.49 s)."
+
+### F-249 · gap · scenarios/presence.md §10 Expected 10 (0.46, F-245): "unobservable from the cut", judged on a black box's output, depends on how often that output comes
+
+> Step 10 (0.44): "Its link is cut for 1 s, and healed."
+
+> Expected 10 (0.46, F-245): "A tool run as a black box is judged on what
+> its output shows: every address it followed unobservable from the cut,
+> never down, and its read complete within 30 s of the heal."
+
+> CHANGELOG 0.46: "zk2py measured zenctl unobservable 0.41–0.49 s after
+> the cut."
+
+A black box's output can come once a period. `zenctl watchdog` prints a
+transition only when it evaluates, once every `--every`, 5 s by default
+(its `--help`). Until its first output after the cut, its last word is
+the one before the cut, "ok". What it shows "from the cut" is therefore
+its first output after the cut, if that output comes before the reader
+has recovered. Step 10's run, beside 2,000 tokens in `ns`, every session
+through one link cut for 1 s:
+- at `--every 0.5`, as zk2py's runner sets it, it printed unobservable
+  0.47–0.50 s after the cut, before the heal, in 4 of 4 (and 0.45 s beside
+  10,000);
+- at `--every 2` it printed unobservable 1.91 s after the cut, after the
+  heal, and ok at 3.92 s, in 3 of 3;
+- at `--every 5`, its default, it printed nothing after the cut, so its
+  output said ok throughout, in 3 of 3.
+
+The same tool can therefore pass, fail or be argued either way, depending
+on a period the step does not set. At 2 s, reading "from the cut" as "its
+first output after the cut" passes it, and reading it as "before the heal"
+fails it. At its default it fails, though nothing it printed was down. The
+CHANGELOG's 0.41–0.49 s were measured at `--every 0.5`, and it does not
+say so. A reader under test is judged "from the move itself and before
+any read" (step 6), which a white box can show. A black box can show only
+what its output samples.
+
+**zk2py:** the runner runs zenctl watchdog at `--every 0.5`, below the cut.
+It reads "from the cut" as zenctl's first transition after the cut,
+printed before the heal. With `--reopen`, a note gives what zenctl prints
+at 5 s and at 2 s.
+
+**Wording that would remove the guess:** "A tool run as a black box is run
+with its output's period below the cut (zk2py runs zenctl watchdog at
+`--every 0.5`), and judged on what its output shows: from its first output
+after the cut until a complete read after the heal, every address it
+followed unobservable, never down, and its read complete within 30 s of
+the heal."
+
+**Counts at core 0.46:** 249 entries. Open: F-248 and F-249, against §8.1
+and `scenarios/presence.md` §10: one minor point and one gap. Every other
+entry is resolved.

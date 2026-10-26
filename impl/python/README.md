@@ -113,9 +113,10 @@ redundancy    180 passed     0 failed
 total        3042 passed     0 failed
 ```
 
-The figures are against `core.md` 0.45, `hostid.v1` 0.7, `freshness.v1`
+The figures are against `core.md` 0.46, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
 `telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.5.
+Core 0.46 changed no fixture and no reading (411).
 Core 0.45 changed no fixture; `readings` gained two cases for F-242's
 take-up (411).
 Core 0.44 changed no fixture; `readings` gained its 15 cases (409).
@@ -2012,7 +2013,7 @@ against zk2py's owner:
 - `link_scenarios` 78, in two runs;
 - `desired_scenarios` 52, zk2py's author and target.
 
-## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45)
+## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46)
 
 ```bash
 PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) \
@@ -2754,6 +2755,99 @@ build), the crowd in `ns`:
 - **The time to recover beside 10,000 tokens.** zk2py's follower was
   complete again 4.0–5.1 s after the heal. With its waits at 20 ms it took
   7.1 s. The debug zenctl took 25.3 s. All are within step 10's 30 s.
+
+**Core 0.46**, read cold in round 71, on main 0893c8fc (#888). It is
+wording only: it answers round 70's three findings, and changes no
+fixture, no verdict and no behaviour. zk2py's readers did not change, and
+`readings` is unchanged (411):
+- **A black box is judged on what its output shows** (F-245): every
+  address it followed unobservable from the cut, never down, and its read
+  complete within 30 s of the heal.
+- **The wait after a move is a session's first read** (F-246). The
+  follower sizes nothing on a read's cost: after a move its round trip
+  waits until it ends, at the latest at its watch session's interests
+  timeout.
+- **The MAY's example is zk2py's follower** (F-247), as its README said.
+
+**The runner** follows 0.46's Expected 10:
+- **zenctl's step 10 is one check**, where at 0.45 it was two. It is
+  unobservable from the cut, never firing, and ok again within 30 s of the
+  heal. zenctl's watchdog prints a transition only when it evaluates, once
+  every `--every`. The runner sets 0.5 s, below the 1 s cut, and reads
+  "from the cut" as its first transition after the cut, printed before the
+  heal (F-249).
+- **`--reopen`** with zenctl adds F-249's note: the same run at the
+  watchdog's default `--every 5`, and at 2 s.
+
+**`presence_scenarios`**, against `owner-wf` and `zenctl-wf` (main
+0893c8fc). §1–§8 ran once, with zk2py's owner and reader. §9 and §10 ran
+in every pairing:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 46 | 1 |
+| Rust, zk2py | – | 9 | 40 | 1 |
+| zk2py, zenctl | – | – | 9 | 2 |
+| Rust, zenctl | – | – | 8 | 3 |
+
+Every check passes. zenctl's §10 has one check fewer than at 0.45, since
+its two step 10 checks are now one. Not run:
+- §3 step 2, as before;
+- §10 step 7 with the Rust owner;
+- for zenctl, §9 and §10 step 9.
+
+**Beside 10,000 tokens**, §10 ran whole once with each reader: 46 of 46
+with zk2py's, and 9 of 9 with zenctl, step 9 not run.
+
+§10 step 10 at 0.46, measured on zenoh-python 1.10.1 routers (a release
+build), the crowd in `ns`:
+
+| | 2,000 tokens (2 runs; zenctl's 3) | 10,000 tokens (1 run) |
+|---|---|---|
+| The round trip at the start | 41.6–43.8 ms, no token | 41.0 ms, no token |
+| The first after the reopen | 169–241 ms | 3.76 s |
+| The next, asked at once (F-241) | 0.83–1.09 ms | 1.72 ms |
+| GETs for the four asks | 1 | 1 |
+| Stand-in follower: complete after the heal | 0.80–0.82 s | 7.31 s |
+| Default follower: complete after the heal | 0.21–0.26 s | 4.25 s |
+| zenctl watchdog: unobservable after the cut | 0.48–0.50 s | 0.45 s |
+| zenctl watchdog: ok again after the heal | 1.47–1.50 s | 24.6 s |
+
+- zenctl's first transition after the cut was unobservable in every run,
+  its evidence naming every address under `crowd/*`. It never fired.
+- Beside 10,000 the stand-in follower asked 6 reads and took up 31. Its
+  round trip after the reopen took 5.4 s, where the default follower's
+  took 3.6 s. The stand-in's reads, made possibly incomplete while that
+  round trip ran, shared the router with the reopening's telling.
+- zenctl's stderr held no `Unknown interest` and no `Didn't receive
+  DeclareFinal` line in any run.
+
+**Measured for the cold read** (scratch probes on the same routers, and
+`--reopen`). These are notes, not checks:
+- **A session's first read, and a reader's seed** (F-248). Beside 10,000
+  tokens a fresh session's first read took 3.48–3.77 s and its next
+  0.49–0.50 s, in 3 of 3. zk2py's follower on fresh sessions seeded in
+  3.13–3.91 s, a session's first read, and the next read on its reading
+  session took 0.47–0.49 s, in 3 of 3.
+- **Successive reopens** (F-246). A watch session in no namespace, its
+  subscriber without history on the wire key, its link cut and healed
+  three times beside 10,000 tokens. The round trip after each reopen took
+  3.43–4.54 s, and the next 1.6–1.9 ms, on 2 sessions. Every reopen costs
+  about a session's first read, not only the first. Beside 2,000, at the
+  second cut the subscriber was told all 2,000 tokens withdrawn before the
+  heal, since it had been told them at the first reopen. After the heal it
+  was told all 2,000 again.
+- **The watchdog's period** (F-249). The step's run with zenctl's
+  watchdog at its default `--every 5` printed nothing after the 1 s cut,
+  in 3 of 3 runs. At `--every 2` it printed unobservable 1.91 s after the
+  cut, after the heal, and ok 3.92 s after it, in 3 of 3.
+
+**Where the two implementations disagree:** on no verdict.
+- **Step 6's round trips** still differ, as 0.43 allows: one before the
+  first seed for zk2py, and two for the reference.
+- **The time to recover beside 10,000 tokens.** zk2py's follower was
+  complete again 4.25 s after the heal, and 7.31 s with its waits at 20 ms.
+  The debug zenctl took 24.6 s. All are within step 10's 30 s.
 
 ## What it does not cover
 
