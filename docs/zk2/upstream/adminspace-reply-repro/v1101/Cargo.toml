@@ -1,0 +1,20 @@
+[package]
+name = "asr-1101"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Its own workspace: the zenkey workspace does not list it, so `cargo` at the
+# repository root never builds it.
+[workspace]
+
+[[bin]]
+name = "asr"
+path = "../src/main.rs"
+
+[dependencies]
+zenoh = { version = "=1.10.1", features = ["unstable"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "io-std", "sync"] }
+
+[profile.release]
+debug = 1

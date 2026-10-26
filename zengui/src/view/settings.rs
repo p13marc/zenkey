@@ -2,7 +2,8 @@
 //!
 //! Five settings were launch-only and invisible afterwards: `--contracts`
 //! (`--registry` until #614),
-//! `--max-keys`, `--echo-lines`, `--history-entries` and `--eager`. A user
+//! `--max-keys`, `--echo-lines`, `--history-entries` and `--eager`
+//! (`--admin-declared` joined them with #890). A user
 //! who tripped the key-table bound had no way to raise it and — worse — no
 //! way to *see* it, in an application whose whole moat is that every bound
 //! reports its cost.
@@ -39,6 +40,8 @@ pub struct SettingsForm {
     pub max_keys: String,
     pub timeout: String,
     pub eager: bool,
+    /// Whether the admin space's declaration records are asked (#890).
+    pub admin_declared: bool,
     /// Contract paths — authoring files, directories of them, `.history`
     /// roots — comma- or space-separated; empty = contracts from the bus
     /// alone (spec §8.4).
@@ -56,6 +59,7 @@ impl SettingsForm {
         self.max_keys = s.max_keys.to_string();
         self.timeout = s.timeout_secs.to_string();
         self.eager = s.eager;
+        self.admin_declared = s.admin_declared;
         self.contracts = s
             .contracts
             .iter()
@@ -74,6 +78,7 @@ pub struct Tuning {
     pub max_keys: usize,
     pub timeout_secs: u64,
     pub eager: bool,
+    pub admin_declared: bool,
     pub contracts: Vec<PathBuf>,
 }
 
@@ -85,6 +90,7 @@ pub enum SettingsMsg {
     MaxKeysChanged(String),
     TimeoutChanged(String),
     EagerToggled(bool),
+    AdminDeclaredToggled(bool),
     ContractsChanged(String),
     /// Validate the whole form; a valid one becomes a [`Tuning`].
     Apply,
@@ -129,6 +135,7 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         scope,
         selectors,
         eager: _,           // controlled below (reconnect)
+        admin_declared: _,  // controlled below (asked on apply)
         echo_lines: _,      // controlled below (live)
         history_entries: _, // controlled below (live)
         max_keys: _,        // controlled below (reconnect)
@@ -230,6 +237,16 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         .style(muted),
     );
 
+    // ── The one switch that costs the bus, not this window (#890) ──
+    col = col.push(group("admin space"));
+    col = col.push(
+        kit::check(d.form.admin_declared)
+            .label("ask the declared entities — can freeze a zenoh 1.10 router (#890)")
+            .on_toggle(|b| msg(SettingsMsg::AdminDeclaredToggled(b)))
+            .text_size(font::CAPTION),
+    );
+    col = col.push(kit::body(ADMIN_DECLARED_COST).style(muted));
+
     // ── The contracts, which are not a bound at all (#614, FL6a) ──
     col = col.push(group("contracts"));
     col = col.push(input_row(
@@ -319,6 +336,14 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     col = col.push(kit::body(FONTS_NOTICE).style(muted));
     col.into()
 }
+
+/// What asking the declared entities costs (#890), said under the switch.
+pub const ADMIN_DECLARED_COST: &str = "off by default — zenoh 1.10.1 answers the admin \
+     space's subscriber, publisher, queryable, querier and token records while it holds its \
+     routing tables' read lock, and a declaration or a session from any other client in \
+     between deadlocks the router for good. On, they are asked at once and then at every \
+     reconnect, namespace switch and admin sweep; off, the tree is the contract skeleton and \
+     what was observed.";
 
 /// What the binary embeds and under which licences (#533) — the long form is
 /// `zengui/assets/fonts/NOTICE.md`, shipped beside every release binary.

@@ -36,6 +36,10 @@ pub(crate) fn update(form: &mut SettingsForm, msg: SettingsMsg) -> Task<Message>
             form.eager = b;
             Task::none()
         }
+        SettingsMsg::AdminDeclaredToggled(b) => {
+            form.admin_declared = b;
+            Task::none()
+        }
         SettingsMsg::ContractsChanged(v) => {
             form.contracts = v;
             Task::none()
@@ -80,6 +84,7 @@ fn parse(form: &SettingsForm) -> Result<Tuning, String> {
             )
         })?,
         eager: form.eager,
+        admin_declared: form.admin_declared,
         contracts: crate::view::contexts::words(&form.contracts)
             .into_iter()
             .map(Into::into)

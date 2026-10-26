@@ -3,6 +3,76 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.48 — 2026-10-26: an admin read that reaches no router's declaration records (zenkey #890)
+
+zengui's boot asked the admin space for every session's declarations, and
+its spray test hung in 3 of 40 runs eight at a time (#890; 4 of 40 when
+measured again, 0 of 80 once it stopped asking). zenoh 1.10.1
+answers a node's declaration records,
+`@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`, in
+`resources_data`, which holds the routing tables' read lock while it
+replies, and each reply takes that lock again. A writer queued between two
+replies, another face's declaration, interest or new session, waits on the
+replying thread, which waits on it, and the node's routing stops for good.
+`linkstate/*` and `route/successor/src/<zid>/dst/<zid>` do the same, and
+zenoh's main has the same code. A reproduction with zenoh alone
+(`docs/zk2/upstream/adminspace-reply-repro/`) froze the router in 135 of
+135 trials that asked one of those keys, with a record to send, beside
+another client's declarations, 107 of them at the first GET, and in 0 of
+28 without a writer or on a key answered without the lock held across a
+reply. zenoh 1.10.1 with the replies sent after the lock is dropped froze
+in 0 of 138. §4.2's storages selector reached the same records.
+
+**Changed: S4's check reads the storage manager's status subtree**
+(§4.2).
+- **The gap.** 0.11 named `@/*/router/**/storage_manager/storages/**`.
+  Its `**` intersects `@/<zid>/router/queryable/**` and
+  `…/subscriber/**`, and §4.2 said so: "the record of a queryable ending
+  in `**`, such as an owner's `…/state/**`, intersects the selector and
+  answers it". Each of those answers was sent under the lock. Beside 500
+  subscribers and queryables ending in `**` and a client's churn, the
+  reproduction's first GET of that selector froze the router in 10 of 10
+  trials; beside 500 on concrete keys, which answer nothing, in 0 of 5.
+- **Now.** `@/*/router/status/plugins/storage_manager/storages/**`. Every
+  zenoh 1.x storage manager answers a storage's GET there (the admin
+  space's `status/plugins/**` handler), and no `config/**` key answers a
+  GET, so the reference reads every storage it read before. Beside the
+  same 500 records, 0 of 5 trials froze.
+
+**Added: what a tool does not ask** (§4.2). A tool MUST NOT ask a
+selector that intersects a router's declaration records, its
+`linkstate/*` or its `route/successor/**` unless its user asks for that
+read. The reference asks them only so: zengui's declared-entities sweep
+is behind `--admin-declared`, and `zenctl get` asks what its user types,
+its help naming the hazard.
+
+**Added: `scenarios/state.md` §12**, the MUST NOT's evidence
+(`[Sc: state.md §12]`): S4's check reads, 200 times, beside an owner
+whose state queryable ends in `**`, 400 more records ending in `**` and a
+client declaring flat out. Every read finds the router and the storage,
+a put and the owner's S4 answer cross the router within 2 s after each,
+and no selector the reads asked reaches a declaration record, as a
+queryable on `@/**` hears them. The reference runs its safe half as
+`zenkey-fleet`'s `s12_the_checks_reads_beside_a_router_declaring`: 96 of
+96 runs passed eight at a time, the slowest put 68 ms and the slowest S4
+answer 82 ms. The hazardous half is the reproduction's, never a suite's.
+
+**Added: Appendix B's fact**, with the root document, metrics and
+plugins' status answered without the lock held across a reply.
+
+**Deliberately not changed.**
+- What a storage is (0.15, F-86), who answered (0.12–0.13) and every
+  verdict of the check.
+- `@/*/router`, which the check reads first: the root document is
+  answered without the lock held across its reply.
+- §11.1's admin-read grant, `@/*/router` and `@/*/router/**`. It permits
+  the declaration records' GETs; narrowing it would let a router refuse
+  them, and is left for a round of its own.
+- No rule for zenoh: the upstream report is drafted
+  (`docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`), not
+  filed.
+- zk2py (`impl/python/`) reads 0.11's selector until its next round.
+
 ## 0.47 — 2026-10-26: the period a black box is sampled at, and the first read a reader can time (round 71's F-248 and F-249)
 
 zk2py round 71 (PR #889) read 0.46 cold and resolved F-245 to F-247. It

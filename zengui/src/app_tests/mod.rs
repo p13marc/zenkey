@@ -11,7 +11,8 @@
 //!
 //! One module per subject (#614, FL5), each a child of this one, so the
 //! chunks that port them in parallel do not meet in one file: `tree`,
-//! `subject`, `replay`, `windows`, `slots`, `tuning`, `link` and `send`.
+//! `subject`, `replay`, `windows`, `slots`, `tuning`, `link` and `send`,
+//! and `admin` for what the window asks the admin space (#890).
 //! The fixtures more than one of them drives stay here.
 
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use crate::message::{BusTick, Message, Subject, SubjectMsg};
 use crate::state::tree::{KeyCounts, shape_held};
 use crate::update;
 
+mod admin;
 mod config;
 mod link;
 mod replay;

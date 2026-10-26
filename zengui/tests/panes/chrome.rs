@@ -503,6 +503,7 @@ fn launch_settings() -> zengui::config::Settings {
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],
         eager: false,
+        admin_declared: false,
         echo_lines: 2000,
         history_entries: 200,
         max_keys: 50_000,

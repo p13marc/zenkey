@@ -120,6 +120,23 @@ pub struct Cli {
     #[arg(long)]
     pub eager: bool,
 
+    /// Ask the routers' admin space what every session declared — its
+    /// `@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`
+    /// records — at boot, on a reconnect or a namespace switch and with
+    /// each admin sweep, so the tree can show a declared key no sample has
+    /// reached yet.
+    ///
+    /// Off by default, because asking can freeze the router (#890): zenoh
+    /// 1.10.1 sends those replies while it holds its routing tables' read
+    /// lock, each reply takes that lock again, and a declaration or a new
+    /// session from any other client in between deadlocks the router for
+    /// good. Turn it on only against a bus nothing else is declaring on.
+    /// Off, the tree is the contract skeleton and what was observed, and
+    /// the admin pane says "not asked". Remembered when applied from the
+    /// Settings overlay; a flag turns it on for this launch only.
+    #[arg(long)]
+    pub admin_declared: bool,
+
     /// How many echo lines to retain (default 2000; the Settings overlay
     /// changes it live, and remembers the change — a flag beats the memory
     /// for this launch without becoming it).
@@ -165,6 +182,10 @@ pub struct Settings {
     pub scope: ScopePreset,
     pub selectors: Vec<String>,
     pub eager: bool,
+    /// Whether the admin space's declaration records are asked
+    /// (`--admin-declared`): off by default, since asking can freeze a
+    /// zenoh 1.10.1 router (#890).
+    pub admin_declared: bool,
     pub echo_lines: usize,
     pub history_entries: usize,
     pub max_keys: usize,
@@ -310,6 +331,9 @@ impl Cli {
             // The flag can only assert, so it wins by OR: `--eager` over a
             // remembered lazy is eager; there is no `--no-eager` to lose.
             eager: self.eager || prefs.eager.unwrap_or(false),
+            // Asserted the same way: a flag or the overlay's memory turns it
+            // on, and nothing else does (#890).
+            admin_declared: self.admin_declared || prefs.admin_declared.unwrap_or(false),
             echo_lines,
             history_entries,
             max_keys,
@@ -615,6 +639,10 @@ mod tests {
         assert_eq!(s.scouting, None, "scouting is opt-in (RFC 09 §0.1)");
         assert_eq!(s.scope, ScopePreset::Everything);
         assert!(!s.eager, "lazy is the default (issue #85)");
+        assert!(
+            !s.admin_declared,
+            "the declaration records are not asked by default (#890)"
+        );
         assert_eq!(s.echo_lines, 2000);
         assert_eq!(s.history_entries, 200);
         assert_eq!(s.max_keys, zenkey_fleet::DEFAULT_MAX_KEYS);
@@ -698,6 +726,29 @@ mod tests {
         };
         let s = parse_remembering(&[], &stale).expect("must still start");
         assert_eq!(s.echo_lines, 2000);
+    }
+
+    /// The declared-entities sweep is asked only when someone said so: the
+    /// flag for this launch, or the Settings overlay's memory (#890).
+    #[test]
+    fn the_declared_sweep_is_asked_only_by_flag_or_memory() {
+        assert!(parse(&["--admin-declared"]).unwrap().admin_declared);
+        let on = Prefs {
+            admin_declared: Some(true),
+            ..Prefs::default()
+        };
+        assert!(parse_remembering(&[], &on).unwrap().admin_declared);
+        let off = Prefs {
+            admin_declared: Some(false),
+            ..Prefs::default()
+        };
+        assert!(!parse_remembering(&[], &off).unwrap().admin_declared);
+        assert!(
+            parse_remembering(&["--admin-declared"], &off)
+                .unwrap()
+                .admin_declared,
+            "the flag wins its launch"
+        );
     }
 
     /// Context supplies defaults; flags override (issue #35).

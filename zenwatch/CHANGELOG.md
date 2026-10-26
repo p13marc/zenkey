@@ -7,6 +7,12 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the scheduled doctor's storages read reaches no declaration record (#890, WJ)
+
+| Before | Now | Notes |
+|---|---|---|
+| the `doctor` block and the `doctor` rule read the storages from `@/*/router/**/storage_manager/storages/**` | from `@/*/router/status/plugins/storage_manager/storages/**` | the old `**` reached the routers' declaration records, which zenoh 1.10.1 answers under its routing tables' read lock, so a run could freeze the router beside another client's declaration; zenctl's row says more |
+
 ## Unreleased (`main`, zk2) — a reopen beside a large population (#882, WF)
 
 | Before | Now | Notes |

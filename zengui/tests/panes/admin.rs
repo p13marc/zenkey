@@ -7,7 +7,7 @@
 use super::*;
 use std::sync::Arc;
 use zengui::admin::{AdminState, AdminSweep};
-use zengui::view::admin::pane;
+use zengui::view::admin::{DECLARED_OFF, Declared, pane};
 use zenkey_fleet::DeclaredEntities;
 use zenkey_fleet::report::{
     Asked, AttachedTo, Attachment, InstanceAttachment, InstanceJoin, RouterInfo, StorageInfo,
@@ -208,7 +208,7 @@ fn storage(name: &str, key_expr: Option<&str>) -> StorageInfo {
 #[test]
 fn the_admin_pane_never_reports_a_sweep_it_did_not_run() {
     let state = AdminState::default();
-    let mut ui = simulator::<Message, _, _>(pane(&state, None, sp()));
+    let mut ui = simulator::<Message, _, _>(pane(&state, Declared::Off, sp()));
     assert!(ui.find("admin space not swept yet").is_ok());
     assert!(
         ui.find(
@@ -233,7 +233,7 @@ fn the_admin_pane_never_reports_a_sweep_it_did_not_run() {
 #[test]
 fn a_router_less_bus_says_so_four_ways() {
     let state = sweep("", vec![], vec![], topology(vec![], vec![]));
-    let mut ui = simulator::<Message, _, _>(pane(&state, None, sp()));
+    let mut ui = simulator::<Message, _, _>(pane(&state, Declared::Unanswered, sp()));
     // Verbatim from the CLI, so the two tools cannot disagree.
     assert!(
         ui.find(
@@ -289,7 +289,7 @@ fn the_s4_table_reads_a_storage_on_owner_state_as_the_finding() {
         topology(vec![node("z1", "router", true)], vec![]),
     );
     let declared = DeclaredEntities::default();
-    let mut ui = simulator::<Message, _, _>(pane(&state, Some(&declared), sp()));
+    let mut ui = simulator::<Message, _, _>(pane(&state, Declared::Answered(&declared), sp()));
     assert!(ui.find("S4: storages on owners' state").is_ok());
     assert!(ui.find("answers on owner state").is_ok());
     assert!(ui.find("intersects acme/zk2/*/*/*/state/**").is_ok());
@@ -320,7 +320,7 @@ fn the_s4_table_reads_a_storage_on_owner_state_as_the_finding() {
 fn an_empty_admin_space_reads_differently_from_an_absent_one() {
     let state = sweep("", vec![], vec![], topology(vec![], vec![]));
     let declared = DeclaredEntities::default();
-    let mut ui = simulator::<Message, _, _>(pane(&state, Some(&declared), sp()));
+    let mut ui = simulator::<Message, _, _>(pane(&state, Declared::Answered(&declared), sp()));
     assert!(
         ui.find("declared entities: 0 — the admin space answered and declared none")
             .is_ok()
@@ -334,4 +334,36 @@ fn an_empty_admin_space_reads_differently_from_an_absent_one() {
         .is_err(),
         "an answered read must not carry the unreachable sentence"
     );
+}
+
+/// The declared entities off (#890), the default: the pane says they were
+/// not asked and why, and never reads as "nothing answered" or "none".
+#[test]
+fn a_declared_sweep_that_is_off_says_not_asked_and_why() {
+    let state = sweep("", vec![], vec![], topology(vec![], vec![]));
+    let mut ui = simulator::<Message, _, _>(pane(&state, Declared::Off, sp()));
+    assert!(ui.find(DECLARED_OFF).is_ok());
+    assert!(DECLARED_OFF.contains("#890") && DECLARED_OFF.contains("--admin-declared"));
+    assert!(
+        ui.find("declared entities: 0 — the admin space answered and declared none")
+            .is_err()
+    );
+    assert!(
+        ui.find(
+            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
+             adminspace.enabled defaults to false and a peer mesh has none, so this is \
+             \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
+        )
+        .is_err(),
+        "not asked is not \"nothing answered\""
+    );
+    // An answer held when the switch went off is still shown: it is what
+    // was read.
+    let declared = DeclaredEntities::default();
+    assert!(matches!(
+        Declared::of(false, Some(&declared)),
+        Declared::Answered(_)
+    ));
+    assert!(matches!(Declared::of(true, None), Declared::Unanswered));
+    assert!(matches!(Declared::of(false, None), Declared::Off));
 }

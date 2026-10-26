@@ -1,0 +1,3 @@
+net-0: queries::route_send_response (dispatcher/queries.rs:557) -> RwLock::read_contended (rwlock/futex.rs:156)
+rx-0: adminspace::subscribers_data (runtime/adminspace.rs:832) -> adminspace::resources_data (runtime/adminspace.rs:822) -> queries::route_send_response (dispatcher/queries.rs:557) -> RwLock::read_contended (rwlock/futex.rs:156)
+rx-1: {impl#10}::send_declare (dispatcher/face.rs:638) -> Face::undeclare_token (dispatcher/token.rs:119) -> undeclare_token::{closure#0} (dispatcher/token.rs:134) -> Face::with_mapped_nullable_expr (dispatcher/face.rs:531) -> RwLock::write_contended (rwlock/futex.rs:257)

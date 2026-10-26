@@ -18,6 +18,11 @@ use crate::services::ServiceError;
 /// Read the admin space's declared entities on the session in no namespace
 /// — the admin space has none. `adminspace.enabled` defaults to false, so a
 /// silent admin space is the common answer, and it lands as `Ok(None)`.
+///
+/// Asked only with `--admin-declared` (#890; the gate is
+/// `update::bus::read_declared`): these are the admin keys a zenoh 1.10.1
+/// router answers while holding its routing tables' read lock, so asking
+/// them beside another client's declarations can freeze the router.
 pub fn declared(raw: zenoh::Session, timeout: Duration) -> Task<Message> {
     Task::perform(
         async move {

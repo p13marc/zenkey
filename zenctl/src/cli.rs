@@ -578,7 +578,11 @@ pub(crate) enum Command {
     ///
     /// Two forms, never confused. `get <SELECTOR>` is RAW: any key
     /// expression, on a session in no namespace, so the selector is the wire
-    /// key as it is (`prod/zk2/…`, `v1/…`, `@/**` for the zenoh admin space).
+    /// key as it is (`prod/zk2/…`, `v1/…`, `@/*/router` for a router's admin
+    /// document). A selector reaching a router's declaration records
+    /// (`@/**`, `@/*/router/subscriber/**`, …) can freeze a zenoh 1.10.1
+    /// router: it answers them under its routing tables' read lock, and
+    /// another client's declaration in between deadlocks it (#890).
     /// The fleet discipline (RFC 05 §2.1): target All, consolidation None,
     /// every reply attributed by its own key; error envelopes render as
     /// errors, and each reply is resolved through the deployment in

@@ -1921,7 +1921,7 @@ pub fn storage_check() -> StorageCheck {
     StorageCheck {
         base: "acme".into(),
         source: zenkey_fleet::report::CheckSource::AdminSpace,
-        asked: "@/*/router/**/storage_manager/storages/**".into(),
+        asked: "@/*/router/status/plugins/storage_manager/storages/**".into(),
         planned: 3,
         observed: 3,
         findings: vec![
@@ -1966,7 +1966,7 @@ pub fn storage_check_unobservable() -> StorageCheck {
     StorageCheck {
         base: "acme".into(),
         source: zenkey_fleet::report::CheckSource::AdminSpace,
-        asked: "@/*/router/**/storage_manager/storages/**".into(),
+        asked: "@/*/router/status/plugins/storage_manager/storages/**".into(),
         planned: 3,
         observed: 0,
         findings: vec![],
