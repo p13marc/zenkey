@@ -3,6 +3,89 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.45 — 2026-10-26: which round trip a reopen costs, and what taking up a GET means (round 69's F-241 to F-244)
+
+zk2py round 69 (PR #885) read 0.44 cold, resolved F-238 to F-240, and
+filed four findings: one measured contradiction, a minor wording point and
+two gaps. It also ran round 68's watchdog run again against the fixed
+reference: a debug `zenctl watchdog` beside 10,000 tokens read ok 25–27 s
+after the heal, in 3 of 3 runs, with none of zenoh's `Unknown interest`
+lines. Wording only; no fixture and no verdict changes.
+
+**Changed: only the first round trip after a reopen waits for the
+population** (§8.1; F-241, contradiction).
+- **The gap.** 0.44 said the watch session's round trip is one round trip
+  at any population "only until its transport first moves", and 0.42's
+  bullet "until its transport moves, when it waits for the population".
+  Read as written, every round trip after the first move waits for the
+  population. Measured by zk2py (zenoh-python 1.10.1, release; round trips
+  asked one after another, the link cut and healed): beside 10,000 tokens
+  the first after the reopen took 3.7–4.2 s and the next three 0.8–1.7 ms;
+  beside 2,000, 145–146 ms, then 0.3–0.8 ms. 0.44's own "Deliberately not
+  changed" said it right: paid once at each reopen.
+- **Now.** One round trip at any population but for the first after each
+  reopen of its transport, which waits for the reopening's telling; once
+  that has been sent, the next is one round trip again. 0.42's bullet says
+  the same.
+
+**Changed: a wait that ends first takes up the round trip in flight**
+(§8.1; F-242, minor).
+- **The gap.** The first SHOULD said a reader whose wait ends first "makes
+  the round trip again", and the next bullet said not to ask one beside
+  one in flight but to take it up. §10's Expected 10 read it the second
+  way.
+- **Now.** It reads possibly incomplete and, before its next read, takes
+  up the round trip in flight, asking another only once that one has ended
+  without standing. That is what both implementations do.
+
+**Changed: what in flight means, and a GET its own timeout ends**
+(§8.1, Appendix B; F-243, gap).
+- **The gap.** "The next that needs one takes up the one in flight, its
+  caller's wait or its own having ended" could read "its own" as the GET's
+  own timeout. A GET that its own timeout ends cannot be taken up: zenoh
+  hands it an error reply, `Timeout`, and its final reply, and nothing
+  after them (`api/session.rs`, `liveliness_query`). Its router answers it
+  in full all the same. Measured by zk2py beside 10,000 tokens: a GET asked
+  on that session meanwhile took 258–266 ms, against 6–10 ms on a quiet
+  session.
+- **Now.** The wait that ends first is the caller's or the reader's own.
+  In flight is at the reader: from the GET's ask until its final reply
+  reaches the reader. A GET its own timeout ends is over for the reader
+  and cannot be taken up, and the text gives its cost. A reader MAY ask
+  each GET with its own timeout at or above its session's interests
+  timeout and bound its own wait apart, so that none ends before it can
+  take it up. zk2py does so for every GET of its follower. The reference
+  does so for its round trip, and its presence feed asks a read with the
+  reader's timeout and backs off, 1 s at first, after one that runs to it.
+  Appendix B gains the fact.
+
+**Changed: §10 step 10's counts are the reader's own** (F-244, gap).
+- **The gap.** Expected 10's "asked one", "one round trip after the
+  reopen" and "never a read beside one in flight" can only be counted at
+  the reader's own sessions. zenoh tells a router nothing of a GET given up
+  on, so no router or link can tell it from one waited for. The step's
+  "giving up on the first three at once" needs an interface a tool's
+  command line does not offer. Its "caller … may drop the call in flight"
+  tests nothing for a reader whose reads do not run on its caller's call.
+- **Now.** The four round trips go through the reader's own interface, and
+  that half is not run for a tool run as a black box. A reader whose reads
+  do not run on its caller's call has its own waits, each ended after
+  20 ms, stand in for the dropped calls. Every count is the reader's own,
+  as step 6's are. A tool run as a black box is judged only on its read
+  being complete within 30 s of the heal, which zk2py's runner already did
+  for zenctl.
+
+**Deliberately not changed.**
+- **No new MUST or SHOULD.** The SHOULD NOT reads as 0.44 meant it. The
+  one new rule, a GET asked with its own timeout at or above the interests
+  timeout, is a MAY: a GET its own timeout ends costs its router work and
+  the next GET a wait, but not the reader's honesty. A read that runs to
+  its own timeout is still possibly incomplete.
+- **The reference's reads** keep the reader's timeout. A read that runs to
+  it is retried after a back-off, so at most one more GET waits behind
+  each, which is the cost F-243 measured.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.44 — 2026-10-25: a watch session's reopen beside a population (#882, round 68's F-238 to F-240)
 
 zk2py round 68 (PR #881) read 0.43 cold and filed three findings, and

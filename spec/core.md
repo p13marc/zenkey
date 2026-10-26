@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.44** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.45** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -57,7 +57,9 @@ time against an interests timeout it cannot read, in 0.43 two of
 what a watch session's reopen beside a population measured: every token
 its subscribers match told at the reopen, a round trip after it that
 waits for them, and a read or a round trip never asked again beside the
-one in flight).
+one in flight, and in 0.45 which round trip after a reopen waits for the
+population, what taking up a GET in flight means, and which of §10's
+counts only the reader's own sessions show).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -2023,9 +2025,9 @@ Liveliness tokens carry no payload; everything is in the key.
         `<ns>/zk2/…`, and its round trip's key so too,
         `<ns>/zk2/…/@zk/settle`. Its round trip is then one round trip at
         any population (1.2 ms beside 2,000 tokens in `ns`, and 44 ms
-        beside 10,000, debug builds) until its transport moves, when it
-        waits for the population (below, 0.44, F-239), and it hears the
-        withdrawal on the wire key.
+        beside 10,000, debug builds), but for the first after each reopen
+        of its transport, which waits for the population (below, 0.44,
+        F-239; 0.45, F-241), and it hears the withdrawal on the wire key.
       - It strips the namespace from every key it hears. A key outside
         the namespace is not the deployment's: it is counted, never
         folded.
@@ -2062,12 +2064,18 @@ Liveliness tokens carry no payload; everything is in the key.
         and 24 s in a debug one, where the round trip at the session's
         start took 49–66 ms; beside 2,000, 0.15 s and 0.75–1.5 s. So a
         watch session's round trip is one round trip at any population
-        only until its transport first moves.
+        but for the first after each reopen of its transport, which waits
+        for the reopening's telling; once that has been sent the next is
+        one round trip again (0.45, F-241; zk2py, release: beside 10,000
+        tokens 3.7–4.2 s after the reopen, then 0.8–1.7 ms; beside 2,000,
+        145–146 ms, then 0.3–0.8 ms).
         - A reader SHOULD wait for the round trip after a move, and run
           its interests timeout, above that time at its population: about
           what a read of the population costs, every matching token sent
           once. One whose wait ends first reads possibly incomplete
-          (below), as before, and makes the round trip again.
+          (below), as before, and before its next read takes up the round
+          trip in flight (below), asking another only once that one has
+          ended without standing (0.45, F-242).
         - **One round trip, and one read, at a time** (0.44, #882). zenoh
           1.10.1 tells a router nothing of a liveliness GET whose caller
           stops waiting for it, by dropping it, by its timeout or by
@@ -2075,12 +2083,28 @@ Liveliness tokens carry no payload; everything is in the key.
           A reader SHOULD NOT ask a round trip while one it asked since
           its watch session's transport last moved is in flight, nor ask
           a read while one it asked of the same scope is: the next that
-          needs one takes up the one in flight, its caller's wait or its
-          own having ended. Measured by the reference before it did so: a
-          reader whose caller dropped its call every 250 ms, beside 10,000
-          tokens whose read took 0.5–3 s, asked 450 reads in 120 s and
-          folded none, and never read its scope complete again after a
-          3 s cut.
+          needs one takes up the one in flight, whichever wait ended
+          first, its caller's or the reader's own (0.45, F-243). Measured
+          by the reference before it did so: a reader whose caller dropped
+          its call every 250 ms, beside 10,000 tokens whose read took
+          0.5–3 s, asked 450 reads in 120 s and folded none, and never
+          read its scope complete again after a 3 s cut.
+          - **In flight is at the reader** (0.45, F-243): from the GET's
+            ask until its final reply reaches the reader. A GET its own
+            timeout ends is over for the reader, which zenoh hands an
+            error reply and the final reply and nothing after them, and
+            cannot be taken up. Its router answers it in full all the
+            same (Appendix B), and a GET asked on that session meanwhile
+            waits behind it: beside 10,000 tokens, 258–266 ms after a
+            read its own 0.2 s timeout ended, against 6–10 ms on a quiet
+            session (zk2py).
+          - A reader MAY ask each GET with its own timeout at or above
+            its session's interests timeout, where zenoh's runtime ends
+            it, and bound its own wait apart, so that none ends before the
+            reader can take it up. zk2py does so for its round trips and
+            reads. The reference does so for its round trip; its presence
+            feed asks a read with the reader's timeout, and when one runs
+            to it asks again after a back-off, 1 s at first.
       - **No round trip through a watch session cut off** (0.42, F-228).
         Through a session cut off zenoh answers a liveliness GET at once,
         with the final reply alone (above), and a round trip is a
@@ -3527,6 +3551,10 @@ Appendix B. These are the ones the rules above cite:
   runtime ends it at `routing/interests/timeout`, and logs each reply that
   arrives after that `Unknown interest` (`hat/client/interests.rs`;
   0.44, §8.1; `docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`).
+  A GET its own timeout ends is handed an error reply, `Timeout`, and its
+  final reply, and nothing after them (`api/session.rs`,
+  `liveliness_query`); its router answers it all the same, and a GET the
+  session asks meanwhile waits behind it (0.45, §8.1, F-243).
 - A client whose transport opens again declares its session's interests
   again in `CurrentFuture` mode, whatever mode they were declared in
   (`hat/client/interests.rs`, `repropagate_interests`): a liveliness
@@ -3683,7 +3711,7 @@ reader, clients, some under CPU load:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); Appendix B |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
