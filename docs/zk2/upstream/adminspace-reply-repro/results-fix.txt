@@ -1,0 +1,160 @@
+# cell --load 0
+result ver=1.10.1+fix trial=fix-1 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15002 asks=81075 churns=13710 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-2 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15017 asks=80788 churns=13962 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-3 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15031 asks=77322 churns=13723 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-4 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15022 asks=59485 churns=12729 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-5 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15028 asks=81724 churns=13902 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-6 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15004 asks=81007 churns=13829 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-7 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15013 asks=81584 churns=13619 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-8 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15013 asks=83578 churns=13858 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-9 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15006 asks=83832 churns=13849 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-10 selector=@/*/router/subscriber/** load=0 shape=concrete churn=all outcome=clean t_ms=15017 asks=81728 churns=13539 first_replies=1 first_errors=0
+# cell --load 1
+result ver=1.10.1+fix trial=fix-11 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15043 asks=79422 churns=13797 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-12 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15023 asks=79087 churns=13828 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-13 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15035 asks=38322 churns=12738 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-14 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15043 asks=32148 churns=12231 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-15 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15041 asks=19184 churns=11992 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-16 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15036 asks=31421 churns=12779 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-17 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15033 asks=37485 churns=12640 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-18 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15025 asks=28783 churns=11966 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-19 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15047 asks=33687 churns=12433 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-20 selector=@/*/router/subscriber/** load=1 shape=concrete churn=all outcome=clean t_ms=15031 asks=35181 churns=12898 first_replies=2 first_errors=0
+# cell --load 10
+result ver=1.10.1+fix trial=fix-21 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15038 asks=22518 churns=12583 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-22 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15022 asks=36056 churns=13091 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-23 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15011 asks=28568 churns=12637 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-24 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15041 asks=19981 churns=11947 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-25 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15015 asks=22764 churns=12295 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-26 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15048 asks=21309 churns=12655 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-27 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15022 asks=30591 churns=13045 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-28 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15035 asks=35199 churns=13398 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-29 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15032 asks=36496 churns=13392 first_replies=11 first_errors=0
+result ver=1.10.1+fix trial=fix-30 selector=@/*/router/subscriber/** load=10 shape=concrete churn=all outcome=clean t_ms=15029 asks=34759 churns=13101 first_replies=11 first_errors=0
+# cell --load 100
+result ver=1.10.1+fix trial=fix-31 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15012 asks=6897 churns=14071 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-32 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15025 asks=6979 churns=13666 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-33 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15024 asks=7107 churns=14348 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-34 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15026 asks=8036 churns=12983 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-35 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15010 asks=6947 churns=14086 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-36 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15012 asks=6922 churns=14898 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-37 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15019 asks=6800 churns=13938 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-38 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15018 asks=7131 churns=14256 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-39 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15015 asks=6884 churns=14027 first_replies=101 first_errors=0
+result ver=1.10.1+fix trial=fix-40 selector=@/*/router/subscriber/** load=100 shape=concrete churn=all outcome=clean t_ms=15008 asks=6898 churns=14128 first_replies=101 first_errors=0
+# cell --load 500
+result ver=1.10.1+fix trial=fix-41 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15011 asks=4428 churns=14117 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-42 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15022 asks=4263 churns=14228 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-43 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15007 asks=4297 churns=14028 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-44 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15015 asks=4371 churns=13525 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-45 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15021 asks=4000 churns=12901 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-46 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15009 asks=4643 churns=13851 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-47 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15005 asks=4353 churns=13723 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-48 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15006 asks=4597 churns=14280 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-49 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15008 asks=4494 churns=14496 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-50 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all outcome=clean t_ms=15006 asks=4539 churns=15066 first_replies=501 first_errors=0
+# cell --selector @/*/router/publisher/**
+result ver=1.10.1+fix trial=fix-51 selector=@/*/router/publisher/** load=500 shape=concrete churn=all outcome=clean t_ms=15004 asks=4670 churns=13871 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-52 selector=@/*/router/publisher/** load=500 shape=concrete churn=all outcome=clean t_ms=15010 asks=5240 churns=14171 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-53 selector=@/*/router/publisher/** load=500 shape=concrete churn=all outcome=clean t_ms=15007 asks=4965 churns=13984 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-54 selector=@/*/router/publisher/** load=500 shape=concrete churn=all outcome=clean t_ms=15007 asks=5081 churns=14240 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-55 selector=@/*/router/publisher/** load=500 shape=concrete churn=all outcome=clean t_ms=15006 asks=4711 churns=13796 first_replies=500 first_errors=0
+# cell --selector @/*/router/queryable/**
+result ver=1.10.1+fix trial=fix-56 selector=@/*/router/queryable/** load=500 shape=concrete churn=all outcome=clean t_ms=15033 asks=4472 churns=13624 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-57 selector=@/*/router/queryable/** load=500 shape=concrete churn=all outcome=clean t_ms=15013 asks=4725 churns=14117 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-58 selector=@/*/router/queryable/** load=500 shape=concrete churn=all outcome=clean t_ms=15013 asks=4543 churns=14758 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-59 selector=@/*/router/queryable/** load=500 shape=concrete churn=all outcome=clean t_ms=15014 asks=4620 churns=13752 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-60 selector=@/*/router/queryable/** load=500 shape=concrete churn=all outcome=clean t_ms=15013 asks=4410 churns=13931 first_replies=500 first_errors=0
+# cell --selector @/*/router/querier/**
+result ver=1.10.1+fix trial=fix-61 selector=@/*/router/querier/** load=500 shape=concrete churn=all outcome=clean t_ms=15000 asks=4686 churns=14810 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-62 selector=@/*/router/querier/** load=500 shape=concrete churn=all outcome=clean t_ms=15010 asks=4654 churns=15428 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-63 selector=@/*/router/querier/** load=500 shape=concrete churn=all outcome=clean t_ms=15008 asks=4608 churns=14570 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-64 selector=@/*/router/querier/** load=500 shape=concrete churn=all outcome=clean t_ms=15050 asks=4673 churns=15152 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-65 selector=@/*/router/querier/** load=500 shape=concrete churn=all outcome=clean t_ms=15007 asks=4652 churns=14592 first_replies=500 first_errors=0
+# cell --selector @/*/router/token/**
+result ver=1.10.1+fix trial=fix-66 selector=@/*/router/token/** load=500 shape=concrete churn=all outcome=clean t_ms=15010 asks=4439 churns=13741 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-67 selector=@/*/router/token/** load=500 shape=concrete churn=all outcome=clean t_ms=15004 asks=4424 churns=13988 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-68 selector=@/*/router/token/** load=500 shape=concrete churn=all outcome=clean t_ms=15014 asks=3257 churns=11224 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-69 selector=@/*/router/token/** load=500 shape=concrete churn=all outcome=clean t_ms=15037 asks=4262 churns=13528 first_replies=500 first_errors=0
+result ver=1.10.1+fix trial=fix-70 selector=@/*/router/token/** load=500 shape=concrete churn=all outcome=clean t_ms=15006 asks=3541 churns=13399 first_replies=500 first_errors=0
+# cell --churn sub
+result ver=1.10.1+fix trial=fix-71 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub outcome=clean t_ms=15015 asks=4334 churns=18999 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-72 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub outcome=clean t_ms=15028 asks=4624 churns=19110 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-73 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub outcome=clean t_ms=15021 asks=4739 churns=19018 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-74 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub outcome=clean t_ms=15008 asks=4598 churns=19006 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-75 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub outcome=clean t_ms=15016 asks=4506 churns=19339 first_replies=501 first_errors=0
+# cell --churn lsub
+result ver=1.10.1+fix trial=fix-76 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub outcome=clean t_ms=15017 asks=4610 churns=19207 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-77 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub outcome=clean t_ms=15026 asks=4668 churns=19194 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-78 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub outcome=clean t_ms=15015 asks=4497 churns=19144 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-79 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub outcome=clean t_ms=15017 asks=4673 churns=19203 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-80 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub outcome=clean t_ms=15014 asks=4561 churns=19102 first_replies=501 first_errors=0
+# cell --churn token
+result ver=1.10.1+fix trial=fix-81 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token outcome=clean t_ms=15024 asks=4432 churns=17945 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-82 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token outcome=clean t_ms=15001 asks=4805 churns=18989 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-83 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token outcome=clean t_ms=15010 asks=4623 churns=17899 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-84 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token outcome=clean t_ms=15015 asks=4489 churns=18566 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-85 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token outcome=clean t_ms=15012 asks=4482 churns=18347 first_replies=501 first_errors=0
+# cell --churn connect
+result ver=1.10.1+fix trial=fix-86 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect outcome=clean t_ms=15016 asks=5051 churns=17864 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-87 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect outcome=clean t_ms=15008 asks=4929 churns=16801 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-88 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect outcome=clean t_ms=15007 asks=4875 churns=15250 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-89 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect outcome=clean t_ms=15007 asks=4494 churns=13454 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-90 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect outcome=clean t_ms=15001 asks=5056 churns=18227 first_replies=501 first_errors=0
+# cell --churn none
+result ver=1.10.1+fix trial=fix-91 selector=@/*/router/subscriber/** load=500 shape=concrete churn=none outcome=clean t_ms=15002 asks=4393 churns=0 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-92 selector=@/*/router/subscriber/** load=500 shape=concrete churn=none outcome=clean t_ms=15005 asks=4428 churns=0 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-93 selector=@/*/router/subscriber/** load=500 shape=concrete churn=none outcome=clean t_ms=15005 asks=4344 churns=0 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-94 selector=@/*/router/subscriber/** load=500 shape=concrete churn=none outcome=clean t_ms=15002 asks=4361 churns=0 first_replies=501 first_errors=0
+result ver=1.10.1+fix trial=fix-95 selector=@/*/router/subscriber/** load=500 shape=concrete churn=none outcome=clean t_ms=15000 asks=4392 churns=0 first_replies=501 first_errors=0
+# cell --selector @/*/router
+result ver=1.10.1+fix trial=fix-96 selector=@/*/router load=500 shape=concrete churn=all outcome=clean t_ms=15012 asks=60776 churns=14467 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-97 selector=@/*/router load=500 shape=concrete churn=all outcome=clean t_ms=15013 asks=63945 churns=14386 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-98 selector=@/*/router load=500 shape=concrete churn=all outcome=clean t_ms=15008 asks=59927 churns=14367 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-99 selector=@/*/router load=500 shape=concrete churn=all outcome=clean t_ms=15039 asks=57711 churns=14207 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-100 selector=@/*/router load=500 shape=concrete churn=all outcome=clean t_ms=15023 asks=55696 churns=14105 first_replies=1 first_errors=0
+# cell --selector @/*/*
+result ver=1.10.1+fix trial=fix-101 selector=@/*/* load=500 shape=concrete churn=all outcome=clean t_ms=15049 asks=60612 churns=14620 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-102 selector=@/*/* load=500 shape=concrete churn=all outcome=clean t_ms=15019 asks=61643 churns=14834 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-103 selector=@/*/* load=500 shape=concrete churn=all outcome=clean t_ms=15017 asks=60673 churns=16084 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-104 selector=@/*/* load=500 shape=concrete churn=all outcome=clean t_ms=15004 asks=58518 churns=15114 first_replies=1 first_errors=0
+result ver=1.10.1+fix trial=fix-105 selector=@/*/* load=500 shape=concrete churn=all outcome=clean t_ms=15008 asks=59663 churns=14383 first_replies=1 first_errors=0
+# cell --selector @/*/router/linkstate/*
+result ver=1.10.1+fix trial=fix-106 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all outcome=clean t_ms=15012 asks=85065 churns=13635 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-107 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all outcome=clean t_ms=15016 asks=84886 churns=13885 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-108 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all outcome=clean t_ms=15007 asks=86097 churns=13635 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-109 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all outcome=clean t_ms=15005 asks=85619 churns=14727 first_replies=2 first_errors=0
+result ver=1.10.1+fix trial=fix-110 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all outcome=clean t_ms=15006 asks=86053 churns=15175 first_replies=2 first_errors=0
+# cell --selector @/*/router/route/successor/**
+result ver=1.10.1+fix trial=fix-111 selector=@/*/router/route/successor/** load=500 shape=concrete churn=all outcome=clean t_ms=15037 asks=55251 churns=13578 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-112 selector=@/*/router/route/successor/** load=500 shape=concrete churn=all outcome=clean t_ms=15030 asks=55917 churns=12906 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-113 selector=@/*/router/route/successor/** load=500 shape=concrete churn=all outcome=clean t_ms=15026 asks=61374 churns=13080 first_replies=0 first_errors=0
+# cell --selector @/*/router/**/storage_manager/storages/** --shape wild
+result ver=1.10.1+fix trial=fix-114 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15027 asks=1766 churns=13392 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-115 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15019 asks=2247 churns=13859 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-116 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15028 asks=2010 churns=13621 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-117 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15016 asks=1848 churns=12553 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-118 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15010 asks=2268 churns=13978 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-119 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15001 asks=2400 churns=13928 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-120 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15001 asks=2691 churns=14818 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-121 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15021 asks=2884 churns=15510 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-122 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15014 asks=2210 churns=14515 first_replies=1000 first_errors=0
+result ver=1.10.1+fix trial=fix-123 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15008 asks=2746 churns=14106 first_replies=1000 first_errors=0
+# cell --selector @/*/router/**/storage_manager/storages/** --shape concrete
+result ver=1.10.1+fix trial=fix-124 selector=@/*/router/**/storage_manager/storages/** load=500 shape=concrete churn=all outcome=clean t_ms=15017 asks=5313 churns=14622 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-125 selector=@/*/router/**/storage_manager/storages/** load=500 shape=concrete churn=all outcome=clean t_ms=15007 asks=5262 churns=14593 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-126 selector=@/*/router/**/storage_manager/storages/** load=500 shape=concrete churn=all outcome=clean t_ms=15007 asks=5356 churns=14675 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-127 selector=@/*/router/**/storage_manager/storages/** load=500 shape=concrete churn=all outcome=clean t_ms=15017 asks=5217 churns=14575 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-128 selector=@/*/router/**/storage_manager/storages/** load=500 shape=concrete churn=all outcome=clean t_ms=15025 asks=5414 churns=16083 first_replies=0 first_errors=0
+# cell --selector @/*/router/status/plugins/storage_manager/storages/** --shape wild
+result ver=1.10.1+fix trial=fix-129 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15012 asks=93524 churns=13850 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-130 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15011 asks=93782 churns=14545 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-131 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15006 asks=94338 churns=13738 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-132 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15010 asks=92453 churns=13614 first_replies=0 first_errors=0
+result ver=1.10.1+fix trial=fix-133 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all outcome=clean t_ms=15002 asks=92991 churns=13784 first_replies=0 first_errors=0
+# cell --selector @/**
+result ver=1.10.1+fix trial=fix-134 selector=@/** load=500 shape=concrete churn=all outcome=clean t_ms=15011 asks=1781 churns=13905 first_replies=2507 first_errors=0
+result ver=1.10.1+fix trial=fix-135 selector=@/** load=500 shape=concrete churn=all outcome=clean t_ms=15012 asks=698 churns=15153 first_replies=2507 first_errors=0
+result ver=1.10.1+fix trial=fix-136 selector=@/** load=500 shape=concrete churn=all outcome=clean t_ms=15014 asks=1803 churns=15442 first_replies=2507 first_errors=0
+result ver=1.10.1+fix trial=fix-137 selector=@/** load=500 shape=concrete churn=all outcome=clean t_ms=15019 asks=1777 churns=13844 first_replies=2507 first_errors=0
+result ver=1.10.1+fix trial=fix-138 selector=@/** load=500 shape=concrete churn=all outcome=clean t_ms=15019 asks=1299 churns=13751 first_replies=2507 first_errors=0

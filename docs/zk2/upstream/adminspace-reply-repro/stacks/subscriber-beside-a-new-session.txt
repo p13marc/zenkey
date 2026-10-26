@@ -1,0 +1,3 @@
+net-0: queries::route_send_response (dispatcher/queries.rs:557) -> RwLock::read_contended (rwlock/futex.rs:156)
+acc-0: init_new_transport_unicast::{async_fn#0} (unicast/manager.rs:742) -> TransportManager::notify_new_transport_unicast (unicast/manager.rs:586) -> Gateway::new_transport_unicast (routing/gateway.rs:271) -> RwLock::write_contended (rwlock/futex.rs:257)
+rx-0: adminspace::subscribers_data (runtime/adminspace.rs:832) -> adminspace::resources_data (runtime/adminspace.rs:822) -> queries::route_send_response (dispatcher/queries.rs:557) -> RwLock::read_contended (rwlock/futex.rs:156)

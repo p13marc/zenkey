@@ -10,7 +10,8 @@
 //!   work;
 //! - **churn** declares and undeclares, in a loop, a subscriber, a
 //!   liveliness subscriber with history (an interest) and a liveliness
-//!   token: each one asks the router's tables for the write lock;
+//!   token: each one asks the router's tables for the write lock
+//!   (`--churn-every MS` pauses between rounds);
 //! - **ask** GETs `--selector` in a loop (target All, consolidation None,
 //!   3 s timeout);
 //! - **hb-pub** puts a heartbeat every 10 ms, and **hb-sub** hears it.
@@ -189,6 +190,8 @@ async fn trial(args: &[String]) {
     let churn = opt(args, "--churn", "all");
     let run_for = Duration::from_secs_f64(opt(args, "--for", "20").parse().unwrap());
     let stall = Duration::from_secs_f64(opt(args, "--stall", "10").parse().unwrap());
+    // A pause between churn rounds, ms (0: flat out).
+    let churn_every = Duration::from_millis(opt(args, "--churn-every", "0").parse().unwrap());
     let stacks_dir = opt(args, "--stacks", "");
     let label = opt(args, "--trial", "0");
 
@@ -364,6 +367,9 @@ async fn trial(args: &[String]) {
                     let _ = tokio::time::timeout(Duration::from_secs(2), s.close()).await;
                 }
                 churns.fetch_add(1, Ordering::Relaxed);
+                if !churn_every.is_zero() {
+                    tokio::time::sleep(churn_every).await;
+                }
             }
         });
     }
@@ -424,10 +430,11 @@ async fn trial(args: &[String]) {
     }
     println!(
         "result ver={} trial={label} selector={selector} load={load} shape={shape} churn={} \
-         outcome={outcome} t_ms={t_ms} asks={asks} churns={churns} first_replies={first_ok} \
+         every_ms={} outcome={outcome} t_ms={t_ms} asks={asks} churns={churns} first_replies={first_ok} \
          first_errors={first_err}{summary}",
         ver(),
         opt(args, "--churn", "all"),
+        churn_every.as_millis(),
     );
     let _ = child.start_kill();
     std::process::exit(0);
@@ -442,7 +449,8 @@ async fn main() {
         _ => {
             eprintln!(
                 "usage: asr trial [--selector SEL] [--load N] [--shape concrete|wild] \
-                 [--churn all|sub|lsub|token|connect|none] [--for SECS] [--stall SECS] \
+                 [--churn all|sub|lsub|token|connect|none] [--churn-every MS] [--for SECS] \
+                 [--stall SECS] \
                  [--stacks DIR] [--trial LABEL]"
             );
             std::process::exit(2);

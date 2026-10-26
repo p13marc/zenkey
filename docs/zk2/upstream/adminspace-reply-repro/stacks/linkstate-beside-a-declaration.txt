@@ -1,0 +1,3 @@
+net-0: queries::route_send_response (dispatcher/queries.rs:557) -> RwLock::read_contended (rwlock/futex.rs:156)
+rx-0: adminspace::linkstate_data (runtime/adminspace.rs:873) -> queries::route_send_response (dispatcher/queries.rs:557) -> RwLock::read_contended (rwlock/futex.rs:156)
+rx-1: {impl#10}::send_declare (dispatcher/face.rs:570) -> Face::declare_subscriber (dispatcher/pubsub.rs:45) -> declare_subscriber::{closure#0} (dispatcher/pubsub.rs:59) -> Face::with_mapped_expr (dispatcher/face.rs:434) -> RwLock::write_contended (rwlock/futex.rs:257)
