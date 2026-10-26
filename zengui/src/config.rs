@@ -131,9 +131,12 @@ pub struct Cli {
     /// lock, each reply takes that lock again, and a declaration or a new
     /// session from any other client in between deadlocks the router for
     /// good. Turn it on only against a bus nothing else is declaring on.
-    /// Off, the tree is the contract skeleton and what was observed, and
-    /// the admin pane says "not asked". Remembered when applied from the
-    /// Settings overlay; a flag turns it on for this launch only.
+    /// A router under the deny block `zenctl acl gen` writes refuses them
+    /// to every principal (core §11.1, 0.50, #894), and the admin pane then
+    /// says nothing answered. Off, the tree is the contract skeleton and
+    /// what was observed, and the admin pane says "not asked". Remembered
+    /// when applied from the Settings overlay; a flag turns it on for this
+    /// launch only.
     #[arg(long)]
     pub admin_declared: bool,
 

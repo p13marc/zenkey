@@ -6,6 +6,13 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the admin read grants the tools' reads alone (#894, WL)
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen` under `deny`: a tool enrolled with `admin = true` held `query` (ingress) and `reply` (egress) on `@/*/router` and `@/*/router/**` (`admin-read-in`, `admin-read-out`) | on `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, the three selectors the tools read; `acl gen --check` reports a block generated before as differing on those two rules | `@/*/router/**` admitted a GET of a router's declaration records, which zenoh 1.10.1 answers under its routing tables' read lock, so one GET with a tool's credentials beside another client's declaration could freeze the router (#890). zenoh admits a query by inclusion, so the router now refuses such a GET at its ingress, complete and empty. `zenctl get '@/*/router/**'` with a tool's credentials reads nothing of a router through such a block; spec §11.1, §11.2, 0.50 |
+| `admin graph` under a generated `deny` block: `@/*/*` refused, no node answered | answered | no `@/*/router…` key includes `@/*/*`; the doctor, `check conform`, `storage list` and `storage gen --check` read as before |
+
 ## Unreleased (`main`, zk2) — the storages read reaches no declaration record (#890, WJ)
 
 | Before | Now | Notes |

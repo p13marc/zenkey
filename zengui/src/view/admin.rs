@@ -331,6 +331,16 @@ pub const DECLARED_OFF: &str = "declared entities: not asked — off by default,
      --admin-declared, or the Settings overlay, asks. This is \"not asked\", never \
      \"nothing declared\" (RFC 09 §5.1 O4).";
 
+/// The sentence a declared-entities read that is asked and holds no answer
+/// renders: nothing landed yet, or nothing answered, a router under a
+/// generated `deny` block among the reasons (core §11.1, 0.50, #894). The
+/// three answer alike, complete and empty, so it names them all.
+pub const DECLARED_UNANSWERED: &str = "declared entities: n/a — not read yet, or nothing \
+     answered. zenoh's adminspace.enabled defaults to false, a peer mesh has none, and a \
+     router under the deny block zenctl acl gen writes refuses these records to every \
+     principal (core §11.1, 0.50, #894), so this is \"not available\", never \"nothing \
+     declared\" (RFC 09 §5.1 O4).";
+
 /// Declared entities — [`Declared`] separates "the admin space answered and
 /// declared nothing" from "no answer (yet)", which is #70's explicit
 /// reachability ask, and both from "not asked" (#890).
@@ -342,11 +352,7 @@ fn entities<'a>(declared: Declared<'a>, sp: Spacing) -> Element<'a, Message> {
             return col.into();
         }
         Declared::Unanswered => {
-            col = col.push(kit::muted(
-                "declared entities: n/a — not read yet, or nothing answered. zenoh's \
-                 adminspace.enabled defaults to false and a peer mesh has none, so this is \
-                 \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4).",
-            ));
+            col = col.push(kit::muted(DECLARED_UNANSWERED));
             return col.into();
         }
         Declared::Answered(d) => d,

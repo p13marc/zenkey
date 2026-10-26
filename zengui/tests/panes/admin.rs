@@ -7,7 +7,7 @@
 use super::*;
 use std::sync::Arc;
 use zengui::admin::{AdminState, AdminSweep};
-use zengui::view::admin::{DECLARED_OFF, Declared, pane};
+use zengui::view::admin::{DECLARED_OFF, DECLARED_UNANSWERED, Declared, pane};
 use zenkey_fleet::DeclaredEntities;
 use zenkey_fleet::report::{
     Asked, AttachedTo, Attachment, InstanceAttachment, InstanceJoin, RouterInfo, StorageInfo,
@@ -253,14 +253,10 @@ fn a_router_less_bus_says_so_four_ways() {
         ui.find("no storage to judge — the sweep found none (above)")
             .is_ok()
     );
-    assert!(
-        ui.find(
-            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
-             adminspace.enabled defaults to false and a peer mesh has none, so this is \
-             \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
-        )
-        .is_ok()
-    );
+    assert!(ui.find(DECLARED_UNANSWERED).is_ok());
+    // A refusal answers as a disabled admin space does, complete and empty
+    // (core §11.1, 0.50), so the sentence names it among the causes.
+    assert!(DECLARED_UNANSWERED.contains("zenctl acl gen") && DECLARED_UNANSWERED.contains("#894"));
     assert!(
         ui.find("not on owner state").is_err(),
         "no storage, no clean row"
@@ -326,12 +322,7 @@ fn an_empty_admin_space_reads_differently_from_an_absent_one() {
             .is_ok()
     );
     assert!(
-        ui.find(
-            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
-             adminspace.enabled defaults to false and a peer mesh has none, so this is \
-             \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
-        )
-        .is_err(),
+        ui.find(DECLARED_UNANSWERED).is_err(),
         "an answered read must not carry the unreachable sentence"
     );
 }
@@ -349,12 +340,7 @@ fn a_declared_sweep_that_is_off_says_not_asked_and_why() {
             .is_err()
     );
     assert!(
-        ui.find(
-            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
-             adminspace.enabled defaults to false and a peer mesh has none, so this is \
-             \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
-        )
-        .is_err(),
+        ui.find(DECLARED_UNANSWERED).is_err(),
         "not asked is not \"nothing answered\""
     );
     // An answer held when the switch went off is still shown: it is what
