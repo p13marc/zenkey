@@ -3,6 +3,36 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.52 — 2026-10-26: whose answers the admin read reaches (round 75's F-258)
+
+zk2py round 75 (PR #901) was the final cold read of the admin-space line,
+#890 and #894, rounds 73–75. It read 0.51 and §4.2, §11.1 to §11.3,
+Appendix B, `security.md` §4 and `state.md` §12 whole, and resolved F-256
+and F-257. Every check passed in every pairing, among them `zenctl get`
+logged in as the tool under each generated block, refused as §4.2 says.
+It filed one finding, wording only.
+
+**Changed: whose answers the admin read reaches** (§11.1, "The shapes
+compose"; F-258). The bullet called the admin read "a `query` on the
+routers' answers". Since 0.50 the admin read includes `@/*/*`, which
+every node with its admin space on answers. zk2py measured a client's and
+a peer's root documents answering beside the router's. It now reads "a
+`query` on the nodes' admin space". The bullet's point, that the admin
+read writes nothing, holds whoever answers.
+
+**Also, outside the text** (round 75): `zenctl get`'s note for a GET with
+no reply named three causes. A GET refused by a router's access control,
+answered at once, complete and empty (§11.2), is a fourth, and the note
+now names it, in the human and the machine forms.
+
+**Deliberately not changed.**
+- **No rule.** No verdict, test or implementation moves.
+- **No further cold read of this line is planned.** Rounds 73–75 took the
+  admin space from 0.48 to 0.51, and the last found one wording point.
+  0.52's own wording is read by the next round that reads §11 for any
+  other reason.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.51 — 2026-10-26: the posture and flow 0.50's generator rule holds for, and where a recorder hears a freezing read (round 74's F-256 and F-257)
 
 zk2py round 74 (PR #898) read 0.50 cold and resolved F-253 to F-255. It

@@ -133,8 +133,10 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         match answers.len() {
             0 => println!(
                 "no replies within {secs}s. Silence is not a verdict (RFC 05 §3.1): \
-                 nothing may hold the selector, its holders may be down, or the \
-                 timeout too short — `zenctl admin graph` says who is attached."
+                 nothing may hold the selector, its holders may be down, a router's \
+                 access control may have refused it (core §11.2: at once, complete and \
+                 empty), or the timeout too short — `zenctl admin graph` says who is \
+                 attached."
             ),
             len => eprintln!(
                 "{len} repl{} within {secs}s — an observation, not totality \

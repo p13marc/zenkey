@@ -255,7 +255,8 @@ impl Render for GetReport {
         if self.answers.is_empty() {
             notes.push(Note::silence(format!(
                 "no replies to {} within {}s. Nothing may hold it, its holders may \
-                 be down, or the timeout was short — and the three are different",
+                 be down, a router's access control may have refused it (core §11.2), \
+                 or the timeout was short — and the four are different",
                 self.selector, self.timeout_s
             )));
         }
