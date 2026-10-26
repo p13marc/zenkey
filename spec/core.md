@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.48** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.49** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -63,7 +63,10 @@ counts only the reader's own sessions show, and in 0.46 what a black box
 is judged on there, and which read of a population the round trip after
 a reopen costs, in 0.47 the period a black box's output is sampled at
 there, and the one first read a reader can time, and in 0.48 an admin
-read that reaches no router's declaration records).
+read that reaches no router's declaration records, and in 0.49 three
+wordings the final cold read of the watch-session line found: whose
+timeout the interests timeout sits above, which history figure passes the
+waits, and a black box that prints nothing while its link is cut).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1895,10 +1898,13 @@ Liveliness tokens carry no payload; everything is in the key.
       received an error reply, and a round trip (below) that ended there
       as not standing (0.44, F-240: it was asked, so it was made; what it
       establishes is nothing).
-    - A reader whose GETs may wait longer SHOULD run its session with an
-      interests timeout above their timeout: its long reads can then be
-      complete (measured: the same read was whole, in 22 s, under a 120 s
-      interests timeout).
+    - A reader whose reads may wait longer SHOULD run its session with an
+      interests timeout above the longest it waits for one: its long
+      reads can then be complete (measured: the same read was whole, in
+      22 s, under a 120 s interests timeout). A reader that asks each GET
+      with its own timeout at or above the interests timeout (below, 0.45)
+      bounds that wait apart, and meets this by it (0.49, F-250: zk2py's
+      follower runs 120 s and asks its GETs with 121 s).
     - **Its time** (0.42, F-232) is counted from before the GET is asked
       to its final reply, so it is never less than the time the runtime
       counted. The read itself carries no sign of the interests timeout,
@@ -2033,9 +2039,10 @@ Liveliness tokens carry no payload; everything is in the key.
       does not strip its namespace from that key, and its subscriber
       without history never hears the withdrawal (Appendix B). A history
       there brings the population back into every round trip: 23 s beside
-      10,000 tokens (the reference, a debug build), 3.2–3.9 s (zk2py, a
-      release build), past the scenarios' 5 s wait and zenoh's 10 s
-      interests timeout, where the round trip does not stand (above). So:
+      10,000 tokens in a debug build (the reference), past the scenarios'
+      5 s wait and zenoh's 10 s interests timeout, where the round trip
+      does not stand (above); and in a release build 3.1–5.9 s (zk2py,
+      under load), at the 5 s wait (0.49, F-251). So:
       - A reader that follows presence in a namespace SHOULD hold its
         watch session in **no** namespace, and declare its subscribers,
         without history, on the **wire keys**: the namespace in front,
@@ -3755,7 +3762,7 @@ reader, clients, some under CPU load:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27); §12 S4's check reads beside a router that is declaring (0.48) |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46), and at what period its output is sampled (0.47); Appendix B |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46), at what period its output is sampled (0.47), and one that prints nothing while its link is cut (0.49); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
