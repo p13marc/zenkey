@@ -2855,13 +2855,27 @@ def run_python_budget(report: Report, exe: Path) -> None:
         stated = (entry.get("cardinality") or {}).get("state/checks/{check}")
         b = bg.bound(64, [stated])
         sel = "zk2/lab/svc/health.v1/state/checks/*"
-        reading, members = bg.get_population(tool, sel)
+        # health.v1 §2.3 puts the status before the tokens, and the checks on
+        # change, so "ready" may come before them: the GET is asked again
+        # until the 10 are put, for up to 5 s (round 69: one run in four read
+        # 0 members, complete, at once after "ready")
+        t_ready = time.monotonic()
+        got: list[Any] = [None]
+
+        def put() -> bool:
+            got[0] = bg.get_population(tool, sel)[0]
+            return got[0].members == 10
+
+        while not put() and time.monotonic() - t_ready < 5.0:
+            time.sleep(0.1)
+        reading = got[0]
         v = bg.population("state", b, None, reading)
         report.check(run, "the bound is the contract's, 64, its descriptor stating none; a complete S4 GET answers "
                           "10 members: within, complete",
                      b == 64 and reading == bg.GetReading(10, True) and v.pair() == {"verdict": "within",
                                                                                      "reason": "complete"},
-                     f"stated {stated}, bound {b}; {reading}; {v.pair()}")
+                     f"stated {stated}, bound {b}; {reading} {time.monotonic() - t_ready:.2f} s after ready; "
+                     f"{v.pair()}")
         answers = [rust.command(f"check c{i} OK") for i in range(10, 64)]
         reading, _ = bg.get_population(tool, sel)
         v = bg.population("state", b, None, reading)
