@@ -3280,8 +3280,106 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
-        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings()
+        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings()
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _admin_read_readings() -> list[tuple[str, Any, Any]]:
+    """Core 0.50 §11.1 and §11.2 in :mod:`zk2py.acl` (#609, round 74): the
+    admin read as the tools' three reads, the generator's MUST NOT, the
+    block check (:func:`zk2py.acl.block_hazards`) and inclusion, by zenoh
+    1.10.1's own key expressions. No session is opened."""
+    import zenoh
+
+    from . import acl, live
+
+    label = "core 0.50 §11.1, the admin read"
+    out: list[tuple[str, Any, Any]] = []
+    for key in acl.ADMIN_READ:
+        out.append((f"{label}: {key} reaches no node's declaration records", live.admin_records_reached(key), []))
+    out.append((f"{label}: 0.15's @/*/router/** reached every family of them",
+                len(live.admin_records_reached("@/*/router/**")), len(live.ADMIN_RECORDS)))
+    # §11.2 (0.50): admitted by inclusion, never by intersection.
+    status = "@/*/router/status/plugins/storage_manager/storages/**"
+    for allowed, asked, includes in (("@/*/router", "@/*/*", False), (status, "@/*/router/**", False),
+                                     ("@/*/router/**", "@/*/*", False), ("@/*/*", "@/*/router", True)):
+        a, q = zenoh.KeyExpr(allowed), zenoh.KeyExpr(asked)
+        out.append((f"core 0.50 §11.2: {allowed} intersects {asked}, and "
+                    f"{'includes' if includes else 'does not include'} it", (a.intersects(q), a.includes(q)),
+                    (True, includes)))
+    tool = acl.Principal("tool", "tool", inspects=["*/*"], admin_read=True)
+    svc = acl.Principal("svc", "svc", service="h1/tc")
+    deny = acl.generate([tool, svc], "deny")
+    out.append((f"{label}: the generator grants the tool query on the three reads and their reply, never "
+                f"namespaced",
+                (sorted(k for k in deny.grants[("tool", "query", acl.INGRESS)] if k.startswith("@")),
+                 sorted(k for k in deny.grants[("tool", "reply", acl.EGRESS)] if k.startswith("@"))),
+                (sorted(acl.ADMIN_READ), sorted(acl.ADMIN_READ))))
+    out.append((f"{label}: the generated deny block allows no hazardous query", acl.block_hazards(deny.block), []))
+    try:
+        acl.generate([tool, svc], "deny", admin_read=acl.ADMIN_READ_015)
+        refused = None
+    except acl.HazardousGrant as e:
+        refused = "@/*/router/**" in str(e)
+    out.append((f"{label}: the generator refuses 0.15's admin read (MUST NOT, 0.50)", refused, True))
+    old = acl.generate([tool, svc], "deny", admin_read=acl.ADMIN_READ_015, hazard_ok=True).block
+    out.append((f"{label}: the block check finds 0.15's grant, once, on the tool's ingress query",
+                [(h.kind, h.policy, h.flow, h.key) for h in acl.block_hazards(old)],
+                [("allowed_query", "tool-policy", acl.INGRESS, "@/*/router/**")]))
+    allow = acl.generate([tool, svc], "allow").block
+    out.append((f"{label}: under allow, every policy is open to a GET of the records (0.50: deny alone protects "
+                f"a router)", sorted(h.policy for h in acl.block_hazards(allow) if h.kind == "allow_posture"),
+                ["svc-policy", "tool-policy"]))
+
+    def block(rules: list[dict], posture: str = "deny", listed: list[str] | None = None, **extra: Any) -> dict:
+        return {"enabled": True, "default_permission": posture, "rules": rules,
+                "subjects": [{"id": "s", "usernames": ["u"]}],
+                "policies": [{"id": "p", "rules": [r["id"] for r in rules] if listed is None else listed,
+                              "subjects": ["s"]}], **extra}
+
+    def rule(rid: str, keys: list[str], messages: tuple = ("query",), flows: list[str] | None = None,
+             permission: str = "allow") -> dict:
+        r = {"id": rid, "messages": list(messages), "permission": permission, "key_exprs": keys}
+        if flows is not None:
+            r["flows"] = flows
+        return r
+
+    cases = [
+        ("a peer's token records (any node's, F-253)", block([rule("r", ["@/*/peer/token/**"], flows=["ingress"])]),
+         [("allowed_query", "ingress", "@/*/peer/token/**")]),
+        ("a rule with no flows applies to both (zenoh's default)", block([rule("r", ["@/**"])]),
+         [("allowed_query", "ingress", "@/**"), ("allowed_query", "egress", "@/**")]),
+        ("an egress query counts: the MUST NOT names no flow", block([rule("r", ["@/**"], flows=["egress"])]),
+         [("allowed_query", "egress", "@/**")]),
+        ("a rule no policy lists is inert", block([rule("r", ["@/**"], flows=["ingress"])], listed=[]), []),
+        ("a reply alone is not a query", block([rule("r", ["@/**"], messages=("reply",), flows=["egress"])]), []),
+        ("a verbatim chunk past the records' prefix reaches nothing (§1.3)",
+         block([rule("r", ["@/*/router/token/zk2/*/*/@zk/**"], flows=["ingress"])]), []),
+        ("access control not enabled admits everything", {**block([]), "enabled": False}, [("disabled", None, None)]),
+        ("under allow, a deny of query on @/** keeps a policy off",
+         block([rule("d", ["@/**"], flows=["ingress"], permission="deny")], posture="allow"), []),
+        ("under allow, a deny of query narrower than @/** does not",
+         block([rule("d", ["@/*/router/**"], flows=["ingress"], permission="deny")], posture="allow"),
+         [("allow_posture", None, None)]),
+    ]
+    for note, b, want in cases:
+        got = [(h.kind, h.flow, h.key) for h in acl.block_hazards(b)]
+        out.append((f"{label}, the block check: {note}", got, want))
+    text = """// a block as a generator writes it, at a router configuration's top level
+access_control: {
+  enabled: true,
+  default_permission: "deny",  // §11.2
+  rules: [ { id: "a", permission: "allow", flows: ["ingress"], messages: ["query"],
+             key_exprs: ["@/*/router/**"] }, ],
+  subjects: [ { id: "s", usernames: ["u"] } ],
+  policies: [ { id: "p", rules: ["a"], subjects: ["s"] } ],
+},
+"""
+    read = acl.read_block_json5(text)
+    out.append((f"{label}, the block check: a JSON5 block with comments, read by zenoh's own loader",
+                [(h.kind, h.policy, h.rule, h.flow, h.key) for h in acl.block_hazards(read)],
+                [("allowed_query", "p", "a", "ingress", "@/*/router/**")]))
+    return out
 
 
 def _admin_records_readings() -> list[tuple[str, Any, Any]]:
