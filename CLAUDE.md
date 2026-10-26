@@ -284,7 +284,16 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   verdict cache's "not yet checked" never one of them. **The tree** starts
   from the contract skeleton (`Skeleton::build(&lens, admin)`, on the
   update thread, rebuilt by `Arc` identity when the lens's inputs or the
-  admin answer move, never on a tick); its chunks carry zk2 roles, it
+  admin answer move, never on a tick). The admin answer is the declared
+  entities, asked only with `--admin-declared` or the Settings overlay's
+  switch (`Settings::admin_declared`, remembered in `zengui.toml`; every
+  path asks through `update::bus::read_declared`), since zenoh 1.10.1
+  answers `@/<zid>/<whatami>/{subscriber,…,token}/**` under its routing
+  tables' read lock and another client's declaration in between freezes
+  the router (#890,
+  `docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`); off,
+  it is `None`, "admin n/a", and the admin pane says "not asked"
+  (`view::admin::Declared`). Its chunks carry zk2 roles, it
   pivots by system, address, iface and kind, a declared `@op` row offers no
   watch (`scope::names_operation`: no watch, seed or fetch GETs under
   `@op`), and a watched templated family wears a budget badge from
@@ -441,7 +450,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
-  namespace and one in none for the admin space and the presence domain;
+  namespace and one in none for the admin space and the presence domain
+  (the admin space through `@/*/router` and the storage manager's status
+  subtree, `bus::admin::STORAGES`, never a selector
+  `zenkey_fleet::reaches_tables_lock` finds, which zenoh 1.10.1 answers
+  under its routing tables' read lock: core §4.2, 0.48, #890);
   exit 1 on a finding at or above `--fail-on` (default warning), 2 when a
   check is unobservable or the scope is empty. The watchdog's `doctor` rule
   and `record --on` run it too.
@@ -1176,7 +1189,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.47 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.48 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1198,7 +1211,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     output shows, a session's first read the cost the round trip after a
     reopen matches, round 70's F-245 to F-247; 0.47: a black box's
     output sampled below the cut, a reader's seed the first read it can
-    time, round 71's F-248 and F-249; changes go through
+    time, round 71's F-248 and F-249; 0.48: no admin read a tool asks
+    unbidden reaches a router's declaration records, which zenoh 1.10.1
+    answers under its tables' read lock, #890; changes go through
     `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
