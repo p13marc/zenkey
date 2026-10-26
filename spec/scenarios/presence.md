@@ -526,8 +526,9 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
     sessions, as step 6's are (0.45, F-244): zenoh tells a router nothing
     of a GET given up on (Appendix B), so no router or link tells one
     given up on from one waited for. A tool run as a black box is run
-    with its output's period below the cut (0.47, F-249: zk2py runs
-    `zenctl watchdog` at `--every 0.5` beside the 1 s cut), and judged on
+    with its output's period at most half the cut (0.47, F-249: zk2py
+    runs `zenctl watchdog` at `--every 0.5` beside the 1 s cut), so that
+    it prints at least once while the link is cut, and judged on
     what its output shows: from its first output after the cut until a
     complete read after the heal, every address it followed unobservable,
     never down, and its read complete within 30 s of the heal. The counts

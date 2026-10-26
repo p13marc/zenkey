@@ -40,8 +40,9 @@ minor).
   The step set no period, so one tool could pass, fail or be argued
   either way. 0.46's 0.41–0.49 s were measured at `--every 0.5`, which it
   did not say.
-- **Now.** A tool run as a black box is run with its output's period below
-  the cut; zk2py runs `zenctl watchdog` at `--every 0.5`. It is judged on
+- **Now.** A tool run as a black box is run with its output's period at
+  most half the cut, so that it prints at least once while the link is
+  cut; zk2py runs `zenctl watchdog` at `--every 0.5` beside the 1 s cut. It is judged on
   what its output shows, from its first output after the cut until a
   complete read after the heal: every address it followed unobservable,
   never down, and its read complete within 30 s of the heal.

@@ -2077,12 +2077,13 @@ Liveliness tokens carry no payload; everything is in the key.
           what a session's first read of the population costs, every
           matching token sent once (0.46, F-246). Beside 10,000 tokens a
           session's first read took 3.3–4.2 s and a later one 0.52–0.58 s
-          (zk2py, release), and a read after a reopen is a later read. So
+          (zk2py, release, round 70), and a read after a reopen is a later
+          read. So
           a reader that sizes this wait from its own later reads sizes it
           too short. Its seed, on a session that has not read the
           population before, is a session's first read, and the one it can
-          time (0.47, F-248; zk2py's follower seeded in 3.1–3.9 s, and its
-          next read took 0.47–0.49 s). The round trip after a reopen ran to
+          time (0.47, F-248; measured again in round 71, zk2py's follower
+          seeded in 3.1–3.9 s, and its next read took 0.47–0.49 s). The round trip after a reopen ran to
           4.54 s beside those seeds' 3.91 s, so a wait sized from a seed
           keeps a margin. One whose wait
           ends first reads possibly incomplete (below), as before, and
