@@ -12716,8 +12716,9 @@ standing."
 **Status at core 0.45:** resolved, as proposed: "… and before its next
 read takes up the round trip in flight (below), asking another only once
 that one has ended without standing (0.45, F-242)". zk2py's barrier
-already did this. `readings` gains the case: a wait that ended, then the
-round trip taken up and ended without standing, then a second GET (410).
+already did this. `readings` gains two cases (411): a wait that ended,
+then the round trip taken up and ended without standing, then a second
+GET; and the order the barrier reads the fake session's links in.
 Beside 10,000 tokens, step 10's stand-in follower, with every wait at 20
 ms, took up its round trip 16 times and asked one.
 
@@ -12877,7 +12878,7 @@ MAY and one Appendix B fact. No fixture and no verdict changed. zk2py's
 readers already did what it says, and none of them changed. Its runner
 follows the new step 10: the follower with its own waits at 20 ms is the
 reader under test, and zenctl's counts are not asked. `readings` gains
-one case, F-242's take-up.
+two cases, for F-242's take-up.
 
 The runner also had a fault of its own. Step 7's control did not wait
 for its token to reach the router before its watch session opened. In 3
@@ -12889,7 +12890,7 @@ token first, so the text is right. The control now waits as step 1 does.
 **Round 69's findings at 0.45:** F-241, F-242, F-243 and F-244 are
 resolved. Each entry has its status line.
 
-**`just py-conformance`: 3041 of 3041.**
+**`just py-conformance`: 3042 of 3042.**
 
 **Live:** `presence_scenarios` against `owner-wf` and `zenctl-wf`. §1–§8
 ran once, with zk2py's owner and reader. §9 and §10 ran in every pairing:

@@ -1844,6 +1844,14 @@ def _s10_step_7(report: Report, sec: str, ep1: str) -> None:
             # 0.43 and one at 0.45, each with the withdrawal heard)
             held_first = _wait(lambda: h.key in {_inst_key(i) for i in live.list_presence(tool, S10, 5.0).instances},
                                10.0, 0.05)
+            if not held_first:
+                # the runner's own precondition, never the reader's verdict
+                # (review-bot on PR #887)
+                report.check(sec, f"7. {label}: setup, the owner's token read held by the tool before the watch "
+                                  "session opens, as step 1's tool reads it", False,
+                             f"{h.key} not read within 10 s: the case was not run, and says nothing of the reader")
+                h.close()
+                continue
             watch = live.open_client(ep1, namespace=wns)
             f = pr.PresenceFollower(tool, watch, S10, history=history)
             try:
@@ -2121,12 +2129,6 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
                      f"{fourth.elapsed_s * 1000:.0f} ms, the last told {((last_told or 0) - rt_end) * 1000:.1f} ms "
                      "from its end")
         gets_after = [g for g in w.gets[n_gets:]]
-        # beyond Expected 10, §8.1 (0.45, F-241): "once that has been sent the
-        # next is one round trip again"; zenoh's own GET, asked at once
-        nfin, ntoks, nerrs, nsecs = _round_trip_raw(inner, live.settle_key(wire), 5.0, direct=True)
-        report.note(sec, f"10. §8.1 (0.45, F-241), beyond Expected 10: the next round trip, zenoh's own, asked at once "
-                         f"after the one after the reopen: {nsecs * 1000:.2f} ms (final reply {nfin}, {ntoks} tokens, "
-                         f"{nerrs} errors), against {fourth.elapsed_s * 1000:.0f} ms for the one after the reopen")
         report.check(sec, "10. the reader under test asks its round trip four times in a row, giving up on the first "
                           "three at once and waiting 30 s for the fourth, through its own interface (0.45): its round "
                           "trip stands, and it asked one, counted at its watch session, the three it gave up on "
@@ -2138,6 +2140,14 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
                      f"taken up {barrier.taken_up}; the fourth {fourth.why or 'stood'} in "
                      f"{fourth.elapsed_s * 1000:.0f} ms, {(t_open or 0) and (fourth.asked_ns / 1e9 - t_open) * 1000:.1f} "
                      "ms after the reopen was heard")
+        # beyond Expected 10, §8.1 (0.45, F-241): "once that has been sent the
+        # next is one round trip again". zenoh's own GET, asked once the
+        # reader's count has been checked, on the session itself (``inner``,
+        # not the counting ``w``): it is in no count of the reader's
+        nfin, ntoks, nerrs, nsecs = _round_trip_raw(inner, live.settle_key(wire), 5.0, direct=True)
+        report.note(sec, f"10. §8.1 (0.45, F-241), beyond Expected 10: the next round trip, zenoh's own, asked at once "
+                         f"after the one after the reopen: {nsecs * 1000:.2f} ms (final reply {nfin}, {ntoks} tokens, "
+                         f"{nerrs} errors), against {fourth.elapsed_s * 1000:.0f} ms for the one after the reopen")
     finally:
         for x in (sub, listener):
             try:
@@ -2270,6 +2280,11 @@ def _s10_step_10_reader(report: Report, sec: str, ep1: str, ns_tool: Any, label:
         link.close()
 
 
+#: how long ``--reopen``'s late measure waits for the reopening's telling to
+#: end before it asks its first round trip (review-bot on PR #887)
+LATE_TELLING_S = 30.0
+
+
 def _s10_reopen(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any]) -> None:
     """Beyond the text (round 68, F-239), run only with ``--reopen``: what a
     watch session's subscriber without history hears when its transport
@@ -2319,10 +2334,11 @@ def _s10_reopen(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any
                 def told() -> int:
                     return sum(1 for t, k in list(heard) if t >= t_heal and k == "PUT")
 
-                over = _wait(lambda: told() >= n, 120.0, 0.05)
+                # beside 10,000 tokens the telling took under 5 s (round 70)
+                over = _wait(lambda: told() >= n, LATE_TELLING_S, 0.05)
                 time.sleep(1.0)
                 if not over:
-                    return said + f"; not measured further: told {told()} of the {n} within 120 s"
+                    return said + f"; not measured further: told {told()} of the {n} within {LATE_TELLING_S:g} s"
             rt1 = live.settle(watch, 30.0, selector=wire)
             rt2 = live.settle(watch, 30.0, selector=wire)
             time.sleep(1.0)
@@ -2567,7 +2583,7 @@ def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
                           back_limit=60.0)
     finally:
         link.close()
-    within = r.get("after_heal") is not None and r["after_heal"] <= 30.0
+    within = r.get("after_heal") is not None and 0.0 <= r["after_heal"] <= 30.0
     what = (f"ok {r.get('t_ok', 0):.1f} s after its start; since the cut {r.get('cut_states')}; ok again "
             f"{r.get('after_heal')} s after the heal; {r.get('stderr')}")
     report.check(sec, f"10. (the reader under test, a tool run as a black box) zenctl watchdog --namespace {NS} --rule "
@@ -2615,7 +2631,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="the reference's zenctl")
     ap.add_argument("--crowd", type=int, default=2000, help="§10's crowd, 2,000 instance tokens by default")
     ap.add_argument("--reopen", action="store_true",
-                    help="§10: also measure a watch session's reopen beside the crowd (F-239; notes only, no check)")
+                    help="§10: also measure a watch session's reopen beside the crowd (F-239, F-241; notes only, no "
+                         "check). Slow beside a large crowd: about a minute beside 10,000 tokens, each wait for "
+                         "the reopening's telling bounded at 30 s")
     ap.add_argument("--tokenless", type=int, default=100, help="§5's services, 100 by default")
     args = ap.parse_args(argv)
     P.owner, P.reader, P.owner_bin, P.zenctl_bin, P.crowd = args.owner, args.reader, args.owner_bin, args.zenctl, \

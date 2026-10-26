@@ -3102,22 +3102,39 @@ def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
     # 0.45 (F-242): a wait that ended first takes up the round trip in
     # flight, "asking another only once that one has ended without
     # standing": its links gone at its end (cut off during it), then a new one
+    # the links the fake hands out, in the order the barrier reads them: the
+    # first GET's before (up) and after (gone: cut off during it), then the
+    # second's before and after (up); a round trip taken up not standing
+    # reads none (review-bot on PR #887)
     gate = threading.Event()
     w = _FakeSession([], [up, [], up, up], gate=gate)
     live.register(w, interests_timeout_s=60.0)
     b = live.Barrier(w, sel)
     gave_up = b.round_trip(0.0)
-    until(lambda: w.asked == [key])
+    asked = until(lambda: w.asked == [key])
     gate.set()
-    until(lambda: not b.in_flight)
-    taken = b.round_trip(30.0)
-    asked_then = list(w.asked)
-    again = b.round_trip(30.0)
-    out.append((f"core 0.45 §8.1 (F-242), zk2py's barrier: a wait that ended first, then the round trip in flight "
-                "taken up and ended without standing: no second GET until then, and another asked only after it, "
-                "which stands",
-                [gave_up.why, (taken.stands, taken.why), asked_then, again.stands, w.asked, b.asked, b.taken_up],
-                [live.WAIT_ENDED, (False, live.CUT_OFF_DURING), [key], True, [key, key], 2, 1]))
+    ended = until(lambda: not b.in_flight)
+    label242 = "core 0.45 §8.1 (F-242), zk2py's barrier"
+    if not (asked and ended):
+        # a fake GET that was never asked, or never ended, within 30 s
+        out.append((f"{label242}: setup, the first GET asked and then ended within 30 s",
+                    {"asked": asked, "ended": ended}, {"asked": True, "ended": True}))
+    else:
+        links_left_after_first = len(w.links)
+        taken = b.round_trip(30.0)
+        asked_then = list(w.asked)
+        links_left_after_take_up = len(w.links)
+        again = b.round_trip(30.0)
+        out.append((f"{label242}: a wait that ended first, then the round trip in flight taken up and ended without "
+                    "standing: no second GET until then, and another asked only after it, which stands",
+                    {"first": gave_up.why, "taken up": (taken.stands, taken.why), "GETs then": asked_then,
+                     "another stands": again.stands, "GETs in all": w.asked, "asked": b.asked,
+                     "taken up count": b.taken_up},
+                    {"first": live.WAIT_ENDED, "taken up": (False, live.CUT_OFF_DURING), "GETs then": [key],
+                     "another stands": True, "GETs in all": [key, key], "asked": 2, "taken up count": 1}))
+        out.append((f"{label242}: the fake's links read in the barrier's order: two by the first GET, none by the "
+                    "take-up of one not standing, two by the second (its last one kept)",
+                    [links_left_after_first, links_left_after_take_up, w.links], [2, 2, [up]]))
     live.forget(w)
     # one taken up after it ended: it stands only through a session that
     # still holds a link (a cut its listener has not told is in no count)

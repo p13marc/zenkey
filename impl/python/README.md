@@ -100,7 +100,7 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings      410 passed     0 failed
+readings      411 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
@@ -110,13 +110,14 @@ alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
 desired       408 passed     0 failed
 redundancy    180 passed     0 failed
-total        3041 passed     0 failed
+total        3042 passed     0 failed
 ```
 
 The figures are against `core.md` 0.45, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
 `telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.5.
-Core 0.45 changed no fixture; `readings` gained one case, F-242's take-up (410).
+Core 0.45 changed no fixture; `readings` gained two cases for F-242's
+take-up (411).
 Core 0.44 changed no fixture; `readings` gained its 15 cases (409).
 Core 0.43 changed no fixture and no rule, and no reading (394).
 Core 0.42 changed no fixture; `readings` gained its 15 cases (394).
@@ -2625,7 +2626,7 @@ already did what it says, and none of them changed:
   none after one that stood until the next move.
 - **A wait that ends first takes up the round trip in flight** (F-242),
   asking another only once that one has ended without standing. This is
-  `live.Barrier`. `readings` gains one case for it (410).
+  `live.Barrier`. `readings` gains two cases for it (411).
 - **In flight is at the reader, and the MAY** (F-243). `live.Flight` asks
   each GET with its own timeout above its session's interests timeout
   (`live.flight_timeout`), and the caller's wait is apart. zk2py does this
