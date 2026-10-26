@@ -113,9 +113,10 @@ redundancy    180 passed     0 failed
 total        3042 passed     0 failed
 ```
 
-The figures are against `core.md` 0.46, `hostid.v1` 0.7, `freshness.v1`
+The figures are against `core.md` 0.47, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
 `telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.5.
+Core 0.47 changed no fixture and no reading (411).
 Core 0.46 changed no fixture and no reading (411).
 Core 0.45 changed no fixture; `readings` gained two cases for F-242's
 take-up (411).
@@ -2013,7 +2014,7 @@ against zk2py's owner:
 - `link_scenarios` 78, in two runs;
 - `desired_scenarios` 52, zk2py's author and target.
 
-## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46)
+## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47)
 
 ```bash
 PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) \
@@ -2867,6 +2868,95 @@ build), the crowd in `ns`:
   complete again 4.25–6.90 s after the heal, and 7.31–8.08 s with its
   waits at 20 ms. The debug zenctl took 24.6–30.9 s, once past the 30 s
   that step 10 asks beside 2,000.
+
+**Core 0.47**, read cold in round 72, on main 8880e3c6 (#891). It is
+wording only: it answers round 71's two findings, and changes no fixture,
+no verdict and no behaviour. zk2py's readers did not change, and
+`readings` is unchanged (411):
+- **A reader's seed is the first read it can time** (F-248). The follower
+  sizes nothing on a read's cost. Step 10's notes now give each
+  follower's seed beside its round trip after the reopen, in the same run.
+- **A black box is run with its output's period at most half the cut**
+  (F-249). The runner's `--every 0.5` beside the 1 s cut is half the cut.
+  Step 10's check now refuses a period above half the cut. It judges
+  zenctl from its first transition after the cut, which must come while
+  the link is cut, through the first `ok` after the heal.
+
+**The runner had a fault of its own.** Step 10's "the round trip after
+the reopen ends only after them" took the round trip's end as its ask
+plus its elapsed time. The ask is stamped before the links check. The
+elapsed time runs from just before the GET to the flight thread's wake-up.
+So the sum is off the final reply by a few ms, either way. In this round's
+first run the check failed by 4.4 ms. The end is now stamped in the GET's
+drop callback (`RoundTrip.ended_ns`). In the seven runs since, one of them
+beside 10,000, the last token told came 0.0–0.1 ms before it. The old sum
+was 0.0 and 1.1 ms off it in the two runs that printed both. Steps 1 to
+3's "still waiting when the stall ends" read the same sum, and now read
+the stamp. The first run cannot be judged again. The check is one-sided:
+a token told after the final reply, but before the drop callback ran,
+would go unseen.
+
+**`presence_scenarios`**, against `owner-wf` and `zenctl-wf` (main
+8880e3c6). §1–§8 ran once, with zk2py's owner and reader. §9 and §10 ran
+in every pairing:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 46 | 1 |
+| Rust, zk2py | – | 9 | 40 | 1 |
+| zk2py, zenctl | – | – | 9 | 2 |
+| Rust, zenctl | – | – | 8 | 3 |
+
+Every check passes, after the runner's fix. With zk2py's owner and reader,
+§10 ran six times. The first failed the one check above, and the five
+after the fix passed 46 of 46. Not run:
+- §3 step 2, as before;
+- §10 step 7 with the Rust owner;
+- for zenctl, §9 and §10 step 9.
+
+**Beside 10,000 tokens**, §10 ran whole once with each reader: 46 of 46
+with zk2py's, and 9 of 9 with zenctl, step 9 not run.
+
+§10 step 10 at 0.47, measured on zenoh-python 1.10.1 routers (a release
+build), the crowd in `ns`, beside a Rust agent's builds:
+
+| | 2,000 tokens (7 runs; zenctl's 2) | 10,000 tokens (1 run each) |
+|---|---|---|
+| The round trip at the start | 0.5–45.2 ms, no token | 43.0 ms, no token |
+| The first after the reopen | 169–247 ms | 3.94 s |
+| The next, asked at once (F-241) | 0.57–3.18 ms | 1.83 ms |
+| GETs for the four asks | 1 | 1 |
+| Stand-in follower: its seed | 0.13–0.21 s | 3.39 s |
+| Stand-in follower: its round trip after the reopen | 78–130 ms | 5.18 s |
+| Stand-in follower: complete after the heal | 0.80–2.80 s | 9.85 s |
+| Default follower: its seed | 0.13–0.18 s | 3.46 s |
+| Default follower: its round trip after the reopen | 65–150 ms | 3.80 s |
+| Default follower: complete after the heal | 0.22–2.33 s | 6.49 s |
+| zenctl watchdog at `--every 0.5`: unobservable after the cut | 0.45–0.48 s | 0.48 s |
+| zenctl watchdog: ok again after the heal | 1.46–1.48 s | 28.5 s |
+
+- zenctl's first transition after the cut was unobservable in every run,
+  printed while the link was cut. It never fired, and its stderr held no
+  `Unknown interest` and no `Didn't receive DeclareFinal` line.
+- Beside 10,000, each follower's round trip after the reopen ran 1.10
+  times (the default follower) and 1.53 times (the stand-in) its own seed.
+  The stand-in's reads shared the link with the reopen's telling. So a
+  wait sized from a seed needs its margin (F-248).
+- §10 step 4's watch session in `ns` with history, beside 10,000: its
+  round trip took 3.51, 5.87 and 3.70 s, every token heard by its end.
+  Step 8's follower handed one stood after 3.09 s (F-251).
+
+**The text, read cold.** 0.47's two changes say what zk2py found. Read
+whole, §8.1 and presence §9 and §10 hold three wording points, all minor
+(F-250 to F-252). None changes a verdict, a test or an implementation.
+
+**Where the two implementations disagree:** on no verdict.
+- **Step 6's round trips** still differ, as 0.43 allows: one before the
+  first seed for zk2py, and two for the reference.
+- **The time to recover beside 10,000 tokens.** zk2py's follower was
+  complete again 6.49 s after the heal, and 9.85 s with its waits at
+  20 ms. The debug zenctl took 28.5 s, within the 30 s that step 10 asks
+  beside 2,000.
 
 ## What it does not cover
 
