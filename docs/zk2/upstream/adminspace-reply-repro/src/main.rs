@@ -23,7 +23,16 @@
 //! is `clean`.
 //!
 //! One trial per process pair, so a frozen router never leaks into the next
-//! trial. `run.sh` runs the matrix.
+//! trial. `run-matrix.sh` runs the matrix.
+//!
+//! **`--acl wide|narrow`** (zenkey #894) runs the router under access
+//! control, `default_permission: deny`, with usrpwd principals: `asr`, which
+//! every session but the asker presents and which may do anything under
+//! `asr/**`, and `tool`, the asker, which holds zk2's admin read alone:
+//! `wide` is core 0.15's (`@/*/router`, `@/*/router/**`), `narrow` 0.50's
+//! (`@/*/router`, the storage manager's status subtree and `@/*/*`), each a
+//! `query` on ingress and a `reply` on egress. `run-acl.sh` runs that
+//! matrix.
 
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -59,17 +68,68 @@ fn base() -> Config {
     c
 }
 
-async fn client(endpoint: &str) -> Session {
+/// A client presenting `user` (password `<user>-pw`), when given: what a
+/// router under `--acl` requires of every session.
+async fn client_as(endpoint: &str, user: Option<&str>) -> Session {
     let mut c = base();
     c.insert_json5("mode", "\"client\"").unwrap();
     c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
         .unwrap();
+    if let Some(u) = user {
+        c.insert_json5(
+            "transport/auth/usrpwd",
+            &format!("{{ user: \"{u}\", password: \"{u}-pw\" }}"),
+        )
+        .unwrap();
+    }
     zenoh::open(c).await.expect("a client session")
 }
 
-/// The router: admin space on, read permitted, an ephemeral loopback port.
+/// The admin read `--acl` grants the asker: core 0.15's, or 0.50's.
+fn admin_read(acl: &str) -> &'static [&'static str] {
+    match acl {
+        "wide" => &["@/*/router", "@/*/router/**"],
+        "narrow" => &[
+            "@/*/router",
+            "@/*/router/status/plugins/storage_manager/storages/**",
+            "@/*/*",
+        ],
+        other => panic!("--acl {other}: wide, narrow or none"),
+    }
+}
+
+/// The router's `access_control` block under `--acl`: deny by default; `asr`
+/// may do anything under `asr/**`, both ways; `tool` holds the admin read.
+fn access_control(acl: &str) -> String {
+    let keys: Vec<String> = admin_read(acl).iter().map(|k| format!("\"{k}\"")).collect();
+    let keys = keys.join(", ");
+    format!(
+        r#"{{
+  enabled: true,
+  default_permission: "deny",
+  rules: [
+    {{ id: "asr", permission: "allow", flows: ["ingress", "egress"],
+      messages: ["put", "delete", "declare_subscriber", "query", "declare_queryable", "reply",
+                 "liveliness_token", "declare_liveliness_subscriber", "liveliness_query"],
+      key_exprs: ["asr/**"] }},
+    {{ id: "admin-read-in", permission: "allow", flows: ["ingress"], messages: ["query"],
+      key_exprs: [{keys}] }},
+    {{ id: "admin-read-out", permission: "allow", flows: ["egress"], messages: ["reply"],
+      key_exprs: [{keys}] }},
+  ],
+  subjects: [ {{ id: "asr", usernames: ["asr"] }}, {{ id: "tool", usernames: ["tool"] }} ],
+  policies: [
+    {{ id: "asr", rules: ["asr"], subjects: ["asr"] }},
+    {{ id: "tool", rules: ["admin-read-in", "admin-read-out"], subjects: ["tool"] }},
+  ],
+}}"#
+    )
+}
+
+/// The router: admin space on, read permitted, an ephemeral loopback port;
+/// under `--acl`, usrpwd from `--dict` and the access control block.
 /// Prints `endpoint <locator>` and runs until stdin closes.
-async fn router() {
+async fn router(args: &[String]) {
     let mut c = base();
     c.insert_json5("mode", "\"router\"").unwrap();
     c.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")
@@ -77,6 +137,17 @@ async fn router() {
     c.insert_json5("adminspace/enabled", "true").unwrap();
     c.insert_json5("adminspace/permissions/read", "true")
         .unwrap();
+    let acl = opt(args, "--acl", "none");
+    if acl != "none" {
+        let dict = opt(args, "--dict", "");
+        c.insert_json5(
+            "transport/auth/usrpwd",
+            &format!("{{ user: \"router\", password: \"router-pw\", dictionary_file: {dict:?} }}"),
+        )
+        .unwrap();
+        c.insert_json5("access_control", &access_control(&acl))
+            .unwrap();
+    }
     let r = zenoh::open(c).await.expect("a router");
     let endpoint = r
         .info()
@@ -194,10 +265,25 @@ async fn trial(args: &[String]) {
     let churn_every = Duration::from_millis(opt(args, "--churn-every", "0").parse().unwrap());
     let stacks_dir = opt(args, "--stacks", "");
     let label = opt(args, "--trial", "0");
+    // `none`, `wide` or `narrow`; under either of the last two every session
+    // presents a principal: the asker `tool`, every other one `asr`.
+    let acl = opt(args, "--acl", "none");
+    let (me, asker_user) = match acl.as_str() {
+        "none" => (None, None),
+        a => {
+            let _ = admin_read(a);
+            (Some("asr"), Some("tool"))
+        }
+    };
+    let dict = std::env::temp_dir().join(format!("asr-usrpwd-{}.txt", std::process::id()));
+    if me.is_some() {
+        std::fs::write(&dict, "router:router-pw\nasr:asr-pw\ntool:tool-pw\n").unwrap();
+    }
 
     let exe = std::env::current_exe().unwrap();
     let mut child = tokio::process::Command::new(exe)
         .arg("router")
+        .args(["--acl", &acl, "--dict", &dict.display().to_string()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .kill_on_drop(true)
@@ -216,7 +302,7 @@ async fn trial(args: &[String]) {
         }
     };
 
-    let loader = client(&endpoint).await;
+    let loader = client_as(&endpoint, me).await;
     let mut held = Vec::new();
     for i in 0..load {
         let key = match shape.as_str() {
@@ -253,8 +339,8 @@ async fn trial(args: &[String]) {
     }
 
     // The heartbeat, heard before anything else runs.
-    let hb_pub = client(&endpoint).await;
-    let hb_sub = client(&endpoint).await;
+    let hb_pub = client_as(&endpoint, me).await;
+    let hb_sub = client_as(&endpoint, me).await;
     let epoch = Instant::now();
     let last_hb = Arc::new(AtomicU64::new(0));
     let heard = Arc::new(AtomicBool::new(false));
@@ -287,8 +373,8 @@ async fn trial(args: &[String]) {
     // start: a session that connects is a writer of the tables too (a new
     // face, `Gateway::new_transport_unicast`), and the `connect` churn
     // measures that path on its own.
-    let asker = client(&endpoint).await;
-    let churner = client(&endpoint).await;
+    let asker = client_as(&endpoint, asker_user).await;
+    let churner = client_as(&endpoint, me).await;
     // Settle the load's declarations, then one GET alone: what the admin
     // space answers this selector with, before any churn.
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -362,6 +448,13 @@ async fn trial(args: &[String]) {
                     c.insert_json5("mode", "\"client\"").unwrap();
                     c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
                         .unwrap();
+                    if let Some(u) = me {
+                        c.insert_json5(
+                            "transport/auth/usrpwd",
+                            &format!("{{ user: \"{u}\", password: \"{u}-pw\" }}"),
+                        )
+                        .unwrap();
+                    }
                     // A frozen router accepts no session: the churn stops.
                     let Ok(s) = zenoh::open(c).await else { break };
                     let _ = tokio::time::timeout(Duration::from_secs(2), s.close()).await;
@@ -430,12 +523,13 @@ async fn trial(args: &[String]) {
     }
     println!(
         "result ver={} trial={label} selector={selector} load={load} shape={shape} churn={} \
-         every_ms={} outcome={outcome} t_ms={t_ms} asks={asks} churns={churns} first_replies={first_ok} \
-         first_errors={first_err}{summary}",
+         every_ms={} acl={acl} outcome={outcome} t_ms={t_ms} asks={asks} churns={churns} \
+         first_replies={first_ok} first_errors={first_err}{summary}",
         ver(),
         opt(args, "--churn", "all"),
         churn_every.as_millis(),
     );
+    let _ = std::fs::remove_file(&dict);
     let _ = child.start_kill();
     std::process::exit(0);
 }
@@ -444,13 +538,13 @@ async fn trial(args: &[String]) {
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("router") => router().await,
+        Some("router") => router(&args).await,
         Some("trial") => trial(&args).await,
         _ => {
             eprintln!(
                 "usage: asr trial [--selector SEL] [--load N] [--shape concrete|wild] \
                  [--churn all|sub|lsub|token|connect|none] [--churn-every MS] [--for SECS] \
-                 [--stall SECS] \
+                 [--stall SECS] [--acl none|wide|narrow] \
                  [--stacks DIR] [--trial LABEL]"
             );
             std::process::exit(2);
