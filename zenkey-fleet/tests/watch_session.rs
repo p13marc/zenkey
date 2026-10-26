@@ -678,14 +678,20 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
     assert_eq!(feed.presence().status(&h1), AddressStatus::Unobservable);
     assert_eq!(downs(&seen), 0, "nobody down: {seen:#?}");
 
-    // Healed: the read finds the owner, up again.
+    // Healed: the read finds the owner, up again. A read made before the
+    // round trip stands again shows it up too, possibly incomplete (core
+    // §8.1, 0.42, F-229), so the wait is for a complete one (#902).
     link.heal();
-    until(&mut feed, &mut seen, "h1/tc up again", |f| {
-        f.presence().status(&h1) == AddressStatus::Up
-    })
+    until(
+        &mut feed,
+        &mut seen,
+        "h1/tc up again, by a complete read",
+        |f| {
+            f.presence().status(&h1) == AddressStatus::Up && *f.last_seed() == SeedOutcome::Complete
+        },
+    )
     .await;
     assert_eq!(downs(&seen), 0, "nobody down: {seen:#?}");
-    assert_eq!(*feed.last_seed(), SeedOutcome::Complete);
     assert_eq!(monitor.settled(), Some(true), "made again before the read");
 
     // A real departure is down, once the read after its withdrawal says so.
