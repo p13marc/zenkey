@@ -45,11 +45,13 @@ Admin      query                                           reply
   and ``@/*/*``, never namespaced. 0.15's ``@/*/router/**`` admitted a GET of
   every declaration record of a router's, which zenoh 1.10.1 answers under
   its routing tables' read lock (§4.2, Appendix B).
-- **No allowed query reaches a node's declaration records** (§11.1, 0.50):
-  "A generator MUST NOT allow a query on a key expression that intersects
-  one of those keys of any node". :func:`generate` refuses a block that
-  would (:class:`HazardousGrant`), and :func:`block_hazards` finds one in
-  any block, zk2py's or another generator's.
+- **No allowed ingress query reaches a node's declaration records**
+  (§11.1, 0.50; its posture and flow, 0.51, F-256): "Under deny, a
+  generator MUST NOT compile an allow rule for an ingress query on a key
+  expression that intersects one of those keys of any node".
+  :func:`generate` refuses a block that would (:class:`HazardousGrant`),
+  and :func:`block_hazards` finds one in any block, zk2py's or another
+  generator's.
 - No principal declares queryables under ``@/**``. Under ``allow`` the deny
   is a rule in each principal's own policy, never a catch-all subject's
   (§11.2, 0.15: such a subject "makes the per-user subjects lose their
@@ -295,13 +297,14 @@ def generate(principals: list[Principal], posture: str, *, egress_selectors: boo
     ``default_permission: allow``: security.md §2's "Allow rules alone,
     under allow, block nothing".
 
-    §11.1 (0.50): "A generator MUST NOT allow a query on a key expression
-    that intersects one of those keys of any node". A block whose allow
-    rules would is refused (:class:`HazardousGrant`), unless ``hazard_ok``:
-    security.md §4 step 4 compiles 0.15's admin read (``admin_read``) on
-    purpose, beside no writer. Under ``allow`` no allow rule is evaluated,
-    and the generator compiles no admin read (0.50: "This protects a router
-    under deny alone"); :func:`block_hazards` says so of such a block.
+    §11.1 (0.50, 0.51): "Under deny, a generator MUST NOT compile an allow
+    rule for an ingress query on a key expression that intersects one of
+    those keys of any node". A block whose allow rules would is refused
+    (:class:`HazardousGrant`), unless ``hazard_ok``: security.md §4 step 4
+    compiles 0.15's admin read (``admin_read``) on purpose, beside no
+    writer. Under ``allow`` no allow rule is evaluated, and the generator
+    compiles no admin read, "so a router there is not protected" (0.51,
+    F-256); :func:`block_hazards` says so of such a block.
 
     Under ``allow``, each principal's complement is taken per message and
     flow over every key of the deployment (:func:`universe`) its grants do
@@ -366,24 +369,25 @@ def generate(principals: list[Principal], posture: str, *, egress_selectors: boo
 
 
 class HazardousGrant(ValueError):
-    """§11.1 (0.50): a block whose allow rules admit a query on a key
-    expression that intersects a node's declaration records, its
-    ``linkstate/*`` or its ``route/successor/**``."""
+    """§11.1 (0.50, 0.51): a ``deny`` block whose allow rules admit an
+    ingress query on a key expression that intersects a node's declaration
+    records, its ``linkstate/*`` or its ``route/successor/**``."""
 
 
 @dataclass(frozen=True)
 class AdminHazard:
     """One way a block admits a GET of a node's declaration records
-    (§11.1, 0.50; §4.2; Appendix B):
+    (§11.1, 0.50, 0.51; §4.2; Appendix B):
     - ``allowed_query``: under ``deny``, an allow rule a policy lists names
-      ``query`` on a key expression that intersects them (``reaches``, by
-      zenoh 1.10.1's own intersection). The MUST NOT names no flow, so an
-      egress ``query`` counts too; the GET that freezes a router is the
-      asker's, on ingress;
+      ``query`` on the ingress flow (named, or zenoh's default of both) and
+      a key expression that intersects them (``reaches``, by zenoh 1.10.1's
+      own intersection). An egress ``query`` alone is not one: "the GET
+      that freezes a node is the asker's, decided at the asker's face on
+      ingress" (0.51, F-256);
     - ``allow_posture``: under ``allow`` no allow rule is evaluated, and the
       policy holds no deny of ``query`` that includes ``@/**``, so a GET of
-      ``@/**`` from its subjects reaches the records ("This protects a
-      router under deny alone", 0.50);
+      ``@/**`` from its subjects reaches the records ("a router there is
+      not protected", 0.51, F-256);
     - ``disabled``: access control is not enabled (``enabled`` false or
       absent), so every query is admitted."""
 
@@ -397,18 +401,19 @@ class AdminHazard:
     def why(self) -> str:
         if self.kind == "allowed_query":
             return (f"{self.policy}: rule {self.rule} allows query on {self.key} ({self.flow}), which intersects "
-                    f"{list(self.reaches)} (§11.1, 0.50)")
+                    f"{list(self.reaches)} (§11.1, 0.50, 0.51)")
         if self.kind == "allow_posture":
             return (f"{self.policy}: under allow, no deny of query includes {ADMIN}, so its subjects' GETs reach a "
-                    f"node's declaration records (§11.1, 0.50: deny alone protects a router)")
+                    f"node's declaration records (§11.1, 0.51: a router there is not protected)")
         return "access control is not enabled: every query is admitted"
 
 
 def block_hazards(block: dict[str, Any]) -> list[AdminHazard]:
-    """§11.1 (0.50) read against a router's ``access_control`` block,
+    """§11.1 (0.50, 0.51) read against a router's ``access_control`` block,
     zk2py's or another generator's: every way it admits a GET of a node's
     declaration records (:class:`AdminHazard`). Empty for a ``deny`` block
-    that meets the MUST NOT. Rules no policy lists are inert, and skipped.
+    that meets the MUST NOT. Rules no policy lists are inert, and skipped,
+    and so is a rule's egress flow (0.51).
     Inclusion and intersection are zenoh 1.10.1's own (:func:`_includes`,
     :func:`_intersects`), never a string test."""
     if not block.get("enabled"):
@@ -427,11 +432,13 @@ def block_hazards(block: dict[str, Any]) -> list[AdminHazard]:
         for r in listed:
             if r.get("permission") != "allow" or "query" not in (r.get("messages") or []):
                 continue
-            for flow in r.get("flows") or [INGRESS, EGRESS]:
-                for k in r.get("key_exprs") or []:
-                    reaches = tuple(p for p in ADMIN_RECORDS if _intersects(k, p))
-                    if reaches:
-                        out.append(AdminHazard("allowed_query", pol.get("id"), r["id"], flow, k, reaches))
+            # 0.51: "an ingress query"; zenoh reads a rule with no flows as both
+            if INGRESS not in (r.get("flows") or [INGRESS, EGRESS]):
+                continue
+            for k in r.get("key_exprs") or []:
+                reaches = tuple(p for p in ADMIN_RECORDS if _intersects(k, p))
+                if reaches:
+                    out.append(AdminHazard("allowed_query", pol.get("id"), r["id"], INGRESS, k, reaches))
     return out
 
 

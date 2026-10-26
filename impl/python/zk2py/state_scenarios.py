@@ -46,6 +46,10 @@ the router's replier id, so "Who answered" counts it. The owner is zk2py's
   doctor's S4 check (``zenctl-doctor``) and ``zenctl storage list``
   (``zenctl-storage``). Every wait is bounded, and no hazardous GET is
   asked: the router is killed at the end of each run, frozen or not.
+  The recorder is a client's queryable. Expected 3 (0.51, F-257): it "may
+  never hear a read that freezes the router", so the runner counts what
+  it heard against the reads the reader makes, and Expected 2 fails such
+  a reader either way.
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -619,7 +623,7 @@ def _section12(report: Report, run: Run, kind: str) -> None:
         reaching = sorted({k for k in keys if live.admin_records_reached(k)})
         report.check(sec, "expected 3: every selector the queryable on @/** heard is one of the two, and none "
                           "intersects a node's declaration records, its linkstate/* or its route/successor/**; it "
-                          f"heard each of the reader's {reader.asks} read(s) a round (0.50, F-254)",
+                          f"heard each of the reader's {reader.asks} read(s) a round (0.50, F-254; 0.51, F-257)",
                      set(keys) <= allowed and not reaching and len(keys) == reader.asks * n,
                      f"heard {len(keys)} GET(s) over {n} round(s): {sorted(set(keys))}; reaching the records {reaching}")
     finally:
