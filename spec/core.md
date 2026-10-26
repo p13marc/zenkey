@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.51** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.52** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -70,7 +70,7 @@ waits, and a black box that prints nothing while its link is cut, and in
 0.50 an admin-read grant that admits no GET of a node's declaration
 records, and those records named for any node, and in 0.51 the posture
 and flow that rule holds for, and where a recorder can hear a read that
-freezes a node).
+freezes a node, and in 0.52 whose answers the admin read reaches).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -3377,8 +3377,10 @@ The format is the generator's own. The reference reads an enrollment file
   - Own stays scoped to the services the principal runs;
   - a tool's grants read, and call specific operations: Consume, Call,
     presence and the admin read write nothing;
-  - the admin read is a `query` on the routers' answers, and every
-    principal is still denied a queryable under `@/**`.
+  - the admin read is a `query` on the nodes' admin space, each node with
+    its admin space on answering for itself (0.52, F-258: since 0.50 it
+    includes `@/*/*`, which a client's and a peer's root documents answer
+    too), and every principal is still denied a queryable under `@/**`.
 
   A principal's grants therefore never let it write what a service it
   does not run owns, which is what §6 rests on. `[Sc: security.md §1]`
