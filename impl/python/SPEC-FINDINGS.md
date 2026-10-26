@@ -12392,6 +12392,15 @@ timeout …". In the same step, "its watch session reaches R1 through the
 link, whose `routing/interests/timeout` is 300 ms" gives the 300 ms to the
 link. It is the watch session's.
 
+**Status at core 0.44:** resolved, as proposed. Step 6 now ends the stall
+"until the reader's first seed has been read, or, for a reader that makes
+no read while no round trip stands, until its first round trip has run
+out under the 300 ms interests timeout". It says "its watch session, whose
+`routing/interests/timeout` is 300 ms". Expected 6 is unchanged. zk2py's
+follower seeds after a round trip that ran out, so its run does not move:
+the stall lasted 303–306 ms until its first seed, and its one round trip
+before the seed ran out at 301 ms.
+
 ### F-239 · contradiction · core §8.1 (0.42) "A move unconfirms what the reader holds" and "In a namespace, a watch session in no namespace": a transport that opens tells a subscriber without history every token
 
 > §8.1 (0.42, F-229): "Its subscribers may not have heard what moved while
@@ -12480,6 +12489,27 @@ token is held.
 - §10 step 8 could cut and heal its watch session, with Expected 8 saying
   what the round trip after the reopen waits for.
 
+**Status at core 0.44:** resolved. §8.1 now says, as measured, that "a
+token withdrawn then is never told to them. A token declared then is told
+when the transport opens again, unordered with the reader's reads". The
+move rule stands, with its reason corrected. "The round trip after a move
+waits for the population" is a bullet of its own, with a SHOULD to wait
+for it and to run the interests timeout above that time. Two zenoh facts
+join Appendix B. In place of a cut in step 8, a new step 10 cuts and heals
+a watch session beside the crowd. zk2py's follower now waits for the
+round trip after a move (`move_wait_s`). Step 10 passes in each pairing
+with zk2py's reader, beside 2,000 tokens and beside 10,000:
+- the subscriber was told every crowd token at the reopen, the one
+  declared during the cut among them, and never the one withdrawn then;
+- the round trip after the reopen took 147–160 ms and 3.7–4.0 s, the last
+  token told before its end.
+
+The round 68 run in which zenctl never recovered now recovers. Beside
+10,000 tokens, after a 3 s cut, `zenctl-wf watchdog` was ok again 25.2–27.1
+s after the heal, in 3 of 3 runs. Its sentence "one round trip at any
+population only until its transport first moves" is new, and it says more
+than was measured (F-241).
+
 ### F-240 · minor · core §8.1 (0.41) "A read that runs to its session's interests timeout is not complete": a round trip "as not made"
 
 > §8.1 (0.41): "A reader MUST read a read whose time reached its session's
@@ -12515,6 +12545,257 @@ evidence.
 **Wording that would remove the guess:** "… and a round trip (below) that
 ended there as not standing."
 
+**Status at core 0.44:** resolved, as proposed: "… and a round trip
+(below) that ended there as not standing (0.44, F-240: it was asked, so it
+was made; what it establishes is nothing)". §8.1's other use, a history's
+round trip past the interests timeout, now reads "where the round trip
+does not stand". zk2py's `RoundTrip.made` is now True for one ended at
+the interests timeout. Step 5's check and `readings` say so. `stands`
+was already False.
+
 **Counts at core 0.43:** 240 entries. Open: F-238 to F-240, against
 §8.1 and `scenarios/presence.md` §10: one gap, one contradiction and one
 minor. Every other entry is resolved.
+
+## At core 0.44 (#609)
+
+Round 69 read core 0.44 cold, on main c178e18f (#882, chunk WF). It read
+the CHANGELOG's 0.44 entry, §8.1's changed bullets, Appendix B, and
+`scenarios/presence.md` §10, steps 6 and 10 above all. 0.44 answers round
+68's three findings and adds:
+- two SHOULDs: wait for the round trip after a move, and one round trip,
+  and one read, at a time;
+- two zenoh facts in Appendix B;
+- §10 step 10, a reopen beside the crowd.
+
+No fixture changed. zk2py implemented the SHOULDs from the text first:
+- `live.Flight` and `live.Barrier`;
+- the follower's round trips through a barrier and its reads through a
+  flight, each taken up when a wait ends first;
+- its wait for the round trip after a move;
+- `next_move`;
+- `RoundTrip.made` for one at the interests timeout (F-240).
+
+Its runner then ran step 10. The README's "What a complete presence read
+is" says where zk2py already did what 0.44 says and where it did not.
+
+**Round 68's findings at 0.44:** F-238, F-239 and F-240 are resolved.
+Each entry has its status line.
+
+**`just py-conformance`: 3035 of 3035.** `readings` gained 10 cases (404).
+
+**Live:** `presence_scenarios` against `owner-wf` and `zenctl-wf`. §1–§8
+ran once, with zk2py's owner and reader. §9 and §10 ran in every pairing:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 46 | 1 |
+| Rust, zk2py | – | 9 | 40 | 1 |
+| zk2py, zenctl | – | – | 9 | 4 |
+| Rust, zenctl | – | – | 8 | 5 |
+
+Every check passes. §10 also ran whole beside 10,000 tokens: 46 of 46 with
+zk2py's reader, and 9 of 9 with zenctl. For zenctl, step 10's four round
+trips, and its one round trip and reads after the reopen, are not run:
+none is observable from its output (F-244).
+
+**Round 68's watchdog run, again:** `zenctl-wf watchdog --namespace ns
+--rule 'instance-gone crowd/*' --timeout 30`, every session through the
+link, beside 10,000 tokens, a 3 s cut and a heal. It reads ok again
+25.2–27.1 s after the heal, in 3 of 3 runs. Its stderr carried no
+`Unknown interest` and no `Didn't receive DeclareFinal`. With `zenctl-wd`
+it was still unobservable at 420 s.
+
+**Where the two implementations disagree:** on no verdict.
+- zenctl now words a read ended at the interests timeout as one that "ran
+  to its timeout or to its session's interests timeout". zk2py names the
+  interests timeout. Round 68's difference is gone.
+- Step 6's round trips differ as 0.43 allows: one before the first seed
+  for zk2py, and two for the reference.
+- Beside 10,000 tokens, after the heal, zk2py's follower was complete again
+  in 4.2–4.9 s and the debug zenctl in 25–28 s. Both are within step 10's
+  30 s, which the step asks beside 2,000.
+
+**The text, read cold.** Four findings:
+- F-241: a contradiction, measured;
+- F-242: a minor wording point;
+- F-243 and F-244: two gaps.
+
+Asked in particular whether step 10's Expected and the two new SHOULDs can
+be observed from outside a reader: only in part (F-244).
+
+### F-241 · contradiction · core §8.1 (0.44) "The round trip after a move waits for the population": only the first after each reopen waits
+
+> §8.1 (0.44): "So a watch session's round trip is one round trip at any
+> population only until its transport first moves."
+
+> §8.1 (0.42, as amended in 0.44): "Its round trip is then one round trip
+> at any population … until its transport moves, when it waits for the
+> population (below, 0.44, F-239)".
+
+> CHANGELOG 0.44, "Deliberately not changed": "a history pays the
+> population at every round trip, where this pays it once at each
+> reopen."
+
+The two sentences of §8.1 read as if every round trip after the first move
+waits for the population. The CHANGELOG says it is paid once at each
+reopen. Measured on zenoh-python 1.10.1 routers, the CHANGELOG is right.
+A watch session in no namespace, through a link, its subscriber without
+history on `ns/zk2/*/*/@zk/instance/*`; round trips asked one after
+another; the link cut and healed:
+
+| | 2,000 tokens (3 runs) | 10,000 tokens (2 runs) |
+|---|---|---|
+| At its start: the first, then the next two | 41–44 ms, then 0.4–0.6 ms | 42–49 ms, then 0.8–1.6 ms |
+| After the reopen: the first | 145–146 ms | 3.7–4.2 s |
+| After the reopen: the next three | 0.3–0.8 ms | 0.8–1.7 ms |
+
+So the reopen's telling is paid by the first round trip after it, and the
+next is one round trip again. A reader that takes the text at its word
+sizes every later round trip's wait for the population. The SHOULD itself
+names the right one: "wait for the round trip after a move".
+
+**zk2py:** waits until the first round trip after a move ends. A round
+trip after one that stood is not asked until the next move.
+
+**Wording that would remove the guess:**
+- "So a watch session's round trip is one round trip at any population,
+  except the first after each reopen of its transport, which waits for the
+  population."
+- In the bullet of 0.42: "… until its transport moves: the first round
+  trip after each reopen waits for the population (below)".
+
+### F-242 · minor · core §8.1 (0.44): "makes the round trip again" beside "the next that needs one takes up the one in flight"
+
+> §8.1 (0.44): "A reader SHOULD wait for the round trip after a move …
+> One whose wait ends first reads possibly incomplete (below), as before,
+> and makes the round trip again."
+
+> §8.1 (0.44), the next bullet: "A reader SHOULD NOT ask a round trip while
+> one it asked since its watch session's transport last moved is in
+> flight … the next that needs one takes up the one in flight, its
+> caller's wait or its own having ended."
+
+A reader whose wait ended first still has its round trip in flight. zenoh
+answers it in full, and ends it at the latest at the interests timeout
+(Appendix B). Read as "asks another GET", "makes the round trip again" is
+what the next bullet says not to do. Read as "takes up the one in flight",
+it agrees with it. Step 10's Expected supports the second reading: "it
+asked one: the three it gave up on ran on, and the fourth took it up".
+But a cold reader meets the first bullet first.
+
+**zk2py:** takes it up. Its follower's next attempt, 0.2 s later, waits on
+the same flight, and asks a new round trip only once that one has ended
+without standing.
+
+**Wording that would remove the guess:** "… reads possibly incomplete
+(below), as before, and before its next read takes up the round trip in
+flight (below), asking another only once that one has ended without
+standing."
+
+### F-243 · gap · core §8.1 (0.44) "One round trip, and one read, at a time": a GET its own timeout ended cannot be taken up, and its router still answers it
+
+> §8.1 (0.44): "the next that needs one takes up the one in flight, its
+> caller's wait or its own having ended."
+
+> Appendix B (0.44): "A liveliness GET whose caller drops it, times it out
+> or cancels it is answered in full all the same: the session sends its
+> router nothing … The runtime ends it at `routing/interests/timeout`".
+
+A GET whose own timeout ends is over for its caller. zenoh hands it an
+error reply, `Timeout`, and its final reply, and replies after that never
+reach it. So there is nothing left to take up. Its router goes on
+answering it all the same. Measured on zenoh-python 1.10.1, beside 10,000
+tokens in `ns`, on one client session of the router, 3 runs:
+- A read whose own timeout was 0.2 s: 0 tokens, 1 error reply, 0.202 s.
+- A round trip's GET asked at once after it, on the same session:
+  258–266 ms. On a quiet session it took 5.7–10.3 ms.
+- A full read asked at once after another 0.2 s read: 0.72–0.74 s, all
+  10,000.
+
+So "its own having ended" names a case the rule cannot be followed in.
+The reader holds nothing in flight. If it asks the next read at once, the
+read is beside one its router is still answering, which is what the
+SHOULD is meant to prevent. The reader cannot see when the router has
+finished. The text does not say which it means:
+- **"Its own" is a wait of the reader's,** apart from the GET's own
+  timeout. Then the text should say that the GET's own timeout does not
+  end it first. That means a GET asked with an own timeout above its
+  session's interests timeout, where zenoh's runtime ends it.
+- **Or it is the GET's own timeout.** Then the text should say what a
+  reader does once a GET's own timeout ends it. "Take it up" cannot be
+  done.
+
+**zk2py:** takes the first reading. Every GET of its follower, read or
+round trip, is asked with its own timeout above its session's interests
+timeout (`live.flight_timeout`). Only the caller's wait ends first, and
+the flight runs to its routers' final reply or to the interests timeout.
+
+**Wording that would remove the guess:** "… takes up the one in flight,
+its caller's wait having ended. A GET's own timeout ends it for its caller
+alone (Appendix B), and one so ended cannot be taken up: a reader that
+takes up its GETs asks each with a timeout above its session's interests
+timeout, and bounds its own wait apart." Appendix B could add the cost:
+measured beside 10,000 tokens, a GET asked after one its own timeout
+ended waited for it, 258–266 ms against 6–10 ms on a quiet session
+(zk2py).
+
+### F-244 · gap · scenarios/presence.md §10 step 10 and Expected 10 (0.44): what a runner observes from outside the reader
+
+> step 10: "the reader under test asks its round trip four times in a row,
+> giving up on the first three at once and waiting 30 s for the fourth …
+> its caller asks it for its next move from a loop that also wakes every
+> 20 ms, which may drop the call in flight."
+
+> Expected 10: "The reader's round trip stands, and it asked one: the
+> three it gave up on ran on, and the fourth took it up (0.44) … It asks
+> one round trip after the reopen, and never a read beside one in flight,
+> however often its caller drops the call (0.44)."
+
+Asked whether step 10's Expected and the two new SHOULDs can be observed
+from outside a reader: only in part.
+- **Observable from outside:**
+  - what the subscriber is told, at the cut and at the reopen;
+  - the round trip's times;
+  - the reader's verdicts: unobservable from the cut, and a complete read
+    within 30 s of the heal.
+- **"It asked one", "one round trip after the reopen" and "never a read
+  beside one in flight"** are counts at the reader's own sessions.
+  - zenoh tells a router nothing of a GET given up on (Appendix B), so
+    neither a router nor a relay on the link tells one given up on from
+    one waited for. zenoh-python's routers expose no per-session count of
+    liveliness GETs.
+  - zk2py counted them by wrapping its reader's sessions in process, each
+    GET timed from its ask to its final reply.
+  - A reader run as a black box cannot be judged on them. zenctl cannot.
+    The zenoh lines on its stderr (`Unknown interest`, `Didn't receive
+    DeclareFinal`) are a proxy, and they appear only once GETs pile up
+    past the interests timeout. Their absence shows nothing.
+- **"Giving up on the first three at once"** needs a reader that offers a
+  round trip a caller can ask and give up on. A tool's command line
+  offers none. The step does not say that this half asks the reader's own
+  interface, nor that a tool may leave it out.
+- **"Its caller … may drop the call in flight"** presumes a reader whose
+  reads are driven by its caller's call. zk2py's follower reads on its
+  own timers. Its caller's wait (`next_move`) drops nothing, so for it
+  the clause tests nothing. zk2py ran its own analog as well: every wait
+  of its own at 20 ms, so that its take-up path runs. That run passed
+  too.
+- **The first SHOULD's wait** is observable only in effect: a read after
+  the reopen that is ordered. A reader that waited cannot be told from
+  one that retried.
+
+**zk2py:** runs step 10's counts on its own reader through its sessions,
+and its analog beside it. For zenctl it reports them NOT RUN, and checks
+only that the read is complete within 30 s.
+
+**Wording that would remove the guess:** in step 10, as step 6 says its
+count is the reader's own: "… it asked one (counted at the reader's watch
+session: no router can tell a GET given up on, Appendix B) … a reader
+whose reads do not run on its caller's call has no call to drop, and its
+own waits stand in … a tool run as a black box is judged on the read
+complete within 30 s alone."
+
+**Counts at core 0.44:** 244 entries. Open: F-241 to F-244, against §8.1
+and `scenarios/presence.md` §10: one contradiction, one minor point and
+two gaps. Every other entry is resolved.
