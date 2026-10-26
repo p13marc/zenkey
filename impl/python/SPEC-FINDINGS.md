@@ -12972,11 +12972,12 @@ tool run as a black box is judged on what its output shows: every address
 it followed unobservable from the cut, never down, and its read complete
 within 30 s of the heal. The counts are not asked of it." zk2py's runner
 now judges zenctl on that as one check, where at 0.45 it was two. zenctl
-passes it in every run. Its first transition after the cut was
-unobservable, 0.45–0.50 s after the cut, its evidence naming every address
-under `crowd/*`. It never fired. It was ok again 1.47–1.50 s after the heal
-beside 2,000 tokens, and 24.6 s after it beside 10,000. What "from the
-cut" means for an output that comes once a period is F-249.
+passes it in every run beside the step's 2,000 tokens. Its first
+transition after the cut was unobservable, 0.45–0.50 s after the cut, its
+evidence naming every address under `crowd/*`. It never fired. It was ok
+again 1.46–1.50 s after the heal beside 2,000 tokens. Beside 10,000, which
+the step does not ask, it took 24.6–30.9 s, once past the 30 s. What "from
+the cut" means for an output that comes once a period is F-249.
 
 ### F-246 · minor · core §8.1 (0.44, 0.45): "about what a read of the population costs", and F-243's figure, are a later read's
 
@@ -13119,21 +13120,26 @@ ran once, with zk2py's owner and reader. §9 and §10 ran in every pairing:
 | Rust, zenctl | – | – | 8 | 3 |
 
 Every check passes. zenctl's §10 has one check fewer than at 0.45: its two
-step 10 checks are now one. §10 also ran whole once beside 10,000 tokens
-with each reader: 46 of 46 with zk2py's, and 9 of 9 with zenctl. Step 10
-beside 10,000:
-- the round trip after the reopen took 3.76 s, and the next 1.72 ms;
-- zk2py's follower was complete again 4.25 s after the heal, and 7.31 s
-  with every wait at 20 ms;
-- zenctl watchdog was unobservable 0.45 s after the cut, never fired, and
-  was ok again 24.6 s after the heal.
+step 10 checks are now one. After review-bot's items on PR #889, §10 ran
+again in each pairing, the default crowd, and passed whole. §10 also ran
+whole beside 10,000 tokens: 46 of 46 with zk2py's reader, twice, and with
+zenctl 9 of 9 twice and 8 of 9 once. Step 10 beside 10,000:
+- the round trip after the reopen took 3.76–3.81 s, and the next
+  1.72–1.99 ms;
+- zk2py's follower was complete again 4.25–6.90 s after the heal, and
+  7.31–8.08 s with every wait at 20 ms;
+- zenctl watchdog was unobservable 0.45–0.48 s after the cut and never
+  fired. It was ok again 24.6–30.9 s after the heal. The 30.9 s, in a run
+  with `--reopen`, failed the runner's 30 s check. Step 10 asks the 30 s
+  beside its 2,000 tokens, not beside 10,000. There the debug zenctl sits
+  at the edge: 25.3 s in round 70, 25–28 s in round 69.
 
 **Where the two implementations disagree:** on no verdict.
 - Step 6's round trips still differ, as 0.43 allows: one before the first
   seed for zk2py, and two for the reference.
 - Beside 10,000 tokens, after the heal, zk2py's follower recovered in
-  4.25–7.31 s and the debug zenctl in 24.6 s. Both are within step 10's
-  30 s.
+  4.25–8.08 s and the debug zenctl in 24.6–30.9 s, once past the 30 s that
+  step 10 asks beside 2,000.
 
 **The text, read cold.** 0.46's wording says what zk2py found, but for two
 points:
@@ -13208,12 +13214,17 @@ its first output after the cut, if that output comes before the reader
 has recovered. Step 10's run, beside 2,000 tokens in `ns`, every session
 through one link cut for 1 s:
 - at `--every 0.5`, as zk2py's runner sets it, it printed unobservable
-  0.47–0.50 s after the cut, before the heal, in 4 of 4 (and 0.45 s beside
-  10,000);
+  0.46–0.50 s after the cut, before the heal, in 6 of 6 (0.45–0.48 s
+  beside 10,000, in 3 of 3);
 - at `--every 2` it printed unobservable 1.91 s after the cut, after the
   heal, and ok at 3.92 s, in 3 of 3;
 - at `--every 5`, its default, it printed nothing after the cut, so its
   output said ok throughout, in 3 of 3.
+
+Beside 10,000 tokens, where zenctl took about 30 s to recover, it printed
+unobservable 4.97 s after the cut at `--every 5`, and 1.98 s after it at
+`--every 2`. So what it shows depends on its period against the time it
+takes to recover, as well as against the cut.
 
 The same tool can therefore pass, fail or be argued either way, depending
 on a period the step does not set. At 2 s, reading "from the cut" as "its

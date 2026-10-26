@@ -2776,6 +2776,15 @@ fixture, no verdict and no behaviour. zk2py's readers did not change, and
   every `--every`. The runner sets 0.5 s, below the 1 s cut, and reads
   "from the cut" as its first transition after the cut, printed before the
   heal (F-249).
+- **What it reads** (review-bot on PR #889). zenctl prints one row per
+  rule, never one per address: `instance-gone crowd/*` is one state for
+  every address it follows, firing while any is gone. The check reads
+  every transition after the cut up to the first `ok` printed after the
+  heal. The first must go from `ok` to `unobservable` before the heal, and
+  every one before that closing `ok` must be `unobservable`: none firing,
+  and no `ok` before a complete read after the heal. The cut waits until
+  the watchdog has printed nothing for two evaluations, so no row printed
+  before the cut is read as the cut's.
 - **`--reopen`** with zenctl adds F-249's note: the same run at the
   watchdog's default `--every 5`, and at 2 s.
 
@@ -2796,29 +2805,36 @@ its two step 10 checks are now one. Not run:
 - §10 step 7 with the Rust owner;
 - for zenctl, §9 and §10 step 9.
 
-**Beside 10,000 tokens**, §10 ran whole once with each reader: 46 of 46
-with zk2py's, and 9 of 9 with zenctl, step 9 not run.
+**Beside 10,000 tokens**, §10 ran whole: 46 of 46 with zk2py's reader,
+twice (once with `--reopen`), and with zenctl 9 of 9 twice and 8 of 9 once
+(with `--reopen`), step 9 not run. In that run zenctl was ok again 30.9 s
+after the heal, past step 10's 30 s. The step asks the 30 s beside its
+2,000 tokens, not beside 10,000, where the debug zenctl sits at the edge:
+24.6–30.9 s here, 25.3 s in round 70 and 25–28 s in round 69.
+
+§10 ran once more in each pairing after review-bot's items on PR #889,
+the default crowd: 46 of 46 with zk2py's reader, 9 of 9 with zenctl and
+zk2py's owner, and 8 of 8 with zenctl and the Rust owner.
 
 §10 step 10 at 0.46, measured on zenoh-python 1.10.1 routers (a release
 build), the crowd in `ns`:
 
-| | 2,000 tokens (2 runs; zenctl's 3) | 10,000 tokens (1 run) |
+| | 2,000 tokens (3 runs; zenctl's 5) | 10,000 tokens (2 runs; zenctl's 3) |
 |---|---|---|
-| The round trip at the start | 41.6–43.8 ms, no token | 41.0 ms, no token |
-| The first after the reopen | 169–241 ms | 3.76 s |
-| The next, asked at once (F-241) | 0.83–1.09 ms | 1.72 ms |
+| The round trip at the start | 41.6–43.8 ms, no token | 41.0–44.1 ms, no token |
+| The first after the reopen | 154–241 ms | 3.76–3.81 s |
+| The next, asked at once (F-241) | 0.61–1.09 ms | 1.72–1.99 ms |
 | GETs for the four asks | 1 | 1 |
-| Stand-in follower: complete after the heal | 0.80–0.82 s | 7.31 s |
-| Default follower: complete after the heal | 0.21–0.26 s | 4.25 s |
-| zenctl watchdog: unobservable after the cut | 0.48–0.50 s | 0.45 s |
-| zenctl watchdog: ok again after the heal | 1.47–1.50 s | 24.6 s |
+| Stand-in follower: complete after the heal | 0.80–2.79 s | 7.31–8.08 s |
+| Default follower: complete after the heal | 0.19–0.26 s | 4.25–6.90 s |
+| zenctl watchdog: unobservable after the cut | 0.46–0.50 s | 0.45–0.48 s |
+| zenctl watchdog: ok again after the heal | 1.46–1.50 s | 24.6–30.9 s |
 
 - zenctl's first transition after the cut was unobservable in every run,
   its evidence naming every address under `crowd/*`. It never fired.
-- Beside 10,000 the stand-in follower asked 6 reads and took up 31. Its
-  round trip after the reopen took 5.4 s, where the default follower's
-  took 3.6 s. The stand-in's reads, made possibly incomplete while that
-  round trip ran, shared the router with the reopening's telling.
+- Beside 10,000 the stand-in follower asked 6 and 3 reads, and took up
+  31 and 22. Its round trip after the reopen took 5.4 s and 3.85 s, the
+  default follower's 3.6 s and 4.06 s.
 - zenctl's stderr held no `Unknown interest` and no `Didn't receive
   DeclareFinal` line in any run.
 
@@ -2839,15 +2855,18 @@ build), the crowd in `ns`:
   was told all 2,000 again.
 - **The watchdog's period** (F-249). The step's run with zenctl's
   watchdog at its default `--every 5` printed nothing after the 1 s cut,
-  in 3 of 3 runs. At `--every 2` it printed unobservable 1.91 s after the
-  cut, after the heal, and ok 3.92 s after it, in 3 of 3.
+  in 3 of 3 runs beside 2,000. At `--every 2` it printed unobservable 1.91
+  s after the cut, after the heal, and ok 3.92 s after it, in 3 of 3.
+  Beside 10,000, where it took about 30 s to recover, it printed
+  unobservable 4.97 s after the cut at 5 s, and 1.98 s after it at 2 s.
 
 **Where the two implementations disagree:** on no verdict.
 - **Step 6's round trips** still differ, as 0.43 allows: one before the
   first seed for zk2py, and two for the reference.
 - **The time to recover beside 10,000 tokens.** zk2py's follower was
-  complete again 4.25 s after the heal, and 7.31 s with its waits at 20 ms.
-  The debug zenctl took 24.6 s. All are within step 10's 30 s.
+  complete again 4.25–6.90 s after the heal, and 7.31–8.08 s with its
+  waits at 20 ms. The debug zenctl took 24.6–30.9 s, once past the 30 s
+  that step 10 asks beside 2,000.
 
 ## What it does not cover
 

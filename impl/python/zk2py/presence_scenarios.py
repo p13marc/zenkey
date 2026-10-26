@@ -475,6 +475,12 @@ class Watchdog:
         with self.lock:
             return [(t, r.get("to"), r.get("evidence", "")) for t, r in self.rows if r.get("rule") == rule]
 
+    def moves(self, rule: str) -> list[tuple[float, str | None, str | None, str]]:
+        """``rule``'s transitions as (monotonic s when read, from, to, evidence)."""
+        with self.lock:
+            return [(t, r.get("from"), r.get("to"), r.get("evidence") or "") for t, r in self.rows
+                    if r.get("rule") == rule]
+
     def state(self, rule: str) -> str | None:
         tr = self.transitions(rule)
         return tr[-1][1] if tr else None
@@ -2550,31 +2556,55 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
                   start_limit: float, back_limit: float, every: float = 0.5) -> dict[str, Any]:
     """One ``zenctl watchdog`` run through ``endpoint_link``, evaluating every
     ``every`` s: ok at its start, the link cut for ``cut_s`` and healed, timed
-    to ok again."""
+    to ok again.
+
+    zenctl prints one row per rule, never one per address: ``instance-gone
+    crowd/*`` is one state, firing while any address is gone, and its rows
+    carry no address (``rule``, ``from``, ``to``, ``evidence``). So what its
+    output shows of every address it followed is that rule's transitions.
+    The window read is every transition after the cut up to the first ``ok``
+    printed after the heal, which closes it; one before the heal is in it.
+    Times are compared unrounded, all on ``time.monotonic()``."""
     out: dict[str, Any] = {}
     wd = Watchdog(endpoint_link.endpoint, [rule], every=every, namespace=namespace, extra=extra)
     try:
         t0 = time.monotonic()
         out["ok"] = _wait(lambda: wd.state(rule) == "ok", start_limit, 0.1)
         out["t_ok"] = time.monotonic() - t0
-        n0 = len(wd.transitions(rule))
+        # quiet before the cut: no row for two evaluations, the state ok, so no
+        # row printed before the cut is read after it and taken for the cut's
+        quiet_s = max(1.0, 2 * every)
+
+        def quiet() -> bool:
+            mv = wd.moves(rule)
+            return bool(mv) and mv[-1][2] == "ok" and time.monotonic() - mv[-1][0] >= quiet_s
+
+        out["quiet"] = out["ok"] and _wait(quiet, quiet_s + 10.0, 0.05)
+        n0 = len(wd.moves(rule))
         t_cut = time.monotonic()
         endpoint_link.cut()
         time.sleep(cut_s)
         t_heal = time.monotonic()
         endpoint_link.heal()
-        out["back"] = _wait(lambda: any(t > t_heal and to == "ok" for t, to, _ in wd.transitions(rule)), back_limit,
-                            0.05)
-        tr = wd.transitions(rule)[n0:]
-        out["after_heal"] = next((round(t - t_heal, 2) for t, to, _ in tr if t > t_heal and to == "ok"), None)
-        out["cut_states"] = [(round(t - t_cut, 2), to) for t, to, _ in tr]
-        out["fired"] = "firing" in {to for _, to, _ in tr}
-        out["unobservable"] = "unobservable" in {to for t, to, _ in tr if t <= t_heal + 0.5}
-        # 0.46 (F-245): "unobservable from the cut", read as the first
-        # transition its output prints after the cut, before the heal (F-249)
-        first = tr[0] if tr else None
-        out["first"] = None if first is None else (round(first[0] - t_cut, 2), first[1], first[2])
-        out["unobservable_first"] = first is not None and first[1] == "unobservable" and first[0] < t_heal
+        out["back"] = _wait(lambda: any(t > t_heal and to == "ok" for t, _, to, _ in wd.moves(rule)[n0:]),
+                            back_limit, 0.05)
+        mv = wd.moves(rule)[n0:]
+        close = next((i for i, (t, _, to, _) in enumerate(mv) if t > t_heal and to == "ok"), None)
+        window = mv if close is None else mv[:close]
+        out["after_heal"] = None if close is None else round(mv[close][0] - t_heal, 2)
+        out["cut_states"] = [(round(t - t_cut, 2), to) for t, _, to, _ in mv]
+        out["fired"] = "firing" in {to for _, _, to, _ in mv}
+        first = window[0] if window else None
+        out["first"] = None if first is None else (round(first[0] - t_cut, 2), first[2], first[3])
+        # 0.46 (F-245): "every address it followed unobservable from the cut,
+        # never down": the first transition after the cut leaves the ok it was
+        # cut from for unobservable, printed before the heal (F-249: below the
+        # cut, its period shows it), and every one until the closing ok is
+        # unobservable: none firing, none ok before a complete read after the
+        # heal
+        out["unobservable_first"] = (first is not None and first[1] == "ok" and first[2] == "unobservable"
+                                     and first[0] < t_heal)
+        out["window_unobservable"] = bool(window) and all(to == "unobservable" for _, _, to, _ in window)
         out["stderr"] = _stderr_counts(list(wd.err))
     finally:
         wd.close()
@@ -2605,15 +2635,18 @@ def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
         link.close()
     within = r.get("after_heal") is not None and 0.0 <= r["after_heal"] <= 30.0
     first = r.get("first")
-    said = "none" if first is None else f"{first[1]} {first[0]} s after the cut ({(first[2] or '')[:160]})"
-    what = (f"ok {r.get('t_ok', 0):.1f} s after its start; its first transition after the cut: {said}; since the "
-            f"cut {r.get('cut_states')}; ok again {r.get('after_heal')} s after the heal; {r.get('stderr')}")
+    said = "none" if first is None else f"{first[1]} {first[0]} s after the cut ({first[2][:160]})"
+    what = (f"ok {r.get('t_ok', 0):.1f} s after its start, quiet before the cut {r.get('quiet')}; its first "
+            f"transition after the cut: {said}; since the cut {r.get('cut_states')}; ok again "
+            f"{r.get('after_heal')} s after the heal; {r.get('stderr')}")
     report.check(sec, f"10. (the reader under test, a tool run as a black box) zenctl watchdog --namespace {NS} --rule "
                       f"'{rule}' --timeout 30 --every 0.5 beside the {P.crowd}, every session through one link cut "
-                      "for 1 s and healed, judged on what its output shows (0.46, F-245): unobservable from the cut "
-                      "(its first transition after it, before the heal), never firing, and its read complete again "
-                      "within 30 s of the heal, ok",
-                 bool(r.get("ok")) and bool(r.get("unobservable_first")) and not r.get("fired") and within, what)
+                      "for 1 s and healed, judged on what its output shows (0.46, F-245), its one rule's transitions "
+                      "(one state for every address it follows): unobservable from the cut (its first transition "
+                      "after it, from ok, before the heal), every transition until the first ok after the heal "
+                      "unobservable, never firing, and its read complete again within 30 s of the heal, ok",
+                 bool(r.get("ok")) and bool(r.get("quiet")) and bool(r.get("unobservable_first"))
+                 and bool(r.get("window_unobservable")) and not r.get("fired") and within, what)
     report.note(sec, "10. zenctl's one round trip after the reopen, and no read beside one in flight: counts at the "
                      "reader's own sessions, not asked of a tool run as a black box (0.45, F-244; 0.46, F-245)")
 
@@ -2677,8 +2710,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--crowd", type=int, default=2000, help="§10's crowd, 2,000 instance tokens by default")
     ap.add_argument("--reopen", action="store_true",
                     help="§10: also measure a watch session's reopen beside the crowd (F-239, F-241), and with "
-                         "zenctl step 10 at other watchdog periods (F-249); notes only, no check. Slow beside a large crowd: about a minute beside 10,000 tokens, each wait for "
-                         "the reopening's telling bounded at 30 s")
+                         "zenctl round 68's watchdog run and step 10 at other watchdog periods (F-249); notes only, "
+                         "no check. Beside 10,000 tokens it adds about 20 s with zk2py's reader, each wait for the "
+                         "reopening's telling bounded at 30 s, and about 3 min with zenctl, three more watchdog runs "
+                         "that each start by reading the crowd (bounded at 300 s and 180 s)")
     ap.add_argument("--tokenless", type=int, default=100, help="§5's services, 100 by default")
     args = ap.parse_args(argv)
     P.owner, P.reader, P.owner_bin, P.zenctl_bin, P.crowd = args.owner, args.reader, args.owner_bin, args.zenctl, \
