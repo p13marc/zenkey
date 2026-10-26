@@ -1176,7 +1176,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.44 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.45 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1191,7 +1191,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     reopen tells its subscribers every token and the round trip after it
     waits for them, one round trip and one read at a time, a round trip at
     the interests timeout not standing, round 68's F-238 to F-240, #882;
-    changes go through `spec/CHANGELOG.md`):
+    0.45: only the first round trip after a reopen waits for the
+    population, a GET in flight is at the reader and one its own timeout
+    ended cannot be taken up, §10 step 10's counts the reader's own,
+    round 69's F-241 to F-244; changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
