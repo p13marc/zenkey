@@ -30,7 +30,7 @@ Options:
 $ zenctl iface list --help
 Every interface provided or required, and by whom.
 
-From one presence read and every instance's descriptor: providers by interface token or, for the tokenless set, by descriptor; consumers by the roles descriptors declare; the revisions providers name. A read that ran to its timeout is possibly incomplete, and says so.
+From one presence read and every instance's descriptor: providers by interface token or, for the tokenless set, by descriptor; consumers by the roles descriptors declare; the revisions providers name. A read that ran to its timeout, or to its session's interests timeout (`routing/interests/timeout`), is possibly incomplete, and says so.
 
 Usage: zenctl iface list [OPTIONS]
 

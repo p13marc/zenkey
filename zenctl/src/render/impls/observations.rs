@@ -360,7 +360,7 @@ fn instance_notes(join: &zenkey_fleet::report::InstanceJoin) -> Vec<Note> {
     if let Some(why) = zenkey_fleet::model::catalog::incomplete_reason(
         join.complete,
         join.cut_off_during,
-        "ran to its timeout",
+        zenkey_fleet::model::catalog::RAN_OUT,
     ) {
         notes.push(
             Note::coverage(format!(

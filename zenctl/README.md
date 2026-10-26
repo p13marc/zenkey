@@ -498,8 +498,9 @@ zenctl compat tc.netif.v1 tc.netif.v1.toml --namespace acme     # 0 compatible, 
 ```
 
 Three honesty rules have a place in every report:
-a presence read that ran to its timeout says it is **possibly incomplete** (a
-service missing from it may still be up); a token and a descriptor are **two
+a presence read that ran to its timeout, or to its session's interests timeout
+(`routing/interests/timeout`), says it is **possibly incomplete** (a service
+missing from it may still be up); a token and a descriptor are **two
 sources** and stay side by side, so "tokenless" (configured) and "no token"
 (missing) never read alike; and what was **not asked** — a descriptor that
 did not answer, a contract never retrieved — renders as `—`, never as empty.

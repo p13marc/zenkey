@@ -1751,6 +1751,113 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
         !ended[1].1,
         "the reference's round trip cut while it ran does not stand"
     );
+
+    // 10 (0.44, F-239): beside the crowd in `ns`, a watch session in no
+    // namespace through a link the test cuts and heals. The reopen tells
+    // its subscriber without history every crowd token, the one declared
+    // while the link was cut included and the one withdrawn then not, and
+    // the round trip after it waits for them; the reference asks one round
+    // trip for it, however often it is asked while it runs (#882).
+    let link10 = common::link_to(&ep1).await;
+    let watch = client_waiting(link10.endpoint(), 60_000).await;
+    let heard: Heard = Arc::default();
+    let h = Arc::clone(&heard);
+    let _sub = presence::declare_subscriber(&watch, format!("ns/{INSTANCES}"))
+        .history(false)
+        .callback(move |s: Sample| {
+            h.lock().unwrap().push((
+                s.key_expr().as_str().to_owned(),
+                s.kind() == SampleKind::Put,
+            ));
+        })
+        .await
+        .unwrap();
+    let barrier = presence::Barrier::at(
+        &watch,
+        &format!("ns/{NO_TOKEN}"),
+        std::time::Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    let t = std::time::Instant::now();
+    assert!(barrier.establish().await, "the round trip at the start");
+    let at_start = t.elapsed();
+    assert!(
+        at_start < std::time::Duration::from_secs(1),
+        "one round trip at the start: {at_start:?}"
+    );
+    assert!(heard.lock().unwrap().is_empty(), "no history");
+    let seen = barrier.moves();
+    link10.cut();
+    eventually("the watch session cut off", || presence::cut_off(&watch)).await;
+    // While the link is cut: one crowd token withdrawn, one declared.
+    let withdrawn = "zk2/crowd0/svc1/@zk/instance/0000000000000001";
+    crowd_held.remove(0).undeclare().await.unwrap();
+    let born = "zk2/crowd0/born/@zk/instance/00000000000000bb";
+    let _born = holders[0].liveliness().declare_token(born).await.unwrap();
+    eventually("the router holds the move", || async {
+        raw_read(&tool_ns, born).await.1 == [born.to_owned()]
+            && raw_read(&tool_ns, withdrawn).await.1.is_empty()
+    })
+    .await;
+    let told_at_cut = heard.lock().unwrap().clone();
+    heard.lock().unwrap().clear();
+    let asked = presence::liveliness_gets(&watch).settles;
+    link10.heal();
+    eventually("the watch session's transport opened again", || async {
+        barrier.moves() >= seen + 2
+    })
+    .await;
+    let reopened = std::time::Instant::now();
+    for _ in 0..3 {
+        let _ = barrier
+            .establish_within(std::time::Duration::from_millis(1))
+            .await;
+    }
+    let stood = barrier
+        .establish_within(std::time::Duration::from_secs(30))
+        .await;
+    let after = reopened.elapsed();
+    let told: BTreeSet<String> = heard
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, put)| *put)
+        .map(|(k, _)| k.clone())
+        .collect();
+    let trips = presence::liveliness_gets(&watch).settles - asked;
+    eprintln!(
+        "§10 step 10: the round trip at the start {at_start:?}, carrying none; after the \
+         reopen {after:?}, standing {stood}, {} tokens told by its end, {trips} round trip(s) \
+         asked",
+        told.len()
+    );
+    assert!(
+        told_at_cut.is_empty(),
+        "nothing told at the cut: {told_at_cut:?}"
+    );
+    assert!(stood, "the round trip after the reopen stands");
+    assert_eq!(trips, 1, "one round trip, however often it was asked");
+    assert!(
+        told.contains(&format!("ns/{born}")),
+        "the token declared while the link was cut is told at the reopen"
+    );
+    assert!(
+        !heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(k, _)| *k == format!("ns/{withdrawn}")),
+        "the token withdrawn while the link was cut is never told"
+    );
+    let held = CROWD - 2 + 1;
+    assert_eq!(
+        told.len(),
+        held,
+        "every crowd token held, told by the round trip's end"
+    );
+    drop(_sub);
+    let _ = watch.close().await;
     drop(r1);
 }
 
@@ -1972,4 +2079,63 @@ async fn a_refused_barrier_still_orders_the_subscriber() {
     }
     eprintln!("one router, the barrier refused: heard {heard} of {RUNS}");
     assert_eq!(heard, RUNS);
+}
+
+/// #882: a barrier's round trip runs on a task of its own, one per
+/// transport state, that every waiter shares. Through a stalled link,
+/// three waiters that stop waiting and one dropped at its await ask one
+/// round trip between them; when the stall ends that one stands, and
+/// nothing more is asked. A transport move loses it, and the next waiter
+/// asks a new one. Before, each waiter asked a GET of its own, and a GET
+/// its caller stops waiting for is still answered in full: zenoh 1.10.1
+/// tells the router nothing of it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_round_trip_in_flight_is_taken_up_not_asked_again() {
+    use std::time::Duration;
+    let (_r1, ep) = router(None).await;
+    let link = common::link_to(&ep).await;
+    let watch = client_waiting(link.endpoint(), 30_000).await;
+    let (_sub, _) = listen(&watch, false).await;
+    let barrier = presence::Barrier::new(&watch, INSTANCES, Duration::from_millis(50))
+        .await
+        .unwrap();
+    let asked = presence::liveliness_gets(&watch).settles;
+
+    link.stall();
+    for _ in 0..3 {
+        assert!(!barrier.establish().await, "not back while stalled");
+    }
+    let dropped =
+        tokio::time::timeout(Duration::from_millis(20), barrier.establish_within(T)).await;
+    assert!(dropped.is_err(), "dropped at its await");
+    assert!(barrier.in_flight(), "the round trip runs on");
+    assert_eq!(
+        presence::liveliness_gets(&watch).settles - asked,
+        1,
+        "one round trip between them"
+    );
+    link.heal();
+    assert!(
+        barrier.establish_within(Duration::from_secs(5)).await,
+        "the same round trip stands once the stall ends"
+    );
+    assert!(!barrier.in_flight());
+    assert_eq!(presence::liveliness_gets(&watch).settles - asked, 1);
+
+    // A move loses it; the next waiter asks a new one, which stands. The
+    // waiter asks it once both moves are counted, the close and the open:
+    // the open's event can follow the links by a moment, and a round trip
+    // asked before it is one the waiter leaves for the new state's (a
+    // second one asked, as the move rule wants).
+    let seen = barrier.moves();
+    link.cut();
+    eventually("the watch session cut off", || presence::cut_off(&watch)).await;
+    link.heal();
+    eventually("the watch session's transport opened again", || async {
+        barrier.moves() >= seen + 2
+    })
+    .await;
+    assert!(!barrier.established(), "lost with the transport");
+    assert!(barrier.establish_within(Duration::from_secs(5)).await);
+    assert_eq!(presence::liveliness_gets(&watch).settles - asked, 2);
 }

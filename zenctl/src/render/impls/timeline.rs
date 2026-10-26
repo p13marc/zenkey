@@ -200,7 +200,7 @@ impl Render for TimelineReport {
             zenkey_fleet::model::catalog::incomplete_reason(
                 p.complete,
                 p.cut_off_during,
-                "ended at its timeout",
+                zenkey_fleet::model::catalog::RAN_OUT,
             )
         }) {
             notes.push(

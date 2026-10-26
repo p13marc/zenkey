@@ -6,6 +6,13 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a reopen beside a large population, and the interests timeout named (#882, WF)
+
+| Before | Now | Notes |
+|---|---|---|
+| `watchdog` / `record --on` with `instance-gone` beside 10,000 tokens: after its link was cut and healed, unobservable for good (each wake of the loop dropped the presence re-read in flight and asked another; 450 reads asked in 120 s, none folded) | ok again once the watch session's round trip stands and one read is complete: 4.4–4.5 s after the reopen in a release build | the re-read runs on a task of its own; core §8.1, 0.44, F-239 |
+| a presence read possibly incomplete for its time: "ran to its timeout … raise --timeout to ask again" | "ran to its timeout or to its session's interests timeout (routing/interests/timeout) … raise --timeout, and the interests timeout above it, to ask again"; a read whose report keeps it says which | round 68; `service list`, `service show`, `iface`, `namespace list`, `graph`, the doctor, `health`, `alarms`, `telemetry`, `desired`, `config`, `timeline` |
+
 ## Unreleased (`main`, zk2) — `redundancy` after review, and round 60 (#841, RD)
 
 | Before | Now | Notes |

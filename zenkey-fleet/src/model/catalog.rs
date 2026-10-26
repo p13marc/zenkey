@@ -55,6 +55,15 @@ use crate::report::{
 
 // ─── what presence brought back ─────────────────────────────────────────────
 
+/// What a report that keeps no more than a read's `complete` and
+/// `cut_off_during` says of one that ended for its time (#882; core §8.1,
+/// 0.41): its own timeout, or its session's interests timeout, where zenoh
+/// ends it with no error reply, and nothing in the read says which. A view
+/// that keeps the read names the one ([`Observed::incomplete_reason`]). The
+/// `timeout` a tool's renderer passes to [`incomplete_reason`].
+pub const RAN_OUT: &str =
+    "ran to its timeout or to its session's interests timeout (routing/interests/timeout)";
+
 /// Why a presence read is possibly incomplete (core §8.1), as a phrase after
 /// "the presence read …": [`crate::bus::presence::CUT_OFF_DURING`] when its
 /// session was cut off while it ran (0.38, F-185), else `timeout`, the
@@ -87,6 +96,10 @@ pub struct Observed {
     /// `false` for a read that ended at its timeout, or one patched from
     /// presence ([`Observed::with_token`]).
     pub cut_off_during: bool,
+    /// The read ran to its session's interests timeout (#851, core §8.1,
+    /// 0.41; [`zenkey::presence::PresenceRead::at_interests_timeout`]):
+    /// zenoh ended it with no error reply, so `complete` is false.
+    pub at_interests_timeout: bool,
     /// The zk2 tokens read: instance, interface and member tokens.
     pub tokens: Vec<ZkKey>,
     /// Keys the selector matched that are not zk2 tokens, verbatim.
@@ -115,6 +128,7 @@ impl Observed {
             selector: selector.into(),
             complete,
             cut_off_during: false,
+            at_interests_timeout: false,
             tokens,
             unparsed,
             descriptors: None,
@@ -130,16 +144,21 @@ impl Observed {
     ) -> Observed {
         Observed {
             cut_off_during: read.cut_off_during,
+            at_interests_timeout: read.at_interests_timeout,
             ..Observed::from_keys(selector, &read.keys, read.complete)
         }
     }
 
     /// Why the read is possibly incomplete, as a phrase after "the presence
     /// read …" (core §8.1): it was cut off while it ran
-    /// ([`crate::bus::presence::CUT_OFF_DURING`], 0.38), else `timeout`, the
-    /// caller's words for a read that ended at its timeout or with an error
-    /// reply. `None` when it is complete.
+    /// ([`crate::bus::presence::CUT_OFF_DURING`], 0.38), it ran to its
+    /// session's interests timeout ([`zenkey::presence::AT_INTERESTS_TIMEOUT`],
+    /// 0.41; #882), else `timeout`, the caller's words for a read that ended
+    /// at its timeout or with an error reply. `None` when it is complete.
     pub fn incomplete_reason<'a>(&self, timeout: &'a str) -> Option<&'a str> {
+        if !self.complete && !self.cut_off_during && self.at_interests_timeout {
+            return Some(zenkey::presence::AT_INTERESTS_TIMEOUT);
+        }
         incomplete_reason(self.complete, self.cut_off_during, timeout)
     }
 
@@ -1801,7 +1820,47 @@ fn exposure(c: &Contract, entry: &InterfaceEntry, held: &[String]) -> Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use serde_json::json;
+
+    /// #882: a read that ran to its session's interests timeout says which
+    /// bound ended it, and a report that keeps only `complete` names both.
+    #[test]
+    fn a_read_at_the_interests_timeout_says_which_bound_ended_it() {
+        let at_interests = zenkey::presence::PresenceRead {
+            keys: Vec::new(),
+            complete: false,
+            errors: Vec::new(),
+            cut_off_during: false,
+            at_interests_timeout: true,
+        };
+        let o = Observed::from_read("zk2/*/*/@zk/**", &at_interests);
+        assert!(o.at_interests_timeout);
+        assert_eq!(
+            o.incomplete_reason("ended at its timeout"),
+            Some(zenkey::presence::AT_INTERESTS_TIMEOUT)
+        );
+        let own = zenkey::presence::PresenceRead {
+            errors: vec!["zenoh/string: Timeout".to_owned()],
+            at_interests_timeout: false,
+            ..at_interests.clone()
+        };
+        assert_eq!(
+            Observed::from_read("zk2/*/*/@zk/**", &own).incomplete_reason("ended at its timeout"),
+            Some("ended at its timeout")
+        );
+        let cut = zenkey::presence::PresenceRead {
+            cut_off_during: true,
+            ..at_interests
+        };
+        assert_eq!(
+            Observed::from_read("zk2/*/*/@zk/**", &cut).incomplete_reason("ended at its timeout"),
+            Some(crate::bus::presence::CUT_OFF_DURING),
+            "a cut is said as a cut"
+        );
+        assert_eq!(incomplete_reason(false, false, RAN_OUT), Some(RAN_OUT));
+        assert!(RAN_OUT.contains("routing/interests/timeout"));
+    }
 
     const NETIF_FP: &str = "abababababababababababababababababababababababababababababababab";
 

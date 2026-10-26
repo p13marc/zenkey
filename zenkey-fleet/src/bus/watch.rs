@@ -14,7 +14,10 @@
 //! why #872 gave a namespaced watch session's subscribers history. A
 //! session in no namespace hears it on the wire key, so here the
 //! subscribers have no history and the round trip is one round trip at any
-//! population, in a namespace too (`docs/zk2/upstream/namespace-drops-token-withdrawal-by-key.md`).
+//! population, in a namespace too (`docs/zk2/upstream/namespace-drops-token-withdrawal-by-key.md`),
+//! until the session's transport moves: the transport that opens again
+//! tells the subscribers every token they match, and the round trip after
+//! it waits for them (core §8.1, 0.44, F-239; `zenkey::presence::Barrier`).
 //!
 //! **One place knows the namespace.** A [`WatchSession`] carries the
 //! session and the deployment's namespace together, and is the only way the
@@ -184,7 +187,9 @@ impl WatchSession {
     /// core §8.1, 0.41; #875): its round trip asks
     /// `zenkey::presence::barrier_key(scope)` on the wire, a key no token
     /// holds, so it carries nothing and is one round trip at any
-    /// population. Each round trip is bounded by `timeout`.
+    /// population, until the session's transport moves (core §8.1, 0.44,
+    /// F-239). A reader's [`zenkey::presence::Barrier::establish`] waits
+    /// `timeout` for a round trip, which runs on past it (#882).
     pub async fn barrier(
         &self,
         scope: &str,

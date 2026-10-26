@@ -3,6 +3,120 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.44 — 2026-10-25: a watch session's reopen beside a population (#882, round 68's F-238 to F-240)
+
+zk2py round 68 (PR #881) read 0.43 cold and filed three findings, and
+measured what F-239 rests on: a watch session's transport that opens
+again tells its subscribers without history every token they match, and
+the round trip after it waits for them. Its run of a debug zenctl beside
+10,000 tokens never read `instance-gone` ok again after a 3 s cut (#882).
+The reference reproduced both and found why zenctl did not recover: its
+loop dropped the presence re-read in flight four times a second, and
+zenoh answers a GET its caller drops in full, so reads piled up at the
+router and none was ever folded. Fixed in the reference (WF); measured in
+`scenarios/presence.md` §10, step 10 new.
+
+**Changed: what a move leaves, and what the round trip after it costs**
+(§8.1; F-239).
+- **The gap.** 0.42 gave the move rule's reason as "a token withdrawn
+  then, or one declared then, of which a subscriber without history is
+  never told", and called the watch session's round trip "one round trip
+  at any population". Measured by zk2py (zenoh-python 1.10.1, release) and
+  the reference (Rust, debug and release): when the transport opens again
+  a subscriber without history is told every token it matches, one
+  declared while the link was down included, and a token withdrawn then
+  is never told. The round trip after the reopen ends after that telling:
+  beside 10,000 tokens 3.2–4.7 s (zk2py) and 3.9–4.1 s (the reference,
+  release), 24 s (debug), against 41–66 ms at the session's start; beside
+  2,000, 134–151 ms (release). zenoh's client declares each interest of
+  its session again in `CurrentFuture` mode at a reopen, whatever its
+  mode (`hat/client/interests.rs`, `repropagate_interests`).
+- **The rule stands; its reason is corrected.** While the transport is
+  down nothing is heard: a token withdrawn then is never told, and one
+  declared then is told at the reopen, unordered with the reader's reads.
+  So what the reader held is unconfirmed from the move until a complete
+  read after a round trip that stands, as 0.42 said.
+- **New: the round trip after a move waits for the population.** "One
+  round trip at any population" holds until the transport first moves. A
+  reader SHOULD wait for the round trip after a move, and run its
+  interests timeout, above that time at its population, about what a read
+  of it costs.
+- **New: one round trip, and one read, at a time.** zenoh 1.10.1 tells a
+  router nothing of a liveliness GET whose caller drops it, times it out
+  or cancels it (`api/session.rs`), so the router answers it in full, and
+  after the interests timeout the client logs every late reply `Unknown
+  interest`. A reader SHOULD NOT ask a round trip while one it asked since
+  its watch session's transport last moved is in flight, nor a read while
+  one of the same scope is: the next that needs one takes it up. This is
+  #882: the reference's watchdog dropped its re-read at every wake of its
+  loop, beside 10,000 tokens whose read takes 0.5–3 s; 450 reads were asked
+  in 120 s and none folded, and after 120 s its stderr carried zenoh's
+  `Didn't receive DeclareFinal … Timeout(120s)!` (139 in 300 s) and
+  `Unknown interest` (700,070).
+- **Measured, the fix** (`zenkey::presence::Barrier`: one round trip per
+  transport state on a task of its own, shared by every waiter;
+  `PresenceFeed` and zenwatch's ledger: a re-read's round trip and read on
+  tasks that outlive the call): beside 10,000 tokens, complete again
+  4.4–4.5 s after the watch session's reopen in a release build; the
+  fleet's watchdog ok 5–6 s after the heal (release, 1 s ticks) and
+  28–29 s (debug), where it never was. Step 10's reader, its call dropped
+  every 20 ms beside 2,000 tokens: one round trip and one read after the
+  reopen, complete 1.3–4.5 s after the heal, 24 of 24 runs; before, no
+  read folded in 30 s.
+- Appendix B gains both zenoh facts. An upstream report is drafted, not
+  filed: `docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`.
+
+**Changed: §10 step 6's stall, for a reader that makes no read while no
+round trip stands, and the interests timeout's owner** (F-238).
+- **The gap.** 0.43 ended the stall at the reader's first seed. §8.1 does
+  not oblige a reader to seed while no round trip stands, and one that
+  carries the cut-off caution over to a round trip that ran out makes no
+  seed until one stands, which under the stall never happens. And the
+  step gave the 300 ms interests timeout to the link; it is the watch
+  session's.
+- **Now.** The stall ends at the reader's first seed, or, for a reader
+  that makes no read while no round trip stands, when its first round
+  trip has run out under the 300 ms interests timeout; the timeout is the
+  watch session's. Expected 6 is unchanged. Both implementations seed
+  after a round trip that ran out, so neither run moves.
+
+**Changed: a round trip ended at the interests timeout reads as not
+standing** (§8.1; F-240).
+- **The gap.** The MUST read a round trip that ended at the interests
+  timeout "as not made". Elsewhere in §8.1 and §10 a round trip or a read
+  "made" is one asked, and "not made" one never asked (Expected 9: "makes
+  no round trip, asking no liveliness GET"); Expected 5 calls the same
+  round trip "not standing".
+- **Now.** "As not standing": it was asked, and it establishes nothing.
+  §8.1's other use of the phrase for it, a history's round trip past the
+  interests timeout, says so too. Every other "made" and "not made" in
+  §8.1 and §10 already meant asked and never asked, and no doc comment or
+  message of the reference quoted the phrase; the reference's `settle`
+  and `Barrier` read such a round trip as not established.
+
+**Also, outside the text** (round 68): zenctl worded a read ended at the
+interests timeout as one that "ran to its timeout … raise --timeout to
+ask again". Its reports that keep only `complete` now name both bounds,
+the interests timeout by its key, and a view that holds the read says
+which (`zenkey::presence::AT_INTERESTS_TIMEOUT`).
+
+**Deliberately not changed.**
+- **The move rule.** A move still unconfirms what the reader holds at
+  once, before any read (0.42, F-229): the reopen's telling is unordered
+  with the reader's reads, and a withdrawal while the link was down is
+  never told, so a token told at the reopen is evidence it is held, never
+  evidence of what went.
+- **No new MUST.** The two new rules are SHOULDs: a reader that waits less
+  for its round trip still reads honestly, possibly incomplete, and one
+  that abandons a read costs its routers work and itself its progress,
+  not its honesty.
+- **A watch session in no namespace, without history** (0.42, F-233)
+  stands: a history pays the population at every round trip, where this
+  pays it once at each reopen.
+- **Step 6's counts** stay the readers' own; the reference still makes
+  four round trips in all there.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.43 — 2026-10-25: two of §10's steps worded for any reader (round 67's F-236 and F-237)
 
 zk2py round 67 (PR #879) read 0.42 cold, resolved F-227 to F-235, and

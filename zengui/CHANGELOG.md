@@ -4,6 +4,12 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the presence link after a reopen (#882, WF)
+
+| Before | Now | Notes |
+|---|---|---|
+| the presence link's re-read, dropped by its coalescing timer, started again from the start at the next call, the dropped read still answered in full | taken up by the next call: one read asked per re-read, its round trip shared | `PresenceFeed`, core §8.1, 0.44, F-239 |
+
 ## Unreleased (`main`, zk2) — the redundancy reading waits for the selection to settle (#841, RD)
 
 | Before | Now | Notes |
