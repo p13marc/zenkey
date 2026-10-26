@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.46** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.47** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -61,7 +61,8 @@ one in flight, and in 0.45 which round trip after a reopen waits for the
 population, what taking up a GET in flight means, and which of §10's
 counts only the reader's own sessions show, and in 0.46 what a black box
 is judged on there, and which read of a population the round trip after
-a reopen costs).
+a reopen costs, and in 0.47 the period a black box's output is sampled at
+there, and the one first read a reader can time).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -2077,8 +2078,13 @@ Liveliness tokens carry no payload; everything is in the key.
           matching token sent once (0.46, F-246). Beside 10,000 tokens a
           session's first read took 3.3–4.2 s and a later one 0.52–0.58 s
           (zk2py, release), and a read after a reopen is a later read. So
-          a reader that times its own reads as it runs sees only later
-          reads, and sizes this wait from them too short. One whose wait
+          a reader that sizes this wait from its own later reads sizes it
+          too short. Its seed, on a session that has not read the
+          population before, is a session's first read, and the one it can
+          time (0.47, F-248; zk2py's follower seeded in 3.1–3.9 s, and its
+          next read took 0.47–0.49 s). The round trip after a reopen ran to
+          4.54 s beside those seeds' 3.91 s, so a wait sized from a seed
+          keeps a margin. One whose wait
           ends first reads possibly incomplete (below), as before, and
           before its next read takes up the round trip in flight (below),
           asking another only once that one has
@@ -3721,7 +3727,7 @@ reader, clients, some under CPU load:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46); Appendix B |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46), and at what period its output is sampled (0.47); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |

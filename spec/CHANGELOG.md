@@ -3,6 +3,58 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.47 — 2026-10-26: the period a black box is sampled at, and the first read a reader can time (round 71's F-248 and F-249)
+
+zk2py round 71 (PR #889) read 0.46 cold and resolved F-245 to F-247. It
+measured again beside 10,000 tokens: a session's first read took
+3.13–3.91 s and a later read 0.47–0.50 s. The round trip after each of
+three successive reopens took 3.43–4.54 s, and the next 1.6–1.9 ms. It
+filed two findings, a minor point and a gap. Wording only; no fixture,
+no verdict and no behaviour changes.
+
+**Changed: a reader can time one first read, its seed** (§8.1; F-248,
+minor).
+- **The gap.** 0.46 said "a reader that times its own reads as it runs
+  sees only later reads". A reader's seed, on a session that has not read
+  the population before, is a session's first read, the cost the SHOULD
+  names. zk2py's follower seeded in 3.1–3.9 s, and its next read took
+  0.47–0.49 s. "Only" could lead a reader to drop the one measure it has.
+- **Now.** A reader that sizes the wait from its own later reads sizes it
+  too short. Its seed is the first read it can time. The round trip after
+  a reopen ran to 4.54 s beside seeds of up to 3.91 s, so a wait sized
+  from a seed keeps a margin. The SHOULD stands.
+
+**Changed: a black box is run with its output's period below the cut**
+(presence §10 Expected 10; F-249, gap).
+- **The gap.** 0.46 judged a black box on "every address it followed
+  unobservable from the cut". A tool's output can come once a period:
+  `zenctl watchdog` prints a transition only when it evaluates, once
+  every `--every`, 5 s by default. Beside 2,000 tokens, its link cut for
+  1 s:
+  - at `--every 0.5`, it printed unobservable 0.47–0.50 s after the cut,
+    before the heal;
+  - at 2 s, it printed unobservable at 1.91 s, after the heal;
+  - at 5 s, it printed nothing after the cut, so its output said ok
+    throughout, though it never read down.
+
+  The step set no period, so one tool could pass, fail or be argued
+  either way. 0.46's 0.41–0.49 s were measured at `--every 0.5`, which it
+  did not say.
+- **Now.** A tool run as a black box is run with its output's period below
+  the cut; zk2py runs `zenctl watchdog` at `--every 0.5`. It is judged on
+  what its output shows, from its first output after the cut until a
+  complete read after the heal: every address it followed unobservable,
+  never down, and its read complete within 30 s of the heal.
+
+**Deliberately not changed.**
+- **No new rule.** The SHOULD stands as 0.44 wrote it. Only how a reader
+  sizes it, and how a black box is sampled in §10, are said.
+- **zenctl's default `--every`** stays at 5 s. A watchdog that prints
+  nothing during a 1 s cut never claimed the crowd was there. What it
+  leaves out is a scenario's question, not a defect: its next evaluation
+  reads what the cut left.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.46 — 2026-10-26: what a black box is judged on, and which read the round trip after a reopen costs (round 70's F-245 to F-247)
 
 zk2py round 70 (PR #887) read 0.45 cold and resolved F-241 to F-244. It
