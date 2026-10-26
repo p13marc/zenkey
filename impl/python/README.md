@@ -3001,14 +3001,24 @@ freezes it for good. zk2py read it cold in round 73.
   `@/*/router/status/plugins/storage_manager/storages/**`. 0.11's
   `@/*/router/**/storage_manager/storages/**` reached the records.
 - **zk2py asks no selector that reaches them.** `live.admin_guard` refuses
-  one before anything is sent, and every GET through `live._answers` passes
-  it. It reads Appendix B's fact as a node's, so a peer's or a client's
-  records are refused too (F-253). `live.admin_records_reached` uses zenoh's
-  own intersection. The `readings` family checks 17 selectors and three
-  refusals: S4's two reach nothing, 0.11's reaches six of the seven, and
-  `@/*/router/token/zk2/*/*/@zk/**` reaches nothing. `**` crosses no
-  verbatim chunk, so a record of a zk2 token is reached by no `**`. A GET
-  of such a key reaches neither the admin space nor a queryable on `@/**`.
+  one, and every GET through `live._answers` passes it.
+  - **When.** `_answers` refuses when it is called, before anything is
+    asked. Its GET is still made at the first `next()`, as before.
+  - **A malformed selector** reaches nothing in the guard. It fails where
+    it failed before, at the GET, with zenoh's `ZError`.
+  - **Every whatami.** zk2py reads Appendix B's fact as a node's, so a
+    peer's or a client's records are refused too (F-253).
+  - `live.admin_records_reached` parses a selector as `Session.get` does,
+    and uses zenoh's own intersection.
+- **The `readings` family** checks 17 selectors and seven calls.
+  - S4's two selectors reach nothing, 0.11's reaches six of the seven,
+    and `@/*/router/token/zk2/*/*/@zk/**` reaches nothing. `**` crosses
+    no verbatim chunk, so a record of a zk2 token is reached by no `**`.
+    A GET of such a key reaches neither the admin space nor a queryable
+    on `@/**`.
+  - The calls: three refusals when called, S4's read asked at the first
+    `next()`, a read the user asked for, and two malformed selectors
+    failing with zenoh's error.
 - **zk2py never ran a hazardous read in a suite.** The admin selectors it
   asks are `@/*/router`, S4's storages read, and `@/<zid>/router` from a
   router process's own session.
@@ -3037,8 +3047,14 @@ Its admin space is on and read-only.
   and undeclaring a subscriber and a liveliness token flat out. A
   queryable on `@/**`, declared not complete, records every selector it
   hears. Each round is the reader's reads, a put across the router and
-  the consumer's S4 GET, each bounded at 2 s. The runner stops if the
-  router stops routing, and kills the router process at the end.
+  the consumer's S4 GET, each bounded at 2 s.
+  - **A missed round ends the run.** The first round whose put or S4
+    answer misses its 2 s fails §12 with that round's number, so a frozen
+    router fails it at once. Each reader's whole run is bounded at 60 s
+    plus 0.5 s a round, and a zenctl read is killed past what is left.
+    The router process is killed at the end. With the router stopped
+    (SIGSTOP) mid-run, both readers' runs failed at the next round and
+    took 19 s together.
   - **The readers.** `zk2py` is `live.check_s4` on one session.
     `zenctl-doctor` is `doctor --check storage-on-state`, which asks the
     same two selectors. `zenctl-storage` is `storage list`, which asks the

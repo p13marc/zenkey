@@ -3321,15 +3321,50 @@ def _admin_records_readings() -> list[tuple[str, Any, Any]]:
     for sel, want in cases:
         got = sorted(k for k, p in kinds.items() if p in live.admin_records_reached(sel))
         out.append((f"{label}: {sel} reaches {want or 'none'}", got, sorted(want)))
-    for sel in (live.S4_STORAGES_011, "@/*/router/queryable/**", "@/**"):
+    import zenoh
+
+    class Asked:
+        """A session that records each GET and parses its selector as
+        ``Session.get`` does (``zenoh.Selector``, measured to raise the
+        same ``ZError``), then ends it with no reply."""
+
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        def get(self, selector: str, handler: Any, **_: Any) -> None:
+            zenoh.Selector(selector)
+            self.asked.append(selector)
+            handler.drop()
+
+    def call(sel: str, **kw: Any) -> tuple[str, list[str]]:
+        """How a call of ``_answers`` ends: refused when called, a GET made
+        at the first ``next()``, or zenoh's error there."""
+        sess = Asked()
         try:
-            next(iter(live._answers(None, sel, None, 1.0)))  # type: ignore[arg-type]
-            how = "asked"
+            gen = live._answers(sess, sel, zenoh.QueryTarget.ALL, 1.0, **kw)  # type: ignore[arg-type]
         except live.AdminRecordsRefused:
-            how = "refused"
-        except Exception as e:  # noqa: BLE001 - anything else reached the session
-            how = f"reached the session: {type(e).__name__}"
-        out.append((f"{label}: zk2py's GET refuses {sel} before anything is sent", how, "refused"))
+            return "refused when called", sess.asked
+        if sess.asked:
+            return "asked when called", sess.asked
+        try:
+            list(gen)
+        except zenoh.ZError:
+            return "ZError at the first next()", sess.asked
+        return "asked at the first next()", sess.asked
+
+    for sel in (live.S4_STORAGES_011, "@/*/router/queryable/**", "@/**"):
+        out.append((f"{label}: zk2py's GET refuses {sel} when called, before anything is asked",
+                    call(sel), ("refused when called", [])))
+    out.append((f"{label}: {live.S4_STORAGES} is asked, at the first next(), as before the guard",
+                call(live.S4_STORAGES), ("asked at the first next()", [live.S4_STORAGES])))
+    out.append((f"{label}: a read the user asked for passes the guard (user_asked)",
+                call("@/*/router/queryable/**", user_asked=True),
+                ("asked at the first next()", ["@/*/router/queryable/**"])))
+    # A malformed selector fails as it did before the guard: zenoh's own
+    # error, at the GET, not a refusal, the hazardous-looking one included.
+    for sel in ("a//b", "@/*/router/queryable/**/**"):
+        out.append((f"{label}: malformed {sel!r} reaches nothing here, and fails at the GET with zenoh's ZError",
+                    (live.admin_records_reached(sel), call(sel)), ([], ("ZError at the first next()", []))))
     return out
 
 

@@ -1027,10 +1027,18 @@ def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
     default holds every reply until the query finalizes, and a slow corrupt
     reply can displace the valid one.
 
-    A selector that reaches a node's declaration records is refused before
-    it is asked (:func:`admin_guard`, §4.2, 0.48), unless ``user_asked``.
+    A selector that reaches a node's declaration records is refused when
+    this is called, before anything is asked (:func:`admin_guard`, §4.2,
+    0.48), unless ``user_asked``. The GET itself is made at the first
+    ``next()``, as before the guard, so a malformed selector still raises
+    zenoh's ``ZError`` there.
     """
     admin_guard(selector, user_asked=user_asked)
+    return _replies(session, selector, target, timeout)
+
+
+def _replies(session: zenoh.Session, selector: str, target: zenoh.QueryTarget, timeout: float):
+    """:func:`_answers`' GET, made at the first ``next()``, and its replies."""
     q: queue.Queue = queue.Queue()
     session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
                 target=target, consolidation=zenoh.ConsolidationMode.NONE, timeout=timeout)
@@ -1279,18 +1287,25 @@ ADMIN_RECORDS = tuple(f"@/*/*/{kind}/**" for kind in ("subscriber", "publisher",
     + ("@/*/*/linkstate/*", "@/*/*/route/successor/**")
 
 
-class AdminRecordsRefused(ValueError):
+class AdminRecordsRefused(Exception):
     """A selector that intersects a node's declaration records, its
     ``linkstate/*`` or its ``route/successor/**`` (§4.2, 0.48): "A tool MUST
     NOT ask a selector that intersects one of these keys unless its user
-    asks for that read"."""
+    asks for that read". Not a ``ValueError``: the ``except ValueError``
+    around a payload's JSON in zk2py's readers never swallows it."""
 
 
 def admin_records_reached(selector: str) -> list[str]:
     """The patterns of :data:`ADMIN_RECORDS` that ``selector``'s key
     expression intersects, by zenoh 1.10.1's own intersection; empty when it
-    reaches none. The selector's parameters (``?…``) play no part."""
-    ke = zenoh.KeyExpr(selector.split("?", 1)[0])
+    reaches none. The selector is parsed as ``Session.get`` parses it
+    (``zenoh.Selector``), so its parameters (``?…``) play no part. A
+    selector zenoh cannot parse reaches nothing here: it reaches no router
+    either, since ``Session.get`` refuses it with zenoh's own error."""
+    try:
+        ke = zenoh.Selector(selector).key_expr
+    except zenoh.ZError:
+        return []
     return [p for p in ADMIN_RECORDS if ke.intersects(zenoh.KeyExpr(p))]
 
 
@@ -1298,7 +1313,9 @@ def admin_guard(selector: str, *, user_asked: bool = False) -> None:
     """Refuse, before anything is sent, a selector that reaches a node's
     declaration records (§4.2, 0.48), unless the user asked for that read.
     Every GET zk2py makes through :func:`_answers` passes here; no zk2py
-    reader asks one, and none takes a user's selector."""
+    reader asks one, and none takes a user's selector. A malformed selector
+    passes, and fails where it failed before the guard: at the GET, with
+    zenoh's ``ZError``."""
     reached = admin_records_reached(selector)
     if reached and not user_asked:
         raise AdminRecordsRefused(f"{selector} intersects {reached}: a router answers those records under its "

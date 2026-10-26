@@ -302,24 +302,43 @@ def close_bounded(*sessions: Any, timeout: float = 5.0) -> bool:
 @dataclass
 class Probe:
     """A put that crosses the router, and a GET it routes to a queryable,
-    each within ``within`` seconds: two clients of the router."""
+    each within ``within`` seconds: two clients of the router. It is ready
+    once a put and a GET have crossed, polled for at most ``ready_s``; a
+    probe that cannot come up closes what it opened and raises."""
 
     endpoint: str
     within: float = 2.0
+    ready_s: float = 10.0
     n: int = 0
     sessions: list[Any] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         import zenoh
 
-        self.pub_s, self.sub_s = _client(self.endpoint), _client(self.endpoint)
-        self.sessions = [self.pub_s, self.sub_s]
         self.arrived: dict[int, float] = {}
         self._cv = threading.Condition()
-        self.sub = self.sub_s.declare_subscriber("probe/put/*", zenoh.handlers.Callback(self._sample))
-        self.qbl = self.sub_s.declare_queryable("probe/get", zenoh.handlers.Callback(
-            lambda q: q.reply("probe/get", b"here")))
-        time.sleep(0.3)
+        try:
+            self.pub_s = _client(self.endpoint)
+            self.sessions.append(self.pub_s)
+            self.sub_s = _client(self.endpoint)
+            self.sessions.append(self.sub_s)
+            self.sub = self.sub_s.declare_subscriber("probe/put/*", zenoh.handlers.Callback(self._sample))
+            self.qbl = self.sub_s.declare_queryable("probe/get", zenoh.handlers.Callback(
+                lambda q: q.reply("probe/get", b"here")))
+            deadline = time.monotonic() + self.ready_s
+            put_ok = get_ok = False
+            while not (put_ok and get_ok):
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise RuntimeError(f"the probe did not come up within {self.ready_s:g} s "
+                                       f"(a put crossed: {put_ok}; a GET was answered: {get_ok})")
+                wait = min(0.2, left)
+                put_ok = put_ok or self._put(wait) is not None
+                get_ok = get_ok or self._get(wait) is not None
+        except BaseException:
+            close_bounded(*self.sessions)
+            self.sessions.clear()
+            raise
 
     def _sample(self, s: Any) -> None:
         with self._cv:
@@ -328,17 +347,23 @@ class Probe:
 
     def put(self) -> float | None:
         """The seconds a put took to arrive, or None past ``within``."""
+        return self._put(self.within)
+
+    def get(self) -> float | None:
+        """The seconds the GET's reply took, or None past ``within``."""
+        return self._get(self.within)
+
+    def _put(self, within: float) -> float | None:
         self.n += 1
         n = self.n
         t0 = time.monotonic()
         self.pub_s.put(f"probe/put/{n}", b"x")
         with self._cv:
-            self._cv.wait_for(lambda: n in self.arrived, timeout=self.within)
+            self._cv.wait_for(lambda: n in self.arrived, timeout=within)
             at = self.arrived.get(n)
         return None if at is None else at - t0
 
-    def get(self) -> float | None:
-        """The seconds the GET's reply took, or None past ``within``."""
+    def _get(self, within: float) -> float | None:
         import zenoh
 
         got = threading.Event()
@@ -350,8 +375,8 @@ class Probe:
                 at.append(time.monotonic())
                 got.set()
 
-        self.pub_s.get("probe/get", zenoh.handlers.Callback(cb), target=zenoh.QueryTarget.ALL, timeout=self.within)
-        got.wait(self.within)
+        self.pub_s.get("probe/get", zenoh.handlers.Callback(cb), target=zenoh.QueryTarget.ALL, timeout=within)
+        got.wait(within)
         return at[0] - t0 if at else None
 
     def routes(self) -> tuple[float | None, float | None]:

@@ -13530,12 +13530,13 @@ and round 72's PR #895). It read, as a newcomer would:
 - **S4's check** (`live.check_s4`) reads
   `@/*/router/status/plugins/storage_manager/storages/**`. 0.11's
   selector is kept only as a name the readings show reaching the records.
-- **`live.admin_guard`** refuses, before anything is sent, a selector
-  that intersects a node's declaration records, its `linkstate/*` or its
-  `route/successor/**`. It checks by zenoh's own intersection, and every
-  GET through `live._answers` passes it. No zk2py reader takes a user's
-  selector.
-- **`readings`** gains 20 cases (431).
+- **`live.admin_guard`** refuses a selector that intersects a node's
+  declaration records, its `linkstate/*` or its `route/successor/**`. It
+  checks by zenoh's own intersection. Every GET through `live._answers`
+  passes it, refused when called, before anything is asked. A malformed
+  selector fails as it did before the guard, at the GET, with zenoh's
+  `ZError`. No zk2py reader takes a user's selector.
+- **`readings`** gains 24 cases (435).
 - **The state runner** runs state.md §3 and §12 on a zenoh-python router
   in a process of its own. The router's own session plays the storage
   manager's document, so its answer is the router's, verified. §12's
@@ -13547,7 +13548,7 @@ and round 72's PR #895). It read, as a newcomer would:
 **Round 72's findings at 0.49:** F-250, F-251 and F-252 are resolved, as
 proposed. Each entry has its status line.
 
-**`just py-conformance`: 3062 of 3062.**
+**`just py-conformance`: 3066 of 3066.**
 
 **Live,** on `owner-wk`, `zenctl-wk` and `consume-wk`:
 
