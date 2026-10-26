@@ -3286,9 +3286,10 @@ def family_readings(root: Path) -> list[Result]:
 
 def _admin_read_readings() -> list[tuple[str, Any, Any]]:
     """Core 0.50 §11.1 and §11.2 in :mod:`zk2py.acl` (#609, round 74): the
-    admin read as the tools' three reads, the generator's MUST NOT, the
-    block check (:func:`zk2py.acl.block_hazards`) and inclusion, by zenoh
-    1.10.1's own key expressions. No session is opened."""
+    admin read as the tools' three reads, the generator's MUST NOT (under
+    ``deny``, on an ingress ``query``, 0.51, round 75), the block check
+    (:func:`zk2py.acl.block_hazards`) and inclusion, by zenoh 1.10.1's own
+    key expressions. No session is opened."""
     import zenoh
 
     from . import acl, live
@@ -3327,9 +3328,11 @@ def _admin_read_readings() -> list[tuple[str, Any, Any]]:
                 [(h.kind, h.policy, h.flow, h.key) for h in acl.block_hazards(old)],
                 [("allowed_query", "tool-policy", acl.INGRESS, "@/*/router/**")]))
     allow = acl.generate([tool, svc], "allow").block
-    out.append((f"{label}: under allow, every policy is open to a GET of the records (0.50: deny alone protects "
-                f"a router)", sorted(h.policy for h in acl.block_hazards(allow) if h.kind == "allow_posture"),
+    out.append((f"{label}: under allow, every policy is open to a GET of the records (0.51: a router there is "
+                f"not protected)", sorted(h.policy for h in acl.block_hazards(allow) if h.kind == "allow_posture"),
                 ["svc-policy", "tool-policy"]))
+    out.append((f"{label}: under allow, the generator compiles no allow rule, the admin read's included (0.51)",
+                [r["id"] for r in allow["rules"] if r["permission"] == "allow"], []))
 
     def block(rules: list[dict], posture: str = "deny", listed: list[str] | None = None, **extra: Any) -> dict:
         return {"enabled": True, "default_permission": posture, "rules": rules,
@@ -3347,10 +3350,12 @@ def _admin_read_readings() -> list[tuple[str, Any, Any]]:
     cases = [
         ("a peer's token records (any node's, F-253)", block([rule("r", ["@/*/peer/token/**"], flows=["ingress"])]),
          [("allowed_query", "ingress", "@/*/peer/token/**")]),
-        ("a rule with no flows applies to both (zenoh's default)", block([rule("r", ["@/**"])]),
-         [("allowed_query", "ingress", "@/**"), ("allowed_query", "egress", "@/**")]),
-        ("an egress query counts: the MUST NOT names no flow", block([rule("r", ["@/**"], flows=["egress"])]),
-         [("allowed_query", "egress", "@/**")]),
+        ("a rule with no flows applies to both (zenoh's default), so to an ingress query",
+         block([rule("r", ["@/**"])]), [("allowed_query", "ingress", "@/**")]),
+        ("a rule on both flows is found once, on ingress", block([rule("r", ["@/**"], flows=["egress", "ingress"])]),
+         [("allowed_query", "ingress", "@/**")]),
+        ("an egress query alone is not one: the freezing GET is the asker's, on ingress (0.51, F-256)",
+         block([rule("r", ["@/**"], flows=["egress"])]), []),
         ("a rule no policy lists is inert", block([rule("r", ["@/**"], flows=["ingress"])], listed=[]), []),
         ("a reply alone is not a query", block([rule("r", ["@/**"], messages=("reply",), flows=["egress"])]), []),
         ("a verbatim chunk past the records' prefix reaches nothing (§1.3)",

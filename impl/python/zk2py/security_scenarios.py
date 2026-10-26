@@ -1,4 +1,4 @@
-"""``spec/scenarios/security.md`` §4 (core §11.1, §11.2, 0.50), the admin
+"""``spec/scenarios/security.md`` §4 (core §11.1, §11.2, 0.50, 0.51), the admin
 read that admits no GET of a node's declaration records:
 ``python -m zk2py.security_scenarios [--zenctl PATH]``, and the live
 runner's ``security4``.
@@ -46,9 +46,14 @@ Beside the section, on the same blocks:
 - §11.2's two inclusion facts, each on a block that allows one key alone:
   under ``@/*/router``, ``@/*/*`` is refused; under the storage manager's
   status subtree, ``@/*/router/**`` is;
-- 0.50's "This protects a router under deny alone": under the generator's
+- 0.51's "a router there is not protected": under the generator's
   ``allow`` block, the tool's GET of the queryable records is admitted, and
-  answered with the service principal's record.
+  answered with the service principal's record;
+- with ``--zenctl``, §4.2's "a tool its user asks reads nothing of them
+  through it, and says the admin space did not answer, never that nothing
+  is declared": once step 3 is over, ``zenctl get`` logs in as the tool
+  and asks ``@/*/router/queryable/**`` and ``@/*/router/**``
+  (:func:`zenctl_get_as`).
 
 Every GET of a declaration record here is made beside no writer, so none
 can freeze R1. The freeze itself is :mod:`zk2py.adminspace`'s measurement,
@@ -324,20 +329,20 @@ def run_section4(report: Any, repo: Path = REPO, zenctl: Path | None = None) -> 
             else:
                 report.check("security.md §4 (zenctl acl gen)", "the section ran", False, f"{zenctl} not found")
         for blocks in sets:
-            _section4(report, blocks, workdir)
+            _section4(report, blocks, workdir, zenctl if zenctl is not None and zenctl.is_file() else None)
         _inclusion(report, workdir)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-def _section4(report: Any, b: Blocks, workdir: str) -> None:
+def _section4(report: Any, b: Blocks, workdir: str, zenctl: Path | None = None) -> None:
     from . import acl
 
     run = f"security.md §4 ({b.name}'s block, under deny)"
     hazards = acl.block_hazards(b.deny)
     old = [h for h in acl.block_hazards(b.deny_015) if h.kind == "allowed_query"]
-    report.check(run, "zk2py's block check (§11.1, 0.50): the deny block allows no query that intersects a node's "
-                      "declaration records; with 0.15's admin read it finds the tool's @/*/router/** rule",
+    report.check(run, "zk2py's block check (§11.1, 0.51): the deny block allows no ingress query that intersects a "
+                      "node's declaration records; with 0.15's admin read it finds the tool's @/*/router/** rule",
                  not hazards and old and all(h.key == "@/*/router/**" and h.flow == "ingress" for h in old),
                  f"{[h.why() for h in hazards]}; with 0.15's: {[h.why() for h in old][:2]}")
     users = sorted({b.tool, b.service})
@@ -394,6 +399,8 @@ def _section4(report: Any, b: Blocks, workdir: str) -> None:
                           "the recorder hears none of them",
                      all(not got3[s][0]["values"] and got3[s][0]["complete"] and not got3[s][1] for s in READS),
                      " | ".join(_show(got3[s][0]) for s in READS) + f"; heard {[got3[s][1] for s in READS]}")
+        if zenctl is not None:
+            _zenctl_get_refused(report, run, r1, b.tool, zenctl, workdir)
     finally:
         r1.close()
     # Step 4: 0.15's admin read.
@@ -417,15 +424,82 @@ def _section4(report: Any, b: Blocks, workdir: str) -> None:
     _under_allow(report, b, workdir)
 
 
+#: §4.2's records selectors zenctl get asks as the tool, beside the section
+ZENCTL_REFUSED = ["@/*/router/queryable/**", "@/*/router/**"]
+
+
+def zenctl_get_as(zenctl: Path, endpoint: str, user: str, selector: str, workdir: str,
+                  timeout: float = GET_TIMEOUT_S) -> tuple[int, list[dict[str, Any]], str, float]:
+    """``zenctl get <selector> --no-decode`` as ``user``, a black box: a
+    named context in a configuration directory of the run's own
+    (``ZENKEY_EXPLORER_CONFIG_DIR``), whose zenoh configuration logs in by
+    usrpwd. Its exit code, its ndjson rows, its stderr, and how long it
+    ran."""
+    # one context per (user, R1): each R1 listens on a port of its own
+    cfgdir = os.path.join(workdir, f"zenctl-{user}-{endpoint.rsplit(':', 1)[-1]}")
+    env = dict(os.environ, ZENKEY_EXPLORER_CONFIG_DIR=cfgdir, NO_COLOR="1", ZENCTL_FORMAT="ndjson")
+    if not os.path.isdir(cfgdir):
+        os.makedirs(cfgdir)
+        conf = os.path.join(cfgdir, "zenoh.json5")
+        Path(conf).write_text(json.dumps({
+            "mode": "client", "scouting": {"multicast": {"enabled": False}},
+            "transport": {"auth": {"usrpwd": {"user": user, "password": password(user)}}}}))
+        p = subprocess.run([str(zenctl), "context", "create", "tool", "--zenoh-config", conf, "-c", endpoint,
+                            "--select"], env=env, capture_output=True, text=True, timeout=30)
+        if p.returncode != 0:
+            raise RuntimeError(f"zenctl context create exited {p.returncode}: {p.stderr.strip()[:300]}")
+    t0 = time.monotonic()
+    # zenctl's --timeout takes whole seconds
+    p = subprocess.run([str(zenctl), "get", selector, "--no-decode", "--timeout", str(int(timeout))], env=env,
+                       capture_output=True, text=True, timeout=timeout + 30)
+    rows = []
+    for line in p.stdout.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return p.returncode, rows, p.stderr.strip(), round((time.monotonic() - t0) * 1000, 1)
+
+
+def _zenctl_get_refused(report: Any, run: str, r1: R1, user: str, zenctl: Path, workdir: str) -> None:
+    """§4.2 (0.50): "A router under a generated block refuses such a GET
+    from a tool's credentials, so a tool its user asks reads nothing of them
+    through it, and says the admin space did not answer, never that nothing
+    is declared." The reference's raw ``get`` is such a tool: its user
+    types the selector. Run once step 3 is over, so its session opens while
+    no GET runs; a refused GET reaches no reply loop."""
+    seen = []
+    ok = True
+    for sel in ZENCTL_REFUSED:
+        r1.recorder.take()
+        try:
+            code, rows, err, ms = zenctl_get_as(zenctl, r1.endpoint, user, sel, workdir)
+        except (RuntimeError, subprocess.TimeoutExpired) as e:
+            report.check(run, "beside the section: zenctl get as the tool", False, str(e))
+            return
+        heard = _heard(r1)
+        head = next((r for r in rows if r.get("report") == "get"), {})
+        answers = [r for r in rows if r.get("row") == "answer"]
+        said = " ".join(n.get("text", "") for n in head.get("notes") or []) + " " + err
+        ok = ok and code == 2 and head.get("answers") == 0 and not answers and not heard \
+            and "no replies" in said and "nothing is declared" not in said.lower()
+        seen.append(f"{sel}: exit {code} in {ms} ms, {head.get('answers')} answer(s), heard {heard}, said "
+                    f"{said.strip()[:160]!r}")
+    report.check(run, "beside the section, §4.2: zenctl get, its user asking the records as the tool, reads nothing "
+                      "and exits 2 (no verdict), saying no reply came, never that nothing is declared; the recorder "
+                      "hears neither GET", ok, " | ".join(seen))
+
+
 def _under_allow(report: Any, b: Blocks, workdir: str) -> None:
-    """0.50 §11.1: "Under allow, the generator compiles no admin read, and a
-    GET wider than every deny is in none (§11.3). This protects a router
-    under deny alone." Beside no writer."""
+    """0.51 §11.1: "Under allow, the generator compiles no admin read, and a
+    GET wider than every deny is in none (§11.3), so a router there is not
+    protected … This protects a router under deny alone (0.51, F-256)."
+    Beside no writer."""
     import zenoh
 
     from . import acl
 
-    run = f"core §11.1 (0.50), under allow ({b.name}'s block)"
+    run = f"core §11.1 (0.51), under allow ({b.name}'s block)"
     open_ = sorted({h.policy for h in acl.block_hazards(b.allow) if h.kind == "allow_posture"})
     r1 = R1(b.allow, sorted({b.tool, b.service}), workdir)
     try:
