@@ -13402,6 +13402,16 @@ it waits for one: its long reads can then be complete (…). A reader that
 asks each GET with its own timeout at or above the interests timeout
 (below) bounds that wait apart."
 
+**Status at core 0.49:** resolved, as proposed. §8.1 now reads "A reader
+whose reads may wait longer SHOULD run its session with an interests
+timeout above the longest it waits for one", and "A reader that asks each
+GET with its own timeout at or above the interests timeout (below, 0.45)
+bounds that wait apart, and meets this by it", naming zk2py's follower,
+120 s and 121 s. Read cold, the SHOULD and the MAY no longer meet on one
+timeout: the SHOULD is about the reader's wait, the MAY about a GET's own
+timeout. zk2py is unchanged, as it already read it, and its doc comments
+quote 0.49.
+
 ### F-251 · minor · core §8.1 (0.42, F-233): "3.2–3.9 s (zk2py, a release build), past the scenarios' 5 s wait and zenoh's 10 s interests timeout"
 
 > §8.1 (0.42): "A history there brings the population back into every
@@ -13439,6 +13449,14 @@ population back into every round trip: 23 s beside 10,000 tokens in a
 debug build (the reference), past the scenarios' 5 s wait and zenoh's
 10 s interests timeout, where the round trip does not stand (above), and
 3.1–5.9 s in a release build (zk2py), at the 5 s wait."
+
+**Status at core 0.49:** resolved, as proposed. §8.1 now puts only the
+debug build's 23 s "past the scenarios' 5 s wait and zenoh's 10 s interests
+timeout, where the round trip does not stand", and the release build's
+"3.1–5.9 s (zk2py, under load), at the 5 s wait". The figure is round
+72's. §8.1's other figure for a namespaced round trip, "3.9–4.1 s in a
+release build (zk2py: 3.2–4.7 s)" after a reopen, is a different
+measurement and still reads right. zk2py is unchanged.
 
 ### F-252 · minor · scenarios/presence.md §10 Expected 10 (0.47, F-249): a black box that prints nothing while the link is cut
 
@@ -13482,6 +13500,222 @@ every address it followed unobservable, never down, and that read within
 30 s of the heal. A tool that prints nothing while the link is cut has
 not shown the move, and fails."
 
+**Status at core 0.49:** resolved, as proposed. Expected 10 now says
+the period ensures the tool "evaluates at least once while the link is
+cut", and judges it "from its first output after the cut, which must come
+while the link is cut, to its first output that shows a complete read
+after the heal". It ends "A tool that prints nothing while the link is
+cut has not shown the move, and fails (0.49, F-252)". That is the verdict
+zk2py's runner gave already: its check asks that the first transition
+after the cut leave ok for unobservable before the heal. Its comments now
+quote 0.49. In this round's §10 run with zk2py's owner and reader (46 of
+46) step 10's black box was not run; zenctl's verdict is round 72's, and
+0.49 changes none.
+
 **Counts at core 0.47:** 252 entries. Open: F-250 to F-252, against §8.1
 and `scenarios/presence.md` §10: three minor points, wording only. Every
 other entry is resolved.
+
+## At core 0.49 (#609)
+
+Round 73 read core 0.48 and 0.49 cold, on main 4cbeb39a (#890's PR #893
+and round 72's PR #895). It read, as a newcomer would:
+- the CHANGELOG's 0.48 and 0.49 entries;
+- core §4.2, from "What the check reads" through "Who answered";
+- Appendix B's new fact;
+- `scenarios/state.md` §3 and §12;
+- §8.1's three changed sentences, and presence §10's Expected 10.
+
+**0.48 in zk2py.**
+- **S4's check** (`live.check_s4`) reads
+  `@/*/router/status/plugins/storage_manager/storages/**`. 0.11's
+  selector is kept only as a name the readings show reaching the records.
+- **`live.admin_guard`** refuses a selector that intersects a node's
+  declaration records, its `linkstate/*` or its `route/successor/**`. It
+  checks by zenoh's own intersection. Every GET through `live._answers`
+  passes it, refused when called, before anything is asked. A malformed
+  selector fails as it did before the guard, at the GET, with zenoh's
+  `ZError`. No zk2py reader takes a user's selector.
+- **`readings`** gains 24 cases (435).
+- **The state runner** runs state.md §3 and §12 on a zenoh-python router
+  in a process of its own. The router's own session plays the storage
+  manager's document, so its answer is the router's, verified. §12's
+  readers are zk2py's check, `zenctl-wk doctor --check storage-on-state`
+  and `zenctl-wk storage list`.
+- **`zk2py.adminspace measure`** measures the hazard outside every suite.
+  Each trial runs a node process of its own, which it kills.
+
+**Round 72's findings at 0.49:** F-250, F-251 and F-252 are resolved, as
+proposed. Each entry has its status line.
+
+**`just py-conformance`: 3066 of 3066.**
+
+**Live,** on `owner-wk`, `zenctl-wk` and `consume-wk`:
+
+| Run | Pairing | Checks |
+|---|---|---|
+| state.md §3 (two runs) | zk2py's tool and zenctl's doctor; zk2py's owner and consumer | 5 of 5 |
+| state.md §12, 200 rounds (two runs) | zk2py's reader | 4 of 4 |
+| state.md §12, 200 rounds (two runs) | zenctl doctor's S4 check | 4 of 4 |
+| state.md §12, 200 rounds (two runs) | zenctl storage list | 4 of 4 |
+| state.md §10 and §11 (two runs) | zk2py's owner and late joiner | 15 of 15 |
+| the live runner's `seed` | the Rust owner, zk2py's late joiner | 7 of 7 |
+| the live runner's `tool-rules` | zk2py's S4 and S1 checks, security.md §3 | 15 of 15 |
+| the live runner's `acl` | the Tool's admin read, under both postures | 31 of 31 |
+| presence §9 and §10 | zk2py's owner and reader, beside 2,000 tokens | 9 and 46 |
+
+- **§12's figures,** over two runs, for zk2py's reader, zenctl's doctor
+  and `storage list`: the slowest put took 0.5–1.0, 1.3–2.6 and 1.1–1.3
+  ms, and the slowest S4 answer 1.8–2.8, 2.6–2.9 and 1.8–3.7 ms. The
+  third client cycled 8,596 to 32,144 times.
+- **What the queryable on `@/**` heard,** in each run: 400, 400 and 200
+  GETs, every one of the two selectors.
+- **`zenctl storage list`** asks the storages selector alone. `admin
+  graph` asks `@/*/*`, and `admin routers` asks `@/*/router`.
+- **Before 0.48,** the state runner ran no §3. Its earlier S4 runs are
+  `tool-rules` and `acl`, run again here on the new selector.
+
+**The freeze, measured on zenoh-python 1.10.1** (`adminspace measure`).
+- **The setup.** Each trial runs one node process, a client holding 200
+  subscribers and 200 queryables on `load/<i>/**`, and a client declaring
+  and undeclaring a subscriber and a token flat out. A reader asks the
+  cell's selectors up to 20 times, and a put crosses after each.
+- **Frozen** means no put and no GET crossed within 2 s, at once and
+  12 s later.
+
+| Cell | Froze | At ask |
+|---|---|---|
+| `@/*/router/queryable/**` beside the churn | 9 of 10 | 1, 1, 1, 2, 2, 5, 6, 7, 11; one trial ran all 20 |
+| the same, no writer | 0 of 5 | – |
+| 0.11's selector beside the churn | 5 of 5 | 1, 1, 2, 2, 2 |
+| 0.48's two selectors beside the churn | 0 of 5 | – |
+| a peer's `@/*/peer/queryable/**` beside its clients' churn | 5 of 5 | 1, 2, 2, 3, 4 |
+
+So the text's claim holds on zenoh-python 1.10.1: a read of a router's
+queryable records beside a client declaring flat out freezes it for good.
+- **Not always at the first GET.** 3 of the 9 router freezes came at the
+  first ask, where the CHANGELOG's reproduction froze 107 of 135. This
+  load was 200 records, not 500.
+- **The freezing GET** ended at its 3 s timeout, after 0 to 271 of its
+  replies, and nothing crossed the node again.
+- **Every client kept its link** to the frozen node 12 s after the
+  freeze, past zenoh's 10 s lease. A reader there is not cut off (§8.1).
+  Its reads end at their timeouts, possibly incomplete, which is what
+  §8.1 already says of a read that ends so.
+- **The peer froze as the router does**, which §4.2 does not name
+  (F-253).
+- **The recorder never heard the freezing GET.** In all 19 freezes the
+  queryable on `@/**` heard every GET before it, and never that one
+  (F-254).
+
+**Where the two implementations disagree:** on no verdict. zenctl's
+doctor and zk2py's check find the same storage, read clean without it,
+and ask the same two selectors. zk2py's guard covers every whatami, where
+§4.2 names a router's records. Whether the reference refuses a peer's
+records is not observable from outside: neither tool asks one.
+
+**The text, read cold.** Three points, none of which changes a verdict:
+- F-253: the MUST NOT names a router's records, and Appendix B a node's;
+- F-254: Expected 3's queryable cannot hear the read that freezes the
+  router;
+- F-255: Appendix B states std's lock policy without its platform.
+
+F-253 changes zk2py's implementation, which guards every whatami, but no
+verdict. F-254 changes zk2py's test, which counts what the queryable
+heard against the reads, but no verdict, since Expected 2 fails such a
+reader. F-255 is wording only.
+- **Not a finding.** §4.2 says every zenoh 1.x storage manager answers
+  under `status/plugins/`, never under `config/`. That is not measurable
+  here: a zenoh-python router loads no plugin, and zk2py plays the
+  document.
+- **The MUST NOT can be followed from outside a tool**, by the selectors
+  it asks. It can be judged from outside, by §12's Expected 2 and 3
+  together.
+- **No gap from verbatim chunks.** A selector past the record prefix with
+  a verbatim chunk, `@/*/router/token/zk2/*/*/@zk/**`, reaches neither the
+  admin space nor the `@/**` queryable, measured, since `**` crosses no
+  verbatim chunk.
+
+### F-253 · minor · core §4.2 (0.48) "What a tool does not ask" beside Appendix B: a router's records, or a node's
+
+> §4.2 (0.48): "A router answers its declaration records,
+> `@/<zid>/router/{subscriber,publisher,queryable,querier,token}/**`,
+> while it holds its routing tables' read lock … A tool MUST NOT ask a
+> selector that intersects one of these keys unless its user asks for
+> that read."
+
+> Appendix B (0.48): "A node's admin space answers its declaration records
+> (`@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`),
+> its `linkstate/*` and a `route/successor/src/<zid>/dst/<zid>` key while
+> it holds the routing tables' read lock … deadlocks the node".
+
+Read word for word, the MUST NOT forbids `@/*/router/queryable/**` and
+allows `@/*/peer/queryable/**`. Appendix B says the second freezes a peer
+the same way. Measured on zenoh-python 1.10.1, a peer had its admin space
+on, its clients held 200 subscribers and 200 queryables, and one of them
+was churning. A GET of `@/*/peer/queryable/**` froze the peer in 5 of 5
+trials, at the first to fourth ask, and nothing crossed it again. The core
+has peers (§8.1's peer readers, 0.40), so a tool that reads a peer's admin
+space is outside the rule as written.
+
+**zk2py:** `live.admin_guard` refuses every whatami's records, a peer's
+and a client's too. No verdict moves: S4's two selectors name `router`.
+
+**Wording that would remove the guess:** "A node answers its declaration
+records, `@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`
+(a router's, a peer's or a client's), … A tool MUST NOT ask a selector
+that intersects one of these keys of any node unless its user asks for
+that read."
+
+### F-254 · minor · scenarios/state.md §12 Expected 3 (0.48): the queryable on `@/**` cannot hear the read that freezes the router
+
+> Expected 3: "Every selector the reader asked, as the queryable on `@/**`
+> heard it, is one of the two above: none intersects a router's
+> declaration records, its `linkstate/*` or its `route/successor/**`."
+
+The queryable hears a GET only when the router routes it on. Measured
+with `adminspace measure` in all 19 freezes, of a router and of a peer:
+the queryable heard every GET before the one that froze the node, and
+never that one. zk2py reads that as the router answering its own admin
+space before it routes the GET on, and freezing while it answers. Either
+way, the GET never reaches a remote queryable.
+The CHANGELOG's reproduction froze 107 of 135 at the first GET. A reader
+whose first read is hazardous therefore passes Expected 3 as written,
+with nothing heard or only safe selectors heard.
+
+The section's verdict is still right. The router stops routing, so
+Expected 2 fails that reader, and a hazardous read that does not freeze
+the router is heard, so Expected 3 fails it. But Expected 3 alone, and
+the CHANGELOG's "as a queryable on `@/**` hears them", claim more than
+the queryable can show.
+
+**zk2py:** the runner counts what the queryable heard against the reads
+the reader makes: two a round for zk2py's check and zenctl's doctor, one
+for `storage list`. A read not heard fails Expected 3 as well as 2.
+
+**Wording that would remove the guess:** "3. Every selector the queryable
+on `@/**` heard is one of the two above … The queryable hears a read only
+when the router routes it on, so it never hears one that freezes the
+router; Expected 2 fails that reader. A runner that knows how many reads
+the reader makes counts them heard."
+
+### F-255 · minor · core Appendix B (0.48): "A new reader of std's `RwLock` waits behind a waiting writer"
+
+The fact is stated for every platform. std's documentation leaves the
+lock's priority policy to the operating system: a waiting writer may or
+may not block new readers. The futex implementation on Linux makes new
+readers wait, which is the deadlock Appendix B describes. zk2py measured
+on Linux x86_64 only. The MUST NOT stands on any platform, so nothing
+moves.
+
+**zk2py:** unchanged.
+
+**Wording that would remove the guess:** "On Linux, where std's
+`RwLock` makes a new reader wait behind a waiting writer (std leaves the
+policy to the platform), a declaration, an interest or a new session from
+another face between two replies deadlocks the node."
+
+**Counts at core 0.49:** 255 entries. Open: F-253 to F-255, against core
+§4.2, Appendix B and `scenarios/state.md` §12: three minor points. F-253
+changes zk2py's implementation, F-254 its test, and F-255 is wording
+only. None changes a verdict. Every other entry is resolved.

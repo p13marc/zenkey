@@ -23,15 +23,43 @@ would, and setting a stamp where the scenario says so. The late joiner, a
 client of W, is a tool's :class:`~zk2py.seed.LateJoiner`, and a
 consumer's beside it shows R6.
 
+§3 (S4) and §12 (0.48) run on one zenoh-python router in a process of its
+own (:class:`zk2py.adminspace.RouterProcess`), its admin space on, read
+only, whose own session plays the storage manager's document for
+``plans``, ``key_expr`` ``zk2/ground/fleet-mgr/**``: a zenoh-python router
+loads no plugin, and the document played on the router's session carries
+the router's replier id, so "Who answered" counts it. The owner is zk2py's
+:class:`~zk2py.owner.Owner` of the walkthrough's ``mission_plan.v1``
+(``ground/fleet-mgr``), whose state queryable ends in ``**``.
+- §3: the tool's S4 check finds the storage (zk2py's
+  :func:`zk2py.live.check_s4`, and, when a zenctl reader is asked, the
+  reference's ``doctor --check storage-on-state``); the router drops the
+  document; the consumer's plan GET goes through a session that captures
+  what it asks and who answers.
+- §12: 200 rounds, each the reader's two reads, a put across the router
+  and the consumer's S4 GET, each within 2 s, beside a client holding 200
+  subscribers and 200 queryables on ``load/<i>/**`` and a third declaring
+  and undeclaring a subscriber and a liveliness token flat out
+  (:class:`zk2py.adminspace.LoadProcess`), while a queryable on ``@/**``
+  (:class:`zk2py.adminspace.Recorder`) records every selector it hears.
+  The readers: zk2py's (``--reader zk2py``, the default), the reference's
+  doctor's S4 check (``zenctl-doctor``) and ``zenctl storage list``
+  (``zenctl-storage``). Every wait is bounded, and no hazardous GET is
+  asked: the router is killed at the end of each run, frozen or not.
+
 Exit 0 when every check passes, 1 when any fails.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +67,28 @@ from . import seed as sd
 
 REPO = Path(__file__).resolve().parents[3]
 PLANS = REPO / "impl" / "python" / "interop" / "zk2py_plans.v1.toml"
+MISSION_PLAN = REPO / "examples" / "zk2" / "walkthrough" / "mission_plan.v1.toml"
+#: §3 and §12's storage, as the storage manager states it (§4.2)
+STORAGE = ("plans", "zk2/ground/fleet-mgr/**")
+DEFAULT_ZENCTL = REPO / "target" / "debug" / "zenctl"
+
+
+@dataclass
+class Run:
+    """What ``main`` was told, handed to each section: §12's readers and
+    rounds, and the reference's zenctl. §3 runs zenctl's doctor too whenever
+    a zenctl reader is asked."""
+
+    readers: list[str] = field(default_factory=lambda: ["zk2py"])
+    rounds: int = 200
+    zenctl: Path = Path(os.environ.get("ZK2PY_ZENCTL", DEFAULT_ZENCTL))
+
+    @property
+    def budget_s(self) -> float:
+        """§12's bound on one reader's whole run, setup and rounds: a round
+        takes 10–60 ms when the router routes, so this is room, never a
+        wait."""
+        return 60.0 + 0.5 * self.rounds
 
 
 class Report:
@@ -49,6 +99,9 @@ class Report:
         self.rows.append((section, name, ok, detail))
         print(f"{'PASS' if ok else 'FAIL'} [{section}] {name}" + (f": {detail}" if detail else ""), flush=True)
         return ok
+
+    def note(self, section: str, text: str) -> None:
+        print(f"NOTE [{section}] {text}", flush=True)
 
 
 class Hold:
@@ -80,7 +133,7 @@ def _show(e: sd.Entry | None) -> str:
     return f"{'deleted' if e.deleted else e.payload.decode()} at {e.stamp} via {e.via}"
 
 
-def section10(report: Report) -> None:
+def section10(report: Report, run: Run | None = None) -> None:
     from . import live
     from .live_interop import _r1
 
@@ -199,7 +252,7 @@ def section10(report: Report) -> None:
         r1.close()
 
 
-def section11(report: Report) -> None:
+def section11(report: Report, run: Run | None = None) -> None:
     import json
 
     import zenoh
@@ -300,6 +353,285 @@ def section11(report: Report) -> None:
         w.close()
 
 
+# -- §3 and §12: S4's check, and its reads beside a router that is declaring ------
+
+READERS = ("zk2py", "zenctl-doctor", "zenctl-storage")
+
+
+class Capture:
+    """A consumer's session whose outgoing queries the test captures (§3
+    step 2): each ``get``'s selector, target and consolidation as the
+    consumer asked them, and each reply's replier id. It is captured at the
+    session's API, not on the wire: zenoh-python sends what it is given."""
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+        self.asked: list[dict[str, Any]] = []
+        self.repliers: list[str | None] = []
+
+    def get(self, selector: str, handler: Any = None, **kw: Any) -> Any:
+        import zenoh
+
+        from . import live
+
+        self.asked.append({"selector": selector, "target": kw.get("target"),
+                           "consolidation": kw.get("consolidation")})
+        inner = handler.callback
+
+        def cb(reply: Any) -> None:
+            self.repliers.append(live.replier_of(reply))
+            inner(reply)
+
+        return self.session.get(selector, zenoh.handlers.Callback(cb, handler.drop), **kw)
+
+
+class _Bus:
+    """§3's and §12's bus: the router process, the owner of
+    ``mission_plan.v1`` holding ``plans/vehicle-01``, and the consumer."""
+
+    def __init__(self) -> None:
+        from . import live
+        from .adminspace import RouterProcess
+        from .contract import load_contract
+        from .owner import Owner
+
+        self.router = RouterProcess({STORAGE[0]: STORAGE[1]})
+        self.sessions: list[Any] = []
+        self.owner = None
+        c = load_contract(MISSION_PLAN)
+        self.owner = Owner("ground", "fleet-mgr", [c], connect=self.router.endpoint)
+        self.owner.start()
+        self.plan = f"{self.owner.prefix(c)}/state/plans/vehicle-01"
+        self.stamp = self.owner.set_state(self.plan, b"plan-v1")
+        assert self.owner.session is not None
+        self.owner_zid = str(self.owner.session.zid())
+        self.consumer = self.open()
+
+    def open(self) -> Any:
+        from .adminspace import _client
+
+        s = _client(self.router.endpoint)
+        self.sessions.append(s)
+        return s
+
+    def close(self) -> None:
+        from .adminspace import close_bounded
+
+        self.router.kill()  # first: a client of a router that froze closes once its link is gone
+        close_bounded(*self.sessions)
+        if self.owner is not None:
+            close_bounded(self.owner, timeout=5.0)
+
+
+def _zenctl(zenctl: Path, argv: list[str], endpoint: str, timeout: float = 30.0) -> tuple[int | None, Any, str]:
+    """One zenctl run as a black box: its exit code (None past ``timeout``,
+    killed), its JSON document, and its stderr's tail."""
+    try:
+        p = subprocess.run([str(zenctl), *argv, "--format", "json", "--timeout", "2", "-c", endpoint],
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, None, "killed past its timeout"
+    try:
+        doc = json.loads(p.stdout)
+    except ValueError:
+        doc = None
+    # its stderr says what it read; only a run with no verdict needs it shown
+    return p.returncode, doc, "" if p.returncode in (0, 1) and doc is not None else p.stderr[-300:]
+
+
+def _doctor_s4(doc: Any) -> tuple[bool, bool, str]:
+    """The reference doctor's ``storage-on-state`` as its JSON shows it:
+    (a router answered, the storage found on owners' state, why)."""
+    if not isinstance(doc, dict):
+        return False, False, "no document"
+    notes = " ".join(n.get("text", "") for n in doc.get("notes", []) if isinstance(n, dict))
+    row = next((r for r in doc.get("rows", []) if isinstance(r, dict) and r.get("check") == "storage-on-state"), {})
+    found = [f for f in row.get("findings", []) if isinstance(f, dict)
+             and str(f.get("subject", "")).startswith(f"{STORAGE[0]}@") and STORAGE[1] in str(f.get("evidence", ""))]
+    return "1 router(s) answered the admin space" in notes, bool(found), \
+        f"{row.get('verdict')}; findings {[f.get('subject') for f in row.get('findings', [])]}"
+
+
+def section3(report: Report, run: Run) -> None:
+    from . import live
+
+    sec = "§3 the owner is authoritative (S4)"
+    bus = _Bus()
+    try:
+        tool = bus.open()
+        time.sleep(0.5)
+        # Step 1: a tool inspects the routers' storage admin space.
+        s4 = live.check_s4(tool)
+        report.check(sec, "expected 1 (zk2py's tool): the storage plans on zk2/ground/fleet-mgr/** is a finding, "
+                          "read from the router's own, verified answer",
+                     s4.verdict == "broken" and s4.routers == [bus.router.zid]
+                     and [(x[2], x[3]) for x in s4.storages] == [(STORAGE[1], True)], f"{s4.verdict}: {s4.detail}")
+        zc = [r for r in run.readers if r.startswith("zenctl")]
+        if zc:
+            rc, doc, err = _zenctl(run.zenctl, ["doctor", "--check", "storage-on-state"], bus.router.endpoint)
+            answered, found, why = _doctor_s4(doc)
+            report.check(sec, "expected 1 (zenctl doctor --check storage-on-state): exit 1, the finding names plans "
+                              "and its key_expr", rc == 1 and answered and found, f"exit {rc}; {why} {err}")
+        # Step 2: without the storage.
+        dropped = bus.router.command(f"drop {STORAGE[0]}")
+        time.sleep(0.3)
+        clean = live.check_s4(tool)
+        report.check(sec, "without the storage the tool's check reads clean: the router verified, no storage answer",
+                     dropped == f"ok drop {STORAGE[0]}" and clean.verdict == "clean" and not clean.storages,
+                     f"{dropped}; {clean.verdict}: {clean.detail}")
+        if zc:
+            rc, doc, err = _zenctl(run.zenctl, ["doctor", "--check", "storage-on-state"], bus.router.endpoint)
+            answered, found, why = _doctor_s4(doc)
+            report.check(sec, "without the storage zenctl's check exits 0: established clean",
+                         rc == 0 and answered and not found, f"exit {rc}; {why} {err}")
+        import zenoh
+
+        cap = Capture(bus.consumer)
+        got = live.get_state(cap, bus.plan, timeout=2.0)  # type: ignore[arg-type]
+        report.check(sec, "expected 2: the consumer's query carries target All and consolidation Latest, set "
+                          "explicitly, and the owner alone answers it: its one reply carries the owner's stamp, and "
+                          "every reply's replier id is the owner's session",
+                     cap.asked == [{"selector": bus.plan, "target": zenoh.QueryTarget.ALL,
+                                    "consolidation": zenoh.ConsolidationMode.LATEST}]
+                     and [r.stamp_id for r in got.replies] == [str(bus.stamp).split("/", 1)[1]]
+                     and cap.repliers == [bus.owner_zid] and not got.errors,
+                     f"asked {cap.asked}; replies {[(r.key, r.stamp_id) for r in got.replies]}, repliers "
+                     f"{cap.repliers}, owner {bus.owner_zid}, errors {got.errors}")
+    finally:
+        bus.close()
+
+
+class _Reader:
+    """§12's reader under test: one S4 check's reads per :meth:`read`, as
+    (the router found, ``plans`` found with its key_expr, why)."""
+
+    def __init__(self, kind: str, bus: _Bus, zenctl: Path) -> None:
+        self.kind, self.bus, self.zenctl = kind, bus, zenctl
+        self.session = bus.open() if kind == "zk2py" else None
+        #: how many reads of each selector one read makes, as Expected 3 counts them
+        self.asks = {"zk2py": 2, "zenctl-doctor": 2, "zenctl-storage": 1}[kind]
+
+    def read(self, timeout: float = 30.0) -> tuple[bool | None, bool, str]:
+        """One read; a zenctl run is killed past ``timeout``."""
+        from . import live
+
+        if self.kind == "zk2py":
+            s4 = live.check_s4(self.session, timeout=2.0)
+            return (s4.routers == [self.bus.router.zid],
+                    s4.verdict == "broken" and [(x[2], x[3]) for x in s4.storages] == [(STORAGE[1], True)],
+                    f"{s4.verdict}: {s4.detail}")
+        if self.kind == "zenctl-doctor":
+            rc, doc, err = _zenctl(self.zenctl, ["doctor", "--check", "storage-on-state"], self.bus.router.endpoint,
+                                   timeout)
+            answered, found, why = _doctor_s4(doc)
+            return answered, rc == 1 and found, f"exit {rc}; {why} {err}"
+        rc, doc, err = _zenctl(self.zenctl, ["storage", "list"], self.bus.router.endpoint, timeout)
+        rows = doc.get("rows", []) if isinstance(doc, dict) else []
+        found = [r for r in rows if isinstance(r, dict) and r.get("name") == STORAGE[0]
+                 and r.get("key_expr") == STORAGE[1] and r.get("zid") == self.bus.router.zid]
+        # storage list reads the second selector alone: the first is not asked
+        return None, rc == 0 and len(found) == 1 and len(rows) == 1, f"exit {rc}; rows {rows} {err}"
+
+
+def section12(report: Report, run: Run) -> None:
+    for kind in run.readers:
+        if kind.startswith("zenctl") and not run.zenctl.is_file():
+            report.check(f"§12 ({kind})", "the section ran", False, f"{run.zenctl} not found")
+            continue
+        _section12(report, run, kind)
+
+
+def _section12(report: Report, run: Run, kind: str) -> None:
+    """One reader's §12. It ends at the first round that misses Expected 2,
+    a put not arrived or the owner's S4 answer missing within 2 s, and
+    fails there with that round's number: a frozen router fails it at once,
+    and never runs out the rounds. The whole run is bounded by
+    :attr:`Run.budget_s`, and a zenctl read by what is left of it."""
+    from . import live
+    from .adminspace import LoadProcess, Probe, Recorder
+
+    sec = f"§12 the check's reads beside a router that is declaring ({kind} reader, {run.rounds} rounds)"
+    deadline = time.monotonic() + run.budget_s
+    bus = _Bus()
+    load = None
+    try:
+        load = LoadProcess(bus.router.endpoint, 200, churn=True)
+        recorder = Recorder(bus.open())
+        probe = Probe(bus.router.endpoint)
+        bus.sessions += probe.sessions
+        reader = _Reader(kind, bus, run.zenctl)
+        time.sleep(0.5)
+        recorder.take()
+        rounds: list[dict[str, Any]] = []
+        missed: int | None = None  # the round, from 1, that missed Expected 2
+        out_of_time = False
+        for i in range(run.rounds):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                out_of_time = True
+                break
+            found_router, found_plans, why = reader.read(min(30.0, left))
+            put_s = probe.put()
+            t0 = time.monotonic()
+            got = live.get_state(bus.consumer, bus.plan, timeout=2.0)
+            owner_s = time.monotonic() - t0
+            answered = [r.stamp_id for r in got.replies] == [str(bus.stamp).split("/", 1)[1]] and owner_s <= 2.0
+            rounds.append({"router": found_router, "plans": found_plans, "why": why, "put": put_s,
+                           "owner": owner_s if answered else None, "owner_detail": f"{len(got.replies)} replies, "
+                           f"errors {got.errors}, after {owner_s * 1000:.1f} ms"})
+            if put_s is None or not answered:
+                missed = i + 1
+                break
+        heard = recorder.take()
+        n = len(rounds)
+        if missed is not None:
+            why_stop = f"stopped at round {missed}, which missed Expected 2"
+        elif out_of_time:
+            why_stop = f"stopped after round {n}: the section's {run.budget_s:g} s ran out"
+        else:
+            why_stop = ""
+        report.check(sec, f"the rounds ran: {n} of {run.rounds}", n == run.rounds and missed is None, why_stop)
+        first = [r["router"] for r in rounds if r["router"] is not None]
+        bad1 = [i + 1 for i, r in enumerate(rounds) if r["router"] is False or not r["plans"]]
+        report.check(sec, "expected 1: every read of the first selector finds the router, and every read of the "
+                          "second finds plans with its key_expr"
+                          + ("" if first else " (this reader does not read the first: the recorder shows it)"),
+                     not bad1 and n > 0,
+                     f"{len(first)} read(s) of the first; failing rounds {bad1[:5]}"
+                     + (f": {rounds[bad1[0] - 1]['why']}" if bad1 else ""))
+        puts = [r["put"] for r in rounds if r["put"] is not None]
+        owners = [r["owner"] for r in rounds if r["owner"] is not None]
+        if missed is not None:
+            last = rounds[-1]
+            detail = (f"round {missed} missed it: the put "
+                      + ("did not arrive within 2 s" if last["put"] is None else f"arrived in {last['put'] * 1000:.1f} ms")
+                      + ", the owner's S4 answer "
+                      + ("missing within 2 s" if last["owner"] is None else f"in {last['owner'] * 1000:.1f} ms")
+                      + f" ({last['owner_detail']})")
+        else:
+            detail = (f"{len(puts)} puts and {len(owners)} S4 answers of {n} rounds; slowest put "
+                      f"{max(puts, default=0) * 1000:.1f} ms, slowest S4 answer {max(owners, default=0) * 1000:.1f} ms")
+        report.check(sec, "expected 2: the router keeps routing throughout: in every round the put arrives, and the "
+                          "owner answers the S4 GET, within 2 s of being made",
+                     missed is None and len(puts) == n == len(owners) and n > 0, detail)
+        keys = [h.split("?", 1)[0] for h in heard]
+        allowed = {live.S4_ROUTERS, live.S4_STORAGES}
+        reaching = sorted({k for k in keys if live.admin_records_reached(k)})
+        report.check(sec, "expected 3: every selector the reader asked, as the queryable on @/** heard it, is one of "
+                          "the two, and none intersects a router's declaration records, its linkstate/* or its "
+                          f"route/successor/**; the queryable heard each of the reader's {reader.asks} read(s) a round",
+                     set(keys) <= allowed and not reaching and len(keys) == reader.asks * n,
+                     f"heard {len(keys)} GET(s) over {n} round(s): {sorted(set(keys))}; reaching the records {reaching}")
+    finally:
+        if load is not None:
+            load.close()
+        # the recorder's session is the bus's: it closes there, after the
+        # router is killed, so a router that froze holds nothing up
+        bus.close()
+    if load is not None:
+        report.note(sec, f"the third client declared and undeclared a subscriber and a token {load.churned} times")
+
+
 def sd_ns() -> int:
     return 1_000_000_000
 
@@ -308,13 +640,26 @@ def _t(ts: Any) -> str:
     return str(sd.Stamp.of(ts))
 
 
+SECTIONS = {"3": section3, "10": section10, "11": section11, "12": section12}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.state_scenarios", description=__doc__.split("\n")[0])
-    ap.parse_args(argv)
+    ap.add_argument("--only", action="append", choices=sorted(SECTIONS, key=int), help="run only these sections")
+    ap.add_argument("--reader", action="append", choices=READERS,
+                    help="§12's reader under test, repeatable (default zk2py); §3's tool is zenctl's doctor too "
+                         "whenever a zenctl reader is asked")
+    ap.add_argument("--rounds", type=int, default=200, help="§12's rounds, 200 as the section says")
+    ap.add_argument("--zenctl", type=Path, default=Run().zenctl, help="the reference's zenctl, run as a black box")
+    args = ap.parse_args(argv)
+    run = Run(readers=args.reader or ["zk2py"], rounds=args.rounds, zenctl=args.zenctl)
     report = Report()
-    for name, fn in (("§10", section10), ("§11", section11)):
+    for key, fn in SECTIONS.items():
+        name = f"§{key}"
+        if args.only and key not in args.only:
+            continue
         try:
-            fn(report)
+            fn(report, run)
         except Exception as e:  # noqa: BLE001 - a section that cannot run is a failure
             report.check(name, "the section ran", False, f"{type(e).__name__}: {e}")
     passed = sum(1 for r in report.rows if r[2])
@@ -327,4 +672,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    rc = main()
+    sys.stdout.flush()
+    # a session whose router was killed can hold the interpreter at exit
+    os._exit(rc)

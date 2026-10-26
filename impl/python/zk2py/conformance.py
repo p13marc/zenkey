@@ -3280,8 +3280,92 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
-        + _watch_wire_readings() + _one_at_a_time_readings()
+        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings()
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _admin_records_readings() -> list[tuple[str, Any, Any]]:
+    """Core 0.48 §4.2 "What a tool does not ask", in :mod:`zk2py.live`
+    (#609, round 73): which selectors reach a node's declaration records,
+    its ``linkstate/*`` or its ``route/successor/**``, by zenoh 1.10.1's own
+    intersection; S4's two selectors reach none and 0.11's reached them; and
+    :func:`zk2py.live._answers` refuses one before it is asked, no session
+    touched."""
+    from . import live
+
+    label = "core 0.48 §4.2, a selector reaching a node's declaration records"
+    kinds = {p.split("/")[3]: p for p in live.ADMIN_RECORDS}
+    cases = [
+        (live.S4_ROUTERS, []),
+        (live.S4_STORAGES, []),
+        (live.S4_STORAGES_011, ["subscriber", "publisher", "queryable", "querier", "token", "route"]),
+        ("@/*/router/queryable/**", ["queryable"]),
+        ("@/*/router/subscriber/load/**", ["subscriber"]),
+        ("@/*/router/**", list(kinds)),
+        ("@/**", list(kinds)),
+        ("@/*/router/linkstate/routers", ["linkstate"]),
+        ("@/*/router/route/successor/src/a1/dst/b2", ["route"]),
+        ("@/*/peer/token/**", ["token"]),  # Appendix B: a node's, not a router's alone
+        ("@/*/router/metrics", []),
+        ("@/*/*", []),  # every node's root document, as zenctl admin graph reads it
+        ("@/*/router/status/**", []),
+        ("@/*/router?_time=[now(-1s)..]", []),
+        # §1.3: `**` crosses no verbatim chunk, so a record of a zk2 token,
+        # `@/<zid>/router/token/zk2/…/@zk/…`, is reached by no `**` and is
+        # asked only by a selector the admin space never hears
+        ("@/*/router/token/zk2/*/*/@zk/**", []),
+        ("zk2/**", []),
+        ("**", []),
+    ]
+    out: list[tuple[str, Any, Any]] = []
+    for sel, want in cases:
+        got = sorted(k for k, p in kinds.items() if p in live.admin_records_reached(sel))
+        out.append((f"{label}: {sel} reaches {want or 'none'}", got, sorted(want)))
+    import zenoh
+
+    class Asked:
+        """A session that records each GET and parses its selector as
+        ``Session.get`` does (``zenoh.Selector``, measured to raise the
+        same ``ZError``), then ends it with no reply."""
+
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        def get(self, selector: str, handler: Any, **_: Any) -> None:
+            zenoh.Selector(selector)
+            self.asked.append(selector)
+            handler.drop()
+
+    def call(sel: str, **kw: Any) -> tuple[str, list[str]]:
+        """How a call of ``_answers`` ends: refused when called, a GET made
+        at the first ``next()``, or zenoh's error there."""
+        sess = Asked()
+        try:
+            gen = live._answers(sess, sel, zenoh.QueryTarget.ALL, 1.0, **kw)  # type: ignore[arg-type]
+        except live.AdminRecordsRefused:
+            return "refused when called", sess.asked
+        if sess.asked:
+            return "asked when called", sess.asked
+        try:
+            list(gen)
+        except zenoh.ZError:
+            return "ZError at the first next()", sess.asked
+        return "asked at the first next()", sess.asked
+
+    for sel in (live.S4_STORAGES_011, "@/*/router/queryable/**", "@/**"):
+        out.append((f"{label}: zk2py's GET refuses {sel} when called, before anything is asked",
+                    call(sel), ("refused when called", [])))
+    out.append((f"{label}: {live.S4_STORAGES} is asked, at the first next(), as before the guard",
+                call(live.S4_STORAGES), ("asked at the first next()", [live.S4_STORAGES])))
+    out.append((f"{label}: a read the user asked for passes the guard (user_asked)",
+                call("@/*/router/queryable/**", user_asked=True),
+                ("asked at the first next()", ["@/*/router/queryable/**"])))
+    # A malformed selector fails as it did before the guard: zenoh's own
+    # error, at the GET, not a refusal, the hazardous-looking one included.
+    for sel in ("a//b", "@/*/router/queryable/**/**"):
+        out.append((f"{label}: malformed {sel!r} reaches nothing here, and fails at the GET with zenoh's ZError",
+                    (live.admin_records_reached(sel), call(sel)), ([], ("ZError at the first next()", []))))
+    return out
 
 
 def _desired_encoding() -> list[tuple[str, Any, Any]]:

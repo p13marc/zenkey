@@ -552,9 +552,10 @@ Four more runs:
   - `live.attribute_stamp` attributes a state stamp by `meta.zid`: `owner`,
     `foreign` or `unattributable`. Since 0.11, zids compare by value only,
     and a `meta.zid` that is not hex is unattributable.
-  - `live.check_s4` reads 0.11's two selectors, `@/*/router` and
-    `@/*/router/**/storage_manager/storages/**`, with `plugins` beside
-    them.
+  - `live.check_s4` reads §4.2's two selectors, `@/*/router` and, since
+    0.48, `@/*/router/status/plugins/storage_manager/storages/**` (0.11's
+    `@/*/router/**/storage_manager/storages/**` until round 73), with
+    `plugins` beside them.
     - With the admin space off, the check is unobservable.
     - With it on, read-only, a router with no storage is clean.
     - **Who answered (0.12).** An answer counts only when its replier id
@@ -649,8 +650,10 @@ router of its own. It shows:
   not on h1's key, and reads `*/tc`'s presence and the admin space.
 
 S4's storages read keeps only answers whose key the selector includes,
-ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
-`router/queryable/<…/state/**>` records intersect the selector.
+ending `…/storage_manager/storages/<name>` (§4.2, 0.15). Under 0.11's
+selector a router's `router/queryable/<…/state/**>` records answered it;
+under 0.48's none does (see "A router's admin space beside a router that
+is declaring").
 
 **Since 0.16 and 0.17** (run `0.16`, and the `acl` run under `deny`):
 - **A tool's S1 check (§4.2)** is `live.s1_check`. It judges the stamp
@@ -978,7 +981,8 @@ just py-state
   `state_answer` makes the answer, and `answer_state` sends it.
 - **`just py-state`** (`python -m zk2py.state_scenarios`) runs state.md §10
   against zk2py's owner, plus the timeout and absent-owner cases, and §11
-  (0.27), 15 of 15. §11's W is a peer session without an HLC, which puts
+  (0.27), 15 of 15. Since round 73 it runs §3 and §12 too (core 0.48,
+  below), 22 of 22 in all. §11's W is a peer session without an HLC, which puts
   unstamped samples and answers a held GET with stamps zk2py chooses. The
   Rust owner example does not apply to §11: its keys are an owner's,
   always stamped.
@@ -2015,7 +2019,7 @@ against zk2py's owner:
 - `link_scenarios` 78, in two runs;
 - `desired_scenarios` 52, zk2py's author and target.
 
-## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47)
+## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.49)
 
 ```bash
 PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) \
@@ -2970,6 +2974,137 @@ whole, §8.1 and presence §9 and §10 hold three wording points, all minor
   20 ms. The debug zenctl took 28.5 s, within the 30 s that step 10 asks
   beside 2,000.
 
+**At 0.49** (round 73). 0.49 is wording only: §8.1's SHOULD on the
+interests timeout is about the longest a reader waits (F-250), only the
+debug build's 23 s history round trip is past the waits (F-251), and
+Expected 10 fails a black box that prints nothing while its link is cut
+(F-252). No reader changed, and the runner's step 10 check already gave
+0.49's verdict. §9 and §10 ran once with zk2py's owner and reader beside
+2,000 tokens: 9 of 9 and 46 of 46.
+
+## A router's admin space beside a router that is declaring (core §4.2 and Appendix B, 0.48)
+
+```bash
+PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) \
+  target/py-venv/bin/python -m zk2py.state_scenarios [--only 3|10|11|12]... \
+  [--reader zk2py|zenctl-doctor|zenctl-storage]... [--rounds 200] [--zenctl <zenctl>]
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.adminspace measure \
+  [--cell records+churn|records|0.11+churn|0.48+churn|peer-records+churn]... [--trials 10]
+```
+
+Core 0.48 found that zenoh 1.10.1 answers a router's declaration records,
+`@/<zid>/router/{subscriber,publisher,queryable,querier,token}/**`, its
+`linkstate/*` and its `route/successor/**` while it holds its routing
+tables' read lock, so another client's declaration between two replies
+freezes it for good. zk2py read it cold in round 73.
+- **S4's check** (`live.check_s4`) reads `@/*/router` and
+  `@/*/router/status/plugins/storage_manager/storages/**`. 0.11's
+  `@/*/router/**/storage_manager/storages/**` reached the records.
+- **zk2py asks no selector that reaches them.** `live.admin_guard` refuses
+  one, and every GET through `live._answers` passes it.
+  - **When.** `_answers` refuses when it is called, before anything is
+    asked. Its GET is still made at the first `next()`, as before.
+  - **A malformed selector** reaches nothing in the guard. It fails where
+    it failed before, at the GET, with zenoh's `ZError`.
+  - **Every whatami.** zk2py reads Appendix B's fact as a node's, so a
+    peer's or a client's records are refused too (F-253).
+  - `live.admin_records_reached` parses a selector as `Session.get` does,
+    and uses zenoh's own intersection.
+- **The `readings` family** checks 17 selectors and seven calls.
+  - S4's two selectors reach nothing, 0.11's reaches six of the seven,
+    and `@/*/router/token/zk2/*/*/@zk/**` reaches nothing. `**` crosses
+    no verbatim chunk, so a record of a zk2 token is reached by no `**`.
+    A GET of such a key reaches neither the admin space nor a queryable
+    on `@/**`.
+  - The calls: three refusals when called, S4's read asked at the first
+    `next()`, a read the user asked for, and two malformed selectors
+    failing with zenoh's error.
+- **zk2py never ran a hazardous read in a suite.** The admin selectors it
+  asks are `@/*/router`, S4's storages read, and `@/<zid>/router` from a
+  router process's own session.
+
+**state.md §3 and §12** (`zk2py.state_scenarios`). Both run on a
+zenoh-python router in a process of its own (`adminspace.RouterProcess`),
+which listens on port 0 and reads its endpoint from its own root document.
+Its admin space is on and read-only.
+- **The storage.** A zenoh-python router loads no plugin, so the router's
+  own session plays the storage manager. It answers
+  `@/<zid>/router/status/plugins/storage_manager/storages/plans` with
+  `{"key_expr": "zk2/ground/fleet-mgr/**", "volume": "memory"}`. The reply
+  carries the router's replier id, so "Who answered" counts it. The
+  document is played alone: no data storage answers on the key.
+- **The owner** is zk2py's owner of the walkthrough's `mission_plan.v1`.
+  Its state queryable ends in `**`, and it holds `plans/vehicle-01`.
+- **§3.** The tool's check finds the storage: zk2py's `broken`, and
+  `zenctl doctor --check storage-on-state` exits 1 with the finding. The
+  router drops the document, and both read clean. The consumer's plan GET
+  goes through `Capture`, which records each `get`'s target and
+  consolidation and each reply's replier id at the session's API. It asked
+  `All` and `Latest`, and the owner alone answered. 5 checks with zenctl,
+  3 without.
+- **§12.** The rounds run beside a load process: one client holding 200
+  subscribers and 200 queryables on `load/<i>/**`, and a second declaring
+  and undeclaring a subscriber and a liveliness token flat out. A
+  queryable on `@/**`, declared not complete, records every selector it
+  hears. Each round is the reader's reads, a put across the router and
+  the consumer's S4 GET, each bounded at 2 s.
+  - **A missed round ends the run.** The first round whose put or S4
+    answer misses its 2 s fails §12 with that round's number, so a frozen
+    router fails it at once. Each reader's whole run is bounded at 60 s
+    plus 0.5 s a round, and a zenctl read is killed past what is left.
+    The router process is killed at the end. With the router stopped
+    (SIGSTOP) mid-run, both readers' runs failed at the next round and
+    took 19 s together.
+  - **The readers.** `zk2py` is `live.check_s4` on one session.
+    `zenctl-doctor` is `doctor --check storage-on-state`, which asks the
+    same two selectors. `zenctl-storage` is `storage list`, which asks the
+    storages selector alone, so Expected 1's first half has nothing to
+    judge there.
+  - **Expected 3** also counts what the queryable heard against the reads
+    the reader makes: a read that is not heard fails. The queryable never
+    hears the read that freezes a router (F-254), so a count is the only
+    way Expected 3 can see that read. Expected 2 fails such a reader as
+    well.
+
+Round 73, on `owner-wk` and `zenctl-wk`, two runs of 200 rounds each:
+
+| Reader | Checks | Slowest put | Slowest S4 answer | Third client's cycles |
+|---|---|---|---|---|
+| zk2py | 4 of 4 | 0.5–1.0 ms | 1.8–2.8 ms | 8,596–9,216 |
+| zenctl doctor's S4 check | 4 of 4 | 1.3–2.6 ms | 2.6–2.9 ms | 28,630–32,144 |
+| zenctl storage list | 4 of 4 | 1.1–1.3 ms | 1.8–3.7 ms | 25,529–30,345 |
+
+In each run the queryable on `@/**` heard 400, 400 and 200 GETs. Each
+was one of the two selectors, and none reached a record. With every
+reader, the whole state runner passes 32 of 32.
+
+**The hazard, measured** (`zk2py.adminspace measure`, never in a suite).
+- **The setup.** Each trial runs one zenoh-python 1.10.1 node in a process
+  of its own, the same load beside it, and the `@/**` recorder. A reader
+  asks the cell's selectors up to 20 times, with a put across the node
+  after each.
+- **Frozen** means a put and a GET each failed to cross within 2 s, at
+  once and again 12 s later, past the 10 s lease.
+- Every GET waits at most 3 s, and the node's process is killed at the
+  end, frozen or not.
+
+| Cell | Froze | At ask |
+|---|---|---|
+| `@/*/router/queryable/**` beside the churn | 9 of 10 | 1, 1, 1, 2, 2, 5, 6, 7, 11; one trial ran all 20 |
+| the same, no writer | 0 of 5 | 100 asks, 201 records each |
+| 0.11's selector beside the churn | 5 of 5 | 1, 1, 2, 2, 2; up to 401 replies |
+| 0.48's two selectors beside the churn | 0 of 5 | 200 asks of each |
+| a peer's `@/*/peer/queryable/**` beside its clients' churn | 5 of 5 | 1, 2, 2, 3, 4 |
+
+- **The freezing GET.** It ended at its 3 s timeout, after anywhere from
+  0 to 271 of its replies.
+- **Afterwards** the node routed nothing again: no put, no GET.
+- **Every client kept its link** to the frozen node 12 s on, past zenoh's
+  10 s lease. A reader there is not cut off (§8.1). Its reads end at
+  their timeouts, possibly incomplete.
+- **The `@/**` recorder** heard every GET before the freezing one, and
+  never that one, in all 19 freezes (F-254).
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -2991,6 +3126,10 @@ whole, §8.1 and presence §9 and §10 hold three wording points, all minor
     (0.10): zk2py counts no budget and runs no archive;
   - `desired.v1`'s scenario §9, a tool's (`zenctl desired`, #840's DD):
     zk2py's §2.17 runs on fixtures only.
+  - a storage manager: a zenoh-python router loads no plugin. state.md §3
+    and §12 play a storage's document on the router's own session, so
+    §4.2's statement (0.48) that every zenoh 1.x storage manager answers
+    under `status/plugins/`, never under `config/`, is not measured here.
 
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
@@ -3100,7 +3239,10 @@ impl/python/
     redundancy_live.py redundancy.v1 a candidate on a bus, the following consumer, a tool's two reads
     redundancy_owner.py redundancy.v1 one candidate as a process
     redundancy_scenarios.py redundancy.v1 scenarios.md §1–§12 and a re-mint, zk2py against itself
-    state_scenarios.py §4.2     scenarios/state.md §10 against zk2py's owner, and §11's open cases
+    state_scenarios.py §4.2     scenarios/state.md §3 and §12 on a router process, §10 against zk2py's owner,
+                                and §11's open cases
+    adminspace.py     §4.2 App. B a router or a peer in a process of its own, the load beside it, the @/** recorder,
+                                and the freeze measurement (never a suite)
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
                       sysinfo_x, tracker, order, order_b, budget, plans, epoch (presence.md §3); freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
