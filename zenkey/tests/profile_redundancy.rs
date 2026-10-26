@@ -175,6 +175,48 @@ struct Candidate {
 /// Brings an instance up on sessions of `ep` (one endpoint for all three),
 /// or returns why its start refused.
 async fn candidate(ep: &str, o: Opts) -> Result<Candidate, Error> {
+    prepare(ep, o).await?.start().await
+}
+
+/// An instance before its start: its three sessions open and its service
+/// built, nothing alive declared. [`Prepared::start`] makes the claim
+/// (§2.5 step 1), so that §3 can open both instances' sessions first and
+/// release both starts together.
+struct Prepared {
+    name: &'static str,
+    id: InstanceId,
+    iface: IfaceId,
+    builder: ServiceBuilder,
+    red: Redundancy,
+    calls: Arc<AtomicU64>,
+    state: Arc<StateWriter>,
+    stream: Option<Writer>,
+    servers: Vec<OperationServer>,
+    sessions: Vec<zenoh::Session>,
+}
+
+impl Prepared {
+    /// The start (core §8.2), or why it refused.
+    async fn start(self) -> Result<Candidate, Error> {
+        let svc = self.builder.start().await?;
+        Ok(Candidate {
+            name: self.name,
+            id: self.id,
+            iface: self.iface,
+            svc,
+            red: self.red,
+            calls: self.calls,
+            state: self.state,
+            stream: self.stream,
+            servers: self.servers,
+            sessions: self.sessions,
+        })
+    }
+}
+
+/// An instance's sessions of `ep` opened and its service built, up to its
+/// start.
+async fn prepare(ep: &str, o: Opts) -> Result<Prepared, Error> {
     let claim = session(ep, o.lease).await;
     let watch = session(ep, o.lease).await;
     let reader = session(ep, o.lease).await;
@@ -226,12 +268,11 @@ async fn candidate(ep: &str, o: Opts) -> Result<Candidate, Error> {
     }
     startup.refuse_without_lock = o.refuse_without_lock;
     let red = b.redundancy(startup)?;
-    let svc = b.start().await?;
-    Ok(Candidate {
+    Ok(Prepared {
         name: o.name,
         id: id(o.id),
         iface,
-        svc,
+        builder: b,
         red,
         calls,
         state,
