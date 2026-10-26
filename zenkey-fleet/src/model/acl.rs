@@ -280,7 +280,7 @@ pub(crate) const ADMIN_READ: [&str; 3] = [
 ];
 const CITE_ADMIN_READ_IN: &str = "§11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the \
      routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, \
-     for the check and the doctor) and the mesh's (`@/*/*`), and none of a router's \
+     for the check and the doctor) and the mesh's (`@/*/*`), and none of any node's \
      declaration records, which zenoh 1.10.1 answers under its routing tables' read lock \
      (#890): a query is admitted by inclusion, so one that reaches them is refused here, \
      before the admin space runs. Under deny no other grant reaches the admin space. Never \
@@ -4358,7 +4358,7 @@ type = { raw = "text/plain" }
     }
 
     /// §11.1 Tool (0.50, #894): the admin read admits the tools' three reads
-    /// and no GET that reaches a router's declaration records. A query is
+    /// and no GET that reaches a node's declaration records. A query is
     /// admitted by inclusion (§11.2), and no key of the grant intersects
     /// those records, so no query it includes reaches them. 0.15's grant,
     /// `@/*/router` and `@/*/router/**`, admitted a GET on every record of a

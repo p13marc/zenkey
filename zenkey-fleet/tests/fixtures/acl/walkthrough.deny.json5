@@ -251,7 +251,7 @@ access_control: {
     { id: "presence-out:tool.zenwatch", permission: "allow", flows: ["egress"],
       messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/*/*/@zk/**"] },
-    // admin_read (tool.zenwatch): §11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, for the check and the doctor) and the mesh's (`@/*/*`), and none of a router's declaration records, which zenoh 1.10.1 answers under its routing tables' read lock (#890): a query is admitted by inclusion, so one that reaches them is refused here, before the admin space runs. Under deny no other grant reaches the admin space. Never namespaced
+    // admin_read (tool.zenwatch): §11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, for the check and the doctor) and the mesh's (`@/*/*`), and none of any node's declaration records, which zenoh 1.10.1 answers under its routing tables' read lock (#890): a query is admitted by inclusion, so one that reaches them is refused here, before the admin space runs. Under deny no other grant reaches the admin space. Never namespaced
     { id: "admin-read-in:tool.zenwatch", permission: "allow", flows: ["ingress"],
       messages: ["query"],
       key_exprs: ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"] },
@@ -379,7 +379,7 @@ access_control: {
     { id: "call-out:tool.ops", permission: "allow", flows: ["egress"],
       messages: ["reply"],
       key_exprs: ["zk2/vehicle-01/thruster-l/thruster.v1/@op/arm", "zk2/vehicle-01/thruster-l/thruster.v1/@op/disarm", "zk2/vehicle-01/thruster-r/thruster.v1/@op/arm", "zk2/vehicle-01/thruster-r/thruster.v1/@op/disarm", "zk2/vehicle-01/navigation/nav.v2/@op/set_origin"] },
-    // admin_read (tool.ops): §11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, for the check and the doctor) and the mesh's (`@/*/*`), and none of a router's declaration records, which zenoh 1.10.1 answers under its routing tables' read lock (#890): a query is admitted by inclusion, so one that reaches them is refused here, before the admin space runs. Under deny no other grant reaches the admin space. Never namespaced
+    // admin_read (tool.ops): §11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, for the check and the doctor) and the mesh's (`@/*/*`), and none of any node's declaration records, which zenoh 1.10.1 answers under its routing tables' read lock (#890): a query is admitted by inclusion, so one that reaches them is refused here, before the admin space runs. Under deny no other grant reaches the admin space. Never namespaced
     { id: "admin-read-in:tool.ops", permission: "allow", flows: ["ingress"],
       messages: ["query"],
       key_exprs: ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"] },
