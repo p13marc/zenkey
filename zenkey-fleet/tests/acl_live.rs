@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use util::zk2::{T, eventually};
-use zenkey_fleet::report::{AclPermission, AclPlan, ContractSource, Enrollment};
+use zenkey_fleet::report::{AclGrantKind, AclPermission, AclPlan, ContractSource, Enrollment};
 use zenkey_fleet::{AclOptions, ContractSet, Revision, acl_plan_json5, plan_acl};
 use zenoh::Wait;
 use zenoh::bytes::Encoding;
@@ -269,16 +269,27 @@ fn scratch(name: &str) -> std::path::PathBuf {
 /// A router holding the plan's block and a usrpwd dictionary of every
 /// principal. Returns the router and its endpoint.
 async fn router(plan: &AclPlan) -> (zenoh::Session, String, std::path::PathBuf) {
+    router_of(plan, &PRINCIPALS, "").await
+}
+
+/// A router holding the plan's block, a usrpwd dictionary of `users`
+/// (password `<user>-pw`), and `extra`, config text of its own. Returns
+/// the router, its endpoint and the dictionary.
+async fn router_of(
+    plan: &AclPlan,
+    users: &[&str],
+    extra: &str,
+) -> (zenoh::Session, String, std::path::PathBuf) {
     let dict = scratch("usrpwd.txt");
-    let mut users = String::from("router:router-pw\n");
-    for p in PRINCIPALS {
-        users.push_str(&format!("{p}:{p}-pw\n"));
+    let mut dictionary = String::from("router:router-pw\n");
+    for p in users {
+        dictionary.push_str(&format!("{p}:{p}-pw\n"));
     }
-    std::fs::write(&dict, users).unwrap();
+    std::fs::write(&dict, dictionary).unwrap();
     let text = format!(
         "{{\n  mode: \"router\",\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
          listen: {{ endpoints: [\"{}\"] }},\n  \
-         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n{}}}\n",
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n{extra}{}}}\n",
         util::ANY_PORT,
         dict.display().to_string(),
         acl_plan_json5(plan)
@@ -1319,6 +1330,271 @@ async fn under_allow_no_principal_answers_the_admin_space() {
             .collect();
         assert_eq!(replies.len(), answered, "{replies:?}");
     }
+}
+
+// ─── security.md §4: the admin read reaches no declaration record ──────────
+
+/// security.md §4's deployment (core §11.1 Tool, 0.50, #894): a doctor
+/// that reads the admin space and inspects every service, and a service
+/// principal that does neither.
+const ADMIN_ENROLLMENT: &str = r#"
+[[principal]]
+user = "doctor"
+tools = ["doctor"]
+[[principal]]
+user = "tc-h1"
+services = ["h1/tc"]
+
+[[service]]
+address = "h1/tc"
+implements = ["tc.netif.v1"]
+
+[[tool]]
+name = "doctor"
+admin = true
+inspects = ["*/*"]
+"#;
+
+/// The router's admin space on, read permitted, as a deployment that wants
+/// S4 checked runs it (core §4.2).
+const ADMIN_ON: &str =
+    "  adminspace: { enabled: true, permissions: { read: true, write: false } },\n";
+
+/// GETs that reach a router's declaration records (core §4.2, 0.48): one
+/// record family, the whole router, and the whole admin space, which is
+/// what an older tool, a script or `zenctl get` with a tool's credentials
+/// could ask. Each is asked here only where nothing declares meanwhile.
+const DECLARATION_READS: [&str; 3] = ["@/*/router/queryable/**", "@/*/router/**", "@/**"];
+
+/// A router with its admin space on and `plan`'s block, the doctor and the
+/// service principal as clients of it, and, on the router's own session,
+/// which no principal's grants decide: an ear on `@/**` that records every
+/// admin GET the router routes and answers nothing, and the storage
+/// manager's document for one storage, `plans`, as state.md §12 plays it
+/// (an in-process router loads no plugin).
+struct AdminBus {
+    router: zenoh::Session,
+    doctor: zenoh::Session,
+    service: zenoh::Session,
+    heard: Arc<Mutex<Vec<String>>>,
+    _ear: zenoh::query::Queryable<()>,
+    _storage: zenoh::query::Queryable<()>,
+    dict: std::path::PathBuf,
+}
+
+impl AdminBus {
+    async fn up(plan: &AclPlan) -> AdminBus {
+        let (router, ep, dict) = router_of(plan, &["doctor", "tc-h1"], ADMIN_ON).await;
+        let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+        let ear = {
+            let heard = Arc::clone(&heard);
+            router
+                .declare_queryable("@/**")
+                .callback(move |q| heard.lock().unwrap().push(q.key_expr().to_string()))
+                .await
+                .expect("the ear")
+        };
+        let doc = format!(
+            "@/{}/router/status/plugins/storage_manager/storages/plans",
+            router.zid()
+        );
+        let body = serde_json::to_vec(&serde_json::json!({
+            "key_expr": "zk2/h1/tc/**",
+            "volume": "memory",
+        }))
+        .expect("JSON");
+        let at = doc.clone();
+        let storage = router
+            .declare_queryable(&doc)
+            .callback(move |q| {
+                let _ = q.reply(at.as_str(), body.clone()).wait();
+            })
+            .await
+            .expect("the storage document");
+        let doctor = client(&ep, Some("doctor")).await.expect("the doctor");
+        let service = client(&ep, Some("tc-h1")).await.expect("the service");
+        AdminBus {
+            router,
+            doctor,
+            service,
+            heard,
+            _ear: ear,
+            _storage: storage,
+            dict,
+        }
+    }
+
+    fn zid(&self) -> String {
+        self.router.zid().to_string()
+    }
+
+    /// The distinct selectors the ear heard since the last call.
+    fn heard(&self) -> BTreeSet<String> {
+        std::mem::take(&mut *self.heard.lock().unwrap())
+            .into_iter()
+            .collect()
+    }
+}
+
+impl Drop for AdminBus {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.dict);
+    }
+}
+
+/// `plan` with every admin-read rule's keys replaced by `keys`.
+fn with_admin_read(mut plan: AclPlan, keys: &[&str]) -> AclPlan {
+    let mut n = 0;
+    for r in plan
+        .rules
+        .iter_mut()
+        .filter(|r| r.grant == AclGrantKind::AdminRead)
+    {
+        r.key_exprs = keys.iter().map(|k| (*k).to_owned()).collect();
+        n += 1;
+    }
+    assert_eq!(n, 2, "the doctor's admin-read-in and -out");
+    plan
+}
+
+fn admin_plan() -> AclPlan {
+    let enrollment: Enrollment = toml::from_str(ADMIN_ENROLLMENT).expect("the enrollment parses");
+    let plan = plan_acl(&enrollment, &contracts(), &AclOptions::default()).expect("it plans");
+    assert!(plan.refusals.is_empty(), "{:#?}", plan.refusals);
+    plan
+}
+
+/// `spec/scenarios/security.md` §4 (core §11.1 Tool, §11.2, 0.50, #894):
+/// under `deny`, beside no writer, the generated admin read passes the
+/// tools' three reads and refuses every GET that reaches a router's
+/// declaration records at the router's ingress, before the admin space
+/// runs. A refused GET is answered complete and empty, and the ear on
+/// `@/**`, which hears every admin GET the router routes, never hears it.
+/// The service principal, which holds no admin read, gets nothing.
+///
+/// Nothing declares while a GET runs: every session is open and every
+/// queryable declared before the first one, so even a GET the router
+/// admitted could freeze nothing (core Appendix B). The suite never asks
+/// one beside a writer; `docs/zk2/upstream/adminspace-reply-repro/`
+/// measures that, with zenoh alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s4_the_admin_read_reaches_no_declaration_record() {
+    use zenkey_fleet::bus::admin::{ROUTERS, STORAGES, TOPOLOGY, admin_read};
+    let plan = admin_plan();
+    let admin: Vec<_> = plan
+        .rules
+        .iter()
+        .filter(|r| r.grant == AclGrantKind::AdminRead)
+        .collect();
+    assert_eq!(admin.len(), 2, "{admin:#?}");
+    for r in &admin {
+        assert_eq!(r.key_exprs, [ROUTERS, STORAGES, TOPOLOGY], "{}", r.id);
+        assert!(
+            r.key_exprs
+                .iter()
+                .all(|k| !zenkey_fleet::reaches_tables_lock(k)),
+            "{}",
+            r.id
+        );
+    }
+
+    let bus = AdminBus::up(&plan).await;
+    let zid = bus.zid();
+    eventually("the doctor reads the router", || async {
+        zenkey_fleet::routers(&bus.doctor, T)
+            .await
+            .is_ok_and(|r| r.iter().any(|r| r.zid == zid))
+    })
+    .await;
+    bus.heard();
+
+    // 1. The tools' reads pass: S4's two (core §4.2) and `admin graph`'s.
+    let routers = zenkey_fleet::routers(&bus.doctor, T)
+        .await
+        .expect("routers");
+    assert!(routers.iter().any(|r| r.zid == zid), "{routers:?}");
+    let storages = zenkey_fleet::storages(&bus.doctor, T)
+        .await
+        .expect("storages");
+    assert!(
+        storages
+            .iter()
+            .any(|s| s.name == "plans" && s.key_expr.as_deref() == Some("zk2/h1/tc/**")),
+        "{storages:?}"
+    );
+    let topology = zenkey_fleet::topology(&bus.doctor, T)
+        .await
+        .expect("topology");
+    assert!(
+        topology.nodes.iter().any(|n| n.zid == zid && n.answered),
+        "{topology:?}"
+    );
+    assert_eq!(
+        bus.heard(),
+        [ROUTERS, STORAGES, TOPOLOGY].map(str::to_owned).into(),
+        "the router routed each of the tools' reads"
+    );
+
+    // 2. Every GET that reaches the declaration records is refused at the
+    //    router's ingress: answered at once, complete and with nothing of
+    //    the router's, and never routed. `@/**` also reaches the doctor's
+    //    own session, whose runtime answers `@/<its zid>/session/**`
+    //    itself, through no router.
+    let own = format!("@/{}/", bus.doctor.zid());
+    for selector in DECLARATION_READS {
+        assert!(zenkey_fleet::reaches_tables_lock(selector), "{selector}");
+        let read = admin_read(&bus.doctor, selector, T).await.expect("a read");
+        assert!(
+            read.complete && read.entries.iter().all(|e| e.key.starts_with(&own)),
+            "{selector}: {:?}",
+            read.entries
+        );
+    }
+    // 3. A principal without the admin read reads nothing of it (§11.1:
+    //    under deny, no other grant reaches the admin space).
+    for selector in [ROUTERS, STORAGES, TOPOLOGY] {
+        let read = admin_read(&bus.service, selector, T).await.expect("a read");
+        assert!(
+            read.complete && read.entries.is_empty(),
+            "{selector}: {:?}",
+            read.entries
+        );
+    }
+    assert!(
+        bus.heard().is_empty(),
+        "a refused GET reached the router's routing"
+    );
+}
+
+/// How zenoh 1.10.1 admits a query (core §11.2, 0.50, measured): by
+/// inclusion of the query's key expression in an allowed one, never by
+/// intersection. Under 0.15's admin read, `@/*/router` and
+/// `@/*/router/**`, `admin graph`'s `@/*/*` is refused, though both rules
+/// intersect it, while `@/*/router` passes. Only reads that reach no
+/// declaration record are asked.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_query_is_admitted_by_inclusion_never_by_intersection() {
+    use zenkey_fleet::bus::admin::{ROUTERS, TOPOLOGY};
+    let plan = with_admin_read(admin_plan(), &["@/*/router", "@/*/router/**"]);
+    let bus = AdminBus::up(&plan).await;
+    let zid = bus.zid();
+    eventually("the doctor reads the router", || async {
+        zenkey_fleet::routers(&bus.doctor, T)
+            .await
+            .is_ok_and(|r| r.iter().any(|r| r.zid == zid))
+    })
+    .await;
+    bus.heard();
+    let topology = zenkey_fleet::topology(&bus.doctor, T)
+        .await
+        .expect("topology");
+    assert!(topology.nodes.is_empty(), "{topology:?}");
+    assert!(bus.heard().is_empty(), "{TOPOLOGY} was routed");
+    let routers = zenkey_fleet::routers(&bus.doctor, T)
+        .await
+        .expect("routers");
+    assert!(routers.iter().any(|r| r.zid == zid), "{routers:?}");
+    assert_eq!(bus.heard(), [ROUTERS.to_owned()].into());
 }
 
 /// `config.v1`'s acts, each its own grant (config.v1 §2.21; scenarios.md

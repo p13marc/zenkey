@@ -255,14 +255,38 @@ const BOTH: &[AclFlow] = &[AclFlow::Egress, AclFlow::Ingress];
 /// Every contract bundle (§8.4), relative to the namespace.
 pub const CONTRACTS: &str = "zk2/@zk/contract/**";
 
-/// What a tool reading the admin space queries (§4.2, §11.1 Tool, 0.15):
-/// the router documents and everything under them, S4's storages included.
-const ADMIN_READ: [&str; 2] = ["@/*/router", "@/*/router/**"];
-const CITE_ADMIN_READ_IN: &str = "§11.1 Tool (0.15), §4.2: a tool reads the routers' admin \
-     space to check S4 and the doctor's router checks; under deny no other grant reaches it. \
-     Never namespaced";
-const CITE_ADMIN_READ_OUT: &str = "§11.1 Tool (0.15), §4.2, egress: the routers' answers, \
-     each checked against its own key";
+/// What a tool reading the admin space queries (§4.2, §11.1 Tool, 0.15,
+/// 0.50): the routers' documents and the storage manager's status subtree,
+/// S4's two reads, which the doctor and `check conform` make, and every
+/// node's root document, which `admin graph` and zengui's mesh read. Held
+/// equal to `bus::admin`'s `ROUTERS`, `STORAGES` and `TOPOLOGY` by a test
+/// there.
+///
+/// Nothing more (0.50, #894). Until 0.50 the grant was `@/*/router` and
+/// `@/*/router/**`, which admitted a GET on a router's declaration records
+/// (`bus::admin::UNDER_TABLES_LOCK`), and zenoh 1.10.1 answers those while
+/// holding its routing tables' read lock: one GET with a tool's credentials
+/// beside another client's declaration froze the router (#890). zenoh
+/// admits a query by inclusion of its key expression in an allowed one
+/// (§11.2, measured), and none of these keys intersects those records, so
+/// no query this grant admits reaches them: the router refuses it at its
+/// ingress, before the admin space runs, and answers it complete and empty.
+/// It also refused `admin graph`'s `@/*/*`, which no `@/*/router…` key
+/// includes.
+pub(crate) const ADMIN_READ: [&str; 3] = [
+    "@/*/router",
+    "@/*/router/status/plugins/storage_manager/storages/**",
+    "@/*/*",
+];
+const CITE_ADMIN_READ_IN: &str = "§11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the \
+     routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, \
+     for the check and the doctor) and the mesh's (`@/*/*`), and none of a router's \
+     declaration records, which zenoh 1.10.1 answers under its routing tables' read lock \
+     (#890): a query is admitted by inclusion, so one that reaches them is refused here, \
+     before the admin space runs. Under deny no other grant reaches the admin space. Never \
+     namespaced";
+const CITE_ADMIN_READ_OUT: &str = "§11.1 Tool (0.15, 0.50), §4.2, egress: the routers' \
+     answers to those reads, each checked against its own key";
 
 /// The routers' admin space, which no namespace prefixes (#684).
 pub const ADMIN_SPACE: &str = "@/**";
@@ -4298,7 +4322,15 @@ type = { raw = "text/plain" }
                 ),
             ] {
                 let r = rule_of(&plan, &id);
-                assert_eq!(r.key_exprs, ["@/*/router", "@/*/router/**"], "{id}");
+                assert_eq!(
+                    r.key_exprs,
+                    [
+                        "@/*/router",
+                        "@/*/router/status/plugins/storage_manager/storages/**",
+                        "@/*/*"
+                    ],
+                    "{id}"
+                );
                 assert_eq!(r.messages, msgs, "{id}");
                 assert_eq!(r.grant, AclGrantKind::AdminRead);
             }
@@ -4323,6 +4355,46 @@ type = { raw = "text/plain" }
                 .iter()
                 .all(|r| r.grant != AclGrantKind::AdminRead)
         );
+    }
+
+    /// §11.1 Tool (0.50, #894): the admin read admits the tools' three reads
+    /// and no GET that reaches a router's declaration records. A query is
+    /// admitted by inclusion (§11.2), and no key of the grant intersects
+    /// those records, so no query it includes reaches them. 0.15's grant,
+    /// `@/*/router` and `@/*/router/**`, admitted a GET on every record of a
+    /// router's, and refused `admin graph`'s `@/*/*`.
+    #[test]
+    fn the_admin_read_reaches_no_declaration_record() {
+        use crate::bus::admin::reaches_tables_lock;
+        use crate::bus::admin::{ROUTERS, STORAGES, TOPOLOGY, UNDER_TABLES_LOCK};
+        for k in ADMIN_READ {
+            assert!(!reaches_tables_lock(k), "{k}");
+            for family in UNDER_TABLES_LOCK {
+                assert!(!intersects(k, family), "{k} meets {family}");
+            }
+        }
+        let plan = walkthrough(AclPermission::Deny);
+        let ingress = |key: &str| {
+            explain_acl(&plan, "ground", key, AclMessage::Query)
+                .expect("explains")
+                .ingress
+                .decision
+        };
+        for read in [ROUTERS, STORAGES, TOPOLOGY] {
+            assert_eq!(ingress(read), AclDecision::Allowed, "{read}");
+        }
+        for read in [
+            "@/*/router/queryable/**",
+            "@/*/router/subscriber/**",
+            "@/*/*/token/**",
+            "@/*/router/linkstate/*",
+            "@/*/router/**",
+            "@/*/router/**/storage_manager/storages/**",
+            "@/**",
+        ] {
+            assert!(reaches_tables_lock(read), "{read}");
+            assert_eq!(ingress(read), AclDecision::DeniedByDefault, "{read}");
+        }
     }
 
     /// §11.1 Tool (0.27, #748): a tool's `inspects` is presence alone — the

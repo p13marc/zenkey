@@ -934,6 +934,11 @@ mod tests {
             crate::model::storage::CHECK_ASKED,
             "the check cites what the sweep asks"
         );
+        assert_eq!(
+            crate::model::acl::ADMIN_READ,
+            [ROUTERS, STORAGES, TOPOLOGY],
+            "the admin read grants what the tools ask (core §11.1, 0.50)"
+        );
         for selector in declared_entity_selectors() {
             assert!(reaches_tables_lock(&selector), "{selector}");
         }

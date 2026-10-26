@@ -184,9 +184,11 @@ pub struct ArchiveSpec {
 pub struct ToolSpec {
     /// A plain chunk, naming the tool in rule ids.
     pub name: String,
-    /// Reads the routers' admin space, for S4's check and the doctor
-    /// (§4.2, §11.1 Tool, 0.15). Under `deny`, no grant reaches it
-    /// otherwise.
+    /// Reads the routers' admin space, for S4's check, the doctor and the
+    /// mesh (§4.2, §11.1 Tool, 0.15, 0.50): `@/*/router`, the storage
+    /// manager's status subtree and `@/*/*`, and none of the routers'
+    /// declaration records, which a GET can freeze a router with (#894).
+    /// Under `deny`, no grant reaches the admin space otherwise.
     #[serde(default)]
     pub admin: bool,
     #[serde(default)]
