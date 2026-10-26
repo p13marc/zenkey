@@ -1836,6 +1836,14 @@ def _s10_step_7(report: Report, sec: str, ep1: str) -> None:
                 (f"the control, a follower whose watch session is in {NS} without history: it never hears the owner "
                  "go, and goes on reading it up", NS, False, False, False)):
             h = Holder(ep1, "s10/nf", namespace=NS)
+            # the token held at the router before the watch session's
+            # subscriber is declared: zenoh orders one session's messages,
+            # never two sessions', so a token whose declaration reached the
+            # router after the subscriber is told to it live, and its
+            # withdrawal with it (round 70: the control's two failures at
+            # 0.43 and one at 0.45, each with the withdrawal heard)
+            held_first = _wait(lambda: h.key in {_inst_key(i) for i in live.list_presence(tool, S10, 5.0).instances},
+                               10.0, 0.05)
             watch = live.open_client(ep1, namespace=wns)
             f = pr.PresenceFollower(tool, watch, S10, history=history)
             try:
@@ -1854,11 +1862,13 @@ def _s10_step_7(report: Report, sec: str, ep1: str) -> None:
                 # one snapshot of what the follower read and heard, under its lock
                 with f.lock:
                     deletes = sum(1 for _, _, kind in f.view.events if kind == "delete")
+                    told = sum(1 for _, k, kind in f.view.events if kind == "put" and k == h.key)
                     folds = list(f.folds)
                     rts = [(bool(r), round(r.elapsed_s * 1000)) for r in f.round_trips]
                     outside = f.outside
                 report.check(sec, f"7. {label}", was_up and down is want and f.history is want_history and wire,
-                             f"history {f.history}, subscribed {f.wire}, {state}, outside {outside}; up before "
+                             f"history {f.history}, subscribed {f.wire}, {state}, outside {outside}; the token held "
+                             f"before the watch session opened {held_first}, told to the subscriber {told}; up before "
                              f"{was_up}, idle before the withdrawal {idle}, reads {folds[:n_reads]} then "
                              f"{folds[n_reads:]}, {deletes} withdrawals heard, round trips {rts}")
             finally:
