@@ -583,8 +583,35 @@ async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
 /// `redundancy.v1` (#841, RC): `serve` of a governed contract elects too. A
 /// second beside a serving one stands by: a call finds it nowhere (§2.4),
 /// and it serves once the first is gone.
+///
+/// Each incumbent is called once the tool reads its interface token (#900).
+/// Its own role reads `serving` as soon as its session has declared the
+/// token, before the router has registered what that session declared, and
+/// a call the router routes before then meets no queryable: silence. The
+/// router registers one session's declarations in their order, the
+/// queryables first and the token last (§2.6), so once the tool reads the
+/// token through it, the call finds the queryable.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
+    /// Whether the tool reads `instance`'s interface token of `iface` at the
+    /// address, through the router.
+    async fn held(
+        tool: &zenoh::Session,
+        iface: &zenkey_model::grammar::IfaceId,
+        instance: &str,
+    ) -> bool {
+        let Ok(r) = zenkey::presence::liveliness_read(tool, "zk2/lab/ledger/@zk/**", T).await
+        else {
+            return false;
+        };
+        r.keys.iter().any(|k| {
+            matches!(
+                zenkey_model::grammar::parse(k),
+                Ok(zenkey_model::grammar::ZkKey::Alive { iface: i, instance: id, .. })
+                    if i == *iface && id.as_str() == instance
+            )
+        })
+    }
     async fn until(
         s: &zenkey_fleet::Served,
         iface: &zenkey_model::grammar::IfaceId,
@@ -634,6 +661,11 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
     };
     let first = up("first").await;
     until(&first, &iface, zenkey::redundancy::Role::Serving).await;
+    let first_id = first.instance();
+    util::zk2::eventually("the first's token at the tool", || {
+        held(&tool, &iface, &first_id)
+    })
+    .await;
     let second = up("second").await;
     // A live incumbent wins (§2.5 step 2): it stands by once it has read.
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -641,9 +673,9 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
     let call = zenkey::Client::new(&tool, ledger.shared_contract(), &["lab/ledger"])
         .unwrap()
         .with_timeout(Duration::from_secs(5));
-    let answered = |o: &zenkey::Outcome| -> Vec<u8> {
+    let answered = |o: &zenkey::Outcome, from: &str| -> Vec<u8> {
         o.answer()
-            .unwrap_or_else(|| panic!("a value: {o:?}"))
+            .unwrap_or_else(|| panic!("a value from the {from}: {o:?}"))
             .payload()
             .to_bytes()
             .to_vec()
@@ -658,13 +690,23 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
             )
             .await
             .unwrap();
-        assert_eq!(answered(&o), b"first", "a call finds no standby (§2.4)");
+        assert_eq!(
+            answered(&o, "first"),
+            b"first",
+            "a call finds no standby (§2.4)"
+        );
     }
     assert_eq!(second.calls(), 0);
     first.close().await.unwrap();
     until(&second, &iface, zenkey::redundancy::Role::Serving).await;
-    // Its queryable is declared before its token (§2.6), so a call made
-    // once it serves finds it.
+    // Its queryable is declared before its token (§2.6), so a call made once
+    // the tool reads its token finds it; its own role, read above, says
+    // nothing of the router (#900).
+    let second_id = second.instance();
+    util::zk2::eventually("the second's token at the tool", || {
+        held(&tool, &iface, &second_id)
+    })
+    .await;
     let o = call
         .call(
             &addr("lab/ledger"),
@@ -674,7 +716,7 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
         )
         .await
         .unwrap();
-    assert_eq!(answered(&o), b"second");
+    assert_eq!(answered(&o, "second"), b"second");
     // A standby's close undeclares what it never declared, cleanly.
     let third = up("third").await;
     tokio::time::sleep(Duration::from_secs(2)).await;
