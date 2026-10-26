@@ -796,9 +796,13 @@ impl PresenceFeed {
     /// The barrier is waited for as long as the read would be, and at least
     /// [`crate::bus::monitor::SETTLE_TIMEOUT`]: after a move of the watch
     /// session's transport the round trip waits for the population (core
-    /// §8.1, 0.44, F-239), about what a read of it costs. One that is not
-    /// back by then runs on ([`zenkey::presence::Barrier::establish_within`]),
-    /// and the next re-read waits for the same one. A read made again after
+    /// §8.1, 0.44, F-239), about what a session's first read of it costs
+    /// (0.46, F-246), and that can outlast this wait: 3.9–4.1 s beside
+    /// 10,000 tokens in a release build, 24 s in a debug one. One that is
+    /// not back by then runs on
+    /// ([`zenkey::presence::Barrier::establish_within`]), the read made
+    /// meanwhile possibly incomplete, and the next re-read waits for the
+    /// same one. A read made again after
     /// a loss in its window waits for none: its round trip stood, and stands
     /// unless the transport moved since.
     fn settle(&self) -> Task<Settle> {

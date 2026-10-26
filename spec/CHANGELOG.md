@@ -3,6 +3,62 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.46 — 2026-10-26: what a black box is judged on, and which read the round trip after a reopen costs (round 70's F-245 to F-247)
+
+zk2py round 70 (PR #887) read 0.45 cold and resolved F-241 to F-244. It
+confirmed 0.45's facts by measurement. The first round trip after a
+reopen waited 148–154 ms beside 2,000 tokens and 3.80 s beside 10,000,
+and the next 0.6–1.7 ms. Asked once the telling was over, the first took
+about 1–2 ms. A GET whose own timeout equals the interests timeout ends
+at the interests timeout. It filed three findings: one gap and two minor
+points. Wording only; no fixture, no verdict and no behaviour changes.
+
+**Changed: a black box in §10 step 10 is judged on what its output
+shows** (Expected 10; F-245, gap).
+- **The gap.** 0.45 judged a tool run as a black box "on its read complete
+  within 30 s of the heal alone". That dropped a verdict a black box does
+  show: every address it followed is unobservable from the cut, never
+  down, which §8.1 asks of every reader after a move. As written, a tool
+  that read the crowd down at the cut, then ok again, passed. zk2py's
+  runner never judged zenctl on the 30 s alone. The wording was its own
+  proposal in round 69.
+- **Now.** A black box is judged on what its output shows: every address
+  it followed unobservable from the cut, never down, and its read complete
+  within 30 s of the heal. The counts are not asked of it. zk2py measured
+  zenctl unobservable 0.41–0.49 s after the cut.
+
+**Changed: the cost is a session's first read** (§8.1; F-246, minor).
+- **The gap.** The SHOULD sized the wait after a move as "about what a
+  read of the population costs", and 0.45's F-243 figure was taken on a
+  session that had read the population before. Measured by zk2py
+  (zenoh-python 1.10.1, release, beside 10,000 tokens in `ns`):
+  - a session's first read took 3.3–4.2 s, on 11 fresh sessions;
+  - a later read took 0.52–0.58 s;
+  - a read after a reopen was a later read, 0.55 s;
+  - the round trip after a reopen took 3.7–4.9 s, about a first read.
+
+  A reader that sized its wait from its own later reads would wait 7–9
+  times too short. Behind a read its own timeout ended, the next round
+  trip waited 266–280 ms on a session that had read before, and 2.6–3.4 s
+  after the session's first read.
+- **Now.** The SHOULD names a session's first read, with zk2py's figures,
+  and the F-243 figure gives both cases. The rules are unchanged.
+
+**Changed: which of zk2py's readers asks its GETs at the interests timeout**
+(§8.1; F-247, minor). 0.45 said "zk2py does so for its round trips and
+reads". Only its follower does. Its profile readers ask each GET with the
+caller's wait as its own timeout, as their texts, written against 0.40,
+let them. Now it reads "zk2py's follower".
+
+**Deliberately not changed.**
+- **No new rule.** The SHOULD and the MAY stand as 0.44 and 0.45 wrote
+  them. Only what they cost and who follows them are corrected.
+- **The reference's wait after a move** is `--timeout` or the monitor's
+  5 s, whichever is larger. A round trip not back by then runs on and is
+  taken up, so a short wait costs a possibly incomplete read, never a
+  second GET.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.45 — 2026-10-26: which round trip a reopen costs, and what taking up a GET means (round 69's F-241 to F-244)
 
 zk2py round 69 (PR #885) read 0.44 cold, resolved F-238 to F-240, and
