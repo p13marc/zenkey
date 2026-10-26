@@ -3363,7 +3363,7 @@ The format is the generator's own. The reference reads an enrollment file
   - 0.15's admin read, `@/*/router` and `@/*/router/**`, admitted a GET of
     every record of a router's (a peer's and a client's it never
     reached). It also refused `@/*/*`, which neither key includes.
-  - Under `allow`, the generator compiles no allow rule, and a GET wider
+  - Under `allow`, the generator compiles no admin read, and a GET wider
     than every deny is in none (§11.3), so a router there is not
     protected: a tool's GET of `@/*/router/queryable/**` under either
     generator's `allow` block was admitted and answered (zk2py, round 74).
