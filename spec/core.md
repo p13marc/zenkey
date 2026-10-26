@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.47** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.48** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -61,8 +61,9 @@ one in flight, and in 0.45 which round trip after a reopen waits for the
 population, what taking up a GET in flight means, and which of §10's
 counts only the reader's own sessions show, and in 0.46 what a black box
 is judged on there, and which read of a population the round trip after
-a reopen costs, and in 0.47 the period a black box's output is sampled at
-there, and the one first read a reader can time).
+a reopen costs, in 0.47 the period a black box's output is sampled at
+there, and the one first read a reader can time, and in 0.48 an admin
+read that reaches no router's declaration records).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1070,23 +1071,36 @@ cannot tell under `Latest` which replier answered.
   deployment that wants S4 checked enables it, read-only, for the tools'
   principals (0.10). Without it, a tool reports the check unobservable,
   never clean.
-- **What the check reads** (0.11). The reference reads two selectors:
+- **What the check reads** (0.11; the second selector since 0.48). The
+  reference reads two selectors:
   - `@/*/router`, the routers that answer;
-  - `@/*/router/**/storage_manager/storages/**`, one key per storage a
-    router's storage manager runs, its value the storage's configuration
-    with its `key_expr`.
+  - `@/*/router/status/plugins/storage_manager/storages/**`, one key per
+    storage a router's storage manager runs, its value the storage's
+    configuration with its `key_expr`.
 
   **A storage** is an answer to the second selector whose key the selector
-  includes, ending `…/storage_manager/storages/<name>` (0.15, F-86). Other
-  answers arrive too, and are not storages. A router's admin space records
-  each queryable as `@/<zid>/router/queryable/<key expr>`, and the record
-  of a queryable ending in `**`, such as an owner's `…/state/**`,
-  intersects the selector and answers it.
+  includes, ending `…/storage_manager/storages/<name>` (0.15, F-86). Any
+  other answer is not a storage.
 
   A storage whose `key_expr` intersects an owner's `state/**` or
   `@state/**` breaks S4. A router that answers the first selector and has
   no storage answer runs no storage. When no router answers the first, the
   check is unobservable.
+- **What a tool does not ask** (0.48, zenkey #890). A router answers its
+  declaration records, `@/<zid>/router/{subscriber,publisher,queryable,
+  querier,token}/**`, while it holds its routing tables' read lock, and a
+  declaration, an interest or a session from another client between two
+  of those replies freezes it for good (Appendix B). So does its
+  `linkstate/*`, and its `route/successor/src/<zid>/dst/<zid>`.
+  - A tool MUST NOT ask a selector that intersects one of these keys
+    unless its user asks for that read.
+  - 0.11's second selector, `@/*/router/**/storage_manager/storages/**`,
+    intersected them. A router records each queryable as
+    `@/<zid>/router/queryable/<key expr>`, and the record of a queryable
+    ending in `**`, such as an owner's `…/state/**`, answered it.
+  - The two selectors above do not, and every zenoh 1.x storage manager
+    answers a storage's GET under `status/plugins/`, never under
+    `config/`.
 - **Who answered** (0.12, F-80).
   - **The problem.** Any session can declare a queryable under
     `@/<zid>/router`, a real router's zid included. The key names the zid
@@ -3549,6 +3563,19 @@ Appendix B. These are the ones the rules above cite:
   occurrence a union storage holds is never pruned by its retention.
 - A router's admin document (`@/<zid>/router`) lists its sessions, each
   with the peer's zid and `whatami`: `router`, `peer` or `client`.
+- A node's admin space answers its declaration records
+  (`@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`),
+  its `linkstate/*` and a `route/successor/src/<zid>/dst/<zid>` key while
+  it holds the routing tables' read lock, and each reply takes that read
+  lock again. A new reader of std's `RwLock` waits behind a waiting writer,
+  so a declaration, an interest or a new session from another face
+  between two replies deadlocks the node: every put, query and declaration
+  through it stops for good (`net/runtime/adminspace.rs`,
+  `resources_data`; `dispatcher/queries.rs`, `route_send_response`; the
+  same on zenoh's main; 0.48, §4.2;
+  `docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`). Its
+  root document (`@/<zid>/<whatami>`), its metrics and the plugins' status
+  are answered without the lock held across a reply.
 - A query that sets no timeout waits `queries_default_timeout`, 10 s by
   default.
 - A client connects to one endpoint at a time.
