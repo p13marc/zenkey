@@ -46,6 +46,17 @@ read. The reference asks them only so: zengui's declared-entities sweep
 is behind `--admin-declared`, and `zenctl get` asks what its user types,
 its help naming the hazard.
 
+**Added: `scenarios/state.md` §12**, the MUST NOT's evidence
+(`[Sc: state.md §12]`): S4's check reads, 200 times, beside an owner
+whose state queryable ends in `**`, 400 more records ending in `**` and a
+client declaring flat out. Every read finds the router and the storage,
+a put and the owner's S4 answer cross the router within 2 s after each,
+and no selector the reads asked reaches a declaration record, as a
+queryable on `@/**` hears them. The reference runs its safe half as
+`zenkey-fleet`'s `s12_the_checks_reads_beside_a_router_declaring`: 96 of
+96 runs passed eight at a time, the slowest put 68 ms and the slowest S4
+answer 82 ms. The hazardous half is the reproduction's, never a suite's.
+
 **Added: Appendix B's fact**, with the root document, metrics and
 plugins' status answered without the lock held across a reply.
 

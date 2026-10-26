@@ -10,7 +10,7 @@ the runtime (#610 onward).
 | File | Rules |
 |---|---|
 | [`grammar.md`](grammar.md) | §1.3 the guard, §1.6 namespaces |
-| [`state.md`](state.md) | §4: S1–S7, archives, events, a late joiner's seed (0.26) and its merge's open cases (0.27) |
+| [`state.md`](state.md) | §4: S1–S7, archives, events, a late joiner's seed (0.26) and its merge's open cases (0.27), and S4's check reads beside a router that is declaring (0.48) |
 | [`operations.md`](operations.md) | §5: O1–O7; §6 split-brain |
 | [`presence.md`](presence.md) | §1.5 epochs, §3.2 an unbound required role, §3.3 the descriptor, §8.1–§8.2 |
 | [`bindings.md`](bindings.md) | §3.2: R1–R6 |

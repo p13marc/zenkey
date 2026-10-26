@@ -256,3 +256,57 @@ plays W from one peer session, the late joiner a client of it.
 `s11_a_tools_seed_keeps_a_key_that_is_not_concrete`, through the fleet's
 seeded subscription. `conformance/seed/merge.json` states the same order
 as a pure fixture.*
+
+## §12 The check's reads beside a router that is declaring (§4.2, 0.48)
+
+**Setup.** As above, on one router with its admin space on, read
+permitted, whose storage manager runs one storage, `plans`, with
+`key_expr` `zk2/ground/fleet-mgr/**`. The owner serves its state, so it
+holds a queryable ending in `**`,
+`zk2/ground/fleet-mgr/mission_plan.v1/state/**`, and it holds
+`plans/vehicle-01`. Another client holds 200 subscribers and 200
+queryables on keys ending in `**` (`load/<i>/**`), so that a reply loop
+over the router's declaration records would have work. A third client
+declares and undeclares a subscriber and a liveliness token, flat out,
+throughout. A tool, the reader under test, makes S4's check reads. A
+session of the test's own holds a queryable on `@/**` that answers nothing
+and records the selector of every GET it receives.
+
+**Steps.** 200 times:
+1. The reader reads `@/*/router`, then
+   `@/*/router/status/plugins/storage_manager/storages/**`.
+2. A client puts on a key another client subscribes to.
+3. The consumer GETs its plan (S4).
+
+**Expected.**
+1. Every read of the first selector finds the router, and every read of
+   the second finds `plans` with its `key_expr`.
+2. The router keeps routing throughout: in every round the put arrives,
+   and the owner answers the GET, within 2 s of being made.
+3. Every selector the reader asked, as the queryable on `@/**` heard it,
+   is one of the two above: none intersects a router's declaration
+   records, its `linkstate/*` or its `route/successor/**`.
+
+*Measured.* The hazard this section guards against was measured with
+zenoh alone, never in a suite: a reader that asks one of those keys
+beside a writer freezes the router for good, and every session through
+it (`docs/zk2/upstream/adminspace-reply-repro/`, zenoh 1.10.1, beside 500
+subscribers and queryables and a client churning declarations). 0.11's
+second selector, `@/*/router/**/storage_manager/storages/**`, froze the
+router in 10 of 10 trials beside records ending in `**`, at the first
+GET; the declaration-record selectors and `linkstate/*`, with a record to
+send, in 135 of 135 across every cell. The two selectors above froze it
+in 0 of 10 (five each, the status subtree beside the same records ending
+in `**`), and with the replies sent after the lock is dropped nothing
+froze in 138 trials. The reference ran this section 96 times, eight at a
+time, in a debug build: every round passed, the slowest put crossing in
+68 ms and the slowest S4 answer in 82 ms, beside 1,692 to 2,588 rounds of
+the writer per run.
+
+*The reference (`zenkey-fleet/tests/adminspace.rs`) runs it as
+`s12_the_checks_reads_beside_a_router_declaring`, through the fleet's
+`routers` and `storages`, which the doctor and `zenctl storage list` read
+through. An in-process router loads no plugin, so a session of the test's
+plays the storage manager's document on the router's own key. It never
+asks 0.11's selector: that read freezes the router, and the suite with
+it.*

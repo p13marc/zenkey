@@ -1093,7 +1093,7 @@ cannot tell under `Latest` which replier answered.
   of those replies freezes it for good (Appendix B). So does its
   `linkstate/*`, and its `route/successor/src/<zid>/dst/<zid>`.
   - A tool MUST NOT ask a selector that intersects one of these keys
-    unless its user asks for that read.
+    unless its user asks for that read. `[Sc: state.md §12]`
   - 0.11's second selector, `@/*/router/**/storage_manager/storages/**`,
     intersected them. A router records each queryable as
     `@/<zid>/router/queryable/<key expr>`, and the record of a queryable
@@ -3753,7 +3753,7 @@ reader, clients, some under CPU load:
 | `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order and unstamped samples (0.27) |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
+| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27); §12 S4's check reads beside a router that is declaring (0.48) |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46), and at what period its output is sampled (0.47); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
