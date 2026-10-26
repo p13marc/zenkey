@@ -3193,13 +3193,16 @@ Step 4 compiles 0.15's admin read again: zk2py's generator with
 Beside the section, on each block:
 - the block check finds no hazard, and finds step 4's `@/*/router/**`;
 - with `--zenctl`, once step 3 is over, `zenctl get --no-decode` logs in
-  as the tool (a named context in a configuration directory of the run's
-  own, whose zenoh configuration carries the usrpwd credentials) and asks
-  `@/*/router/queryable/**` and `@/*/router/**`. §4.2 says such a tool
-  "reads nothing of them through it, and says the admin space did not
-  answer, never that nothing is declared". zenctl exits 2 (no verdict),
-  with no answer, its note "no replies to … within 3s", and the recorder
-  hears neither GET;
+  as the tool (a named context in a configuration directory made fresh
+  for each call, whose zenoh configuration carries the usrpwd
+  credentials) and asks `@/*/router/queryable/**` and `@/*/router/**`,
+  each whatever the other did. §4.2 says such a tool "reads nothing of
+  them through it, and says the admin space did not answer, never that
+  nothing is declared". The check rests on zenctl's exit contract: exit 2
+  (no verdict) with no answer printed, and the recorder hearing neither
+  GET. The note's text ("no replies to … within 3s") is reported beside
+  it, never judged. zenctl-wl's `--timeout` takes whole seconds (it
+  refuses `3.0`), so a fractional wait is rounded up;
 - under the generator's `allow` block, the tool's GET of R1's queryable
   records is admitted and answered with the service principal's record:
   "a router there is not protected" (0.51).

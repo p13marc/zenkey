@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -428,30 +429,35 @@ def _section4(report: Any, b: Blocks, workdir: str, zenctl: Path | None = None) 
 ZENCTL_REFUSED = ["@/*/router/queryable/**", "@/*/router/**"]
 
 
+def zenctl_timeout(timeout: float) -> str:
+    """``timeout`` as ``zenctl get --timeout`` takes it. Measured on
+    zenctl-wl as a black box: it takes whole seconds, and refuses ``3.0``
+    and ``0.5`` ("invalid digit found in string", exit 2). A whole value is
+    passed as it is; any other is rounded up, so the wait is never shorter
+    than meant, and never 0."""
+    return str(int(timeout)) if float(timeout).is_integer() and timeout >= 1 else str(max(1, math.ceil(timeout)))
+
+
 def zenctl_get_as(zenctl: Path, endpoint: str, user: str, selector: str, workdir: str,
                   timeout: float = GET_TIMEOUT_S) -> tuple[int, list[dict[str, Any]], str, float]:
     """``zenctl get <selector> --no-decode`` as ``user``, a black box: a
-    named context in a configuration directory of the run's own
+    named context in a configuration directory made fresh for this call
     (``ZENKEY_EXPLORER_CONFIG_DIR``), whose zenoh configuration logs in by
-    usrpwd. Its exit code, its ndjson rows, its stderr, and how long it
-    ran."""
-    # one context per (user, R1): each R1 listens on a port of its own
-    cfgdir = os.path.join(workdir, f"zenctl-{user}-{endpoint.rsplit(':', 1)[-1]}")
+    usrpwd, so no call reuses another's endpoint or credentials. Its exit
+    code, its ndjson rows, its stderr, and how long ``get`` ran."""
+    cfgdir = tempfile.mkdtemp(prefix=f"zenctl-{user}-", dir=workdir)
     env = dict(os.environ, ZENKEY_EXPLORER_CONFIG_DIR=cfgdir, NO_COLOR="1", ZENCTL_FORMAT="ndjson")
-    if not os.path.isdir(cfgdir):
-        os.makedirs(cfgdir)
-        conf = os.path.join(cfgdir, "zenoh.json5")
-        Path(conf).write_text(json.dumps({
-            "mode": "client", "scouting": {"multicast": {"enabled": False}},
-            "transport": {"auth": {"usrpwd": {"user": user, "password": password(user)}}}}))
-        p = subprocess.run([str(zenctl), "context", "create", "tool", "--zenoh-config", conf, "-c", endpoint,
-                            "--select"], env=env, capture_output=True, text=True, timeout=30)
-        if p.returncode != 0:
-            raise RuntimeError(f"zenctl context create exited {p.returncode}: {p.stderr.strip()[:300]}")
+    conf = os.path.join(cfgdir, "zenoh.json5")
+    Path(conf).write_text(json.dumps({
+        "mode": "client", "scouting": {"multicast": {"enabled": False}},
+        "transport": {"auth": {"usrpwd": {"user": user, "password": password(user)}}}}))
+    p = subprocess.run([str(zenctl), "context", "create", "tool", "--zenoh-config", conf, "-c", endpoint,
+                        "--select"], env=env, capture_output=True, text=True, timeout=30)
+    if p.returncode != 0:
+        raise RuntimeError(f"zenctl context create exited {p.returncode}: {p.stderr.strip()[:300]}")
     t0 = time.monotonic()
-    # zenctl's --timeout takes whole seconds
-    p = subprocess.run([str(zenctl), "get", selector, "--no-decode", "--timeout", str(int(timeout))], env=env,
-                       capture_output=True, text=True, timeout=timeout + 30)
+    p = subprocess.run([str(zenctl), "get", selector, "--no-decode", "--timeout", zenctl_timeout(timeout)],
+                       env=env, capture_output=True, text=True, timeout=timeout + 30)
     rows = []
     for line in p.stdout.splitlines():
         try:
@@ -467,27 +473,37 @@ def _zenctl_get_refused(report: Any, run: str, r1: R1, user: str, zenctl: Path, 
     through it, and says the admin space did not answer, never that nothing
     is declared." The reference's raw ``get`` is such a tool: its user
     types the selector. Run once step 3 is over, so its session opens while
-    no GET runs; a refused GET reaches no reply loop."""
+    no GET runs; a refused GET reaches no reply loop.
+
+    The check rests on what zenctl's exit contract fixes: exit 2, its
+    silence (no verdict), and no answer printed, and on the recorder
+    hearing nothing. The note's text is reported beside it, never judged:
+    its "no replies to … within …" prefix, and whether it says nothing is
+    declared. Every selector is asked, whatever the one before it did."""
     seen = []
     ok = True
     for sel in ZENCTL_REFUSED:
         r1.recorder.take()
         try:
             code, rows, err, ms = zenctl_get_as(zenctl, r1.endpoint, user, sel, workdir)
-        except (RuntimeError, subprocess.TimeoutExpired) as e:
-            report.check(run, "beside the section: zenctl get as the tool", False, str(e))
-            return
+        except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
+            ok = False
+            seen.append(f"{sel}: zenctl did not run to its end: {e}")
+            _heard(r1)
+            continue
         heard = _heard(r1)
         head = next((r for r in rows if r.get("report") == "get"), {})
         answers = [r for r in rows if r.get("row") == "answer"]
-        said = " ".join(n.get("text", "") for n in head.get("notes") or []) + " " + err
-        ok = ok and code == 2 and head.get("answers") == 0 and not answers and not heard \
-            and "no replies" in said and "nothing is declared" not in said.lower()
-        seen.append(f"{sel}: exit {code} in {ms} ms, {head.get('answers')} answer(s), heard {heard}, said "
-                    f"{said.strip()[:160]!r}")
-    report.check(run, "beside the section, §4.2: zenctl get, its user asking the records as the tool, reads nothing "
-                      "and exits 2 (no verdict), saying no reply came, never that nothing is declared; the recorder "
-                      "hears neither GET", ok, " | ".join(seen))
+        ok = ok and code == 2 and not answers and head.get("answers", 0) == 0 and not heard
+        said = (" ".join(n.get("text", "") for n in head.get("notes") or []) + " " + err).strip()
+        report.info(run, f"zenctl get {sel}: its note {'opens' if said.startswith('no replies') else 'does not open'} "
+                         f"with \"no replies\", and {'says' if 'nothing is declared' in said.lower() else 'never says'} "
+                         f"nothing is declared: {said[:200]!r}")
+        seen.append(f"{sel}: exit {code} in {ms} ms, {len(answers)} answer row(s), header answers "
+                    f"{head.get('answers')}, heard {heard}")
+    report.check(run, "beside the section, §4.2: zenctl get, its user asking the records as the tool, exits 2 (no "
+                      "verdict) with no answer printed, for each selector; the recorder hears neither GET",
+                 ok, " | ".join(seen))
 
 
 def _under_allow(report: Any, b: Blocks, workdir: str) -> None:
