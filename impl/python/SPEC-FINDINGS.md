@@ -13195,6 +13195,24 @@ from its own later reads sizes it too short. Its seed, on a session that
 has not read the population before, is a session's first read (zk2py's
 follower: 3.1–3.9 s, the next read 0.47–0.49 s)."
 
+**Status at core 0.47:** resolved, as proposed. §8.1 now reads "So a
+reader that sizes this wait from its own later reads sizes it too short.
+Its seed, on a session that has not read the population before, is a
+session's first read, and the one it can time", with round 71's figures.
+It adds "The round trip after a reopen ran to 4.54 s beside those seeds'
+3.91 s, so a wait sized from a seed keeps a margin". zk2py reads that as
+a margin kept above the seed, since the figures in the same sentence need
+one. Measured again, in §10 step 10 beside 10,000 tokens, each follower on
+fresh sessions:
+- the default follower seeded in 3.46 s, its next read took 0.49 s, and
+  its round trip after the reopen took 3.80 s, 1.10 times its seed;
+- the stand-in, its waits at 20 ms, seeded in 3.39 s, and its round trip
+  after the reopen took 5.18 s, 1.53 times its seed. Its reads shared the
+  link with the reopen's telling.
+
+So the margin is real, and can be half the seed. zk2py is unchanged: it
+sizes nothing on a read's cost.
+
 ### F-249 · gap · scenarios/presence.md §10 Expected 10 (0.46, F-245): "unobservable from the cut", judged on a black box's output, depends on how often that output comes
 
 > Step 10 (0.44): "Its link is cut for 1 s, and healed."
@@ -13247,6 +13265,223 @@ after the cut until a complete read after the heal, every address it
 followed unobservable, never down, and its read complete within 30 s of
 the heal."
 
+**Status at core 0.47:** resolved, and firmer than proposed. Expected 10
+now runs a black box "with its output's period at most half the cut
+(0.47, F-249: zk2py runs `zenctl watchdog` at `--every 0.5` beside the 1 s
+cut), so that it prints at least once while the link is cut". It judges
+it "from its first output after the cut until a complete read after the
+heal", as proposed. zk2py's runner sets `--every 0.5`, half the cut, and
+its check now refuses a period above half the cut. zenctl's first
+transition after the cut was unobservable 0.45–0.48 s after it, before
+the heal, in 3 of 3 runs, two beside 2,000 tokens and one beside 10,000.
+It was ok again 1.46–1.48 s after the heal beside 2,000, and 28.5 s after
+it beside 10,000. It never fired. The text does not yet say how it judges
+a tool that prints nothing while the link is cut (F-252).
+
 **Counts at core 0.46:** 249 entries. Open: F-248 and F-249, against §8.1
 and `scenarios/presence.md` §10: one minor point and one gap. Every other
 entry is resolved.
+
+## At core 0.47 (#609)
+
+Round 72 read core 0.47 cold, on main 8880e3c6 (#891). It is meant as
+the final cold read of the watch session's line, rounds 66 to 71. It
+read, as a newcomer would:
+- the CHANGELOG's 0.47 entry;
+- §8.1 whole, its round trip bullets from "In a namespace, a watch
+  session in no namespace" through "A reader whose watch session is cut
+  off follows nothing" among them;
+- Appendix B's zenoh facts;
+- `scenarios/presence.md` §9 and §10, end to end.
+
+0.47 is wording only. It answers round 71's two findings, and changes no
+fixture, no verdict and no behaviour. zk2py's readers did not change, and
+`readings` is unchanged (411). Its runner follows the new Expected 10.
+Step 10's check refuses a watchdog period above half the cut, and judges
+zenctl from its first transition after the cut, which must come while the
+link is cut. Step 10's notes now give each follower's seed beside its
+round trip after the reopen.
+
+The runner also had a fault of its own, found by this round's first run.
+Step 10's "the round trip after the reopen ends only after them" took the
+round trip's end as its ask plus its elapsed time. That sum is off the
+final reply by a links check and a thread's wake-up, a few ms either way.
+The check failed by 4.4 ms. The end is now stamped in the GET's drop
+callback. In the seven runs since, one of them beside 10,000 tokens, the
+last token told came 0.0–0.1 ms before it, as Appendix B says. The first
+run cannot be judged again.
+
+**Round 71's findings at 0.47:** F-248 and F-249 are resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 3042 of 3042.**
+
+**Live:** `presence_scenarios` against `owner-wf` and `zenctl-wf`. §1–§8
+ran once, with zk2py's owner and reader. §9 and §10 ran in every pairing,
+beside the default crowd of 2,000:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 46 | 1 |
+| Rust, zk2py | – | 9 | 40 | 1 |
+| zk2py, zenctl | – | – | 9 | 2 |
+| Rust, zenctl | – | – | 8 | 3 |
+
+Every check passes, after the runner's fix. With zk2py's owner and
+reader, §10 ran six times. The first run failed the one check above, and
+the five after the fix passed 46 of 46. Beside 10,000 tokens, §10 ran
+whole once with each reader: 46 of 46 with zk2py's, and 9 of 9 with
+zenctl. Step 10 beside 10,000:
+- the round trip after the reopen took 3.94 s, and the next 1.83 ms;
+- zk2py's follower was complete again 6.49 s after the heal, and 9.85 s
+  with every wait at 20 ms;
+- zenctl watchdog was unobservable 0.48 s after the cut, and ok again
+  28.5 s after the heal.
+
+After review-bot's items on PR #892, step 10's check allows no tolerance
+between the last token told and the round trip's drop, where it allowed
+1 ms, and asks that the round trip end with no error reply. §10 ran again
+with the default crowd: three times with zk2py's owner and reader, 46 of
+46 each, the last token told 0.1 ms before the drop; and once with zk2py's
+owner and zenctl, 9 of 9.
+
+**Where the two implementations disagree:** on no verdict.
+- Step 6's round trips still differ, as 0.43 allows: one before the first
+  seed for zk2py, and two for the reference.
+- Beside 10,000 tokens, after the heal, zk2py's follower recovered in
+  6.49–9.85 s and the debug zenctl in 28.5 s. Both are within step 10's
+  30 s, which the step asks beside 2,000.
+
+**The text, read cold.** 0.47's two changes say what zk2py found and
+measured. Read whole, §8.1 and `scenarios/presence.md` §9 and §10 hold
+three minor points:
+- F-250: §8.1's SHOULD on the interests timeout, read beside 0.45's MAY;
+- F-251: §8.1's figure for a namespaced history, which zk2py's own F-233
+  put past the scenarios' 5 s wait;
+- F-252: Expected 10's black box that prints nothing while the link is
+  cut.
+
+All three are wording only. None changes a verdict, a test or an
+implementation, in zk2py or in the reference. Not a finding: the
+CHANGELOG's 0.47–0.50 s for zenctl at `--every 0.5` is round 71's
+0.46–0.50 s. Nothing else was found ambiguous, contradictory or
+untestable.
+
+### F-250 · minor · core §8.1 (0.41, 0.45): "an interests timeout above their timeout" beside "its own timeout at or above its session's interests timeout"
+
+> §8.1 (0.41): "A reader whose GETs may wait longer SHOULD run its session
+> with an interests timeout above their timeout: its long reads can then
+> be complete (measured: the same read was whole, in 22 s, under a 120 s
+> interests timeout)."
+
+> §8.1 (0.45, F-243): "A reader MAY ask each GET with its own timeout at
+> or above its session's interests timeout, where zenoh's runtime ends it,
+> and bound its own wait apart, so that none ends before the reader can
+> take it up. zk2py's follower does so for its round trips and reads".
+
+Read word for word, the two cannot both be followed. A reader that takes
+the MAY asks each GET with its own timeout at or above the interests
+timeout. The SHOULD asks for an interests timeout above that same
+timeout. zk2py's follower runs its sessions at 120 s, and asks every GET
+with 121 s (`live.flight_timeout`). So it is the MAY's example, and by
+the letter it breaks the SHOULD.
+
+The SHOULD was written at 0.41, before a reader's wait and its GET's own
+timeout were told apart. Its reason, "its long reads can then be
+complete", is about how long the reader waits. Read that way the two
+agree: an interests timeout above the longest the reader waits for a
+read, and, under the MAY, a GET's own timeout at or above the interests
+timeout. zk2py's follower waits for a read as long as its caller sets,
+1 s by default and 30 s in §10 step 10, under its 120 s interests timeout.
+
+**zk2py:** unchanged. It reads "their timeout" as the reader's own wait.
+
+**Wording that would remove the guess:** "A reader whose reads may wait
+longer SHOULD run its session with an interests timeout above the longest
+it waits for one: its long reads can then be complete (…). A reader that
+asks each GET with its own timeout at or above the interests timeout
+(below) bounds that wait apart."
+
+### F-251 · minor · core §8.1 (0.42, F-233): "3.2–3.9 s (zk2py, a release build), past the scenarios' 5 s wait and zenoh's 10 s interests timeout"
+
+> §8.1 (0.42): "A history there brings the population back into every
+> round trip: 23 s beside 10,000 tokens (the reference, a debug build),
+> 3.2–3.9 s (zk2py, a release build), past the scenarios' 5 s wait and
+> zenoh's 10 s interests timeout, where the round trip does not stand
+> (above)."
+
+As written, both figures are past the scenarios' 5 s wait and the 10 s
+interests timeout. Only the debug build's 23 s is. zk2py's 3.2–3.9 s is
+within both, and a round trip that ends there stands. The slip is zk2py's
+own. Round 66's F-233 listed both figures, then said "That is past the
+scenarios' 5 s round-trip wait, and past zenoh's 10 s interests timeout",
+and 0.42 took the sentence over. Later rounds read it and missed it.
+
+Measured in this round, beside 10,000 tokens in `ns`, on zenoh-python
+1.10.1 routers, a release build, beside a Rust agent's builds:
+- in §10 step 4, a watch session in `ns` with history, its interests
+  timeout 60 s, made its round trip in 3.51, 5.87 and 3.70 s, with every
+  token heard by its end;
+- in step 8, zk2py's follower handed a watch session in `ns` with history
+  had its round trip stand after 3.09 s.
+
+So in a release build the history's round trip mostly fits the scenarios'
+5 s wait, and once in three went past it under load. It never went past
+the 10 s interests timeout. The SHOULD's reason stands: a history puts the
+population back into every round trip, and that cost grows with the
+population. Only the figures are misplaced.
+
+**zk2py:** unchanged. Its watch session is in no namespace, on the wire
+keys, as the SHOULD says.
+
+**Wording that would remove the guess:** "A history there brings the
+population back into every round trip: 23 s beside 10,000 tokens in a
+debug build (the reference), past the scenarios' 5 s wait and zenoh's
+10 s interests timeout, where the round trip does not stand (above), and
+3.1–5.9 s in a release build (zk2py), at the 5 s wait."
+
+### F-252 · minor · scenarios/presence.md §10 Expected 10 (0.47, F-249): a black box that prints nothing while the link is cut
+
+> Expected 10 (0.47): "A tool run as a black box is run with its output's
+> period at most half the cut (0.47, F-249: zk2py runs `zenctl watchdog`
+> at `--every 0.5` beside the 1 s cut), so that it prints at least once
+> while the link is cut, and judged on what its output shows: from its
+> first output after the cut until a complete read after the heal, every
+> address it followed unobservable, never down, and its read complete
+> within 30 s of the heal."
+
+"So that it prints at least once while the link is cut" holds for a tool
+whose output comes every period. `zenctl watchdog`'s does not. It
+evaluates once every `--every`, and prints only a transition: in this
+round's runs its output after the cut was two rows, unobservable at
+0.45–0.48 s and ok after the heal. The period ensures an evaluation while
+the link is cut. It ensures a row only for a tool whose state moves.
+
+A tool that never sees the move prints nothing. That is the fault §8.1's
+"A move unconfirms what the reader holds" is about. Then "its first
+output after the cut" names no output, and nothing in the window is
+judged. Its read is "complete within 30 s of the heal" only by the ok it
+printed before the cut. A tool that saw the move only after the heal
+prints its first row after the heal, and the window starts there. As
+written, the step says neither tool fails. The purpose clause points that
+way, but states no verdict.
+
+zk2py's runner fails both. Its check asks that the first transition after
+the cut go from ok to unobservable, and be printed before the heal.
+zenctl passes in every run. So the reading decides no verdict of either
+implementation. It decides only a tool that does not show the move.
+
+**zk2py:** unchanged since round 71, apart from refusing a period above
+half the cut.
+
+**Wording that would remove the guess:** "… so that it evaluates at least
+once while the link is cut, and judged on what its output shows: its
+first output after the cut, which comes while the link is cut, and every
+one after it until its first that shows a complete read after the heal,
+every address it followed unobservable, never down, and that read within
+30 s of the heal. A tool that prints nothing while the link is cut has
+not shown the move, and fails."
+
+**Counts at core 0.47:** 252 entries. Open: F-250 to F-252, against §8.1
+and `scenarios/presence.md` §10: three minor points, wording only. Every
+other entry is resolved.
