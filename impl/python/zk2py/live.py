@@ -139,7 +139,7 @@ from typing import Any
 
 import zenoh
 
-from . import bundle, keys
+from . import admin_records, bundle, keys
 
 #: Liveliness GET timeout: the caller's choice, 1 s in a conformance run (§8.1).
 PRESENCE_TIMEOUT_S = 1.0
@@ -1277,15 +1277,11 @@ S4_STORAGES = "@/*/router/status/plugins/storage_manager/storages/**"
 S4_STORAGES_011 = "@/*/router/**/storage_manager/storages/**"
 
 #: §4.2 (0.48; any node's, 0.50, F-253) "What a tool does not ask": a node's
-#: declaration records,
-#: ``@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**``, a
-#: router's, a peer's or a client's, its ``linkstate/*`` and its
-#: ``route/successor/src/<zid>/dst/<zid>``, which zenoh 1.10.1 answers while
-#: it holds its routing tables' read lock (Appendix B). §11.1 (0.50) forbids
-#: a generator to allow a query that intersects them
-#: (:func:`zk2py.acl.block_hazards`).
-ADMIN_RECORDS = tuple(f"@/*/*/{kind}/**" for kind in ("subscriber", "publisher", "queryable", "querier", "token")) \
-    + ("@/*/*/linkstate/*", "@/*/*/route/successor/**")
+#: declaration records, its ``linkstate/*`` and its ``route/successor/**``,
+#: which zenoh 1.10.1 answers while it holds its routing tables' read lock
+#: (Appendix B), from :mod:`zk2py.admin_records`, which the generator's
+#: §11.1 check reads too (:func:`zk2py.acl.block_hazards`).
+ADMIN_RECORDS = admin_records.ADMIN_RECORDS
 
 
 class AdminRecordsRefused(Exception):

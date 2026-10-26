@@ -3361,7 +3361,26 @@ def _admin_read_readings() -> list[tuple[str, Any, Any]]:
         ("under allow, a deny of query narrower than @/** does not",
          block([rule("d", ["@/*/router/**"], flows=["ingress"], permission="deny")], posture="allow"),
          [("allow_posture", None, None)]),
+        ("under allow, a deny of query on @/*/router alone does not",
+         block([rule("d", ["@/*/router"], flows=["ingress"], permission="deny")], posture="allow"),
+         [("allow_posture", None, None)]),
+        # zenoh's inclusion, not a string or glob test: `**` crosses no
+        # verbatim chunk (§1.3), so it includes no `@/…` key, and `@/*/**`
+        # needs a chunk after `@` that `@/**` does not
+        ("under allow, a deny of query on ** does not: ** includes no @/… key",
+         block([rule("d", ["**"], flows=["ingress"], permission="deny")], posture="allow"),
+         [("allow_posture", None, None)]),
+        ("under allow, a deny of query on @/*/** does not: it does not include @/**",
+         block([rule("d", ["@/*/**"], flows=["ingress"], permission="deny")], posture="allow"),
+         [("allow_posture", None, None)]),
+        ("under allow, a deny of reply on @/** does not: it is no query",
+         block([rule("d", ["@/**"], messages=("reply",), flows=["ingress"], permission="deny")], posture="allow"),
+         [("allow_posture", None, None)]),
     ]
+    for a, b, want in (("@/**", "@/*/router", True), ("**", "@/**", False), ("@/*/**", "@/**", False),
+                       ("@/*/router", "@/**", False), ("@/**", "@/**", True)):
+        out.append((f"{label}, the block check: zenoh's inclusion, {a} {'includes' if want else 'does not include'} "
+                    f"{b}", acl._includes(a, b), want))
     for note, b, want in cases:
         got = [(h.kind, h.flow, h.key) for h in acl.block_hazards(b)]
         out.append((f"{label}, the block check: {note}", got, want))

@@ -71,6 +71,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from .admin_records import ADMIN_RECORDS
 from .contract import Contract
 
 INGRESS, EGRESS = "ingress", "egress"
@@ -163,10 +164,14 @@ def _ke(text: str):
 
 
 def _includes(a: str, b: str) -> bool:
+    """Whether key expression ``a`` includes ``b``, by zenoh's own
+    ``KeyExpr.includes``."""
     return _ke(a).includes(_ke(b))
 
 
 def _intersects(a: str, b: str) -> bool:
+    """Whether key expressions ``a`` and ``b`` intersect, by zenoh's own
+    ``KeyExpr.intersects``."""
     return _ke(a).intersects(_ke(b))
 
 
@@ -403,9 +408,9 @@ def block_hazards(block: dict[str, Any]) -> list[AdminHazard]:
     """§11.1 (0.50) read against a router's ``access_control`` block,
     zk2py's or another generator's: every way it admits a GET of a node's
     declaration records (:class:`AdminHazard`). Empty for a ``deny`` block
-    that meets the MUST NOT. Rules no policy lists are inert, and skipped."""
-    from .live import ADMIN_RECORDS
-
+    that meets the MUST NOT. Rules no policy lists are inert, and skipped.
+    Inclusion and intersection are zenoh 1.10.1's own (:func:`_includes`,
+    :func:`_intersects`), never a string test."""
     if not block.get("enabled"):
         return [AdminHazard("disabled")]
     rules = {r["id"]: r for r in block.get("rules") or []}

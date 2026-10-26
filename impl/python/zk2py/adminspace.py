@@ -37,7 +37,8 @@ load, the churn and the probe log in as. The reader logs in as the tool,
 and the queryable on ``@/**`` is the router's own session's
 (``router --record``), since no principal may declare one.
 
-Exit 0 when the processes ran, 1 when a measurement could not be made.
+Exit 0 when the processes ran, 1 when a measurement could not be made: a
+process that did not come up, or a trial that asked nothing.
 """
 
 from __future__ import annotations
@@ -464,7 +465,11 @@ def _ask(session: Any, selector: str, timeout: float) -> dict[str, Any]:
     return {"replies": len(ok), "errors": errs, "ended": ended, "s": round(time.monotonic() - t0, 3)}
 
 
-#: the measurement's own principal under access control, and the tool's
+#: the measurement's own principal under access control, the tool and the
+#: service principal. The passwords are fixed and test-only: every router
+#: here listens on loopback alone (port 0), and reads them from a usrpwd
+#: dictionary written to a temporary directory of its own (:class:`_AclFiles`),
+#: removed once the trial ends.
 BENCH = ("bench", "pw-bench")
 TOOL = ("tool", "pw-tool")
 SERVICE = ("svc", "pw-svc")
@@ -563,6 +568,7 @@ def trial(selectors: list[str], records: int, churn: bool, timeout: float, settl
         recorder.take()
         out["asks"] = []
         out["froze_at"] = None
+        n = 0  # rounds run: none when asks is 0, a trial that measures nothing
         for n in range(1, asks + 1):
             for sel in selectors:
                 out["asks"].append(_ask(reader, sel, timeout))
@@ -645,9 +651,11 @@ def measure_main(args: argparse.Namespace) -> int:
                 return 1
             asks = t.pop("asks", [])
             heard = t.pop("heard", [])
-            # F-254: whether the queryable on @/** heard every GET asked,
-            # the last one, which froze the node in a frozen trial, included
-            heard_all = len(heard) >= len(asks)
+            # F-254, F-257: whether the queryable on @/** heard every GET
+            # asked, the last one, which froze the node in a frozen trial,
+            # included. A trial that asked nothing has no answer (None), and
+            # is reported apart, never as heard.
+            heard_all = len(heard) >= len(asks) if asks else None
             summary.setdefault(cell, []).append((t["frozen"], heard_all, len(asks)))
             t["asks"] = {"n": len(asks), "replies": [a["replies"] for a in asks][-3:],
                          "answered": sum(1 for a in asks if a["replies"]),
@@ -655,11 +663,18 @@ def measure_main(args: argparse.Namespace) -> int:
                          "slowest_s": max((a["s"] for a in asks), default=None)}
             t["heard"] = {"n": len(heard), "selectors": sorted(set(heard)), "every_get": heard_all}
             print(json.dumps({"cell": cell, "trial": i, **t}), flush=True)
+    unasked = 0
     for cell, rows in summary.items():
-        frozen = [r for r in rows if r[0]]
-        print(f"{cell}: froze in {len(frozen)} of {len(rows)} trials, {sum(r[2] for r in rows)} GETs; the queryable "
-              f"on @/** heard the freezing GET in {sum(1 for r in frozen if r[1])} of {len(frozen)}", flush=True)
-    return 0
+        asked = [r for r in rows if r[2]]
+        frozen = [r for r in asked if r[0]]
+        line = f"{cell}: froze in {len(frozen)} of {len(asked)} trials, {sum(r[2] for r in asked)} GETs; "
+        line += (f"the queryable on @/** heard the freezing GET in {sum(1 for r in frozen if r[1])} of {len(frozen)}"
+                 if frozen else "nothing froze, so no freezing GET to hear")
+        if len(asked) < len(rows):
+            line += f"; {len(rows) - len(asked)} trial(s) asked nothing, and measured nothing"
+            unasked += len(rows) - len(asked)
+        print(line, flush=True)
+    return 1 if unasked else 0
 
 
 def main(argv: list[str] | None = None) -> int:

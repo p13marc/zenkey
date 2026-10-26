@@ -3145,10 +3145,16 @@ records. zk2py read it cold in round 74.
     includes `@/**`, whose subjects' GETs reach the records ("This
     protects a router under deny alone");
   - `disabled`: access control not enabled.
-- **The `readings` family** gains 23 cases: the three reads reach no
+- **The records' patterns** live in `admin_records.py`, plain strings, so
+  `live`'s guard and `acl`'s check share them, and `import zk2py.acl`
+  loads no zenoh. Each intersects them with zenoh's own key expressions.
+- **The `readings` family** gains 32 cases: the three reads reach no
   record, 0.15's `@/*/router/**` reaches every family, §11.2's inclusion
   pairs by zenoh's own key expressions, the generator's grants and its
   refusal, and the block check on hand-made blocks and on a JSON5 one.
+  Under `allow`, only a deny of `query` that includes `@/**` keeps a
+  policy off: one on `@/*/router`, `@/*/router/**`, `@/*/**` or `**`
+  does not, since `**` crosses no verbatim chunk.
 
 **security.md §4** (`zk2py.security_scenarios`, the live runner's
 `security4`). R1 is a zenoh-python router in the runner's process,
@@ -3346,6 +3352,7 @@ impl/python/
     redundancy_scenarios.py redundancy.v1 scenarios.md §1–§12 and a re-mint, zk2py against itself
     state_scenarios.py §4.2     scenarios/state.md §3 and §12 on a router process, §10 against zk2py's owner,
                                 and §11's open cases
+    admin_records.py  §4.2 §11.1 the keys a node answers under its tables' read lock, shared by live and acl
     adminspace.py     §4.2 App. B a router or a peer in a process of its own, the load beside it, the @/** recorder,
                                 and the freeze measurement (never a suite), under access control too (0.50)
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops

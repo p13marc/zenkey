@@ -72,7 +72,6 @@ from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[3]
-DEFAULT_ZENCTL = REPO / "target" / "debug" / "zenctl"
 STORAGES = "status/plugins/storage_manager/storages"
 #: §4's storage, as R1's storage manager states it
 PLANS = ("plans", "zk2/ground/fleet-mgr/**")
@@ -94,6 +93,9 @@ ZENCTL_ENROLLMENTS = [
 
 
 def password(user: str) -> str:
+    """A fixed, test-only password: R1 listens on loopback alone (port 0),
+    and reads it from a usrpwd dictionary in a temporary directory, removed
+    at the end of the run."""
     return f"pw-{user}"
 
 
@@ -183,7 +185,7 @@ def _show(a: dict[str, Any]) -> str:
             f"errors {a['errors']}, {'complete' if a['complete'] else 'not complete'} in {a['ms']} ms")
 
 
-def _heard(r1: R1, a: dict[str, Any]) -> list[str]:
+def _heard(r1: R1) -> list[str]:
     """What the recorder heard of one GET. Its callback runs before the GET's
     final reply can come, so by the time the GET has ended it has heard it."""
     time.sleep(0.05)
@@ -353,7 +355,7 @@ def _section4(report: Any, b: Blocks, workdir: str) -> None:
         got = {}
         for sel in READS:
             a = ask(tool, sel)
-            got[sel] = (a, _heard(r1, a))
+            got[sel] = (a, _heard(r1))
         routers, storages, roots = (got[s][0] for s in READS)
         plans = [json.loads(p).get("key_expr") for k, _, p in storages["values"] if k == r1.storage_key]
         report.check(run, "expected 1: R1 answers each of step 1's reads: its document, plans with its key_expr, "
@@ -369,7 +371,7 @@ def _section4(report: Any, b: Blocks, workdir: str) -> None:
         got2 = {}
         for sel in REFUSED:
             a = ask(tool, sel)
-            got2[sel] = (a, _heard(r1, a))
+            got2[sel] = (a, _heard(r1))
         mine = f"@/{tool_zid}/session/"
         foreign = {s: [(k, r) for k, r, _ in got2[s][0]["values"] if not (k.startswith(mine) and r in (tool_zid, None))]
                    for s in REFUSED}
@@ -387,7 +389,7 @@ def _section4(report: Any, b: Blocks, workdir: str) -> None:
         got3 = {}
         for sel in READS:
             a = ask(svc, sel)
-            got3[sel] = (a, _heard(r1, a))
+            got3[sel] = (a, _heard(r1))
         report.check(run, "expected 3: nothing answers the service principal's three reads, each GET complete, and "
                           "the recorder hears none of them",
                      all(not got3[s][0]["values"] and got3[s][0]["complete"] and not got3[s][1] for s in READS),
@@ -402,9 +404,9 @@ def _section4(report: Any, b: Blocks, workdir: str) -> None:
         r1.recorder.take()
         own = f"@/{r1.zid}/router"
         mesh = ask(tool, "@/*/*")
-        mesh_heard = _heard(r1, mesh)
+        mesh_heard = _heard(r1)
         routers = ask(tool, "@/*/router")
-        routers_heard = _heard(r1, routers)
+        routers_heard = _heard(r1)
         report.check(run, "expected 4: under 0.15's admin read (@/*/router, @/*/router/**), @/*/* is refused, "
                           "complete and unheard, though both keys intersect it; @/*/router is answered and heard",
                      not mesh["values"] and mesh["complete"] and not mesh_heard
@@ -432,7 +434,7 @@ def _under_allow(report: Any, b: Blocks, workdir: str) -> None:
         time.sleep(0.5)
         r1.recorder.take()
         a = ask(tool, "@/*/router/queryable/**")
-        heard = _heard(r1, a)
+        heard = _heard(r1)
         record = f"@/{r1.zid}/router/queryable/{b.held}"
         report.check(run, "the tool's GET of R1's queryable records is admitted: the recorder hears it, and R1 "
                           "answers the service principal's record; zk2py's block check names every policy open",
@@ -461,9 +463,9 @@ def _inclusion(report: Any, workdir: str) -> None:
         for user, (allowed, asked) in pairs.items():
             k_a, k_q = zenoh.KeyExpr(allowed), zenoh.KeyExpr(asked)
             inside = ask(sessions[user], allowed)
-            inside_heard = _heard(r1, inside)
+            inside_heard = _heard(r1)
             outside = ask(sessions[user], asked)
-            outside_heard = _heard(r1, outside)
+            outside_heard = _heard(r1)
             report.check(run, f"under an allowed {allowed} alone, {asked} (which it intersects and does not include) "
                               f"is refused, complete, empty and unheard; {allowed} itself is answered and heard",
                          k_a.intersects(k_q) and not k_a.includes(k_q)

@@ -13788,13 +13788,14 @@ read, as a newcomer would:
   cells. Each runs the router in a process of its own under zk2py's block
   for the two principals, plus `bench`, the measurement's own principal
   for the load, the churn and the probe. Each trial kills the router.
-- **`readings`** gains 23 cases (458).
+- **`readings`** gains 32 cases (467). The records' patterns moved to
+  `admin_records.py`, which `live` and `acl` share without zenoh.
 
 **Round 73's findings at 0.50:** F-253, F-254 and F-255 are resolved, as
 proposed. Each entry has its status line. One clause of F-254's proposed
 wording proves wider than measured (F-257).
 
-**`just py-conformance`: 3089 of 3089.**
+**`just py-conformance`: 3098 of 3098.**
 
 **Live,** on `owner-wl`, `zenctl-wl` and `consume-wl`:
 
