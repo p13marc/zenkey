@@ -1455,7 +1455,7 @@ def _s10_run(endpoint: str, tools: list[Any], address: str, *, round_trip: bool,
         if round_trip:
             rt = live.settle(w.session, 5.0, selector=watch_selector)
             out["rt"] = rt
-            out["rt_end"] = rt.asked_ns / 1e9 + rt.elapsed_s
+            out["rt_end"] = rt.ended_ns / 1e9 if rt.ended_ns else rt.asked_ns / 1e9 + rt.elapsed_s
         out["seed"] = all(_reads_held(t, h.key, timeout=2.0) for t in tools)
         h.withdraw()
         out["gone"] = all(_reads_gone(t, h.key) for t in tools)
@@ -2124,7 +2124,10 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
         three = [barrier.round_trip(0.0) for _ in range(3)]
         fourth = barrier.round_trip(30.0)
         told_by_end = list(heard)
-        rt_end = fourth.asked_ns / 1e9 + fourth.elapsed_s
+        # its final reply's hand-over, stamped in the GET's drop callback
+        # (round 72: asked + elapsed is off it by the links check and a
+        # thread's wake-up, and once fell 4.4 ms short)
+        rt_end = fourth.ended_ns / 1e9 if fourth.ended_ns else fourth.asked_ns / 1e9 + fourth.elapsed_s
         told = {k for t, kind, k in told_by_end if t >= t_heal and kind == "put"}
         want = {f"{NS}/{k}" for k in after}
         victim_told = [x for x in heard if gone and x[2] == f"{NS}/{gone[0]}"]
@@ -2139,7 +2142,8 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
                           "been told all of them",
                      fourth.finished and want <= told and last_told is not None and last_told <= rt_end + 0.001,
                      f"{fourth.elapsed_s * 1000:.0f} ms, the last told {((last_told or 0) - rt_end) * 1000:.1f} ms "
-                     "from its end")
+                     f"from its end (its drop callback; asked + elapsed "
+                     f"{(fourth.asked_ns / 1e9 + fourth.elapsed_s - rt_end) * 1000:.1f} ms from it)")
         gets_after = [g for g in w.gets[n_gets:]]
         report.check(sec, "10. the reader under test asks its round trip four times in a row, giving up on the first "
                           "three at once and waiting 30 s for the fourth, through its own interface (0.45): its round "

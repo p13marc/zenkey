@@ -125,6 +125,7 @@ blocking GET keeps its own timeout as its wait.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import queue
 import re
@@ -575,6 +576,13 @@ class RoundTrip:
     #: default was taken: a round trip judged "before the interests
     #: timeout" rests on it (§8.1, 0.42, F-232)
     interests_timeout_assumed: bool = False
+    #: monotonic ns when its final reply was handed over (the GET's drop
+    #: callback ran), 0 when none came. ``asked_ns`` is taken before the
+    #: links are checked, and ``elapsed_s`` runs from just before the GET to
+    #: the asking thread's wake-up, so ``asked_ns + elapsed_s`` is off the
+    #: end by a few ms either way (round 72: at least 4.4 ms short beside a
+    #: reopen's telling, a runner's false failure)
+    ended_ns: int = 0
 
     def __bool__(self) -> bool:
         return self.stands
@@ -604,17 +612,23 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
     done = threading.Event()
     errors: list[Any] = []
     oks: list[Any] = []
+    ended: list[int] = []
+
+    def drop() -> None:
+        ended.append(time.monotonic_ns())
+        done.set()
+
     t0 = time.monotonic()
     try:
         watch.liveliness().get(key, zenoh.handlers.Callback(
-            lambda r: (errors if r.ok is None else oks).append(r), done.set), timeout=timeout)
+            lambda r: (errors if r.ok is None else oks).append(r), drop), timeout=timeout)
     except Exception as e:  # noqa: BLE001 - a closed or broken session makes no round trip
         return RoundTrip(False, False, key, f"the GET could not be made: {e!r}", asked_ns=asked)
     finished = done.wait(timeout + 5.0)
     elapsed = time.monotonic() - t0
     after = links_held(watch)
     rt = dict(key=key, elapsed_s=elapsed, finished=finished, errors=len(errors), tokens=len(oks), asked_ns=asked,
-              interests_timeout_assumed=not interests_timeout_known(watch))
+              interests_timeout_assumed=not interests_timeout_known(watch), ended_ns=ended[0] if ended else 0)
     if not finished:
         return RoundTrip(False, True, why="no final reply", **rt)
     if errors:
@@ -809,8 +823,7 @@ class Barrier:
             moved = fl.gen != self.gen
         why = MOVED_DURING if moved else CUT_OFF_SINCE if held is False else LINKS_UNREADABLE if held is None else ""
         if rt.stands and why:
-            rt = RoundTrip(False, rt.made, rt.key, why, rt.elapsed_s, rt.finished, rt.errors, rt.tokens,
-                           rt.asked_ns, rt.interests_timeout_assumed)
+            rt = dataclasses.replace(rt, stands=False, why=why)
         return rt, fl
 
     def round_trip(self, wait: float | None = PRESENCE_TIMEOUT_S) -> RoundTrip:
