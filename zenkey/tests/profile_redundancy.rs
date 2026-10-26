@@ -939,7 +939,10 @@ async fn start_together(ep: &str, a: Opts, b: Opts) -> (Candidate, Candidate) {
             rt.block_on(p.start())
         })
     };
-    let (a, b) = (release(a.unwrap()), release(b.unwrap()));
+    // Both prepared before either is released: a thread waiting at the
+    // barrier for a partner that never comes would hang the test.
+    let (a, b) = (a.unwrap(), b.unwrap());
+    let (a, b) = (release(a), release(b));
     let started = |r: Result<Result<Candidate, Error>, tokio::task::JoinError>| match r {
         Ok(c) => c.unwrap(),
         Err(e) => std::panic::resume_unwind(e.into_panic()),
@@ -952,7 +955,15 @@ fn spread_of(spreads: &[Duration]) -> String {
     let mut s = spreads.to_vec();
     s.sort();
     match (s.first(), s.last()) {
-        (Some(lo), Some(hi)) => format!("{lo:?} to {hi:?}, median {:?}", s[s.len() / 2]),
+        (Some(lo), Some(hi)) => {
+            let n = s.len();
+            let median = if n.is_multiple_of(2) {
+                (s[n / 2 - 1] + s[n / 2]) / 2
+            } else {
+                s[n / 2]
+            };
+            format!("{lo:?} to {hi:?}, median {median:?}")
+        }
         _ => "none".to_owned(),
     }
 }
