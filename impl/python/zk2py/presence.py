@@ -66,6 +66,18 @@ Core 0.42 (#609, round 67):
   watch session is **unconfirmed**" and "A read made while no round trip
   stands, a seed or a re-read … is possibly incomplete": 0.41's
   :data:`MOVED` and unordered reads, unchanged (F-229 was zk2py's reading).
+
+Core 0.44 (#609, round 69):
+- "A token declared then is told when the transport opens again, unordered
+  with the reader's reads": a put heard at the reopen is positive evidence,
+  as any put heard is, never evidence of what went (:meth:`PresenceView.heard`,
+  unchanged).
+- "A reader SHOULD wait for the round trip after a move": after the first
+  move the follower's round trip waits until it ends (``move_wait_s``).
+- "One round trip, and one read, at a time": its round trips go through a
+  :class:`zk2py.live.Barrier` and its reads through a
+  :class:`zk2py.live.Flight`, each taken up by the next attempt when a wait
+  ends first, never asked again beside it.
 """
 
 from __future__ import annotations
@@ -382,13 +394,32 @@ class PresenceFollower:
     (:data:`zk2py.live.WATCH_CUT_OFF`), asking no GET, once for each move
     and token move heard; the next waits for the transport to open (its
     event asks it), checked every ``max_retry_s`` in case that event is
-    lost. In a namespace its watch session is in none, on the wire keys."""
+    lost. In a namespace its watch session is in none, on the wire keys.
+
+    0.44 (#882, F-239):
+    - **One round trip, and one read, at a time.** Its round trips go
+      through a :class:`zk2py.live.Barrier`, told each move as the follower
+      hears it, and its reads through a :class:`zk2py.live.Flight` of its
+      own, each GET's own timeout above its session's interests timeout
+      (:func:`zk2py.live.flight_timeout`). A wait that ends first, ``timeout``
+      for a read and ``round_trip_timeout`` for a round trip, leaves the
+      GET running, and the next attempt takes it up: it never asks a round
+      trip beside one asked since the last move, nor a read beside its read
+      in flight.
+    - **The round trip after a move waits for the population.** After the
+      first move heard its wait is ``move_wait_s``, by default until the
+      round trip ends (at the latest at the watch session's interests
+      timeout): "A reader SHOULD wait for the round trip after a move".
+    - Its caller can wait for the next change, :meth:`next_move`, as long
+      as it likes: its reads run on its own timers, so a wait that ends
+      cancels nothing."""
 
     def __init__(self, session: Any, watch: Any, selector: str = "zk2/*/*/@zk/**", *,
                  reread_delay_s: float = REREAD_DELAY_S, retry_s: float = 0.2, max_retry_s: float = 5.0,
                  timeout: float = 1.0, round_trip: bool = True, history: bool | None = None,
                  round_trip_timeout: float | None = None, follow_moves: bool = True,
-                 namespace: str | None = None) -> None:
+                 namespace: str | None = None, move_wait_s: float | None = None,
+                 read_get_timeout: float | None = None) -> None:
         """``round_trip`` False makes the reader core §8.1 warns of, a
         scenario's control (presence.md §9 step 5, §10 step 2): no round trip
         on the watch session, and every read taken as ordered.
@@ -397,7 +428,10 @@ class PresenceFollower:
         ``namespace`` is the deployment's, the reading session's as recorded
         by default (0.42): with a watch session in no namespace the follower
         watches its wire keys, without history; with one in a namespace it
-        keeps history (0.41's option). ``history`` overrides either."""
+        keeps history (0.41's option). ``history`` overrides either.
+        ``move_wait_s`` is the round trip's wait after a move, None until it
+        ends (0.44); ``read_get_timeout`` a read's own GET timeout, by
+        default above its session's interests timeout (0.44)."""
         import zenoh
 
         from . import live
@@ -405,6 +439,8 @@ class PresenceFollower:
         self.session, self.watch, self.selector = session, watch, selector
         self.delay, self.timeout = reread_delay_s, timeout
         self.rt_timeout = timeout if round_trip_timeout is None else round_trip_timeout
+        self.move_wait = move_wait_s
+        self.read_get_timeout = read_get_timeout
         self.retry_min, self.retry_max = retry_s, max_retry_s
         self.backoff = retry_s
         self.round_trip = round_trip
@@ -420,6 +456,22 @@ class PresenceFollower:
         self.outside = 0
         self.view = PresenceView(selector)
         self.lock = threading.Lock()
+        #: every change of the view, for :meth:`next_move`
+        self._changed = threading.Condition(self.lock)
+        self.version = 0
+        #: the watch session's round trips, one at a time (0.44)
+        self.barrier = live.Barrier(watch, self.wire)
+        #: the read in flight, or the last one (0.44)
+        self._read_flight: Any = None
+        #: reads asked, and reads in flight taken up by a later attempt
+        self.read_flights = 0
+        self.reads_taken_up = 0
+        #: waits that ended before their answer: a round trip's, a read's
+        self.rt_waits_ended = 0
+        self.read_waits_ended = 0
+        #: whether this attempt's round trip stood (a binding without
+        #: transport events: it stands for the read right after it alone)
+        self._rt_now = False
         self._attempting = threading.Lock()
         self._timer: threading.Timer | None = None
         self._due: float | None = None
@@ -453,6 +505,7 @@ class PresenceFollower:
                     self.outside += 1
                     return
                 self.view.heard(key, kind)
+                self._bump()
                 owed = self.view.owes_read
             if owed:
                 self._schedule(self.delay)
@@ -461,8 +514,12 @@ class PresenceFollower:
             kind = "close" if event.kind == zenoh.SampleKind.DELETE else "open"
             with self.lock:
                 self.gen += 1
+                # told under the lock, so the barrier's count and the
+                # follower's move together (0.44)
+                self.barrier.moved()
                 self.moves.append((time.monotonic_ns(), kind))
                 self.view.moved()
+                self._bump()
                 self.backoff = self.retry_min
             self._schedule(self.delay)
 
@@ -519,24 +576,56 @@ class PresenceFollower:
 
     @property
     def idle(self) -> bool:
-        """No read scheduled, and none owed."""
+        """No read scheduled, none owed, and none in flight."""
         with self.lock:
-            return self._timer is None and not self.view.owes_read
+            fl = self._read_flight
+            return self._timer is None and not self.view.owes_read and (fl is None or fl.consumed)
+
+    def _bump(self) -> None:
+        """The view changed (the lock held): :meth:`next_move` wakes."""
+        self.version += 1
+        self._changed.notify_all()
+
+    def next_move(self, wait: float | None = None) -> int | None:
+        """Wait up to ``wait`` (None: for ever) for the view's next change: the
+        new version, or None when the wait ended first or the follower was
+        closed. A caller may stop waiting whenever it likes (presence.md §10
+        step 10's loop, waking every 20 ms): the follower's reads and round
+        trips run on its own timers, never on this call, so a wait that ends
+        drops nothing in flight (core §8.1, 0.44)."""
+        with self._changed:
+            v = self.version
+            if self._closed:
+                return None
+            got = self._changed.wait_for(lambda: self.version != v or self._closed, wait)
+            return self.version if got and not self._closed else None
 
     def _make_round_trip(self) -> None:
-        """One round trip on the watch session unless one stands; settle()
-        makes none through a session cut off (it would be answered at once)."""
+        """One round trip on the watch session unless one stands, through the
+        barrier (0.44): the round trip in flight taken up, or one asked; its
+        wait ``rt_timeout``, and after a move ``move_wait_s`` (None: until it
+        ends, "A reader SHOULD wait for the round trip after a move"). A wait
+        that ends first records nothing: the round trip runs on, and the next
+        attempt takes it up. settle() makes none through a session cut off
+        (it would be answered at once)."""
         from . import live
 
         with self.lock:
+            self._rt_now = False
             if not self.round_trip or (self.listener is not None and self._stands()):
                 return
-            gen = self.gen
-        rt = live.settle(self.watch, self.rt_timeout, selector=self.wire)
+            wait = self.rt_timeout if self.gen == 0 else self.move_wait
+        rt, fl = self.barrier.ask(wait)
         with self.lock:
+            self._rt_now = rt.stands
+            if rt.why == live.WAIT_ENDED:
+                self.rt_waits_ended += 1
+                return
+            # the barrier hands each answer back once
             self.round_trips.append(rt)
-            if rt.stands and self.gen == gen:
-                self._stood = gen
+            # the barrier's count moves with the follower's, under this lock
+            if rt.stands and fl.gen == self.gen:
+                self._stood = fl.gen
 
     def _attempt(self) -> None:
         """A round trip unless one stands, one read, and the next one
@@ -562,11 +651,12 @@ class PresenceFollower:
                     self.backoff = min(self.backoff * 2, self.retry_max)
                 self._schedule(again)
                 return
-            ok = False
+            ok = running = False
             try:
                 self._make_round_trip()
                 p = self.read(_after_round_trip=True)
-                ok = p.kind == live.COMPLETE and self.folds[-1][1]
+                running = p is None
+                ok = p is not None and p.kind == live.COMPLETE and self.folds[-1][1]
             except Exception as e:  # noqa: BLE001 - a read that raised is retried, never fatal
                 with self.lock:
                     self.failures.append(e)
@@ -575,6 +665,10 @@ class PresenceFollower:
                 if ok:
                     self.backoff = self.retry_min
                     again = self.retry_min if owed else None
+                elif running:
+                    # its wait ended first: the read runs on, and the next
+                    # attempt takes it up (0.44), asking none beside it
+                    again = self.retry_min
                 else:
                     again = self.backoff
                     self.backoff = min(self.backoff * 2, self.retry_max)
@@ -607,24 +701,71 @@ class PresenceFollower:
         when ``unordered``, when no round trip stands, or when the watch
         session's transport moved while it ran (core §8.1, 0.41), or its
         links were gone at its end; not made, asking no GET, while the watch
-        session holds no link (0.42: :data:`zk2py.live.WATCH_CUT_OFF`)."""
+        session holds no link (0.42: :data:`zk2py.live.WATCH_CUT_OFF`).
+
+        0.44: "nor ask a read while one it asked of the same scope is [in
+        flight]: the next that needs one takes up the one in flight". A read
+        not yet folded is taken up, whatever this call's arguments; else one
+        is asked, its GET on a :class:`zk2py.live.Flight` whose own timeout
+        is above the session's interests timeout. The wait is ``timeout``:
+        None when it ends first, the read running on for the next call."""
         from . import live
 
         with self.lock:
-            asked = self.view.asked()
-            gen = self.gen
-            self._read_at = (gen, len(self.view.events))
-            ordered = not unordered and self._stands_for_read(_after_round_trip)
-        if self._watch_cut_off():
-            # 0.42: no GET on either session; what it would establish is
-            # unobservable until the transport opens and a round trip stands
-            p = live.Presence(not_made=live.WATCH_CUT_OFF)
-        else:
-            p = live.list_presence(self.session, self.selector, self.timeout)
-            # the watch session's link gone while the read ran: its
-            # subscribers may not have heard what moved meanwhile
-            if self.round_trip and live.links_held(self.watch) is not True:
-                ordered = False
+            fl = self._read_flight
+            pending = fl is not None and not fl.consumed
+            if pending:
+                fl.taken_up += 1
+                self.reads_taken_up += 1
+        if not pending:
+            with self.lock:
+                asked = self.view.asked()
+                gen = self.gen
+                self._read_at = (gen, len(self.view.events))
+                ordered = not unordered and self._stands_for_read(_after_round_trip)
+            if self._watch_cut_off():
+                # 0.42: no GET on either session; what it would establish is
+                # unobservable until the transport opens and a round trip stands
+                p = live.Presence(not_made=live.WATCH_CUT_OFF)
+                self._fold(p, asked, gen, False)
+                return p
+            timeout = (live.flight_timeout(self.session, self.timeout) if self.read_get_timeout is None
+                       else self.read_get_timeout)
+
+            def go() -> tuple[Any, bool | None]:
+                p = live.list_presence(self.session, self.selector, timeout)
+                # the watch session's link gone while the read ran: its
+                # subscribers may not have heard what moved meanwhile
+                return p, (live.links_held(self.watch) if self.round_trip else True)
+
+            fl = live.Flight(gen, {"asked": asked, "ordered": ordered})
+            with self.lock:
+                self._read_flight = fl
+                self.read_flights += 1
+            fl.run(go)
+        if not fl.wait(self.timeout):
+            with self.lock:
+                self.read_waits_ended += 1
+            return None
+        with self.lock:
+            if fl.consumed:
+                # folded by another caller of read(): its answer, once
+                return fl.meta.get("presence")
+            fl.consumed = True
+            if fl.error is None:
+                fl.meta["presence"] = fl.result[0]
+        if fl.error is not None:
+            raise fl.error
+        p, watch_after = fl.result
+        ordered = fl.meta["ordered"] and not (self.round_trip and watch_after is not True)
+        self._fold(p, fl.meta["asked"], fl.gen, ordered)
+        return p
+
+    def _fold(self, p: Any, asked: int, gen: int, ordered: bool) -> None:
+        """A read's answer folded, as of when it was asked (``asked``, at the
+        move count ``gen``)."""
+        from . import live
+
         if p.kind == live.NOT_MADE:
             # a read not made orders nothing, whichever check found it not
             # makeable: folded and recorded unordered (review-bot on PR #879;
@@ -640,15 +781,14 @@ class PresenceFollower:
             self.view.answered(Read(asked, self.selector, p.kind, found, ordered=ordered))
             self.reads.append(p)
             self.folds.append((p.kind, ordered))
-        return p
+            self._bump()
 
     def _stands_for_read(self, after_round_trip: bool) -> bool:
         if self._stands():
             return True
         # without transport events, the round trip just made stands for the
         # read that follows it
-        return (self.round_trip and self.listener is None and after_round_trip and bool(self.round_trips)
-                and bool(self.round_trips[-1]))
+        return self.round_trip and self.listener is None and after_round_trip and self._rt_now
 
     def address(self, system: str, service: str) -> tuple[str, str]:
         with self.lock:
@@ -659,6 +799,7 @@ class PresenceFollower:
             self._closed = True
             if self._timer is not None:
                 self._timer.cancel()
+            self._changed.notify_all()
         for x in (getattr(self, "sub", None), getattr(self, "listener", None)):
             try:
                 if x is not None:

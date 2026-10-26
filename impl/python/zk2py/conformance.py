@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -2806,8 +2807,9 @@ def _round_trip_readings() -> list[tuple[str, Any, Any]]:
          (False, True, live.CUT_OFF_DURING, [key])),
         (f"{label}: one that ended with an error reply (its timeout) does not stand", rt([up, up], errors=1)[:2],
          (False, True)),
-        (f"{label}: one ended at the interests timeout is not made",
-         rt([up, up], delay=0.06, its=0.05), (False, False, live.AT_INTERESTS_TIMEOUT, [key])),
+        (f"{label}: one ended at the interests timeout does not stand, and was made: asked, it establishes nothing "
+         "(0.44, F-240: \"as not standing\"; 0.41 said \"as not made\")",
+         rt([up, up], delay=0.06, its=0.05), (False, True, live.AT_INTERESTS_TIMEOUT, [key])),
         (f"{label}: links that cannot be read before it: no GET, not standing (review of PR #876)",
          rt([RuntimeError("no links")]), (False, False, live.LINKS_UNREADABLE, [])),
         (f"{label}: links that cannot be read at its end leave it not standing",
@@ -3001,6 +3003,142 @@ def _watch_wire_readings() -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
+    """Core 0.44 §8.1 in :mod:`zk2py.live` and :mod:`zk2py.presence`, on fake
+    sessions whose GETs take a while (#609, round 69): one round trip, and
+    one read, at a time, the next that needs one taking up the one in
+    flight; a round trip asked before a move standing for nothing after
+    it; the round trip after a move waited for; and a caller's wait for
+    the next change that drops nothing."""
+    import zenoh
+
+    from . import live
+    from . import presence as pr
+
+    tok = "zk2/lab/o/@zk/instance/" + "a" * 16
+    sel = "zk2/*/*/@zk/instance/*"
+    key = live.settle_key(sel)
+    up = [object()]
+    out: list[tuple[str, Any, Any]] = []
+
+    def until(cond: Any, limit: float = 5.0) -> bool:
+        end = time.monotonic() + limit
+        while time.monotonic() < end:
+            if cond():
+                return True
+            time.sleep(0.01)
+        return bool(cond())
+
+    label = "core 0.44 §8.1, zk2py's barrier"
+    w = _FakeSession([], [up], delay_s=0.3)
+    live.register(w, interests_timeout_s=60.0)
+    b = live.Barrier(w, sel)
+    four = [b.round_trip(0.0) for _ in range(3)] + [b.round_trip(5.0)]
+    out += [
+        (f"{label}: its round trip asked four times in a row, the first three given up on at once and the fourth "
+         "waited for: one GET, the three not standing, their wait ended, and the fourth taking it up and standing "
+         "(presence.md §10 step 10)",
+         [w.asked, [r.why == live.WAIT_ENDED and r.made and not r.stands for r in four[:3]], four[3].stands,
+          b.asked, b.taken_up, len({r.asked_ns for r in four[:3]}), four[3].asked_ns >= four[0].asked_ns],
+         [[key], [True, True, True], True, 1, 3, 1, True]),
+        (f"{label}: a flight's own GET timeout is above its session's interests timeout, never below the caller's",
+         [live.flight_timeout(w), live.flight_timeout(w, 90.0), live.flight_timeout(_FakeSession([], [up]))],
+         [61.0, 90.0, live.ZENOH_INTERESTS_TIMEOUT_S + 1.0]),
+    ]
+    # a move: the one in flight was asked before it, so the next asks anew,
+    # and the first stands for nothing after the move
+    w = _FakeSession([], [up], delay_s=0.3)
+    live.register(w, interests_timeout_s=60.0)
+    b = live.Barrier(w, sel)
+    first: list[Any] = []
+    t = threading.Thread(target=lambda: first.append(b.round_trip(5.0)))
+    t.start()
+    until(lambda: w.asked == [key])
+    b.moved()
+    second = b.round_trip(5.0)
+    t.join(5.0)
+    out.append((f"{label}: a move while one is in flight: the next asks another (\"since its watch session's "
+                "transport last moved\"), and the first stands for nothing after the move",
+                [w.asked, b.asked, first[0].stands if first else None, first[0].why if first else None, second.stands],
+                [[key, key], 2, False, live.MOVED_DURING, True]))
+    # an ended one is not taken up: a new one is asked
+    w = _FakeSession([], [up])
+    live.register(w, interests_timeout_s=60.0)
+    b = live.Barrier(w, sel)
+    a1, a2 = b.round_trip(5.0), b.round_trip(5.0)
+    out.append((f"{label}: one that ended is in flight no more: the next asks its own",
+                [w.asked, a1.stands, a2.stands, b.taken_up], [[key, key], True, True, 0]))
+    for x in (w,):
+        live.forget(x)
+
+    label = "core 0.44 §8.1, zk2py's follower"
+    # its reading session slow: the read's wait ends first, the read runs on,
+    # and the next read takes it up, asking no second GET
+    r, w = _FakeSession([tok], [up], delay_s=0.3), _FakeSession([], [up])
+    live.register(r, interests_timeout_s=120.0)
+    live.register(w, interests_timeout_s=120.0)
+    f = pr.PresenceFollower(r, w, sel, timeout=0.05, retry_s=60.0, max_retry_s=60.0)
+    after_start = [list(r.asked), f.read_waits_ended, list(f.folds), f.idle]
+    f.timeout = 5.0
+    p = f.read()
+    taken = [list(r.asked), f.reads_taken_up, list(f.folds), p.kind if p is not None else None, f.address("lab", "o")]
+    f.read()
+    again = list(r.asked)
+    f.close()
+    out += [
+        (f"{label}: its read's wait ends first: no answer yet, the read in flight, not idle",
+         after_start, [[sel], 1, [], False]),
+        (f"{label}: the next read takes it up: one GET, folded once, ordered",
+         taken, [[sel], 1, [(live.COMPLETE, True)], live.COMPLETE, (pr.UP, "")]),
+        (f"{label}: one ended and folded is in flight no more: the next read asks its own", again, [sel, sel]),
+    ]
+    live.forget(r)
+    live.forget(w)
+    # after a move, its round trip waits until it ends: the wait at its start
+    # (round_trip_timeout) ends first, the one after the move does not
+    r, w = _FakeSession([tok], [up]), _FakeSession([], [up], delay_s=0.3)
+    live.register(r, interests_timeout_s=120.0)
+    live.register(w, interests_timeout_s=120.0)
+    f = pr.PresenceFollower(r, w, sel, round_trip_timeout=0.05, retry_s=60.0, max_retry_s=60.0)
+    start = [f.rt_waits_ended, list(f.folds[:1]), len(w.listeners)]
+    until(lambda: not f.barrier.in_flight)
+    n_rt = len(f.round_trips)
+
+    class _Event:
+        kind = zenoh.SampleKind.PUT
+
+    w.listeners[0].callback(_Event())
+    ok = until(lambda: f.folds[-1:] == [(live.COMPLETE, True)] and len(f.folds) >= 2)
+    out += [
+        (f"{label}: at its start the round trip's wait ends first, and its read is unordered",
+         start, [1, [(live.COMPLETE, False)], 1]),
+        (f"{label}: after a move it waits for the round trip (\"A reader SHOULD wait for the round trip after a "
+         "move\"): no wait ended, the round trip stands, then an ordered read",
+         [ok, f.rt_waits_ended, [bool(x) for x in f.round_trips[n_rt:]], len(w.asked)], [True, 1, [True], 2]),
+    ]
+    # its caller's wait for the next change: none, then one
+    sub = w.subscribers[0][1]
+    nothing = f.next_move(0.02)
+    threading.Timer(0.05, lambda: sub.callback(_Sample(tok.replace("lab/o", "lab/q")))).start()
+    moved = f.next_move(5.0)
+    f.close()
+    out.append((f"{label}: its caller's wait for the next change ends with nothing when nothing moved, and drops "
+                "nothing; a token heard is a change", [nothing, moved is not None, f.address("lab", "q")],
+                [None, True, (pr.UP, "")]))
+    live.forget(r)
+    live.forget(w)
+    return out
+
+
+class _Sample:
+    """A liveliness sample for a fake subscriber: its key and kind."""
+
+    def __init__(self, key: str, kind: Any = None) -> None:
+        import zenoh
+
+        self.key_expr, self.kind = key, kind if kind is not None else zenoh.SampleKind.PUT
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -3013,7 +3151,7 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
-        + _watch_wire_readings()
+        + _watch_wire_readings() + _one_at_a_time_readings()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
