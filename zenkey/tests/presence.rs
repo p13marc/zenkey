@@ -2122,12 +2122,17 @@ async fn a_round_trip_in_flight_is_taken_up_not_asked_again() {
     assert!(!barrier.in_flight());
     assert_eq!(presence::liveliness_gets(&watch).settles - asked, 1);
 
-    // A move loses it; the next waiter asks a new one, which stands.
+    // A move loses it; the next waiter asks a new one, which stands. The
+    // waiter asks it once both moves are counted, the close and the open:
+    // the open's event can follow the links by a moment, and a round trip
+    // asked before it is one the waiter leaves for the new state's (a
+    // second one asked, as the move rule wants).
+    let seen = barrier.moves();
     link.cut();
     eventually("the watch session cut off", || presence::cut_off(&watch)).await;
     link.heal();
-    eventually("the watch session reconnected", || async {
-        !presence::cut_off(&watch).await
+    eventually("the watch session's transport opened again", || async {
+        barrier.moves() >= seen + 2
     })
     .await;
     assert!(!barrier.established(), "lost with the transport");

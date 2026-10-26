@@ -545,8 +545,10 @@ struct BarrierInner {
     timeout: Duration,
     /// Bumped by every transport event of the session.
     moved: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    /// The `moved` count a barrier was established at; `u64::MAX` for none.
-    at: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// One more than the `moved` count of the latest round trip that stood;
+    /// 0 for none. Raised by `fetch_max` alone, so it never goes back: a
+    /// round trip that stood at an older count can never undo a newer one's.
+    stood: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// The round trip in flight, or the last one (#882).
     trip: Mutex<Option<Trip>>,
     /// Woken at every transport event of the session.
@@ -559,9 +561,18 @@ struct Trip {
     /// The `moved` count it was asked at: it can establish the barrier only
     /// while the count is still this.
     asked_at: u64,
-    /// `None` while it runs; whether it stood once it ended.
+    /// `None` while it runs; whether it stood once it ended. A sender
+    /// dropped with nothing sent is a task aborted or ended in a panic.
     ended: tokio::sync::watch::Receiver<Option<bool>>,
     task: tokio::task::AbortHandle,
+}
+
+impl Trip {
+    /// No answer yet, and its task not ended: a task that ended with
+    /// nothing sent was aborted or panicked, and is never waited on.
+    fn running(&self) -> bool {
+        self.ended.borrow().is_none() && !self.task.is_finished()
+    }
 }
 
 impl Drop for BarrierInner {
@@ -619,7 +630,7 @@ impl Barrier {
                 key: key.to_owned(),
                 timeout,
                 moved,
-                at: std::sync::Arc::new(AtomicU64::new(u64::MAX)),
+                stood: std::sync::Arc::new(AtomicU64::new(0)),
                 trip: Mutex::new(None),
                 moves,
                 _events: events,
@@ -629,10 +640,18 @@ impl Barrier {
 
     /// Whether the barrier stands: a round trip came back, and the
     /// session's transport has not moved since it was asked.
+    ///
+    /// Read from two counts that only grow: the latest round trip that
+    /// stood, as its `moved` count plus one, and `moved` itself. A move
+    /// between a round trip's own check of `moved` and its store leaves
+    /// the store one behind, and it reads false, as it must; and a round
+    /// trip of an older count, ending late, cannot lower a newer one's
+    /// (`fetch_max`).
     #[must_use]
     pub fn established(&self) -> bool {
         use std::sync::atomic::Ordering;
-        self.inner.at.load(Ordering::SeqCst) == self.inner.moved.load(Ordering::SeqCst)
+        self.inner.stood.load(Ordering::SeqCst)
+            == self.inner.moved.load(Ordering::SeqCst).wrapping_add(1)
     }
 
     /// [`Barrier::establish_within`] the barrier's own wait, the `timeout`
@@ -650,16 +669,39 @@ impl Barrier {
     /// 0.44, F-239), so a reader that waits for it before a read waits as
     /// long as it would for the read itself: a read of the population costs
     /// about what the telling costs, every matching token sent once.
+    ///
+    /// **Across a move** a waiter takes up the round trip of the transport
+    /// as it is: one asked before the move can no longer stand, so the
+    /// waiter stops waiting for it at the move, and waits on for the new
+    /// state's within what is left of `wait`, asking it if no other waiter
+    /// has. A round trip that ended without standing at the transport as it
+    /// still is (it ran to its timeout or to the interests timeout, or its
+    /// session was cut off) returns `false` at once, never asked again
+    /// within the same call: the caller decides when to ask again.
     pub async fn establish_within(&self, wait: Duration) -> bool {
-        if self.established() {
-            return true;
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            if self.established() {
+                return true;
+            }
+            let (asked_at, mut ended) = self.trip();
+            // Its end, a move that leaves it unable to stand, or a task
+            // that ended with nothing sent (`wait_for`'s error).
+            let over = tokio::time::timeout_at(deadline, async {
+                tokio::select! {
+                    _ = ended.wait_for(Option::is_some) => {}
+                    () = self.moved_since(asked_at) => {}
+                }
+            })
+            .await;
+            if over.is_err() || self.established() || self.moves() == asked_at {
+                return self.established();
+            }
         }
-        let mut ended = self.trip();
-        let _ = tokio::time::timeout(wait, ended.wait_for(Option::is_some)).await;
-        self.established()
     }
 
-    /// Whether a round trip is in flight (#882): asked, and not ended.
+    /// Whether a round trip is in flight (#882): asked, with no answer yet
+    /// and its task not ended.
     #[must_use]
     pub fn in_flight(&self) -> bool {
         self.inner
@@ -667,13 +709,15 @@ impl Barrier {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .is_some_and(|t| t.ended.borrow().is_none())
+            .is_some_and(Trip::running)
     }
 
-    /// The round trip to wait for: the one in flight, when it was asked at
-    /// the session's transport as it is now; else a new one, on a task of
-    /// its own, the old one ended.
-    fn trip(&self) -> tokio::sync::watch::Receiver<Option<bool>> {
+    /// The round trip to wait for, and the `moved` count it was asked at:
+    /// the one in flight, when it was asked at the session's transport as
+    /// it is now; else a new one, on a task of its own, the old one ended.
+    /// A task that has ended, with or without sending, is never taken up:
+    /// one that ended in a panic would otherwise be waited on for good.
+    fn trip(&self) -> (u64, tokio::sync::watch::Receiver<Option<bool>>) {
         use std::sync::atomic::Ordering;
         let mut slot = self
             .inner
@@ -683,36 +727,40 @@ impl Barrier {
         let now = self.inner.moved.load(Ordering::SeqCst);
         if let Some(trip) = slot.as_ref()
             && trip.asked_at == now
-            && trip.ended.borrow().is_none()
+            && trip.running()
         {
-            return trip.ended.clone();
+            return (now, trip.ended.clone());
         }
         if let Some(old) = slot.take() {
             old.task.abort();
         }
         let (tx, ended) = tokio::sync::watch::channel(None);
         let (session, key) = (self.inner.session.clone(), self.inner.key.clone());
-        let (moved, at) = (
+        let (moved, stood) = (
             std::sync::Arc::clone(&self.inner.moved),
-            std::sync::Arc::clone(&self.inner.at),
+            std::sync::Arc::clone(&self.inner.stood),
         );
         // As long as the session's runtime waits for its routers: zenoh ends
         // the GET there anyway, and a waiter waits as long as it chooses.
         let bound = interests_timeout(&session).max(self.inner.timeout);
         let task = tokio::spawn(async move {
             let came = settle_at(&session, &key, bound).await.unwrap_or(false);
-            let stood = came && moved.load(Ordering::SeqCst) == now;
-            if stood {
-                at.store(now, Ordering::SeqCst);
+            // Checked, then stored, in two steps: a move between them leaves
+            // `stood` at this count while `moved` is past it, which
+            // `established` reads as not standing; `fetch_max` keeps an
+            // older round trip from lowering a newer one's.
+            let came = came && moved.load(Ordering::SeqCst) == now;
+            if came {
+                stood.fetch_max(now.wrapping_add(1), Ordering::SeqCst);
             }
-            let _ = tx.send(Some(stood));
+            let _ = tx.send(Some(came));
         });
         *slot = Some(Trip {
             asked_at: now,
             ended: ended.clone(),
             task: task.abort_handle(),
         });
-        ended
+        (now, ended)
     }
 
     /// How many transport events the session has had since this barrier
