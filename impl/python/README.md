@@ -609,8 +609,15 @@ which a principal owning a service may hold too. `acl.generate(principals,
   of its grants, so one that owns a service and inspects others gets both;
 - **the `@/**` queryable deny** is a rule in each principal's own policy
   under `allow`, never a catch-all subject's;
-- **the Tool's admin read** (0.15): `query` on `@/*/router` and
-  `@/*/router/**`, and their `reply`;
+- **the Tool's admin read** (0.15, 0.50): `query` on `@/*/router`,
+  `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and
+  their `reply`. 0.15's `@/*/router` and `@/*/router/**` are compiled only
+  for security.md §4 step 4 (`admin_read=acl.ADMIN_READ_015`,
+  `hazard_ok=True`);
+- **no allowed query reaches a node's declaration records** (§11.1, 0.50):
+  `generate` refuses a block whose allow rules would (`HazardousGrant`),
+  and `acl.block_hazards(block)` finds one in any block (see "The admin
+  read under access control");
 - **an event's keys** are its occurrences, `…/events/<template>/<ulid>`
   (core §2.6): a binding or a resource of kind event grants its template
   and one chunk more (fixed in the `config.v1` round, which first granted
@@ -3061,10 +3068,10 @@ Its admin space is on and read-only.
     storages selector alone, so Expected 1's first half has nothing to
     judge there.
   - **Expected 3** also counts what the queryable heard against the reads
-    the reader makes: a read that is not heard fails. The queryable never
-    hears the read that freezes a router (F-254), so a count is the only
-    way Expected 3 can see that read. Expected 2 fails such a reader as
-    well.
+    the reader makes: a read that is not heard fails. A client's queryable
+    never heard the read that froze a router (F-254), so a count is the
+    only way Expected 3 can see that read, as 0.50 now says. Expected 2
+    fails such a reader as well.
 
 Round 73, on `owner-wk` and `zenctl-wk`, two runs of 200 rounds each:
 
@@ -3077,6 +3084,11 @@ Round 73, on `owner-wk` and `zenctl-wk`, two runs of 200 rounds each:
 In each run the queryable on `@/**` heard 400, 400 and 200 GETs. Each
 was one of the two selectors, and none reached a record. With every
 reader, the whole state runner passes 32 of 32.
+
+Round 74, on `zenctl-wl`, §3 and §12 with the three readers, two runs:
+17 of 17 each. The slowest put took 0.3–1.4, 0.5 and 0.5–1.1 ms, and the
+slowest S4 answer 1.6–3.1, 1.6–2.2 and 1.7–1.8 ms; the queryable heard
+400, 400 and 200 GETs a run, as before.
 
 **The hazard, measured** (`zk2py.adminspace measure`, never in a suite).
 - **The setup.** Each trial runs one zenoh-python 1.10.1 node in a process
@@ -3104,6 +3116,103 @@ reader, the whole state runner passes 32 of 32.
   their timeouts, possibly incomplete.
 - **The `@/**` recorder** heard every GET before the freezing one, and
   never that one, in all 19 freezes (F-254).
+
+## The admin read under access control (core §11.1, §11.2, 0.50)
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.security_scenarios [--zenctl <zenctl>]
+PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) target/py-venv/bin/python -m zk2py.live_interop \
+  --only security4 [--zenctl <zenctl>]
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.adminspace measure \
+  --cell acl-0.15:records+churn --cell acl-0.50:records+churn … [--asks 200]
+```
+
+Core 0.50 narrowed §11.1's admin read to the tools' three reads, and
+forbade a generator to allow a query that reaches a node's declaration
+records. zk2py read it cold in round 74.
+- **The generator** (`acl.generate`) grants the tool `query` on
+  `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**`
+  and `@/*/*`, and their `reply`. A block whose allow rules name `query` on
+  a key that intersects `live.ADMIN_RECORDS` is refused
+  (`HazardousGrant`), unless asked for on purpose (`hazard_ok`).
+- **The block check** (`acl.block_hazards`) reads any block, zk2py's or
+  `zenctl acl gen`'s JSON5 (`acl.read_block_json5`, through zenoh's own
+  loader). It returns:
+  - `allowed_query`, under `deny`: an allow rule a policy lists names
+    `query` on such a key. The MUST NOT names no flow, so an egress
+    `query` counts too (F-256);
+  - `allow_posture`, under `allow`: a policy with no deny of `query` that
+    includes `@/**`, whose subjects' GETs reach the records ("This
+    protects a router under deny alone");
+  - `disabled`: access control not enabled.
+- **The records' patterns** live in `admin_records.py`, plain strings, so
+  `live`'s guard and `acl`'s check share them, and `import zk2py.acl`
+  loads no zenoh. Each intersects them with zenoh's own key expressions.
+- **The `readings` family** gains 32 cases: the three reads reach no
+  record, 0.15's `@/*/router/**` reaches every family, §11.2's inclusion
+  pairs by zenoh's own key expressions, the generator's grants and its
+  refusal, and the block check on hand-made blocks and on a JSON5 one.
+  Under `allow`, only a deny of `query` that includes `@/**` keeps a
+  policy off: one on `@/*/router`, `@/*/router/**`, `@/*/**` or `**`
+  does not, since `**` crosses no verbatim chunk.
+
+**security.md §4** (`zk2py.security_scenarios`, the live runner's
+`security4`). R1 is a zenoh-python router in the runner's process,
+listening on port 0, its admin space on, read only, under `deny` with the
+block under test. Its own session plays `plans`'s storage document and
+holds the queryable on `@/**`, since no principal may declare one. The
+service principal holds a queryable ending in `**` on its own prefix, so
+a GET of the records admitted would be answered. Nothing declares once
+step 1 starts. The blocks:
+- zk2py's own, for the section's two principals;
+- `zenctl acl gen` over `impl/python/interop/security/section4.enrollment.toml`
+  (the same two principals: its grants equal zk2py's per principal,
+  message and flow, 19 of 19);
+- `zenctl acl gen` over `examples/zk2/acl/walkthrough.enrollment.toml`
+  (`ground`, which runs the tool `ops`, and `navigation`, among 13
+  principals).
+
+Step 4 compiles 0.15's admin read again: zk2py's generator with
+`hazard_ok`, zenctl's block with its admin-read rules' keys replaced.
+Beside the section, on each block:
+- the block check finds no hazard, and finds step 4's `@/*/router/**`;
+- under the generator's `allow` block, the tool's GET of R1's queryable
+  records is admitted and answered with the service principal's record:
+  0.50's defence holds under `deny` alone, as it says.
+
+§11.2's inclusion facts run on a block of their own, each user allowed one
+key: under `@/*/router`, `@/*/*` is refused; under the status subtree,
+`@/*/router/**` is. Every refused GET ended complete and empty in 0.3–0.7
+ms, and the recorder heard none.
+
+Round 74, on `zenctl-wl`: 30 of 30, 9 per block, the generators' grants
+compared, and the two inclusion facts.
+
+**The freeze under access control** (`adminspace measure`'s `acl-…`
+cells, never in a suite). The router process runs zk2py's block for the
+tool and the service principal, plus a principal of the measurement's
+own, `bench`, which the load, the churn and the probe log in as. The
+reader is the tool. The queryable on `@/**` is the router's own session's
+(`router --record`), or with `--client-recorder` a client's logged in as
+`bench`, allowed to declare it.
+
+| Cell, beside the churn | 0.15's admin read | 0.50's admin read |
+|---|---|---|
+| `@/*/router/queryable/**` | froze 5 of 5 | 0 of 5, 1,000 GETs refused |
+| `@/*/router/**` | froze 5 of 5 | 0 of 5, 1,000 GETs refused |
+| 0.11's storages selector | froze 5 of 5 | 0 of 5, 1,000 GETs refused |
+| `@/**` | 0 of 5, refused (neither key includes it) | 0 of 5, 1,000 GETs refused |
+| the three reads | 0 of 5, `@/*/*` refused | 0 of 5, 3,000 GETs answered |
+
+- **Under 0.15's grant** 10 of the 15 freezes came at the first GET and
+  5 at the second. The freezing GET ended at its 3 s timeout, and nothing
+  crossed the router again.
+- **Under 0.50's** every hazardous GET ended in at most 2 ms with nothing,
+  and the recorder heard none of them.
+- **The recorder heard the freezing GET** when it sat on the router's own
+  session under the block: 20 of 20 freezes. On a client under the same
+  block it heard it in 0 of 4, and on the router's own session without a
+  block in 0 of 7 (F-257).
 
 ## What it does not cover
 
@@ -3202,6 +3311,8 @@ impl/python/
     live_interop.py             the live runner, with the Rust owner and consume examples
     acl.py            §11       the grant generator: a deployment → zenoh's access_control block
     acl_interop.py    §11       the access-control run (`--only acl`)
+    security_scenarios.py §11.1 §11.2 scenarios/security.md §4 (0.50) on zk2py's block and zenctl acl gen's,
+                                and §11.2's inclusion facts (`--only security4`)
     hostid.py         hostid.v1 the derivation, the shape, the runtime over a root
     hostid_scenarios.py hostid.v1 scenarios.md §1–§6 in temporary roots
     freshness.py      freshness.v1 horizons, judgements, the clock trust, a subscriber, a tool's read
@@ -3241,8 +3352,9 @@ impl/python/
     redundancy_scenarios.py redundancy.v1 scenarios.md §1–§12 and a re-mint, zk2py against itself
     state_scenarios.py §4.2     scenarios/state.md §3 and §12 on a router process, §10 against zk2py's owner,
                                 and §11's open cases
+    admin_records.py  §4.2 §11.1 the keys a node answers under its tables' read lock, shared by live and acl
     adminspace.py     §4.2 App. B a router or a peer in a process of its own, the load beside it, the @/** recorder,
-                                and the freeze measurement (never a suite)
+                                and the freeze measurement (never a suite), under access control too (0.50)
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
                       sysinfo_x, tracker, order, order_b, budget, plans, epoch (presence.md §3); freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
@@ -3250,7 +3362,8 @@ impl/python/
                       zk2py's own, a declaration invalid for §5's over many samples;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4);
                       redundancy/ ledger.v1 and valve.v1, redundancy.v1's scenarios' contracts, and
-                      ledger-vote.v1, §11's invalid election
+                      ledger-vote.v1, §11's invalid election; security/ section4.enrollment.toml,
+                      security.md §4's two principals for `zenctl acl gen`
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.

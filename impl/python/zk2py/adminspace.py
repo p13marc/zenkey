@@ -28,7 +28,17 @@ router process of its own, which it kills, frozen or not; every wait is
 bounded. It is a measurement of zenoh, and never runs in
 ``just py-conformance``.
 
-Exit 0 when the processes ran, 1 when a measurement could not be made.
+The ``acl-…`` cells (core §11.1, 0.50) run the router under
+``default_permission: deny`` with the block zk2py's generator compiles for
+§4's tool and service principal, 0.15's admin read (``acl-0.15``) or
+0.50's (``acl-0.50``), and a principal of the measurement's own, ``bench``,
+allowed everything on ``load/**``, ``churn/**`` and ``probe/**``, which the
+load, the churn and the probe log in as. The reader logs in as the tool,
+and the queryable on ``@/**`` is the router's own session's
+(``router --record``), since no principal may declare one.
+
+Exit 0 when the processes ran, 1 when a measurement could not be made: a
+process that did not come up, or a trial that asked nothing.
 """
 
 from __future__ import annotations
@@ -52,24 +62,50 @@ STORAGES = "status/plugins/storage_manager/storages"
 
 # -- the router process -------------------------------------------------------
 
-def router_main(args: argparse.Namespace) -> None:
+def node_config(mode: str = "router", block: dict[str, Any] | None = None, users: str | None = None):
+    """A node listening on port 0, multicast scouting off, timestamping on,
+    its admin space on, read permitted, write refused; with ``block``, under
+    that ``access_control`` block, and with ``users``, a usrpwd dictionary
+    file, authenticating every session."""
     import zenoh
 
     conf = zenoh.Config()
-    conf.insert_json5("mode", json.dumps(args.mode))
+    conf.insert_json5("mode", json.dumps(mode))
     conf.insert_json5("listen/endpoints", json.dumps(["tcp/127.0.0.1:0"]))
     conf.insert_json5("scouting/multicast/enabled", "false")
     conf.insert_json5("timestamping/enabled", "true")
     conf.insert_json5("adminspace", json.dumps({"enabled": True, "permissions": {"read": True, "write": False}}))
-    r = zenoh.open(conf)
-    zid = str(r.zid())
+    if users is not None:
+        conf.insert_json5("transport/auth/usrpwd", json.dumps({"dictionary_file": users}))
+    if block is not None:
+        conf.insert_json5("access_control", json.dumps(block))
+    return conf
+
+
+def own_endpoint(session: Any, mode: str = "router") -> str | None:
+    """The loopback TCP endpoint a node listening on port 0 got, from its
+    own root document (``@/<zid>/<whatami>``'s ``locators``), which 0.48
+    says is answered without the lock held across a reply. The node's own
+    session asks it, so no access control block refuses it."""
+    import zenoh
+
     got: list[Any] = []
     done = threading.Event()
-    r.get(f"@/{zid}/{args.mode}", zenoh.handlers.Callback(got.append, done.set), timeout=2.0)
+    session.get(f"@/{session.zid()}/{mode}", zenoh.handlers.Callback(got.append, done.set), timeout=2.0)
     done.wait(5.0)
     doc = next((json.loads(x.ok.payload.to_bytes()) for x in got if x.ok is not None), {})
-    endpoint = next((loc for loc in doc.get("locators", []) if loc.startswith("tcp/127.0.0.1:")), None)
+    return next((loc for loc in doc.get("locators", []) if loc.startswith("tcp/127.0.0.1:")), None)
+
+
+def router_main(args: argparse.Namespace) -> None:
+    import zenoh
+
+    block = json.loads(Path(args.acl).read_text()) if args.acl else None
+    r = zenoh.open(node_config(args.mode, block, args.users))
+    zid = str(r.zid())
+    endpoint = own_endpoint(r, args.mode)
     held: dict[str, Any] = {}
+    recorder = Recorder(r) if args.record else None
 
     def add(name: str, key_expr: str) -> None:
         key = f"@/{zid}/{args.mode}/{STORAGES}/{name}"
@@ -89,6 +125,8 @@ def router_main(args: argparse.Namespace) -> None:
         elif words[:1] == ["add"] and len(words) == 3:
             add(words[1], words[2])
             print(f"ok add {words[1]}", flush=True)
+        elif words == ["heard"] and recorder is not None:
+            print(json.dumps(recorder.take()), flush=True)
         else:
             print(f"refused {line.strip()}", flush=True)
     for q in held.values():
@@ -98,27 +136,37 @@ def router_main(args: argparse.Namespace) -> None:
 
 # -- the load process ---------------------------------------------------------
 
-def _client(endpoint: str):
+def _client(endpoint: str, auth: tuple[str, str] | None = None):
     import zenoh
 
     conf = zenoh.Config()
     conf.insert_json5("mode", json.dumps("client"))
     conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
     conf.insert_json5("scouting/multicast/enabled", "false")
+    if auth is not None:
+        conf.insert_json5("transport/auth/usrpwd", json.dumps({"user": auth[0], "password": auth[1]}))
     return zenoh.open(conf)
+
+
+def _auth(text: str | None) -> tuple[str, str] | None:
+    if not text:
+        return None
+    user, _, password = text.partition(":")
+    return user, password
 
 
 def load_main(args: argparse.Namespace) -> None:
     import zenoh
 
-    holder = _client(args.connect)
+    auth = _auth(args.auth)
+    holder = _client(args.connect, auth)
     held = []
     for i in range(args.records):
         held.append(holder.declare_subscriber(f"load/{i}/**", zenoh.handlers.Callback(lambda s: None)))
         held.append(holder.declare_queryable(f"load/{i}/**", zenoh.handlers.Callback(lambda q: None)))
     churned = [0]
     stop = threading.Event()
-    churner = _client(args.connect) if args.churn else None
+    churner = _client(args.connect, auth) if args.churn else None
 
     def churn() -> None:
         assert churner is not None
@@ -219,10 +267,17 @@ class RouterProcess(Child):
     ``peer`` makes it a peer, its admin space under ``@/<zid>/peer``, which
     clients may join (the measurement's node that is no router)."""
 
-    def __init__(self, storages: dict[str, str] | None = None, timeout: float = 15.0, mode: str = "router") -> None:
+    def __init__(self, storages: dict[str, str] | None = None, timeout: float = 15.0, mode: str = "router",
+                 acl: str | None = None, users: str | None = None, record: bool = False) -> None:
         argv = ["router", "--mode", mode]
         for name, ke in (storages or {}).items():
             argv += ["--storage", f"{name}={ke}"]
+        if acl is not None:
+            argv += ["--acl", acl]
+        if users is not None:
+            argv += ["--users", users]
+        if record:
+            argv += ["--record"]
         super().__init__(argv)
         first = self.lines.next(timeout)
         if first is None:
@@ -248,8 +303,10 @@ class LoadProcess(Child):
     """``load``: §12's other client and its third, ready once the records are
     declared."""
 
-    def __init__(self, endpoint: str, records: int, churn: bool, timeout: float = 30.0) -> None:
-        super().__init__(["load", "--connect", endpoint, "--records", str(records)] + (["--churn"] if churn else []))
+    def __init__(self, endpoint: str, records: int, churn: bool, timeout: float = 30.0,
+                 auth: tuple[str, str] | None = None) -> None:
+        super().__init__(["load", "--connect", endpoint, "--records", str(records)] + (["--churn"] if churn else [])
+                         + (["--auth", f"{auth[0]}:{auth[1]}"] if auth else []))
         if self.lines.next(timeout) != "ready":
             self.kill()
             raise RuntimeError("the load process did not come up")
@@ -311,6 +368,7 @@ class Probe:
     ready_s: float = 10.0
     n: int = 0
     sessions: list[Any] = field(default_factory=list)
+    auth: tuple[str, str] | None = None
 
     def __post_init__(self) -> None:
         import zenoh
@@ -318,9 +376,9 @@ class Probe:
         self.arrived: dict[int, float] = {}
         self._cv = threading.Condition()
         try:
-            self.pub_s = _client(self.endpoint)
+            self.pub_s = _client(self.endpoint, self.auth)
             self.sessions.append(self.pub_s)
-            self.sub_s = _client(self.endpoint)
+            self.sub_s = _client(self.endpoint, self.auth)
             self.sessions.append(self.sub_s)
             self.sub = self.sub_s.declare_subscriber("probe/put/*", zenoh.handlers.Callback(self._sample))
             self.qbl = self.sub_s.declare_queryable("probe/get", zenoh.handlers.Callback(
@@ -407,8 +465,67 @@ def _ask(session: Any, selector: str, timeout: float) -> dict[str, Any]:
     return {"replies": len(ok), "errors": errs, "ended": ended, "s": round(time.monotonic() - t0, 3)}
 
 
+#: the measurement's own principal under access control, the tool and the
+#: service principal. The passwords are fixed and test-only: every router
+#: here listens on loopback alone (port 0), and reads them from a usrpwd
+#: dictionary written to a temporary directory of its own (:class:`_AclFiles`),
+#: removed once the trial ends.
+BENCH = ("bench", "pw-bench")
+TOOL = ("tool", "pw-tool")
+SERVICE = ("svc", "pw-svc")
+
+
+def measure_block(admin_read: list[str], bench_recorder: bool = False) -> dict[str, Any]:
+    """The ``acl-…`` cells' block: zk2py's generator over security.md §4's
+    two principals, a tool with ``admin_read`` that inspects every service
+    and a service principal that does neither, under ``deny``, and
+    ``bench``, allowed every message on both flows on ``load/**``,
+    ``churn/**`` and ``probe/**``. 0.15's admin read is compiled on
+    purpose (``hazard_ok``): it is what is measured. ``bench_recorder``
+    also lets ``bench`` hold the queryable on ``@/**`` as a client, which
+    §11.1 lets no principal of a deployment do."""
+    from . import acl
+
+    principals = [acl.Principal("tool", TOOL[0], inspects=["*/*"], admin_read=True),
+                  acl.Principal("svc", SERVICE[0], service="h1/tc")]
+    block = acl.generate(principals, "deny", admin_read=admin_read, hazard_ok=True).block
+    block["rules"].append({"id": "bench-all", "messages": list(acl.MESSAGES), "flows": [acl.INGRESS, acl.EGRESS],
+                           "permission": "allow", "key_exprs": ["load/**", "churn/**", "probe/**"]})
+    names = ["bench-all"]
+    if bench_recorder:
+        block["rules"] += [
+            {"id": "bench-recorder-in", "messages": ["declare_queryable", "reply"], "flows": [acl.INGRESS],
+             "permission": "allow", "key_exprs": ["@/**"]},
+            {"id": "bench-recorder-out", "messages": ["query"], "flows": [acl.EGRESS], "permission": "allow",
+             "key_exprs": ["@/**"]}]
+        names += ["bench-recorder-in", "bench-recorder-out"]
+    block["subjects"].append({"id": "bench", "usernames": [BENCH[0]]})
+    block["policies"].append({"id": "bench-policy", "rules": names, "subjects": ["bench"]})
+    return block
+
+
+class _AclFiles:
+    """The block and the usrpwd dictionary, written to a directory of their
+    own, removed at :meth:`close`."""
+
+    def __init__(self, block: dict[str, Any]) -> None:
+        import tempfile
+
+        self.dir = tempfile.mkdtemp(prefix="zk2py-adminspace-")
+        self.acl = os.path.join(self.dir, "acl.json")
+        self.users = os.path.join(self.dir, "users.txt")
+        Path(self.acl).write_text(json.dumps(block))
+        Path(self.users).write_text("".join(f"{u}:{p}\n" for u, p in (BENCH, TOOL, SERVICE)))
+
+    def close(self) -> None:
+        import shutil
+
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
 def trial(selectors: list[str], records: int, churn: bool, timeout: float, settle: float,
-          mode: str = "router", asks: int = 20) -> dict[str, Any]:
+          mode: str = "router", asks: int = 20, admin_read: list[str] | None = None,
+          own_recorder: bool = False, client_recorder: bool = False) -> dict[str, Any]:
     """One router process (``mode`` ``peer``: a peer), the load beside it, a
     queryable on ``@/**`` recording what it hears, as §12's does, and a
     reader asking ``selectors`` in turn, up to ``asks`` times, a put across
@@ -416,24 +533,42 @@ def trial(selectors: list[str], records: int, churn: bool, timeout: float, settl
     2 s (``froze_at``); then whether the node routes: a put and a GET within
     2 s right after, and again ``settle`` seconds later, with the reader's
     links then. Frozen means neither probe passed at either time. The
-    node's process is killed at the end, frozen or not."""
-    out: dict[str, Any] = {"mode": mode, "selectors": selectors, "records": records, "churn": churn}
-    router = RouterProcess(mode=mode)
+    node's process is killed at the end, frozen or not.
+
+    With ``admin_read``, the router runs :func:`measure_block` with that
+    admin read: the reader logs in as the tool, the load and the probe as
+    ``bench``, and the recorder is the router's own session's, read with
+    ``heard``. ``own_recorder`` puts it there without access control too
+    (F-254's queryable was a client's), and ``client_recorder`` puts it on
+    a client logged in as ``bench`` under access control."""
+    own_recorder = own_recorder or (admin_read is not None and not client_recorder)
+    out: dict[str, Any] = {"mode": mode, "selectors": selectors, "records": records, "churn": churn,
+                           "admin_read": admin_read, "recorder": "the router's own session" if own_recorder
+                           else "a client"}
+    files = _AclFiles(measure_block(admin_read, client_recorder)) if admin_read is not None else None
+    bench = BENCH if files else None
+    router = RouterProcess(mode=mode, acl=files.acl if files else None, users=files.users if files else None,
+                           record=own_recorder)
     load = None
     sessions: list[Any] = []
     try:
-        load = LoadProcess(router.endpoint, records, churn)
-        reader = _client(router.endpoint)
-        rec_s = _client(router.endpoint)
-        sessions += [reader, rec_s]
-        recorder = Recorder(rec_s)
-        probe = Probe(router.endpoint)
+        load = LoadProcess(router.endpoint, records, churn, auth=bench)
+        reader = _client(router.endpoint, TOOL if files else None)
+        sessions.append(reader)
+        if not own_recorder:
+            rec_s = _client(router.endpoint, bench)
+            sessions.append(rec_s)
+            recorder: Any = Recorder(rec_s)
+        else:
+            recorder = _RouterRecorder(router)
+        probe = Probe(router.endpoint, auth=bench)
         sessions += probe.sessions
         out["before"] = probe.routes()
         time.sleep(0.5)  # the churn runs
         recorder.take()
         out["asks"] = []
         out["froze_at"] = None
+        n = 0  # rounds run: none when asks is 0, a trial that measures nothing
         for n in range(1, asks + 1):
             for sel in selectors:
                 out["asks"].append(_ask(reader, sel, timeout))
@@ -454,12 +589,29 @@ def trial(selectors: list[str], records: int, churn: bool, timeout: float, settl
             out["churned"] = load.churned
         router.kill()  # killed first: a client of a frozen router closes once its link is gone
         out["closed"] = close_bounded(*sessions)
+        if files is not None:
+            files.close()
     return out
 
 
+class _RouterRecorder:
+    """The router process's own queryable on ``@/**`` (``router --record``),
+    read with ``heard``; nothing, if the process does not say within 5 s."""
+
+    def __init__(self, router: RouterProcess) -> None:
+        self.router = router
+
+    def take(self) -> list[str]:
+        line = self.router.command("heard")
+        try:
+            return list(json.loads(line)) if line else []
+        except ValueError:
+            return []
+
+
 #: name -> (the selectors the reader asks, a client declaring flat out
-#: beside it, the node's mode)
-CELLS = {
+#: beside it, the node's mode[, the tool's admin read under access control])
+CELLS: dict[str, tuple] = {
     # Appendix B's fact: the queryable records, read beside the churn.
     "records+churn": (["@/*/router/queryable/**"], True, "router"),
     # the control without a writer (the CHANGELOG's "0 of 28 without a writer")
@@ -472,30 +624,57 @@ CELLS = {
     # beside the churn of its clients, which §4.2's MUST NOT does not name
     "peer-records+churn": (["@/*/peer/queryable/**"], True, "peer"),
 }
+#: core §11.1 (0.50): the same GETs from a tool principal under deny, with
+#: 0.15's admin read and with 0.50's, beside the churn. ``@/**`` is
+#: included by neither grant; ``reads`` are the tools' three reads.
+_HAZARDOUS = {"records": ["@/*/router/queryable/**"], "router**": ["@/*/router/**"],
+              "0.11": ["@/*/router/**/storage_manager/storages/**"], "all": ["@/**"]}
+for _grant, _keys in (("0.15", ["@/*/router", "@/*/router/**"]),
+                      ("0.50", ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"])):
+    for _name, _sels in _HAZARDOUS.items():
+        CELLS[f"acl-{_grant}:{_name}+churn"] = (_sels, True, "router", _keys)
+    CELLS[f"acl-{_grant}:reads+churn"] = (["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**",
+                                           "@/*/*"], True, "router", _keys)
 
 
 def measure_main(args: argparse.Namespace) -> int:
     cells = args.cell or list(CELLS)
     summary: dict[str, list[bool]] = {}
     for cell in cells:
-        selectors, churn, mode = CELLS[cell]
+        selectors, churn, mode, *grant = CELLS[cell]
         for i in range(args.trials):
             try:
-                t = trial(selectors, args.records, churn, args.timeout, args.settle, mode, args.asks)
+                t = trial(selectors, args.records, churn, args.timeout, args.settle, mode, args.asks,
+                          grant[0] if grant else None, args.own_recorder, args.client_recorder)
             except RuntimeError as e:
                 print(json.dumps({"cell": cell, "trial": i, "could not run": str(e)}), flush=True)
                 return 1
-            summary.setdefault(cell, []).append(t["frozen"])
             asks = t.pop("asks", [])
+            heard = t.pop("heard", [])
+            # F-254, F-257: whether the queryable on @/** heard every GET
+            # asked, the last one, which froze the node in a frozen trial,
+            # included. A trial that asked nothing has no answer (None), and
+            # is reported apart, never as heard.
+            heard_all = len(heard) >= len(asks) if asks else None
+            summary.setdefault(cell, []).append((t["frozen"], heard_all, len(asks)))
             t["asks"] = {"n": len(asks), "replies": [a["replies"] for a in asks][-3:],
+                         "answered": sum(1 for a in asks if a["replies"]),
                          "errors": sorted({e for a in asks for e in a["errors"]}),
                          "slowest_s": max((a["s"] for a in asks), default=None)}
-            heard = t.pop("heard", [])
-            t["heard"] = {"n": len(heard), "selectors": sorted(set(heard))}
+            t["heard"] = {"n": len(heard), "selectors": sorted(set(heard)), "every_get": heard_all}
             print(json.dumps({"cell": cell, "trial": i, **t}), flush=True)
-    for cell, frozen in summary.items():
-        print(f"{cell}: froze in {sum(frozen)} of {len(frozen)} trials", flush=True)
-    return 0
+    unasked = 0
+    for cell, rows in summary.items():
+        asked = [r for r in rows if r[2]]
+        frozen = [r for r in asked if r[0]]
+        line = f"{cell}: froze in {len(frozen)} of {len(asked)} trials, {sum(r[2] for r in asked)} GETs; "
+        line += (f"the queryable on @/** heard the freezing GET in {sum(1 for r in frozen if r[1])} of {len(frozen)}"
+                 if frozen else "nothing froze, so no freezing GET to hear")
+        if len(asked) < len(rows):
+            line += f"; {len(rows) - len(asked)} trial(s) asked nothing, and measured nothing"
+            unasked += len(rows) - len(asked)
+        print(line, flush=True)
+    return 1 if unasked else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -504,8 +683,12 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("router", help="a router in a process of its own, its admin space on, read-only")
     r.add_argument("--mode", choices=("router", "peer"), default="router")
     r.add_argument("--storage", action="append", metavar="NAME=KEY_EXPR", help="a storage document to play")
+    r.add_argument("--acl", help="a JSON file holding an access_control block")
+    r.add_argument("--users", help="a usrpwd dictionary file")
+    r.add_argument("--record", action="store_true", help="a queryable on @/** on the router's own session")
     lo = sub.add_parser("load", help="the records' holder and, with --churn, a client declaring flat out")
     lo.add_argument("--connect", required=True)
+    lo.add_argument("--auth", metavar="USER:PASSWORD")
     lo.add_argument("--records", type=int, default=200)
     lo.add_argument("--churn", action="store_true")
     m = sub.add_parser("measure", help="does a GET of the declaration records freeze the router? (never a suite)")
@@ -516,6 +699,10 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--settle", type=float, default=12.0,
                    help="seconds before the second look, past zenoh's 10 s lease")
     m.add_argument("--asks", type=int, default=20, help="the most rounds of the cell's reads in one trial")
+    m.add_argument("--own-recorder", action="store_true",
+                   help="the queryable on @/** on the node's own session, as the acl-… cells have it")
+    m.add_argument("--client-recorder", action="store_true",
+                   help="acl-… cells: the queryable on @/** on a client, bench, allowed to declare it")
     args = ap.parse_args(argv)
     if args.cmd == "router":
         router_main(args)

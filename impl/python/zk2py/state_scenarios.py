@@ -617,9 +617,9 @@ def _section12(report: Report, run: Run, kind: str) -> None:
         keys = [h.split("?", 1)[0] for h in heard]
         allowed = {live.S4_ROUTERS, live.S4_STORAGES}
         reaching = sorted({k for k in keys if live.admin_records_reached(k)})
-        report.check(sec, "expected 3: every selector the reader asked, as the queryable on @/** heard it, is one of "
-                          "the two, and none intersects a router's declaration records, its linkstate/* or its "
-                          f"route/successor/**; the queryable heard each of the reader's {reader.asks} read(s) a round",
+        report.check(sec, "expected 3: every selector the queryable on @/** heard is one of the two, and none "
+                          "intersects a node's declaration records, its linkstate/* or its route/successor/**; it "
+                          f"heard each of the reader's {reader.asks} read(s) a round (0.50, F-254)",
                      set(keys) <= allowed and not reaching and len(keys) == reader.asks * n,
                      f"heard {len(keys)} GET(s) over {n} round(s): {sorted(set(keys))}; reaching the records {reaching}")
     finally:

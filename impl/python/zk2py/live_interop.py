@@ -31,7 +31,8 @@ read refused by access control, and one stalled past its timeout),
 operations.md §1 (target and consolidation shown by behaviour),
 operations.md §2 (fan-out over templates), the tool rules of 0.10 to 0.13,
 access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
-generated grants), ``hostid.v1`` with core R1's ``self.system``
+generated grants; ``security4``, ``zk2py.security_scenarios``: §4 on
+zk2py's block and on ``zenctl acl gen``'s, core 0.50), ``hostid.v1`` with core R1's ``self.system``
 providers (0.20), ``freshness.v1``'s re-puts and judgements (0.21), and
 ``health.v1`` (text 0.2), the population budget (core §2.7, 0.24), and a
 late joiner's seed (core §4.2, 0.26), across both implementations.
@@ -3368,6 +3369,20 @@ def run_python_seed(report: Report, exe: Path) -> None:
         r1.close()
 
 
+DEFAULT_ZENCTL = REPO / "target" / "debug" / "zenctl"
+
+
+def _run_security4(report: Report, zenctl: Path) -> None:
+    """security.md §4 (core 0.50, zk2py.security_scenarios): on zk2py's
+    generated block, and on ``zenctl acl gen``'s when ``zenctl`` is a
+    file."""
+    from .security_scenarios import run_section4
+
+    if not zenctl.is_file():
+        report.info("security.md §4", f"{zenctl} not found: §4 runs on zk2py's block alone")
+    run_section4(report, REPO, zenctl if zenctl.is_file() else None)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -3377,6 +3392,9 @@ def main(argv: list[str] | None = None) -> int:
                          "impl/python/interop)")
     ap.add_argument("--consume", type=Path, default=Path(os.environ.get("ZK2PY_CONSUME", DEFAULT_CONSUME)),
                     help="the consume example binary")
+    ap.add_argument("--zenctl", type=Path, default=Path(os.environ.get("ZK2PY_ZENCTL", DEFAULT_ZENCTL)),
+                    help="the reference's zenctl: security4 runs security.md §4 on its acl gen block too, when "
+                         "it is a file")
     ap.add_argument("--scale", type=int, default=2000,
                     help="extra tokens for the presence-at-scale check, in the first run (0: skip)")
     python_runs = {
@@ -3391,6 +3409,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed": lambda r: run_python_seed(r, args.owner),
         "config": lambda r: run_python_config(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
+        "security4": lambda r: _run_security4(r, args.zenctl),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),
                     help="run only these runs, the ones behind a router of the runner's (repeatable), "

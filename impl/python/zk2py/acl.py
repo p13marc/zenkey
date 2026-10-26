@@ -40,8 +40,16 @@ Admin      query                                           reply
 - Fan-in (§11.2): every reader selector that intersects a provider's keys
   is added to that provider's egress, and to its ingress ``reply``, since
   a refusal is checked against the query's key.
-- The admin read (§11.1 Tool, 0.15): ``@/*/router`` and ``@/*/router/**``,
-  never namespaced.
+- The admin read (§11.1 Tool, 0.15, 0.50): the tools' three reads,
+  ``@/*/router``, ``@/*/router/status/plugins/storage_manager/storages/**``
+  and ``@/*/*``, never namespaced. 0.15's ``@/*/router/**`` admitted a GET of
+  every declaration record of a router's, which zenoh 1.10.1 answers under
+  its routing tables' read lock (§4.2, Appendix B).
+- **No allowed query reaches a node's declaration records** (§11.1, 0.50):
+  "A generator MUST NOT allow a query on a key expression that intersects
+  one of those keys of any node". :func:`generate` refuses a block that
+  would (:class:`HazardousGrant`), and :func:`block_hazards` finds one in
+  any block, zk2py's or another generator's.
 - No principal declares queryables under ``@/**``. Under ``allow`` the deny
   is a rule in each principal's own policy, never a catch-all subject's
   (§11.2, 0.15: such a subject "makes the per-user subjects lose their
@@ -63,6 +71,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from .admin_records import ADMIN_RECORDS
 from .contract import Contract
 
 INGRESS, EGRESS = "ingress", "egress"
@@ -70,9 +79,15 @@ MESSAGES = ("put", "delete", "declare_subscriber", "query", "declare_queryable",
             "liveliness_token", "declare_liveliness_subscriber", "liveliness_query")
 CONTRACTS = "zk2/@zk/contract/**"
 ADMIN = "@/**"
-#: §11.1 Tool (0.15): the admin read, "query on @/*/router and @/*/router/**,
-#: and their reply, never namespaced".
-ADMIN_READ = ["@/*/router", "@/*/router/**"]
+#: §11.1 Tool (0.15, 0.50): the admin read, "query on @/*/router,
+#: @/*/router/status/plugins/storage_manager/storages/** and @/*/*, and their
+#: reply, never namespaced": S4's two reads (§4.2) and every node's root
+#: document, which a mesh view reads.
+ADMIN_READ = ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"]
+#: 0.15's admin read, "@/*/router and @/*/router/**", which 0.50 narrowed: it
+#: admitted a GET of every record of a router's, and refused @/*/*, which
+#: neither key includes. Compiled only for security.md §4 step 4.
+ADMIN_READ_015 = ["@/*/router", "@/*/router/**"]
 
 
 @dataclass
@@ -97,7 +112,7 @@ class Principal:
     inspects: list[str] = field(default_factory=list)
     #: a variant for the scenarios: drop the presence a shape carries
     presence: bool = True
-    #: the Tool's admin read (§11.1, 0.15)
+    #: the Tool's admin read (§11.1, 0.15, 0.50)
     admin_read: bool = False
 
 
@@ -149,10 +164,14 @@ def _ke(text: str):
 
 
 def _includes(a: str, b: str) -> bool:
+    """Whether key expression ``a`` includes ``b``, by zenoh's own
+    ``KeyExpr.includes``."""
     return _ke(a).includes(_ke(b))
 
 
 def _intersects(a: str, b: str) -> bool:
+    """Whether key expressions ``a`` and ``b`` intersect, by zenoh's own
+    ``KeyExpr.intersects``."""
     return _ke(a).intersects(_ke(b))
 
 
@@ -166,15 +185,18 @@ def resource_keys(service: str, contracts: list[Contract]) -> list[str]:
 
 
 def compile_grants(principals: list[Principal], *, egress_selectors: bool = True,
-                   reply_selectors: bool = True,
-                   presence_egress: bool = True) -> dict[tuple[str, str, str], set[str]]:
+                   reply_selectors: bool = True, presence_egress: bool = True,
+                   admin_read: list[str] | None = None) -> dict[tuple[str, str, str], set[str]]:
     """The grants of §11.1–§11.2, as (principal, message, flow) -> keys.
     The shapes compose per principal (0.27): a principal holds the union of
     the grants of what it runs, Own for its service and a tool's beside it.
     ``egress_selectors``/``reply_selectors``: security.md §2's generator
     check removes the consumer selectors from providers' egress, or from
     their ingress ``reply``; ``presence_egress`` (0.27) removes the
-    presence selectors from providers' egress."""
+    presence selectors from providers' egress. ``admin_read`` is the Tool's
+    admin read, :data:`ADMIN_READ` unless security.md §4 step 4 asks 0.15's
+    (:data:`ADMIN_READ_015`)."""
+    admin_keys = list(ADMIN_READ if admin_read is None else admin_read)
     g: dict[tuple[str, str, str], set[str]] = {}
 
     def add(pid: str, messages: tuple[str, ...], flow: str, keys: list[str]) -> None:
@@ -213,8 +235,8 @@ def compile_grants(principals: list[Principal], *, egress_selectors: bool = True
             add(p.id, ("liveliness_token", "reply", "put"), EGRESS, sels)
             presence_readers += [(p.id, s) for s in sels]
         if p.admin_read:
-            add(p.id, ("query",), INGRESS, ADMIN_READ)
-            add(p.id, ("reply",), EGRESS, ADMIN_READ)
+            add(p.id, ("query",), INGRESS, admin_keys)
+            add(p.id, ("reply",), EGRESS, admin_keys)
     # §11.2: a provider's egress, and its ingress reply, carry every reader
     # selector that intersects what it serves. A presence selector (0.27)
     # joins its egress alone, as `fan-in-presence`: "No refusal answers a
@@ -266,11 +288,20 @@ def _rules_for(subject: str, grouped: dict[tuple[str, ...], set[tuple[str, str]]
 
 def generate(principals: list[Principal], posture: str, *, egress_selectors: bool = True,
              reply_selectors: bool = True, allow_rules_under_allow: bool = False,
-             presence_egress: bool = True) -> Generated:
+             presence_egress: bool = True, admin_read: list[str] | None = None,
+             hazard_ok: bool = False) -> Generated:
     """The ``access_control`` block for ``posture`` (``deny`` or ``allow``).
     ``allow_rules_under_allow`` compiles the allow rules but sets
     ``default_permission: allow``: security.md §2's "Allow rules alone,
     under allow, block nothing".
+
+    §11.1 (0.50): "A generator MUST NOT allow a query on a key expression
+    that intersects one of those keys of any node". A block whose allow
+    rules would is refused (:class:`HazardousGrant`), unless ``hazard_ok``:
+    security.md §4 step 4 compiles 0.15's admin read (``admin_read``) on
+    purpose, beside no writer. Under ``allow`` no allow rule is evaluated,
+    and the generator compiles no admin read (0.50: "This protects a router
+    under deny alone"); :func:`block_hazards` says so of such a block.
 
     Under ``allow``, each principal's complement is taken per message and
     flow over every key of the deployment (:func:`universe`) its grants do
@@ -278,7 +309,7 @@ def generate(principals: list[Principal], posture: str, *, egress_selectors: boo
     core §11.2's stricter branch (0.31, "A generator that denies them too,
     per message and flow, is stricter, and conforms")."""
     grants = compile_grants(principals, egress_selectors=egress_selectors, reply_selectors=reply_selectors,
-                            presence_egress=presence_egress)
+                            presence_egress=presence_egress, admin_read=admin_read)
     out = Generated({}, grants={k: sorted(v) for k, v in grants.items()})
     subjects = [{"id": p.id, "usernames": [p.user]} for p in principals]
     rules: list[dict] = []
@@ -328,7 +359,91 @@ def generate(principals: list[Principal], posture: str, *, egress_selectors: boo
         "subjects": subjects,
         "policies": policies,
     }
+    allowed = [h for h in block_hazards(out.block) if h.kind == "allowed_query"]
+    if allowed and not hazard_ok:
+        raise HazardousGrant("; ".join(h.why() for h in allowed))
     return out
+
+
+class HazardousGrant(ValueError):
+    """§11.1 (0.50): a block whose allow rules admit a query on a key
+    expression that intersects a node's declaration records, its
+    ``linkstate/*`` or its ``route/successor/**``."""
+
+
+@dataclass(frozen=True)
+class AdminHazard:
+    """One way a block admits a GET of a node's declaration records
+    (§11.1, 0.50; §4.2; Appendix B):
+    - ``allowed_query``: under ``deny``, an allow rule a policy lists names
+      ``query`` on a key expression that intersects them (``reaches``, by
+      zenoh 1.10.1's own intersection). The MUST NOT names no flow, so an
+      egress ``query`` counts too; the GET that freezes a router is the
+      asker's, on ingress;
+    - ``allow_posture``: under ``allow`` no allow rule is evaluated, and the
+      policy holds no deny of ``query`` that includes ``@/**``, so a GET of
+      ``@/**`` from its subjects reaches the records ("This protects a
+      router under deny alone", 0.50);
+    - ``disabled``: access control is not enabled (``enabled`` false or
+      absent), so every query is admitted."""
+
+    kind: str
+    policy: str | None = None
+    rule: str | None = None
+    flow: str | None = None
+    key: str | None = None
+    reaches: tuple[str, ...] = ()
+
+    def why(self) -> str:
+        if self.kind == "allowed_query":
+            return (f"{self.policy}: rule {self.rule} allows query on {self.key} ({self.flow}), which intersects "
+                    f"{list(self.reaches)} (§11.1, 0.50)")
+        if self.kind == "allow_posture":
+            return (f"{self.policy}: under allow, no deny of query includes {ADMIN}, so its subjects' GETs reach a "
+                    f"node's declaration records (§11.1, 0.50: deny alone protects a router)")
+        return "access control is not enabled: every query is admitted"
+
+
+def block_hazards(block: dict[str, Any]) -> list[AdminHazard]:
+    """§11.1 (0.50) read against a router's ``access_control`` block,
+    zk2py's or another generator's: every way it admits a GET of a node's
+    declaration records (:class:`AdminHazard`). Empty for a ``deny`` block
+    that meets the MUST NOT. Rules no policy lists are inert, and skipped.
+    Inclusion and intersection are zenoh 1.10.1's own (:func:`_includes`,
+    :func:`_intersects`), never a string test."""
+    if not block.get("enabled"):
+        return [AdminHazard("disabled")]
+    rules = {r["id"]: r for r in block.get("rules") or []}
+    out: list[AdminHazard] = []
+    for pol in block.get("policies") or []:
+        listed = [rules[r] for r in pol.get("rules") or [] if r in rules]
+        if block.get("default_permission") == "allow":
+            kept_off = any(r.get("permission") == "deny" and "query" in (r.get("messages") or [])
+                           and INGRESS in (r.get("flows") or [INGRESS, EGRESS])
+                           and any(_includes(k, ADMIN) for k in r.get("key_exprs") or []) for r in listed)
+            if not kept_off:
+                out.append(AdminHazard("allow_posture", pol.get("id")))
+            continue
+        for r in listed:
+            if r.get("permission") != "allow" or "query" not in (r.get("messages") or []):
+                continue
+            for flow in r.get("flows") or [INGRESS, EGRESS]:
+                for k in r.get("key_exprs") or []:
+                    reaches = tuple(p for p in ADMIN_RECORDS if _intersects(k, p))
+                    if reaches:
+                        out.append(AdminHazard("allowed_query", pol.get("id"), r["id"], flow, k, reaches))
+    return out
+
+
+def read_block_json5(text: str) -> dict[str, Any]:
+    """A block as another generator writes it, JSON5 at a router
+    configuration's top level (``access_control: {…}``, comments included),
+    read by zenoh's own configuration loader. Fields zenoh fills in are
+    ``null``, which it reads back as absent."""
+    import zenoh
+
+    body = text if text.lstrip().startswith("{") else "{" + text + "}"
+    return json.loads(zenoh.Config.from_json5(body).get_json("access_control"))
 
 
 def may_call(g: Generated, principal: str, key: str) -> bool:

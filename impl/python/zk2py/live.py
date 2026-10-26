@@ -139,7 +139,7 @@ from typing import Any
 
 import zenoh
 
-from . import bundle, keys
+from . import admin_records, bundle, keys
 
 #: Liveliness GET timeout: the caller's choice, 1 s in a conformance run (§8.1).
 PRESENCE_TIMEOUT_S = 1.0
@@ -1276,22 +1276,19 @@ S4_STORAGES = "@/*/router/status/plugins/storage_manager/storages/**"
 #: that zk2py's readings can show it reaches them; never asked.
 S4_STORAGES_011 = "@/*/router/**/storage_manager/storages/**"
 
-#: §4.2 (0.48) "What a tool does not ask": a router's declaration records,
-#: ``@/<zid>/router/{subscriber,publisher,queryable,querier,token}/**``, its
-#: ``linkstate/*`` and its ``route/successor/src/<zid>/dst/<zid>``, which
-#: zenoh 1.10.1 answers while it holds its routing tables' read lock
-#: (Appendix B). Appendix B states the fact of a node,
-#: ``@/<zid>/<whatami>/…``, so zk2py guards every whatami, a peer's and a
-#: client's admin space too, not a router's alone.
-ADMIN_RECORDS = tuple(f"@/*/*/{kind}/**" for kind in ("subscriber", "publisher", "queryable", "querier", "token")) \
-    + ("@/*/*/linkstate/*", "@/*/*/route/successor/**")
+#: §4.2 (0.48; any node's, 0.50, F-253) "What a tool does not ask": a node's
+#: declaration records, its ``linkstate/*`` and its ``route/successor/**``,
+#: which zenoh 1.10.1 answers while it holds its routing tables' read lock
+#: (Appendix B), from :mod:`zk2py.admin_records`, which the generator's
+#: §11.1 check reads too (:func:`zk2py.acl.block_hazards`).
+ADMIN_RECORDS = admin_records.ADMIN_RECORDS
 
 
 class AdminRecordsRefused(Exception):
     """A selector that intersects a node's declaration records, its
-    ``linkstate/*`` or its ``route/successor/**`` (§4.2, 0.48): "A tool MUST
-    NOT ask a selector that intersects one of these keys unless its user
-    asks for that read". Not a ``ValueError``: the ``except ValueError``
+    ``linkstate/*`` or its ``route/successor/**`` (§4.2, 0.48, 0.50): "A
+    tool MUST NOT ask a selector that intersects one of these keys of any
+    node unless its user asks for that read". Not a ``ValueError``: the ``except ValueError``
     around a payload's JSON in zk2py's readers never swallows it."""
 
 
