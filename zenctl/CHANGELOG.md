@@ -11,6 +11,7 @@ sitting.
 | Before | Now | Notes |
 |---|---|---|
 | `storage list` (and `--watch`), `storage gen --check`, the doctor's `storage-on-state`, `admin-unreachable` and `router-version-skew` read the storages from `@/*/router/**/storage_manager/storages/**` | from `@/*/router/status/plugins/storage_manager/storages/**`; a `--check` report's `asked` says so | the old `**` intersected the routers' declaration records (`@/<zid>/router/{subscriber,queryable,…}/**`), which zenoh 1.10.1 answers under its routing tables' read lock: beside a queryable ending in `**`, an owner's `…/state/**` among them, a declaration from another client could freeze the router (`docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`); every 1.x storage manager answers under `status/plugins/`; spec §4.2 |
+| `get --help`: "`@/**` for the zenoh admin space" | "`@/*/router` for a router's admin document", and a selector reaching a router's declaration records (`@/**`, `@/*/router/subscriber/**`, …) named as one that can freeze a zenoh 1.10.1 router | `get` still asks what it is given: a user's own read (spec §4.2) |
 
 ## Unreleased (`main`, zk2) — a reopen beside a large population, and the interests timeout named (#882, WF)
 
