@@ -50,8 +50,9 @@ directory.
 | `v1101/`, `vfix/` | The same source built against zenoh 1.10.1 (crates.io), and 1.10.1 with `fix.patch` |
 | `fix.patch` | The intervention: `resources_data`, `linkstate_data` and `route_successor`'s shortcut collect their replies under the read lock and send them after it is dropped |
 | `run-matrix.sh` | The measurement matrix; one fresh router per trial |
+| `run-acl.sh` | The same router under access control, the asker a tool principal holding zk2's admin read, core 0.15's or 0.50's (zenkey #894) |
 | `summary.py` | The tables below, from the result lines |
-| `results-1.10.1.txt`, `results-fix.txt` | Raw `result` lines, one per trial, and a `# cell` line per cell |
+| `results-1.10.1.txt`, `results-fix.txt`, `results-acl.txt` | Raw `result` lines, one per trial, and a `# cell` line per cell |
 | `stacks/` | The condensed stacks (one line per thread that touches the tables) of one frozen trial per writer |
 
 ## Build
@@ -101,8 +102,18 @@ froze the router.
 ./target-1.10.1/release/asr trial --selector '@/*/router/subscriber/**' --load 500 --stacks scratch/stacks
 ./run-matrix.sh 1.10.1 >> results-1.10.1.txt
 ./run-matrix.sh fix >> results-fix.txt
+./run-acl.sh >> results-acl.txt
 python3 -I summary.py results-1.10.1.txt results-fix.txt
+python3 -I summary.py results-acl.txt
 ```
+
+`--acl wide|narrow` runs the router under `default_permission: deny`, with
+usrpwd principals: `asr`, which every session but the asker presents and
+which may do anything under `asr/**`, and `tool`, the asker, which holds
+zk2's admin read alone, `query` on ingress and `reply` on egress: `wide`
+is core 0.15's (`@/*/router`, `@/*/router/**`), `narrow` 0.50's
+(`@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**`,
+`@/*/*`). Each result line then carries `acl=`.
 
 ## Results
 
@@ -173,6 +184,73 @@ shortcut, which replies under it, needs a routed mesh, which this
 reproduction does not build. The storages selectors with nothing to send
 (no record ending in `**`, or the status subtree with no storage manager)
 take no second read.
+
+## Under access control (zenkey #894)
+
+zk2's access control (core §11) grants a tool the **admin read**. Core
+0.15's was `query` on `@/*/router` and `@/*/router/**`, which includes
+every declaration record of a router's; 0.50's is `@/*/router`,
+`@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, which
+intersect none. `run-acl.sh` runs the router under `default_permission:
+deny` with the asker holding one or the other (`--acl wide|narrow`),
+beside the same 500 records of each kind and a client declaring flat out.
+Run 2026-10-26 on the same VM, release build, beside the zenkey test
+suites: 150 trials, no error.
+
+- **0.15's grant froze the router in 45 of 45 trials** that asked a key
+  under `@/*/router/**` the locked handlers answer: every record family,
+  `linkstate/*`, `@/*/router/**` and 0.11's storages selector: 43 at the
+  first GET the churn met, the other two within 61 ms. The stacks are the same pair
+  as without access control (`stacks/subscriber-under-the-wide-admin-read.txt`).
+  Access control changes nothing for a GET it admits. `@/**` froze
+  nothing (0 of 5): no key of the grant includes it, so it was refused,
+  and its 2 replies are the asker's own session's `@/<zid>/session/**`.
+  It also refused `@/*/*`: 0 replies, where 0.50 gets the router's
+  document.
+- **0.50's grant froze it in 0 of 70**: the same nine selectors (50
+  trials, `@/**` among them) and the record GET beside each writer alone
+  (20). Each trial asked 66,276 to 115,545 GETs in its 15 s, 6,925,404 in
+  all, and each was refused at once with no reply: zenoh admits a query
+  only when an allowed key expression includes it
+  (`interceptor/authorization.rs`, `policy_decision_point`), and answers
+  one it refuses on ingress with the final response before routing it
+  (`primitives/demux.rs`), so the admin space never ran. The tools' three
+  reads stayed answered beside the churn (0 of 15 froze).
+
+The narrowing is a defence under `deny` alone. Under `allow` a deny
+applies by inclusion too, so a GET wider than every deny, `@/**`, is in
+none, and reaches the handlers.
+
+| zenoh | admin read | selector | load | shape | churn | pause (ms) | hung | first GET's replies | froze at (ms, median) | replier | writer |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1.10.1 | wide | `@/*/router/subscriber/**` | 500 | concrete | all | 0 | 10 of 10 | 501 | -5 | subscribers_data | Face::send_declare, Face::send_interest, Face::with_mapped_expr, Face::with_mapped_nullable_expr |
+| 1.10.1 | wide | `@/*/router/publisher/**` | 500 | concrete | all | 0 | 5 of 5 | 500 | -7 | publishers_data | Face::send_declare, Face::with_mapped_expr |
+| 1.10.1 | wide | `@/*/router/queryable/**` | 500 | concrete | all | 0 | 5 of 5 | 500 | -5 | queryables_data | Face::send_declare, Face::send_interest, Face::with_mapped_expr, Face::with_mapped_nullable_expr |
+| 1.10.1 | wide | `@/*/router/querier/**` | 500 | concrete | all | 0 | 5 of 5 | 500 | -5 | queriers_data | Face::send_interest, Face::with_mapped_expr |
+| 1.10.1 | wide | `@/*/router/token/**` | 500 | concrete | all | 0 | 5 of 5 | 500 | -5 | tokens_data | Face::send_declare, Face::send_interest, Face::with_mapped_expr |
+| 1.10.1 | wide | `@/*/router/linkstate/*` | 500 | concrete | all | 0 | 5 of 5 | 2 | -2 | linkstate_data | Face::send_interest, Face::with_mapped_nullable_expr |
+| 1.10.1 | wide | `@/*/router/**` | 500 | concrete | all | 0 | 5 of 5 | 2505 | -10 | linkstate_data, publishers_data, subscribers_data, tokens_data | Face::send_declare, Face::send_interest, Face::with_mapped_expr, Face::with_mapped_nullable_expr |
+| 1.10.1 | wide | `@/**` | 500 | concrete | all | 0 | 0 of 5 | 2 | — | — | — |
+| 1.10.1 | wide | `@/*/router/**/storage_manager/storages/**` | 500 | wild | all | 0 | 5 of 5 | 1000 | -6 | queryables_data, subscribers_data | Face::send_declare, Face::with_mapped_expr |
+| 1.10.1 | wide | `@/*/router` | 500 | concrete | all | 0 | 0 of 5 | 1 | — | — | — |
+| 1.10.1 | wide | `@/*/*` | 500 | concrete | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | wide | `@/*/router/status/plugins/storage_manager/storages/**` | 500 | wild | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/subscriber/**` | 500 | concrete | all | 0 | 0 of 10 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/publisher/**` | 500 | concrete | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/queryable/**` | 500 | concrete | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/querier/**` | 500 | concrete | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/token/**` | 500 | concrete | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/linkstate/*` | 500 | concrete | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/**` | 500 | concrete | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/**` | 500 | concrete | all | 0 | 0 of 5 | 2 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/**/storage_manager/storages/**` | 500 | wild | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router` | 500 | concrete | all | 0 | 0 of 5 | 1 | — | — | — |
+| 1.10.1 | narrow | `@/*/*` | 500 | concrete | all | 0 | 0 of 5 | 1 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/status/plugins/storage_manager/storages/**` | 500 | wild | all | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/subscriber/**` | 500 | concrete | sub | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/subscriber/**` | 500 | concrete | lsub | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/subscriber/**` | 500 | concrete | token | 0 | 0 of 5 | 0 | — | — | — |
+| 1.10.1 | narrow | `@/*/router/subscriber/**` | 500 | concrete | connect | 0 | 0 of 5 | 0 | — | — | — |
 
 ## The stacks
 

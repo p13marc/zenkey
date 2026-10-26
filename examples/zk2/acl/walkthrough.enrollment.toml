@@ -197,8 +197,10 @@ records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*"]
 # (core §11.1, 0.27), and its writes stay under its own prefixes.
 [[tool]]
 name = "ops"
-# Reads the routers' admin space, for S4's check and the doctor (core
-# §4.2, §11.1 Tool, 0.15): under deny, no other grant reaches it.
+# Reads the routers' admin space, for S4's check, the doctor and `zenctl
+# admin graph` (core §4.2, §11.1 Tool, 0.15, 0.50): under deny, no other
+# grant reaches it. The grant names those reads alone, so the router refuses
+# a GET on its declaration records from this principal (#894).
 admin = true
 # Inspects every service without binding or calling it (core §11.1, 0.27):
 # the doctor and `zenctl service list` read presence and descriptors on

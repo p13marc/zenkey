@@ -1,0 +1,178 @@
+# cell --acl wide --selector @/*/router/subscriber/**
+result ver=1.10.1 trial=acl-1 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9065 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-2 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9143 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-3 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9012 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-4 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=1 churns=9303 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-5 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9033 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-6 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9006 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-7 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=8729 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer=Face::with_mapped_nullable_expr
+result ver=1.10.1 trial=acl-8 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=8847 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-9 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=1 churns=9097 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-10 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9055 first_replies=501 first_errors=0 replier=adminspace::subscribers_data writer=Face::with_mapped_expr
+# cell --acl wide --selector @/*/router/publisher/**
+result ver=1.10.1 trial=acl-11 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9006 first_replies=500 first_errors=0 replier=adminspace::publishers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-12 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9176 first_replies=500 first_errors=0 replier=adminspace::publishers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-13 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=1 churns=9023 first_replies=500 first_errors=0 replier=adminspace::publishers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-14 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9065 first_replies=500 first_errors=0 replier=adminspace::publishers_data writer=Face::with_mapped_expr
+result ver=1.10.1 trial=acl-15 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9008 first_replies=500 first_errors=0 replier=adminspace::publishers_data writer={impl#10}::send_declare
+# cell --acl wide --selector @/*/router/queryable/**
+result ver=1.10.1 trial=acl-16 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9090 first_replies=500 first_errors=0 replier=adminspace::queryables_data writer=Face::with_mapped_nullable_expr
+result ver=1.10.1 trial=acl-17 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-4 asks=1 churns=9015 first_replies=500 first_errors=0 replier=adminspace::queryables_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-18 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9037 first_replies=500 first_errors=0 replier=adminspace::queryables_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-19 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=1 churns=9019 first_replies=500 first_errors=0 replier=adminspace::queryables_data writer=Face::with_mapped_expr
+result ver=1.10.1 trial=acl-20 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-3 asks=1 churns=9075 first_replies=500 first_errors=0 replier=adminspace::queryables_data writer={impl#10}::send_interest
+# cell --acl wide --selector @/*/router/querier/**
+result ver=1.10.1 trial=acl-21 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9074 first_replies=500 first_errors=0 replier=adminspace::queriers_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-22 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-4 asks=1 churns=9016 first_replies=500 first_errors=0 replier=adminspace::queriers_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-23 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-4 asks=1 churns=9125 first_replies=500 first_errors=0 replier=adminspace::queriers_data writer=Face::with_mapped_expr
+result ver=1.10.1 trial=acl-24 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=1 churns=9078 first_replies=500 first_errors=0 replier=adminspace::queriers_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-25 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9087 first_replies=500 first_errors=0 replier=adminspace::queriers_data writer=Face::with_mapped_expr
+# cell --acl wide --selector @/*/router/token/**
+result ver=1.10.1 trial=acl-26 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-4 asks=1 churns=9044 first_replies=500 first_errors=0 replier=adminspace::tokens_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-27 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-7 asks=1 churns=9762 first_replies=500 first_errors=0 replier=adminspace::tokens_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-28 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-5 asks=1 churns=9086 first_replies=500 first_errors=0 replier=adminspace::tokens_data writer=Face::with_mapped_expr
+result ver=1.10.1 trial=acl-29 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=1 churns=8963 first_replies=500 first_errors=0 replier=adminspace::tokens_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-30 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-2 asks=2 churns=8983 first_replies=500 first_errors=0 replier=adminspace::tokens_data writer={impl#10}::send_interest
+# cell --acl wide --selector @/*/router/linkstate/*
+result ver=1.10.1 trial=acl-31 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-10 asks=1 churns=8795 first_replies=2 first_errors=0 replier=adminspace::linkstate_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-32 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=4 churns=9030 first_replies=2 first_errors=0 replier=adminspace::linkstate_data writer=Face::with_mapped_nullable_expr
+result ver=1.10.1 trial=acl-33 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=61 asks=43 churns=8895 first_replies=2 first_errors=0 replier=adminspace::linkstate_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-34 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-2 asks=1 churns=9029 first_replies=2 first_errors=0 replier=adminspace::linkstate_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-35 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-2 asks=2 churns=8974 first_replies=2 first_errors=0 replier=adminspace::linkstate_data writer={impl#10}::send_interest
+# cell --acl wide --selector @/*/router/**
+result ver=1.10.1 trial=acl-36 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-9 asks=1 churns=9417 first_replies=2505 first_errors=0 replier=adminspace::linkstate_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-37 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-10 asks=1 churns=8876 first_replies=2505 first_errors=0 replier=adminspace::subscribers_data writer=Face::with_mapped_expr
+result ver=1.10.1 trial=acl-38 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-10 asks=1 churns=8990 first_replies=2505 first_errors=0 replier=adminspace::publishers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-39 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-2 asks=1 churns=9352 first_replies=2505 first_errors=0 replier=adminspace::publishers_data writer={impl#10}::send_interest
+result ver=1.10.1 trial=acl-40 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=hung t_ms=-10 asks=1 churns=8552 first_replies=2505 first_errors=0 replier=adminspace::tokens_data writer=Face::with_mapped_nullable_expr
+# cell --acl wide --selector @/**
+result ver=1.10.1 trial=acl-41 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15013 asks=53625 churns=10916 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-42 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15000 asks=53229 churns=11322 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-43 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15007 asks=70490 churns=13495 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-44 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15048 asks=82570 churns=14815 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-45 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15031 asks=66030 churns=13224 first_replies=2 first_errors=0
+# cell --acl wide --selector @/*/router/**/storage_manager/storages/** --shape wild
+result ver=1.10.1 trial=acl-46 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=hung t_ms=-9 asks=1 churns=8549 first_replies=1000 first_errors=0 replier=adminspace::queryables_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-47 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=hung t_ms=4 asks=1 churns=8831 first_replies=1000 first_errors=0 replier=adminspace::queryables_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-48 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=hung t_ms=-10 asks=1 churns=8776 first_replies=1000 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-49 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=hung t_ms=-6 asks=1 churns=8732 first_replies=1000 first_errors=0 replier=adminspace::subscribers_data writer={impl#10}::send_declare
+result ver=1.10.1 trial=acl-50 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=hung t_ms=-2 asks=1 churns=8771 first_replies=1000 first_errors=0 replier=adminspace::queryables_data writer=Face::with_mapped_expr
+# cell --acl wide --selector @/*/router
+result ver=1.10.1 trial=acl-51 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15006 asks=33256 churns=12455 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-52 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15026 asks=33506 churns=12462 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-53 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15045 asks=33800 churns=12914 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-54 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15020 asks=34748 churns=13833 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-55 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15020 asks=38372 churns=13289 first_replies=1 first_errors=0
+# cell --acl wide --selector @/*/*
+result ver=1.10.1 trial=acl-56 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15008 asks=85688 churns=13718 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-57 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15012 asks=67385 churns=13877 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-58 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15040 asks=44616 churns=11546 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-59 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15011 asks=100627 churns=14712 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-60 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=wide outcome=clean t_ms=15005 asks=103314 churns=15246 first_replies=0 first_errors=0
+# cell --acl wide --selector @/*/router/status/plugins/storage_manager/storages/** --shape wild
+result ver=1.10.1 trial=acl-61 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=clean t_ms=15006 asks=91869 churns=14041 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-62 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=clean t_ms=15005 asks=92393 churns=13535 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-63 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=clean t_ms=15005 asks=92525 churns=14324 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-64 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=clean t_ms=15014 asks=85740 churns=14838 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-65 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=wide outcome=clean t_ms=15025 asks=64302 churns=13965 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/subscriber/**
+result ver=1.10.1 trial=acl-66 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15019 asks=73074 churns=13609 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-67 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15008 asks=74896 churns=13762 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-68 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15019 asks=78271 churns=14559 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-69 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15014 asks=101272 churns=14074 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-70 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15015 asks=82320 churns=13991 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-71 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15020 asks=84410 churns=14251 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-72 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15024 asks=81645 churns=13746 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-73 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15021 asks=80740 churns=14015 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-74 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15016 asks=85212 churns=13723 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-75 selector=@/*/router/subscriber/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15013 asks=72752 churns=13461 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/publisher/**
+result ver=1.10.1 trial=acl-76 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15022 asks=66276 churns=14899 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-77 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15024 asks=70685 churns=14516 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-78 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15028 asks=80380 churns=14124 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-79 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15015 asks=81800 churns=14575 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-80 selector=@/*/router/publisher/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15031 asks=82567 churns=14233 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/queryable/**
+result ver=1.10.1 trial=acl-81 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15023 asks=84564 churns=15673 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-82 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15022 asks=82220 churns=14230 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-83 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15004 asks=91871 churns=15234 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-84 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15009 asks=82052 churns=14347 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-85 selector=@/*/router/queryable/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15014 asks=83536 churns=13801 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/querier/**
+result ver=1.10.1 trial=acl-86 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15008 asks=104673 churns=13653 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-87 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15009 asks=108454 churns=14115 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-88 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15017 asks=107546 churns=13727 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-89 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15009 asks=107503 churns=14457 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-90 selector=@/*/router/querier/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15008 asks=108377 churns=14209 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/token/**
+result ver=1.10.1 trial=acl-91 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15012 asks=107171 churns=13896 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-92 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15002 asks=108002 churns=13942 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-93 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15008 asks=107472 churns=13749 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-94 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15005 asks=108199 churns=14036 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-95 selector=@/*/router/token/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15006 asks=106326 churns=13719 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/linkstate/*
+result ver=1.10.1 trial=acl-96 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15007 asks=108408 churns=14927 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-97 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15010 asks=105735 churns=13633 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-98 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15002 asks=97929 churns=13861 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-99 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15010 asks=89206 churns=14650 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-100 selector=@/*/router/linkstate/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15003 asks=106771 churns=13816 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/**
+result ver=1.10.1 trial=acl-101 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15003 asks=106211 churns=13635 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-102 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15011 asks=106734 churns=15272 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-103 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15012 asks=108326 churns=14975 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-104 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15026 asks=96348 churns=13775 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-105 selector=@/*/router/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15016 asks=105844 churns=13921 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/**
+result ver=1.10.1 trial=acl-106 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15004 asks=104307 churns=14885 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-107 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15047 asks=105645 churns=13984 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-108 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15012 asks=103370 churns=14895 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-109 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15010 asks=104880 churns=14515 first_replies=2 first_errors=0
+result ver=1.10.1 trial=acl-110 selector=@/** load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15005 asks=102317 churns=13832 first_replies=2 first_errors=0
+# cell --acl narrow --selector @/*/router/**/storage_manager/storages/** --shape wild
+result ver=1.10.1 trial=acl-111 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15012 asks=106567 churns=14034 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-112 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15014 asks=107549 churns=14007 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-113 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15000 asks=106606 churns=13893 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-114 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15012 asks=104834 churns=13759 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-115 selector=@/*/router/**/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15023 asks=105762 churns=14166 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router
+result ver=1.10.1 trial=acl-116 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15013 asks=61601 churns=13955 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-117 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15006 asks=60240 churns=13625 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-118 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15000 asks=61213 churns=13809 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-119 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15008 asks=60248 churns=13811 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-120 selector=@/*/router load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15012 asks=60995 churns=13528 first_replies=1 first_errors=0
+# cell --acl narrow --selector @/*/*
+result ver=1.10.1 trial=acl-121 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15015 asks=60642 churns=14783 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-122 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15011 asks=59440 churns=13772 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-123 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15050 asks=60081 churns=14205 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-124 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15046 asks=52712 churns=13605 first_replies=1 first_errors=0
+result ver=1.10.1 trial=acl-125 selector=@/*/* load=500 shape=concrete churn=all every_ms=0 acl=narrow outcome=clean t_ms=15012 asks=44425 churns=13481 first_replies=1 first_errors=0
+# cell --acl narrow --selector @/*/router/status/plugins/storage_manager/storages/** --shape wild
+result ver=1.10.1 trial=acl-126 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15009 asks=91514 churns=15412 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-127 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15005 asks=71307 churns=13923 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-128 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15013 asks=91940 churns=15478 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-129 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15007 asks=90758 churns=13663 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-130 selector=@/*/router/status/plugins/storage_manager/storages/** load=500 shape=wild churn=all every_ms=0 acl=narrow outcome=clean t_ms=15010 asks=91108 churns=13946 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/subscriber/** --churn sub
+result ver=1.10.1 trial=acl-131 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub every_ms=0 acl=narrow outcome=clean t_ms=15011 asks=101159 churns=18194 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-132 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub every_ms=0 acl=narrow outcome=clean t_ms=15051 asks=108625 churns=19674 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-133 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub every_ms=0 acl=narrow outcome=clean t_ms=15048 asks=108330 churns=19928 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-134 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub every_ms=0 acl=narrow outcome=clean t_ms=15009 asks=98589 churns=19391 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-135 selector=@/*/router/subscriber/** load=500 shape=concrete churn=sub every_ms=0 acl=narrow outcome=clean t_ms=15006 asks=110745 churns=19225 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/subscriber/** --churn lsub
+result ver=1.10.1 trial=acl-136 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub every_ms=0 acl=narrow outcome=clean t_ms=15008 asks=111600 churns=19407 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-137 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub every_ms=0 acl=narrow outcome=clean t_ms=15006 asks=112861 churns=18483 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-138 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub every_ms=0 acl=narrow outcome=clean t_ms=15001 asks=114752 churns=19086 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-139 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub every_ms=0 acl=narrow outcome=clean t_ms=15002 asks=115545 churns=19426 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-140 selector=@/*/router/subscriber/** load=500 shape=concrete churn=lsub every_ms=0 acl=narrow outcome=clean t_ms=15002 asks=114092 churns=18811 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/subscriber/** --churn token
+result ver=1.10.1 trial=acl-141 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token every_ms=0 acl=narrow outcome=clean t_ms=15050 asks=111589 churns=17924 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-142 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token every_ms=0 acl=narrow outcome=clean t_ms=15050 asks=111159 churns=18205 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-143 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token every_ms=0 acl=narrow outcome=clean t_ms=15050 asks=110649 churns=17475 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-144 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token every_ms=0 acl=narrow outcome=clean t_ms=15000 asks=111308 churns=17673 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-145 selector=@/*/router/subscriber/** load=500 shape=concrete churn=token every_ms=0 acl=narrow outcome=clean t_ms=15048 asks=111747 churns=18017 first_replies=0 first_errors=0
+# cell --acl narrow --selector @/*/router/subscriber/** --churn connect
+result ver=1.10.1 trial=acl-146 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect every_ms=0 acl=narrow outcome=clean t_ms=15045 asks=100222 churns=21881 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-147 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect every_ms=0 acl=narrow outcome=clean t_ms=15046 asks=99316 churns=21628 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-148 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect every_ms=0 acl=narrow outcome=clean t_ms=15045 asks=98658 churns=21683 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-149 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect every_ms=0 acl=narrow outcome=clean t_ms=15046 asks=98251 churns=21341 first_replies=0 first_errors=0
+result ver=1.10.1 trial=acl-150 selector=@/*/router/subscriber/** load=500 shape=concrete churn=connect every_ms=0 acl=narrow outcome=clean t_ms=15046 asks=98592 churns=21519 first_replies=0 first_errors=0

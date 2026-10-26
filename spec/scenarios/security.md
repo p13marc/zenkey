@@ -98,3 +98,52 @@ router. The tool reads S4's two selectors (core §4.2).
   generator's live test (#612, FJ7);
 - step 3, in both cases under both postures, by zk2py's generator, built
   from §11 alone (0.15).*
+
+## §4 The admin read admits no GET of a node's declaration records (core §11.1, §11.2, 0.50)
+
+**Setup.** One router R1, its admin space on, read permitted (core §4.2),
+under `default_permission: deny`, with the block a generator compiles for
+two principals: a tool that reads the admin space and inspects every
+service (core §11.1 Tool), and a service principal that does neither.
+R1's storage manager runs one storage, `plans`. A session that is no
+principal, R1's own, holds a queryable on `@/**` that answers nothing and
+records the selector of every GET R1 routes to it. Nothing declares while
+a step runs: every session is open and every queryable declared before
+step 1.
+
+**Steps.**
+1. The tool reads `@/*/router`,
+   `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`.
+2. The tool GETs `@/*/router/queryable/**`, `@/*/router/**` and `@/**`.
+3. The service principal reads step 1's three selectors.
+4. **How a query is admitted.** Compile the block again with the tool's
+   admin read replaced by 0.15's, `@/*/router` and `@/*/router/**`, and
+   repeat step 1's `@/*/*`, then its `@/*/router`.
+
+**Expected.**
+1. R1 answers each: its document, `plans` with its `key_expr`, and its
+   root document. The recorder hears each selector.
+2. Each GET ends complete, with nothing of R1's, and the recorder hears
+   none of them: R1 refused each at the tool's face, before
+   routing it, so none reached the admin space. `@/**` also reaches the
+   tool's own session, whose runtime answers `@/<its zid>/session/**`
+   itself.
+3. Nothing answers, and the recorder hears none of them. Under `deny`, no
+   grant but the admin read reaches the admin space.
+4. `@/*/*` is refused, although both of 0.15's keys intersect it, and the
+   recorder does not hear it; `@/*/router` is answered. A query is admitted
+   by inclusion in an allowed key, never by intersection.
+
+*Measured on zenoh 1.10.1:
+- steps 1–4 by the reference generator's live tests (`zenkey-fleet/tests/
+  acl_live.rs`, `s4_the_admin_read_reaches_no_declaration_record` and
+  `a_query_is_admitted_by_inclusion_never_by_intersection`). The suite
+  never asks a declaration record beside a writer;
+- beside one, with zenoh alone (`docs/zk2/upstream/adminspace-reply-repro/`,
+  "Under access control"): beside 500 records of each kind and a client
+  declaring flat out, the tool's GETs of a router's records, its
+  `linkstate/*`, `@/*/router/**` and 0.11's storages selector froze R1 in
+  45 of 45 trials under 0.15's admin read, 43 at the first GET, and in 0
+  of 70 under 0.50's, `@/**` and each kind of writer alone included,
+  where each of 6.9 million GETs was refused. The three reads of step 1
+  froze nothing under either (0 of 30), and 0.15's refused `@/*/*`.*

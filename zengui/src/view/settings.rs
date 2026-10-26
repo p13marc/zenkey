@@ -343,7 +343,8 @@ pub const ADMIN_DECLARED_COST: &str = "off by default — zenoh 1.10.1 answers t
      routing tables' read lock, and a declaration or a session from any other client in \
      between deadlocks the router for good. On, they are asked at once and then at every \
      reconnect, namespace switch and admin sweep; off, the tree is the contract skeleton and \
-     what was observed.";
+     what was observed. A router under the deny block zenctl acl gen writes refuses them to \
+     every principal (#894), and answers nothing.";
 
 /// What the binary embeds and under which licences (#533) — the long form is
 /// `zengui/assets/fonts/NOTICE.md`, shipped beside every release binary.

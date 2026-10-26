@@ -7,7 +7,8 @@ other drafts here are, as a record of behaviour zk2 designs around. Since
 #890 the reference asks none of these keys unless its user does: zengui's
 declared-entities sweep is opt-in (`--admin-declared`), and the storages
 read names the storage manager's status subtree. Core 0.48 (§4.2,
-Appendix B) records the behaviour.
+Appendix B) records the behaviour. Since #894 (core 0.50, §11.1) the admin
+read `zenctl acl gen` grants a tool admits none of them under `deny`.
 
 ---
 
@@ -148,6 +149,24 @@ take no tables lock across a reply (read, not measured: the reproduction
 runs no plugin). A storage listing can name the status subtree whole,
 `@/*/router/status/plugins/storage_manager/storages/**`, which reaches
 none of the locked handlers.
+
+**Access control keeps a principal off them** (zenkey #894). zenoh's
+access control admits a query only when an allowed key expression
+includes the query's (`policy_decision_point`, `nodes_including`), and a
+query it refuses on ingress is answered with its final response at once,
+never routed (`primitives/demux.rs`, `handle_message`). So under
+`default_permission: deny`, a principal granted no key that intersects the
+locked handlers never reaches them, whatever it asks. Measured with
+`adminspace-reply-repro/run-acl.sh`, beside the same 500 records and churn:
+a principal granted `@/*/router` and `@/*/router/**` froze the router in
+45 of 45 trials (every declaration record, `linkstate/*`, `@/*/router/**`,
+the `**` storages selector); one granted `@/*/router`,
+`@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, in
+0 of 70 (the same selectors and `@/**`, beside the churn and beside each
+writer alone; 6.9 million GETs, each refused with no reply), while its
+own reads of those three stayed answered. Under
+`default_permission: allow` there is no such defence: a deny applies by
+inclusion too, so `@/**` is in none narrower than itself.
 
 **Not identified.** Whether a writer can also slip in on a peer's or a
 client's admin space (their tables have the same lock; the reproduction

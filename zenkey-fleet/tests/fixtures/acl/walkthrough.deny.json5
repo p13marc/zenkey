@@ -251,14 +251,14 @@ access_control: {
     { id: "presence-out:tool.zenwatch", permission: "allow", flows: ["egress"],
       messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/*/*/@zk/**"] },
-    // admin_read (tool.zenwatch): §11.1 Tool (0.15), §4.2: a tool reads the routers' admin space to check S4 and the doctor's router checks; under deny no other grant reaches it. Never namespaced
+    // admin_read (tool.zenwatch): §11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, for the check and the doctor) and the mesh's (`@/*/*`), and none of a router's declaration records, which zenoh 1.10.1 answers under its routing tables' read lock (#890): a query is admitted by inclusion, so one that reaches them is refused here, before the admin space runs. Under deny no other grant reaches the admin space. Never namespaced
     { id: "admin-read-in:tool.zenwatch", permission: "allow", flows: ["ingress"],
       messages: ["query"],
-      key_exprs: ["@/*/router", "@/*/router/**"] },
-    // admin_read (tool.zenwatch): §11.1 Tool (0.15), §4.2, egress: the routers' answers, each checked against its own key
+      key_exprs: ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"] },
+    // admin_read (tool.zenwatch): §11.1 Tool (0.15, 0.50), §4.2, egress: the routers' answers to those reads, each checked against its own key
     { id: "admin-read-out:tool.zenwatch", permission: "allow", flows: ["egress"],
       messages: ["reply"],
-      key_exprs: ["@/*/router", "@/*/router/**"] },
+      key_exprs: ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"] },
     // own (vehicle-01/executor): §11.1 Own: the service puts, deletes, serves and declares tokens under its prefix, each verbatim subtree spelled out because `**` never crosses one (§1.3), its `@adv` subtrees where it uses advanced publication (§2.5); reply covers its answers to queries on its own keys
     { id: "own-in:vehicle-01/executor", permission: "allow", flows: ["ingress"],
       messages: ["put", "delete", "declare_queryable", "reply", "liveliness_token"],
@@ -379,14 +379,14 @@ access_control: {
     { id: "call-out:tool.ops", permission: "allow", flows: ["egress"],
       messages: ["reply"],
       key_exprs: ["zk2/vehicle-01/thruster-l/thruster.v1/@op/arm", "zk2/vehicle-01/thruster-l/thruster.v1/@op/disarm", "zk2/vehicle-01/thruster-r/thruster.v1/@op/arm", "zk2/vehicle-01/thruster-r/thruster.v1/@op/disarm", "zk2/vehicle-01/navigation/nav.v2/@op/set_origin"] },
-    // admin_read (tool.ops): §11.1 Tool (0.15), §4.2: a tool reads the routers' admin space to check S4 and the doctor's router checks; under deny no other grant reaches it. Never namespaced
+    // admin_read (tool.ops): §11.1 Tool (0.15, 0.50), §4.2: the tools' reads of the routers' admin space, S4's two (`@/*/router` and the storage manager's status subtree, for the check and the doctor) and the mesh's (`@/*/*`), and none of a router's declaration records, which zenoh 1.10.1 answers under its routing tables' read lock (#890): a query is admitted by inclusion, so one that reaches them is refused here, before the admin space runs. Under deny no other grant reaches the admin space. Never namespaced
     { id: "admin-read-in:tool.ops", permission: "allow", flows: ["ingress"],
       messages: ["query"],
-      key_exprs: ["@/*/router", "@/*/router/**"] },
-    // admin_read (tool.ops): §11.1 Tool (0.15), §4.2, egress: the routers' answers, each checked against its own key
+      key_exprs: ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"] },
+    // admin_read (tool.ops): §11.1 Tool (0.15, 0.50), §4.2, egress: the routers' answers to those reads, each checked against its own key
     { id: "admin-read-out:tool.ops", permission: "allow", flows: ["egress"],
       messages: ["reply"],
-      key_exprs: ["@/*/router", "@/*/router/**"] },
+      key_exprs: ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"] },
     // contracts: §11.1: contract bundles are open, any principal may hold or fetch `zk2/@zk/contract/**`, because the hash is the check (§8.4)
     { id: "contracts-in", permission: "allow", flows: ["ingress"],
       messages: ["declare_queryable", "reply", "query"],

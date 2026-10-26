@@ -293,7 +293,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   the router (#890,
   `docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`); off,
   it is `None`, "admin n/a", and the admin pane says "not asked"
-  (`view::admin::Declared`). Its chunks carry zk2 roles, it
+  (`view::admin::Declared`); on, through a router under a generated
+  `deny` block, nothing answers, since the admin read grants no principal
+  those records (core §11.1, 0.50, #894; no enrollment field grants them
+  back), and the pane says so (`view::admin::DECLARED_UNANSWERED`). Its
+  chunks carry zk2 roles, it
   pivots by system, address, iface and kind, a declared `@op` row offers no
   watch (`scope::names_operation`: no watch, seed or fetch GETs under
   `@op`), and a watched templated family wears a budget badge from
@@ -462,7 +466,15 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   an enrollment (`examples/zk2/acl/`: principals by user or CN, never a
   zid, running services, archives and tools with their bindings and calls,
   and a tool's `inspects`, presence alone, since core 0.27; a principal
-  holds the union of what it runs) in `zenkey_fleet::model::acl`; a
+  holds the union of what it runs) in `zenkey_fleet::model::acl`; a tool
+  enrolled with `admin` holds the admin read, `query` and `reply` on
+  `@/*/router`, the storage manager's status subtree and `@/*/*`
+  (`model::acl::ADMIN_READ`, held equal to `bus::admin`'s `ROUTERS`,
+  `STORAGES` and `TOPOLOGY`), never a key `reaches_tables_lock` finds, so
+  under `deny` a router refuses a GET of its declaration records from any
+  principal at its ingress, complete and empty (core §11.1, §11.2, 0.50,
+  #894; `tests/acl_live.rs`' `s4_the_admin_read_reaches_no_declaration_
+  record`, beside no writer); a
   wildcard presence selector joins each provider's egress, since the
   descriptor read travels to it (0.27); `--default-permission allow` compiles each
   grant into denies of its complement. `--face-policy <FILE>` (#769 LB)
@@ -1189,7 +1201,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.49 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.50 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1214,7 +1226,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     time, round 71's F-248 and F-249; 0.48: no admin read a tool asks
     unbidden reaches a router's declaration records, which zenoh 1.10.1
     answers under its tables' read lock, #890; 0.49: the final cold read's
-    three wordings, round 72's F-250 to F-252; changes go through
+    three wordings, round 72's F-250 to F-252; 0.50: the admin read is the
+    tools' three reads and admits no GET of any node's declaration
+    records, a query admitted by inclusion, #894, with round 73's F-253
+    to F-255; changes go through
     `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

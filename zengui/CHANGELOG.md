@@ -4,6 +4,20 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a deny block refuses the declared entities (#894, WL)
+
+Since core 0.50, `zenctl acl gen`'s admin read grants a tool the three reads
+the tools make, and none of a router's declaration records: under `deny`, a
+router refuses `--admin-declared`'s GETs from every principal, complete and
+empty, as a disabled admin space answers them. No enrollment field grants
+them back.
+
+| Before | Now | Notes |
+|---|---|---|
+| asked, nothing answered: "declared entities: n/a — not read yet, or nothing answered. zenoh's adminspace.enabled defaults to false and a peer mesh has none, …" | "… a peer mesh has none, and a router under the deny block zenctl acl gen writes refuses these records to every principal (core §11.1, 0.50, #894), …" (`view::admin::DECLARED_UNANSWERED`) | a refusal and an admin space that is off answer alike, so the sentence names both, never "nothing declared" (O4) |
+| `--admin-declared`'s help and the Settings switch's cost | name the refusal under a generated deny block | |
+| the mesh under a generated `deny` block: `@/*/*` refused | answered | the admin read now includes it |
+
 ## Unreleased (`main`, zk2) — the declared entities are asked only on opt-in (#890, WJ)
 
 zenoh 1.10.1 answers the admin space's declaration records,

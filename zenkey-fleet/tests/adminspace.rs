@@ -110,9 +110,11 @@ async fn admin_router() -> (zenoh::Session, String) {
 /// beside an owner whose state queryable ends in `**`, 400 more records
 /// ending in `**`, and a client declaring flat out. Each read finds the
 /// router and the storage; a put and the owner's S4 answer cross the
-/// router within [`BOUND`] after each; and no selector the reads asked, as
-/// a queryable on `@/**` heard them, reaches a handler zenoh answers under
-/// its tables' read lock.
+/// router within [`BOUND`] after each; and a queryable on `@/**` hears
+/// each of the check's reads, two a round and nothing else, none reaching
+/// a handler zenoh answers under its tables' read lock (it hears a read
+/// only once the router routes it on, so a read that froze the router
+/// would be missing from the count: F-254, core 0.50).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s12_the_checks_reads_beside_a_router_declaring() {
     panic_watchdog::install();
@@ -330,8 +332,16 @@ async fn s12_the_checks_reads_beside_a_router_declaring() {
         "the writer kept writing: {churned} rounds"
     );
 
-    // 3. What the reads asked, as the ear heard them.
+    // 3. What the reads asked, as the ear heard them. The ear hears a
+    //    read only once the router routes it on, so it never hears one
+    //    that froze the router (F-254, 0.50): every read the check made is
+    //    counted heard, two a round, and nothing else.
     let asked = heard.lock().unwrap().clone();
+    assert_eq!(
+        asked.len(),
+        2 * ROUNDS,
+        "the check's two reads a round, each heard: {asked:?}"
+    );
     for read in [
         zenkey_fleet::bus::admin::ROUTERS,
         zenkey_fleet::bus::admin::STORAGES,
