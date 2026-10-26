@@ -369,7 +369,7 @@ re-read, 3 s for the ten. The test's control, a reader that skips the
 round trip, its link stalled until the withdrawal had reached R1, missed
 the withdrawal in 3 of 3 starts in each of the 10 runs.*
 
-## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46; Appendix B)
+## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47; Appendix B)
 
 **Setup.** Routers R1 and R2, linked R2 → R1. An owner, a tool and two
 crowd sessions are clients of R1; the crowd sessions, in a namespace `ns`,
@@ -525,10 +525,14 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
     call (0.44). Every count here is the reader's own, taken at its own
     sessions, as step 6's are (0.45, F-244): zenoh tells a router nothing
     of a GET given up on (Appendix B), so no router or link tells one
-    given up on from one waited for. A tool run as a black box is judged
-    on what its output shows: every address it followed unobservable from
-    the cut, never down, and its read complete within 30 s of the heal.
-    The counts are not asked of it (0.46, F-245).
+    given up on from one waited for. A tool run as a black box is run
+    with its output's period at most half the cut (0.47, F-249: zk2py
+    runs `zenctl watchdog` at `--every 0.5` beside the 1 s cut), so that
+    it prints at least once while the link is cut, and judged on
+    what its output shows: from its first output after the cut until a
+    complete read after the heal, every address it followed unobservable,
+    never down, and its read complete within 30 s of the heal. The counts
+    are not asked of it (0.46, F-245).
 
 *Measured (0.41, #851) by the reference, in a debug build, in
 `zenkey/tests/presence.rs`'s `s10_a_round_trip_at_a_population_and_the_interests_timeout`
