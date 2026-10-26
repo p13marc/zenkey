@@ -87,6 +87,11 @@ the MAY's example (F-247), and sizes the wait after a move as a session's
 first read of the population (F-246). The follower sizes nothing on a
 read's cost: after a move its round trip waits until it ends, at the latest
 at its watch session's interests timeout.
+
+Core 0.47 (#609, round 72) is wording only too. A reader's seed, on a
+session that has not read the population, is the first read it can time,
+and a wait sized from it keeps a margin (F-248). The follower still sizes
+nothing on a read's cost, so nothing here changed.
 """
 
 from __future__ import annotations

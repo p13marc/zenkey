@@ -1,4 +1,4 @@
-"""core ``scenarios/presence.md`` §1 to §10 (core 0.46), run from Python on
+"""core ``scenarios/presence.md`` §1 to §10 (core 0.47), run from Python on
 zenoh-python 1.10.1 routers in process, with an owner and a reader under
 test of either implementation::
 
@@ -43,9 +43,13 @@ the reader under test's verdict (0.38, F-188, F-189):
   (F-245): a tool run as a black box is judged on what its output shows:
   every address it followed unobservable from the cut, never down, and its
   read complete within 30 s of the heal; the counts are not asked of it.
-  zenctl's watchdog prints a transition only at an evaluation, so the runner
-  sets ``--every 0.5``, below the 1 s cut, and reads "from the cut" as its
-  first transition after the cut, before the heal (F-249).
+  0.47 (F-249): such a tool is run with its output's period at most half the
+  cut, so that it prints at least once while the link is cut, and judged
+  from its first output after the cut until a complete read after the heal.
+  zenctl's watchdog prints a transition only at an evaluation, once every
+  ``--every``: the runner sets 0.5 s beside the 1 s cut, refuses a period
+  above half the cut, and reads its first transition after the cut, which
+  must be printed before the heal, through the first ``ok`` after the heal.
   ``--reopen`` adds round 68's F-239 measurement to §10 for zk2py's
   reader, and with zenctl round 68's watchdog run beside the crowd, a 3 s
   cut and a heal, and step 10's run at ``--every 5`` and 2 (F-249): notes
@@ -2287,6 +2291,14 @@ def _s10_step_10_reader(report: Report, sec: str, ep1: str, ns_tool: Any, label:
                          f"{f.barrier.asked} and taken up {f.barrier.taken_up}; the round trip after the reopen "
                          f"{[round(r.elapsed_s * 1000) for r in f.round_trips if t_open_ns and r.asked_ns > t_open_ns]} "
                          f"ms; complete again {t_whole:.2f} s after the heal")
+        # beyond Expected 10, §8.1 (0.47, F-248): "Its seed, on a session
+        # that has not read the population before, is a session's first
+        # read, and the one it can time": the seed beside the round trip
+        # after the reopen, in the same run
+        with f.lock:
+            took = [(p.kind, round(p.elapsed_s, 3)) for p in f.reads[:4]]
+        report.note(sec, f"{label}: §8.1 (0.47, F-248), beyond Expected 10: its seed, on a fresh reading session, "
+                         f"and the reads after it (kind, s): {took}")
     finally:
         stop.set()
         if f is not None:
@@ -2569,7 +2581,7 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
     The window read is every transition after the cut up to the first ``ok``
     printed after the heal, which closes it; one before the heal is in it.
     Times are compared unrounded, all on ``time.monotonic()``."""
-    out: dict[str, Any] = {}
+    out: dict[str, Any] = {"every": every, "half_cut": every <= cut_s / 2}
     wd = Watchdog(endpoint_link.endpoint, [rule], every=every, namespace=namespace, extra=extra)
     try:
         t0 = time.monotonic()
@@ -2600,12 +2612,15 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
         out["fired"] = "firing" in {to for _, _, to, _ in mv}
         first = window[0] if window else None
         out["first"] = None if first is None else (round(first[0] - t_cut, 2), first[2], first[3])
-        # 0.46 (F-245): "every address it followed unobservable from the cut,
-        # never down": the first transition after the cut leaves the ok it was
-        # cut from for unobservable, printed before the heal (F-249: below the
-        # cut, its period shows it), and every one until the closing ok is
-        # unobservable: none firing, none ok before a complete read after the
-        # heal
+        # 0.47 (F-249): "run with its output's period at most half the cut,
+        # so that it prints at least once while the link is cut, and judged
+        # ... from its first output after the cut until a complete read after
+        # the heal, every address it followed unobservable, never down": the
+        # first transition after the cut leaves the ok it was cut from for
+        # unobservable, printed before the heal (the runner's reading of "so
+        # that it prints at least once while the link is cut"), and every one
+        # until the closing ok is unobservable: none firing, none ok before a
+        # complete read after the heal
         out["unobservable_first"] = (first is not None and first[1] == "ok" and first[2] == "unobservable"
                                      and first[0] < t_heal)
         out["window_unobservable"] = bool(window) and all(to == "unobservable" for _, _, to, _ in window)
@@ -2618,16 +2633,20 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
 def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
     """§10 step 10's reader, the reference's: ``zenctl watchdog --namespace ns
     --rule 'instance-gone crowd/*'`` beside the crowd, every session through
-    one link, cut for 1 s and healed. 0.46 (F-245): "A tool run as a black
-    box is judged on what its output shows: every address it followed
-    unobservable from the cut, never down, and its read complete within 30 s
-    of the heal. The counts are not asked of it." That is the step's one
-    check; its stderr's zenoh lines are said, a proxy for the counts.
+    one link, cut for 1 s and healed. 0.47 (F-249): "A tool run as a black
+    box is run with its output's period at most half the cut (…), so that it
+    prints at least once while the link is cut, and judged on what its
+    output shows: from its first output after the cut until a complete read
+    after the heal, every address it followed unobservable, never down, and
+    its read complete within 30 s of the heal. The counts are not asked of
+    it (0.46, F-245)." That is the step's one check; its stderr's zenoh
+    lines are said, a proxy for the counts.
 
     zenctl's output is a transition printed at an evaluation, once every
-    ``--every``: the runner sets 0.5 s, below the cut, and reads "from the
-    cut" as the first transition after the cut, printed before the heal.
-    At its default 5 s a 1 s cut is never printed (F-249)."""
+    ``--every``: the runner sets 0.5 s, half the cut, as 0.47 names, and
+    reads the first transition after the cut, printed before the heal,
+    through the first ``ok`` after the heal. At its default 5 s a 1 s cut is
+    never printed (F-249)."""
     from .budget_scenarios import Link
 
     rule = "instance-gone crowd/*"
@@ -2640,17 +2659,20 @@ def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
     within = r.get("after_heal") is not None and 0.0 <= r["after_heal"] <= 30.0
     first = r.get("first")
     said = "none" if first is None else f"{first[1]} {first[0]} s after the cut ({first[2][:160]})"
-    what = (f"ok {r.get('t_ok', 0):.1f} s after its start, quiet before the cut {r.get('quiet')}; its first "
+    what = (f"--every {r.get('every'):g}, at most half the 1 s cut {r.get('half_cut')}; "
+            f"ok {r.get('t_ok', 0):.1f} s after its start, quiet before the cut {r.get('quiet')}; its first "
             f"transition after the cut: {said}; since the cut {r.get('cut_states')}; ok again "
             f"{r.get('after_heal')} s after the heal; {r.get('stderr')}")
     report.check(sec, f"10. (the reader under test, a tool run as a black box) zenctl watchdog --namespace {NS} --rule "
-                      f"'{rule}' --timeout 30 --every 0.5 beside the {P.crowd}, every session through one link cut "
-                      "for 1 s and healed, judged on what its output shows (0.46, F-245), its one rule's transitions "
-                      "(one state for every address it follows): unobservable from the cut (its first transition "
-                      "after it, from ok, before the heal), every transition until the first ok after the heal "
-                      "unobservable, never firing, and its read complete again within 30 s of the heal, ok",
-                 bool(r.get("ok")) and bool(r.get("quiet")) and bool(r.get("unobservable_first"))
-                 and bool(r.get("window_unobservable")) and not r.get("fired") and within, what)
+                      f"'{rule}' --timeout 30 --every 0.5, its output's period at most half the cut (0.47, F-249), "
+                      f"beside the {P.crowd}, every session through one link cut for 1 s and healed, judged on what "
+                      "its output shows (0.46, F-245), its one rule's transitions (one state for every address it "
+                      "follows): from its first output after the cut (from ok, printed while the link is cut) "
+                      "until a complete read after the heal (the first ok after it), every transition unobservable, "
+                      "never firing, and its read complete again within 30 s of the heal, ok",
+                 bool(r.get("half_cut")) and bool(r.get("ok")) and bool(r.get("quiet"))
+                 and bool(r.get("unobservable_first")) and bool(r.get("window_unobservable"))
+                 and not r.get("fired") and within, what)
     report.note(sec, "10. zenctl's one round trip after the reopen, and no read beside one in flight: counts at the "
                      "reader's own sessions, not asked of a tool run as a black box (0.45, F-244; 0.46, F-245)")
 
@@ -2739,7 +2761,7 @@ def main(argv: list[str] | None = None) -> int:
             report.check(f"§{name}", "the section ran", False, repr(e))
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"presence scenarios §1–§10 (core 0.46), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
+    print(f"presence scenarios §1–§10 (core 0.47), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
           f"failed, {len(report.not_run)} not run")
     for sec, name, ok, detail in report.rows:
         if not ok:
