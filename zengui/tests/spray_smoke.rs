@@ -174,8 +174,9 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
 
     panic_watchdog::install();
     // The boot re-reads the shared context file: a scratch one, never the
-    // user's.
-    let home = std::env::temp_dir().join("zengui-spray-live");
+    // user's, and this process's own, so copies of this test run at once
+    // never remove each other's.
+    let home = std::env::temp_dir().join(format!("zengui-spray-live-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).expect("scratch dir");
     // SAFETY: set before any store call; the other test here reads no store.
