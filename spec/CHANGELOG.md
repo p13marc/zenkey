@@ -3,6 +3,60 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.49 — 2026-10-26: three wordings from the final cold read of the watch-session line (round 72's F-250 to F-252)
+
+zk2py round 72 (PR #892) was the final cold read of the line rounds 66–71
+worked on: the watch session, its round trip and a reopen. It read 0.47,
+§8.1 whole, Appendix B and presence §9 and §10 whole, and resolved F-248
+and F-249. It filed three minor findings, each wording only: none
+changes a verdict, a test or an implementation, in zk2py or the
+reference. Every check of §1–§10 passes in every pairing, and the two
+implementations agree on every verdict.
+
+**Changed: whose timeout the interests timeout sits above** (§8.1;
+F-250).
+- **The gap.** 0.41's SHOULD asked for "an interests timeout above their
+  timeout", meaning the GETs' timeout. 0.45's MAY lets a reader ask each
+  GET with its own timeout at or above the interests timeout. Read word
+  for word, a reader that takes the MAY breaks the SHOULD. zk2py's
+  follower is one: interests 120 s, GETs 121 s. The SHOULD's reason, that
+  long reads can then be complete, is about how long the reader waits.
+- **Now.** The interests timeout sits above the longest the reader waits
+  for a read. A reader that takes the MAY bounds that wait apart, and
+  meets the SHOULD by it.
+
+**Changed: which history figure passes the waits** (§8.1; F-251).
+- **The gap.** 0.42 put zk2py's 3.2–3.9 s, a release build, "past the
+  scenarios' 5 s wait and zenoh's 10 s interests timeout". Only the debug
+  build's 23 s is. The slip was in round 66's F-233, and 0.42 took it
+  over. This round measured 3.1–5.9 s in a release build under load: once
+  in three past the 5 s wait, and never past the 10 s.
+- **Now.** The debug figure is past both. The release figure is at the
+  5 s wait. The SHOULD and its reason are unchanged: a history puts the
+  population back into every round trip.
+
+**Changed: a black box that prints nothing while its link is cut**
+(presence §10 Expected 10; F-252).
+- **The gap.** 0.47 said the period ensures "it prints at least once
+  while the link is cut". A tool that prints only transitions, as
+  `zenctl watchdog` does, prints nothing if it never sees the move, and
+  then "its first output after the cut" names nothing to judge. zk2py's
+  runner failed such a tool. The text gave no verdict.
+- **Now.** The period ensures an evaluation while the link is cut. The
+  first output after the cut must come while the link is cut. A tool that
+  prints nothing then has not shown the move, and fails. zenctl prints
+  unobservable 0.45–0.48 s after the cut in every run, so no verdict of
+  either implementation changes.
+
+**Deliberately not changed.**
+- **No rule.** Every SHOULD and MAY stands as written. Only their wording
+  and two figures move.
+- **No further cold read of this line is planned.** Rounds 66–72 took
+  §8.1's watch session from 0.41 to 0.49. The last three rounds found
+  wording only, and none of their findings changed a verdict. 0.49's own
+  wording is read by the next round that reads §8.1 for any other reason.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.48 — 2026-10-26: an admin read that reaches no router's declaration records (zenkey #890)
 
 zengui's boot asked the admin space for every session's declarations, and
