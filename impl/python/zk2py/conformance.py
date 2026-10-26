@@ -2601,11 +2601,14 @@ class _FakeSession:
     its info's links say before and after, or raises; its transports say
     ``transports`` throughout (core 0.38: never what the check reads). Its
     liveliness subscribers and transport listeners are recorded, never
-    called (round 67)."""
+    called (round 67). With ``gate``, a GET's final reply waits until the
+    gate is set (at most 30 s), so a case decides when a GET ends rather
+    than racing a delay (review-bot on PR #885)."""
 
     def __init__(self, tokens: list[str], links: list[Any], transports: list[Any] | None = None,
-                 delay_s: float = 0.0, errors: int = 0) -> None:
+                 delay_s: float = 0.0, errors: int = 0, gate: threading.Event | None = None) -> None:
         self.tokens, self.links, self.closed = tokens, list(links), False
+        self.gate = gate
         self.held_transports = [object()] if transports is None else transports
         self.delay_s, self.errors = delay_s, errors
         self.asked: list[str] = []
@@ -2655,6 +2658,8 @@ class _FakeSession:
                     handler.callback(_Err())
                 if outer.delay_s:
                     time.sleep(outer.delay_s)
+                if outer.gate is not None:
+                    outer.gate.wait(30.0)
                 handler.drop()
 
             def declare_subscriber(self, selector: str, handler: Any, history: bool = False) -> Any:
@@ -3005,11 +3010,14 @@ def _watch_wire_readings() -> list[tuple[str, Any, Any]]:
 
 def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
     """Core 0.44 §8.1 in :mod:`zk2py.live` and :mod:`zk2py.presence`, on fake
-    sessions whose GETs take a while (#609, round 69): one round trip, and
-    one read, at a time, the next that needs one taking up the one in
-    flight; a round trip asked before a move standing for nothing after
-    it; the round trip after a move waited for; and a caller's wait for
-    the next change that drops nothing."""
+    sessions whose GETs end when the case opens their gate (#609, round 69;
+    event-driven on review-bot's word on PR #885, so a slow runner can make
+    a case wait, never fail it): one round trip, and one read, at a time,
+    the next that needs one taking up the one in flight; a round trip asked
+    before a move standing for nothing after it; one taken up after it
+    ended standing only through a session that still holds a link; the
+    round trip after a move waited for; and a caller's wait for the next
+    change that drops nothing."""
     import zenoh
 
     from . import live
@@ -3021,7 +3029,7 @@ def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
     up = [object()]
     out: list[tuple[str, Any, Any]] = []
 
-    def until(cond: Any, limit: float = 5.0) -> bool:
+    def until(cond: Any, limit: float = 30.0) -> bool:
         end = time.monotonic() + limit
         while time.monotonic() < end:
             if cond():
@@ -3030,56 +3038,105 @@ def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
         return bool(cond())
 
     label = "core 0.44 §8.1, zk2py's barrier"
-    w = _FakeSession([], [up], delay_s=0.3)
+    gate = threading.Event()
+    w = _FakeSession([], [up], gate=gate)
     live.register(w, interests_timeout_s=60.0)
     b = live.Barrier(w, sel)
-    four = [b.round_trip(0.0) for _ in range(3)] + [b.round_trip(5.0)]
+    three = [b.ask(0.0) for _ in range(3)]
+    gate.set()
+    fourth, fl4 = b.ask(30.0)
     out += [
         (f"{label}: its round trip asked four times in a row, the first three given up on at once and the fourth "
-         "waited for: one GET, the three not standing, their wait ended, and the fourth taking it up and standing "
-         "(presence.md §10 step 10)",
-         [w.asked, [r.why == live.WAIT_ENDED and r.made and not r.stands for r in four[:3]], four[3].stands,
-          b.asked, b.taken_up, len({r.asked_ns for r in four[:3]}), four[3].asked_ns >= four[0].asked_ns],
-         [[key], [True, True, True], True, 1, 3, 1, True]),
+         "waited for: one GET, the three not standing, their wait ended, and the fourth taking the same one up and "
+         "standing (presence.md §10 step 10)",
+         [w.asked, [r.why == live.WAIT_ENDED and r.made and not r.stands for r, _ in three], fourth.stands,
+          b.asked, b.taken_up, all(f is fl4 for _, f in three)],
+         [[key], [True, True, True], True, 1, 3, True]),
         (f"{label}: a flight's own GET timeout is above its session's interests timeout, never below the caller's",
          [live.flight_timeout(w), live.flight_timeout(w, 90.0), live.flight_timeout(_FakeSession([], [up]))],
          [61.0, 90.0, live.ZENOH_INTERESTS_TIMEOUT_S + 1.0]),
     ]
+    live.forget(w)
     # a move: the one in flight was asked before it, so the next asks anew,
     # and the first stands for nothing after the move
-    w = _FakeSession([], [up], delay_s=0.3)
+    gate = threading.Event()
+    w = _FakeSession([], [up], gate=gate)
     live.register(w, interests_timeout_s=60.0)
     b = live.Barrier(w, sel)
-    first: list[Any] = []
-    t = threading.Thread(target=lambda: first.append(b.round_trip(5.0)))
+    first, _ = b.ask(0.0)
+    until(lambda: w.asked == [key])
+    b.moved()
+    second, _ = b.ask(0.0)
+    until(lambda: w.asked == [key, key])
+    gate.set()
+    until(lambda: not b.in_flight)
+    # the first's answer, had a caller still waited on it, against the move
+    stale, _ = b.ask(30.0)
+    out.append((f"{label}: a move while one is in flight: the next asks another (\"since its watch session's "
+                "transport last moved\"), and the one asked after the move is the one taken up and stands",
+                [w.asked, b.asked, first.why, second.why, stale.stands, b.taken_up],
+                [[key, key], 2, live.WAIT_ENDED, live.WAIT_ENDED, True, 1]))
+    gate = threading.Event()
+    w = _FakeSession([], [up], gate=gate)
+    live.register(w, interests_timeout_s=60.0)
+    b = live.Barrier(w, sel)
+    got: list[Any] = []
+    t = threading.Thread(target=lambda: got.append(b.round_trip(30.0)))
     t.start()
     until(lambda: w.asked == [key])
     b.moved()
-    second = b.round_trip(5.0)
-    t.join(5.0)
-    out.append((f"{label}: a move while one is in flight: the next asks another (\"since its watch session's "
-                "transport last moved\"), and the first stands for nothing after the move",
-                [w.asked, b.asked, first[0].stands if first else None, first[0].why if first else None, second.stands],
-                [[key, key], 2, False, live.MOVED_DURING, True]))
-    # an ended one is not taken up: a new one is asked
+    gate.set()
+    t.join(30.0)
+    out.append((f"{label}: a round trip that ended standing, its caller waiting through a move: it stands for nothing "
+                "after the move", [got[0].stands if got else None, got[0].why if got else None],
+                [False, live.MOVED_DURING]))
+    live.forget(w)
+    # one that ended is not taken up once its answer was handed back
     w = _FakeSession([], [up])
     live.register(w, interests_timeout_s=60.0)
     b = live.Barrier(w, sel)
-    a1, a2 = b.round_trip(5.0), b.round_trip(5.0)
-    out.append((f"{label}: one that ended is in flight no more: the next asks its own",
+    a1, a2 = b.round_trip(30.0), b.round_trip(30.0)
+    out.append((f"{label}: one whose answer was handed back is in flight no more: the next asks its own",
                 [w.asked, a1.stands, a2.stands, b.taken_up], [[key, key], True, True, 0]))
-    for x in (w,):
-        live.forget(x)
+    live.forget(w)
+    # one taken up after it ended: it stands only through a session that
+    # still holds a link (a cut its listener has not told is in no count)
+    for links_now, want in (([up, up, up], (True, "")), ([up, up, []], (False, live.CUT_OFF_SINCE))):
+        gate = threading.Event()
+        w = _FakeSession([], links_now, gate=gate)
+        live.register(w, interests_timeout_s=60.0)
+        b = live.Barrier(w, sel)
+        b.ask(0.0)
+        gate.set()
+        until(lambda: not b.in_flight)
+        r = b.round_trip(30.0)
+        out.append((f"{label}: taken up after it ended standing, the watch session's links "
+                    f"{'held' if want[0] else 'gone'} when it is taken up: "
+                    f"{'it stands' if want[0] else 'it does not stand, cut off since'}", (r.stands, r.why), want))
+        live.forget(w)
+    # one counter: a barrier that reads its caller's count refuses a move told
+    count = [0]
+    b = live.Barrier(_FakeSession([], [up]), sel, gen=lambda: count[0])
+    try:
+        b.moved()
+        refused = False
+    except RuntimeError:
+        refused = True
+    count[0] += 1
+    out.append((f"{label}: a barrier that reads its caller's move count follows it, and refuses to count a move "
+                "itself (review-bot on PR #885: one counter)", [b.gen, refused], [1, True]))
 
     label = "core 0.44 §8.1, zk2py's follower"
-    # its reading session slow: the read's wait ends first, the read runs on,
-    # and the next read takes it up, asking no second GET
-    r, w = _FakeSession([tok], [up], delay_s=0.3), _FakeSession([], [up])
+    # its reading session's GET gated: the read's wait ends first, the read
+    # runs on, and the next read takes it up, asking no second GET
+    gate = threading.Event()
+    r, w = _FakeSession([tok], [up], gate=gate), _FakeSession([], [up])
     live.register(r, interests_timeout_s=120.0)
     live.register(w, interests_timeout_s=120.0)
     f = pr.PresenceFollower(r, w, sel, timeout=0.05, retry_s=60.0, max_retry_s=60.0)
     after_start = [list(r.asked), f.read_waits_ended, list(f.folds), f.idle]
-    f.timeout = 5.0
+    gate.set()
+    f.timeout = 30.0
     p = f.read()
     taken = [list(r.asked), f.reads_taken_up, list(f.folds), p.kind if p is not None else None, f.address("lab", "o")]
     f.read()
@@ -3094,20 +3151,54 @@ def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
     ]
     live.forget(r)
     live.forget(w)
+    # a read that raised: every caller that takes it up gets the error
+    f2 = pr.PresenceFollower(_FakeSession([tok], [up]), _FakeSession([], [up]), sel, retry_s=60.0, max_retry_s=60.0)
+    boom = live.Flight(f2.gen, {"asked": 0, "ordered": True})
+    f2._read_flight = boom
+    f2.timeout = 30.0
+    res: list[str] = []
+
+    def taker() -> None:
+        try:
+            f2.read()
+            res.append("no error")
+        except RuntimeError as e:
+            res.append(str(e))
+
+    t = threading.Thread(target=taker)
+    t.start()
+    until(lambda: boom.taken_up == 1)
+    # another caller had its answer first: the error, already consumed
+    with f2.lock:
+        boom.error, boom.consumed = RuntimeError("boom"), True
+    boom.done.set()
+    t.join(30.0)
+    handed = res[0] if res else "no answer"
+    f2.close()
+    out.append((f"{label}: a read that raised, already taken up by another caller: the error is handed on, never "
+                "None (review-bot on PR #885)", handed, "boom"))
     # after a move, its round trip waits until it ends: the wait at its start
     # (round_trip_timeout) ends first, the one after the move does not
-    r, w = _FakeSession([tok], [up]), _FakeSession([], [up], delay_s=0.3)
+    gate = threading.Event()
+    r, w = _FakeSession([tok], [up]), _FakeSession([], [up], gate=gate)
     live.register(r, interests_timeout_s=120.0)
     live.register(w, interests_timeout_s=120.0)
     f = pr.PresenceFollower(r, w, sel, round_trip_timeout=0.05, retry_s=60.0, max_retry_s=60.0)
     start = [f.rt_waits_ended, list(f.folds[:1]), len(w.listeners)]
+    gate.set()
     until(lambda: not f.barrier.in_flight)
+    gate.clear()
     n_rt = len(f.round_trips)
 
     class _Event:
         kind = zenoh.SampleKind.PUT
 
     w.listeners[0].callback(_Event())
+    # the round trip after the move is asked; it ends only once the gate is
+    # set, well past round_trip_timeout: a wait of 0.05 s would have ended
+    until(lambda: len(w.asked) == 2)
+    time.sleep(0.3)
+    gate.set()
     ok = until(lambda: f.folds[-1:] == [(live.COMPLETE, True)] and len(f.folds) >= 2)
     out += [
         (f"{label}: at its start the round trip's wait ends first, and its read is unordered",
@@ -3116,15 +3207,16 @@ def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
          "move\"): no wait ended, the round trip stands, then an ordered read",
          [ok, f.rt_waits_ended, [bool(x) for x in f.round_trips[n_rt:]], len(w.asked)], [True, 1, [True], 2]),
     ]
-    # its caller's wait for the next change: none, then one
+    # its caller's wait for the next change: none, then one, never missed
     sub = w.subscribers[0][1]
     nothing = f.next_move(0.02)
-    threading.Timer(0.05, lambda: sub.callback(_Sample(tok.replace("lab/o", "lab/q")))).start()
-    moved = f.next_move(5.0)
+    v = f.version
+    sub.callback(_Sample(tok.replace("lab/o", "lab/q")))
+    moved = f.next_move(30.0, since=v)
     f.close()
     out.append((f"{label}: its caller's wait for the next change ends with nothing when nothing moved, and drops "
-                "nothing; a token heard is a change", [nothing, moved is not None, f.address("lab", "q")],
-                [None, True, (pr.UP, "")]))
+                "nothing; a token heard since the version it had is a change, never missed",
+                [nothing, moved is not None and moved > v, f.address("lab", "q")], [None, True, (pr.UP, "")]))
     live.forget(r)
     live.forget(w)
     return out

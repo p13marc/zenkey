@@ -2859,23 +2859,23 @@ def run_python_budget(report: Report, exe: Path) -> None:
         # change, so "ready" may come before them: the GET is asked again
         # until the 10 are put, for up to 5 s (round 69: one run in four read
         # 0 members, complete, at once after "ready")
+        # The check reads the loop's last reading, the one it stopped on
+        # (review-bot on PR #885).
         t_ready = time.monotonic()
-        got: list[Any] = [None]
-
-        def put() -> bool:
-            got[0] = bg.get_population(tool, sel)[0]
-            return got[0].members == 10
-
-        while not put() and time.monotonic() - t_ready < 5.0:
+        gets = 0
+        while True:
+            reading = bg.get_population(tool, sel)[0]
+            gets += 1
+            if reading.members == 10 or time.monotonic() - t_ready >= 5.0:
+                break
             time.sleep(0.1)
-        reading = got[0]
         v = bg.population("state", b, None, reading)
         report.check(run, "the bound is the contract's, 64, its descriptor stating none; a complete S4 GET answers "
                           "10 members: within, complete",
                      b == 64 and reading == bg.GetReading(10, True) and v.pair() == {"verdict": "within",
                                                                                      "reason": "complete"},
-                     f"stated {stated}, bound {b}; {reading} {time.monotonic() - t_ready:.2f} s after ready; "
-                     f"{v.pair()}")
+                     f"stated {stated}, bound {b}; {reading}, the last of {gets} GETs, "
+                     f"{time.monotonic() - t_ready:.2f} s after ready; {v.pair()}")
         answers = [rust.command(f"check c{i} OK") for i in range(10, 64)]
         reading, _ = bg.get_population(tool, sel)
         v = bg.population("state", b, None, reading)

@@ -628,6 +628,11 @@ WAIT_ENDED = ("the wait ended first: the GET runs on, answered in full, and the 
 #: Why a round trip that ended standing does not stand for its caller: the
 #: watch session's transport moved while it ran (core §8.1, 0.41).
 MOVED_DURING = "the watch session's transport moved while it ran: it stands for no read after the move (core §8.1, 0.41)"
+#: Why a round trip that ended standing, taken up later, does not stand: the
+#: watch session held no link when it was taken up, a cut its listener had
+#: not yet told (core §8.1, 0.41, 0.42; review-bot on PR #885).
+CUT_OFF_SINCE = ("cut off since it ended: the watch session held no link when it was taken up, so it stands for "
+                 "no read after (core §8.1, 0.42)")
 
 
 class Flight:
@@ -697,33 +702,59 @@ class Barrier:
     takes up the one in flight".
 
     :meth:`ask` takes up the round trip in flight, or one ended whose answer
-    no caller has had, when it was asked at the current move count
-    (:meth:`moved`), else asks one (:func:`settle`, its
-    GET's own timeout :func:`flight_timeout`, on a thread of its own), and
-    waits ``wait`` for it (None: until it ends). A wait that ends first
-    hands back a round trip not standing, :data:`WAIT_ENDED`, and the GET
-    runs on. One asked before a move stands for nothing after it
-    (:data:`MOVED_DURING`), and after a move the next caller asks anew.
-    ``asked`` counts the round trips it asked, ``taken_up`` the times one
-    in flight was taken up. The caller tells it each move of the watch
-    session's transport, under its own ordering of them."""
+    no caller has had, when it was asked at the current move count, else
+    asks one (:func:`settle`, its GET's own timeout :func:`flight_timeout`,
+    on a thread of its own), and waits ``wait`` for it (None: until it
+    ends). A wait that ends first hands back a round trip not standing,
+    :data:`WAIT_ENDED`, and the GET runs on. One asked before a move stands
+    for nothing after it (:data:`MOVED_DURING`), and after a move the next
+    caller asks anew. ``asked`` counts the round trips it asked,
+    ``taken_up`` the times one was taken up.
 
-    def __init__(self, watch: Any, selector: str | None = None, *, get_timeout: float | None = None) -> None:
+    **The move count is one counter** (review-bot on PR #885). A caller
+    that counts its watch session's moves itself hands the barrier that
+    count, ``gen``, a callable read whenever the barrier needs it, and never
+    calls :meth:`moved`; one that does not tells the barrier each move
+    through :meth:`moved`, which counts them. So no two counters must be
+    kept in step.
+
+    **An answer taken up after it ended** (review-bot on PR #885). "A round
+    trip stands until the watch session's transport moves", however long
+    ago it ended: its final reply ordered the subscribers' declarations
+    before every read asked after it, and its age changes nothing. But the
+    move count holds only the moves the caller has heard, and a transport
+    can close before its listener says so. So a round trip taken up after
+    it ended stands only if the watch session holds a link when it is taken
+    up, as :func:`settle` checks at a round trip's end: a cut not yet heard
+    leaves it not standing (:data:`CUT_OFF_SINCE`), and the next caller
+    asks anew."""
+
+    def __init__(self, watch: Any, selector: str | None = None, *, get_timeout: float | None = None,
+                 gen: Any = None) -> None:
         self.watch, self.selector = watch, selector
         self.key = settle_key(selector)
         self.get_timeout = get_timeout
         self.lock = threading.Lock()
-        self.gen = 0
+        self._gen_of = gen
+        self._moves = 0
         self.flight: Flight | None = None
         self.asked = 0
         self.taken_up = 0
 
+    @property
+    def gen(self) -> int:
+        """The move count: the caller's (``gen``), else the barrier's own."""
+        return self._gen_of() if self._gen_of is not None else self._moves
+
     def moved(self) -> None:
         """The watch session's transport closed or opened: a round trip asked
         before it is no longer one "asked since its watch session's
-        transport last moved"."""
+        transport last moved". Refused for a barrier that reads its
+        caller's count, which then counts the move itself."""
+        if self._gen_of is not None:
+            raise RuntimeError("this barrier reads its caller's move count: the caller counts the move")
         with self.lock:
-            self.gen += 1
+            self._moves += 1
 
     @property
     def in_flight(self) -> bool:
@@ -732,15 +763,17 @@ class Barrier:
 
     def ask(self, wait: float | None = PRESENCE_TIMEOUT_S) -> tuple[RoundTrip, Flight]:
         """A round trip, taken up or asked, and its flight."""
-        start = False
+        start = ended = False
         with self.lock:
             fl = self.flight
+            gen = self.gen
             # in flight, or ended with its answer not yet handed back: taken up
-            if fl is not None and fl.gen == self.gen and not fl.consumed:
+            if fl is not None and fl.gen == gen and not fl.consumed:
                 fl.taken_up += 1
                 self.taken_up += 1
+                ended = not fl.in_flight
             else:
-                fl = self.flight = Flight(self.gen)
+                fl = self.flight = Flight(gen)
                 self.asked += 1
                 start = True
         if start:
@@ -755,11 +788,15 @@ class Barrier:
             return RoundTrip(False, False, self.key, f"the GET could not be made: {fl.error!r}",
                              asked_ns=fl.asked_ns), fl
         rt: RoundTrip = fl.result
+        # an answer taken up after it ended: the watch session's links now,
+        # since a cut its listener has not yet told is in no move count
+        held = links_held(self.watch) if ended and rt.stands else True
         with self.lock:
             fl.consumed = True
             moved = fl.gen != self.gen
-        if rt.stands and moved:
-            rt = RoundTrip(False, rt.made, rt.key, MOVED_DURING, rt.elapsed_s, rt.finished, rt.errors, rt.tokens,
+        why = MOVED_DURING if moved else CUT_OFF_SINCE if held is False else LINKS_UNREADABLE if held is None else ""
+        if rt.stands and why:
+            rt = RoundTrip(False, rt.made, rt.key, why, rt.elapsed_s, rt.finished, rt.errors, rt.tokens,
                            rt.asked_ns, rt.interests_timeout_assumed)
         return rt, fl
 

@@ -85,9 +85,12 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from . import keys
+
+if TYPE_CHECKING:
+    from .live import Presence
 
 UP, DOWN, UNOBSERVABLE = "up", "down", "unobservable"
 #: Why a holder is unobservable.
@@ -459,8 +462,10 @@ class PresenceFollower:
         #: every change of the view, for :meth:`next_move`
         self._changed = threading.Condition(self.lock)
         self.version = 0
-        #: the watch session's round trips, one at a time (0.44)
-        self.barrier = live.Barrier(watch, self.wire)
+        #: the watch session's round trips, one at a time (0.44); it reads
+        #: the follower's move count, so there is one counter (review-bot on
+        #: PR #885)
+        self.barrier = live.Barrier(watch, self.wire, gen=lambda: self.gen)
         #: the read in flight, or the last one (0.44)
         self._read_flight: Any = None
         #: reads asked, and reads in flight taken up by a later attempt
@@ -513,10 +518,8 @@ class PresenceFollower:
         def moved(event: Any) -> None:
             kind = "close" if event.kind == zenoh.SampleKind.DELETE else "open"
             with self.lock:
+                # the one move count, which the barrier reads (0.44)
                 self.gen += 1
-                # told under the lock, so the barrier's count and the
-                # follower's move together (0.44)
-                self.barrier.moved()
                 self.moves.append((time.monotonic_ns(), kind))
                 self.view.moved()
                 self._bump()
@@ -586,15 +589,17 @@ class PresenceFollower:
         self.version += 1
         self._changed.notify_all()
 
-    def next_move(self, wait: float | None = None) -> int | None:
+    def next_move(self, wait: float | None = None, since: int | None = None) -> int | None:
         """Wait up to ``wait`` (None: for ever) for the view's next change: the
         new version, or None when the wait ended first or the follower was
-        closed. A caller may stop waiting whenever it likes (presence.md §10
-        step 10's loop, waking every 20 ms): the follower's reads and round
-        trips run on its own timers, never on this call, so a wait that ends
-        drops nothing in flight (core §8.1, 0.44)."""
+        closed. ``since`` is the version the caller last had, so that a
+        change between two calls is never missed; by default the version at
+        the call. A caller may stop waiting whenever it likes (presence.md
+        §10 step 10's loop, waking every 20 ms): the follower's reads and
+        round trips run on its own timers, never on this call, so a wait that
+        ends drops nothing in flight (core §8.1, 0.44)."""
         with self._changed:
-            v = self.version
+            v = self.version if since is None else since
             if self._closed:
                 return None
             got = self._changed.wait_for(lambda: self.version != v or self._closed, wait)
@@ -623,7 +628,7 @@ class PresenceFollower:
                 return
             # the barrier hands each answer back once
             self.round_trips.append(rt)
-            # the barrier's count moves with the follower's, under this lock
+            # fl.gen is this follower's count when the round trip was asked
             if rt.stands and fl.gen == self.gen:
                 self._stood = fl.gen
 
@@ -695,7 +700,7 @@ class PresenceFollower:
                 return
         self._attempt()
 
-    def read(self, unordered: bool = False, _after_round_trip: bool = False) -> Any:
+    def read(self, unordered: bool = False, _after_round_trip: bool = False) -> Presence | None:
         """One read on the reading session, folded as of when it was asked;
         unordered (possibly incomplete, what it does not show unobservable)
         when ``unordered``, when no round trip stands, or when the watch
@@ -708,7 +713,8 @@ class PresenceFollower:
         not yet folded is taken up, whatever this call's arguments; else one
         is asked, its GET on a :class:`zk2py.live.Flight` whose own timeout
         is above the session's interests timeout. The wait is ``timeout``:
-        None when it ends first, the read running on for the next call."""
+        None when it ends first, the read running on for the next call. A
+        read that raised raises in every caller that takes it up."""
         from . import live
 
         with self.lock:
@@ -749,7 +755,10 @@ class PresenceFollower:
             return None
         with self.lock:
             if fl.consumed:
-                # folded by another caller of read(): its answer, once
+                # folded by another caller of read(): its answer, once, or
+                # its error handed on (review-bot on PR #885)
+                if fl.error is not None:
+                    raise fl.error
                 return fl.meta.get("presence")
             fl.consumed = True
             if fl.error is None:

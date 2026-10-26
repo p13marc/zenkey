@@ -100,7 +100,7 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings      404 passed     0 failed
+readings      409 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
@@ -110,13 +110,13 @@ alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
 desired       408 passed     0 failed
 redundancy    180 passed     0 failed
-total        3035 passed     0 failed
+total        3040 passed     0 failed
 ```
 
 The figures are against `core.md` 0.44, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
 `telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.5.
-Core 0.44 changed no fixture; `readings` gained its 10 cases (404).
+Core 0.44 changed no fixture; `readings` gained its 15 cases (409).
 Core 0.43 changed no fixture and no rule, and no reading (394).
 Core 0.42 changed no fixture; `readings` gained its 15 cases (394).
 Core 0.41 changed no fixture; `readings` gained its 28 cases (379).
@@ -2442,13 +2442,22 @@ did not:
     per transport state: in flight, or ended and not yet handed back, it
     is taken up; after a move the next caller asks anew; one asked before
     a move stands for nothing after it (`MOVED_DURING`).
-  - The follower's round trips go through a barrier that it tells each
-    move, and its reads through a flight of its own. A wait that ends
-    first (`WAIT_ENDED`, or `read()` giving None) leaves the GET running,
-    and the next attempt, 0.2 s later, takes it up.
-  - `PresenceFollower.next_move(wait)` lets a caller wait for the view's
-    next change as long as it likes. The reads run on the follower's own
-    timers, so a wait that ends drops nothing.
+  - A round trip that stood stands until the transport moves, however long
+    ago it ended. But a move count holds only the moves its listener has
+    told. So one taken up after it ended stands only if the watch session
+    still holds a link (`CUT_OFF_SINCE` otherwise; review-bot on PR #885).
+  - The move count is one counter. The follower's barrier reads the
+    follower's count (`Barrier(gen=…)`), and refuses `moved()`. The runner's
+    barrier, which has no follower, counts the moves it is told.
+  - The follower's round trips go through that barrier, and its reads
+    through a flight of its own. A wait that ends first (`WAIT_ENDED`, or
+    `read()` giving None) leaves the GET running, and the next attempt,
+    0.2 s later, takes it up. A read that raised raises in every caller
+    that takes it up.
+  - `PresenceFollower.next_move(wait, since=…)` lets a caller wait for the
+    view's next change as long as it likes, and never miss one between two
+    calls. The reads run on the follower's own timers, so a wait that
+    ends drops nothing.
 - **A round trip at the interests timeout reads "as not standing"**
   (F-240). `RoundTrip.made` is now True for one, since it was asked.
   `stands` was already False.
@@ -2461,11 +2470,16 @@ reader, the desired.v1 target, the redundancy.v1 candidate) keep their
 one-shot round trip and blocking reads. Their texts are written against
 0.40, as 0.44 leaves them.
 
-`readings` gained 10 cases (404). They cover, on fake sessions whose GETs
-take a while:
+`readings` gained 15 cases (409), five of them on review of PR #885. They
+run on fake sessions whose GETs end when the case opens their gate, so a
+slow runner can make a case wait, never fail it. They cover:
 - a round trip asked four times, three given up on at once: one GET;
 - a move while one is in flight: a new one, and `MOVED_DURING`;
+- a round trip taken up after it ended: standing with a link, and
+  `CUT_OFF_SINCE` without one;
+- one move counter;
 - a read whose wait ended, taken up by the next with no second GET;
+- a read's error handed on to a second caller;
 - the round trip after a move waited for;
 - `next_move`.
 
