@@ -1,4 +1,4 @@
-"""core ``scenarios/presence.md`` §1 to §10 (core 0.47), run from Python on
+"""core ``scenarios/presence.md`` §1 to §10 (core 0.49), run from Python on
 zenoh-python 1.10.1 routers in process, with an owner and a reader under
 test of either implementation::
 
@@ -44,8 +44,10 @@ the reader under test's verdict (0.38, F-188, F-189):
   every address it followed unobservable from the cut, never down, and its
   read complete within 30 s of the heal; the counts are not asked of it.
   0.47 (F-249): such a tool is run with its output's period at most half the
-  cut, so that it prints at least once while the link is cut, and judged
-  from its first output after the cut until a complete read after the heal.
+  cut, so that it evaluates at least once while the link is cut (0.49,
+  F-252), and judged from its first output after the cut, which must come
+  while the link is cut, to its first that shows a complete read after the
+  heal; one that prints nothing while the link is cut fails (0.49).
   zenctl's watchdog prints a transition only at an evaluation, once every
   ``--every``: the runner sets 0.5 s beside the 1 s cut, refuses a period
   above half the cut, and reads its first transition after the cut, which
@@ -2627,15 +2629,18 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
         out["fired"] = "firing" in {to for _, _, to, _ in mv}
         first = window[0] if window else None
         out["first"] = None if first is None else (round(first[0] - t_cut, 2), first[2], first[3])
-        # 0.47 (F-249): "run with its output's period at most half the cut,
-        # so that it prints at least once while the link is cut, and judged
-        # ... from its first output after the cut until a complete read after
-        # the heal, every address it followed unobservable, never down": the
-        # first transition after the cut leaves the ok it was cut from for
-        # unobservable, printed before the heal (the runner's reading of "so
-        # that it prints at least once while the link is cut"), and every one
-        # until the closing ok is unobservable: none firing, none ok before a
-        # complete read after the heal
+        # 0.47 (F-249), worded by 0.49 (F-252): "run with its output's period
+        # at most half the cut ..., so that it evaluates at least once while
+        # the link is cut. It is judged on what its output shows, from its
+        # first output after the cut, which must come while the link is cut,
+        # to its first output that shows a complete read after the heal.
+        # Every output before that one shows every address it followed
+        # unobservable, never down ... A tool that prints nothing while the
+        # link is cut has not shown the move, and fails": the first
+        # transition after the cut leaves the ok it was cut from for
+        # unobservable, printed before the heal, and every one until the
+        # closing ok is unobservable: none firing, none ok before a complete
+        # read after the heal
         out["unobservable_first"] = (first is not None and first[1] == "ok" and first[2] == "unobservable"
                                      and first[0] < t_heal)
         out["window_unobservable"] = bool(window) and all(to == "unobservable" for _, _, to, _ in window)
@@ -2648,14 +2653,17 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
 def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
     """§10 step 10's reader, the reference's: ``zenctl watchdog --namespace ns
     --rule 'instance-gone crowd/*'`` beside the crowd, every session through
-    one link, cut for 1 s and healed. 0.47 (F-249): "A tool run as a black
-    box is run with its output's period at most half the cut (…), so that it
-    prints at least once while the link is cut, and judged on what its
-    output shows: from its first output after the cut until a complete read
-    after the heal, every address it followed unobservable, never down, and
-    its read complete within 30 s of the heal. The counts are not asked of
-    it (0.46, F-245)." That is the step's one check; its stderr's zenoh
-    lines are said, a proxy for the counts.
+    one link, cut for 1 s and healed. 0.47 (F-249), worded by 0.49 (F-252):
+    "A tool run as a black box is run with its output's period at most half
+    the cut (…), so that it evaluates at least once while the link is cut.
+    It is judged on what its output shows, from its first output after the
+    cut, which must come while the link is cut, to its first output that
+    shows a complete read after the heal. Every output before that one shows
+    every address it followed unobservable, never down, and the complete
+    read comes within 30 s of the heal. A tool that prints nothing while the
+    link is cut has not shown the move, and fails (0.49, F-252). The counts
+    are not asked of it (0.46, F-245)." That is the step's one check; its
+    stderr's zenoh lines are said, a proxy for the counts.
 
     zenctl's output is a transition printed at an evaluation, once every
     ``--every``: the runner sets 0.5 s, half the cut, as 0.47 names, and
@@ -2776,7 +2784,7 @@ def main(argv: list[str] | None = None) -> int:
             report.check(f"§{name}", "the section ran", False, repr(e))
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"presence scenarios §1–§10 (core 0.47), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
+    print(f"presence scenarios §1–§10 (core 0.49), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
           f"failed, {len(report.not_run)} not run")
     for sec, name, ok, detail in report.rows:
         if not ok:
