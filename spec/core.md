@@ -2074,12 +2074,14 @@ Liveliness tokens carry no payload; everything is in the key.
         - A reader SHOULD wait for the round trip after a move, and run
           its interests timeout, above that time at its population: about
           what a session's first read of the population costs, every
-          matching token sent once (0.46, F-246; zk2py, release, beside
-          10,000: 3.3–4.2 s, where a later read took 0.52–0.58 s; a read
-          after a reopen is a later read, so a reader that times its own
-          reads as it runs sizes this from too short a cost). One whose wait ends first reads possibly incomplete
-          (below), as before, and before its next read takes up the round
-          trip in flight (below), asking another only once that one has
+          matching token sent once (0.46, F-246). Beside 10,000 tokens a
+          session's first read took 3.3–4.2 s and a later one 0.52–0.58 s
+          (zk2py, release), and a read after a reopen is a later read. So
+          a reader that times its own reads as it runs sees only later
+          reads, and sizes this wait from them too short. One whose wait
+          ends first reads possibly incomplete (below), as before, and
+          before its next read takes up the round trip in flight (below),
+          asking another only once that one has
           ended without standing (0.45, F-242).
         - **One round trip, and one read, at a time** (0.44, #882). zenoh
           1.10.1 tells a router nothing of a liveliness GET whose caller
@@ -2109,9 +2111,10 @@ Liveliness tokens carry no payload; everything is in the key.
             its session's interests timeout, where zenoh's runtime ends
             it, and bound its own wait apart, so that none ends before the
             reader can take it up. zk2py's follower does so for its round
-            trips and reads (0.46, F-247). The reference does so for its round trip; its presence
-            feed asks a read with the reader's timeout, and when one runs
-            to it asks again after a back-off, 1 s at first.
+            trips and reads (0.46, F-247). The reference does so for its
+            round trip; its presence feed asks a read with the reader's
+            timeout, and when one runs to it asks again after a back-off,
+            1 s at first.
       - **No round trip through a watch session cut off** (0.42, F-228).
         Through a session cut off zenoh answers a liveliness GET at once,
         with the final reply alone (above), and a round trip is a
