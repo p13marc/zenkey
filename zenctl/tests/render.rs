@@ -1950,7 +1950,8 @@ namespaces listed: (empty), prod
 }
 
 /// A GET's coverage claim is exactly its selector and its window, and a silent
-/// one has to say so — three different silences, not one.
+/// one has to say so — four different silences, not one, a router's access
+/// control refusing it among them (core §11.2).
 #[test]
 fn a_get_with_no_replies_names_the_four_silences() {
     let silent = zenctl::render::GetReport {
