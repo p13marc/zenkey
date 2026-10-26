@@ -1,0 +1,26 @@
+# scenarios/security.md §4 (core §11.1, 0.50) for `zenctl acl gen`: the
+# section's two principals, as zk2py's own generator compiles them
+# (zk2py.security_scenarios.zk2py_principals):
+#
+#   zenctl acl gen --enrollment impl/python/interop/security/section4.enrollment.toml \
+#                  --contracts impl/python/interop/zk2py_echo.v1.toml \
+#                  --contracts impl/python/interop/zk2py_tc.v1.toml --json5
+
+# A tool that reads the admin space and inspects every service.
+[[principal]]
+user  = "tool"
+tools = ["inspector"]
+
+[[tool]]
+name     = "inspector"
+admin    = true
+inspects = ["*/*"]
+
+# A service principal that does neither.
+[[principal]]
+user     = "svc"
+services = ["h1/tc"]
+
+[[service]]
+address    = "h1/tc"
+implements = ["zk2py_echo.v1", "zk2py_tc.v1"]
