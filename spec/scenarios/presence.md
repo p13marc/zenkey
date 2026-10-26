@@ -528,13 +528,14 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
     given up on from one waited for. A tool run as a black box is run
     with its output's period at most half the cut (0.47, F-249: zk2py
     runs `zenctl watchdog` at `--every 0.5` beside the 1 s cut), so that
-    it evaluates at least once while the link is cut, and judged on what
-    its output shows: its first output after the cut, which comes while
-    the link is cut, and every one after it until its first that shows a
-    complete read after the heal, every address it followed unobservable,
-    never down, and that read within 30 s of the heal. A tool that prints
-    nothing while the link is cut has not shown the move, and fails (0.49,
-    F-252). The counts are not asked of it (0.46, F-245).
+    it evaluates at least once while the link is cut. It is judged on what
+    its output shows, from its first output after the cut, which must come
+    while the link is cut, to its first output that shows a complete read
+    after the heal. Every output before that one shows every address it
+    followed unobservable, never down, and the complete read comes within
+    30 s of the heal. A tool that prints nothing while the link is cut has
+    not shown the move, and fails (0.49, F-252). The counts are not asked
+    of it (0.46, F-245).
 
 *Measured (0.41, #851) by the reference, in a debug build, in
 `zenkey/tests/presence.rs`'s `s10_a_round_trip_at_a_population_and_the_interests_timeout`

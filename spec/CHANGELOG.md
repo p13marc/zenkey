@@ -56,6 +56,7 @@ F-250).
   wording only, and none of their findings changed a verdict. 0.49's own
   wording is read by the next round that reads §8.1 for any other reason.
 - **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.48 — 2026-10-26: an admin read that reaches no router's declaration records (zenkey #890)
 
 zengui's boot asked the admin space for every session's declarations, and
