@@ -13667,6 +13667,15 @@ records, `@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`
 that intersects one of these keys of any node unless its user asks for
 that read."
 
+**Status at core 0.50:** resolved, as proposed. §4.2 now reads "A node
+with its admin space on, a router, a peer or a client, answers its
+declaration records, `@/<zid>/<whatami>/{subscriber, publisher,queryable,
+querier,token}/**`", and "A tool MUST NOT ask a selector that intersects
+one of these keys of any node unless its user asks for that read". §11.1's
+new MUST NOT names the same keys of any node. Read cold, a peer's records
+are inside both rules. zk2py's guard already covered every whatami; only
+its doc comments moved.
+
 ### F-254 · minor · scenarios/state.md §12 Expected 3 (0.48): the queryable on `@/**` cannot hear the read that freezes the router
 
 > Expected 3: "Every selector the reader asked, as the queryable on `@/**`
@@ -13699,6 +13708,16 @@ when the router routes it on, so it never hears one that freezes the
 router; Expected 2 fails that reader. A runner that knows how many reads
 the reader makes counts them heard."
 
+**Status at core 0.50:** resolved, as proposed. Expected 3 now judges
+"Every selector the queryable on `@/**` heard", says the queryable "never
+hears one that freezes the router, which Expected 2 fails", and that "A
+runner that knows how many reads the reader makes counts them heard: two a
+round for S4's check". zk2py's runner already counted; its check's label
+now cites 0.50. One clause of the wording zk2py proposed proves wider than
+measured: a queryable on the router's own session, under an access control
+block, heard the freezing GET in 20 of 20 freezes (F-257). No verdict of
+§12 moves, since §12's queryable is a client's.
+
 ### F-255 · minor · core Appendix B (0.48): "A new reader of std's `RwLock` waits behind a waiting writer"
 
 The fact is stated for every platform. std's documentation leaves the
@@ -13715,7 +13734,233 @@ moves.
 policy to the platform), a declaration, an interest or a new session from
 another face between two replies deadlocks the node."
 
+**Status at core 0.50:** resolved, as proposed. Appendix B now reads
+"std leaves the `RwLock`'s priority policy to the platform; on Linux its
+futex lock makes a new reader wait behind a waiting writer (0.50, F-255).
+There, a declaration, an interest or a new session from another face
+between two replies deadlocks the node". Wording only; zk2py is
+unchanged, and still measures on Linux x86_64 alone.
+
 **Counts at core 0.49:** 255 entries. Open: F-253 to F-255, against core
 §4.2, Appendix B and `scenarios/state.md` §12: three minor points. F-253
 changes zk2py's implementation, F-254 its test, and F-255 is wording
 only. None changes a verdict. Every other entry is resolved.
+
+## At core 0.50 (#609)
+
+Round 74 read core 0.50 cold, on main 40e57771 (#894's PR #897). It
+read, as a newcomer would:
+- the CHANGELOG's 0.50 entry;
+- core §11.1's Tool row and the new bullet "The admin read admits no GET
+  of a node's declaration records";
+- §11.2's inclusion text;
+- §4.2's two changed bullets and Appendix B's admin-space facts;
+- `scenarios/security.md` §4 and `scenarios/state.md` §12.
+
+**0.50 in zk2py.**
+- **The generator** (`acl.generate`) grants the Tool's admin read as
+  `query` on `@/*/router`,
+  `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`,
+  and their `reply`. A block whose allow rules name `query` on a key that
+  intersects a node's records, `linkstate/*` or `route/successor/**` is
+  refused, `HazardousGrant`. Only security.md §4 step 4 compiles 0.15's
+  read, on purpose (`hazard_ok`).
+- **The block check** (`acl.block_hazards`) reads any block, zk2py's or
+  `zenctl acl gen`'s JSON5 through zenoh's own loader. It reports
+  `allowed_query` under `deny`, `allow_posture` under `allow` (F-256), and
+  `disabled`.
+- **security.md §4** (`zk2py.security_scenarios`, the live runner's
+  `security4`) runs on R1 in the runner's process, on port 0. R1's own
+  session holds the storage document and the recorder, since no principal
+  may declare a queryable under `@/**`. The service principal holds a
+  queryable ending in `**`, so an admitted GET of the records would have
+  an answer. The blocks:
+  - zk2py's;
+  - `zenctl acl gen` over the section's two principals
+    (`impl/python/interop/security/section4.enrollment.toml`);
+  - `zenctl acl gen` over `examples/zk2/acl/walkthrough.enrollment.toml`,
+    where the tool is `ground` and the service principal `navigation`.
+
+  Beside the section on each block: the block check, and the `allow`
+  block's admission. Then §11.2's two inclusion facts, on a block allowing
+  each user one key.
+- **`adminspace measure`** gains the `acl-0.15:…` and `acl-0.50:…`
+  cells. Each runs the router in a process of its own under zk2py's block
+  for the two principals, plus `bench`, the measurement's own principal
+  for the load, the churn and the probe. Each trial kills the router.
+- **`readings`** gains 23 cases (458).
+
+**Round 73's findings at 0.50:** F-253, F-254 and F-255 are resolved, as
+proposed. Each entry has its status line. One clause of F-254's proposed
+wording proves wider than measured (F-257).
+
+**`just py-conformance`: 3089 of 3089.**
+
+**Live,** on `owner-wl`, `zenctl-wl` and `consume-wl`:
+
+| Run | Pairing | Checks |
+|---|---|---|
+| security.md §4, under `deny` | zk2py's block | 9 of 9 |
+| security.md §4, under `deny` | `zenctl acl gen`, the section's two principals | 9 of 9 |
+| security.md §4, under `deny` | `zenctl acl gen`, the walkthrough's 13 principals | 9 of 9 |
+| the two generators' grants for §4's principals | zk2py and zenctl | 1 of 1 (19 of 19 equal) |
+| §11.2's inclusion facts | a block of one key per user | 2 of 2 |
+| the live runner's `acl` | under both postures, the narrowed admin read | 31 of 31 |
+| the live runner's `tool-rules` | zk2py's S4 and S1 checks, security.md §3 | 15 of 15 |
+| state.md §3 and §12, 200 rounds (two runs) | zk2py's reader, zenctl's doctor, `storage list` | 17 of 17 |
+
+- **Each §4 block's 9:** the block check (no hazard; step 4's
+  `@/*/router/**` found), Expected 1 twice, Expected 2 three times,
+  Expected 3, Expected 4, and the `allow` block's admission.
+- **Every refused GET** ended complete and empty in 0.3–0.7 ms, and the
+  recorder heard none of them. `@/**` drew two answers from the tool's own
+  session, `@/<its zid>/session/transport/…`, as Expected 2 says.
+- **Under each generator's `allow` block** the tool's GET of
+  `@/*/router/queryable/**` was admitted, heard, and answered with the
+  service principal's record.
+- **§12's figures,** over two runs, for zk2py's reader, zenctl's doctor
+  and `storage list`: the slowest put took 0.3–1.4, 0.5 and 0.5–1.1 ms,
+  and the slowest S4 answer 1.6–3.1, 1.6–2.2 and 1.7–1.8 ms. The third
+  client cycled 6,769 to 31,054 times. The queryable heard 400, 400 and
+  200 GETs a run, every one of the two selectors.
+
+**The freeze under access control, measured on zenoh-python 1.10.1**
+(`adminspace measure`, outside every suite). Each trial is one router
+process under `deny`, the load beside it (200 subscribers and 200
+queryables on `load/<i>/**`, and a client declaring and undeclaring flat
+out), and the tool asking the cell's selectors, a put across after each.
+Each GET waits at most 3 s. Frozen means no put and no GET crossed within
+2 s, at once and 12 s later.
+
+| Cell, beside the churn | 0.15's admin read | 0.50's admin read |
+|---|---|---|
+| `@/*/router/queryable/**` | froze 5 of 5 | 0 of 5, 1,000 GETs refused |
+| `@/*/router/**` | froze 5 of 5 | 0 of 5, 1,000 GETs refused |
+| 0.11's storages selector | froze 5 of 5 | 0 of 5, 1,000 GETs refused |
+| `@/**` | 0 of 5, 100 GETs refused | 0 of 5, 1,000 GETs refused |
+| the tools' three reads | 0 of 5, `@/*/*` refused | 0 of 5, 3,000 GETs answered |
+
+- **Under 0.15's grant,** 10 of the 15 freezes came at the first GET and
+  5 at the second. The freezing GET ended at its timeout, after 0 to 286
+  replies, and nothing crossed the router again. The reader kept its
+  link.
+- **Under 0.50's,** every hazardous GET ended in at most 2 ms with
+  nothing. The recorder heard none of them.
+- So the text's claim holds on zenoh-python: under `deny`, 0.50's admin
+  read keeps a tool's credentials from freezing the router with these
+  GETs, and 0.15's did not.
+
+**Where the two implementations disagree:** on no verdict.
+- For §4's two principals, the generators' `deny` blocks grant the same
+  keys on every principal, message and flow (19 of 19).
+- Neither block allows a hazardous query, and both name every policy open
+  under `allow`. Each passes §4 on R1.
+- zk2py's block check counts an egress `query` too (F-256). Neither
+  generator compiles one under `@/`, so no verdict hangs on it.
+- zenctl's output comments still say "none of a router's declaration
+  records", where 0.50 names any node's. That is the reference's text,
+  not the spec's, and its narrowed read reaches no node's records.
+
+**The text, read cold.** Two points, neither changing a verdict on a
+`deny` block:
+- F-256: the MUST NOT names neither the posture nor the flow it holds for;
+- F-257: "never hears" is wider than measured, and fails where
+  security.md §4 puts its recorder.
+
+F-256 changes how zk2py's block check classifies an `allow` block, but
+no verdict on either generator's `deny` output. F-257 is wording only.
+- **Not a finding.** §11.1 cites "(§4.2)" after "draws the mesh", and
+  §4.2 names no mesh read. `@/*/*` is defined by §11.1 itself, and by
+  Appendix B's root document.
+- **Not a finding.** A plugin of the router's own, zenohd's REST plugin
+  for one, asks through the router's own session, which no block governs.
+  §11.1 claims a refusal "at its ingress", and §4.2 one "through it", so
+  the defence is stated no wider than that. zk2py cannot measure a
+  plugin: a zenoh-python router loads none.
+- **Not a finding.** `@/*/*` includes `@/*/router`, so the first of the
+  three keys adds nothing to what the grant admits. The text names the
+  tools' reads, not a minimal key set.
+
+### F-256 · minor · core §11.1 (0.50): the MUST NOT names neither the posture nor the flow it holds for
+
+> §11.1 (0.50): "A generator MUST NOT allow a `query` on a key expression
+> that intersects one of those keys of any node, … Under `deny`, a router
+> then refuses a GET of them from any principal at its ingress …"
+
+> §11.1 (0.50), the same bullet: "Under `allow`, the generator compiles no
+> admin read, and a GET wider than every deny is in none (§11.3). This
+> protects a router under `deny` alone."
+
+**The posture.** Under `default_permission: allow`, a block permits every
+query no deny includes. Read as "permit", the MUST NOT is broken by every
+`allow` block either generator writes:
+- measured on R1, under zk2py's `allow` block and under `zenctl acl gen
+  --default-permission allow`'s, the tool's GET of
+  `@/*/router/queryable/**` was admitted, heard by the recorder, and
+  answered with the service principal's record;
+- the reference's `allow` block denies `declare_queryable` and `reply` on
+  `@/**`, and no `query` there.
+
+Read as "write an allow rule for", the MUST NOT holds under `allow` by
+construction, since no allow rule is evaluated there. The last
+sub-bullet says the defence is `deny`'s alone, which points to the second
+reading, but the MUST itself carries no posture. A block checker has to
+pick one, and its verdict on an `allow` block turns on the pick.
+
+**The flow.** The MUST NOT names no flow. The GET that freezes a router
+is the asker's, decided at the asker's face on ingress. An egress `query`
+allow on `@/**` toward a principal admits no GET by itself, yet breaks
+the MUST as written. Neither generator compiles one, so no verdict moves.
+
+**zk2py:** `block_hazards` reports `allowed_query` only for a `deny`
+block's allow rules, on either flow, and `allow_posture` apart, per
+policy with no deny of `query` that includes `@/**`. The generator refuses
+only `allowed_query`.
+
+**Wording that would remove the guess:** "Under `deny`, a generator MUST
+NOT compile an allow rule for an ingress `query` on a key expression that
+intersects one of those keys of any node … Under `allow`, the generator
+compiles no allow rule, and a GET wider than every deny is in none
+(§11.3), so a router there is not protected."
+
+### F-257 · minor · scenarios/state.md §12 Expected 3 (0.50, F-254): "it never hears one that freezes the router"
+
+> Expected 3 (0.50): "The queryable hears a read only once the router
+> routes it on, so it never hears one that freezes the router, which
+> Expected 2 fails."
+
+zk2py proposed that sentence in round 73 (F-254) from 19 freezes, each
+with the queryable on a client of the node. Round 74 measured where it
+sits, beside the churn, with `@/*/router/queryable/**` and its kin
+(`adminspace measure`, `--own-recorder`, `--client-recorder`):
+
+| The queryable on `@/**` | Access control | Heard the freezing GET |
+|---|---|---|
+| a client of the router | none (round 73) | 0 of 19 |
+| the router's own session | none | 0 of 7 |
+| a client of the router, allowed to declare it | 0.15's block | 0 of 4 |
+| the router's own session | 0.15's block | 20 of 20 |
+
+So under an access control block, a queryable on the router's own
+session heard the GET that froze it, every time. security.md §4 puts its
+recorder exactly there: "A session that is no principal, R1's own".
+
+No verdict moves:
+- §12's queryable is "a session of the test's own", which zk2py's runner
+  opens as a client;
+- §4 asks nothing beside a writer, so nothing freezes;
+- a recorder that hears the freezing GET fails Expected 3 by its
+  selector, and Expected 2 fails the reader in every case.
+
+**zk2py:** unchanged. The runner's count does not lean on the sentence.
+
+**Wording that would remove the guess:** "The queryable may never hear a
+read that freezes the router: a client's queryable never did, though one
+on the router's own session under an access control block did. Expected
+2 fails that reader either way."
+
+**Counts at core 0.50:** 257 entries. Open: F-256 and F-257, against
+core §11.1 and `scenarios/state.md` §12: two minor points. F-256 changes
+how zk2py's block check reads an `allow` block, and F-257 is wording
+only. None changes a verdict on a `deny` block. Every other entry is
+resolved.
