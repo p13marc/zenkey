@@ -10,8 +10,9 @@
 //! `wb_a_barrier_beside_ten_thousand_tokens_measured`), past every tool's
 //! 5 s `--timeout`. The tools' watch session is now in no namespace, on the
 //! wire keys, without history (`zenkey_fleet::open_watch`), and its round
-//! trip at its start carries nothing at any population. After a move it
-//! waits for the population (core §8.1, 0.44, F-239): `watch_reopen.rs`.
+//! trip at its start carries nothing at any population. The first after
+//! each reopen waits for the population (core §8.1, 0.44, F-239; 0.45,
+//! F-241): `watch_reopen.rs`.
 
 mod util;
 
