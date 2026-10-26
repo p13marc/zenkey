@@ -12665,6 +12665,26 @@ trip after one that stood is not asked until the next move.
 - In the bullet of 0.42: "… until its transport moves: the first round
   trip after each reopen waits for the population (below)".
 
+**Status at core 0.45:** resolved, as proposed. §8.1 now says the round
+trip is "one round trip at any population but for the first after each
+reopen of its transport, which waits for the reopening's telling; once
+that has been sent the next is one round trip again", and 0.42's bullet
+says the same. Measured again, in step 10's runs:
+- the first after the reopen took 148–154 ms beside 2,000 tokens and
+  3.80–3.81 s beside 10,000;
+- the next, asked at once, took 0.56–0.88 ms and 1.67–1.69 ms.
+
+Two further cases, measured for this cold read:
+- **Asked from the transport event itself,** the first still waited for
+  the telling: 155–165 ms and 4.7–4.9 s, in 5 of 5 runs. No round trip
+  overtook the reopening's declarations.
+- **Asked once the telling was over,** it took 0.6–1.0 ms and 1.8–2.4 ms.
+
+"Waits for the reopening's telling" holds of both. 0.42's bullet says the
+first "waits for the population". That holds of a first asked while the
+telling is still being sent, which is what a reader that follows the
+SHOULD asks. It is not a finding.
+
 ### F-242 · minor · core §8.1 (0.44): "makes the round trip again" beside "the next that needs one takes up the one in flight"
 
 > §8.1 (0.44): "A reader SHOULD wait for the round trip after a move …
@@ -12692,6 +12712,15 @@ without standing.
 (below), as before, and before its next read takes up the round trip in
 flight (below), asking another only once that one has ended without
 standing."
+
+**Status at core 0.45:** resolved, as proposed: "… and before its next
+read takes up the round trip in flight (below), asking another only once
+that one has ended without standing (0.45, F-242)". zk2py's barrier
+already did this. `readings` gains two cases (411): a wait that ended,
+then the round trip taken up and ended without standing, then a second
+GET; and the order the barrier reads the fake session's links in.
+Beside 10,000 tokens, step 10's stand-in follower, with every wait at 20
+ms, took up its round trip 16 times and asked one.
 
 ### F-243 · gap · core §8.1 (0.44) "One round trip, and one read, at a time": a GET its own timeout ended cannot be taken up, and its router still answers it
 
@@ -12739,6 +12768,25 @@ timeout, and bounds its own wait apart." Appendix B could add the cost:
 measured beside 10,000 tokens, a GET asked after one its own timeout
 ended waited for it, 258–266 ms against 6–10 ms on a quiet session
 (zk2py).
+
+**Status at core 0.45:** resolved, by the first reading. §8.1 now says:
+- the next takes up the one in flight, "whichever wait ended first, its
+  caller's or the reader's own";
+- "In flight is at the reader … A GET its own timeout ends is over for
+  the reader … and cannot be taken up", with its cost;
+- "A reader MAY ask each GET with its own timeout at or above its
+  session's interests timeout … and bound its own wait apart".
+
+Appendix B gains the fact. Measured again, beside 10,000 tokens:
+- a read with a 0.2 s timeout ended with one error reply, `Timeout`, and
+  its final reply, and nothing came after them within 6 s, in 3 of 3;
+- a GET whose own timeout equalled its session's 1 s interests timeout,
+  through a stalled link, was ended by zenoh's runtime at 1.001–1.002 s,
+  with no error reply, in 5 of 5. So "at or above" holds.
+
+Two points of the new text are new findings. The figure it gives is a
+later read's (F-246). "zk2py does so for its round trips and reads" says
+more than zk2py does (F-247).
 
 ### F-244 · gap · scenarios/presence.md §10 step 10 and Expected 10 (0.44): what a runner observes from outside the reader
 
@@ -12796,6 +12844,214 @@ whose reads do not run on its caller's call has no call to drop, and its
 own waits stand in … a tool run as a black box is judged on the read
 complete within 30 s alone."
 
+**Status at core 0.45:** resolved. Step 10 now says:
+- the four round trips go "through its own interface", and "a tool run
+  as a black box offers none, and this half is not run for it";
+- "a reader whose reads do not run on its caller's call has none to drop,
+  and its own waits, each ended after 20 ms, stand in".
+
+Expected 10 says "Every count here is the reader's own, taken at its own
+sessions", and judges a tool run as a black box "on its read complete
+within 30 s of the heal alone". zk2py's runner follows it:
+- the follower with its waits at 20 ms is now the step's reader under
+  test, where at 0.44 it was zk2py's own analog;
+- zenctl's four round trips and counts are notes, no longer NOT RUN.
+
+The word "alone", proposed here, is F-245.
+
 **Counts at core 0.44:** 244 entries. Open: F-241 to F-244, against §8.1
 and `scenarios/presence.md` §10: one contradiction, one minor point and
 two gaps. Every other entry is resolved.
+
+## At core 0.45 (#609)
+
+Round 70 read core 0.45 cold, on main 82858b16 (#886). It read:
+- the CHANGELOG's 0.45 entry;
+- §8.1's round trip bullets, from "In a namespace, a watch session in no
+  namespace" through "A reader whose watch session is cut off follows
+  nothing";
+- Appendix B's zenoh facts;
+- `scenarios/presence.md` §10, end to end.
+
+0.45 is wording only. It answers round 69's four findings, and adds one
+MAY and one Appendix B fact. No fixture and no verdict changed. zk2py's
+readers already did what it says, and none of them changed. Its runner
+follows the new step 10: the follower with its own waits at 20 ms is the
+reader under test, and zenctl's counts are not asked. `readings` gains
+two cases, for F-242's take-up.
+
+The runner also had a fault of its own. Step 7's control did not wait
+for its token to reach the router before its watch session opened. In 3
+of 40 probe trials its subscriber was told the token live, and so heard
+it go. That explains round 68's two failures beside 10,000 tokens, and
+one in this round's first run. Step 7 runs "as step 1", which reads the
+token first, so the text is right. The control now waits as step 1 does.
+
+**Round 69's findings at 0.45:** F-241, F-242, F-243 and F-244 are
+resolved. Each entry has its status line.
+
+**`just py-conformance`: 3042 of 3042.**
+
+**Live:** `presence_scenarios` against `owner-wf` and `zenctl-wf`. §1–§8
+ran once, with zk2py's owner and reader. §9 and §10 ran in every pairing:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 46 | 1 |
+| Rust, zk2py | – | 9 | 40 | 1 |
+| zk2py, zenctl | – | – | 10 | 2 |
+| Rust, zenctl | – | – | 9 | 3 |
+
+Every check passes, once step 7's control waits for its token. §10 also
+ran whole beside 10,000 tokens: 46 of 46 with zk2py's reader, twice, and
+10 of 10 with zenctl. Step 10 beside 10,000:
+- the round trip after the reopen took 3.80–3.81 s, and the next 1.7 ms;
+- zk2py's follower was complete again 4.0–5.1 s after the heal, and 7.1 s
+  with every wait at 20 ms;
+- zenctl watchdog was ok again 25.3 s after the heal.
+
+**Where the two implementations disagree:** on no verdict.
+- Step 6's round trips still differ, as 0.43 allows: one before the first
+  seed for zk2py, and two for the reference.
+- Beside 10,000 tokens, after the heal, zk2py's follower recovered in
+  4.0–7.1 s and the debug zenctl in 25.3 s. Both are within step 10's
+  30 s.
+
+**The text, read cold.** 0.45's wording says what zk2py does and what was
+measured, but for three points:
+- F-245: a gap, in the wording F-244 proposed;
+- F-246: a minor point, measured: the costs §8.1 gives are a later
+  read's;
+- F-247: a minor point: what §8.1 says zk2py does.
+
+Nothing else was found ambiguous, contradictory or untestable.
+
+### F-245 · gap · scenarios/presence.md §10 Expected 10 (0.45): "judged on its read complete within 30 s of the heal alone" leaves out what a black box shows from the cut
+
+> Expected 10 (0.44): "The reader under test: from the cut, every address
+> it followed is unobservable; after the heal it makes the round trip
+> again, and a read after it is complete within 30 s of the heal".
+
+> Expected 10 (0.45, F-244): "A tool run as a black box is judged on its
+> read complete within 30 s of the heal alone."
+
+> core §8.1 (0.42, F-229): "From the move until a complete read made after
+> a round trip that stands, every token and every absence the reader
+> followed through the watch session is **unconfirmed**: an address
+> unobservable, never up or down on what was held before the move."
+
+> CHANGELOG 0.45: "A tool run as a black box is judged only on its read
+> being complete within 30 s of the heal, which zk2py's runner already did
+> for zenctl."
+
+F-244 proposed the sentence to set the counts apart: a black box cannot
+be judged on them. But "alone" sets apart everything else in Expected 10
+too. One of those verdicts can be seen from outside: every address the
+reader followed is unobservable from the cut. It is the verdict §8.1 asks
+of every reader after a move. As written, a tool that reads every crowd
+address down at the cut, then ok within 30 s, passes step 10.
+
+zk2py's runner never judged zenctl on the 30 s alone. At 0.44 its one
+check asked three things: unobservable from the cut, never firing, and ok
+again within 30 s of the heal. The CHANGELOG's "already did" holds only
+for the last. The wording was zk2py's own, in round 69, and so is the
+fault.
+
+**zk2py:** the runner judges zenctl on two checks. The first is the
+step's: ok again within 30 s of the heal. The second is §8.1's:
+unobservable from the cut, never firing. zenctl passes both in every run.
+It went unobservable 0.41–0.49 s after the cut.
+
+**Wording that would remove the guess:** "A tool run as a black box is
+judged on what its output shows: every address it followed unobservable
+from the cut, never down, and its read complete within 30 s of the heal.
+The counts are not asked of it."
+
+### F-246 · minor · core §8.1 (0.44, 0.45): "about what a read of the population costs", and F-243's figure, are a later read's
+
+> §8.1 (0.44): "A reader SHOULD wait for the round trip after a move, and
+> run its interests timeout, above that time at its population: about
+> what a read of the population costs, every matching token sent once."
+
+> §8.1 (0.45, F-243): "a GET asked on that session meanwhile waits behind
+> it: beside 10,000 tokens, 258–266 ms after a read its own 0.2 s timeout
+> ended, against 6–10 ms on a quiet session (zk2py)."
+
+> scenarios/presence.md §10, measured (0.41): "With a 120 s interests
+> timeout the same read was whole, in 22.3 s. Through a tool's session …
+> the read was complete with all 10,000, and again in 2.6 s".
+
+A session's first read of a population costs several times what its
+later reads do. Measured on zenoh-python 1.10.1 routers, a release build,
+beside 10,000 tokens in `ns`:
+- the first full read took 3.3–4.2 s, on 11 fresh sessions;
+- a later read took 0.52–0.58 s;
+- a read after the session's transport reopened was a later read: 0.55 s,
+  in 2 of 2;
+- the round trip after a reopen took 3.7–4.9 s, about a first read's cost,
+  though a read on the reopened session costs a later read's.
+
+§10's measured paragraph gives the reference's reads of 10,000 tokens,
+in a debug build, as 22.3 s on one session and 2.6 s on a tool's, without
+saying which was a session's first. So "about what a read of the
+population costs" names two costs 7× apart.
+A reader that times its own reads while it runs times later reads. Sized
+on those, its interests timeout and its wait after a move would be 7–9
+times short.
+
+F-243's figure is a later read's too. Round 69 asked its 0.2 s read on a
+session that had read the population before. After a session's first
+read, the next GET waits for much more of its router's answer:
+
+| The GET asked next | after a later read (3 runs) | after the session's first read (6 runs) |
+|---|---|---|
+| a round trip | 266–280 ms | 2.6–3.4 s |
+| a full read | 783–792 ms | 3.0–3.4 s |
+
+The rules stand either way. A GET waits behind one its own timeout
+ended, and a reader waits for the round trip after a move. Only how long
+the text says those take is affected.
+
+**zk2py:** sizes nothing on a read's cost. After a move its follower waits
+until the round trip ends (`move_wait_s` None), at the latest at its
+watch session's interests timeout, 120 s.
+
+**Wording that would remove the guess:**
+- "… above that time at its population: about what a session's first
+  read of the population costs, every matching token sent once (zk2py,
+  release, beside 10,000: 3.3–4.2 s, where a later read took 0.52–0.58 s;
+  a read after a reopen is a later read)."
+- "… waits behind it, for what is left of its router's answer: beside
+  10,000 tokens, 266–280 ms after a read its own 0.2 s timeout ended on a
+  session that had read them before, and 2.6–3.4 s after a session's
+  first read (zk2py)."
+
+### F-247 · minor · core §8.1 (0.45, F-243): "zk2py does so for its round trips and reads"
+
+> §8.1 (0.45): "A reader MAY ask each GET with its own timeout at or above
+> its session's interests timeout … zk2py does so for its round trips and
+> reads. The reference does so for its round trip; its presence feed asks
+> a read with the reader's timeout …"
+
+> CHANGELOG 0.45: "zk2py does so for every GET of its follower."
+
+The CHANGELOG is right, and §8.1 says more. zk2py's follower asks every
+GET as the MAY says, and so does the runner's barrier. Its other readers
+ask each GET with the caller's wait as its own timeout:
+- the profile readers: `AlarmsReader`, `budget.Window`, the telemetry
+  reader, the desired.v1 target and the redundancy.v1 candidate;
+- the one-shot reads, `list_presence` and `settle`.
+
+zk2py's README has said so since round 69. Someone looking in zk2py for
+the MAY across every reader would find it only in the follower. The
+reference's sentence names the part of it it describes.
+
+**zk2py:** unchanged. The profile readers make their round trip once, as
+their texts, written against 0.40, ask.
+
+**Wording that would remove the guess:** "zk2py does so for its
+follower's round trips and reads."
+
+**Counts at core 0.45:** 247 entries. Open: F-245 to F-247, against §8.1
+and `scenarios/presence.md` §10: one gap and two minor points. Every
+other entry is resolved.
