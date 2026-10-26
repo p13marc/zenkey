@@ -100,7 +100,7 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings      394 passed     0 failed
+readings      409 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
@@ -110,12 +110,13 @@ alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
 desired       408 passed     0 failed
 redundancy    180 passed     0 failed
-total        3025 passed     0 failed
+total        3040 passed     0 failed
 ```
 
-The figures are against `core.md` 0.43, `hostid.v1` 0.7, `freshness.v1`
+The figures are against `core.md` 0.44, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
 `telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.5.
+Core 0.44 changed no fixture; `readings` gained its 15 cases (409).
 Core 0.43 changed no fixture and no rule, and no reading (394).
 Core 0.42 changed no fixture; `readings` gained its 15 cases (394).
 Core 0.41 changed no fixture; `readings` gained its 28 cases (379).
@@ -2009,7 +2010,7 @@ against zk2py's owner:
 - `link_scenarios` 78, in two runs;
 - `desired_scenarios` 52, zk2py's author and target.
 
-## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43)
+## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44)
 
 ```bash
 PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) \
@@ -2410,6 +2411,209 @@ R1 through a relay link. Its subscriber has no history and is on
 - **Beyond the scenarios** (F-239): beside 10,000 tokens,
   zk2py's follower read complete again within 5 s of a heal. zenctl's
   watchdog over every address did not within 420 s.
+
+**Core 0.44**, read cold in round 69, on main c178e18f (#882). It
+corrects what a move leaves (F-239), adds two SHOULDs, rewords step 6's
+stall (F-238) and a round trip at the interests timeout (F-240), and adds
+§10 step 10. Where zk2py already did what the text now says, and where it
+did not:
+- **A token declared while the transport was down is told at the reopen**
+  (F-239). zk2py already read a put heard after a move as any put heard:
+  evidence the token is held, never evidence of what went. Nothing
+  changed.
+- **"A reader SHOULD wait for the round trip after a move."** zk2py did
+  not. Its follower waited `round_trip_timeout` (1 s by default) for every
+  round trip, so beside 10,000 tokens the one after a reopen ran out and
+  was asked again. Now, after the first move it waits until the round trip
+  ends (`move_wait_s`, None by default): at the latest at the watch
+  session's interests timeout, 120 s for zk2py's sessions.
+- **"One round trip, and one read, at a time."** zk2py did not.
+  - Each GET was a blocking call with its own timeout. A read whose
+    timeout ended was retried 0.2 s later, beside the one its router still
+    answered in full.
+  - Measured beside 10,000 tokens: a read whose own 0.2 s timeout ended
+    made the next GET on its session take 258–266 ms, where a GET on a
+    quiet session takes 6–10 ms.
+  - Now `live.Flight` asks each GET on a thread of its own, its own
+    timeout above the session's interests timeout
+    (`live.flight_timeout`), so the caller's wait can end while the GET
+    runs on.
+  - `live.Barrier` gives a watch session's round trips through flights, one
+    per transport state: in flight, or ended and not yet handed back, it
+    is taken up; after a move the next caller asks anew; one asked before
+    a move stands for nothing after it (`MOVED_DURING`).
+  - A round trip that stood stands until the transport moves, however long
+    ago it ended. But a move count holds only the moves its listener has
+    told. So one taken up after it ended stands only if the watch session
+    still holds a link (`CUT_OFF_SINCE` otherwise; review-bot on PR #885).
+  - The move count is one counter. The follower's barrier reads the
+    follower's count (`Barrier(gen=…)`), and refuses `moved()`. The runner's
+    barrier, which has no follower, counts the moves it is told.
+  - The follower's round trips go through that barrier, and its reads
+    through a flight of its own. A wait that ends first (`WAIT_ENDED`, or
+    `read()` giving None) leaves the GET running, and the next attempt,
+    0.2 s later, takes it up. A read that raised raises in every caller
+    that takes it up.
+  - `PresenceFollower.next_move(wait, since=…)` lets a caller wait for the
+    view's next change as long as it likes, and never miss one between two
+    calls. The reads run on the follower's own timers, so a wait that
+    ends drops nothing.
+- **A round trip at the interests timeout reads "as not standing"**
+  (F-240). `RoundTrip.made` is now True for one, since it was asked.
+  `stands` was already False.
+- **Step 6's stall** (F-238). zk2py's follower seeds after a round trip
+  that ran out, so the stall still ends at its first seed. The 300 ms is
+  the watch session's interests timeout, as zk2py's runner already set it.
+
+The profile readers (`AlarmsReader`, `budget.Window`, the telemetry
+reader, the desired.v1 target, the redundancy.v1 candidate) keep their
+one-shot round trip and blocking reads. Their texts are written against
+0.40, as 0.44 leaves them.
+
+`readings` gained 15 cases (409), five of them on review of PR #885. They
+run on fake sessions whose GETs end when the case opens their gate, so a
+slow runner can make a case wait, never fail it. They cover:
+- a round trip asked four times, three given up on at once: one GET;
+- a move while one is in flight: a new one, and `MOVED_DURING`;
+- a round trip taken up after it ended: standing with a link, and
+  `CUT_OFF_SINCE` without one;
+- one move counter;
+- a read whose wait ended, taken up by the next with no second GET;
+- a read's error handed on to a second caller;
+- the round trip after a move waited for;
+- `next_move`.
+
+**The runner** gains step 10, and a `Watchdog` run for zenctl:
+- **Step 10's watch session** is in no namespace, through a link, its
+  interests timeout 60 s, its subscriber without history on
+  `ns/zk2/*/*/@zk/instance/*`, with direct callbacks (F-230). The reader
+  under test's round trip is a `live.Barrier` on it, told each transport
+  move, and both sessions' GETs are counted.
+- **The reader under test** is zk2py's follower in `ns`. Its watch session
+  is in no namespace, and both of its sessions go through one link. A
+  caller thread calls `next_move(0.02)` in a loop. The checks read every
+  GET's span on both sessions: when it was asked, and when its final reply
+  came.
+- **zk2py's own analog of a dropped call** is the same follower with every
+  wait of its own at 20 ms: `timeout`, `round_trip_timeout` and
+  `move_wait_s`. This makes its take-up path run. It is a check, labelled
+  as zk2py's own.
+- **zenctl.** `watchdog --namespace ns --rule 'instance-gone crowd/*'
+  --timeout 30`, every session through one link, cut for 1 s. Its one
+  round trip, and no read beside one in flight, are NOT RUN: they are not
+  observable from its output. Its stderr's zenoh lines are said as a
+  proxy. The four round trips are NOT RUN for zenctl too.
+- **`--reopen` with zenctl** reruns round 68's watchdog run: a 3 s cut, a
+  note.
+- **Two fixes of zk2py's own, not the text's:**
+  - `_Counted` now times every GET's span;
+  - `live_interop`'s budget run now waits up to 5 s for the owner
+    example's 10 health checks before its first GET. health.v1 puts only
+    the status before the tokens, and one run in four read 0 members at
+    once after `ready`.
+
+**`presence_scenarios`**, against `owner-wf` and `zenctl-wf` (main
+c178e18f). §1–§8 ran once, with zk2py's owner and reader. §9 and §10 ran
+in every pairing:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 46 | 1 |
+| Rust, zk2py | – | 9 | 40 | 1 |
+| zk2py, zenctl | – | – | 9 | 4 |
+| Rust, zenctl | – | – | 8 | 5 |
+
+Every check passes. Not run:
+- §3 step 2, as before;
+- §10 step 7 with the Rust owner;
+- for zenctl, §9, §10 step 9, and step 10's four round trips, its one
+  round trip after the reopen and its reads.
+
+§10 also ran whole beside 10,000 tokens: 46 of 46 with zk2py's reader,
+and 9 of 9 with zenctl.
+
+§10 at 0.44, measured on zenoh-python 1.10.1 routers, the crowd in `ns`:
+- **Step 6.** As at 0.43: the stall lasted 303–306 ms until the first
+  seed, and the one round trip before it ran out at 301 ms. In all, 3
+  round trips and 4 reads, 1 of them not made at the cut.
+- **Step 10, the watch session.**
+
+  | | 2,000 tokens | 10,000 tokens |
+  |---|---|---|
+  | Round trip at its start | 42–46 ms, no token | 41–52 ms, no token |
+  | Told at the cut | no withdrawal | no withdrawal |
+  | Told at the reopen | every token | every token |
+  | Round trip after the reopen | 147–160 ms | 3.7–4.0 s |
+  | GETs for the four asks | 1 | 1 |
+
+  - "Every token" includes the one declared while the link was cut. The
+    one withdrawn then was never told.
+  - The four asks: the first three came back at once, `WAIT_ENDED`, and
+    the fourth took the round trip up and stood. The last token was told
+    0–4.1 ms before the round trip's end.
+  - With zenoh-python's default callbacks too, every token had been
+    handed over by the round trip's end: 5 of 5 runs at 2,000, 3 of 3 at
+    10,000.
+  - Only the first round trip after a reopen waits. The next, asked at
+    once after it, took 0.3–0.8 ms beside 2,000 tokens and 0.8–1.7 ms
+    beside 10,000 (F-241).
+- **Step 10, zk2py's follower.** One round trip after the reopen, none
+  while cut off, and no GET beside one in flight, in every run:
+
+  | | 2,000 tokens | 10,000 tokens |
+  |---|---|---|
+  | Complete again after the heal | 0.19–0.21 s | 4.2–4.9 s |
+  | Its round trip after the reopen | 49–57 ms | 3.5–4.3 s |
+  | Reads in all, its seed included | 2 | 2 |
+
+  - At the cut, every crowd address was unobservable (`MOVED`) at the
+    move itself.
+  - Its caller's 20 ms loop made 190–8,600 calls from the cut. Most were
+    woken by the tokens told at the reopen.
+- **zk2py's own analog, every wait 20 ms.** One round trip after the
+  reopen, and no GET beside one in flight:
+
+  | | 2,000 tokens | 10,000 tokens |
+  |---|---|---|
+  | Complete again after the heal | 0.79–2.79 s | 7.6–7.7 s |
+  | Reads in all, its seed included | 3 | 6 |
+  | Reads taken up | 3 | 32–34 |
+  | Round trips taken up | 1 | 17–18 |
+
+  The reads before the last were unordered: they were asked while the
+  round trip was in flight, its wait having ended.
+- **zenctl, step 10's reader.** It was unobservable from the cut, never
+  firing, and ok again 2.5 s after the heal beside 2,000 tokens. Beside
+  10,000 it was ok 25.2 s and 27.7 s after the heal. Its stderr carried no
+  `Unknown interest` and no `Didn't receive DeclareFinal`.
+
+**Round 68's run, again.** `zenctl-wf watchdog --namespace ns --rule
+'instance-gone crowd/*' --timeout 30`, every session through the link,
+beside 10,000 tokens, a 3 s cut and a heal, in 3 of 3 runs:
+- it was ok 21.0–23.9 s after its start;
+- it was unobservable 0.4–0.5 s after the cut;
+- it was ok again 25.2–27.1 s after the heal;
+- its stderr carried no `Unknown interest` and no `Didn't receive
+  DeclareFinal`.
+
+With `zenctl-wd` (round 68) it was still unobservable at 420 s, its stderr
+full of both. The time is about what the reference measured for a debug
+build (28–29 s for the fleet's watchdog, 32 s for zenctl).
+
+**Where the two implementations disagree:** on no verdict.
+- **Wording.** zenctl now says a read "ran to its timeout or to its
+  session's interests timeout (routing/interests/timeout)", raise
+  "--timeout, and the interests timeout above it". zk2py names the
+  interests timeout. Round 68's difference is gone.
+- **Step 6's round trips** still differ, as 0.43 allows: one before the
+  first seed for zk2py, and two for the reference.
+- **The time to recover beside 10,000 tokens.** After the heal, zk2py's
+  follower was complete again in 4.2–4.9 s, and the debug zenctl in 25–28
+  s. Both are within step 10's 30 s, which the step asks beside 2,000.
+
+`live_interop` against `owner-wf` and `consume-wf`, the consume example
+built this round: 426 of 426. Its first run passed 425: the one failure
+was zk2py's own runner, fixed as above.
 
 ## What it does not cover
 

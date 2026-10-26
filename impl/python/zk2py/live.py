@@ -56,7 +56,7 @@ zenoh-python has no unbounded channel: its default handler and
   no error reply. :func:`list_presence` reads a read whose time reached its
   session's interests timeout as possibly incomplete
   (:data:`AT_INTERESTS_TIMEOUT`), and :func:`settle` a round trip ended
-  there as not made. A session's configuration cannot be read back from
+  there as not standing (0.44, F-240: before, "as not made"). A session's configuration cannot be read back from
   zenoh-python, so :func:`open_client` records the interests timeout it
   opened a session with (:func:`interests_timeout_of`); a session zk2py did
   not open is taken at zenoh's default, 10 s.
@@ -95,6 +95,20 @@ zenoh-python has no unbounded channel: its default handler and
   says that its reads' completeness rests on the default". A read or a
   round trip on a session zk2py did not open, nor :func:`register`, says
   so (:attr:`Presence.interests_timeout_assumed`).
+
+**One round trip, and one read, at a time (§8.1, 0.44).** "zenoh 1.10.1
+tells a router nothing of a liveliness GET whose caller stops waiting for
+it … and the router answers it in full. A reader SHOULD NOT ask a round
+trip while one it asked since its watch session's transport last moved is
+in flight, nor ask a read while one it asked of the same scope is: the
+next that needs one takes up the one in flight". :class:`Flight` is one
+GET asked on a thread of its own, its own timeout above the session's
+interests timeout (:func:`flight_timeout`), so a caller's wait ending
+leaves it running to be taken up; :class:`Barrier` is a watch session's
+round trips through flights, one per transport state. :func:`settle` and
+:func:`list_presence` stay the one-shot primitives a flight runs: a
+profile reader that makes its round trip once, as written against 0.40,
+still calls them.
 
 **Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
 "the scenarios, and so a conformance run, use".
@@ -367,8 +381,9 @@ BESIDE_SUBSCRIBER = ("beside a liveliness subscriber: the session holds one, and
 #: failed, so §8.1's check could not be made (never a pass).
 LINKS_UNREADABLE = ("the session's links could not be read (Session.info.links() failed), so the "
                     "read cannot be shown complete (core §8.1, 0.37, 0.38)")
-#: Why a read made is possibly incomplete, and a round trip not made, when
-#: its time reached its session's interests timeout (§8.1, 0.41).
+#: Why a read made is possibly incomplete, and a round trip not standing,
+#: when its time reached its session's interests timeout (§8.1, 0.41; 0.44,
+#: F-240: "as not standing … it was asked, so it was made").
 AT_INTERESTS_TIMEOUT = ("it ran to its session's interests timeout (routing/interests/timeout), where zenoh ends a "
                         "liveliness GET its routers have not finished with the final reply alone (core §8.1, 0.41)")
 #: The three kinds of a read (§8.1, 0.37: "A read not made is a third kind,
@@ -532,11 +547,11 @@ class RoundTrip:
     **stands**: it ended at its routers' final reply (``finished``), with no
     error reply, before the session's interests timeout, through a session
     holding a link when it was asked and when it ended. ``why`` says why not;
-    ``made`` is False for one not made: no GET through a session cut off or
-    whose links cannot be read before it, or one ended at the interests
-    timeout, which the text reads "as not made". Only ``stands`` is
-    evidence of order; ``made`` follows the text's word, and no caller
-    reads it as more. Truthy when it stands."""
+    ``made`` is False for one not made, no GET asked: through a session cut
+    off or whose links cannot be read before it. One ended at the interests
+    timeout was made and does not stand (0.44, F-240: "as not standing … it
+    was asked, so it was made"; before, zk2py followed 0.41's "as not
+    made"). Only ``stands`` is evidence of order. Truthy when it stands."""
 
     stands: bool
     made: bool
@@ -561,9 +576,10 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
     subscribers, and before the seed: a liveliness GET there whose answer it
     discards serves, since its final reply follows the declarations".
     0.41: of :func:`settle_key` (``selector`` is the subscribers'), which
-    matches no token and costs one round trip at any population. It stands
-    only when its final reply came, no error reply, before the session's
-    interests timeout ("a round trip … that ended there as not made"), and
+    matches no token and costs one round trip until the watch session's
+    transport moves (0.44). It stands only when its final reply came, no
+    error reply, before the session's interests timeout ("a round trip …
+    that ended there as not standing", 0.44), and
     the session held a link before it and at its end: a watch session cut
     off answers it at once, as it answers every liveliness GET (§8.1, 0.37),
     so that answer orders nothing. Its answer is discarded, so a round trip
@@ -596,12 +612,197 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
         # ended at its timeout (an error reply): the declarations not shown ordered
         return RoundTrip(False, True, why="it ended with an error reply (its timeout)", **rt)
     if elapsed >= interests_timeout_of(watch):
-        return RoundTrip(False, False, why=AT_INTERESTS_TIMEOUT, **rt)
+        # 0.44 (F-240): asked, so made; it establishes nothing
+        return RoundTrip(False, True, why=AT_INTERESTS_TIMEOUT, **rt)
     if after is False:
         return RoundTrip(False, True, why=CUT_OFF_DURING, **rt)
     if after is None:
         return RoundTrip(False, True, why=LINKS_UNREADABLE, **rt)
     return RoundTrip(True, True, **rt)
+
+
+#: Why a round trip or a read came back to its caller without an answer:
+#: the caller's wait ended first, and its GET runs on (core §8.1, 0.44).
+WAIT_ENDED = ("the wait ended first: the GET runs on, answered in full, and the next that needs one takes it up "
+              "(core §8.1, 0.44)")
+#: Why a round trip that ended standing does not stand for its caller: the
+#: watch session's transport moved while it ran (core §8.1, 0.41).
+MOVED_DURING = "the watch session's transport moved while it ran: it stands for no read after the move (core §8.1, 0.41)"
+#: Why a round trip that ended standing, taken up later, does not stand: the
+#: watch session held no link when it was taken up, a cut its listener had
+#: not yet told (core §8.1, 0.41, 0.42; review-bot on PR #885).
+CUT_OFF_SINCE = ("cut off since it ended: the watch session held no link when it was taken up, so it stands for "
+                 "no read after (core §8.1, 0.42)")
+
+
+class Flight:
+    """One liveliness GET in flight, asked once on a thread of its own and
+    shared by every caller that waits for it (core §8.1, 0.44: "One round
+    trip, and one read, at a time … the next that needs one takes up the one
+    in flight, its caller's wait or its own having ended").
+
+    zenoh 1.10.1 tells a router nothing of a GET whose caller stops waiting
+    (Appendix B), and its own timeout ends it only for the caller: measured
+    (round 69), after a read of 10,000 tokens whose own 0.2 s timeout ended,
+    the next GET on that session took 258–266 ms where it takes 6–10 ms on
+    a quiet one. So the GET is asked with an own timeout no
+    shorter than its session's interests timeout (:func:`flight_timeout`),
+    where zenoh's runtime ends it, and a caller's wait is its own: it ends,
+    and the flight runs on to be taken up.
+
+    ``gen`` is the caller's count of transport moves when it was asked;
+    ``meta`` what the asker noted then; ``result`` (or ``error``) is set
+    once, before ``done``."""
+
+    def __init__(self, gen: int = 0, meta: dict[str, Any] | None = None) -> None:
+        self.gen = gen
+        self.meta: dict[str, Any] = dict(meta or {})
+        self.asked_ns = time.monotonic_ns()
+        self.done = threading.Event()
+        self.result: Any = None
+        self.error: BaseException | None = None
+        #: how many callers took it up after the one that asked it
+        self.taken_up = 0
+        #: set by the caller that consumed its answer (a fold made once)
+        self.consumed = False
+
+    def run(self, fn: Any) -> "Flight":
+        def go() -> None:
+            try:
+                self.result = fn()
+            except BaseException as e:  # noqa: BLE001 - handed to every waiter, never lost on a thread
+                self.error = e
+            finally:
+                self.done.set()
+
+        threading.Thread(target=go, daemon=True, name="zk2py-flight").start()
+        return self
+
+    @property
+    def in_flight(self) -> bool:
+        return not self.done.is_set()
+
+    def wait(self, wait_s: float | None) -> bool:
+        """Wait ``wait_s`` (None: until it ends) for its answer: whether it came."""
+        return self.done.wait(wait_s)
+
+
+def flight_timeout(session: Any, at_least: float = 0.0) -> float:
+    """A flight's own GET timeout (core §8.1, 0.44): above its session's
+    interests timeout, where zenoh's runtime ends a liveliness GET its
+    routers have not finished, so the GET's own timeout never ends it first
+    while its router still answers it in full; never below ``at_least``."""
+    return max(at_least, interests_timeout_of(session) + 1.0)
+
+
+class Barrier:
+    """A watch session's round trips, one at a time (core §8.1, 0.44): "A
+    reader SHOULD NOT ask a round trip while one it asked since its watch
+    session's transport last moved is in flight … the next that needs one
+    takes up the one in flight".
+
+    :meth:`ask` takes up the round trip in flight, or one ended whose answer
+    no caller has had, when it was asked at the current move count, else
+    asks one (:func:`settle`, its GET's own timeout :func:`flight_timeout`,
+    on a thread of its own), and waits ``wait`` for it (None: until it
+    ends). A wait that ends first hands back a round trip not standing,
+    :data:`WAIT_ENDED`, and the GET runs on. One asked before a move stands
+    for nothing after it (:data:`MOVED_DURING`), and after a move the next
+    caller asks anew. ``asked`` counts the round trips it asked,
+    ``taken_up`` the times one was taken up.
+
+    **The move count is one counter** (review-bot on PR #885). A caller
+    that counts its watch session's moves itself hands the barrier that
+    count, ``gen``, a callable read whenever the barrier needs it, and never
+    calls :meth:`moved`; one that does not tells the barrier each move
+    through :meth:`moved`, which counts them. So no two counters must be
+    kept in step.
+
+    **An answer taken up after it ended** (review-bot on PR #885). "A round
+    trip stands until the watch session's transport moves", however long
+    ago it ended: its final reply ordered the subscribers' declarations
+    before every read asked after it, and its age changes nothing. But the
+    move count holds only the moves the caller has heard, and a transport
+    can close before its listener says so. So a round trip taken up after
+    it ended stands only if the watch session holds a link when it is taken
+    up, as :func:`settle` checks at a round trip's end: a cut not yet heard
+    leaves it not standing (:data:`CUT_OFF_SINCE`), and the next caller
+    asks anew."""
+
+    def __init__(self, watch: Any, selector: str | None = None, *, get_timeout: float | None = None,
+                 gen: Any = None) -> None:
+        self.watch, self.selector = watch, selector
+        self.key = settle_key(selector)
+        self.get_timeout = get_timeout
+        self.lock = threading.Lock()
+        self._gen_of = gen
+        self._moves = 0
+        self.flight: Flight | None = None
+        self.asked = 0
+        self.taken_up = 0
+
+    @property
+    def gen(self) -> int:
+        """The move count: the caller's (``gen``), else the barrier's own."""
+        return self._gen_of() if self._gen_of is not None else self._moves
+
+    def moved(self) -> None:
+        """The watch session's transport closed or opened: a round trip asked
+        before it is no longer one "asked since its watch session's
+        transport last moved". Refused for a barrier that reads its
+        caller's count, which then counts the move itself."""
+        if self._gen_of is not None:
+            raise RuntimeError("this barrier reads its caller's move count: the caller counts the move")
+        with self.lock:
+            self._moves += 1
+
+    @property
+    def in_flight(self) -> bool:
+        with self.lock:
+            return self.flight is not None and self.flight.in_flight
+
+    def ask(self, wait: float | None = PRESENCE_TIMEOUT_S) -> tuple[RoundTrip, Flight]:
+        """A round trip, taken up or asked, and its flight."""
+        start = ended = False
+        with self.lock:
+            fl = self.flight
+            gen = self.gen
+            # in flight, or ended with its answer not yet handed back: taken up
+            if fl is not None and fl.gen == gen and not fl.consumed:
+                fl.taken_up += 1
+                self.taken_up += 1
+                ended = not fl.in_flight
+            else:
+                fl = self.flight = Flight(gen)
+                self.asked += 1
+                start = True
+        if start:
+            timeout = self.get_timeout if self.get_timeout is not None else flight_timeout(self.watch)
+            fl.run(lambda: settle(self.watch, timeout, selector=self.selector))
+        if not fl.wait(wait):
+            return RoundTrip(False, True, self.key, WAIT_ENDED, asked_ns=fl.asked_ns,
+                             interests_timeout_assumed=not interests_timeout_known(self.watch)), fl
+        if fl.error is not None:
+            with self.lock:
+                fl.consumed = True
+            return RoundTrip(False, False, self.key, f"the GET could not be made: {fl.error!r}",
+                             asked_ns=fl.asked_ns), fl
+        rt: RoundTrip = fl.result
+        # an answer taken up after it ended: the watch session's links now,
+        # since a cut its listener has not yet told is in no move count
+        held = links_held(self.watch) if ended and rt.stands else True
+        with self.lock:
+            fl.consumed = True
+            moved = fl.gen != self.gen
+        why = MOVED_DURING if moved else CUT_OFF_SINCE if held is False else LINKS_UNREADABLE if held is None else ""
+        if rt.stands and why:
+            rt = RoundTrip(False, rt.made, rt.key, why, rt.elapsed_s, rt.finished, rt.errors, rt.tokens,
+                           rt.asked_ns, rt.interests_timeout_assumed)
+        return rt, fl
+
+    def round_trip(self, wait: float | None = PRESENCE_TIMEOUT_S) -> RoundTrip:
+        """:meth:`ask`'s round trip alone."""
+        return self.ask(wait)[0]
 
 
 @dataclass
