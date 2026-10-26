@@ -369,7 +369,7 @@ re-read, 3 s for the ten. The test's control, a reader that skips the
 round trip, its link stalled until the withdrawal had reached R1, missed
 the withdrawal in 3 of 3 starts in each of the 10 runs.*
 
-## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42, 0.43, 0.44; Appendix B)
+## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42, 0.43, 0.44, 0.45; Appendix B)
 
 **Setup.** Routers R1 and R2, linked R2 → R1. An owner, a tool and two
 crowd sessions are clients of R1; the crowd sessions, in a namespace `ns`,
@@ -450,11 +450,15 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
     `ns` reads both moves. The link is healed. Once the watch session's
     transport has opened again, the reader under test asks its round trip
     four times in a row, giving up on the first three at once and waiting
-    30 s for the fourth. Then (the reader under test, as step 6's) a reader
-    follows presence beside the crowd, its watch session and its reading
-    session both through a link the test can cut, and its caller asks it
-    for its next move from a loop that also wakes every 20 ms, which may
-    drop the call in flight. Its link is cut for 1 s, and healed.
+    30 s for the fourth, through its own interface (0.45, F-244: a tool
+    run as a black box offers none, and this half is not run for it).
+    Then (the reader under test, as step 6's) a reader follows presence
+    beside the crowd, its watch session and its reading session both
+    through a link the test can cut, and its caller asks it for its next
+    move from a loop that also wakes every 20 ms, which may drop the call
+    in flight; a reader whose reads do not run on its caller's call has
+    none to drop, and its own waits, each ended after 20 ms, stand in
+    (0.45, F-244). Its link is cut for 1 s, and healed.
 
 **Expected.**
 1. The round trip is still waiting when the stall ends, and ends with the
@@ -518,7 +522,11 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
     trip again, and a read after it is complete within 30 s of the heal,
     the crowd's addresses up. It asks one round trip after the reopen, and
     never a read beside one in flight, however often its caller drops the
-    call (0.44).
+    call (0.44). Every count here is the reader's own, taken at its own
+    sessions, as step 6's are (0.45, F-244): zenoh tells a router nothing
+    of a GET given up on (Appendix B), so no router or link tells one
+    given up on from one waited for. A tool run as a black box is judged
+    on its read complete within 30 s of the heal alone.
 
 *Measured (0.41, #851) by the reference, in a debug build, in
 `zenkey/tests/presence.rs`'s `s10_a_round_trip_at_a_population_and_the_interests_timeout`

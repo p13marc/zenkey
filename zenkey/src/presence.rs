@@ -394,8 +394,9 @@ pub async fn cut_off(session: &zenoh::Session) -> bool {
 ///
 /// The runtime's owner-side watches, on a session the application hands
 /// in (desired.v1's target), take history exactly when this says so:
-/// without, the round trip is one round trip at any population until the
-/// session's transport moves (core §8.1, 0.44, F-239); with, it waits for
+/// without, the round trip is one round trip at any population but for
+/// the first after each reopen of the session's transport (core §8.1,
+/// 0.44, F-239; 0.45, F-241); with, it waits for
 /// the history, a handful of tokens of one author. The tools'
 /// watch sessions run in no namespace instead (`zenkey_fleet::WatchSession`,
 /// #875, core §8.1, 0.42), where this reads false and no history is

@@ -219,8 +219,9 @@ impl Deployment {
     /// the owners' instance tokens of `alert-firing`, `alarms --for` and
     /// `check conform`, a telemetry reading's tokens. Its subscribers have
     /// no history, so its round trip is one round trip at any population
-    /// until its transport moves (core §8.1, 0.44, F-239: the reopen tells
-    /// its subscribers every token, and the round trip after it waits);
+    /// but for the first after each reopen of its transport (core §8.1,
+    /// 0.44, F-239; 0.45, F-241: the reopen tells its subscribers every
+    /// token, and the round trip after it waits);
     /// in a namespace they would need history to hear an earlier token
     /// withdrawn (zenoh 1.10.1, #872), and the round trip would wait for
     /// it. It makes no read: [`Deployment::session`] holds no liveliness
