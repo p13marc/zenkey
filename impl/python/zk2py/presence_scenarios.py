@@ -1,4 +1,4 @@
-"""core ``scenarios/presence.md`` §1 to §10 (core 0.45), run from Python on
+"""core ``scenarios/presence.md`` §1 to §10 (core 0.46), run from Python on
 zenoh-python 1.10.1 routers in process, with an owner and a reader under
 test of either implementation::
 
@@ -39,11 +39,17 @@ the reader under test's verdict (0.38, F-188, F-189):
   0.45 (F-244): the four round trips through the reader's own interface,
   not run for a tool run as a black box; a reader whose reads do not run
   on its caller's call, as zk2py's follower, has its own waits, each 20 ms,
-  stand in for the dropped calls; every count the reader's own; and a tool
-  run as a black box judged on its read complete within 30 s of the heal.
+  stand in for the dropped calls; and every count the reader's own. 0.46
+  (F-245): a tool run as a black box is judged on what its output shows:
+  every address it followed unobservable from the cut, never down, and its
+  read complete within 30 s of the heal; the counts are not asked of it.
+  zenctl's watchdog prints a transition only at an evaluation, so the runner
+  sets ``--every 0.5``, below the 1 s cut, and reads "from the cut" as its
+  first transition after the cut, before the heal (F-249).
   ``--reopen`` adds round 68's F-239 measurement to §10 for zk2py's
   reader, and with zenctl round 68's watchdog run beside the crowd, a 3 s
-  cut and a heal: notes only, never a check.
+  cut and a heal, and step 10's run at ``--every 5`` and 2 (F-249): notes
+  only, never a check.
 
 Exit 0 when every check passes, 1 otherwise.
 """
@@ -2506,6 +2512,10 @@ def _section10_zenctl(report: Report, sec: str, ep1: str, held: list[Any]) -> No
                 _s10_watchdog_rerun(report, sec, ep1)
             except Exception as e:  # noqa: BLE001 - a measurement that failed is said, never fatal
                 report.note(sec, f"round 68's watchdog run (beyond the text) did not run: {e!r}")
+            try:
+                _s10_watchdog_period(report, sec, ep1)
+            except Exception as e:  # noqa: BLE001 - a measurement that failed is said, never fatal
+                report.note(sec, f"F-249's watchdog run (beyond the text) did not run: {e!r}")
         # step 7: a namespace
         if P.owner == "rust":
             report.cannot(sec, "7. the owner example takes no namespace")
@@ -2537,11 +2547,12 @@ def _stderr_counts(err: list[str]) -> str:
 
 
 def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str, extra: list[str],
-                  start_limit: float, back_limit: float) -> dict[str, Any]:
-    """One ``zenctl watchdog`` run through ``endpoint_link``: ok at its start,
-    the link cut for ``cut_s`` and healed, timed to ok again."""
+                  start_limit: float, back_limit: float, every: float = 0.5) -> dict[str, Any]:
+    """One ``zenctl watchdog`` run through ``endpoint_link``, evaluating every
+    ``every`` s: ok at its start, the link cut for ``cut_s`` and healed, timed
+    to ok again."""
     out: dict[str, Any] = {}
-    wd = Watchdog(endpoint_link.endpoint, [rule], namespace=namespace, extra=extra)
+    wd = Watchdog(endpoint_link.endpoint, [rule], every=every, namespace=namespace, extra=extra)
     try:
         t0 = time.monotonic()
         out["ok"] = _wait(lambda: wd.state(rule) == "ok", start_limit, 0.1)
@@ -2559,6 +2570,11 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
         out["cut_states"] = [(round(t - t_cut, 2), to) for t, to, _ in tr]
         out["fired"] = "firing" in {to for _, to, _ in tr}
         out["unobservable"] = "unobservable" in {to for t, to, _ in tr if t <= t_heal + 0.5}
+        # 0.46 (F-245): "unobservable from the cut", read as the first
+        # transition its output prints after the cut, before the heal (F-249)
+        first = tr[0] if tr else None
+        out["first"] = None if first is None else (round(first[0] - t_cut, 2), first[1], first[2])
+        out["unobservable_first"] = first is not None and first[1] == "unobservable" and first[0] < t_heal
         out["stderr"] = _stderr_counts(list(wd.err))
     finally:
         wd.close()
@@ -2568,12 +2584,16 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
 def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
     """§10 step 10's reader, the reference's: ``zenctl watchdog --namespace ns
     --rule 'instance-gone crowd/*'`` beside the crowd, every session through
-    one link, cut for 1 s and healed. 0.45 (F-244): "A tool run as a black
-    box is judged on its read complete within 30 s of the heal alone", so
-    that is the step's check; its counts are the reader's own and not asked
-    of it (its stderr's zenoh lines are said, a proxy). What its output
-    shows from the cut, unobservable and never firing, is §8.1's verdict
-    (0.42, F-229), checked apart: 0.45's "alone" leaves it out (F-245)."""
+    one link, cut for 1 s and healed. 0.46 (F-245): "A tool run as a black
+    box is judged on what its output shows: every address it followed
+    unobservable from the cut, never down, and its read complete within 30 s
+    of the heal. The counts are not asked of it." That is the step's one
+    check; its stderr's zenoh lines are said, a proxy for the counts.
+
+    zenctl's output is a transition printed at an evaluation, once every
+    ``--every``: the runner sets 0.5 s, below the cut, and reads "from the
+    cut" as the first transition after the cut, printed before the heal.
+    At its default 5 s a 1 s cut is never printed (F-249)."""
     from .budget_scenarios import Link
 
     rule = "instance-gone crowd/*"
@@ -2584,16 +2604,18 @@ def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
     finally:
         link.close()
     within = r.get("after_heal") is not None and 0.0 <= r["after_heal"] <= 30.0
-    what = (f"ok {r.get('t_ok', 0):.1f} s after its start; since the cut {r.get('cut_states')}; ok again "
-            f"{r.get('after_heal')} s after the heal; {r.get('stderr')}")
+    first = r.get("first")
+    said = "none" if first is None else f"{first[1]} {first[0]} s after the cut ({(first[2] or '')[:160]})"
+    what = (f"ok {r.get('t_ok', 0):.1f} s after its start; its first transition after the cut: {said}; since the "
+            f"cut {r.get('cut_states')}; ok again {r.get('after_heal')} s after the heal; {r.get('stderr')}")
     report.check(sec, f"10. (the reader under test, a tool run as a black box) zenctl watchdog --namespace {NS} --rule "
-                      f"'{rule}' --timeout 30 beside the {P.crowd}, every session through one link cut for 1 s and "
-                      "healed: its read complete again within 30 s of the heal, ok (0.45: the black box's one "
-                      "judgement)", bool(r.get("ok")) and within, what)
-    report.check(sec, "10. (core §8.1, 0.42, F-229; beside 0.45's \"alone\", F-245) what its output shows from the "
-                      "cut: unobservable, never firing", bool(r.get("unobservable")) and not r.get("fired"), what)
+                      f"'{rule}' --timeout 30 --every 0.5 beside the {P.crowd}, every session through one link cut "
+                      "for 1 s and healed, judged on what its output shows (0.46, F-245): unobservable from the cut "
+                      "(its first transition after it, before the heal), never firing, and its read complete again "
+                      "within 30 s of the heal, ok",
+                 bool(r.get("ok")) and bool(r.get("unobservable_first")) and not r.get("fired") and within, what)
     report.note(sec, "10. zenctl's one round trip after the reopen, and no read beside one in flight: counts at the "
-                     "reader's own sessions, not asked of a tool run as a black box (0.45, F-244)")
+                     "reader's own sessions, not asked of a tool run as a black box (0.45, F-244; 0.46, F-245)")
 
 
 def _s10_watchdog_rerun(report: Report, sec: str, ep1: str) -> None:
@@ -2616,6 +2638,29 @@ def _s10_watchdog_rerun(report: Report, sec: str, ep1: str) -> None:
                      f"{r.get('after_heal')} s after the heal (within 300 s: {r.get('back')}); {r.get('stderr')}")
 
 
+def _s10_watchdog_period(report: Report, sec: str, ep1: str) -> None:
+    """Beyond the text (round 71, F-249; ``--reopen``): step 10's zenctl run
+    at the watchdog's default period, ``--every 5``, and at 2 s: what its
+    output prints from a 1 s cut. A note, never a check."""
+    from .budget_scenarios import Link
+
+    rule = "instance-gone crowd/*"
+    said = []
+    for every in (5.0, 2.0):
+        link = Link(ep1)
+        try:
+            r = _watchdog_cut(link, rule, 1.0, namespace=NS, extra=["--timeout", "30"], start_limit=180.0,
+                              back_limit=12.0, every=every)
+        finally:
+            link.close()
+        first = r.get("first")
+        said.append(f"--every {every:g}: its first transition after the cut "
+                    f"{'none' if first is None else f'{first[1]} {first[0]} s after it'}, since the cut "
+                    f"{r.get('cut_states')}")
+    report.note(sec, f"F-249 (beyond the text): step 10's zenctl watchdog, a 1 s cut beside the {P.crowd}, at other "
+                     f"periods: {'; '.join(said)}")
+
+
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
             "7": section7, "8": section8, "9": section9, "10": section10}
 
@@ -2631,8 +2676,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="the reference's zenctl")
     ap.add_argument("--crowd", type=int, default=2000, help="§10's crowd, 2,000 instance tokens by default")
     ap.add_argument("--reopen", action="store_true",
-                    help="§10: also measure a watch session's reopen beside the crowd (F-239, F-241; notes only, no "
-                         "check). Slow beside a large crowd: about a minute beside 10,000 tokens, each wait for "
+                    help="§10: also measure a watch session's reopen beside the crowd (F-239, F-241), and with "
+                         "zenctl step 10 at other watchdog periods (F-249); notes only, no check. Slow beside a large crowd: about a minute beside 10,000 tokens, each wait for "
                          "the reopening's telling bounded at 30 s")
     ap.add_argument("--tokenless", type=int, default=100, help="§5's services, 100 by default")
     args = ap.parse_args(argv)
@@ -2655,7 +2700,7 @@ def main(argv: list[str] | None = None) -> int:
             report.check(f"§{name}", "the section ran", False, repr(e))
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"presence scenarios §1–§10 (core 0.45), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
+    print(f"presence scenarios §1–§10 (core 0.46), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
           f"failed, {len(report.not_run)} not run")
     for sec, name, ok, detail in report.rows:
         if not ok:

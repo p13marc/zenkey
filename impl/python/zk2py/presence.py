@@ -81,6 +81,12 @@ Core 0.44 (#609, round 69):
 
 Core 0.45 (#609, round 70) is wording only, and words what the follower
 already did (F-241 to F-244): see :class:`PresenceFollower`.
+
+Core 0.46 (#609, round 71) is wording only too. It names this follower as
+the MAY's example (F-247), and sizes the wait after a move as a session's
+first read of the population (F-246). The follower sizes nothing on a
+read's cost: after a move its round trip waits until it ends, at the latest
+at its watch session's interests timeout.
 """
 
 from __future__ import annotations
