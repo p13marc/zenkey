@@ -1201,7 +1201,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.50 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.51 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1229,7 +1229,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     three wordings, round 72's F-250 to F-252; 0.50: the admin read is the
     tools' three reads and admits no GET of any node's declaration
     records, a query admitted by inclusion, #894, with round 73's F-253
-    to F-255; changes go through
+    to F-255; 0.51: that rule under `deny` and on an ingress `query`, an
+    `allow` block unprotected, and where §12's recorder hears a freezing
+    read, round 74's F-256 and F-257; changes go through
     `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

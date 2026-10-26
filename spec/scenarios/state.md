@@ -257,7 +257,7 @@ plays W from one peer session, the late joiner a client of it.
 seeded subscription. `conformance/seed/merge.json` states the same order
 as a pure fixture.*
 
-## §12 The check's reads beside a router that is declaring (§4.2, 0.48)
+## §12 The check's reads beside a router that is declaring (§4.2, 0.48, 0.50, 0.51)
 
 **Setup.** As above, on one router with its admin space on, read
 permitted, whose storage manager runs one storage, `plans`, with
@@ -285,10 +285,12 @@ and records the selector of every GET it receives.
    and the owner answers the GET, within 2 s of being made.
 3. Every selector the queryable on `@/**` heard is one of the two above:
    none intersects a node's declaration records, its `linkstate/*` or its
-   `route/successor/**`. The queryable hears a read only once the router
-   routes it on, so it never hears one that freezes the router, which
-   Expected 2 fails. A runner that knows how many reads the reader makes
-   counts them heard: two a round for S4's check (0.50, F-254).
+   `route/successor/**`. The queryable may never hear a read that freezes
+   the router: a client's queryable never did, though one on the router's
+   own session under an access control block did (0.51, F-257). Expected
+   2 fails that reader either way. A runner that knows how many reads the
+   reader makes counts them heard: two a round for S4's check (0.50,
+   F-254).
 
 *Measured.* The hazard this section guards against was measured with
 zenoh alone, never in a suite: a reader that asks one of those keys

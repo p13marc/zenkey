@@ -3,6 +3,57 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.51 — 2026-10-26: the posture and flow 0.50's generator rule holds for, and where a recorder hears a freezing read (round 74's F-256 and F-257)
+
+zk2py round 74 (PR #898) read 0.50 cold and resolved F-253 to F-255. It
+measured the narrowed admin read from a tool principal under `deny`, on a
+router process of its own, beside 400 records and a client declaring flat
+out. Under 0.15's grant a GET of the queryable records, `@/*/router/**`
+or 0.11's selector froze it in 15 of 15 trials, 10 at the first GET.
+Under 0.50's grant, 0 of 15: all 4,000 hazardous GETs were refused and
+the 3,000 reads answered. Both generators gave §4's principals identical
+grants, 19 of 19. It filed two minor findings, and neither changes a
+verdict on a `deny` block.
+
+**Changed: the generator rule names its posture and its flow** (§11.1;
+F-256).
+- **The gap.** 0.50's "A generator MUST NOT allow a `query` on …" named no
+  posture. Under `default_permission: allow` a block permits every query
+  no deny includes. zk2py measured a tool's GET of
+  `@/*/router/queryable/**` admitted and answered under both generators'
+  `allow` blocks. Read as "permit", every `allow` block breaks the MUST.
+  Read as "write an allow rule for", it holds by construction. The rule
+  also named no flow, though the GET that freezes a node is the asker's,
+  decided at the asker's face on ingress.
+- **Now.** Under `deny`, a generator MUST NOT compile an allow rule for an
+  ingress `query` on those keys. The `allow` bullet says plainly that a
+  router there is not protected, with round 74's measurement.
+
+**Changed: where §12's recorder can hear a read that freezes a node**
+(`scenarios/state.md` §12 Expected 3; F-257).
+- **The gap.** 0.50 said the queryable on `@/**` "never hears one that
+  freezes the router". Round 74 measured where the recorder sits. A
+  client's queryable heard none of 30 freezes, with or without an access
+  control block. One on the router's own session, under a block, heard
+  the freezing GET in 20 of 20. `security.md` §4 puts its recorder there,
+  though §4 asks nothing beside a writer, so nothing freezes there.
+- **Now.** The queryable *may* never hear such a read: a client's never
+  did, though one on the router's own session under a block did. Expected
+  2 fails that reader either way.
+
+**Also, outside the text:** `acl gen`'s rule comment and `zenctl get`'s
+help said "a router's declaration records" where 0.50 says any node's.
+They say a node's now. Only the comment lines of the plans changed (re-blessed,
+diff read).
+
+**Deliberately not changed.**
+- **No rule moves.** The MUST NOT now says what both generators did and
+  what 0.50 meant: no verdict on a `deny` block changes.
+- **No allow-posture defence.** A deny of admin `query` for principals
+  without the admin read under `allow` stays left for its own round, as
+  0.50 left it.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.50 — 2026-10-26: an admin read that admits no GET of a node's declaration records (zenkey #894), and round 73's F-253 to F-255
 
 0.48 stopped the tools asking a router's declaration records, which
