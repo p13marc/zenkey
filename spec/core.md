@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.50** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.51** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -68,7 +68,9 @@ wordings the final cold read of the watch-session line found: whose
 timeout the interests timeout sits above, which history figure passes the
 waits, and a black box that prints nothing while its link is cut, and in
 0.50 an admin-read grant that admits no GET of a node's declaration
-records, and those records named for any node).
+records, and those records named for any node, and in 0.51 the posture
+and flow that rule holds for, and where a recorder can hear a read that
+freezes a node).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -3345,13 +3347,15 @@ The format is the generator's own. The reference reads an enrollment file
   freezes it for good (§4.2, Appendix B). A query is admitted by
   inclusion in an allowed key (§11.2), so it reaches only what that key
   reaches.
-  - A generator MUST NOT allow a `query` on a key expression that
-    intersects one of those keys of any node,
+  - Under `deny`, a generator MUST NOT compile an allow rule for an
+    ingress `query` on a key expression that intersects one of those keys
+    of any node,
     `@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`,
-    `…/linkstate/*` or `…/route/successor/**`. Under `deny`, a router
-    then refuses a GET of them from any principal at its ingress, before
-    the admin space runs, and answers it complete and empty.
-    `[Sc: security.md §4]`
+    `…/linkstate/*` or `…/route/successor/**` (0.51, F-256: the GET that
+    freezes a node is the asker's, decided at the asker's face on
+    ingress). A router then refuses a GET of them from any principal at
+    its ingress, before the admin space runs, and answers it complete and
+    empty. `[Sc: security.md §4]`
   - The admin read is the three selectors the reference's tools read:
     S4's two (§4.2), which the doctor and the conformance suite read, and
     every node's root document, which a mesh view reads. None intersects
@@ -3359,9 +3363,11 @@ The format is the generator's own. The reference reads an enrollment file
   - 0.15's admin read, `@/*/router` and `@/*/router/**`, admitted a GET of
     every record of a router's (a peer's and a client's it never
     reached). It also refused `@/*/*`, which neither key includes.
-  - Under `allow`, the generator compiles no admin read, and a GET wider
-    than every deny is in none (§11.3). This protects a router under
-    `deny` alone.
+  - Under `allow`, the generator compiles no allow rule, and a GET wider
+    than every deny is in none (§11.3), so a router there is not
+    protected: a tool's GET of `@/*/router/queryable/**` under either
+    generator's `allow` block was admitted and answered (zk2py, round 74).
+    This protects a router under `deny` alone (0.51, F-256).
 - **There are no cross-principal write grants.**
 - **The shapes compose per principal** (0.27, #748). A principal holds
   the union of the grants of everything it runs: a principal that runs
@@ -3808,7 +3814,7 @@ reader, clients, some under CPU load:
 | `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order and unstamped samples (0.27) |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27); §12 S4's check reads beside a router that is declaring (0.48) |
+| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27); §12 S4's check reads beside a router that is declaring (0.48), where its recorder can hear a read that freezes a node (0.51) |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46), at what period its output is sampled (0.47), and one that prints nothing while its link is cut (0.49); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
