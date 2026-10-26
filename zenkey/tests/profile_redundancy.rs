@@ -920,6 +920,43 @@ async fn s2_takeover_after_a_clean_stop() {
 
 // --- §3 ------------------------------------------------------------------------------
 
+/// Two instances started together (§3; text 0.3, F-216): both opened
+/// first, their six sessions and services, then both starts released from
+/// one barrier, each on a thread of its own, so that nothing but the
+/// claims themselves lies between the two instance tokens. Started with
+/// `tokio::join!` over the whole bring-up, the two were as far apart as
+/// their sessions' opens: A's always first, by a median 7 ms on a quiet
+/// host and 56 ms with eight tests and two CPU hogs on two cores, where no
+/// start of 200 was within 10 ms at S. Released together, 199 were (#905).
+async fn start_together(ep: &str, a: Opts, b: Opts) -> (Candidate, Candidate) {
+    let (a, b) = tokio::join!(prepare(ep, a), prepare(ep, b));
+    let rt = tokio::runtime::Handle::current();
+    let gate = Arc::new(std::sync::Barrier::new(2));
+    let release = |p: Prepared| {
+        let (rt, gate) = (rt.clone(), Arc::clone(&gate));
+        tokio::task::spawn_blocking(move || {
+            gate.wait();
+            rt.block_on(p.start())
+        })
+    };
+    let (a, b) = (release(a.unwrap()), release(b.unwrap()));
+    let started = |r: Result<Result<Candidate, Error>, tokio::task::JoinError>| match r {
+        Ok(c) => c.unwrap(),
+        Err(e) => std::panic::resume_unwind(e.into_panic()),
+    };
+    (started(a.await), started(b.await))
+}
+
+/// The least, the median and the greatest of `spreads`.
+fn spread_of(spreads: &[Duration]) -> String {
+    let mut s = spreads.to_vec();
+    s.sort();
+    match (s.first(), s.last()) {
+        (Some(lo), Some(hi)) => format!("{lo:?} to {hi:?}, median {:?}", s[s.len() / 2]),
+        _ => "none".to_owned(),
+    }
+}
+
 /// §3 A simultaneous start (§2.5, §2.9): 20 runs, fresh ids, A's the
 /// lower. One serves and the other stands by: A, unless B took over before
 /// A's read, A then standing by on B (§2.5 step 2; text 0.2, F-203).
@@ -931,29 +968,33 @@ async fn s3_a_simultaneous_start() {
     let (mut healed, mut b_kept) = (0, 0);
     // F-216 (text 0.3): a start is measured at S, by its instance token's
     // arrival; a run whose two tokens are more than 10 ms apart is made
-    // again, and counted apart.
-    let (mut run, mut apart) = (0u64, 0u64);
+    // again, and counted apart. A host that cannot start two within 10 ms
+    // fails the section, saying how far apart its starts were (#905).
+    let (mut run, mut kept, mut apart) = (0u64, Vec::new(), Vec::new());
     while run < 20 {
         let lo: u64 = rand_id();
         let (a_id, b_id) = (lo, lo + 1 + rand_id() % 1000);
-        let (a, b) = tokio::join!(
-            candidate(&ep, Opts::ledger("A", a_id)),
-            candidate(&ep, Opts::ledger("B", b_id)),
-        );
-        let (a, b) = (a.unwrap(), b.unwrap());
+        let (a, b) = start_together(&ep, Opts::ledger("A", a_id), Opts::ledger("B", b_id)).await;
         eventually("S heard both instance tokens", || async {
             s.instance_at(&a.id).is_some() && s.instance_at(&b.id).is_some()
         })
         .await;
         let (ta, tb) = (s.instance_at(&a.id).unwrap(), s.instance_at(&b.id).unwrap());
-        if ta.max(tb) - ta.min(tb) > Duration::from_millis(10) {
-            apart += 1;
-            assert!(apart < 200, "two hundred starts more than 10 ms apart");
+        let spread = ta.max(tb) - ta.min(tb);
+        if spread > Duration::from_millis(10) {
+            apart.push(spread);
+            assert!(
+                apart.len() < 200,
+                "§3 cannot run on this host: 200 starts more than 10 ms apart at S, {} \
+                 (F-216), with {run} of 20 runs made",
+                spread_of(&apart)
+            );
             a.close().await;
             b.close().await;
             quiet(&s, &g).await;
             continue;
         }
+        kept.push(spread);
         let later = Instant::now();
         let bound = Duration::from_secs(5) + 2 * GRACE;
         let settled = loop {
@@ -1022,7 +1063,10 @@ async fn s3_a_simultaneous_start() {
     }
     println!(
         "§3: {healed} of 20 runs needed the heal; in {b_kept} B kept serving, A standing by on \
-         it; {apart} start(s) more than 10 ms apart made again"
+         it; their starts {} apart at S; {} start(s) more than 10 ms apart made again, {}",
+        spread_of(&kept),
+        apart.len(),
+        spread_of(&apart)
     );
 }
 
