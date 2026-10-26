@@ -3099,6 +3099,26 @@ def _one_at_a_time_readings() -> list[tuple[str, Any, Any]]:
     out.append((f"{label}: one whose answer was handed back is in flight no more: the next asks its own",
                 [w.asked, a1.stands, a2.stands, b.taken_up], [[key, key], True, True, 0]))
     live.forget(w)
+    # 0.45 (F-242): a wait that ended first takes up the round trip in
+    # flight, "asking another only once that one has ended without
+    # standing": its links gone at its end (cut off during it), then a new one
+    gate = threading.Event()
+    w = _FakeSession([], [up, [], up, up], gate=gate)
+    live.register(w, interests_timeout_s=60.0)
+    b = live.Barrier(w, sel)
+    gave_up = b.round_trip(0.0)
+    until(lambda: w.asked == [key])
+    gate.set()
+    until(lambda: not b.in_flight)
+    taken = b.round_trip(30.0)
+    asked_then = list(w.asked)
+    again = b.round_trip(30.0)
+    out.append((f"core 0.45 §8.1 (F-242), zk2py's barrier: a wait that ended first, then the round trip in flight "
+                "taken up and ended without standing: no second GET until then, and another asked only after it, "
+                "which stands",
+                [gave_up.why, (taken.stands, taken.why), asked_then, again.stands, w.asked, b.asked, b.taken_up],
+                [live.WAIT_ENDED, (False, live.CUT_OFF_DURING), [key], True, [key, key], 2, 1]))
+    live.forget(w)
     # one taken up after it ended: it stands only through a session that
     # still holds a link (a cut its listener has not told is in no count)
     for links_now, want in (([up, up, up], (True, "")), ([up, up, []], (False, live.CUT_OFF_SINCE))):

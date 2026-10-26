@@ -1,4 +1,4 @@
-"""core ``scenarios/presence.md`` §1 to §10 (core 0.44), run from Python on
+"""core ``scenarios/presence.md`` §1 to §10 (core 0.45), run from Python on
 zenoh-python 1.10.1 routers in process, with an owner and a reader under
 test of either implementation::
 
@@ -35,7 +35,12 @@ the reader under test's verdict (0.38, F-188, F-189):
   before it run out, as many as the reader's own (F-236), and step 9's
   round trips wait 2 s, the link cut 150 ms in (F-237); 0.44: step 10, a
   watch session's reopen beside the crowd, its round trip asked four times
-  and taken up once, and a reader whose caller stops waiting every 20 ms.
+  and taken up once, and a reader whose caller stops waiting every 20 ms;
+  0.45 (F-244): the four round trips through the reader's own interface,
+  not run for a tool run as a black box; a reader whose reads do not run
+  on its caller's call, as zk2py's follower, has its own waits, each 20 ms,
+  stand in for the dropped calls; every count the reader's own; and a tool
+  run as a black box judged on its read complete within 30 s of the heal.
   ``--reopen`` adds round 68's F-239 measurement to §10 for zk2py's
   reader, and with zenctl round 68's watchdog run beside the crowd, a 3 s
   cut and a heal: notes only, never a check.
@@ -2007,9 +2012,15 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
     """§10 step 10 (0.44, F-239): a watch session in no namespace beside the
     crowd, cut and healed, what its subscriber without history is told at
     the reopen, and the reader under test's round trip asked four times
-    after it; then zk2py's follower beside the crowd, both sessions through
-    one link, its caller waiting for its next move from a loop that wakes
-    every 20 ms, the link cut for 1 s and healed."""
+    after it, through its own interface (0.45, F-244: zk2py's
+    :class:`zk2py.live.Barrier`); then zk2py's follower beside the crowd,
+    both sessions through one link, its caller waiting for its next move
+    from a loop that wakes every 20 ms, the link cut for 1 s and healed.
+    Its reads run on its own timers, not on its caller's call, so its own
+    waits, each ended after 20 ms, stand in for the dropped calls (0.45,
+    F-244); the same follower with its waits as zk2py's callers set them
+    runs beside, zk2py's own. Every count is taken at the reader's own
+    sessions (0.45)."""
     import zenoh
 
     from . import live
@@ -2100,9 +2111,16 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
                      f"{fourth.elapsed_s * 1000:.0f} ms, the last told {((last_told or 0) - rt_end) * 1000:.1f} ms "
                      "from its end")
         gets_after = [g for g in w.gets[n_gets:]]
+        # beyond Expected 10, §8.1 (0.45, F-241): "once that has been sent the
+        # next is one round trip again"; zenoh's own GET, asked at once
+        nfin, ntoks, nerrs, nsecs = _round_trip_raw(inner, live.settle_key(wire), 5.0, direct=True)
+        report.note(sec, f"10. §8.1 (0.45, F-241), beyond Expected 10: the next round trip, zenoh's own, asked at once "
+                         f"after the one after the reopen: {nsecs * 1000:.2f} ms (final reply {nfin}, {ntoks} tokens, "
+                         f"{nerrs} errors), against {fourth.elapsed_s * 1000:.0f} ms for the one after the reopen")
         report.check(sec, "10. the reader under test asks its round trip four times in a row, giving up on the first "
-                          "three at once and waiting 30 s for the fourth: its round trip stands, and it asked one, the "
-                          "three it gave up on running on and the fourth taking it up (0.44)",
+                          "three at once and waiting 30 s for the fourth, through its own interface (0.45): its round "
+                          "trip stands, and it asked one, counted at its watch session, the three it gave up on "
+                          "running on and the fourth taking it up (0.44)",
                      fourth.stands and all(r.why == live.WAIT_ENDED and not r.stands for r in three)
                      and len(gets_after) == 1 and barrier.asked - n_asked == 1
                      and len({r.asked_ns for r in three} | {fourth.asked_ns}) <= 2,
@@ -2119,19 +2137,27 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
                 pass
         live.close(inner)
         link.close()
-    _s10_step_10_reader(report, sec, ep1, ns_tool, "10. (the reader under test) zk2py's follower")
-    _s10_step_10_reader(report, sec, ep1, ns_tool, "10. (zk2py's own analog of a dropped call) zk2py's follower, "
-                                                   "every wait of its own 20 ms", timeout=0.02,
-                        round_trip_timeout=0.02, move_wait_s=0.02)
+    # 0.45 (F-244): its reads do not run on its caller's call, so its own
+    # waits, each ended after 20 ms, stand in for the dropped calls
+    _s10_step_10_reader(report, sec, ep1, ns_tool, "10. (the reader under test) zk2py's follower, its own waits each "
+                                                   "ended after 20 ms (0.45: they stand in for the dropped calls)",
+                        "however often its own waits end (0.45)", timeout=0.02, round_trip_timeout=0.02,
+                        move_wait_s=0.02)
+    _s10_step_10_reader(report, sec, ep1, ns_tool, "10. (zk2py's own, beside the step) zk2py's follower, its waits as "
+                                                   "zk2py's callers set them",
+                        "however often its caller stops waiting (0.44)")
 
 
-def _s10_step_10_reader(report: Report, sec: str, ep1: str, ns_tool: Any, label: str, **kw: Any) -> None:
+def _s10_step_10_reader(report: Report, sec: str, ep1: str, ns_tool: Any, label: str, stops: str,
+                        **kw: Any) -> None:
     """§10 step 10's reader: zk2py's follower in ``ns`` beside the crowd, its
     watch session (in no namespace) and its reading session through one
     link, its caller asking for its next move (:meth:`next_move`) from a
     loop that wakes every 20 ms; the link cut for 1 s and healed. Every
-    liveliness GET of either session is counted and timed. ``kw`` goes to
-    the follower: by default its reads wait 30 s, as step 8's."""
+    liveliness GET of either session is counted and timed, at the reader's
+    own sessions (0.45, F-244). ``stops`` says what ends a wait first, for
+    the labels; ``kw`` goes to the follower: by default its reads wait 30
+    s, as step 8's."""
     from . import live
     from . import presence as pr
     from .budget_scenarios import Link
@@ -2215,7 +2241,7 @@ def _s10_step_10_reader(report: Report, sec: str, ep1: str, ns_tool: Any, label:
                      back and up and bool(rts_after), f"complete {t_whole:.2f} s after the heal, {len(addrs)} addresses "
                                                       f"up {up}; folds since the cut {folds[:8]}")
         report.check(sec, f"{label}: it asks one round trip after the reopen, none while cut off, and never a read "
-                          "beside one in flight, however often its caller stops waiting (0.44)",
+                          f"beside one in flight, {stops}, counted at its own sessions (0.45)",
                      len(rts_after) == 1 and not rts_cut and not reads_beside and not rts_beside,
                      f"round trips after the reopen {len(rts_after)}, while cut {len(rts_cut)}; reads asked "
                      f"{len(reading.gets)} in all, beside one in flight {len(reads_beside)}; the caller's calls "
@@ -2251,11 +2277,13 @@ def _s10_reopen(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any
     n = len(held)  # the crowd as step 8 left it
     wire = f"{NS}/{INSTANCES}"
 
-    def measure(history: bool, reopen: bool) -> str:
+    def measure(history: bool, reopen: bool, late: bool = False) -> str:
         """One watch session through a link of its own, its subscriber on
         the wire key; its round trip at its start and, with ``reopen``,
-        after its link is cut and healed. Everything it opens is closed in
-        its ``finally``."""
+        after its link is cut and healed, then the next at once (0.45,
+        F-241). With ``late`` the first after the reopen is asked only once
+        the reopening's telling is over: every token told, then 1 s with
+        none. Everything it opens is closed in its ``finally``."""
         link = watch = sub = None
         heard: list[tuple[float, str]] = []
         try:
@@ -2277,11 +2305,22 @@ def _s10_reopen(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any
             link.heal()
             if not _wait(lambda: live.links_held(watch) is True, 20.0, 0.02):
                 return said + "; not measured further: the session never reconnected"
+            if late:
+                def told() -> int:
+                    return sum(1 for t, k in list(heard) if t >= t_heal and k == "PUT")
+
+                over = _wait(lambda: told() >= n, 120.0, 0.05)
+                time.sleep(1.0)
+                if not over:
+                    return said + f"; not measured further: told {told()} of the {n} within 120 s"
             rt1 = live.settle(watch, 30.0, selector=wire)
+            rt2 = live.settle(watch, 30.0, selector=wire)
             time.sleep(1.0)
             puts = sum(1 for t, k in list(heard) if t >= t_heal and k == "PUT")
+            when = "asked once the telling was over" if late else "asked at once"
             return (said + f"; its link cut and healed, the subscriber was told {puts} of the {n} again, and the "
-                    f"round trip after the reopen took {rt1.elapsed_s * 1000:.1f} ms (stood {bool(rt1)})")
+                    f"round trip after the reopen, {when}, took {rt1.elapsed_s * 1000:.1f} ms (stood {bool(rt1)}), "
+                    f"the next {rt2.elapsed_s * 1000:.2f} ms (stood {bool(rt2)})")
         finally:
             if sub is not None:
                 try:
@@ -2298,6 +2337,8 @@ def _s10_reopen(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any
     report.note(sec, f"F-239 (beyond the text): a watch session in no namespace through a link, its subscriber "
                      f"without history on {wire}, beside the {n}: {measure(False, reopen=True)}; the control, a "
                      f"history subscriber's: {control}")
+    report.note(sec, f"F-241 (beyond the text, 0.45): the same, the first round trip after the reopen asked late: "
+                     f"{measure(False, reopen=True, late=True)}")
     # zk2py's follower so wired: how long from the reopen to a read that is complete again
     link = watch = f = None
     try:
@@ -2431,8 +2472,8 @@ def _section10_zenctl(report: Report, sec: str, ep1: str, held: list[Any]) -> No
             wd.close()
         report.cannot(sec, "9. zenctl's round trips on its watch session are not observable from its output: asked of "
                            "zk2py's reader")
-        report.cannot(sec, "10. a round trip asked four times and given up on: zenctl's command line asks none, and "
-                           "its GETs are not observable from its output (asked of zk2py's reader)")
+        report.note(sec, "10. the round trip asked four times and given up on: not run for a tool run as a black box, "
+                         "as 0.45 says (F-244: its command line offers no round trip to ask); run on zk2py's reader")
         _s10_step_10_zenctl(report, sec, ep1)
         if P.reopen:
             try:
@@ -2501,9 +2542,12 @@ def _watchdog_cut(endpoint_link: Any, rule: str, cut_s: float, *, namespace: str
 def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
     """§10 step 10's reader, the reference's: ``zenctl watchdog --namespace ns
     --rule 'instance-gone crowd/*'`` beside the crowd, every session through
-    one link, cut for 1 s and healed. That its round trip after the reopen is
-    one, and no read is asked beside one in flight, is not observable from
-    its output: its stderr's zenoh lines are said, a proxy and no check."""
+    one link, cut for 1 s and healed. 0.45 (F-244): "A tool run as a black
+    box is judged on its read complete within 30 s of the heal alone", so
+    that is the step's check; its counts are the reader's own and not asked
+    of it (its stderr's zenoh lines are said, a proxy). What its output
+    shows from the cut, unobservable and never firing, is §8.1's verdict
+    (0.42, F-229), checked apart: 0.45's "alone" leaves it out (F-245)."""
     from .budget_scenarios import Link
 
     rule = "instance-gone crowd/*"
@@ -2514,14 +2558,16 @@ def _s10_step_10_zenctl(report: Report, sec: str, ep1: str) -> None:
     finally:
         link.close()
     within = r.get("after_heal") is not None and r["after_heal"] <= 30.0
-    report.check(sec, f"10. (the reader under test) zenctl watchdog --namespace {NS} --rule '{rule}' --timeout 30 beside "
-                      f"the {P.crowd}, every session through one link cut for 1 s and healed: unobservable from the cut, "
-                      "never firing, ok again within 30 s of the heal",
-                 r.get("ok") and r.get("unobservable") and not r.get("fired") and within,
-                 f"ok {r.get('t_ok', 0):.1f} s after its start; since the cut {r.get('cut_states')}; ok again "
-                 f"{r.get('after_heal')} s after the heal; {r.get('stderr')}")
-    report.cannot(sec, "10. zenctl's one round trip after the reopen, and no read beside one in flight: not observable "
-                       "from its output (its stderr's zenoh lines are said above, a proxy)")
+    what = (f"ok {r.get('t_ok', 0):.1f} s after its start; since the cut {r.get('cut_states')}; ok again "
+            f"{r.get('after_heal')} s after the heal; {r.get('stderr')}")
+    report.check(sec, f"10. (the reader under test, a tool run as a black box) zenctl watchdog --namespace {NS} --rule "
+                      f"'{rule}' --timeout 30 beside the {P.crowd}, every session through one link cut for 1 s and "
+                      "healed: its read complete again within 30 s of the heal, ok (0.45: the black box's one "
+                      "judgement)", bool(r.get("ok")) and within, what)
+    report.check(sec, "10. (core §8.1, 0.42, F-229; beside 0.45's \"alone\", F-245) what its output shows from the "
+                      "cut: unobservable, never firing", bool(r.get("unobservable")) and not r.get("fired"), what)
+    report.note(sec, "10. zenctl's one round trip after the reopen, and no read beside one in flight: counts at the "
+                     "reader's own sessions, not asked of a tool run as a black box (0.45, F-244)")
 
 
 def _s10_watchdog_rerun(report: Report, sec: str, ep1: str) -> None:
@@ -2581,7 +2627,7 @@ def main(argv: list[str] | None = None) -> int:
             report.check(f"§{name}", "the section ran", False, repr(e))
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"presence scenarios §1–§10 (core 0.44), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
+    print(f"presence scenarios §1–§10 (core 0.45), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
           f"failed, {len(report.not_run)} not run")
     for sec, name, ok, detail in report.rows:
         if not ok:

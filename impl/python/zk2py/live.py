@@ -110,6 +110,15 @@ round trips through flights, one per transport state. :func:`settle` and
 profile reader that makes its round trip once, as written against 0.40,
 still calls them.
 
+0.45 (F-242, F-243) words it as zk2py already did it: the wait that ends
+first is "its caller's or the reader's own"; "In flight is at the reader:
+from the GET's ask until its final reply reaches the reader", so a GET
+its own timeout ends cannot be taken up; and "A reader MAY ask each GET
+with its own timeout at or above its session's interests timeout … and
+bound its own wait apart", which :func:`flight_timeout` is. zk2py does so
+for its follower's GETs and the runner's barrier; a profile reader's
+blocking GET keeps its own timeout as its wait.
+
 **Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
 "the scenarios, and so a conformance run, use".
 """
@@ -639,7 +648,9 @@ class Flight:
     """One liveliness GET in flight, asked once on a thread of its own and
     shared by every caller that waits for it (core §8.1, 0.44: "One round
     trip, and one read, at a time … the next that needs one takes up the one
-    in flight, its caller's wait or its own having ended").
+    in flight"; 0.45, F-243: "whichever wait ended first, its caller's or
+    the reader's own", in flight "from the GET's ask until its final reply
+    reaches the reader").
 
     zenoh 1.10.1 tells a router nothing of a GET whose caller stops waiting
     (Appendix B), and its own timeout ends it only for the caller: measured
@@ -688,10 +699,12 @@ class Flight:
 
 
 def flight_timeout(session: Any, at_least: float = 0.0) -> float:
-    """A flight's own GET timeout (core §8.1, 0.44): above its session's
-    interests timeout, where zenoh's runtime ends a liveliness GET its
-    routers have not finished, so the GET's own timeout never ends it first
-    while its router still answers it in full; never below ``at_least``."""
+    """A flight's own GET timeout (core §8.1, 0.44; 0.45's MAY, F-243: "ask
+    each GET with its own timeout at or above its session's interests
+    timeout, where zenoh's runtime ends it"): above its session's interests
+    timeout, where zenoh's runtime ends a liveliness GET its routers have
+    not finished, so the GET's own timeout never ends it first while its
+    router still answers it in full; never below ``at_least``."""
     return max(at_least, interests_timeout_of(session) + 1.0)
 
 

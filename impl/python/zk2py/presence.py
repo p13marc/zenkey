@@ -78,6 +78,9 @@ Core 0.44 (#609, round 69):
   :class:`zk2py.live.Barrier` and its reads through a
   :class:`zk2py.live.Flight`, each taken up by the next attempt when a wait
   ends first, never asked again beside it.
+
+Core 0.45 (#609, round 70) is wording only, and words what the follower
+already did (F-241 to F-244): see :class:`PresenceFollower`.
 """
 
 from __future__ import annotations
@@ -415,7 +418,15 @@ class PresenceFollower:
       timeout): "A reader SHOULD wait for the round trip after a move".
     - Its caller can wait for the next change, :meth:`next_move`, as long
       as it likes: its reads run on its own timers, so a wait that ends
-      cancels nothing."""
+      cancels nothing.
+
+    0.45 (F-241 to F-244) words what it already did: the round trip waited
+    for after a move is the first after each reopen; a wait that ends first
+    reads possibly incomplete and, before the next read, takes up the round
+    trip in flight, asking another only once that one has ended without
+    standing (F-242); and its waits are its own, apart from its GETs' own
+    timeouts (F-243's MAY). In §10 step 10 its own waits, each 20 ms, stand
+    in for a caller's dropped calls (F-244)."""
 
     def __init__(self, session: Any, watch: Any, selector: str = "zk2/*/*/@zk/**", *,
                  reread_delay_s: float = REREAD_DELAY_S, retry_s: float = 0.2, max_retry_s: float = 5.0,
