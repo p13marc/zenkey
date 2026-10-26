@@ -169,11 +169,15 @@ struct Reads {
 struct Task<T>(tokio::task::JoinHandle<T>);
 
 impl<T> Task<T> {
-    /// Its result; cancel-safe, the task running on.
+    /// Its result; cancel-safe, the task running on. An error is a panic:
+    /// the ledger aborts a task only by dropping it. Said at warn, and read
+    /// as a failed read, which backs off; a read not made through a session
+    /// cut off is a value, never this, so it keeps its fixed retry.
     async fn join(&mut self) -> Result<T, String> {
-        (&mut self.0)
-            .await
-            .map_err(|e| format!("the re-read's task ended: {e}"))
+        (&mut self.0).await.map_err(|e| {
+            tracing::warn!("the token ledger's re-read task ended without its result: {e}");
+            format!("the re-read's task ended: {e}")
+        })
     }
 }
 
@@ -313,12 +317,7 @@ impl TokenFeed {
                 }
                 Wake::Item(None) => return None,
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeUp(key)))) => {
-                    // Heard again before the read: it was never said gone.
-                    if !self.withdrawn.remove(&key) {
-                        self.fold(key, true, PresenceSource::Event, SystemTime::now());
-                    } else {
-                        self.held.insert(key);
-                    }
+                    self.heard(key, true);
                     if self.basis == TokenBasis::CutOff {
                         self.owe_within(Duration::ZERO);
                     }
@@ -326,8 +325,7 @@ impl TokenFeed {
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeDown(key)))) => {
                     // A withdrawal heard live is a reason to read again,
                     // never a token gone by itself (core §8.1, 0.37).
-                    self.held.remove(&key);
-                    self.withdrawn.insert(key);
+                    self.heard(key, false);
                     self.owe_within(zenkey_fleet::WITHDRAWAL_SETTLE);
                 }
                 Wake::Item(Some(StreamItem::Event(_))) => {}
@@ -438,7 +436,11 @@ impl TokenFeed {
                     });
                     if self.fold_reads(reads, settled) {
                         self.overruns += 1;
-                        if self.overruns < RESEED_ATTEMPTS {
+                        // Made again at once only behind a round trip that
+                        // stood, the retry waiting for none: one re-read
+                        // waits for a round trip at most once, then makes at
+                        // most RESEED_ATTEMPTS rounds of reads (#882).
+                        if settled && self.overruns < RESEED_ATTEMPTS {
                             continue;
                         }
                         self.back_off();
@@ -460,7 +462,13 @@ impl TokenFeed {
         let session = self.session.clone();
         let watch = self.watch.clone();
         let barrier = self.barrier.clone();
-        let wait = self.timeout.max(zenkey_fleet::bus::monitor::SETTLE_TIMEOUT);
+        // A read made again after a loss waits for no round trip: its own
+        // stood, and stands unless the transport moved since.
+        let wait = if self.overruns == 0 {
+            self.timeout.max(zenkey_fleet::bus::monitor::SETTLE_TIMEOUT)
+        } else {
+            Duration::ZERO
+        };
         Task(tokio::spawn(async move {
             if let Some(why) = zenkey_fleet::cut_off(&session).await {
                 return Settle::Cut(why);
@@ -514,20 +522,30 @@ impl TokenFeed {
     fn fold_delivered(&mut self) {
         while let Some(item) = self.events.try_recv() {
             match item {
-                StreamItem::Event(FleetEvent::NodeUp(key)) => {
-                    if !self.withdrawn.remove(&key) {
-                        self.fold(key, true, PresenceSource::Event, SystemTime::now());
-                    } else {
-                        self.held.insert(key);
-                    }
-                }
-                StreamItem::Event(FleetEvent::NodeDown(key)) => {
-                    self.held.remove(&key);
-                    self.withdrawn.insert(key);
-                }
+                StreamItem::Event(FleetEvent::NodeUp(key)) => self.heard(key, true),
+                StreamItem::Event(FleetEvent::NodeDown(key)) => self.heard(key, false),
                 StreamItem::Event(_) => {}
                 StreamItem::Dropped(n) => self.lost(n),
             }
+        }
+    }
+
+    /// One token move heard live, folded: what [`TokenFeed::next`] and a
+    /// re-read's [`TokenFeed::fold_delivered`] both do with it, so the two
+    /// cannot drift apart. A put of a token heard withdrawn and not yet
+    /// read takes it back, never said gone; a withdrawal leaves the token
+    /// withdrawn, owing the read that says whether it went. The read owed is
+    /// the caller's.
+    fn heard(&mut self, key: String, held: bool) {
+        if held {
+            if self.withdrawn.remove(&key) {
+                self.held.insert(key);
+            } else {
+                self.fold(key, true, PresenceSource::Event, SystemTime::now());
+            }
+        } else {
+            self.held.remove(&key);
+            self.withdrawn.insert(key);
         }
     }
 

@@ -1821,6 +1821,8 @@ fn exposure(c: &Contract, entry: &InterfaceEntry, held: &[String]) -> Vec<String
 mod tests {
     use super::*;
 
+    use serde_json::json;
+
     /// #882: a read that ran to its session's interests timeout says which
     /// bound ended it, and a report that keeps only `complete` names both.
     #[test]
@@ -1859,7 +1861,6 @@ mod tests {
         assert_eq!(incomplete_reason(false, false, RAN_OUT), Some(RAN_OUT));
         assert!(RAN_OUT.contains("routing/interests/timeout"));
     }
-    use serde_json::json;
 
     const NETIF_FP: &str = "abababababababababababababababababababababababababababababababab";
 

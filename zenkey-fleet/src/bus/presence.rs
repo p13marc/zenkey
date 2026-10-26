@@ -495,11 +495,16 @@ enum Settle {
 struct Task<T>(tokio::task::JoinHandle<T>);
 
 impl<T> Task<T> {
-    /// Its result; cancel-safe, the task running on.
+    /// Its result; cancel-safe, the task running on. An error is a panic:
+    /// the feed aborts a task only by dropping it, and then never joins it.
+    /// Said at warn, and read as a read that failed, which backs off; a
+    /// read not made through a session cut off is a value, never this, so
+    /// it keeps its fixed retry.
     async fn join(&mut self) -> std::result::Result<T, String> {
-        (&mut self.0)
-            .await
-            .map_err(|e| format!("the re-read's task ended: {e}"))
+        (&mut self.0).await.map_err(|e| {
+            tracing::warn!("a presence re-read's task ended without its result: {e}");
+            format!("the re-read's task ended: {e}")
+        })
     }
 }
 
@@ -760,7 +765,17 @@ impl PresenceFeed {
                     self.step = None;
                     if self.fold_read(read, settled) {
                         self.overruns += 1;
-                        if self.overruns < RESEED_ATTEMPTS {
+                        // A read whose window lost events is made again at
+                        // once only behind a round trip that stood, and the
+                        // retry waits for none (`settle`): so one re-read,
+                        // its call dropped or not, waits for a round trip at
+                        // most once, max(timeout, SETTLE_TIMEOUT), then
+                        // makes at most RESEED_ATTEMPTS reads of `timeout`
+                        // each (20 s at zenctl's default 5 s; before #882 a
+                        // round trip of 5 s preceded every attempt). One
+                        // behind none would be possibly incomplete anyway,
+                        // so it backs off and waits again next time.
+                        if settled && self.overruns < RESEED_ATTEMPTS {
                             continue;
                         }
                         self.back_off();
@@ -783,12 +798,18 @@ impl PresenceFeed {
     /// session's transport the round trip waits for the population (core
     /// §8.1, 0.44, F-239), about what a read of it costs. One that is not
     /// back by then runs on ([`zenkey::presence::Barrier::establish_within`]),
-    /// and the next re-read waits for the same one.
+    /// and the next re-read waits for the same one. A read made again after
+    /// a loss in its window waits for none: its round trip stood, and stands
+    /// unless the transport moved since.
     fn settle(&self) -> Task<Settle> {
         let session = self.session.clone();
         let watch = self.watch.clone();
         let barrier = self.barrier.clone();
-        let wait = self.timeout.max(crate::bus::monitor::SETTLE_TIMEOUT);
+        let wait = if self.overruns == 0 {
+            self.timeout.max(crate::bus::monitor::SETTLE_TIMEOUT)
+        } else {
+            Duration::ZERO
+        };
         Task(tokio::spawn(async move {
             if let Some(why) = cut_off(&session).await {
                 return Settle::Cut(why);
