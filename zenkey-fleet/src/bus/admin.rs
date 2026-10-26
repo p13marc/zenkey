@@ -285,8 +285,58 @@ pub async fn here(raw: &Session) -> BTreeSet<String> {
     here
 }
 
-/// The selector [`storages`] reads.
-pub const STORAGES: &str = "@/*/router/**/storage_manager/storages/**";
+/// The selector [`storages`] reads: the storage manager's status subtree,
+/// one key per storage, `…/status/plugins/storage_manager/storages/<name>`
+/// (spec §4.2).
+///
+/// Named whole, never `@/*/router/**/storage_manager/storages/**` (#890):
+/// that form also intersects the routers' declaration records
+/// ([`UNDER_TABLES_LOCK`]), so zenoh 1.10.1 answered it from
+/// `resources_data` — one reply per subscriber or queryable ending in `**`,
+/// an owner's `…/state/**` among them, each sent under the routing tables'
+/// read lock — and a declaration from any other client in between froze the
+/// router. Every zenoh 1.x answers a storage's GET here and nowhere else:
+/// no `config/**` key answers a GET.
+pub const STORAGES: &str = "@/*/router/status/plugins/storage_manager/storages/**";
+
+/// The admin keys a zenoh 1.10.1 node answers while it holds its routing
+/// tables' read lock (#890), each a family over every `<zid>/<whatami>`:
+/// the declaration records (`resources_data`), the link state
+/// (`linkstate_data`) and the route successors (`route_successor`, whose
+/// `src/<zid>/dst/<zid>` shortcut replies under the lock).
+///
+/// Each reply takes that read lock again (`route_send_response`), and
+/// std's `RwLock` queues a new reader behind a waiting writer, so a writer
+/// arriving between the two — another face's declaration, interest or new
+/// session — waits on the replying thread, which waits on it: the node's
+/// routing stops for good. zenoh's `main` has the same code. A GET whose
+/// selector intersects one of these runs that handler; see
+/// [`reaches_tables_lock`]. The reproduction, with zenoh alone, is
+/// `docs/zk2/upstream/adminspace-reply-repro/`.
+pub const UNDER_TABLES_LOCK: [&str; 7] = [
+    "@/*/*/subscriber/**",
+    "@/*/*/publisher/**",
+    "@/*/*/queryable/**",
+    "@/*/*/querier/**",
+    "@/*/*/token/**",
+    "@/*/*/linkstate/*",
+    "@/*/*/route/successor/**",
+];
+
+/// Whether a GET on `selector` runs one of the admin-space handlers that
+/// reply under the routing tables' read lock ([`UNDER_TABLES_LOCK`]): the
+/// admin space runs every handler whose key the selector intersects. A
+/// selector that is not a key expression reaches nothing. Pure.
+#[must_use]
+pub fn reaches_tables_lock(selector: &str) -> bool {
+    let key = selector.split_once('?').map_or(selector, |(k, _)| k);
+    let Ok(key) = zenoh::key_expr::KeyExpr::try_from(key) else {
+        return false;
+    };
+    UNDER_TABLES_LOCK
+        .iter()
+        .any(|family| zenoh::key_expr::KeyExpr::try_from(*family).is_ok_and(|f| key.intersects(&f)))
+}
 
 /// Enumerate routers/peers from `@/*/router` (and the fields every layout
 /// carries).
@@ -370,9 +420,11 @@ pub fn storage_from_admin_entry(key: &str, value: &serde_json::Value) -> Option<
 
 /// One row per `(zid, name)`, merging field by field.
 ///
-/// The config and status subtrees both answer a storage sweep, and neither is
-/// reliably the richer one — so a row that names a `key_expr` and a row that
-/// names a `volume` must combine rather than one winning outright. Pure, and
+/// A sweep may hold several answers for one storage — the status subtree
+/// [`STORAGES`] reads, or the config subtree a caller's own selector
+/// reaches — and neither is reliably the richer one, so a row that names a
+/// `key_expr` and a row that names a `volume` must combine rather than one
+/// winning outright. Pure, and
 /// separated from [`storages`] because with three optional fields a hand-rolled
 /// `dedup_by` is where a quietly-dropped field would hide.
 pub fn merge_storage_rows(mut rows: Vec<StorageInfo>) -> Vec<StorageInfo> {
@@ -467,6 +519,16 @@ pub fn declared_from_admin_entry(key: &str, value: &serde_json::Value) -> Option
 /// Enumerate declared subscribers/publishers/queryables/tokens from every
 /// reachable admin space.
 ///
+/// **Asking can freeze the router** (#890). These are
+/// [`UNDER_TABLES_LOCK`]'s declaration records: zenoh 1.10.1 (and `main`)
+/// sends each reply while holding its routing tables' read lock, and a
+/// declaration, an interest or a new session from any other client between
+/// two replies deadlocks the node — every put, query and declaration
+/// through it stops, and this GET just ends at its timeout. The more the
+/// router holds, the longer the loop and the likelier the freeze. Call it
+/// only on a caller's explicit opt-in (zengui's `--admin-declared`), never
+/// ambiently against a deployment in use.
+///
 /// `Ok(None)` when **nothing answered at all**: zenoh's `adminspace.enabled`
 /// defaults to *false* (routers ship with it on; a pure peer mesh has none),
 /// so an empty sweep means "not available", never "nothing declared" —
@@ -481,7 +543,8 @@ pub async fn declared_entities(
 }
 
 /// The admin selectors [`declared_entities`] sweeps, in sweep order — the
-/// coverage claim a report built on the sweep states (RFC 13 §3 O5).
+/// coverage claim a report built on the sweep states (RFC 13 §3 O5). Each
+/// reaches the routing tables' read lock ([`reaches_tables_lock`], #890).
 pub fn declared_entity_selectors() -> Vec<String> {
     EntityKind::ALL
         .iter()
@@ -857,6 +920,41 @@ fn topology_of(entries: &[AdminEntry], self_zid: &str) -> TopologyReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What every default read of the admin space asks reaches none of the
+    /// handlers that reply under the routing tables' read lock (#890), and
+    /// only the opt-in declared sweep does.
+    #[test]
+    fn only_the_declared_sweep_reaches_the_tables_lock() {
+        for selector in [ROUTERS, STORAGES, TOPOLOGY] {
+            assert!(!reaches_tables_lock(selector), "{selector}");
+        }
+        assert_eq!(
+            STORAGES,
+            crate::model::storage::CHECK_ASKED,
+            "the check cites what the sweep asks"
+        );
+        for selector in declared_entity_selectors() {
+            assert!(reaches_tables_lock(&selector), "{selector}");
+        }
+        // The storages selector as it was until #890, and the whole space.
+        assert!(reaches_tables_lock(
+            "@/*/router/**/storage_manager/storages/**"
+        ));
+        assert!(reaches_tables_lock("@/**"));
+        assert!(reaches_tables_lock("@/*/router/subscriber/**?x=1"));
+        // A router's own document, its metrics and the plugins' status are
+        // answered without the lock held across a reply.
+        for selector in [
+            "@/0123456789abcdef/router",
+            "@/*/router/metrics",
+            "@/*/router/status/plugins/**",
+            "@/*/router/plugins/**",
+        ] {
+            assert!(!reaches_tables_lock(selector), "{selector}");
+        }
+        assert!(!reaches_tables_lock("not a $$ key"));
+    }
 
     #[test]
     fn storage_extraction_tolerates_layouts() {

@@ -606,7 +606,7 @@ mod tests {
         let check = StorageCheck {
             base: "".into(),
             source: CheckSource::AdminSpace,
-            asked: "@/*/router/**/storage_manager/storages/**".into(),
+            asked: "@/*/router/status/plugins/storage_manager/storages/**".into(),
             planned: 1,
             observed: 1,
             findings: vec![CheckFinding {

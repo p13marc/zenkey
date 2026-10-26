@@ -6,6 +6,12 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the storages read reaches no declaration record (#890, WJ)
+
+| Before | Now | Notes |
+|---|---|---|
+| `storage list` (and `--watch`), `storage gen --check`, the doctor's `storage-on-state`, `admin-unreachable` and `router-version-skew` read the storages from `@/*/router/**/storage_manager/storages/**` | from `@/*/router/status/plugins/storage_manager/storages/**`; a `--check` report's `asked` says so | the old `**` intersected the routers' declaration records (`@/<zid>/router/{subscriber,queryable,…}/**`), which zenoh 1.10.1 answers under its routing tables' read lock: beside a queryable ending in `**`, an owner's `…/state/**` among them, a declaration from another client could freeze the router (`docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`); every 1.x storage manager answers under `status/plugins/`; spec §4.2 |
+
 ## Unreleased (`main`, zk2) — a reopen beside a large population, and the interests timeout named (#882, WF)
 
 | Before | Now | Notes |

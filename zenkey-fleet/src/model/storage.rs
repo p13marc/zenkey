@@ -61,8 +61,11 @@ pub const DEFAULT_LIFESPAN_S: i64 = 86_400;
 pub const DEFAULT_GC_PERIOD_S: u64 = 30;
 
 /// The admin selector `--check` reads storages from — the same one
-/// [`crate::storages`] sweeps, restated here so the report can cite it.
-pub const CHECK_ASKED: &str = "@/*/router/**/storage_manager/storages/**";
+/// [`crate::storages`] sweeps (`bus::admin::STORAGES`, held equal by a
+/// test there), restated here so the report can cite it: the storage
+/// manager's status subtree, never a `**` that reaches the routers'
+/// declaration records (#890).
+pub const CHECK_ASKED: &str = "@/*/router/status/plugins/storage_manager/storages/**";
 
 /// RFC 09 §2.1's capability table: persistence, and the history mode when
 /// the plugin fixes it. `None` history = per volume (`redb`); `None` overall

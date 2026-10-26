@@ -2325,7 +2325,10 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, Some(2.0));
     // `storage gen --check` sweeps the admin space once, no window.
     let s = scoped(&fx::storage_check());
-    assert_eq!(s.asked, ["@/*/router/**/storage_manager/storages/**"]);
+    assert_eq!(
+        s.asked,
+        ["@/*/router/status/plugins/storage_manager/storages/**"]
+    );
     assert_eq!(s.window_s, None);
 
     // GET-shaped asks: the wait is the window (R5/P1's `timeout_s`).
