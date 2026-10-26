@@ -16,7 +16,7 @@ the runtime (#610 onward).
 | [`bindings.md`](bindings.md) | §3.2: R1–R6 |
 | [`retrieval.md`](retrieval.md) | §8.4 |
 | [`types.md`](types.md) | §2.4 QoS, §7.1–§7.2 |
-| [`security.md`](security.md) | §11, a tool's inspection (0.27); §4.2's admin space |
+| [`security.md`](security.md) | §11, a tool's inspection (0.27); §4.2's admin space; the admin read admitting no GET of a node's declaration records (0.50) |
 | [`constrained.md`](constrained.md) | §1.6, R7, §8.5, §12 |
 | [`budget.md`](budget.md) | §2.7: what a path drops and a reader sees (0.25), a stalled reader (0.27); an owner keeping its bound and its rate |
 

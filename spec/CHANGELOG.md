@@ -3,6 +3,118 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.50 — 2026-10-26: an admin read that admits no GET of a node's declaration records (zenkey #894), and round 73's F-253 to F-255
+
+0.48 stopped the tools asking a router's declaration records, which
+zenoh 1.10.1 answers under its routing tables' read lock (#890), and left
+§11.1's admin read as 0.15 wrote it: `query` on `@/*/router` and
+`@/*/router/**`. That grant admits every one of those GETs, so under
+`deny` any session holding a tool's credentials could still freeze a
+router with one GET beside another client's declaration: an older tool, a
+script, or `zenctl get '@/*/router/**'`. The reproduction measured it
+under access control (`docs/zk2/upstream/adminspace-reply-repro/`, "Under
+access control"): with 0.15's grant, beside 500 records of each kind and a
+client declaring flat out, a tool principal's GET froze the router in 45
+of 45 trials across the five record families, `linkstate/*`,
+`@/*/router/**` and 0.11's storages selector, 43 of them at the first
+GET, and with 0.50's in 0 of 70, the same selectors and `@/**` beside the
+same churn and beside each kind of writer alone, 6.9 million GETs, each
+refused.
+
+**Changed: the admin read is the three reads the tools make** (§11.1
+Tool).
+- **The gap.** 0.15's `@/*/router/**` included every key a router answers
+  under its tables' lock. It also missed one read: `@/*/*`, every node's
+  root document, which a mesh view reads (`zenctl admin graph`, zengui's
+  mesh). zenoh admits a query by inclusion, and neither key includes
+  `@/*/*`, so under `deny` the mesh was refused (measured: the router never
+  routed it). So was `@/**`, which froze nothing in the reproduction for
+  that reason (0 of 5).
+- **Now.** `query` on `@/*/router`,
+  `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and
+  their `reply`: S4's two reads (§4.2), which the doctor and the
+  conformance suite make, and the mesh's. A tool that draws the mesh holds
+  it too.
+
+**Added: a generator MUST NOT allow a query that reaches the declaration
+records** (§11.1). No allowed `query` key may intersect any node's
+declaration records, its `linkstate/*` or its `route/successor/**`. Since a
+query is admitted only when an allowed key includes it, no admitted query
+can then intersect them. `[Sc: security.md §4]`
+
+**Added: a query is admitted by inclusion** (§11.2, Appendix B). Measured
+on zenoh 1.10.1: under an allowed `@/*/router`, a query on `@/*/*` is
+refused, and under an allowed
+`@/*/router/status/plugins/storage_manager/storages/**`, one on
+`@/*/router/**`, though each pair intersects. The router refuses at the
+face the query arrived on, before routing it, and answers with the final
+reply alone (`primitives/demux.rs`), so a refused GET never reaches the
+admin space, and the asker sees it complete and empty, as it sees a
+disabled admin space.
+
+**Added: `scenarios/security.md` §4.** Under `deny`, beside no writer, a
+generated block passes the tool's three reads, refuses its GETs of
+`@/*/router/queryable/**`, `@/*/router/**` and `@/**`, and gives the
+service principal nothing, and a recorder on `@/**` on the router's own
+session hears only the three reads. Step 4 repeats `@/*/*` under 0.15's
+grant: refused. The reference runs it as `zenkey-fleet`'s
+`s4_the_admin_read_reaches_no_declaration_record` and
+`a_query_is_admitted_by_inclusion_never_by_intersection`. The suite never
+asks a declaration record beside a writer; the reproduction does.
+
+**Changed: round 73's three findings** (zk2py round 73, PR #896, read
+0.48 and 0.49 cold; F-253 to F-255, minor, none changing a verdict).
+- **F-253: any node's records** (§4.2, §11.1). 0.48's MUST NOT named a
+  router's records, `@/<zid>/router/…`, where Appendix B states the fact
+  for a node. zk2py measured it on a peer: a GET of
+  `@/*/peer/queryable/**`, beside its clients' churn, froze the peer in 5
+  of 5 trials. Now §4.2's MUST NOT, and 0.50's own in §11.1, name the keys
+  of any node, `@/<zid>/<whatami>/…`. The reference needs nothing:
+  `UNDER_TABLES_LOCK` spells each family over every `<whatami>`
+  (`@/*/*/…`), so `reaches_tables_lock` finds a peer's and a client's
+  records, and the admin read meets none of them. Unit tests now pin both.
+- **F-254: what the queryable on `@/**` can hear** (`scenarios/state.md`
+  §12 Expected 3). It hears a read only once the router routes it on, and
+  in all 19 of zk2py's freezes it never heard the read that froze the
+  node. Expected 3 alone therefore passed a reader whose first read is
+  hazardous, though Expected 2 failed it. Now Expected 3 says so, and a
+  runner that knows how many reads the reader makes counts them heard.
+  The reference's `s12_the_checks_reads_beside_a_router_declaring` now
+  asserts the check's two reads a round, each heard, and nothing else.
+- **F-255: std's lock policy** (Appendix B). std leaves the `RwLock`'s
+  priority policy to the platform. The deadlock is Linux's futex lock,
+  which makes a new reader wait behind a waiting writer, and every
+  measurement here and zk2py's ran on Linux. Wording only: the MUST NOTs
+  stand on any platform.
+
+**Deliberately not changed.**
+- **No grant for a user's own declaration read.** §4.2 lets a tool ask
+  those keys on its user's word (zengui's `--admin-declared`). An
+  enrollment field could grant them to one principal, but a GET of them
+  freezes the router for every session through it, which no other grant
+  of §11.1 can do. Through a router under a generated `deny` block such a
+  tool reads nothing, and says the admin space did not answer. A
+  deployment that wants the read runs it where nothing else declares, or
+  adds the rule by hand, which `acl gen --check` reports as a difference.
+- **Under `allow`, nothing changes.** The generator compiles no admin read
+  there, and deny works by inclusion (§11.3), so no deny keeps a GET wider
+  than every deny, `@/**` or `@/*/router/**`, off the records without
+  denying the tools' reads too. The narrowing protects a router under
+  `deny`. A deny of every admin `query` for principals that hold no admin
+  read would keep those principals off; it is left for a round of its own.
+- **The messages and flows** (§11.2's table): the admin read is still a
+  `query` on ingress and a `reply` on egress.
+- **§4.2's rule** for tools stands; F-253 names its keys for any node.
+- **The face's `admin` deny** (`link.v1` §2.6, `@/**` for the far
+  principal) is unchanged: a far principal holds no admin read.
+- **zenoh is not patched.** The upstream report stays a draft. Its fix,
+  replies sent after the lock is dropped, would make the declaration
+  records safe to grant again.
+- **0.48's entry** keeps its words, "as a queryable on `@/**` hears
+  them": it is history, and F-254's answer is above.
+- zk2py (`impl/python/`) grants 0.15's keys until its next round. It
+  already guards every node's records (F-253).
+
 ## 0.49 — 2026-10-26: three wordings from the final cold read of the watch-session line (round 72's F-250 to F-252)
 
 zk2py round 72 (PR #892) was the final cold read of the line rounds 66–71

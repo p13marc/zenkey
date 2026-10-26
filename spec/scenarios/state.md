@@ -283,9 +283,12 @@ and records the selector of every GET it receives.
    the second finds `plans` with its `key_expr`.
 2. The router keeps routing throughout: in every round the put arrives,
    and the owner answers the GET, within 2 s of being made.
-3. Every selector the reader asked, as the queryable on `@/**` heard it,
-   is one of the two above: none intersects a router's declaration
-   records, its `linkstate/*` or its `route/successor/**`.
+3. Every selector the queryable on `@/**` heard is one of the two above:
+   none intersects a node's declaration records, its `linkstate/*` or its
+   `route/successor/**`. The queryable hears a read only once the router
+   routes it on, so it never hears one that freezes the router, which
+   Expected 2 fails. A runner that knows how many reads the reader makes
+   counts them heard: two a round for S4's check (0.50, F-254).
 
 *Measured.* The hazard this section guards against was measured with
 zenoh alone, never in a suite: a reader that asks one of those keys

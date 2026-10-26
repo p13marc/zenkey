@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.49** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.50** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -66,7 +66,9 @@ there, and the one first read a reader can time, and in 0.48 an admin
 read that reaches no router's declaration records, and in 0.49 three
 wordings the final cold read of the watch-session line found: whose
 timeout the interests timeout sits above, which history figure passes the
-waits, and a black box that prints nothing while its link is cut).
+waits, and a black box that prints nothing while its link is cut, and in
+0.50 an admin-read grant that admits no GET of a node's declaration
+records, and those records named for any node).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1089,14 +1091,16 @@ cannot tell under `Latest` which replier answered.
   `@state/**` breaks S4. A router that answers the first selector and has
   no storage answer runs no storage. When no router answers the first, the
   check is unobservable.
-- **What a tool does not ask** (0.48, zenkey #890). A router answers its
-  declaration records, `@/<zid>/router/{subscriber,publisher,queryable,
-  querier,token}/**`, while it holds its routing tables' read lock, and a
-  declaration, an interest or a session from another client between two
-  of those replies freezes it for good (Appendix B). So does its
-  `linkstate/*`, and its `route/successor/src/<zid>/dst/<zid>`.
-  - A tool MUST NOT ask a selector that intersects one of these keys
-    unless its user asks for that read. `[Sc: state.md §12]`
+- **What a tool does not ask** (0.48, zenkey #890; any node's, 0.50,
+  F-253). A node with its admin space on, a router, a peer or a client,
+  answers its declaration records, `@/<zid>/<whatami>/{subscriber,
+  publisher,queryable,querier,token}/**`, while it holds its routing
+  tables' read lock, and a declaration, an interest or a session from
+  another face between two of those replies freezes it for good
+  (Appendix B). So does its `linkstate/*`, and its
+  `route/successor/src/<zid>/dst/<zid>`.
+  - A tool MUST NOT ask a selector that intersects one of these keys of
+    any node unless its user asks for that read. `[Sc: state.md §12]`
   - 0.11's second selector, `@/*/router/**/storage_manager/storages/**`,
     intersected them. A router records each queryable as
     `@/<zid>/router/queryable/<key expr>`, and the record of a queryable
@@ -1104,6 +1108,11 @@ cannot tell under `Latest` which replier answered.
   - The two selectors above do not, and every zenoh 1.x storage manager
     answers a storage's GET under `status/plugins/`, never under
     `config/`.
+  - Under `deny`, the admin read admits none of them (§11.1, 0.50). A
+    router under a generated block refuses such a GET from a tool's
+    credentials, so a tool its user asks reads nothing of them through
+    it, and says the admin space did not answer, never that nothing is
+    declared.
 - **Who answered** (0.12, F-80).
   - **The problem.** Any session can declare a queryable under
     `@/<zid>/router`, a real router's zid included. The key names the zid
@@ -3321,7 +3330,7 @@ The format is the generator's own. The reference reads an enrollment file
 | **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (0.14, measured in spike S14). |
 | **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1, 0.8) and the descriptor's GET and subscription (§3.3, 0.14) on the `…/@zk/**` subtree of each provider they name. |
 | **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
-| **Tool** (0.14, 0.27) | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data (0.27). A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4 or runs a doctor (§4.2) also holds the **admin read** (0.15): `query` on `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
+| **Tool** (0.14, 0.27) | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data (0.27). A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4, runs a doctor or draws the mesh (§4.2) also holds the **admin read** (0.15, 0.50): `query` on `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
@@ -3329,6 +3338,30 @@ The format is the generator's own. The reference reads an enrollment file
   serve the admin space themselves. A generator allows it to none under
   `deny`, and denies it to every principal under `allow` (§4.2, "Who
   answered"). `[Sc: security.md §3]`
+- **The admin read admits no GET of a node's declaration records**
+  (0.50, zenkey #894). A node answers its declaration records, its
+  `linkstate/*` and its `route/successor/**` under its routing tables'
+  read lock, and one GET of them beside another face's declaration
+  freezes it for good (§4.2, Appendix B). A query is admitted by
+  inclusion in an allowed key (§11.2), so it reaches only what that key
+  reaches.
+  - A generator MUST NOT allow a `query` on a key expression that
+    intersects one of those keys of any node,
+    `@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`,
+    `…/linkstate/*` or `…/route/successor/**`. Under `deny`, a router
+    then refuses a GET of them from any principal at its ingress, before
+    the admin space runs, and answers it complete and empty.
+    `[Sc: security.md §4]`
+  - The admin read is the three selectors the reference's tools read:
+    S4's two (§4.2), which the doctor and the conformance suite read, and
+    every node's root document, which a mesh view reads. None intersects
+    those keys.
+  - 0.15's admin read, `@/*/router` and `@/*/router/**`, admitted a GET of
+    every record of a router's (a peer's and a client's it never
+    reached). It also refused `@/*/*`, which neither key includes.
+  - Under `allow`, the generator compiles no admin read, and a GET wider
+    than every deny is in none (§11.3). This protects a router under
+    `deny` alone.
 - **There are no cross-principal write grants.**
 - **The shapes compose per principal** (0.27, #748). A principal holds
   the union of the grants of everything it runs: a principal that runs
@@ -3381,6 +3414,14 @@ The format is the generator's own. The reference reads an enrollment file
   This is RECOMMENDED where the router can afford the enumeration.
 - **Under `allow`**, Zenoh does not evaluate allow rules. A grant compiles
   into denies of its complement, regenerated on every contract revision.
+- **A query is admitted by inclusion** (0.50, measured on zenoh 1.10.1).
+  A rule allows a query when its key expression includes the query's,
+  never when the two only intersect. Under an allowed `@/*/router`, a
+  query on `@/*/*` is refused; under an allowed
+  `@/*/router/status/plugins/storage_manager/storages/**`, one on
+  `@/*/router/**` is. A router refuses a query on ingress at the face it
+  arrived on, before it routes it, with the final reply alone.
+  `[Sc: security.md §4]`
 - **Egress is checked by inclusion** against the query's or subscription's
   own key expression. A generator MUST therefore add to a provider's egress
   grant every consumer selector that intersects what the provider serves.
@@ -3574,15 +3615,22 @@ Appendix B. These are the ones the rules above cite:
   (`@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`),
   its `linkstate/*` and a `route/successor/src/<zid>/dst/<zid>` key while
   it holds the routing tables' read lock, and each reply takes that read
-  lock again. A new reader of std's `RwLock` waits behind a waiting writer,
-  so a declaration, an interest or a new session from another face
-  between two replies deadlocks the node: every put, query and declaration
-  through it stops for good (`net/runtime/adminspace.rs`,
+  lock again. std leaves the `RwLock`'s priority policy to the platform;
+  on Linux its futex lock makes a new reader wait behind a waiting writer
+  (0.50, F-255). There, a declaration, an interest or a new session from
+  another face between two replies deadlocks the node: every put, query
+  and declaration through it stops for good (`net/runtime/adminspace.rs`,
   `resources_data`; `dispatcher/queries.rs`, `route_send_response`; the
   same on zenoh's main; 0.48, §4.2;
   `docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`). Its
   root document (`@/<zid>/<whatami>`), its metrics and the plugins' status
   are answered without the lock held across a reply.
+- Access control decides a message by inclusion: a rule applies when its
+  key expression includes the message's (`interceptor/authorization.rs`,
+  `policy_decision_point`, `nodes_including`). A request refused on
+  ingress is answered at once with its final response alone, and never
+  routed (`primitives/demux.rs`, `handle_message`), so a refused admin GET
+  never reaches the admin space (0.50, §11.1).
 - A query that sets no timeout waits `queries_default_timeout`, 10 s by
   default.
 - A client connects to one endpoint at a time.
@@ -3766,7 +3814,7 @@ reader, clients, some under CPU load:
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
-| `scenarios/security.md` | §11 |
+| `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion (0.50) |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
 | `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7) (0.25); a stalled reader, and a tool's window over one (§1, 0.27); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
