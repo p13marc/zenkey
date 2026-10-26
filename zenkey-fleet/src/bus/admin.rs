@@ -305,8 +305,9 @@ pub const STORAGES: &str = "@/*/router/status/plugins/storage_manager/storages/*
 /// (`linkstate_data`) and the route successors (`route_successor`, whose
 /// `src/<zid>/dst/<zid>` shortcut replies under the lock).
 ///
-/// Each reply takes that read lock again (`route_send_response`), and
-/// std's `RwLock` queues a new reader behind a waiting writer, so a writer
+/// Each reply takes that read lock again (`route_send_response`), and on
+/// Linux std's futex `RwLock` queues a new reader behind a waiting writer
+/// (std leaves the policy to the platform; core Appendix B), so a writer
 /// arriving between the two — another face's declaration, interest or new
 /// session — waits on the replying thread, which waits on it: the node's
 /// routing stops for good. zenoh's `main` has the same code. A GET whose
@@ -948,6 +949,11 @@ mod tests {
         ));
         assert!(reaches_tables_lock("@/**"));
         assert!(reaches_tables_lock("@/*/router/subscriber/**?x=1"));
+        // Any node's records, a peer's and a client's too (F-253, core
+        // 0.50): the families are spelt over every `<whatami>`.
+        assert!(reaches_tables_lock("@/*/peer/queryable/**"));
+        assert!(reaches_tables_lock("@/*/client/token/**"));
+        assert!(reaches_tables_lock("@/*/peer/linkstate/*"));
         // A router's own document, its metrics and the plugins' status are
         // answered without the lock held across a reply.
         for selector in [

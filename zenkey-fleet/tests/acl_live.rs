@@ -1536,8 +1536,8 @@ async fn s4_the_admin_read_reaches_no_declaration_record() {
     );
 
     // 2. Every GET that reaches the declaration records is refused at the
-    //    router's ingress: answered at once, complete and with nothing of
-    //    the router's, and never routed. `@/**` also reaches the doctor's
+    //    router's ingress: answered complete, with nothing of the router's,
+    //    and never routed. `@/**` also reaches the doctor's
     //    own session, whose runtime answers `@/<its zid>/session/**`
     //    itself, through no router.
     let own = format!("@/{}/", bus.doctor.zid());

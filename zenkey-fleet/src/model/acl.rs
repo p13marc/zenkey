@@ -4391,6 +4391,10 @@ type = { raw = "text/plain" }
             "@/*/router/**",
             "@/*/router/**/storage_manager/storages/**",
             "@/**",
+            // A peer's and a client's records freeze them too (F-253).
+            "@/*/peer/queryable/**",
+            "@/*/client/subscriber/**",
+            "@/*/*/queryable/**",
         ] {
             assert!(reaches_tables_lock(read), "{read}");
             assert_eq!(ingress(read), AclDecision::DeniedByDefault, "{read}");
