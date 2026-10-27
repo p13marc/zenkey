@@ -14119,6 +14119,407 @@ grants the three keys, and its readers count only a router's own answer
 the nodes' admin space, and every principal is still denied a queryable
 under `@/**`."
 
+**Status at core 0.52:** resolved, as proposed. "The shapes compose" now
+reads "the admin read is a `query` on the nodes' admin space". Read in
+round 76, which read §11 for no other reason.
+
 **Counts at core 0.51:** 258 entries. Open: F-258, against core §11.1:
 one minor point, wording only. It changes no verdict, no test and no
 implementation. Every other entry is resolved.
+
+## At timing.v1 0.1 and core 0.53 (#908)
+
+Round 76 read `timing.v1` 0.1 and core 0.53 cold, on main 9457cc6b (PR
+#910, #908's MA). It is the profile's first round, the tenth profile's.
+It read, as a newcomer would:
+- `spec/profiles/timing/v1.md`, `scenarios.md` and `CHANGELOG.md`, whole;
+- the five fixture files' descriptions and every case;
+- core 0.53's CHANGELOG entry, §4.1, Appendix B's two new facts, §10 point
+  2 and Appendix D, and `contracts/w105-timing-max-rate`;
+- `freshness.v1` 0.4's CHANGELOG entry and its two sentences.
+
+Every MUST and MUST NOT was read against its evidence (below, "The
+evidence"). The reference CLI, `zk2-ma`, ran as a black box on the
+contracts zk2py wrote.
+
+**timing.v1 in zk2py.**
+- **`zk2py.timing`,** session-free, from the text alone:
+  - `declaration` (§2.2, §2.3): no key of the vocabulary first, then the
+    kind, then each key alone, in the order period, deadline, lifespan;
+    `requirement` (ignored at 1.0);
+  - `Tracker` (§2.5): edge-triggered `missed` and `met`, `ended` (gone or
+    forgotten), `beyond_bound`, the due and its detection bound
+    max(deadline/50, 1 ms), every member judged at every event in byte
+    order, then the event;
+  - `LifespanReading` (§2.6): the ten steps, ε only, the owner's stamp by
+    value, a clock falsified for the reading;
+  - `period` (§2.7), `conclude` (§5) and `rollup`, read by each question's
+    finding (F-264);
+  - `lint`: the profile's four SHOULDs (an invalid value, a key on a state,
+    an event or an operation, a key on a requirement, a deadline below the
+    period), which have no core code.
+- **The fixtures:** `declarations.json` 42, `deadlines.json` 33,
+  `lifespans.json` 30, `periods.json` 20 and `conclusions.json` 27, 152 of
+  152 on their first run. `layout` reads the tenth profile directory.
+- **Core 0.53:** `timing` moved to the published vocabulary.
+  `w105-timing-max-rate` passed on the interim row and passes on the
+  published one; zk2py's codes and fingerprint are `zk2-ma`'s.
+- **`readings`** gains 18 cases (487): the adopters (`twist_cmd.v1`'s
+  `cmd`, `nav.v2`'s `position`, `pace.v1`'s two streams) declaring as the
+  text reads them, each lint-clean; the linter's four warnings; and
+  zk2py's readings of F-261, F-262 and F-264.
+- **`zk2py.timing_live`:** `Reader`, a consumer (its deadline events on a
+  one-shot wait at the earliest due, its lifespan discard, presence by
+  `PresenceFollower`, `meta.zid` from the instance keys' puts and GETs),
+  and `Window`, a tool's window over it. `Owner.hold_member` and
+  `release_member` hold core §8.1's member tokens, which zk2py's owner
+  never held before.
+- **`pace.v1`,** copied from the scenarios into
+  `impl/python/interop/timing/`, loads with no finding. Its fingerprint,
+  `sha256:6528b66a…`, is `zk2-ma`'s. `zk2-ma contract lint` warns of none
+  of the profile's SHOULDs on a contract that breaks all four, nor does
+  zk2py's core linter: they have no code.
+
+**`just py-conformance`: 3273 of 3273.**
+
+**Live, zk2py only** (`python -m zk2py.timing_scenarios`, in-process
+zenoh-python 1.10.1 routers, every listener on a free port): 26 of 26, in
+each of three runs after the fix to F-266's second half.
+
+| Section | Checks | Notes |
+|---|---|---|
+| §1 a commander paused, then resumed | 4 of 4 | the miss due exactly 500 ms after the last arrival, reported 0.1–0.2 ms after it |
+| §2 a member gone, and a member silent | 3 of 3 | `y` ended 200 ms after its last arrival, at the read 100 ms after its withdrawal; `x` missed |
+| §3 a member never heard | 4 of 4 | due at P + 500 ms, P 1.0 s after S |
+| §4 the lifespan on a stated bound | 4 of 4 | ages 700.2–703.9 ms behind, −399.8 ms ahead then 0.2–0.3 ms |
+| §5 an unstamped owner | 3 of 3 | R1's zid on every sample; through R2, none |
+| §6 a tool's window | 4 of 4 | zk2py's own tool, `Window` |
+| core 0.53's facts | 4 of 4 | below |
+
+- **Every miss** was reported 0.1–0.3 ms after its due: none past the
+  10 ms bound, so the runner's 50 ms allowance was never used.
+- **Core 0.53, measured:**
+  - a stamp's time counts from the Unix epoch: the owner's stamps aged
+    0.15–5.9 ms against C's wall clock on one host;
+  - a client whose HLC is on, having received five puts stamped 300 ms
+    ahead, stamped +179.8 ms off its wall clock 120 ms later, and so did
+    R1, which routed them;
+  - a put its owner stamped 900 ms ahead was re-stamped by the owner's own
+    session, from its clock, and by R1 when the owner's session had no
+    HLC;
+  - the owner's own session, after putting those stamps, stamped +179.7 ms
+    off its wall clock: a session's own put moves its HLC too.
+- **§6 is a tool's scenario.** zk2py's `Window` ran it: the reference
+  tool is #908's MC, not built yet.
+- **Not run.**
+  - §2.8 across a constrained face: no scenario asks it, and zk2py built
+    no face rig for it this round. It is read only through
+    `conclusions.json`'s `across_face` cases.
+  - Any cross pairing: there is no Rust runtime for `timing.v1` yet
+    (#908's MB).
+
+### The evidence
+
+Each MUST and MUST NOT, against what shows it:
+
+| Rule | Evidence | Runs |
+|---|---|---|
+| §2.2 read the keys as the fixture does | `declarations.json` | yes |
+| §2.2 judge nothing under an invalid declaration | `declarations.json`, `conclusions.json`, `lifespans.json` #21–#23 | a tool's and the lifespan only: F-259 |
+| §2.4 no runtime publishes on the owner's behalf | §1 Expected 2 | yes |
+| §2.5 judge the deadline as the fixture does | `deadlines.json`, §1–§3 | yes (F-260) |
+| §2.5 never against a stamp, a wall clock or a payload's time | §4, §5 | yes |
+| §2.5 the detection bound | `deadlines.json`'s `by_ms`, §1, §3 | its arithmetic, and to 60 ms: the scenarios allow 50 ms beyond the 10 ms bound and say so |
+| §2.5 a miss is never "down" | §1 Expected 4 | yes |
+| §2.6 the owner stamps and states `meta.zid` | §4, §5 | yes |
+| §2.6 never the HLC's delta for ε | `lifespans.json` #4, §4 step 4 | yes |
+| §2.6 discard an expired sample, and no other | `deadlines.json` #21, #22, §4 | yes |
+| §2.6 never a payload's time | §5 | yes |
+
+### F-259 · gap · timing.v1 §2.2: "A reader MUST NOT judge a period, a deadline or a lifespan of a resource whose declaration is invalid"
+
+> §2.2: "A reader MUST NOT judge a period, a deadline or a lifespan of a
+> resource whose declaration is invalid, and reports each question of §5
+> unobservable, naming the reasons … `[F: declarations.json,
+> conclusions.json]`"
+
+> §2.5: "A reader judges no deadline for the resource, and a tool reports
+> the deadline's question unobservable (§5)." `[F: declarations.json,
+> conclusions.json]`
+
+The evidence reaches the tool and the lifespan: `conclusions.json` #14 to
+#16 answer `invalid` and `below_period`, and `lifespans.json` #21 to #23
+judge a sample `invalid`. Neither reaches a consumer's deadline.
+`deadlines.json` takes `deadline_ms` as given, and no scenario runs a
+consumer under an invalid declaration or a deadline below the period. A
+runtime that offered `missed` events under either passes every fixture and
+scenario.
+
+No verdict moves. A test is missing: one `deadlines.json` case with the
+resource's annotations in place of `deadline_ms` (an invalid value, a
+deadline below the period: no tracker, no report), or one scenario step.
+zk2py's `Reader` builds no tracker for either (`judged_deadline_ms`).
+
+### F-260 · contradiction · timing.v1 §2.5: "A reader MAY report it so", beside "MUST judge it exactly as the fixture does"
+
+> §2.5: "A member first heard while the bound's members are held is not
+> held, and not judged: it is past the bound, which core §2.7 says an owner
+> MUST NOT exceed. A reader MAY report it so."
+
+> §2.5: "A reader that judges it MUST judge it exactly as the fixture
+> does. `[F: deadlines.json]`"
+
+`deadlines.json` #13, #14 and #16 expect `beyond_bound` among their
+`transitions`, one at each such arrival. A reader that takes the MAY and
+reports nothing fails three cases, though it broke no rule of the text.
+zk2py reports it, so it passes.
+
+It changes a test, not a verdict: `beyond_bound` judges nothing. Wording
+would remove it: the description's "`beyond_bound` is the MAY's report: a
+reader that makes none compares the other reports", or the text's
+"reports it so" as a SHOULD.
+
+### F-261 · gap · timing.v1 §2.5: a known member of an epoch template, and "its member tokens are gone"
+
+> §2.5: "A member never heard is judged only when the reader knows it
+> another way: a known member (§0) whose owner is present."
+
+> §2.5, Ended: "its member tokens are gone: for a template that declares
+> `epoch` (core §2.3, §8.1), a complete read shows no member token of it
+> (core §8.1, 0.37)."
+
+> `deadlines.json`: "member_gone: … a known member stays held, not waited
+> for, until its next arrival"
+
+> core §8.1: "An owner with no member yet holds no member token: one that
+> publishes nothing under the template holds none."
+
+Take a consumer whose binding binds the epoch parameter, so the member is
+known (§0, core R2): `pace.v1`'s `axis/{axis}` bound to `x`.
+- **Its first read comes before the owner declared `x`.** The read is
+  complete and shows no member token of `x`. Read as written, the member
+  has ended: held, waited for by nothing until an arrival. A silent `x` is
+  never reported missed. Its member token appearing later starts nothing,
+  and nothing in §2.5 makes it.
+- **Its first read comes after.** The member is waited for from its
+  owner's interface token, and reported missed a deadline later.
+
+So whether a known member that is declared and never published is ever
+missed depends on which came first, the reader's read or the owner's
+member token. Read the other way, "gone" only once a token of it was seen,
+a member the owner has not declared would be missed, which core §8.1 says
+does not exist yet.
+
+It changes a verdict. zk2py reads the text as written: any complete,
+ordered read that shows no member token of a held member ends it, seen or
+not (`readings` shows both orders). No scenario binds the epoch parameter,
+so this was not run live. Wording that would settle it: "a known member of
+a template that declares `epoch` is waited for from the instant the reader
+sees a member token of it, and is gone when a complete read shows none
+after one was seen".
+
+### F-262 · ambiguity · `deadlines.json`'s description: "every known member never heard and not ended is waited for from it"
+
+> `deadlines.json`: "owner present: from unseen or absent, the owner
+> became present at that instant, and every known member never heard and
+> not ended is waited for from it (if started)"
+
+> `deadlines.json`: "owner absent: every waited-for member is no longer
+> waited for (a missed one stays missed)."
+
+> §2.5: "In between it reports nothing more of the member, however long
+> the silence" and "A miss already reported stands until an arrival."
+
+A known member never heard and reported missed is "never heard and not
+ended". If its owner goes absent and is present again, the description
+waits for it again from that instant, and a deadline later it is missed a
+second time, with no `met` between. §2.5 forbids that. No case covers it:
+#11's owner never comes back.
+
+zk2py leaves a missed member missed (`readings`: one `missed`, then `met`
+at the arrival). That is v1.md's rule, so the text decides it. A reader
+written from the description alone would report the miss twice. It changes
+an implementation, not the text: "every known member never heard, not
+missed and not ended".
+
+### F-263 · ambiguity · timing.v1 §2.7: "present (§0) at every instant from the window's start to its end: unconfirmed or absent at none"
+
+> §2.7: "an interval of its monotonic clock over which it subscribes to
+> the resource and follows the provider's presence (core §8.1). The
+> window's start is the subscription's start."
+
+> §2.7: "The owner present throughout: present (§0) at every instant from
+> the window's start to its end: unconfirmed or absent at none."
+
+> scenarios §6, Setup: "it subscribes to `cmd` and to `axis/*`, follows
+> the owner's presence as C does, reads its descriptor, and states ε =
+> 100 ms."
+
+§0 names three states: present, absent, unconfirmed. A tool that
+subscribes first, as §6's setup lists its steps, holds a fourth at the
+window's start: nothing read yet, which `deadlines.json` calls `unseen`
+and `conclusions.json` counts as not present for a miss.
+- **The bullet's two halves then disagree.** "Present at every instant"
+  is false. "Unconfirmed or absent at none" is true.
+- **Its first samples have no descriptor behind them.** Until the
+  descriptor's GET answers, each reads `unattributed` (§2.6 step 6).
+
+Measured, §6 step 2 with the window opened in the setup's order: the owner
+was unseen for the first 1.5–2.7 ms. `cmd`'s period read unobservable
+(`owner_not_present`) and its lifespan unobservable (`unattributed`).
+Expected 2 says no (`not_kept`) and no (`live`).
+
+zk2py's `Window` follows presence and holds the descriptors first, then
+subscribes, and §6 passes. It changes a verdict. Wording that would remove
+the guess: §2.7's "A tool follows the provider's presence, and holds its
+descriptors, before its window starts", the same order in §6's setup, and
+§0 naming the state before any read.
+
+### F-264 · contradiction · timing.v1 §5: "no when any member's answer is no; yes when every member's is yes", beside the lifespan's "Finding on: Yes"
+
+> §5: "Over a resource, or a run: no when any member's answer is no; yes
+> when every member's is yes, and there is at least one; unobservable
+> otherwise. A member not asked is set aside."
+
+> §5's table, the lifespan's row: "Did a sample of this member arrive
+> expired? | At least one sample expired (`expired`). | Every sample judged
+> live, at least one (`live`). | … | Yes."
+
+The sentence fits the two questions whose finding is no. Over the
+lifespan, whose finding is yes, it inverts:
+- a resource with one member expired and one live reads no, "no sample
+  expired": the finding is hidden;
+- one expired beside one unobservable reads unobservable.
+
+It also leaves "not this profile's" unsaid, which a run over a service's
+resources meets.
+
+It changes a verdict. zk2py's `rollup` reads it by each question's
+finding, and `readings` shows the literal sentence's answer beside it.
+Wording that would remove it: "the finding when any member's answer is the
+finding; the other answer when every member's is that one, and there is at
+least one; unobservable otherwise. A member not asked, or not this
+profile's, is set aside."
+
+### F-265 · gap · core §4.1 (0.53): what a node with an HLC does with an unstamped put it routes
+
+> core §4.1: "Routers stamp puts, where timestamping is enabled. Peers and
+> clients do not stamp by default." … "A session whose HLC is enabled …
+> stamps every put it is not given a timestamp for, a stream sample
+> included, from its own clock (0.23)." … (0.53) "moves it to the stamp of
+> each put it routes, a put it receives for its own subscriber included,
+> when that stamp is later than its own clock and within its delta."
+
+> scenarios §5, Expected 2: "Every sample arrives with no stamp:
+> unobservable, `unstamped`."
+
+> core §4.2: "An unstamped sample (0.27) … put by a session with no HLC
+> through no router that stamps."
+
+Measured on zenoh-python 1.10.1, through R2 (timestamping off): beside C,
+a client whose own HLC is on received 20 of 20 samples of the unstamped
+owner stamped with its own zid. 0.53's bullet says what a node does with a
+stamped put it routes. It does not say that a node with an HLC stamps an
+unstamped one, a put for its own subscriber included. So:
+- **§5 step 2** holds only for a C whose sessions have no HLC, a client's
+  default, which the scenarios do not say;
+- **a reader whose session serves state** (core §4.3: it MUST enable the
+  HLC) never sees `unstamped`. It reads its own zid, `foreign_stamp` (§2.6
+  step 7);
+- **core §4.2's unstamped sample** reaches only a reader whose own session
+  has no HLC. A seeded reader with one would hold it as stamped at its
+  receipt (read, not measured).
+
+For `timing.v1` it changes a test and a reason, never a pole: both are
+unobservable, and nothing is discarded. For §4.2's merge it could change
+what is kept. zk2py's C opens its sessions without an HLC. Wording that
+would remove it:
+- §4.1: "… and stamps an unstamped put it routes, a put for its own
+  subscriber included, from its own clock";
+- §4.2: "through no node that stamps, the reader's own session included";
+- §5's setup: "C's sessions have no HLC".
+
+### F-266 · gap · timing.v1 scenarios §1, §4, §5: when C stops, and when the owner first publishes
+
+> scenarios §4, Setup: "Each step runs a new instance of the owner and a
+> new C … The owner publishes `cmd` every 100 ms for 2 s." Expected 1:
+> "Every sample's stamp carries the owner's `meta.zid`, every sample is
+> live, … C reports no deadline transition."
+
+> §1, Expected 3: "C reports `met` once, at the first arrival of step 3,
+> and nothing after."
+
+> `deadlines.json` #12: "a heard member is judged whatever presence says:
+> missed with its owner absent"
+
+Two instants are left to the runner, and each decides a check.
+- **When C stops.** A deadline after the owner's last sample, `cmd` is
+  missed, owner present or gone. A C that listens past it reports `missed`
+  against §1 Expected 3, §4 Expected 1, 3 and 4, and §5 Expected 1. zk2py
+  closes C 200 ms after the last sample.
+- **When the owner first publishes.** zenoh-python handles each
+  subscriber on a thread of its own: in a probe of 200 put pairs on two
+  keys, one session's put then its publisher's, the second was handled
+  first 82 times. So C can handle a new instance's first sample before its first
+  descriptor, though core §3.3 sends the descriptor's put before any
+  token. Measured, with a put at once after the owner's start: in 3, 1
+  and 3 of 20 starts over three runs (`--only first`), and 8 of 30 in a
+  first probe, the descriptor came up to 3.5 ms after the first sample,
+  which read `unattributed`. Before the fix, §4 step 3 failed so in one of two
+  full runs. zk2py's runner now publishes once C holds the descriptor.
+
+It changes a test, not a rule: §2.6 step 6 is right to read such a sample
+`unattributed`. Wording that would remove it: "C stops a deadline or less
+after the owner's last sample", and "the owner publishes once C holds its
+descriptor".
+
+### F-267 · contradiction · timing.v1 scenarios §6: "each member it holds at the end of the window", beside Expected 4's `axis/x`
+
+> scenarios §6, Setup: "It answers §5's three questions of each member it
+> holds at the end of the window."
+
+> §6, Expected 4: "`axis/x`: its member token went with the owner, so T
+> reports it `ended` at that read: deadline not asked (`ended`); period
+> yes (`kept`), over its span, which ended with it."
+
+> §2.5: "a reader holds every known member, and every member it heard that
+> has not ended". §2.7: "A tool answers §5's questions of each member it
+> holds over a window".
+
+`axis/x` is not known, and it ended in step 4, so T no longer holds it at
+the window's end. A tool built to the setup answers nothing of it, where
+Expected 4 gives two answers. §2.7's "over a window" and
+`conclusions.json`'s `ended` mean a member held at any instant of the
+window. Only one that ended there can be answered `ended`.
+
+It changes a test. zk2py answers every member held in the window. Wording:
+"each member it held in the window".
+
+**Not findings.**
+- **"Naming the reasons"** (§2.2) beside `conclusions.json`'s single
+  `invalid`: zk2py's answer's reason is `invalid`, and its detail names
+  `period_value` and the rest.
+- **`next_due_ms`, "among held members heard or waited for",** leaves a
+  missed member out: the description's states are heard, missed and
+  waited for, and #3's `null` shows it.
+- **"Missed, then forgotten"** (the description's order at an instant):
+  zk2py judges every miss, then every forgetting. No case tells that from
+  per member, and no report's content depends on it.
+- **§1 Expected 1, "its owner present before its first sample":** C
+  handled the first sample 0.2 ms before it applied its owner's token,
+  which travels on its watch session. It reported nothing either way.
+- **ε's type.** "In milliseconds", and every case gives an integer.
+  zk2py takes any number.
+- **`lost`** is zk2py's `StallWatch` over the window (core §2.7, 0.27).
+  zenoh-python's callback handlers drop nothing.
+- **freshness.v1 0.4** changes two sentences and no rule. zk2py's
+  `Subscriber` already ages a stream by its arrival.
+
+**Counts at timing.v1 0.1 and core 0.53:** 267 entries.
+- **Open: F-259 to F-267,** nine.
+  - **A verdict:** F-261, F-263 and F-264.
+  - **A test:** F-260, F-265 (the core's), F-266 and F-267. F-259 is a
+    test missing.
+  - **An implementation,** the text deciding it: F-262, the fixture
+    description's wording.
+- **Resolved:** every other entry. Core 0.52 resolved F-258.
