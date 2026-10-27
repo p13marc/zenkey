@@ -14523,3 +14523,248 @@ It changes a test. zk2py answers every member held in the window. Wording:
   - **An implementation,** the text deciding it: F-262, the fixture
     description's wording.
 - **Resolved:** every other entry. Core 0.52 resolved F-258.
+
+## At arbitration.v1 0.1 and core 0.54 (#909)
+
+Round 77 read `arbitration.v1` 0.1 and core 0.54 cold, on main 4ac79120
+(PR #911, #909's BA), on the branch of round 76 rebased onto it. It is the
+eleventh profile's first round. It read, as a newcomer would:
+- `spec/profiles/arbitration/v1.md`, `scenarios.md` and `CHANGELOG.md`,
+  whole;
+- the four fixture files' descriptions and every case;
+- core 0.54's CHANGELOG entry, and the text it changed: R1, R3 and "A
+  binding is ordered" (§3.2), §3.3's `requires` and cascade 8, §8.1's
+  "Acting on a withdrawal", §10, Appendices C and D;
+- `scenarios/bindings.md` §6, `descriptors/ok-binding-order` and
+  `contracts/w105-arbitration-deadline`.
+
+It read the profile against zk2py's own `timing.py`, round 76's. Every
+check that reads a deadline goes through `zk2py.timing.declaration`.
+`timing.v1` stays at 0.1 on main, and F-259 to F-267 stay open: the
+tracker answers them in a later text.
+
+**arbitration.v1 in zk2py.**
+- **`zk2py.arbitration`,** session-free, from the text alone:
+  - `declaration` (§2.2, §2.3), the eight reasons in order, `unread`
+    with no revision held; `tool_declaration` (§2.14) over every
+    revision a tool holds;
+  - `ranking` (§2.4), by entry, then system, then service, byte by byte;
+  - `Arbiter` (§2.5 to §2.11): the seven outcomes, eligibility,
+    withdrawals and re-admission, a move held back until its round trip
+    stands, the time first at every event, switches and their causes,
+    the dead-man, the counts;
+  - `conclude` (§5), and `lint` (§2.2's SHOULD, checks 1 to 7).
+- **The fixtures:** `declarations.json` 41, `rankings.json` 14,
+  `arbitrations.json` 41, `conclusions.json` 19: 115 of 115 at their
+  first run. The one fix was the runner's: `arbitrations.json`'s cases
+  carry the role at the top level. `layout` reads the eleventh profile
+  directory.
+- **Core 0.54:**
+  - `arbitration` is in the published vocabulary;
+  - `w105-arbitration-deadline`, `e020-requirement` and
+    `descriptors/ok-binding-order` pass;
+  - zk2py's owner already kept a binding's order and repeats.
+- **`readings`** gains 7 (494):
+  - the walkthrough's `thruster.v1` over `twist_cmd.v1`, arbitrated, lint-clean;
+  - its enrollment's two bindings, exact;
+  - the scenarios' contracts;
+  - the linter's checks;
+  - F-268's two orders through the arbiter.
+- **`zk2py.arbitration_live`:**
+  - `Actuator` is the consumer's runtime: it refuses an invalid
+    declaration before anything is declared, then runs one `Arbiter`
+    under one lock, on its service's session, a watch session and a
+    reader;
+  - `Commander` is a commander;
+  - `ToolView` is a tool's own view.
+- **`zk2py.arbitration_owner`** runs a commander or an actuator as a
+  process. The actuator prints its switches as JSON lines and answers
+  `counts`, `reads`, `trips` and `log`.
+- **`steer.v1` and `rudder.v1`** were copied into
+  `impl/python/interop/arbitration/`. Both load with no finding, and
+  their fingerprints are `zk2-ma`'s (`sha256:5162db05…`,
+  `sha256:dfcdac25…`). `zk2-ma contract lint` warns of none of §2.2's
+  SHOULDs on a copy that is `freshest` and of cardinality `one`.
+  zk2py's `lint` names both, `policy_unsupported` and `cardinality`.
+
+**`just py-conformance`: 3399 of 3399.**
+
+**Live, zk2py only.** `python -m zk2py.arbitration_scenarios` runs on an
+in-process zenoh-python 1.10.1 router. The commanders and the
+actuators are processes of their own, and every listener is on a free
+port. The figures below are two full runs, and §3 and §7 run alone,
+after the fixes.
+
+| Section | Checks | Notes |
+|---|---|---|
+| §1 the dead-man at start, each higher priority taking over | 9 of 9 | `teleop 0` and `safety 0` the first payloads on each `angle` |
+| §2 a commander silent past its deadline | 3 of 3 | `at_ms − last_ms` 300.07–300.12 ms |
+| §3 a commander killed | 7 of 7, or 6 of 7 | the switch 2.2–2.6 ms after the kill, `at_ms − last_ms` 10.8–11.3; the strict first arrival lost in 4 of 12 actuator runs (F-269) |
+| §4 a clean stop that publishes after its withdrawal | 5 of 5 | 20 of 20 tail samples `not_active` |
+| §5 a re-mint with no drop | 3 of 3 | no read again |
+| §6 all silent: the dead-man | 3 of 3 | the dead-man at 300.09 ms |
+| §7 the watch session's own transport moves | 5 of 5 | after F-268's fix; the kill under a cut, `deadline` 300.07–300.10 ms |
+| §8 an invalid declaration, refused at start | 6 of 6 | `not started: lab/rudder-l: invalid: <reason>`, exit 1 |
+| §9 a wildcard binding's order | 4 of 4 | the descriptor's `["lab/safety", "lab/*"]` |
+| §10 a tool's questions | 6 of 6 | zk2py's `ToolView`, labelled its own |
+
+- **Every deadline switch** came 0.07–0.12 ms after the due. None was
+  past the 306 ms bound.
+- **§10 is a tool's scenario.** zk2py's tool ran it. The reference tool
+  is #909's BC.
+- **Not run:**
+  - any cross pairing: there is no Rust runtime for `arbitration.v1` yet;
+  - a governed required interface: zk2py's actuator refuses one (F-270);
+  - a face, and a tokenless provider: no scenario asks either.
+
+### The evidence
+
+| Rule | Evidence | Runs |
+|---|---|---|
+| §2.2 read the declaration as the fixture does | `declarations.json` | yes |
+| §2.2 refuse an invalid declaration at start | §8 | five of the eight reasons; `not_used`, `manifest_role`, `resource` and `params_unbound` only by the fixture |
+| §2.4 rank as the fixture does | `rankings.json`, §9 | yes |
+| §2.5 attribute and count as the fixture does | `arbitrations.json`, §1 | yes |
+| §2.5 count only what `redundancy.v1` §2.10 accepts | `arbitrations.json` #35 | the fixture only: F-270 |
+| §2.6 eligibility | `arbitrations.json`, §2, §6 | yes |
+| §2.7 withdraw at a withdrawal, never otherwise; never re-admit on a sample | `arbitrations.json`, §3, §4 | yes |
+| §2.8 keep and apply as one change | `arbitrations.json`, §7 | yes, after F-268 |
+| §2.9 select and deliver | `arbitrations.json`, §1 | yes |
+| §2.10, §2.11 every switch, the dead-man | `arbitrations.json`, §1–§9 | yes |
+| §2.14 conclude as the fixture does | `conclusions.json`, §10 | yes (F-272) |
+
+### F-268 · gap · arbitration.v1 §2.8: "From a move until the round trip asked after the last move stands, a consumer MUST keep every withdrawal and declaration its watch hears"
+
+> §2.8: "When the watch session's transport closes or opens, a **move**
+> … zenoh 1.10.1 can tell its subscriber withdrawn, at the close, every
+> token it was told of … The rule. From a move until the round trip asked
+> after the last move stands … a consumer MUST keep every withdrawal and
+> declaration its watch hears … and apply none of them."
+
+The rule assumes the consumer knows of the move before it hears the
+close's withdrawals. On zenoh-python 1.10.1 it does not. The watch's
+liveliness subscriber is told the close's withdrawals 0.15–0.5 ms
+**before** the session's transport events listener hears the close.
+- **Measured:** at 2 of 2 such closes in a probe, and at 1 to 2 of each
+  actuator's 3 closes in §7's control (`--only 7c`).
+- **The first close tells nothing:** the subscriber, with no history,
+  had been told of no token yet.
+
+A consumer that begins the move at the transport event applies those
+withdrawals as heard. In the control, actuators switched `withdrawn`
+while safety's commands never stopped, once to the dead-man.
+
+zk2py measured that the watch session holds no link by the time each
+such withdrawal is heard (`links_held` false, every time). Its
+`Actuator` begins the move at the first withdrawal heard while the watch
+session holds no link, and §7 passes. No withdrawal can be heard through
+a session with no link but a close's own telling. zk2py cannot tell
+whether Rust's zenoh orders them the same.
+
+It changes a verdict (§7 Expected 1) and an implementation. Wording that
+would remove it:
+- §2.8: "A move begins at its transport event, or at a withdrawal the
+  watch hears while the watch session holds no link, whichever comes
+  first";
+- core §8.1 or Appendix B to state the order.
+
+### F-269 · gap · arbitration.v1 scenarios §3, Expected 2: "at the new instance's first arrival, each switches to `lab/safety`"
+
+> §3 step 2: "2 s later, `C_s` starts again, a new instance." Expected 2:
+> "When S sees the new instance's interface token, the actuators switch
+> nothing; at the new instance's first arrival, each switches to
+> `lab/safety`, cause `sample`."
+
+> §2.7: "A consumer MUST NOT re-admit a provider on a sample."
+
+The new commander puts its first `cmd` as soon as its tokens are
+declared. The actuator hears the token on its watch session and the
+sample on its service's session, two sessions with no order between
+them. zenoh-python also handles each subscriber on a thread of its own:
+in a round 76 probe, the second of two back-to-back puts was handled first in
+82 of 200.
+
+A first sample handled before the watch hears the token is a withdrawn
+provider's: counted `not_active`, as §2.7 says. The switch then comes at
+the next sample, 50 ms later. Measured: in 4 of 12 actuator runs, one
+sample was counted `not_active` before the token. §4 step 2 avoids
+this: X's puts start 500 ms after its tokens.
+
+It changes a test, not a rule. Wording: "at the new instance's first
+arrival after its watch heard the token", or the commander starting to
+put 500 ms after its tokens, as §4 step 2's X does.
+
+### F-270 · gap · arbitration.v1 §2.5: "A consumer MUST count as arrivals only the samples §2.10 accepts", evidenced by the fixture alone
+
+> §2.5, outcome 6: "`not_incumbent`: the required interface is governed
+> (`redundancy.v1` §2.2), and `redundancy.v1` §2.10 does not accept it
+> … A consumer MUST count as arrivals only the samples §2.10 accepts …
+> `[F: arbitrations.json]`"
+
+`arbitrations.json` #35 gives the outcome as an input, `incumbent:
+false`. No scenario governs the required interface, so a runtime that
+never follows the incumbent passes every scenario. zk2py's `Actuator`
+refuses a governed required interface at start, saying so: it follows no
+`redundancy.v1` incumbent. That is its limitation, not the text's.
+
+No verdict moves. A test is missing: a scenario section whose
+commanders' contract uses `redundancy.v1`, a standby among them putting
+raw samples.
+
+### F-271 · ambiguity · arbitration.v1 scenarios, conventions: the counts line has no `deleted`
+
+> scenarios.md, "What an actuator prints": `{"counts": {"providers":
+> {"lab/safety": {"delivered": 40, "not_active": 0, "expired": 0,
+> "not_incumbent": 0}}, "wild": 0, "unresolved": 0, "unbound": 0}}`
+
+> §2.5: "Counted. A consumer keeps the count of each outcome, per provider
+> where the sample has one (4 to 7)", outcome 4 being `deleted`.
+
+The line two implementations are compared on lists four of the five
+per-provider outcomes. zk2py prints `deleted` too, as §2.5 asks. A
+reader of the example would not. It changes a test (a comparison on the
+line) and is wording: the example with `"deleted": 0`.
+
+### F-272 · gap · arbitration.v1 §5 and scenarios §10 step 4: a role read with no consumer has no binding
+
+> §10 step 4: "T reads a copy of `rudder.v1` whose role says
+> `arbitration.policy = "freshest"`, offline, with no consumer running."
+> Expected 4: "The declaration: no, `invalid`, `policy_unsupported`."
+
+> §5, the binding's row: "None beyond the premises: the binding is the
+> descriptor's."
+
+With no consumer there is no descriptor, so no binding, and no view.
+`conclusions.json` takes `bindings` and has no input for "no
+descriptor". Fed an empty list, the fixture's rules answer the binding
+"no, `exact`", which is untrue of a binding nobody read. They answer the
+selection "unobservable, `invalid`", read first. zk2py reports the three
+answers and checks the declaration's alone, as Expected 4 does.
+
+It changes a test (a tool's other two answers there), not a verdict
+Expected 4 gives. Wording: the binding "not asked, `no_descriptor`" when
+the tool reads no consumer's descriptor.
+
+**Not findings.**
+- **The first close tells nothing.** A watch subscriber without history
+  is never told of a token declared before it, so its first close tells
+  no withdrawal. The reopen's telling then declares every token it
+  matches (§2.8), and each later close tells their withdrawals: F-268's
+  order is met from the second close on.
+- **zk2py's owner puts `ok` on `angle` at its start,** its held value of
+  a raw state (core §8.2, "State values"). S sees it before any
+  command, and the runner sets it aside.
+- **Core 0.54's MAY** ("Acting on a withdrawal") is what the actuator
+  does. It reports no absence, and reads again.
+- **The lateness margin** (50 ms) was never used: the timer fires at the
+  due plus 1 ns.
+
+**Counts at arbitration.v1 0.1 and core 0.54:** 272 entries.
+- **Open: F-259 to F-272,** fourteen.
+  - **F-259 to F-267,** round 76's, are answered in a later `timing.v1`
+    text.
+  - **F-268** changes a verdict.
+  - **F-269 and F-271** change a test.
+  - **F-270** is a test missing.
+  - **F-272** changes a tool's test.
+- **Resolved:** every other entry.
