@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.52** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.53** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -70,8 +70,11 @@ waits, and a black box that prints nothing while its link is cut, and in
 0.50 an admin-read grant that admits no GET of a node's declaration
 records, and those records named for any node, and in 0.51 the posture
 and flow that rule holds for, and where a recorder can hear a read that
-freezes a node, and in 0.52 whose answers the admin read reaches).
-Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
+freezes a node, and in 0.52 whose answers the admin read reaches, and in
+0.53 what `timing.v1` needed: its vocabulary published, a session's HLC
+moved by a later stamp it receives, and a stamp's time counted from the
+Unix epoch). Every change goes through [`CHANGELOG.md`](CHANGELOG.md),
+amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
 applications built on Zenoh. It is written so that an implementation in any
@@ -981,6 +984,16 @@ and reports these codes. `[F: descriptors/]`
 - A session whose HLC is enabled, as a serving session's is (§4.3), stamps
   every put it is not given a timestamp for, a stream sample included, from
   its own clock (0.23).
+- **An HLC follows the stamps it receives** (0.53). A node whose HLC is
+  enabled, a session's included, moves it to the stamp of each put it
+  routes, a put it receives for its own subscriber included, when that
+  stamp is later than its own clock and within its delta. A stamp further
+  ahead it does not take: it re-stamps the put from its own clock, or
+  drops it, as a router does (below). Its later stamps can then be ahead
+  of its host's clock by up to that delta, so a bound on how far an
+  owner's stamps and a reader's clock disagree must hold of the stamps,
+  not of the hosts' clocks alone ([`timing.v1`](profiles/timing/v1.md)
+  §2.6).
 - `Latest` consolidation keeps, per key, the reply with the greatest
   timestamp, ranks an unstamped reply lowest, and delivers at query
   completion.
@@ -3252,9 +3265,11 @@ other:
    `telemetry.v1`'s
    ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35),
    `desired.v1`'s ([`profiles/desired/v1.md`](profiles/desired/v1.md) §4,
-   0.36) and `redundancy.v1`'s
+   0.36), `redundancy.v1`'s
    ([`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4, 0.39)
-   followed. `[F: contracts/w105-redundancy-epoch]`
+   and `timing.v1`'s ([`profiles/timing/v1.md`](profiles/timing/v1.md) §4,
+   0.53) followed. `[F: contracts/w105-redundancy-epoch,
+   w105-timing-max-rate]`
    A profile may publish an empty one, as `alarms.v1` does
    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4, 0.34): it
    defines no key, so W105 warns of every key under its name.
@@ -3602,6 +3617,14 @@ Appendix B. These are the ones the rules above cite:
 - A zid is written in lowercase hexadecimal without leading zeros.
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
+  It counts from the Unix epoch, 1970-01-01T00:00:00Z: an HLC's physical
+  clock is its host's wall clock (uhlc's `system_time_clock`, 0.53).
+- A node with its HLC enabled updates it with the stamp of every put it
+  routes, a put a session receives for its own subscriber included: its
+  clock moves to a later stamp, and a stamp more than its delta ahead of
+  its clock is refused, the put re-stamped or dropped
+  (`dispatcher/pubsub.rs`, `treat_timestamp`; uhlc 0.8's
+  `update_with_timestamp`; 0.53, §4.1).
 - Timestamps order by time, then by id. An id is stored as the 16 bytes
   of its 128-bit value little-endian, and compared as that byte array
   (uhlc 0.8's derived `Ord` on `Timestamp` and `ID`), so its least
@@ -3831,6 +3854,7 @@ reader, clients, some under CPU load:
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
 | `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36), and an owner silent within the timeout across a cut, its own answer after the heal (§10, 0.37) |
 | `profiles/redundancy/scenarios.md` §1, §5, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby (0.39); §8.1 a refused read on the claim's own session, and peers that link (§5, 0.40) |
+| `profiles/timing/scenarios.md` §4, §5 | §4.1 a stream sample stamped by its owner's HLC, by a router when its owner's session has none, and unstamped through a router that stamps nothing; §3.3 `meta.zid` attributing a stamp (0.53) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
@@ -3867,6 +3891,7 @@ profile's own table replaces its interim one.
 | `telemetry` | `kind`, `unit`, `buckets`, `semantic` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4 (0.35) |
 | `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 (0.36) |
 | `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 (0.39) |
+| `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 (0.53) |
 
 `link.downsample_ms` left with the interim `link` row (0.29): a face's
 rate is its face policy's `interval_s` (`link.v1` §2.8), a deployment
@@ -3891,12 +3916,19 @@ any other `redundancy.<key>`, a fencing epoch among them, draws W105: the
 profile carries no epoch in a payload at 1.0 (its §2.16).
 `[F: contracts/w105-redundancy-epoch]`
 
+`timing.v1` publishes the interim `timing` row's three keys unchanged
+(0.53): `period_ms`, `deadline_ms` and `lifespan_ms`, each a whole number
+of milliseconds, meaningful on a stream (`timing.v1` §2.2, §2.3). A
+contract that writes any other `timing.<key>` draws W105: a rate ceiling
+among them, since a period is a floor on an owner's cadence, never a
+ceiling (`timing.v1` §2.4), and how often an event may occur is `rate`'s
+(§2.6). `[F: contracts/w105-timing-max-rate]`
+
 **Interim annotation vocabularies** (W105 outside them, until each profile
 publishes its own):
 
 | Profile | Keys |
 |---|---|
-| `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` |
 | `arbitration` | `policy` |
 | `media` | `tiers`, `tier_param`, `frame_clock`, `control`, `receiver_report` |
 | `views` | `document` (an extra's id, `sha256:…`; §9.6) |
