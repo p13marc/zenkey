@@ -4,6 +4,93 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-27: what the runtime showed, and round 76's answers (#908, MB)
+
+The reference runtime (`zenkey::timing`, #908's MB) ran scenarios §1 to
+§5, and the second implementation read 0.1 cold (zk2py round 76: 152 of
+152 fixture cases, 26 of 26 live checks in each of three runs, zk2py
+alone). Round 76 filed F-259 to F-267, all accepted on #908; this text
+answers them, and says what writing the runtime found. It is written
+against core 0.55, whose §4.1 F-265 extends.
+
+**Changed: rules (round 76).**
+- **No tracker under an invalid declaration, or a deadline below the
+  period** (§2.2, §2.5; F-259). A consumer holds no tracker and reports
+  nothing. `deadlines.json` gains five cases that give the resource in
+  place of a deadline, its `tracker` in the expectation.
+- **`beyond_bound` is a MUST, once** (§2.5; F-260): at a member's first
+  arrival past the bound, and never again while it stays past. 0.1's MAY
+  sat beside a fixture that expected the report at each such arrival; the
+  fixture now expects it once (the bound's case loses its second report).
+- **A known member of an epoch template** (§2.5; F-261) is waited for
+  from the instant a member token of it is first seen, never from its
+  owner's presence, and its tokens gone end it only after one was seen: a
+  read that shows none before any was seen ends nothing. 0.1 left a known
+  member silent forever when the reader's first read came before the
+  owner declared it, and judged it when the read came after. A token is
+  seen when heard declared or withdrawn, or shown by a read. Changes a
+  verdict. `deadlines.json` takes `epoch` per case and a `member_seen`
+  event; its member-token cases become epoch templates with their tokens
+  seen, and five cases are added. Scenarios §3 gains step 5.
+- **A tool's window starts once it follows presence and holds the
+  descriptors** (§2.7; F-263), the first instant both stand; §0 names the
+  state before any read, `unseen`. Changes a verdict: a window opened in
+  0.1's order read its owner unseen for its first milliseconds. Scenarios
+  §6's setup takes the order.
+- **The roll-up is read by each question's finding** (§5; F-264): 0.1's
+  sentence fitted the two questions whose finding is no, and hid an
+  expired member beside a live one. Changes a verdict.
+  `conclusions.json` gains twelve roll-up cases.
+
+**Changed: wording and evidence (round 76).**
+- **`deadlines.json`'s description** says "never heard, not missed and
+  not ended" (F-262): a miss stands until an arrival, as §2.5 already
+  said. A case pins it.
+- **The scenarios' two instants** (F-266): C stops a deadline or less
+  after the owner's last sample, and the owner publishes once C holds its
+  descriptor where C judges a lifespan.
+- **Each member held in the window** (§2.7, scenarios §6; F-267).
+- **C's sessions have no HLC** (scenarios' conventions; F-265), with core
+  0.55: a session whose HLC is enabled stamps an unstamped put it
+  receives, so a reader with one reads §5 step 2's samples
+  `foreign_stamp`, never `unstamped`. The pole does not move.
+
+**Stated: what the runtime found.**
+- **How a reader holds `meta.zid`** (§2.6): the descriptors' puts, a GET
+  at the subscription's start, and a GET again at a stamp of an id not
+  held; until then a sample reads `unattributed` or `foreign_stamp`,
+  never discarded.
+- **Following presence** (§2.5): on a watch session, read on another,
+  seeded after the round trip; a watch session's transport move read
+  again; a reader that follows none holds every owner unseen, and loses
+  the never-heard wait and the member token's end, keeping every deadline
+  from its arrivals.
+- **A known member needs an exact provider address** (§0): a wildcard
+  binding names no address.
+- **A tokenless owner's token** (§0) is read only with its descriptor in
+  hand; the reference follows interface tokens alone, so it reads such an
+  owner unseen.
+- **The owner's stamp without an HLC** (§2.6): `Session::new_timestamp()`
+  carries the session's zid with or without one; the reference's writer
+  of a lifespan resource stamps each put so, and refuses to start an owner
+  whose configuration states another `meta.zid`.
+- **ε's unit** (§2.6): milliseconds; the reference's binding states it as
+  a whole number, `clock_bound_ms`.
+- **`arbitration.v1`** is written (#909, its text 0.1), and §2.5 links
+  it.
+
+**Deliberately not changed.**
+- **No verdict of a lifespan or a period.** `lifespans.json` and
+  `periods.json` are as 0.1 wrote them.
+- **The detection bound and its allowance.** The reference's misses came
+  within 2 ms of their due on loopback, and zk2py's within 0.3 ms; the
+  scenarios keep the 50 ms allowance for a loaded runner, and say so.
+- **A tokenless owner followed by its instance token** stays the text's
+  rule (§0); the reference does not yet read it, and says so above.
+- **No tool here.** The doctor's `timing-declaration`, `check conform`'s
+  cases, `zenctl timing` and zengui's Inspector are #908's MC, and run
+  §6.
+
 ## 0.1 — 2026-10-27: the first text, draft (#908, MA)
 
 `timing.v1` is the first profile of use case B, control: setpoints into
