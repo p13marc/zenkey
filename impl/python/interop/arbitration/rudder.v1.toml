@@ -1,0 +1,18 @@
+# arbitration.v1's scenarios' actuator contract, copied from
+# spec/profiles/arbitration/scenarios.md ("The contracts"): what an actuator
+# requires. The reference keeps it as zenkey/tests/contracts/rudder.v1.toml.
+[interface]
+name  = "rudder"
+major = 1
+minor = 0
+uses  = ["arbitration.v1"]
+
+[resources.angle]                # the last command delivered
+kind = "state"
+type = { raw = "text/plain" }
+
+[requires.cmd]
+interface   = "steer.v1"
+resources   = ["cmd"]
+cardinality = "many"
+annotations = { "arbitration.policy" = "priority" }

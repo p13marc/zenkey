@@ -480,6 +480,44 @@ class Owner:
         self._iface_tokens: dict[str, Any] = {}
         #: each instance's current descriptor, which its queryable answers
         self._docs: dict[str, bytes] = {}
+        #: core §8.1's member tokens held, (iface, member) -> (key, token)
+        self._member_tokens: dict[tuple[str, str], tuple[str, Any]] = {}
+
+    # -- core §8.1: member tokens (timing.v1 scenarios §2, round 76) -------
+
+    def hold_member(self, iface: str, member: str, epoch: str | None = None) -> str:
+        """Core §8.1: "The owner MUST hold one member token per member" of the
+        template that declares ``epoch``, at
+        ``…/@zk/member/<iface>/<member>/<epoch>``, ``<member>`` the slugged
+        value of the epoch parameter and ``<epoch>`` an instance id (§1.2), a
+        fresh one unless given. "A member exists from the owner's first
+        declaration of it": the caller holds it before its first sample.
+        Returns the token's key; one already held is kept."""
+        assert self.session is not None
+        with self._writes:
+            held = self._member_tokens.get((iface, member))
+            if held is not None:
+                return held[0]
+            key = f"zk2/{self.system}/{self.service}/@zk/member/{iface}/{slug(member)}/{epoch or secrets.token_hex(8)}"
+            tok = self.session.liveliness().declare_token(key)
+            self._member_tokens[(iface, member)] = (key, tok)
+            self._entities.append(tok)
+            return key
+
+    def release_member(self, iface: str, member: str) -> bool:
+        """The member's entity is gone: its token withdrawn. False when none
+        was held."""
+        with self._writes:
+            held = self._member_tokens.pop((iface, member), None)
+            if held is None:
+                return False
+            if held[1] in self._entities:
+                self._entities.remove(held[1])
+        try:
+            held[1].undeclare()
+        except Exception:  # noqa: BLE001 - withdrawn anyway
+            pass
+        return True
 
     # -- keys -------------------------------------------------------------
 

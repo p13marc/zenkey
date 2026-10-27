@@ -1168,6 +1168,117 @@ def _redundancy_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _timing_declarations(path: Path) -> list[Result]:
+    """timing.v1 §2.2, §2.3, §2.5: a resolved resource (or its layers), or a
+    requirement -> its declaration."""
+    from . import timing as tm
+
+    return [_check(f"declarations #{i}: {c['note']}", tm.declaration_of(c).expect(), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _timing_deadlines(path: Path) -> list[Result]:
+    """timing.v1 §2.5: one reader's tracker for one provider and resource,
+    driven by its events -> its reports, what it holds, its next due."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        t = tm.Tracker(c["deadline_ms"], c["bound"], c["known"])
+        for e in c["events"]:
+            t.event(e)
+        due = t.next_due()
+        got = {"transitions": [r.expect() for r in t.reports], "held": t.held(),
+               "next_due_ms": None if due is None else tm.ns_to_ms(due)}
+        out.append(_check(f"deadlines #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _timing_lifespans(path: Path) -> list[Result]:
+    """timing.v1 §2.6: one member's samples in arrival order within one
+    reading -> each sample's lifespan judgement."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        decl = tm.declaration_of(c)
+        stamps = [None if s["stamp"] is None else tm.Stamp(tm.ms_to_ns(s["stamp"]["age_ms"]), s["stamp"]["id"])
+                  for s in c["samples"]]
+        got = [v.pair() for v in tm.judge_lifespans(decl, c["epsilon_ms"], c["owners"], stamps)]
+        out.append(_check(f"lifespans #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _timing_periods(path: Path) -> list[Result]:
+    """timing.v1 §2.7: one member's arrivals over a tool's window -> whether
+    the period was kept."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        w = c["window"]
+        got = tm.period(c["period_ms"], tm.ms_to_ns(w["from_ms"]), tm.ms_to_ns(w["to_ms"]), bool(c["known"]),
+                        None if c["ended_ms"] is None else tm.ms_to_ns(c["ended_ms"]),
+                        [tm.ms_to_ns(a) for a in c["arrivals_ms"]]).expect()
+        out.append(_check(f"periods #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _timing_conclusions(path: Path) -> list[Result]:
+    """timing.v1 §2.7, §5: a tool's reading of one member over one window ->
+    §5's three questions."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = {q: a.pair() for q, a in tm.conclude(tm.declaration_of(c), tm.Reading.of(c["reading"])).items()}
+        out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _arbitration_declarations(path: Path) -> list[Result]:
+    """arbitration.v1 §2.2, §2.3: one role and the revision of its required
+    interface held -> its declaration."""
+    from . import arbitration as ab
+
+    return [_check(f"declarations #{i}: {c['note']}", ab.declaration_of(c).expect(), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _arbitration_rankings(path: Path) -> list[Result]:
+    """arbitration.v1 §2.4: a binding and the addresses heard -> the
+    providers in rank order, the unbound, the wildcards and the shadowed."""
+    from . import arbitration as ab
+
+    return [_check(f"rankings #{i}: {c['note']}", ab.ranking(c["bindings"], c["heard"]), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _arbitration_arbitrations(path: Path) -> list[Result]:
+    """arbitration.v1 §2.5 to §2.11: one consumer's role and its events in
+    order -> what it decides after each."""
+    from . import arbitration as ab
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        a = ab.arbiter_of(c.get("role", c))
+        got = [a.event(e).expect() for e in c["events"]]
+        out.append(_check(f"arbitrations #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _arbitration_conclusions(path: Path) -> list[Result]:
+    """arbitration.v1 §2.14, §5: a tool's reading of one consumer's role ->
+    §5's three questions."""
+    from . import arbitration as ab
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = {q: a.expect() for q, a in ab.conclude(*ab.reading_of(c["reading"])).items()}
+        out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -1192,6 +1303,11 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
                    "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions,
                    "polls.json": _redundancy_polls},
+    "timing": {"declarations.json": _timing_declarations, "deadlines.json": _timing_deadlines,
+               "lifespans.json": _timing_lifespans, "periods.json": _timing_periods,
+               "conclusions.json": _timing_conclusions},
+    "arbitration": {"declarations.json": _arbitration_declarations, "rankings.json": _arbitration_rankings,
+                    "arbitrations.json": _arbitration_arbitrations, "conclusions.json": _arbitration_conclusions},
 }
 
 
@@ -3280,8 +3396,270 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
-        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings()
+        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
+        + _timing_readings(root) + _arbitration_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _arbitration_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """arbitration.v1 0.1 in :mod:`zk2py.arbitration` (#609, round 77): the
+    walkthrough's arbitrated role and its binding, the scenarios' contracts,
+    the linter, and the arbiter fed F-268's two orders. No session is
+    opened."""
+    import tomllib
+
+    from . import arbitration as ab
+    from .contract import load_contract
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "arbitration.v1 0.1"
+    repo = root.parent.parent
+    walk = repo / "examples/zk2/walkthrough"
+    thruster, twist = load_contract(walk / "thruster.v1.toml"), load_contract(walk / "twist_cmd.v1.toml")
+    want = {"declaration": "arbitrated", "policy": "priority", "resource": "stream/cmd", "deadline_ms": 100,
+            "period_ms": 20}
+    out.append((f"{label} Appendix B: thruster.v1's cmd over twist_cmd.v1, as the walkthrough writes them",
+                ab.declaration(ab.role_of(thruster.canonical, "cmd"), ab.provider_of(twist.canonical)).expect(), want))
+    out.append((f"{label} §2.2: thruster.v1 draws no warning of the profile's linter, twist_cmd.v1 held",
+                ab.lint(thruster.canonical, {"twist_cmd.v1": twist.canonical}), []))
+    enr = tomllib.loads((repo / "examples/zk2/acl/walkthrough.enrollment.toml").read_text())
+    binds = [s["bindings"]["cmd"]["providers"] for s in enr.get("service", []) if "cmd" in s.get("bindings", {})]
+    out.append((f"{label} §2.4: the walkthrough enrollment's two thrusters bind cmd in priority order, exact entries",
+                [ab.ranking(b, []) for b in binds],
+                [{"ranked": ["vehicle-01/safety", "vehicle-01/teleop", "vehicle-01/autopilot"], "unbound": [],
+                  "wildcards": [], "shadowed": []}] * 2))
+    idir = repo / "impl/python/interop/arbitration"
+    rudder, steer = load_contract(idir / "rudder.v1.toml"), load_contract(idir / "steer.v1.toml")
+    out.append((f"{label}: the scenarios' rudder.v1 over steer.v1, a 300 ms deadline and a 50 ms period",
+                ab.declaration(ab.role_of(rudder.canonical, "cmd"), ab.provider_of(steer.canonical)).expect(),
+                {**want, "deadline_ms": 300, "period_ms": 50}))
+    bad = {"uses": ["arbitration.v1"], "requires": {"cmd": {"interface": "steer.v1", "resources": ["cmd"],
+                                                            "cardinality": "one",
+                                                            "annotations": {"arbitration.policy": "freshest"}}}}
+    out.append((f"{label} §2.2: the linter's checks 1 to 5 without the required interface, 6 and 7 with it",
+                (ab.lint(bad), ab.lint({**bad, "requires": {"cmd": {**bad["requires"]["cmd"], "cardinality": "many",
+                                                                    "annotations": {"arbitration.policy": "priority"},
+                                                                    "resources": ["nope"]}}},
+                                      {"steer.v1": steer.canonical})),
+                ([("cmd", "policy_unsupported"), ("cmd", "cardinality")], [("cmd", "resource")])))
+    # F-268: the close's withdrawals heard before the move's event, as
+    # zenoh-python 1.10.1 tells them, against the move heard first.
+    tok = "zk2/lab/{}/@zk/alive/steer.v1/00000000000000a{}/6f2b0c1d9e8a7b65"
+    seq = [{"at": 0, "event": "start"}, {"at": 1, "event": "declared", "token": tok.format("safety", 1)},
+           {"at": 2, "event": "declared", "token": tok.format("teleop", 2)},
+           {"at": 10, "event": "sample", "key": "zk2/lab/safety/steer.v1/stream/cmd"},
+           {"at": 15, "event": "sample", "key": "zk2/lab/teleop/steer.v1/stream/cmd"}]
+    close = [{"at": 20, "event": "withdrawn", "token": tok.format("safety", 1)},
+             {"at": 20, "event": "withdrawn", "token": tok.format("teleop", 2)}]
+    reopen = [{"at": 40, "event": "moved"}, {"at": 41, "event": "declared", "token": tok.format("safety", 1)},
+              {"at": 41, "event": "declared", "token": tok.format("teleop", 2)}, {"at": 50, "event": "stood"}]
+    for name, events, want_sw in (
+            ("the move's event after its withdrawals: withdrawn, to the dead-man", seq + close
+             + [{"at": 20, "event": "moved"}] + reopen,
+             [("lab/safety", "lab/teleop", "withdrawn"), ("lab/teleop", None, "withdrawn")]),
+            ("the move begun at the first withdrawal heard with no link: nothing", seq
+             + [{"at": 20, "event": "moved"}] + close + [{"at": 20, "event": "moved"}] + reopen, [])):
+        a = ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab/safety", "lab/teleop"])
+        got = [s for e in events[len(seq):] for s in a.event(e).switches] if all(a.event(e) for e in seq) else []
+        out.append((f"{label} §2.8 (F-268): {name}", [(s.from_, s.to, s.cause) for s in got], want_sw))
+    out += _arbitration_review_readings(root)
+    return out
+
+
+def _arbitration_review_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Review-bot on PR #912 (#609, round 77): the actuator's timer never
+    spins, its round trip after a move is never given up, and a binding
+    entry that is not one is refused. No session is opened: the round trip
+    runs on stand-ins for ``live.settle`` and ``live.links_held``."""
+    import copy
+    import threading
+
+    from . import arbitration as ab
+    from . import live
+    from .arbitration_live import Actuator
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "arbitration.v1 0.1 (review-bot on PR #912)"
+    # 1. A tick at a past due always moves the state: over every state
+    # arbitrations.json reaches, a tick 1 ns after the due changes the
+    # active provider or its due.
+    path = root.parent / "profiles" / "arbitration" / "conformance" / "arbitrations.json"
+    states = moved = 0
+    for c in _load_json(path)["cases"]:
+        a = ab.arbiter_of(c)
+        for e in c["events"]:
+            a.event(e)
+            due = a.due()
+            if due is None:
+                continue
+            states += 1
+            b = copy.deepcopy(a)
+            before = (b.active, due)
+            b.tick(due + 1)
+            moved += (b.active, b.due()) != before
+    out.append((f"{label}: the timer: a tick just past the due moves the state, in every state the fixture reaches "
+                f"with a due ({states})", moved, states))
+
+    # 2. The round trip after a move: asked until one stands.
+    class Fake:
+        pass
+
+    def fake(gen_now: int) -> Any:
+        f = Fake()
+        f.lock = threading.RLock()
+        f.log, f.round_trips, f.warned = [], [], []
+        f.gen, f.closed, f.t0, f.retry_s = gen_now, False, 0, 0.0
+        f.selectors = ["zk2/lab/safety/@zk/alive/steer.v1/**"]
+        f.watch = object()
+        f.warn = f.warned.append
+        f.arb = ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab/safety", "lab/teleop"])
+        f.arb.start(0)
+        f.arb.moved(1)
+        f.handled = []
+        f._handle = f.handled.append
+        return f
+
+    saved = live.settle, live.links_held
+    try:
+        answers = [False, False, True]
+        live.settle = lambda *a, **k: live.RoundTrip(answers.pop(0), True, "k", "" if not answers else "x")
+        live.links_held = lambda s: True
+        f = fake(1)
+        Actuator._round_trip(f, 1)  # type: ignore[arg-type]
+        out.append((f"{label}: two round trips that do not stand, then one that does: asked three times, the kept "
+                    f"events applied once, each failure said",
+                    ([r["stands"] for r in f.round_trips], f.arb.pending, len(f.handled),
+                     sum(1 for _, w, _ in f.log if w.startswith("pending:")), len(f.warned)),
+                    ([False, False, True], False, 1, 2, 2)))
+        answers = [False, False, False]
+        f = fake(1)
+        calls = []
+
+        def settle_then_move(*a: Any, **k: Any) -> Any:
+            calls.append(1)
+            if len(calls) == 2:
+                f.gen = 2  # a later move: it asks its own
+            return live.RoundTrip(False, True, "k", "not yet")
+
+        live.settle = settle_then_move
+        Actuator._round_trip(f, 1)  # type: ignore[arg-type]
+        out.append((f"{label}: a later move during the retries ends this move's, applying nothing",
+                    (len(calls), f.arb.pending, len(f.handled)), (2, True, 0)))
+        cut = iter([False, False, True])
+        live.links_held = lambda s: next(cut, True)
+        live.settle = lambda *a, **k: live.RoundTrip(True, True, "k", "")
+        f = fake(1)
+        Actuator._round_trip(f, 1)  # type: ignore[arg-type]
+        out.append((f"{label}: cut off, it waits for a link, saying so, then asks and applies",
+                    (sum(1 for _, w, _ in f.log if w.startswith("pending: cut off")), f.arb.pending),
+                    (2, False)))
+    finally:
+        live.settle, live.links_held = saved
+
+    # 3. A binding entry that is not <chunk>/<chunk> is refused, never left
+    # silently unbound.
+    out.append((f"{label}: entries checked: exact, wildcard, and three that are not",
+                [ab.entry_valid(e) for e in ("lab/safety", "*/teleop", "lab", "lab/a/b", "Lab/x")],
+                [True, True, False, False, False]))
+    try:
+        ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab"])
+        refused = False
+    except ValueError:
+        refused = True
+    out.append((f"{label}: the arbiter refuses an entry without a /", refused, True))
+    return out
+
+
+def _timing_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """timing.v1 0.1 in :mod:`zk2py.timing` (#609, round 76): the adopters'
+    contracts, the profile's linter, and zk2py's readings of F-261, F-262
+    and F-264. No session is opened."""
+    from . import timing as tm
+    from .contract import load_contract
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "timing.v1 0.1"
+    repo = root.parent.parent
+    # Appendix A's two adopters, and core's ok-kinds (the text's §0 sources).
+    adopters = [(repo / "examples/zk2/walkthrough/twist_cmd.v1.toml", "stream/cmd",
+                 {"declaration": "declared", "period_ms": 20, "deadline_ms": 100, "lifespan_ms": 100,
+                  "below_period": False}),
+                (repo / "examples/zk2/walkthrough/nav.v2.toml", "stream/position",
+                 {"declaration": "declared", "period_ms": 100, "deadline_ms": None, "lifespan_ms": 500,
+                  "below_period": False}),
+                (repo / "impl/python/interop/timing/pace.v1.toml", "stream/cmd",
+                 {"declaration": "declared", "period_ms": 100, "deadline_ms": 500, "lifespan_ms": 300,
+                  "below_period": False}),
+                (repo / "impl/python/interop/timing/pace.v1.toml", "stream/axis/{axis}",
+                 {"declaration": "declared", "period_ms": 100, "deadline_ms": 500, "lifespan_ms": None,
+                  "below_period": False})]
+    for path, rid, want in adopters:
+        c = load_contract(path)
+        r = next(x for x in c.canonical["resources"] if f"{x['token']}/{x['template']}" == rid)
+        out.append((f"{label}: {path.name}'s {rid} declares as the text reads it",
+                    tm.declaration(r["kind"], r["annotations"]).expect(), want))
+        out.append((f"{label}: {path.name} draws no warning of the profile's linter", tm.lint(c.canonical), []))
+    # The linter's four SHOULDs (§2.2, §2.3, §2.5), over a canonical form.
+    canon = {"uses": ["timing.v1"], "requires": {"src": {"annotations": {"timing.deadline_ms": 50}},
+                                                 "plain": {"annotations": {}}},
+             "resources": [
+                 {"token": "state", "template": "s", "kind": "state", "annotations": {"timing.period_ms": 20}},
+                 {"token": "stream", "template": "a", "kind": "stream", "annotations": {"timing.deadline_ms": 0}},
+                 {"token": "stream", "template": "b", "kind": "stream",
+                  "annotations": {"timing.deadline_ms": 50, "timing.period_ms": 100}},
+                 {"token": "stream", "template": "c", "kind": "stream",
+                  "annotations": {"timing.deadline_ms": 100, "timing.period_ms": 100}}]}
+    out.append((f"{label}: the linter warns of a key on a state, an invalid value, a deadline below the period and "
+                f"a key on a requirement, and of nothing else",
+                [(w.what, w.where) for w in tm.lint(canon)],
+                [("ignored_kind", "state/s"), ("invalid_value", "stream/a"), ("below_period", "stream/b"),
+                 ("ignored_requirement", "requires.src")]))
+    # F-264: §5's roll-up over a resource, by each question's finding.
+    expired, live = tm.Answer(tm.YES, "expired"), tm.Answer(tm.NO, "live")
+    unobs = tm.Answer(tm.UNOBSERVABLE, "no_bound")
+    out.append((f"{label} §5 (F-264): the lifespan over a resource with an expired member beside a live one is the "
+                f"finding, yes", tm.rollup("lifespan", [live, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+    out.append((f"{label} §5 (F-264): the sentence as written answers no there, hiding the finding",
+                tm.rollup_literal([live, expired]).pair(), {"answer": "no", "reason": "live"}))
+    out.append((f"{label} §5 (F-264): an expired member beside an unobservable one is the finding",
+                tm.rollup("lifespan", [unobs, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+    out.append((f"{label} §5: the deadline over a resource, one member missed, is no",
+                tm.rollup("deadline", [tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")]).pair(),
+                {"answer": "no", "reason": "missed"}))
+    out.append((f"{label} §5: a member not asked, or not this profile's, set aside: every other yes is yes",
+                tm.rollup("period", [tm.Answer(tm.NOT_ASKED, "not_heard"), tm.Answer(tm.YES, "kept"),
+                                     tm.Answer("not_this_profiles", "kind")]).pair(),
+                {"answer": "yes", "reason": "kept"}))
+    # F-262: a missed member never heard stays missed when its owner is
+    # present again: one missed, then met at the arrival.
+    t = tm.Tracker(100, 1, ["cmd"])
+    for e in ({"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 0, "event": "start"},
+              {"at_ms": 101, "event": "tick"}, {"at_ms": 150, "event": "owner", "state": "unconfirmed"},
+              {"at_ms": 160, "event": "owner", "state": "absent"}, {"at_ms": 200, "event": "owner", "state": "present"},
+              {"at_ms": 400, "event": "tick"}, {"at_ms": 450, "event": "arrival", "member": "cmd"}):
+        t.event(e)
+    out.append((f"{label} §2.5 (F-262): a missed member, its owner absent then present again, is not waited for "
+                f"again: one missed, then met at its arrival",
+                [(r.event, tm.ns_to_ms(r.at_ns)) for r in t.reports], [("missed", 101), ("met", 450)]))
+    # F-261: a known member of an epoch template, ended by a complete read
+    # made before its owner declared it, is never waited for again.
+    t = tm.Tracker(100, 4, ["axis/x"])
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 5, "event": "member_gone", "member": "axis/x"},
+              {"at_ms": 50, "event": "owner", "state": "present"}, {"at_ms": 1000, "event": "tick"}):
+        t.event(e)
+    out.append((f"{label} §2.5 (F-261): a known epoch member a complete read ended before its owner held its "
+                f"member token is never reported, however long the silence",
+                ([r.expect() for r in t.reports], t.next_due()), ([], None)))
+    t = tm.Tracker(100, 4, ["axis/x"])
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 50, "event": "owner", "state": "present"},
+              {"at_ms": 151, "event": "tick"}):
+        t.event(e)
+    out.append((f"{label} §2.5 (F-261): the same member, its owner's first read after its member token, is missed",
+                [r.event for r in t.reports], ["missed"]))
+    # §2.6: a zid of 33 digits states none; one of 32 is one.
+    out.append((f"{label} §2.6: a meta.zid of 33 hexadecimal digits states none, one of 32 does",
+                (tm.zid_value("1" * 33), tm.zid_value("f" * 32) == 2**128 - 1), (None, True)))
+    return out
 
 
 def _admin_read_readings() -> list[tuple[str, Any, Any]]:

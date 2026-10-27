@@ -67,14 +67,22 @@ PUBLISHED_VOCABULARY = {
     # published unchanged; any other redundancy.<key>, a fencing epoch
     # among them, draws W105.
     "redundancy": {"election"},
+    # profiles/timing/v1.md §4 (core 0.53): the interim row's three keys,
+    # published unchanged; any other timing.<key>, a rate ceiling such as
+    # timing.max_rate among them, draws W105 (contracts/w105-timing-max-rate).
+    "timing": {"period_ms", "deadline_ms", "lifespan_ms"},
+    # profiles/arbitration/v1.md §4 (core 0.54): the interim row's one key,
+    # published unchanged, read on a requirement; any other
+    # arbitration.<key>, a tightened deadline among them, draws W105
+    # (contracts/w105-arbitration-deadline).
+    "arbitration": {"policy"},
 }
 
 #: Appendix D, interim annotation vocabularies (W105 outside them, until each
 #: profile publishes its own). freshness's, link's, alarms's, telemetry's,
-#: desired's and redundancy's rows moved to the published table.
+#: desired's, redundancy's, timing's and arbitration's rows moved to the
+#: published table.
 INTERIM_VOCABULARY = {
-    "timing": {"period_ms", "deadline_ms", "lifespan_ms"},
-    "arbitration": {"policy"},
     "media": {"tiers", "tier_param", "frame_clock", "control", "receiver_report"},
     "views": {"document"},
 }

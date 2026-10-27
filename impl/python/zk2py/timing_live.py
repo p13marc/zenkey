@@ -1,0 +1,566 @@
+"""``timing.v1`` on a bus (profile text 0.1, core 0.53; #609, round 76).
+
+- :class:`Reader` is a consumer of a timed resource (§2.1, §2.5, §2.6) for
+  one provider address: a :class:`zk2py.timing.Tracker` per resource with a
+  deadline, judged at every arrival and at instants it sets itself (a
+  one-shot wait at the earliest instant a miss is due, §2.5), fed the
+  owner's token as :class:`zk2py.presence.PresenceFollower` observes it (a
+  liveliness subscriber on a watch session, reads on a session that never
+  held one, a read 100 ms after a withdrawal, core §8.1, 0.37) and each
+  member's end at a complete read that shows no member token of it; a
+  :class:`zk2py.timing.LifespanReading` per resource, on the ε it is given,
+  against the ``meta.zid`` of every descriptor of the address it holds. It
+  subscribes to the address's instance keys, so it holds a new instance's
+  descriptor before its first sample: core §3.3 puts the first descriptor
+  in §8.2 step 3, before any token. An expired sample is discarded, never
+  handed on and no arrival; every other sample is handed on (§2.6).
+- :class:`Window` is a tool's window over it (§2.7): presence followed and
+  the descriptors held first, then the subscriptions (the window's start),
+  the trackers evaluated at its end, and §5's three questions per member.
+- :func:`stamped_clock` is an owner's stamping clock offset from its host's
+  wall clock (the scenarios' ``simulate_offset``).
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from . import timing as tm
+from .presence import DOWN, UP, PresenceFollower
+
+NS = 1_000_000_000
+
+
+def _template_expr(template: str) -> str:
+    from .owner import _template_key
+
+    return _template_key(template)
+
+
+@dataclass
+class Arrival:
+    """One sample as the reader took it: its key, its arrival on the
+    monotonic clock and the wall clock then, its stamp, its lifespan's
+    judgement, and whether it was handed on."""
+
+    rid: str
+    key: str
+    mono_ns: int
+    wall_ns: int
+    stamp_ns: int | None
+    stamp_id: str | None
+    verdict: tm.Verdict
+    handed: bool
+    payload: bytes
+
+
+@dataclass
+class _Resource:
+    rid: str
+    r: dict[str, Any]
+    decl: tm.Declaration
+    expr: str
+    known: list[str]
+    tracker: tm.Tracker | None
+    lifespan: tm.LifespanReading
+    epoch: str | None
+    #: the instant each member first began to be held: its first arrival, or
+    #: the start of its wait (a known member), for a tool's ``held``
+    first_held: dict[str, int] = field(default_factory=dict)
+
+
+class Reader:
+    """A consumer of ``rids`` (``<kind token>/<template>``) of ``iface`` at
+    ``address`` (``<system>/<service>``), its role bound to it (core R1).
+
+    ``params`` binds template parameters (core R2): a template whose every
+    parameter is bound has its member known. ``epsilon_ms`` is the
+    deployment's ε, None for none stated. ``on_value`` is the application:
+    called with (key, payload) for each sample handed on. ``on_report`` is
+    called with (rid, :class:`zk2py.timing.Report`) for each deadline
+    report. With ``seed_first`` the subscriptions are declared only once the
+    follower's first read is folded and every instance it shows has its
+    descriptor held (a tool's window, §2.7). With ``subscribe_first`` they
+    are declared before the follower exists, as scenarios §6 lists a tool's
+    steps (F-263)."""
+
+    def __init__(self, session: Any, watch: Any, address: str, contract: Any, rids: list[str], *,
+                 epsilon_ms: int | float | None = None, params: dict[str, str] | None = None,
+                 on_value: Callable[[str, bytes], None] | None = None,
+                 on_report: Callable[[str, tm.Report], None] | None = None,
+                 seed_first: bool = False, seed_timeout_s: float = 3.0, subscribe_first: bool = False) -> None:
+        self.session, self.watch, self.address = session, watch, address
+        self.system, self.service = address.split("/", 1)
+        canonical = contract.canonical if hasattr(contract, "canonical") else contract
+        self.iface = canonical["interface"]
+        self.epsilon_ms = epsilon_ms
+        self.params = dict(params or {})
+        self.on_value, self.on_report = on_value, on_report
+        self.lock = threading.RLock()
+        self.cond = threading.Condition(self.lock)
+        self.closed = False
+        self.owner_state = tm.UNSEEN
+        #: (monotonic ns, state) of each change of the owner's token as observed
+        self.owner_states: list[tuple[int, str]] = []
+        self.arrivals: list[Arrival] = []
+        self.reports: list[tuple[str, tm.Report]] = []
+        #: samples on a wildcard key (core R6) and delete samples: no arrival
+        self.discarded: list[str] = []
+        self.deletes: list[str] = []
+        #: descriptors held, by instance
+        self.descriptors: dict[str, dict[str, Any]] = {}
+        #: when each instance's first descriptor reached the reader, and how
+        #: (its ``put``, core §3.3, or a ``get``)
+        self.descriptor_at: dict[str, tuple[int, str]] = {}
+        self._fetching: set[str] = set()
+        #: the instants a tick ran late past a report's detection bound
+        self.late: list[tuple[str, int]] = []
+        self.resources: dict[str, _Resource] = {}
+        by_rid = {f"{r['token']}/{r['template']}": r for r in canonical["resources"]}
+        for rid in rids:
+            r = by_rid[rid]
+            decl = tm.declaration(r["kind"], r.get("annotations", {}))
+            base = f"zk2/{address}/{self.iface}/{r['token']}"
+            known = self._known(base, r)
+            bound = self._bound(r)
+            dl = decl.judged_deadline_ms
+            tracker = None if dl is None else tm.Tracker(dl, bound, known)
+            self.resources[rid] = _Resource(rid, r, decl, f"{base}/{_template_expr(r['template'])}", known, tracker,
+                                            tm.LifespanReading(decl, epsilon_ms), r.get("epoch"))
+        self._folds_seen = 0
+        self.subs: list[Any] = []
+        self.start_ns: int | None = None
+        if subscribe_first:
+            # §6's setup in its listed order: subscribed, then presence
+            # followed, then the descriptor read (F-263)
+            self._subscribe()
+        # Presence first: the follower (its seed read made in its
+        # constructor), then the descriptors' puts.
+        self.follower = PresenceFollower(session, watch, f"zk2/{address}/@zk/**")
+        import zenoh
+
+        self.subs.append(session.declare_subscriber(f"zk2/{address}/@zk/instance/*",
+                                                    zenoh.handlers.Callback(self._descriptor_put)))
+        self._threads = [threading.Thread(target=self._presence_loop, daemon=True),
+                         threading.Thread(target=self._timer_loop, daemon=True)]
+        for th in self._threads:
+            th.start()
+        if seed_first:
+            self.wait_seeded(seed_timeout_s)
+        if not subscribe_first:
+            self._subscribe()
+
+    # -- setup ----------------------------------------------------------------------
+
+    def _known(self, base: str, r: dict[str, Any]) -> list[str]:
+        """v1.md §0: a member is known when its template has no parameter, or
+        the reader's binding binds every one (core R2)."""
+        from . import templates
+
+        tpl = templates.parse_template(r["template"])
+        names = [s.text for s in tpl.segments if s.kind != templates.LITERAL]
+        if any(n not in self.params for n in names):
+            return []
+        from .slug import slug
+
+        chunks = [slug(self.params[s.text]) if s.kind != templates.LITERAL else s.text for s in tpl.segments]
+        return [f"{base}/{'/'.join(chunks)}"]
+
+    def _bound(self, r: dict[str, Any], stated: int | None = None) -> int | None:
+        """Core §2.7 (v1.md §2.5): the instance's stated cardinality, else the
+        contract's; one for a template without parameters; none for
+        4294967295."""
+        if not r.get("params"):
+            return 1
+        b = r.get("cardinality")
+        if b is None:
+            return None
+        if stated is not None and 1 <= stated <= b:
+            b = stated
+        return None if b == 4294967295 else b
+
+    def _subscribe(self) -> None:
+        import zenoh
+
+        t0 = time.monotonic_ns()
+        with self.lock:
+            self.start_ns = t0
+            for res in self.resources.values():
+                if res.tracker is not None:
+                    self._apply(res, res.tracker.start(t0))
+        for res in self.resources.values():
+            self.subs.append(self.session.declare_subscriber(
+                res.expr, zenoh.handlers.Callback(lambda s, res=res: self._sample(res, s))))
+
+    def wait_seeded(self, timeout_s: float) -> bool:
+        """Until the follower's first read is folded and every instance it
+        shows has its descriptor held."""
+        end = time.monotonic() + timeout_s
+        while time.monotonic() < end:
+            with self.follower.lock:
+                folded = bool(self.follower.folds)
+                instances = {k.rsplit("/", 1)[1] for x in self.follower.view.holders.values() for k in x.held
+                             if "/@zk/instance/" in k}
+            with self.lock:
+                have = set(self.descriptors)
+            if folded and instances <= have:
+                # the seed's word applied before the window starts (§2.7: the
+                # owner present at its start)
+                self._presence_changed()
+                return True
+            time.sleep(0.01)
+        return False
+
+    # -- descriptors (meta.zid, core §3.3) ------------------------------------------
+
+    def _descriptor_put(self, sample: Any) -> None:
+        at = time.monotonic_ns()
+        try:
+            doc = json.loads(sample.payload.to_bytes())
+        except ValueError:
+            return
+        self._take_descriptor(doc, at, "put")
+
+    def _take_descriptor(self, doc: Any, at: int | None = None, source: str = "get") -> None:
+        if not isinstance(doc, dict) or not isinstance(doc.get("instance"), str):
+            return
+        if doc.get("service") != self.address:
+            return
+        meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
+        with self.lock:
+            if doc["instance"] not in self.descriptors:
+                self.descriptor_at[doc["instance"]] = (time.monotonic_ns() if at is None else at, source)
+            self.descriptors[doc["instance"]] = doc
+            zid = meta.get("zid")
+            for res in self.resources.values():
+                if isinstance(zid, str):
+                    res.lifespan.add_owner(zid)
+                for e in doc.get("interfaces", []):
+                    if isinstance(e, dict) and e.get("iface") == self.iface and res.tracker is not None:
+                        stated = (e.get("cardinality") or {}).get(res.rid)
+                        if isinstance(stated, int):
+                            res.tracker.bound = self._bound(res.r, stated)
+        self._presence_changed()
+
+    def _fetch_descriptors(self, instances: set[str]) -> None:
+        from . import live
+
+        for inst in instances:
+            with self.lock:
+                if inst in self.descriptors or inst in self._fetching:
+                    continue
+                self._fetching.add(inst)
+
+            def go(inst: str = inst) -> None:
+                try:
+                    for a in live.get_descriptor(self.session, f"zk2/{self.address}/@zk/instance/{inst}"):
+                        if a.ok:
+                            try:
+                                self._take_descriptor(json.loads(a.payload), None, "get")
+                            except ValueError:
+                                pass
+                            break
+                finally:
+                    with self.lock:
+                        self._fetching.discard(inst)
+
+            threading.Thread(target=go, daemon=True).start()
+
+    # -- samples ----------------------------------------------------------------------
+
+    def _sample(self, res: _Resource, sample: Any) -> None:
+        import zenoh
+
+        mono, wall = time.monotonic_ns(), time.time_ns()
+        key = str(sample.key_expr)
+        if "*" in key or "$" in key:
+            with self.lock:
+                self.discarded.append(key)  # core R6
+            return
+        if sample.kind == zenoh.SampleKind.DELETE:
+            with self.lock:
+                self.deletes.append(key)  # "a delete sample is none": a stream's samples are values
+            return
+        ts = sample.timestamp
+        stamp_ns = None if ts is None else ts.get_time_as_ntp64().as_nanos()
+        stamp_id = None if ts is None else str(ts.get_id())
+        stamp = None if ts is None else tm.Stamp(wall - stamp_ns, stamp_id)
+        payload = sample.payload.to_bytes()
+        with self.lock:
+            v = res.lifespan.judge(stamp)
+            expired = v.verdict == tm.EXPIRED
+            if res.tracker is not None:
+                self._apply(res, res.tracker.arrival(mono, key, expired))
+            if not expired and key not in res.first_held and (res.tracker is None or key in res.tracker.members):
+                res.first_held[key] = mono
+            self.arrivals.append(Arrival(res.rid, key, mono, wall, stamp_ns, stamp_id, v, not expired, payload))
+            self.cond.notify_all()
+        # §2.6: "A consumer MUST discard an expired sample: it does not hand it
+        # to its application as a value … It MUST NOT discard a sample whose
+        # lifespan is live, unobservable or not asked."
+        if not expired and self.on_value is not None:
+            self.on_value(key, payload)
+
+    def _apply(self, res: _Resource, reports: list[tm.Report]) -> None:
+        """Record a tracker's reports (the lock held), and each known
+        member's wait as it begins."""
+        if res.tracker is not None:
+            for name in res.known:
+                m = res.tracker.members.get(name)
+                if m is not None and m.wait is not None and name not in res.first_held:
+                    res.first_held[name] = m.wait
+        for r in reports:
+            self.reports.append((res.rid, r))
+            if r.event == "missed" and r.at_ns > (r.by_ns or 0):
+                self.late.append((r.member, r.at_ns - (r.by_ns or 0)))
+            if self.on_report is not None:
+                self.on_report(res.rid, r)
+        self.cond.notify_all()
+
+    # -- presence -----------------------------------------------------------------------
+
+    def _presence_loop(self) -> None:
+        # from the follower's first version: a fold before this thread first
+        # waits is never missed
+        v: int | None = 0
+        while not self.closed:
+            got = self.follower.next_move(0.5, since=v)
+            if self.closed:
+                return
+            if got is not None:
+                v = got
+            self._presence_changed()
+
+    def _tokenless(self) -> bool:
+        with self.lock:
+            for doc in self.descriptors.values():
+                for e in doc.get("interfaces", []):
+                    if isinstance(e, dict) and e.get("iface") == self.iface and e.get("token") is False:
+                        return True
+        return False
+
+    def _presence_changed(self) -> None:
+        """The owner's token as observed (v1.md §0), and each held member of
+        an epoch template whose member tokens a complete read shows gone:
+        any complete, ordered read showing none of it, as the text and
+        deadlines.json's ``member_gone`` say, whether or not one was ever
+        seen (F-261)."""
+        from .slug import slug
+        from . import templates
+
+        tokenless = self._tokenless()
+        f = self.follower
+        with f.lock:
+            if tokenless:
+                st, _ = f.view.state(("instance", self.system, self.service))
+            else:
+                st, _ = f.view.state(("alive", self.system, self.service, self.iface))
+            new_folds = f.folds[self._folds_seen:]
+            self._folds_seen = len(f.folds)
+            complete = any(kind == "complete" and ordered for kind, ordered in new_folds)
+            instances = {k.rsplit("/", 1)[1] for x in f.view.holders.values() for k in x.held
+                         if "/@zk/instance/" in k}
+            gone: dict[str, list[str]] = {}
+            if complete:
+                with self.lock:
+                    for res in self.resources.values():
+                        if res.tracker is None or not res.epoch:
+                            continue
+                        tpl = templates.parse_template(res.r["template"])
+                        prefix = f"zk2/{self.address}/{self.iface}/{res.r['token']}/"
+                        for m in res.tracker.held():
+                            b = templates.match(tpl, m[len(prefix):].split("/")) if m.startswith(prefix) else None
+                            if not b or res.epoch not in b:
+                                continue
+                            h = ("member", self.system, self.service, self.iface, slug(b[res.epoch][0]))
+                            if f.view.state(h)[0] == DOWN:
+                                gone.setdefault(res.rid, []).append(m)
+        if tokenless and st == UP and not self._tokenless_listed():
+            st = "unobservable"
+        now = time.monotonic_ns()
+        with self.lock:
+            if st == UP:
+                state = tm.PRESENT
+            elif st == DOWN:
+                state = tm.ABSENT
+            else:
+                # a withdrawal heard, a read not made or possibly incomplete,
+                # a transport's move: not present, never absent by itself
+                state = tm.UNCONFIRMED if self.owner_state in (tm.PRESENT, tm.UNCONFIRMED) else self.owner_state
+            if state != self.owner_state:
+                self.owner_state = state
+                self.owner_states.append((now, state))
+                for res in self.resources.values():
+                    if res.tracker is not None:
+                        self._apply(res, res.tracker.owner(now, state))
+            for rid, members in gone.items():
+                res = self.resources[rid]
+                for m in members:
+                    self._apply(res, res.tracker.member_gone(now, m))
+        self._fetch_descriptors(instances)
+
+    def _tokenless_listed(self) -> bool:
+        """For a tokenless interface, "its descriptor listing the interface"."""
+        with self.lock:
+            return any(any(isinstance(e, dict) and e.get("iface") == self.iface for e in d.get("interfaces", []))
+                       for d in self.descriptors.values())
+
+    # -- the reader's own instants (§2.5) --------------------------------------------
+
+    def _timer_loop(self) -> None:
+        """A one-shot wait at the earliest instant a miss is due among the
+        members held (or one is forgotten): "A one-shot timer set at the
+        earliest instant a miss is due among them meets the bound"."""
+        while True:
+            with self.cond:
+                if self.closed:
+                    return
+                nxt = min((i for res in self.resources.values() if res.tracker is not None
+                           and (i := res.tracker.next_instant()) is not None), default=None)
+                now = time.monotonic_ns()
+                if nxt is None or nxt > now:
+                    self.cond.wait(0.5 if nxt is None else min((nxt - now) / NS, 0.5))
+                    continue
+                for res in self.resources.values():
+                    if res.tracker is not None:
+                        self._apply(res, res.tracker.tick(now))
+
+    def tick(self, at_ns: int | None = None) -> None:
+        """Judge every member at an instant (a tool's window end)."""
+        now = time.monotonic_ns() if at_ns is None else at_ns
+        with self.lock:
+            for res in self.resources.values():
+                if res.tracker is not None:
+                    self._apply(res, res.tracker.tick(now))
+
+    # -- reading it -----------------------------------------------------------------------
+
+    def reports_of(self, member: str | None = None, event: str | None = None) -> list[tm.Report]:
+        with self.lock:
+            return [r for _, r in self.reports if (member is None or r.member == member)
+                    and (event is None or r.event == event)]
+
+    def arrivals_of(self, key: str) -> list[Arrival]:
+        with self.lock:
+            return [a for a in self.arrivals if a.key == key]
+
+    def present_at(self) -> int | None:
+        """The instant the reader first saw its owner present."""
+        with self.lock:
+            return next((t for t, s in self.owner_states if s == tm.PRESENT), None)
+
+    def close(self) -> None:
+        with self.cond:
+            self.closed = True
+            self.cond.notify_all()
+        for s in self.subs:
+            try:
+                s.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        self.follower.close()
+
+
+class Window:
+    """A tool's window over ``address`` (§2.7): it follows presence and holds
+    the descriptors first, then subscribes (the window's start, F-263), and
+    at the end evaluates every tracker and answers §5's questions of every
+    member it held in the window, one that ended in it included (§2.7's
+    "each member it holds over a window", F-267)."""
+
+    def __init__(self, session: Any, watch: Any, address: str, contract: Any, rids: list[str], *,
+                 epsilon_ms: int | float | None = None, params: dict[str, str] | None = None,
+                 across_face: bool = False, seed_first: bool = True) -> None:
+        """``seed_first`` False opens the window (the subscriptions) before
+        the first presence read lands, as §6's setup lists the steps
+        (F-263): the owner is then unseen at the window's start."""
+        from .budget import StallWatch
+
+        self.across_face = across_face
+        self.stall = StallWatch(session)
+        self.reader = Reader(session, watch, address, contract, rids, epsilon_ms=epsilon_ms, params=params,
+                             seed_first=seed_first, subscribe_first=not seed_first)
+        self.start_ns = self.reader.start_ns
+        self.end_ns: int | None = None
+
+    def end(self) -> dict[str, dict[str, tm.Answer]]:
+        """The window's end: every tracker evaluated there, then each
+        member's reading and §5's three answers."""
+        rd = self.reader
+        self.end_ns = end = time.monotonic_ns()
+        rd.tick(end)
+        gap_ms, closed = self.stall.reading()
+        lost = closed or gap_ms > self.stall.bound_ms
+        out: dict[str, dict[str, tm.Answer]] = {}
+        self.readings: dict[str, tm.Reading] = {}
+        start = self.start_ns
+        assert start is not None
+        with rd.lock:
+            states = list(rd.owner_states)
+            present_at_start = self._state_at(states, start) == tm.PRESENT
+            present_throughout = present_at_start and all(s == tm.PRESENT for t, s in states if start < t <= end)
+            for res in rd.resources.values():
+                members = set(res.first_held) | set(res.known)
+                if res.tracker is not None:
+                    members |= set(res.tracker.members)
+                for m in sorted(members):
+                    out[m] = tm.conclude(res.decl, self._reading(res, m, start, end, lost, present_throughout))
+        return out
+
+    @staticmethod
+    def _state_at(states: list[tuple[int, str]], t: int) -> str:
+        s = tm.UNSEEN
+        for at, st in states:
+            if at <= t:
+                s = st
+        return s
+
+    def _reading(self, res: _Resource, m: str, start: int, end: int, lost: bool, present: bool) -> tm.Reading:
+        rd = self.reader
+        mine = [r for rid, r in rd.reports if rid == res.rid and r.member == m and start <= r.at_ns <= end]
+        arr = [a.mono_ns for a in rd.arrivals if a.key == m and a.handed]
+        ends = [r.at_ns for r in mine if r.event == "ended"]
+        ended_at = ends[-1] if ends and not any(t > ends[-1] for t in arr) else None
+        first = res.first_held.get(m)
+        held = 0 if first is None else max(0, (ended_at if ended_at is not None else end) - max(start, first))
+        missed = [r for r in mine if r.event == "missed"]
+        acct = tm.DeadlineAccount(held, sum(1 for r in missed if r.owner == tm.PRESENT),
+                                  sum(1 for r in missed if r.owner != tm.PRESENT), bool(ends))
+        known = m in res.known
+        # conclude() reads the kind, the declaration, the key and the face
+        # before the period's verdict, so with no period this is never read
+        per = (tm.period(res.decl.period_ms, start, end, known, ended_at, arr).verdict
+               if res.decl.period_ms is not None else tm.NOT_HEARD)
+        lifespans = tuple(a.verdict for a in rd.arrivals if a.key == m)
+        reading = tm.Reading(acct, per, lifespans, self.across_face, lost, present)
+        self.readings[m] = reading
+        return reading
+
+    def close(self) -> None:
+        self.reader.close()
+        self.stall.close()
+
+
+def stamped_clock(session: Any, offset_ns: Callable[[], int] | int = 0) -> Callable[[], Any]:
+    """An owner's stamping clock: its host's wall clock plus ``offset_ns``
+    (a number, or a function of nothing giving one), under its session's
+    zid, as the scenarios' runner sets an owner's clock (``simulate_offset``).
+    Read from the wall clock, never the session's HLC, which follows the
+    later stamps it routes (core §4.1, 0.53)."""
+    import zenoh
+
+    zid = session.new_timestamp().get_id()
+
+    def clock() -> Any:
+        off = offset_ns() if callable(offset_ns) else offset_ns
+        n = time.time_ns() + off
+        return zenoh.Timestamp(zenoh.NTP64(n // NS, n % NS), zid)
+
+    return clock
+
+
+__all__ = ["Reader", "Window", "Arrival", "stamped_clock"]
