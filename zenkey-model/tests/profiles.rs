@@ -3566,6 +3566,9 @@ fn timing_conclusions() {
 // (the BA chunk's, before this module ran), so these runners check them; a
 // bless claims the reference and the text agree.
 
+/// One resource of a revision, as `declarations.json` writes it.
+type AbOffer = (KindToken, Template, BTreeMap<String, Value>);
+
 fn ab_ifaces(v: &Value) -> Vec<zenkey_model::grammar::IfaceId> {
     v.as_array()
         .expect("uses")
@@ -3653,20 +3656,17 @@ fn arbitration_declarations() {
             annotations: &anns,
         };
         let p = &case["provider"];
-        let (iface, puses, offered): (
-            Option<zenkey_model::grammar::IfaceId>,
-            Vec<zenkey_model::grammar::IfaceId>,
-            Vec<(KindToken, Template, BTreeMap<String, Value>)>,
-        ) = if p.is_null() {
-            (None, Vec::new(), Vec::new())
+        let iface: Option<zenkey_model::grammar::IfaceId> = (!p.is_null())
+            .then(|| p["interface"].as_str().expect("interface").parse().expect("an id"));
+        let puses = if p.is_null() {
+            Vec::new()
         } else {
-            (
-                Some(p["interface"].as_str().expect("interface").parse().expect("an id")),
-                ab_ifaces(&p["uses"]),
-                p["resources"]
-                    .as_array()
-                    .expect("resources")
-                    .iter()
+            ab_ifaces(&p["uses"])
+        };
+        let offered: Vec<AbOffer> = p["resources"]
+            .as_array()
+            .map(|rs| {
+                rs.iter()
                     .map(|r| {
                         (
                             link_token(&r["token"]),
@@ -3675,9 +3675,9 @@ fn arbitration_declarations() {
                             annotations(&r["annotations"]),
                         )
                     })
-                    .collect(),
-            )
-        };
+                    .collect()
+            })
+            .unwrap_or_default();
         let rev = iface.as_ref().map(|iface| arbitration::Revision {
             iface,
             uses: &puses,
