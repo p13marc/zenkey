@@ -411,7 +411,54 @@ async fn s3_a_member_never_heard() {
     let sub2 = listen(&c2, AXIS, &heard2).await;
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(heard2.events().is_empty(), "{:?}", heard2.events());
-    drop((sub, sub2));
+    // 5. C3 binds axis to x, a known member of an epoch template (text
+    // 0.2, F-261): its owner present, it is waited for by nothing until a
+    // member token of x is seen, then missed from that instant.
+    let mut o = o;
+    let (c3s, c3w) = (client(&ep).await, client(&ep).await);
+    let heard3 = Arc::new(Heard::default());
+    let c3 = Consumer::for_tool(
+        &c3s,
+        Arc::new(contract("pace.v1")),
+        &[ADDR],
+        &[("axis".to_owned(), "x".to_owned())].into(),
+    )
+    .unwrap()
+    .with_watch(c3w.clone());
+    let sub3 = listen(&c3, AXIS, &heard3).await;
+    assert_eq!(
+        sub3.owner_state(&ADDR.parse().unwrap()),
+        OwnerState::Present
+    );
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        heard3.events().is_empty(),
+        "nothing waited for: {:?}",
+        heard3.events()
+    );
+    let m0 = Instant::now();
+    o.svc.declare_member(&pace(), "x").await.unwrap();
+    let m1 = Instant::now();
+    let xk = axis_key("x");
+    eventually("C3 reports axis/x missed", || async {
+        !heard3.events_of(&xk).is_empty()
+    })
+    .await;
+    let ev = heard3.events_of(&xk)[0].clone();
+    let TimingEvent::Missed { due, at, .. } = &ev else {
+        panic!("{ev:?}");
+    };
+    assert!(*due >= m0 + DEADLINE, "due before the member token");
+    assert!(
+        *due <= m1 + DEADLINE + Duration::from_millis(500),
+        "due long after it"
+    );
+    assert!(
+        at.duration_since(*due) <= BOUND + ALLOWANCE,
+        "{:?}",
+        at.duration_since(*due)
+    );
+    drop((sub, sub2, sub3));
     o.svc.close().await.unwrap();
 }
 
@@ -439,6 +486,15 @@ async fn lifespan_step(
     let t0 = Instant::now();
     let o = owner(&os, offset_ms.load(Ordering::Relaxed)).await;
     let t1 = Instant::now();
+    // F-266: the owner publishes once C holds its descriptor, so no
+    // sample reads unattributed (§2.6 step 6).
+    if epsilon_ms.is_some() {
+        let zid = zenkey::timing::zid_value(&os.zid().to_string()).unwrap();
+        eventually("C holds the owner's meta.zid", || async {
+            sub.owner_zids(&ADDR.parse().unwrap()).contains(&zid)
+        })
+        .await;
+    }
     let (on, stop) = (
         Arc::new(AtomicBool::new(true)),
         Arc::new(AtomicBool::new(false)),
@@ -576,8 +632,12 @@ async fn unstamped_step(ep: &str, owner_hlc: bool) -> (Arc<Heard>, String) {
     b.expose(&pace(), CMD).unwrap();
     b.expose(&pace(), AXIS).unwrap();
     let svc = b.start().await.unwrap();
-    // C holds the owner's meta.zid before the first sample.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // F-266: C holds the owner's meta.zid before the first sample.
+    let zid = zenkey::timing::zid_value(&os.zid().to_string()).unwrap();
+    eventually("C holds the owner's meta.zid", || async {
+        sub.owner_zids(&ADDR.parse().unwrap()).contains(&zid)
+    })
+    .await;
     let publisher = os.declare_publisher(CMD_KEY).await.unwrap();
     for _ in 0..20 {
         let ten_s_ago = std::time::SystemTime::now() - Duration::from_secs(10);

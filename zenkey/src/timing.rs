@@ -169,6 +169,9 @@ pub(crate) struct Plan {
     pub(crate) epoch_at: Option<usize>,
     /// The known members' keys (§0), per exact provider.
     pub(crate) known: BTreeMap<Addr, Vec<String>>,
+    /// A known member's epoch chunk, on a template that declares `epoch`:
+    /// the member its member tokens name (core §8.1).
+    pub(crate) known_epoch: Option<String>,
     pub(crate) iface: IfaceId,
 }
 
@@ -208,6 +211,7 @@ impl Plan {
             })
             .collect();
         let mut known = BTreeMap::new();
+        let known_epoch = epoch_at.and_then(|at| chunks.as_ref()?.get(at).cloned());
         if let Some(chunks) = chunks {
             let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
             for p in providers {
@@ -229,6 +233,7 @@ impl Plan {
             bound,
             epoch_at,
             known,
+            known_epoch,
             iface: iface.clone(),
         }
     }
@@ -256,6 +261,9 @@ struct ProviderTiming {
     asked: BTreeSet<u128>,
     /// Each held member's epoch chunk, for its member token (core §8.1).
     epochs: BTreeMap<String, String>,
+    /// The epoch chunks a member token of which was seen and not since
+    /// shown gone (§2.5, text 0.2, F-261).
+    seen: BTreeSet<String>,
 }
 
 /// A subscription's engine: every provider's judging, behind one lock.
@@ -266,6 +274,9 @@ pub(crate) struct Engine {
     /// The owner's state per address, as the presence follower last said,
     /// with the instant it said it.
     owners: BTreeMap<Addr, (OwnerState, Instant)>,
+    /// Member chunks seen of an address no provider timing exists for yet:
+    /// handed to it when its first sample makes one.
+    pending_seen: BTreeMap<Addr, BTreeSet<String>>,
     events: tokio::sync::mpsc::UnboundedSender<TimingEvent>,
     expired: Arc<AtomicU64>,
     /// Woken when a due may have moved earlier.
@@ -286,9 +297,19 @@ impl Engine {
 
     fn provider(&mut self, addr: &Addr) -> &mut ProviderTiming {
         if !self.providers.contains_key(addr) {
+            let known = self.plan.known.get(addr).cloned().unwrap_or_default();
+            let mut epochs = BTreeMap::new();
+            if let Some(c) = &self.plan.known_epoch {
+                for k in &known {
+                    epochs.insert(k.clone(), c.clone());
+                }
+            }
+            let epoch = self.plan.epoch_at.is_some();
             let tracker = self.plan.deadline.map(|d| {
-                let known = self.plan.known.get(addr).cloned().unwrap_or_default();
                 let mut t = Tracker::new(d, self.plan.bound, known);
+                if epoch {
+                    t = t.with_epoch();
+                }
                 t.observe(Mono::ZERO, Event::Start);
                 if let Some((state, since)) = self.owners.get(addr) {
                     let at = Mono::after(since.saturating_duration_since(self.origin));
@@ -311,9 +332,17 @@ impl Engine {
                     lifespan,
                     owners: BTreeSet::new(),
                     asked: BTreeSet::new(),
-                    epochs: BTreeMap::new(),
+                    epochs,
+                    seen: BTreeSet::new(),
                 },
             );
+        }
+        if let Some(seen) = self.pending_seen.remove(addr) {
+            self.providers
+                .get_mut(addr)
+                .expect("inserted above")
+                .seen
+                .extend(seen);
         }
         self.providers.get_mut(addr).expect("inserted above")
     }
@@ -397,18 +426,25 @@ impl Engine {
         // §2.5: a delete sample is no arrival.
         let reports = match (&mut p.tracker, delete) {
             (Some(t), false) => {
+                let mut reports = Vec::new();
                 if let Some(at) = epoch_at
                     && let Some(c) = chunks.get(at)
                 {
                     p.epochs.insert(key.to_owned(), c.clone());
+                    // A member token of it seen before its first arrival
+                    // (F-261): its tracker learns it here.
+                    if p.seen.contains(c) {
+                        reports.extend(t.observe(mono, Event::MemberSeen(key)));
+                    }
                 }
-                t.observe(
+                reports.extend(t.observe(
                     mono,
                     Event::Arrival {
                         member: key,
                         expired,
                     },
-                )
+                ));
+                reports
             }
             _ => Vec::new(),
         };
@@ -475,13 +511,50 @@ impl Engine {
         }
     }
 
+    /// A member token of `addr`'s member `member` (an epoch chunk) seen
+    /// (§2.5, text 0.2, F-261): every held member it names learns it, a
+    /// known one never heard waited for from it.
+    fn member_seen(&mut self, addr: &Addr, member: &str, at: Instant) {
+        if !self.plan.known.contains_key(addr) && !self.providers.contains_key(addr) {
+            // Kept for the provider's first sample: nothing to judge yet.
+            self.pending_seen
+                .entry(addr.clone())
+                .or_default()
+                .insert(member.to_owned());
+            return;
+        }
+        let mono = self.mono(at);
+        let p = self.provider(addr);
+        if !p.seen.insert(member.to_owned()) {
+            return;
+        }
+        let keys: Vec<String> = p
+            .epochs
+            .iter()
+            .filter(|(_, c)| c.as_str() == member)
+            .map(|(k, _)| k.clone())
+            .collect();
+        let mut reports = Vec::new();
+        if let Some(t) = p.tracker.as_mut() {
+            for k in &keys {
+                reports.extend(t.observe(mono, Event::MemberSeen(k)));
+            }
+        }
+        self.send(addr, reports);
+        self.rearm.notify_one();
+    }
+
     /// Every member of `addr` whose epoch chunk is `member` ends (§2.5):
-    /// a complete read shows no member token of it.
+    /// a complete read shows no member token of it, after one was seen.
     fn member_gone(&mut self, addr: &Addr, member: &str, at: Instant) {
         let mono = self.mono(at);
+        if let Some(p) = self.pending_seen.get_mut(addr) {
+            p.remove(member);
+        }
         let Some(p) = self.providers.get_mut(addr) else {
             return;
         };
+        p.seen.remove(member);
         let keys: Vec<String> = p
             .epochs
             .iter()
@@ -512,6 +585,14 @@ impl Engine {
         if let Some(r) = p.lifespan.as_mut() {
             r.set_owners(owners);
         }
+    }
+
+    /// The `meta.zid`s held of `addr`'s instances (§2.6).
+    pub(crate) fn owner_zids(&self, addr: &Addr) -> BTreeSet<u128> {
+        self.providers
+            .get(addr)
+            .map(|p| p.owners.clone())
+            .unwrap_or_default()
     }
 
     /// The owner's state of `addr`, as the reader last observed it.
@@ -587,6 +668,7 @@ pub(crate) fn prepare(plan: Plan, origin: Instant) -> Option<Prepared> {
         origin,
         providers: BTreeMap::new(),
         owners: BTreeMap::new(),
+        pending_seen: BTreeMap::new(),
         events,
         expired: Arc::clone(&expired),
         rearm: Arc::clone(&rearm),
@@ -729,6 +811,7 @@ impl Prepared {
                 barrier,
                 alive: BTreeMap::new(),
                 members: BTreeMap::new(),
+                epoch,
             };
             // Seeded before the subscription is handed back: the owner's
             // presence as a read after the round trip shows it.
@@ -820,6 +903,8 @@ struct Follower {
     alive: BTreeMap<Addr, BTreeSet<String>>,
     /// Each (address, member chunk)'s member tokens held.
     members: BTreeMap<(Addr, String), BTreeSet<String>>,
+    /// The template declares `epoch`: member tokens are followed.
+    epoch: bool,
 }
 
 /// A read owed after a withdrawal.
@@ -918,6 +1003,25 @@ impl Follower {
                 self.alive.insert(a.clone(), keys);
                 self.engine().owner(&a, OwnerState::Present, now);
             }
+            // F-261: the member tokens held, each a member seen.
+            if self.epoch {
+                let sel = format!("zk2/{sys}/{svc}/@zk/member/{}/**", self.iface);
+                let Ok(read) =
+                    crate::presence::liveliness_read(&self.session, &sel, READ_TIMEOUT).await
+                else {
+                    continue;
+                };
+                let now = Instant::now();
+                for k in &read.keys {
+                    if let Ok(ZkKey::Member { addr, member, .. }) = parse(k) {
+                        self.members
+                            .entry((addr.clone(), member.clone()))
+                            .or_default()
+                            .insert(k.clone());
+                        self.engine().member_seen(&addr, &member, now);
+                    }
+                }
+            }
         }
     }
 
@@ -942,6 +1046,9 @@ impl Follower {
                 member,
                 ..
             }) if iface == self.iface => {
+                // Heard declared or withdrawn, a token of it was held
+                // (F-261).
+                self.engine().member_seen(&addr, &member, h.at);
                 let held = self
                     .members
                     .entry((addr.clone(), member.clone()))

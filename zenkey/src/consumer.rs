@@ -817,6 +817,21 @@ impl Subscription {
             .member_state(provider, key)
     }
 
+    /// The `meta.zid`s this subscription holds of `provider`'s instances,
+    /// read from their descriptors (`timing.v1` §2.6): empty for a
+    /// subscription that judges no lifespan.
+    #[must_use]
+    pub fn owner_zids(&self, provider: &Addr) -> Vec<u128> {
+        self.timing.as_ref().map_or_else(Vec::new, |t| {
+            t.engine
+                .lock()
+                .expect("not poisoned")
+                .owner_zids(provider)
+                .into_iter()
+                .collect()
+        })
+    }
+
     /// The instant this subscription was declared: its deadlines' origin
     /// (`timing.v1` §2.5).
     #[must_use]
