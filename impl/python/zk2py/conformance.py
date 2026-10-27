@@ -1168,6 +1168,74 @@ def _redundancy_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _timing_declarations(path: Path) -> list[Result]:
+    """timing.v1 §2.2, §2.3, §2.5: a resolved resource (or its layers), or a
+    requirement -> its declaration."""
+    from . import timing as tm
+
+    return [_check(f"declarations #{i}: {c['note']}", tm.declaration_of(c).expect(), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _timing_deadlines(path: Path) -> list[Result]:
+    """timing.v1 §2.5: one reader's tracker for one provider and resource,
+    driven by its events -> its reports, what it holds, its next due."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        t = tm.Tracker(c["deadline_ms"], c["bound"], c["known"])
+        for e in c["events"]:
+            t.event(e)
+        due = t.next_due()
+        got = {"transitions": [r.expect() for r in t.reports], "held": t.held(),
+               "next_due_ms": None if due is None else tm.ns_to_ms(due)}
+        out.append(_check(f"deadlines #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _timing_lifespans(path: Path) -> list[Result]:
+    """timing.v1 §2.6: one member's samples in arrival order within one
+    reading -> each sample's lifespan judgement."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        decl = tm.declaration_of(c)
+        stamps = [None if s["stamp"] is None else tm.Stamp(tm.ms_to_ns(s["stamp"]["age_ms"]), s["stamp"]["id"])
+                  for s in c["samples"]]
+        got = [v.pair() for v in tm.judge_lifespans(decl, c["epsilon_ms"], c["owners"], stamps)]
+        out.append(_check(f"lifespans #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _timing_periods(path: Path) -> list[Result]:
+    """timing.v1 §2.7: one member's arrivals over a tool's window -> whether
+    the period was kept."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        w = c["window"]
+        got = tm.period(c["period_ms"], tm.ms_to_ns(w["from_ms"]), tm.ms_to_ns(w["to_ms"]), bool(c["known"]),
+                        None if c["ended_ms"] is None else tm.ms_to_ns(c["ended_ms"]),
+                        [tm.ms_to_ns(a) for a in c["arrivals_ms"]]).expect()
+        out.append(_check(f"periods #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _timing_conclusions(path: Path) -> list[Result]:
+    """timing.v1 §2.7, §5: a tool's reading of one member over one window ->
+    §5's three questions."""
+    from . import timing as tm
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = {q: a.pair() for q, a in tm.conclude(tm.declaration_of(c), tm.Reading.of(c["reading"])).items()}
+        out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -1192,6 +1260,9 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
                    "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions,
                    "polls.json": _redundancy_polls},
+    "timing": {"declarations.json": _timing_declarations, "deadlines.json": _timing_deadlines,
+               "lifespans.json": _timing_lifespans, "periods.json": _timing_periods,
+               "conclusions.json": _timing_conclusions},
 }
 
 
@@ -3280,8 +3351,101 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
-        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings()
+        + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
+        + _timing_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _timing_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """timing.v1 0.1 in :mod:`zk2py.timing` (#609, round 76): the adopters'
+    contracts, the profile's linter, and zk2py's readings of F-261, F-262
+    and F-264. No session is opened."""
+    from . import timing as tm
+    from .contract import load_contract
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "timing.v1 0.1"
+    repo = root.parent.parent
+    # Appendix A's two adopters, and core's ok-kinds (the text's §0 sources).
+    adopters = [(repo / "examples/zk2/walkthrough/twist_cmd.v1.toml", "stream/cmd",
+                 {"declaration": "declared", "period_ms": 20, "deadline_ms": 100, "lifespan_ms": 100,
+                  "below_period": False}),
+                (repo / "examples/zk2/walkthrough/nav.v2.toml", "stream/position",
+                 {"declaration": "declared", "period_ms": 100, "deadline_ms": None, "lifespan_ms": 500,
+                  "below_period": False}),
+                (repo / "impl/python/interop/timing/pace.v1.toml", "stream/cmd",
+                 {"declaration": "declared", "period_ms": 100, "deadline_ms": 500, "lifespan_ms": 300,
+                  "below_period": False}),
+                (repo / "impl/python/interop/timing/pace.v1.toml", "stream/axis/{axis}",
+                 {"declaration": "declared", "period_ms": 100, "deadline_ms": 500, "lifespan_ms": None,
+                  "below_period": False})]
+    for path, rid, want in adopters:
+        c = load_contract(path)
+        r = next(x for x in c.canonical["resources"] if f"{x['token']}/{x['template']}" == rid)
+        out.append((f"{label}: {path.name}'s {rid} declares as the text reads it",
+                    tm.declaration(r["kind"], r["annotations"]).expect(), want))
+        out.append((f"{label}: {path.name} draws no warning of the profile's linter", tm.lint(c.canonical), []))
+    # The linter's four SHOULDs (§2.2, §2.3, §2.5), over a canonical form.
+    canon = {"uses": ["timing.v1"], "requires": {"src": {"annotations": {"timing.deadline_ms": 50}},
+                                                 "plain": {"annotations": {}}},
+             "resources": [
+                 {"token": "state", "template": "s", "kind": "state", "annotations": {"timing.period_ms": 20}},
+                 {"token": "stream", "template": "a", "kind": "stream", "annotations": {"timing.deadline_ms": 0}},
+                 {"token": "stream", "template": "b", "kind": "stream",
+                  "annotations": {"timing.deadline_ms": 50, "timing.period_ms": 100}},
+                 {"token": "stream", "template": "c", "kind": "stream",
+                  "annotations": {"timing.deadline_ms": 100, "timing.period_ms": 100}}]}
+    out.append((f"{label}: the linter warns of a key on a state, an invalid value, a deadline below the period and "
+                f"a key on a requirement, and of nothing else",
+                [(w.what, w.where) for w in tm.lint(canon)],
+                [("ignored_kind", "state/s"), ("invalid_value", "stream/a"), ("below_period", "stream/b"),
+                 ("ignored_requirement", "requires.src")]))
+    # F-264: §5's roll-up over a resource, by each question's finding.
+    expired, live = tm.Answer(tm.YES, "expired"), tm.Answer(tm.NO, "live")
+    unobs = tm.Answer(tm.UNOBSERVABLE, "no_bound")
+    out.append((f"{label} §5 (F-264): the lifespan over a resource with an expired member beside a live one is the "
+                f"finding, yes", tm.rollup("lifespan", [live, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+    out.append((f"{label} §5 (F-264): the sentence as written answers no there, hiding the finding",
+                tm.rollup_literal([live, expired]).pair(), {"answer": "no", "reason": "live"}))
+    out.append((f"{label} §5 (F-264): an expired member beside an unobservable one is the finding",
+                tm.rollup("lifespan", [unobs, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+    out.append((f"{label} §5: the deadline over a resource, one member missed, is no",
+                tm.rollup("deadline", [tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")]).pair(),
+                {"answer": "no", "reason": "missed"}))
+    out.append((f"{label} §5: a member not asked, or not this profile's, set aside: every other yes is yes",
+                tm.rollup("period", [tm.Answer(tm.NOT_ASKED, "not_heard"), tm.Answer(tm.YES, "kept"),
+                                     tm.Answer("not_this_profiles", "kind")]).pair(),
+                {"answer": "yes", "reason": "kept"}))
+    # F-262: a missed member never heard stays missed when its owner is
+    # present again: one missed, then met at the arrival.
+    t = tm.Tracker(100, 1, ["cmd"])
+    for e in ({"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 0, "event": "start"},
+              {"at_ms": 101, "event": "tick"}, {"at_ms": 150, "event": "owner", "state": "unconfirmed"},
+              {"at_ms": 160, "event": "owner", "state": "absent"}, {"at_ms": 200, "event": "owner", "state": "present"},
+              {"at_ms": 400, "event": "tick"}, {"at_ms": 450, "event": "arrival", "member": "cmd"}):
+        t.event(e)
+    out.append((f"{label} §2.5 (F-262): a missed member, its owner absent then present again, is not waited for "
+                f"again: one missed, then met at its arrival",
+                [(r.event, tm.ns_to_ms(r.at_ns)) for r in t.reports], [("missed", 101), ("met", 450)]))
+    # F-261: a known member of an epoch template, ended by a complete read
+    # made before its owner declared it, is never waited for again.
+    t = tm.Tracker(100, 4, ["axis/x"])
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 5, "event": "member_gone", "member": "axis/x"},
+              {"at_ms": 50, "event": "owner", "state": "present"}, {"at_ms": 1000, "event": "tick"}):
+        t.event(e)
+    out.append((f"{label} §2.5 (F-261): a known epoch member a complete read ended before its owner held its "
+                f"member token is never reported, however long the silence",
+                ([r.expect() for r in t.reports], t.next_due()), ([], None)))
+    t = tm.Tracker(100, 4, ["axis/x"])
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 50, "event": "owner", "state": "present"},
+              {"at_ms": 151, "event": "tick"}):
+        t.event(e)
+    out.append((f"{label} §2.5 (F-261): the same member, its owner's first read after its member token, is missed",
+                [r.event for r in t.reports], ["missed"]))
+    # §2.6: a zid of 33 digits states none; one of 32 is one.
+    out.append((f"{label} §2.6: a meta.zid of 33 hexadecimal digits states none, one of 32 does",
+                (tm.zid_value("1" * 33), tm.zid_value("f" * 32) == 2**128 - 1), (None, True)))
+    return out
 
 
 def _admin_read_readings() -> list[tuple[str, Any, Any]]:
