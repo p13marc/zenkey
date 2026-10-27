@@ -188,6 +188,18 @@ def tool_declaration(role: dict[str, Any] | None, revisions: list[dict[str, Any]
 
 # -- §2.4 the ranking -------------------------------------------------------------------------
 
+def entry_valid(entry: str) -> bool:
+    """§0: an entry is ``<system>/<service>``, each chunk a plain chunk or
+    ``*`` (core §1.2, D009), a ``self.system`` already resolved (a plain
+    chunk either way). Anything else matches no address, so a runtime
+    refuses it rather than leave the address silently unbound (review-bot on
+    PR #912)."""
+    from .lexical import is_plain_chunk
+
+    chunks = entry.split("/") if isinstance(entry, str) else []
+    return len(chunks) == 2 and all(c == "*" or is_plain_chunk(c) for c in chunks)
+
+
 def is_wild(entry: str) -> bool:
     return "*" in entry.split("/", 1)
 
@@ -304,6 +316,9 @@ class Arbiter:
         self.template = templates.parse_template(template)
         self.params = dict(params)
         self.deadline_ns = deadline_ms * tm.MS
+        bad = [e for e in bindings if not entry_valid(e)]
+        if bad:
+            raise ValueError(f"not a binding entry: {', '.join(map(repr, bad))} (§0, core D009)")
         self.bindings = list(bindings)
         self.providers: dict[str, _Provider] = {}
         self.active: str | None = None
@@ -695,5 +710,5 @@ def lint(canonical: dict[str, Any], held: dict[str, dict[str, Any]] | None = Non
 
 
 __all__ = ["PROFILE", "POLICY", "Declaration", "declaration", "declaration_of", "tool_declaration", "role_of",
-           "provider_of", "ranking", "rank_of", "matches", "wildcards", "shadowed", "Arbiter", "arbiter_of",
+           "provider_of", "ranking", "rank_of", "matches", "entry_valid", "wildcards", "shadowed", "Arbiter", "arbiter_of",
            "Decision", "Switch", "conclude", "reading_of", "View", "Answer", "lint", "resolve_params", "stream_key"]

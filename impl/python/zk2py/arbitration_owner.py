@@ -52,7 +52,7 @@ def _commander(args: argparse.Namespace) -> int:
                 old, new = c.remint()
                 print(f"reminted {old} {new}", flush=True)
             elif cmd == "count":
-                print(f"count {c.n}", flush=True)
+                print(f"count {c.count()}", flush=True)
             elif cmd:
                 print(f"unknown {cmd}", flush=True)
     finally:

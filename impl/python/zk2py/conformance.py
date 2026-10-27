@@ -3462,6 +3462,111 @@ def _arbitration_readings(root: Path) -> list[tuple[str, Any, Any]]:
         a = ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab/safety", "lab/teleop"])
         got = [s for e in events[len(seq):] for s in a.event(e).switches] if all(a.event(e) for e in seq) else []
         out.append((f"{label} §2.8 (F-268): {name}", [(s.from_, s.to, s.cause) for s in got], want_sw))
+    out += _arbitration_review_readings(root)
+    return out
+
+
+def _arbitration_review_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Review-bot on PR #912 (#609, round 77): the actuator's timer never
+    spins, its round trip after a move is never given up, and a binding
+    entry that is not one is refused. No session is opened: the round trip
+    runs on stand-ins for ``live.settle`` and ``live.links_held``."""
+    import copy
+    import threading
+
+    from . import arbitration as ab
+    from . import live
+    from .arbitration_live import Actuator
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "arbitration.v1 0.1 (review-bot on PR #912)"
+    # 1. A tick at a past due always moves the state: over every state
+    # arbitrations.json reaches, a tick 1 ns after the due changes the
+    # active provider or its due.
+    path = root.parent / "profiles" / "arbitration" / "conformance" / "arbitrations.json"
+    states = moved = 0
+    for c in _load_json(path)["cases"]:
+        a = ab.arbiter_of(c)
+        for e in c["events"]:
+            a.event(e)
+            due = a.due()
+            if due is None:
+                continue
+            states += 1
+            b = copy.deepcopy(a)
+            before = (b.active, due)
+            b.tick(due + 1)
+            moved += (b.active, b.due()) != before
+    out.append((f"{label}: the timer: a tick just past the due moves the state, in every state the fixture reaches "
+                f"with a due ({states})", moved, states))
+
+    # 2. The round trip after a move: asked until one stands.
+    class Fake:
+        pass
+
+    def fake(gen_now: int) -> Any:
+        f = Fake()
+        f.lock = threading.RLock()
+        f.log, f.round_trips, f.warned = [], [], []
+        f.gen, f.closed, f.t0, f.retry_s = gen_now, False, 0, 0.0
+        f.selectors = ["zk2/lab/safety/@zk/alive/steer.v1/**"]
+        f.watch = object()
+        f.warn = f.warned.append
+        f.arb = ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab/safety", "lab/teleop"])
+        f.arb.start(0)
+        f.arb.moved(1)
+        f.handled = []
+        f._handle = f.handled.append
+        return f
+
+    saved = live.settle, live.links_held
+    try:
+        answers = [False, False, True]
+        live.settle = lambda *a, **k: live.RoundTrip(answers.pop(0), True, "k", "" if not answers else "x")
+        live.links_held = lambda s: True
+        f = fake(1)
+        Actuator._round_trip(f, 1)  # type: ignore[arg-type]
+        out.append((f"{label}: two round trips that do not stand, then one that does: asked three times, the kept "
+                    f"events applied once, each failure said",
+                    ([r["stands"] for r in f.round_trips], f.arb.pending, len(f.handled),
+                     sum(1 for _, w, _ in f.log if w.startswith("pending:")), len(f.warned)),
+                    ([False, False, True], False, 1, 2, 2)))
+        answers = [False, False, False]
+        f = fake(1)
+        calls = []
+
+        def settle_then_move(*a: Any, **k: Any) -> Any:
+            calls.append(1)
+            if len(calls) == 2:
+                f.gen = 2  # a later move: it asks its own
+            return live.RoundTrip(False, True, "k", "not yet")
+
+        live.settle = settle_then_move
+        Actuator._round_trip(f, 1)  # type: ignore[arg-type]
+        out.append((f"{label}: a later move during the retries ends this move's, applying nothing",
+                    (len(calls), f.arb.pending, len(f.handled)), (2, True, 0)))
+        cut = iter([False, False, True])
+        live.links_held = lambda s: next(cut, True)
+        live.settle = lambda *a, **k: live.RoundTrip(True, True, "k", "")
+        f = fake(1)
+        Actuator._round_trip(f, 1)  # type: ignore[arg-type]
+        out.append((f"{label}: cut off, it waits for a link, saying so, then asks and applies",
+                    (sum(1 for _, w, _ in f.log if w.startswith("pending: cut off")), f.arb.pending),
+                    (2, False)))
+    finally:
+        live.settle, live.links_held = saved
+
+    # 3. A binding entry that is not <chunk>/<chunk> is refused, never left
+    # silently unbound.
+    out.append((f"{label}: entries checked: exact, wildcard, and three that are not",
+                [ab.entry_valid(e) for e in ("lab/safety", "*/teleop", "lab", "lab/a/b", "Lab/x")],
+                [True, True, False, False, False]))
+    try:
+        ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab"])
+        refused = False
+    except ValueError:
+        refused = True
+    out.append((f"{label}: the arbiter refuses an entry without a /", refused, True))
     return out
 
 

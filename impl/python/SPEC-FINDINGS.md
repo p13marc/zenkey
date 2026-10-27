@@ -14759,6 +14759,19 @@ the tool reads no consumer's descriptor.
 - **The lateness margin** (50 ms) was never used: the timer fires at the
   due plus 1 ns.
 
+**After review-bot on PR #912.** Three of the actuator's faults, none the
+text's:
+- its round trip after a move is now asked until one stands, or a later
+  move asks its own. Before, it gave up after five, and every later event
+  stayed kept. While the move's events are held, it says so;
+- a half-built actuator is closed whole;
+- its timer can no longer spin.
+
+`readings` shows each of them (500). Also, a binding entry that is not
+`<chunk>/<chunk>` is refused. `just py-conformance`: 3405 of 3405. The
+whole scenario run, `7c` included, is unchanged: 51 of 52, the one
+failure F-269's strict first arrival.
+
 **Counts at arbitration.v1 0.1 and core 0.54:** 272 entries.
 - **Open: F-259 to F-272,** fourteen.
   - **F-259 to F-267,** round 76's, are answered in a later `timing.v1`

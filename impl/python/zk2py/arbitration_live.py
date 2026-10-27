@@ -75,7 +75,8 @@ class Actuator:
                  role: str = "cmd", params: dict[str, str] | None = None, watch_connect: str | None = None,
                  reader_connect: str | None = None, epsilon_ms: int | None = None,
                  emit: Callable[[str], None] | None = None, reread_delay_s: float = 0.1,
-                 deliver: Callable[[str, bytes], None] | None = None, infer_moves: bool = True) -> None:
+                 deliver: Callable[[str, bytes], None] | None = None, infer_moves: bool = True,
+                 warn: Callable[[str], None] | None = None) -> None:
         import zenoh
 
         from .owner import Owner, resolve_providers
@@ -84,6 +85,11 @@ class Actuator:
         system, service = address.split("/", 1)
         canon, prov = contract.canonical, held.canonical
         params = dict(params or {})
+        bad = [e for e in bindings if not ab.entry_valid(e)]
+        if bad:
+            # §0: an entry is <system>/<service>, each chunk plain or * (core
+            # §1.2, D009); one that is not would match nothing, silently
+            raise Refused(f"{address}: not a binding entry: {', '.join(map(repr, bad))}")
         decl = ab.declaration(ab.role_of(canon, role), ab.provider_of(prov), params)
         if not decl.valid:
             raise Refused(f"{address}: invalid: {', '.join(decl.reasons)}")
@@ -98,8 +104,12 @@ class Actuator:
         self.params = ab.resolve_params(params, address)
         self.bindings = resolve_providers(list(bindings), system)
         self.emit = emit or (lambda line: print(line, flush=True))
+        self.warn = warn or (lambda line: print(line, file=sys.stderr, flush=True))
         self.deliver = deliver
         self.reread_delay_s = reread_delay_s
+        #: the round trip's retry step after a move (0.1 s more each attempt,
+        #: at most 1 s) and its wait for a link, ten steps
+        self.retry_s = 0.1
         #: F-268: a withdrawal heard while the watch session holds no link
         #: begins a move; False is the control, the transport event alone
         self.infer_moves = infer_moves
@@ -123,37 +133,54 @@ class Actuator:
         state = [r for r in canon["resources"] if r["kind"] == "state" and not r["params"]]
         self.angle_key = (f"zk2/{address}/{canon['interface']}/{state[0]['token']}/{state[0]['template']}"
                           if state else None)
-        # the service: §8.2's start, the descriptor listing the binding in its order (core R3)
-        self.owner = Owner(system, service, [contract], connect=connect, bindings={role: list(bindings)},
-                           params={role: params} if params else None)
-        self.owner.start()
-        self.t0 = time.monotonic_ns()
-        with self.lock:
-            self._handle(self.arb.start(self.t0))
-        # the watch, on a session of its own, then its round trip (§2.7)
-        self.watch = live.open_client(watch_connect or connect)
-        self.selectors = [f"zk2/{e}/@zk/alive/{self.iface}/**" for e in self.bindings]
-        self.watch_subs = [live.declare_liveliness_subscriber(self.watch, sel, self._token, history=False)
-                           for sel in self.selectors]
-        try:
-            self.listener = live._info(self.watch).declare_transport_events_listener(
-                zenoh.handlers.Callback(self._moved), history=False)
-        except Exception:  # noqa: BLE001 - a binding without transport events: no move is heard
-            self.listener = None
-        self._round_trip(0)
-        # the reader, for its reads again
-        self.reader = live.open_client(reader_connect or connect)
+        # Everything a close() may undo, so a failure part way leaves nothing
+        # behind (review-bot on PR #912).
+        self.owner: Any = None
+        self.watch: Any = None
+        self.reader: Any = None
+        self.listener: Any = None
+        self.watch_subs: list[Any] = []
         self.descr_subs: list[Any] = []
-        if self.lifespan is not None:
+        self.subs: list[Any] = []
+        self._timer: threading.Thread | None = None
+        self.t0 = time.monotonic_ns()
+        self.selectors = [f"zk2/{e}/@zk/alive/{self.iface}/**" for e in self.bindings]
+        try:
+            # the service: §8.2's start, the descriptor listing the binding in
+            # its order (core R3)
+            self.owner = Owner(system, service, [contract], connect=connect, bindings={role: list(bindings)},
+                               params={role: params} if params else None)
+            self.owner.start()
+            self.t0 = time.monotonic_ns()
+            with self.lock:
+                self._handle(self.arb.start(self.t0))
+            # the watch, on a session of its own, then its round trip (§2.7)
+            self.watch = live.open_client(watch_connect or connect)
+            for sel in self.selectors:
+                self.watch_subs.append(live.declare_liveliness_subscriber(self.watch, sel, self._token,
+                                                                          history=False))
+            try:
+                self.listener = live._info(self.watch).declare_transport_events_listener(
+                    zenoh.handlers.Callback(self._moved), history=False)
+            except Exception:  # noqa: BLE001 - a binding without transport events: no move is heard
+                self.listener = None
+            self._round_trip(0)
+            # the reader, for its reads again
+            self.reader = live.open_client(reader_connect or connect)
+            if self.lifespan is not None:
+                for e in self.bindings:
+                    self.descr_subs.append(self.owner.session.declare_subscriber(
+                        f"zk2/{e}/@zk/instance/*", zenoh.handlers.Callback(self._descriptor)))
+            # the role's subscription, on the service's session
             for e in self.bindings:
-                self.descr_subs.append(self.owner.session.declare_subscriber(
-                    f"zk2/{e}/@zk/instance/*", zenoh.handlers.Callback(self._descriptor)))
-        # the role's subscription, on the service's session
-        self.subs = [self.owner.session.declare_subscriber(
-            _expr(e, self.iface, self.token, self.template, self.params), zenoh.handlers.Callback(self._sample))
-            for e in self.bindings]
-        self._timer = threading.Thread(target=self._timer_loop, daemon=True)
-        self._timer.start()
+                self.subs.append(self.owner.session.declare_subscriber(
+                    _expr(e, self.iface, self.token, self.template, self.params),
+                    zenoh.handlers.Callback(self._sample)))
+            self._timer = threading.Thread(target=self._timer_loop, daemon=True)
+            self._timer.start()
+        except BaseException:
+            self.close()
+            raise
 
     # -- the events ---------------------------------------------------------------------------
 
@@ -220,25 +247,44 @@ class Actuator:
 
     def _round_trip(self, gen: int) -> None:
         """The round trip asked after the last move (§2.8; core §8.1, 0.41 to
-        0.45): it stands for that move only, and applies what was kept. One
-        that does not stand while the transport is open is asked again; one
-        through a session cut off waits for the next open."""
-        for attempt in range(5):
+        0.45): it stands for that move only, and applies what was kept.
+
+        At the start (``gen`` 0) nothing is kept, so it is asked once. After a
+        move it is asked until one stands, or a later move asks its own, or
+        the actuator closes, never given up (review-bot on PR #912): one that
+        does not stand is asked again, waiting 0.1 s more each time up to
+        1 s; through a session cut off it waits for a link, checked every
+        second, since the next open is a move of its own anyway. While it
+        does not stand, the move's events stay kept, and each attempt says
+        so in the log and on ``warn``."""
+        attempt = 0
+        while True:
+            if gen > 0 and live.links_held(self.watch) is False:
+                with self.lock:
+                    if self.closed or gen != self.gen:
+                        return
+                    self.log.append((_ms(time.monotonic_ns(), self.t0), "pending: cut off, waiting for a link", ""))
+                time.sleep(self.retry_s * 10)
+                continue
             rt = live.settle(self.watch, 5.0, selector=self.selectors[0] if self.selectors else None)
             with self.lock:
-                self.round_trips.append({"at_ms": _ms(time.monotonic_ns(), self.t0), "gen": gen,
-                                         "stands": bool(rt.stands), "why": rt.why})
+                now = time.monotonic_ns()
+                self.round_trips.append({"at_ms": _ms(now, self.t0), "gen": gen, "stands": bool(rt.stands),
+                                         "why": rt.why})
                 if self.closed or gen != self.gen:
                     return  # a later move asks its own
+                if gen == 0:
+                    return  # the start's: nothing is kept (§2.8, "At start there is no move")
                 if rt.stands:
-                    if gen > 0:
-                        now = time.monotonic_ns()
-                        self.log.append((_ms(now, self.t0), "stood", ""))
-                        self._handle(self.arb.stood(now))
+                    self.log.append((_ms(now, self.t0), "stood", ""))
+                    self._handle(self.arb.stood(now))
                     return
-            if live.links_held(self.watch) is False:
-                return
-            time.sleep(0.1 * (attempt + 1))
+                attempt += 1
+                why = f"pending: round trip {attempt} after move {gen} did not stand ({rt.why}); " \
+                      f"{len(self.arb.kept)} events kept"
+                self.log.append((_ms(now, self.t0), why, ""))
+            self.warn(why)
+            time.sleep(min(self.retry_s * attempt, 10 * self.retry_s))
 
     def _descriptor(self, sample: Any) -> None:
         try:
@@ -251,6 +297,13 @@ class Actuator:
                 self.lifespan.add_owner(zid)
 
     def _timer_loop(self) -> None:
+        """The timer (§2.9), armed just after the active provider's due. Each
+        pass either moves the state or waits (review-bot on PR #912): a tick
+        at a due past always moves it, since the active provider is then
+        ineligible and the time decides it (``readings`` checks it over every
+        state ``arbitrations.json`` reaches), and a tick that left it where it
+        was would wait a millisecond, logged once, never spin."""
+        stuck: tuple[Any, ...] | None = None
         while True:
             with self.cond:
                 if self.closed:
@@ -260,7 +313,13 @@ class Actuator:
                 if due is None or due >= now:
                     self.cond.wait(0.5 if due is None else min((due + 1 - now) / NS, 0.5))
                     continue
+                before = (self.arb.active, due)
                 self._handle(self.arb.tick(now))
+                if (self.arb.active, self.arb.due()) == before:
+                    if stuck != before:
+                        stuck = before
+                        self.log.append((_ms(now, self.t0), "timer: a tick left a past due where it was", ""))
+                    self.cond.wait(0.001)
 
     # -- what it decided ------------------------------------------------------------------------
 
@@ -302,17 +361,25 @@ class Actuator:
             return json.loads(json.dumps(self.arb.counts))
 
     def close(self) -> None:
+        """Undo whatever was built, a half-built actuator's included: the
+        subscriptions and the watch first, then the sessions, then the
+        service, its tokens first (core §8.2)."""
         with self.cond:
             self.closed = True
             self.cond.notify_all()
-        for s in self.subs + self.watch_subs + self.descr_subs + ([self.listener] if self.listener else []):
+        for x in self.subs + self.watch_subs + self.descr_subs + ([self.listener] if self.listener else []):
             try:
-                s.undeclare()
+                x.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
-        for s in (self.watch, self.reader):
-            live.close(s)
-        self.owner.close()
+        for sess in (self.watch, self.reader):
+            if sess is not None:
+                live.close(sess)
+        if self.owner is not None:
+            try:
+                self.owner.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 class Commander:
@@ -330,6 +397,7 @@ class Commander:
         self.key = f"zk2/{address}/{c['interface']}/{r['token']}/{r['template']}"
         self.owner = Owner(system, self.service, [contract], connect=connect)
         self.period_s = period_s
+        self.lock = threading.Lock()
         self.n = 0
         self.held = threading.Event()
         self.stop = threading.Event()
@@ -352,11 +420,18 @@ class Commander:
             i += 1
             if self.held.is_set() or self.stop.is_set():
                 continue
+            with self.lock:
+                n = self.n
+                self.n += 1
             try:
-                self.owner.publish(self.key, f"{self.service} {self.n}".encode())
+                self.owner.publish(self.key, f"{self.service} {n}".encode())
             except Exception:  # noqa: BLE001 - closed while putting
                 return
-            self.n += 1
+
+    def count(self) -> int:
+        """The puts made so far."""
+        with self.lock:
+            return self.n
 
     def hold(self) -> None:
         self.held.set()
