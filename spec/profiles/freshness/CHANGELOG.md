@@ -4,6 +4,36 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-27: two sentences that had fallen behind, non-normative (#908)
+
+Writing `timing.v1` (#908, MA) found two sentences of this text that no
+longer said what is true.
+- **§2.2's stream row** gave as the reason a stream is judged by a
+  subscriber only that "its samples carry no owner's stamp (core §4.1)".
+  Core 0.23 says otherwise: a session whose HLC is enabled, as a serving
+  session's is, stamps every put it is not given a stamp for, a stream
+  sample included, and `timing.v1` §2.6 now requires an owner of a
+  lifespan resource to stamp its samples.
+- **§2.1's "why seconds"** said `timing.v1`'s `lifespan_ms` is judged on a
+  receiver's clock. Its deadline is; its lifespan is judged against the
+  owner's stamp, and only on a bound the deployment states (`timing.v1`
+  §2.6).
+
+**Changed: wording, in §2.1 and §2.2's table.**
+- **§2.2:** a stream is judged by a subscriber only because it has no
+  queryable, so no reply to age, and a subscriber ages a delivery by its
+  arrival, never its stamp (§2.5), whichever clock set it.
+- **§2.1:** sub-second staleness is `timing.v1`'s, its deadline on a
+  receiver's clock and its lifespan on a stated bound.
+
+**Deliberately not changed.**
+- **No rule and no fixture.** Who judges a stream, and how, is as before:
+  a subscriber, on its receive clock (§2.5). No case of `conformance/`
+  moves.
+- **Written against core 0.22**, still. No rule of this text reads what a
+  later core changed; the two sentences name 0.23 and `timing.v1` for
+  facts about them.
+
 ## 0.3 — 2026-10-18: an appendix corrected, non-normative (#614)
 
 Two sentences of Appendix A, under "What is not ported", had fallen behind

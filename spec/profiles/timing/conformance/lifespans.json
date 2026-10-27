@@ -1,0 +1,985 @@
+{
+  "cases": [
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        }
+      ],
+      "note": "twist_cmd.v1's cmd, ε 10 ms: a sample 50 ms old is live",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 50,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        }
+      ],
+      "note": "its age less ε exactly the lifespan: live, the bound inclusive (§2.6)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 110,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        }
+      ],
+      "note": "a nanosecond above: expired",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 110.000001,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        }
+      ],
+      "note": "half a second old: expired, discarded, and no arrival (§2.6)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": null,
+      "expect": [
+        {
+          "reason": "no_bound",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "spike S11's reader 250 ms ahead of its commander, no bound stated: unobservable, nothing discarded (§2.6)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 250,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        }
+      ],
+      "note": "the same, the deployment stating 10 ms its clocks do not keep: expired, the error the deployment's (§2.6)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 250,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "a stamp 250 ms ahead of the reader's clock: no transit puts it there, so the clock disagrees with the word (§2.6)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": -250,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        }
+      ],
+      "note": "a stamp exactly ε ahead: live, the bound inclusive",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": -10,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "a nanosecond further ahead: the clock disagrees",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": -10.000001,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "live",
+          "verdict": "live"
+        }
+      ],
+      "note": "falsified for the reading: a later stamp of the same clock, its age now fine, still disagrees; another clock, a re-mint's new zid, is judged apart",
+      "owners": [
+        "1f",
+        "2e"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": -50,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 20,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 20,
+            "id": "2e"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        },
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "falsified from then on, not before",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 20,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": -50,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 20,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "unstamped",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "unstamped: unobservable, nothing discarded",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": null
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "foreign_stamp",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "a router's stamp, its id not the owner's meta.zid: unobservable (§2.6, core §4.1)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 5,
+            "id": "aa"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "unattributed",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "no meta.zid held: a stamp is unattributable (core §3.3)",
+      "owners": [],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 5,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "unattributed",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "a meta.zid that is no zid states none",
+      "owners": [
+        "not-a-zid"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 5,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        },
+        {
+          "reason": "live",
+          "verdict": "live"
+        }
+      ],
+      "note": "ids compared by value: case and leading zeros carry no meaning (core §3.3)",
+      "owners": [
+        "001f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 5,
+            "id": "1F"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 5,
+            "id": "01f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "foreign_stamp",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "live",
+          "verdict": "live"
+        }
+      ],
+      "note": "a router's stamp ahead falsifies nothing of the owner's clock",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": -300,
+            "id": "aa"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 20,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "no_lifespan",
+          "verdict": "not_asked"
+        }
+      ],
+      "note": "no lifespan_ms: not asked",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "no_lifespan",
+          "verdict": "not_asked"
+        }
+      ],
+      "note": "a stream with no annotation: not asked",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {},
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "kind",
+          "verdict": "not_this_profiles"
+        }
+      ],
+      "note": "a lifespan on a state means nothing: not this profile's (§2.3)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": 100
+        },
+        "kind": "state"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "kind",
+          "verdict": "not_this_profiles"
+        }
+      ],
+      "note": "a state with no timing key: not this profile's, the kind read first",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {},
+        "kind": "state"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "invalid",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "an invalid lifespan: unobservable (§2.2)",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": "100"
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "invalid",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "an invalid period makes the declaration invalid whole, a right lifespan beside it",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 0
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "invalid",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "an invalid declaration with no lifespan written: invalid, read before the key",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.period_ms": 0
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 500,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 0,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        },
+        {
+          "reason": "live",
+          "verdict": "live"
+        },
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        },
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "ε 0, the clocks claimed exact",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 0,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 100,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 100.000001,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": -1e-6,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": null,
+      "expect": [
+        {
+          "reason": "no_bound",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "the order: no bound before no stamp",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": null
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 10,
+      "expect": [
+        {
+          "reason": "unstamped",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "the order: no stamp before no meta.zid",
+      "owners": [],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": null
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 50,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        },
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        }
+      ],
+      "note": "nav.v2's position, 500 ms, ε 50 ms",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": 500,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 400,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 551,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        },
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        }
+      ],
+      "note": "pace.v1's cmd (scenarios.md §4): ε 100 ms, an owner 700 ms behind",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 500,
+          "timing.lifespan_ms": 300,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 700.4,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 701.2,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "clock_disagrees",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "pace.v1's cmd: an owner 400 ms ahead, then agreeing, in one reading",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 500,
+          "timing.lifespan_ms": 300,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": -399.3,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": -398.8,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 0.7,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 0.9,
+            "id": "1f"
+          }
+        }
+      ]
+    }
+  ],
+  "description": "timing.v1 §2.6: one reader's samples of one member, in arrival order, within one reading -> each sample's lifespan judgement. resource is {kind, annotations}, read as declarations.json reads one. epsilon_ms is the deployment's stated bound ε in milliseconds, null when none is stated. owners lists the meta.zid of each instance of the provider's address the reader holds a descriptor of, as written; one that is not 1 to 32 hexadecimal digits states none. A sample's stamp is null when it carries none, else {age_ms, id}: age_ms the reader's wall clock at the arrival minus the stamp's time, in milliseconds, exact to the nanosecond, negative when the stamp is ahead; id the stamp's id. Ids and zids compare by value, case and leading zeros ignored (core §3.3). Each expect entry is {verdict, reason}, by the first of these that holds: the resource is not a stream: not_this_profiles, kind; the declaration is invalid: unobservable, invalid; no timing.lifespan_ms: not_asked, no_lifespan; epsilon_ms null: unobservable, no_bound; no stamp: unobservable, unstamped; no owner's zid: unobservable, unattributed; the id is none of the owners': unobservable, foreign_stamp; the id's clock disagrees, because this stamp's age is below -ε, or an earlier sample of this case with the same id (by value) reached this step with an age below -ε: unobservable, clock_disagrees; age - ε above the lifespan: expired, expired; otherwise live, live. Both bounds are inclusive: an age of exactly the lifespan plus ε, or of exactly -ε, is live."
+}
