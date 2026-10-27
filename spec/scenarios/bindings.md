@@ -71,3 +71,25 @@ discards all 10.
 A system that a profile derives resolves the same way, from the derived
 system: `hostid.v1`'s scenarios bind `self.system/sysinfo` from a service
 whose system is minted (`profiles/hostid/scenarios.md` §5).
+
+## §6 A binding's order kept (R1, R3; 0.54)
+
+**Setup.** A tracker `vehicle-01/tracker` binds `detections.v1` as
+`sources`, as §1's does, in this order: `vehicle-01/det1`, `vehicle-01/*`,
+`self.system/det0` and `vehicle-01/det1` again. That is an order no sort
+gives, a wildcard between two exact entries, a `self.system` provider, and
+an address listed twice.
+
+**Steps.**
+1. The owner starts.
+2. A tool reads its descriptor.
+
+**Expected.**
+1. The owner starts: the core reads no order, and refuses no repeat.
+2. The `sources` entry's `bindings` are `["vehicle-01/det1",
+   "vehicle-01/*", "vehicle-01/det0", "vehicle-01/det1"]`: the configured
+   order, the `self.system` provider resolved in its place, the repeat
+   kept. A checker reports no code for such a list
+   (`descriptors/ok-binding-order`). What an order means is a profile's:
+   `arbitration.v1` reads an arbitrated role's as a priority (its §2.4,
+   its `scenarios.md` §9).

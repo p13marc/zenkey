@@ -1,0 +1,21 @@
+# `arbitration.v1` publishes its vocabulary (core 0.54): `policy`, the
+# interim row's one key, read on a requirement. A deadline tightened by the
+# binding or the requirement is not at 1.0 (arbitration.v1 §2.15), so
+# `arbitration.deadline_ms` is outside the table and draws W105, once,
+# where it is written; the policy beside it draws nothing. A requirement's
+# annotations are checked as a resource's are (core §9.2).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["arbitration.v1"]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[requires.cmd]
+interface   = "twist_cmd.v1"
+resources   = ["cmd"]
+cardinality = "many"
+annotations = { "arbitration.policy" = "priority", "arbitration.deadline_ms" = 50 }
