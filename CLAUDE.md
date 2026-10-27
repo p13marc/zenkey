@@ -954,7 +954,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   no holder, `polls.json`; text 0.4, F-220 to F-223, #841 RD: a standby
   probe's wildcards and the MUST never to ask one that would run an
   operation, `[Sc: §12]`; text 0.5, F-226: §12 step 9, the MUST's
-  offline half), and `timing.v1`'s (`timing`, #908 MA: the vocabulary,
+  offline half), `timing.v1`'s (`timing`, #908 MA: the vocabulary,
   `period_ms`, `deadline_ms` and `lifespan_ms`, the interim row published
   unchanged by core 0.53; `declaration`/`declaration_of` over a resolved
   resource, whole milliseconds from 1 to 2^53−1, invalid whole
@@ -972,7 +972,36 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   reading (freshness's `StampAge` and `ClockMeasure`); `period_window`,
   kept when (arrivals + 2) × period covers the span; and §5's
   `deadline_met`, `period_kept`, `lifespan_expired` and `roll_up`;
-  text 0.1).
+  text 0.1), and `arbitration.v1`'s (`arbitration`, #909 BA: the
+  vocabulary, `policy` on a requirement, the interim row published
+  unchanged by core 0.54, the first read on a requirement;
+  `declaration`/`declaration_of` over a role (its contract's `uses`, or a
+  manifest's, refused `manifest_role`), the revision of the required
+  interface held and the parameter bindings: `priority` (`freshest` and
+  `lease` reserved, `policy_unsupported`), cardinality `many`, exactly one
+  stream, its deadline by `timing::declaration` in the revision held
+  (`no_deadline`: none, below the period, or timing's declaration invalid
+  whole), every template parameter bound, eight
+  reasons in order, `unread` with no revision held; `Binding`'s ranking,
+  the configured order (core 0.54 R1, R3), a wildcard's addresses by
+  system then service, an address matched twice at its first entry,
+  shadowed entries; `Arbiter`, one role's pure state machine over
+  (`timing::Mono`, `Event`: sample, declared, withdrawn, read, moved,
+  stood, tick): the source from the key, R6 first, a delete, an expired
+  sample and a governed provider's non-incumbent one no arrival; each
+  provider's one key judged by a `timing::Tracker` of its own, eligible
+  while not withdrawn and not missed (more than the deadline since its last
+  arrival, timing.v1 §2.5), a withdrawal starting the tracker anew;
+  a withdrawal leaving no token known held ineligible at once, never
+  absent, a re-mint no drop, re-admission by a token or a read only, never
+  a sample (core §8.2's stop order); presence events kept from a move of
+  the watch until its round trip stands, applied as one change; the time
+  decided first, no hysteresis, only the active provider's samples
+  delivered, switches caused `start`, `sample`, `deadline` or
+  `withdrawn`, the dead-man at start, `due` for a one-shot timer and
+  `reread` for §8.1's read again; §5's `judge_declaration`,
+  `judge_selection` (the tool's own view) and `judge_binding`, and
+  `held_over` across the revisions a tool holds; text 0.1).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1219,7 +1248,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.53 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.54 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1252,8 +1281,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     read, round 74's F-256 and F-257; 0.52: the admin read reaches every
     node's admin space, round 75's F-258; 0.53: `timing.v1`'s vocabulary
     published, an HLC following the stamps it receives, and a stamp's time
-    counted from the Unix epoch, #908; changes go through
-    `spec/CHANGELOG.md`):
+    counted from the Unix epoch, #908; 0.54: a binding an ordered list
+    whose order the descriptor keeps, a withdrawal heard live acted on
+    without concluding absence, and `arbitration.v1`'s vocabulary
+    published, #909; changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
