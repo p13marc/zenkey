@@ -3379,11 +3379,32 @@ fn timing_deadlines() {
             .iter()
             .map(|m| m.as_str().expect("a member").to_owned())
             .collect();
-        let mut t = timing::Tracker::new(
-            tm_duration(&case["deadline_ms"]),
-            case["bound"].as_u64(),
-            known,
-        );
+        let bound = case["bound"].as_u64();
+        // A resource in place of a deadline: its tracker, or none (text 0.2,
+        // F-259).
+        let tracker = match case.get("resource") {
+            Some(r) => {
+                let (kind, ann) = tm_resource(r);
+                timing::tracker_for(kind, &timing::declaration(kind, &ann), bound, known)
+            }
+            None => Some(timing::Tracker::new(
+                tm_duration(&case["deadline_ms"]),
+                bound,
+                known,
+            )),
+        };
+        let epoch = case["epoch"] == json!(true);
+        let Some(mut t) = tracker.map(|t| if epoch { t.with_epoch() } else { t }) else {
+            let got = json!({
+                "transitions": [],
+                "held": [],
+                "next_due_ms": null,
+                "tracker": false,
+            });
+            let what = format!("{}", case["note"]);
+            expect(case, got, &what);
+            continue;
+        };
         let mut reports = Vec::new();
         for e in case["events"].as_array().expect("events") {
             let at = tm_mono(&e["at_ms"]);
@@ -3398,17 +3419,21 @@ fn timing_deadlines() {
                     timing::OwnerState::parse(e["state"].as_str().expect("state"))
                         .expect("a state"),
                 ),
+                "member_seen" => timing::Event::MemberSeen(member),
                 "member_gone" => timing::Event::MemberGone(member),
                 "tick" => timing::Event::Tick,
                 other => panic!("event {other:?}"),
             };
             reports.extend(t.observe(at, event));
         }
-        let got = json!({
+        let mut got = json!({
             "transitions": reports.iter().map(tm_report_json).collect::<Vec<_>>(),
             "held": t.held().collect::<Vec<_>>(),
             "next_due_ms": t.next_due().map(|m| tm_ms(m.since_origin())),
         });
+        if case.get("resource").is_some() {
+            got["tracker"] = json!(true);
+        }
         let what = format!("{}", case["note"]);
         expect(case, got, &what);
     }
@@ -3507,6 +3532,17 @@ fn timing_periods() {
     }
 }
 
+fn tm_answer(s: &str) -> timing::Answer {
+    match s {
+        "yes" => timing::Answer::Yes,
+        "no" => timing::Answer::No,
+        "unobservable" => timing::Answer::Unobservable,
+        "not_asked" => timing::Answer::NotAsked,
+        "not_this_profiles" => timing::Answer::NotThisProfiles,
+        other => panic!("answer {other:?}"),
+    }
+}
+
 fn tm_judged(j: timing::Judged) -> Value {
     json!({"answer": j.answer.as_str(), "reason": j.reason.as_str()})
 }
@@ -3518,6 +3554,21 @@ fn timing_conclusions() {
     let path = profiles().join("timing/conformance/conclusions.json");
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
+        // §5's roll-up, read by the question's finding (text 0.2, F-264).
+        if let Some(r) = case.get("rollup") {
+            let q = timing::Question::parse(r["question"].as_str().expect("question"))
+                .expect("a question");
+            let answers: Vec<timing::Answer> = r["answers"]
+                .as_array()
+                .expect("answers")
+                .iter()
+                .map(|a| tm_answer(a.as_str().expect("an answer")))
+                .collect();
+            let got = json!({"answer": timing::roll_up(q, answers).as_str()});
+            let what = format!("{}", case["note"]);
+            expect(case, got, &what);
+            continue;
+        }
         let (kind, ann) = tm_resource(&case["resource"]);
         let d = timing::declaration(kind, &ann);
         let r = &case["reading"];
