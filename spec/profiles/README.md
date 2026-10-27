@@ -19,6 +19,7 @@ and `examples/zk2/`.
 | [`desired.v1`](desired/v1.md) | 0.8 | draft | 0.39 | 1: a standard schema, [`desired.v1.json`](desired/desired.v1.json); 2: `target_param`; 4 through `uses` | A document an author keeps as its own state, keyed by its target: the target binds its own slice by R2, orders versions by its author's stamp, acts on each once per run and never on an older one, refuses whole what it cannot take with the previous kept in force, reverts on a delete and never on silence, and reports what is in force and what it last did in the standard `Report`; the author writes only on a change, and restarts from its record (core S1–S7, §4.2, §4.4, R2) |
 | [`redundancy.v1`](redundancy/v1.md) | 0.5 | draft | 0.40 | 2: `election`; 4 through `uses` | One instance serves a governed interface, the others stand by: a candidate's claim is its instance token, the incumbent the holder of the interface's token, a standby marked in its descriptor and exposing nothing, so a call finds none; a live incumbent wins, the lowest id of a complete read breaks a tie, a vacancy is a withdrawal confirmed by a complete read, and a healed split leaves the lower id; consumers follow the incumbent's stamps; `external` names an actuator's own lock; eventual single writer, never a fence (core §5.1 O1, §6, §8.1, §8.2) |
 | [`timing.v1`](timing/v1.md) | 0.1 | draft | 0.53 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
+| [`arbitration.v1`](arbitration/v1.md) | 0.1 | draft | 0.54 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
 
 ## Layout
 
@@ -147,7 +148,11 @@ thing in the same place.
   vocabulary, the interim row unchanged, so that §4.1 says a session moves
   its HLC to a later stamp it receives, which a lifespan's clock bound
   must cover, and so that Appendix B says a stamp's time counts from the
-  Unix epoch.
+  Unix epoch. `arbitration.v1` needed 0.54, so that a binding is an
+  ordered list whose order a descriptor keeps and a profile may read, so
+  that a reader may act on a withdrawal heard live where acting concludes
+  no absence, and so that Appendix D publishes its vocabulary, the interim
+  `policy` unchanged.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in
@@ -168,7 +173,7 @@ thing in the same place.
     `spec/profiles/.history`, compatible with every earlier revision there.
   - A profile's session-free code lives in `zenkey-model` (`hostid`,
     `freshness`, `health`, `config`, `link`, `alarms`, `telemetry`, `desired`,
-    `redundancy`, `timing`), and its runtime in
+    `redundancy`, `timing`, `arbitration`), and its runtime in
     `zenkey`. Its scenarios run as tests of the runtime, one test per
     section, named after it, as the core's do. A scenario that is a tool's
     runs as a test of that tool.

@@ -1,0 +1,710 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "yes",
+          "provider": "lab/safety",
+          "reason": "selected"
+        }
+      },
+      "note": "valid, exact entries, the tool's view following safety: the shape the profile asks for",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "no",
+          "reason": "dead_man"
+        }
+      },
+      "note": "the tool's view in the dead-man after listening longer than one deadline: no, dead_man",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": null,
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "no",
+          "reason": "dead_man"
+        }
+      },
+      "note": "listened exactly one deadline, nothing eligible: no, dead_man",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": null,
+          "listened_ms": 300,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "listening"
+        }
+      },
+      "note": "listened less than one deadline, nothing eligible: unobservable, listening",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": null,
+          "listened_ms": 100,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "yes",
+          "provider": "lab/teleop",
+          "reason": "selected"
+        }
+      },
+      "note": "listened less than one deadline, a provider eligible: yes, it heard one",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": "lab/teleop",
+          "listened_ms": 100,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "lost"
+        }
+      },
+      "note": "samples lost within the last deadline: unobservable, lost, whatever the view selects",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": true
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "lost"
+        }
+      },
+      "note": "lost comes before listening",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": null,
+          "listened_ms": 100,
+          "lost": true
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "not_asked",
+          "reason": "not_listened"
+        }
+      },
+      "note": "the tool did not listen: not asked",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "no",
+          "reason": "unbound"
+        }
+      },
+      "note": "a role bound to nothing: no, unbound, before what the tool heard",
+      "reading": {
+        "bindings": [],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": null,
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "yes",
+          "reason": "wildcard",
+          "shadowed": [],
+          "wildcards": [
+            1
+          ]
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "yes",
+          "provider": "lab/safety",
+          "reason": "selected"
+        }
+      },
+      "note": "a wildcard after an exact entry: a warning",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/*"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "yes",
+          "reason": "wildcard",
+          "shadowed": [
+            1
+          ],
+          "wildcards": [
+            0
+          ]
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "yes",
+          "provider": "lab/safety",
+          "reason": "selected"
+        }
+      },
+      "note": "an exact entry after a wildcard matching it: a wildcard, and a shadowed entry",
+      "reading": {
+        "bindings": [
+          "lab/*",
+          "lab/safety"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "yes",
+          "reason": "shadowed",
+          "shadowed": [
+            2
+          ],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "yes",
+          "provider": "lab/safety",
+          "reason": "selected"
+        }
+      },
+      "note": "an exact entry listed twice: shadowed",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/safety"
+        ],
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "no",
+          "reason": "invalid",
+          "reasons": [
+            "policy_unsupported"
+          ]
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        }
+      },
+      "note": "invalid, reserved policy: no; the selection unobservable, since no consumer so declared starts",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "declaration": "invalid",
+          "reasons": [
+            "policy_unsupported"
+          ]
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "yes",
+          "reason": "wildcard",
+          "shadowed": [],
+          "wildcards": [
+            0
+          ]
+        },
+        "declaration": {
+          "answer": "no",
+          "reason": "invalid",
+          "reasons": [
+            "no_deadline"
+          ]
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        }
+      },
+      "note": "invalid with a wildcard binding: the binding is still warned of",
+      "reading": {
+        "bindings": [
+          "lab/*"
+        ],
+        "declaration": {
+          "declaration": "invalid",
+          "reasons": [
+            "no_deadline"
+          ]
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated"
+        },
+        "selection": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated"
+        }
+      },
+      "note": "no policy: not this profile's, every question",
+      "reading": {
+        "bindings": [
+          "lab/*"
+        ],
+        "declaration": {
+          "declaration": "not_arbitrated"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated"
+        },
+        "selection": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated"
+        }
+      },
+      "note": "a manifest's role (declared_by null), as a tool sees it: not this profile's",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "declaration": "not_arbitrated"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "unobservable",
+          "reason": "no_contract",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "unobservable",
+          "reason": "no_contract"
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "no_contract"
+        }
+      },
+      "note": "the declaring contract not held: unobservable, every question",
+      "reading": {
+        "bindings": [
+          "lab/*"
+        ],
+        "declaration": {
+          "declaration": "no_contract"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "yes",
+          "reason": "wildcard",
+          "shadowed": [],
+          "wildcards": [
+            1
+          ]
+        },
+        "declaration": {
+          "answer": "unobservable",
+          "reason": "no_provider_contract"
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "no_provider_contract"
+        }
+      },
+      "note": "no revision of the required interface held: the declaration and the selection unobservable; the binding read",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/*"
+        ],
+        "declaration": {
+          "declaration": "unread"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "no",
+          "reason": "exact",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "unobservable",
+          "reason": "revisions_disagree"
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "revisions_disagree"
+        }
+      },
+      "note": "the revisions held give two declarations: unobservable, revisions_disagree; the binding read",
+      "reading": {
+        "bindings": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "declaration": {
+          "declaration": "revisions_disagree"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    }
+  ],
+  "description": "arbitration.v1 §2.14, §5: a tool's reading of one consumer's role -> §5's three questions. reading.declaration is what the tool reads of the role: as declarations.json's expect writes one (\"arbitrated\" with deadline_ms, \"invalid\" with reasons, \"not_arbitrated\", \"unread\": no revision of the required interface held), or \"no_contract\" (the declaring contract not held) or \"revisions_disagree\" (the revisions of the required interface held give two declarations). reading.bindings is the descriptor's, in order. reading.view, absent when the tool did not listen, is the tool's own view: listened_ms, how long it has listened; lost, whether it knows it lost samples within the last deadline; active, the provider its view selects (arbitrations.json's rules over its own events), or null. Each answer is {answer, reason}, answer one of yes, no, unobservable, not_asked, not_this_profiles. declaration: no_contract -> unobservable, no_contract; not_arbitrated -> not_this_profiles, not_arbitrated; revisions_disagree -> unobservable, revisions_disagree; unread -> unobservable, no_provider_contract; invalid -> no, invalid, with reasons; arbitrated -> yes, valid. selection: the declaration's answer for the first four (without reasons); invalid -> unobservable, invalid; then bindings empty -> no, unbound; view absent -> not_asked, not_listened; lost -> unobservable, lost; active -> yes, selected, with provider; listened_ms < deadline_ms -> unobservable, listening; else no, dead_man. binding, with wildcards and shadowed as rankings.json computes them (both empty on a premise's answer): no_contract -> unobservable, no_contract; not_arbitrated -> not_this_profiles, not_arbitrated; otherwise (the role carries a policy) a wildcard entry -> yes, wildcard; else a shadowed entry -> yes, shadowed; else no, exact."
+}

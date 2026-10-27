@@ -1,0 +1,4026 @@
+{
+  "cases": [
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 500,
+          "event": "tick"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "the dead-man at start, cause start; a timer with nothing active changes nothing (§2.11)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/teleop"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "the first arrival in the dead-man makes its provider active, cause sample, and is delivered (§2.9, §2.10)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/autopilot/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/autopilot/steer.v1/stream/cmd"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 50,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 60,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/autopilot",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/autopilot"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/autopilot",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 340,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 340,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 360,
+          "outcome": "delivered",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a higher provider takes over at its first arrival, no hysteresis; a lower one's arrivals are counted not_active (§2.9)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 170,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 309,
+          "event": "tick"
+        },
+        {
+          "at": 310,
+          "event": "tick"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 470,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "the active misses its deadline at its due instant, not before: the next eligible, cause deadline (§2.6, §2.9)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 200,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 310,
+          "event": "tick"
+        },
+        {
+          "at": 400,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 500,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 700,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "missed, then back at its next arrival, cause sample: never withdrawn, it needs no re-admission",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 0,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 250,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 305,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 300,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 300,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 605,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            },
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "an event decides the time first: the active's arrival after its due instant makes two switches, its miss and its return",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 0,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 100,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 320,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 300,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 300,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 620,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a miss decided at another provider's arrival: cause deadline, and the arrival delivered by the provider now active",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 310,
+          "event": "tick"
+        },
+        {
+          "at": 320,
+          "event": "tick"
+        },
+        {
+          "at": 400,
+          "event": "tick"
+        },
+        {
+          "at": 500,
+          "event": "sample",
+          "key": "zk2/lab/autopilot/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/teleop",
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/autopilot",
+          "due": 800,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/autopilot"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "every provider misses: the dead-man, cause deadline; then any arrival leaves it, cause sample (§2.11)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 70,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 90,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "address": "lab/safety",
+          "at": 130,
+          "complete": true,
+          "event": "read",
+          "held": []
+        },
+        {
+          "at": 140,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 370,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 370,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 370,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 370,
+          "outcome": "not_active",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a withdrawal of the active: at once, cause withdrawn, a read again asked; its later samples are counted, never delivered, and re-admit nothing (§2.7)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 180,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 200,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a2/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 210,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 480,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 480,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 510,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "re-admitted by its token heard declared, it is eligible again only at its next arrival, cause sample",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "address": "lab/safety",
+          "at": 130,
+          "complete": true,
+          "event": "read",
+          "held": [
+            "00000000000000a1"
+          ]
+        },
+        {
+          "at": 140,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 440,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "re-admitted by a complete read showing a token held (core §8.1's read again)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "address": "lab/safety",
+          "at": 130,
+          "complete": false,
+          "event": "read",
+          "held": [
+            "00000000000000a1"
+          ]
+        },
+        {
+          "at": 140,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 440,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a read not complete showing a token re-admits too: a read cannot invent a token",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "address": "lab/safety",
+          "at": 130,
+          "complete": false,
+          "event": "read",
+          "held": []
+        },
+        {
+          "at": 140,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 320,
+          "outcome": "not_active",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a read not complete showing none leaves the provider withdrawn",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "outcome": "not_active",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a withdrawal of a token never known held leaves none known held: withdrawn, failing toward a lower priority",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a2/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 25,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 330,
+          "outcome": "delivered",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a re-mint: the new token declared before the old one goes, nothing changes, no read asked (§2.7, core §8.1)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "address": "lab/safety",
+          "at": 120,
+          "complete": true,
+          "event": "read",
+          "held": [
+            "00000000000000a2"
+          ]
+        },
+        {
+          "at": 130,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 430,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a re-mint whose new token the watch never heard: withdrawn, then re-admitted by the read again, and active at its next arrival",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 16,
+          "event": "declared",
+          "token": "zk2/lab/teleop/@zk/alive/steer.v1/00000000000000b1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 20,
+          "event": "withdrawn",
+          "token": "zk2/lab/teleop/@zk/alive/steer.v1/00000000000000b1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "reread": [
+            "lab/teleop"
+          ],
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 340,
+          "outcome": "delivered",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a withdrawal of a provider not active switches nothing, and asks a read again",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "address": "lab/safety",
+          "at": 20,
+          "complete": true,
+          "event": "read",
+          "held": [
+            "00000000000000a2"
+          ]
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 340,
+          "outcome": "delivered",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a complete read replaces what was known held: the token it no longer shows is forgotten, and that token's withdrawal leaves the one it shows",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "address": "lab/safety",
+          "at": 20,
+          "complete": false,
+          "event": "read",
+          "held": [
+            "00000000000000a2"
+          ]
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 40,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a2/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 50,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "outcome": "not_active",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a read not complete adds to what was known held: the first withdrawal leaves one, the second none",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "address": "lab/safety",
+          "at": 20,
+          "complete": true,
+          "event": "read",
+          "held": []
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 330,
+          "event": "tick"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 330,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": null
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a read never makes a provider ineligible: a complete read showing no token of the active changes nothing (the deadline alone, as for a tokenless provider)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 2,
+          "event": "declared",
+          "token": "zk2/lab/teleop/@zk/alive/steer.v1/00000000000000b1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "moved"
+        },
+        {
+          "at": 21,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 21,
+          "event": "withdrawn",
+          "token": "zk2/lab/teleop/@zk/alive/steer.v1/00000000000000b1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 40,
+          "event": "moved"
+        },
+        {
+          "at": 41,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 41,
+          "event": "declared",
+          "token": "zk2/lab/teleop/@zk/alive/steer.v1/00000000000000b1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 50,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 60,
+          "event": "stood"
+        },
+        {
+          "at": 70,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 330,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 330,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 330,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 330,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 350,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 350,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 370,
+          "outcome": "delivered",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a move: the close's withdrawals and the reopen's telling are kept, then applied as one change when the round trip stands: nothing changes (§2.8)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "moved"
+        },
+        {
+          "at": 21,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 40,
+          "event": "moved"
+        },
+        {
+          "at": 45,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 50,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 60,
+          "event": "stood"
+        },
+        {
+          "at": 70,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 350,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 345,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 345,
+          "outcome": "not_active",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a move: a withdrawal the reopen did not undo is applied when the round trip stands, cause withdrawn, a read again asked",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "moved"
+        },
+        {
+          "at": 40,
+          "event": "moved"
+        },
+        {
+          "at": 41,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 45,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 50,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 60,
+          "event": "stood"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 350,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a move: the reopen's telling then a withdrawal, kept in order, end withdrawn",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "moved"
+        },
+        {
+          "address": "lab/safety",
+          "at": 120,
+          "complete": true,
+          "event": "read",
+          "held": [
+            "00000000000000a1"
+          ]
+        },
+        {
+          "at": 130,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 140,
+          "event": "stood"
+        },
+        {
+          "at": 150,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 450,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a move: a read's result is kept as well, and a read showing a token held while the move is pending re-admits only when the round trip stands",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "moved"
+        },
+        {
+          "at": 200,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 310,
+          "event": "tick"
+        },
+        {
+          "at": 320,
+          "event": "stood"
+        },
+        {
+          "at": 330,
+          "event": "stood"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 500,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 500,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 500,
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a move: the deadline goes on meanwhile; a round trip standing with nothing kept changes nothing",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "stood"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a round trip standing with no move pending changes nothing",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 1,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 15,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "moved"
+        },
+        {
+          "at": 41,
+          "event": "declared",
+          "token": "zk2/lab/safety/@zk/alive/steer.v1/00000000000000a2/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 50,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 60,
+          "event": "stood"
+        },
+        {
+          "at": 70,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "reread": [
+            "lab/safety"
+          ],
+          "switches": [
+            {
+              "cause": "withdrawn",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/teleop",
+          "due": 315,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 370,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a provider withdrawn before a move, re-admitted by the reopen's telling when the round trip stands, active at its next arrival",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 11,
+          "event": "declared",
+          "token": "zk2/lab/teleop/@zk/alive/steer.v1/00000000000000b1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 100,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 200,
+          "event": "sample",
+          "key": "zk2/lab/autopilot/steer.v1/stream/cmd"
+        },
+        {
+          "at": 320,
+          "event": "withdrawn",
+          "token": "zk2/lab/teleop/@zk/alive/steer.v1/00000000000000b1/6f2b0c1d9e8a7b65"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/autopilot",
+          "due": 500,
+          "reread": [
+            "lab/teleop"
+          ],
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": "lab/teleop"
+            },
+            {
+              "cause": "withdrawn",
+              "from": "lab/teleop",
+              "to": "lab/autopilot"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "the time first at a withdrawal: the active's miss (deadline), then the withdrawal of the provider it fell to (withdrawn)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/*/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/*"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "wild",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "wild",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "identity: a key that is not concrete is discarded first (core R6), whatever else it would be",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/twist_cmd.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/state/cmd"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/@stream/cmd"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/trim"
+        },
+        {
+          "at": 50,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd/x"
+        },
+        {
+          "at": 60,
+          "event": "sample",
+          "key": "v1/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 70,
+          "event": "sample",
+          "key": "zk2/lab/safety/@zk/instance/00000000000000a1"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "identity: keys that are not the role's stream's at any address are unresolved, never an arrival",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/intruder/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unbound",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 320,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "identity: an address no entry matches is unbound, never a provider",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd/rudder-r"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd/rudder-l"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unresolved",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 320,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "identity: a templated stream, its parameter bound: the role's key at each address, another value unresolved",
+      "params": {
+        "target": "rudder-l"
+      },
+      "resource": {
+        "template": "cmd/{target}",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "expired": true,
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 310,
+          "event": "tick"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "expired",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": null
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "an expired sample (timing.v1) is no arrival: counted, never delivered, and the deadline runs from the last arrival",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "incumbent": false,
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 310,
+          "outcome": "not_incumbent",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 330,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a governed provider's sample redundancy.v1 §2.10 does not accept is no arrival: it neither preempts nor keeps an address eligible",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/*"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/autopilot/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/autopilot",
+          "due": 320,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/autopilot"
+            }
+          ]
+        },
+        {
+          "active": "lab/autopilot",
+          "due": 320,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 340,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/autopilot",
+              "to": "lab/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a wildcard entry: its addresses at its position, by byte order, autopilot above teleop (§2.4)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/*",
+        "lab/safety"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "event": "sample",
+          "key": "zk2/lab/autopilot/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/teleop",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/teleop"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 320,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/teleop",
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/autopilot",
+          "due": 330,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "lab/safety",
+              "to": "lab/autopilot"
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "an address matched twice ranks at its first entry: safety inside lab/*, below autopilot",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "withdrawn",
+          "token": "zk2/lab/safety/@zk/alive/twist_cmd.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 30,
+          "event": "withdrawn",
+          "token": "zk2/lab/intruder/@zk/alive/steer.v1/00000000000000a1/6f2b0c1d9e8a7b65"
+        },
+        {
+          "at": 40,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 340,
+          "outcome": "delivered",
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "tokens of another interface, or at an address no entry matches, are no withdrawal and ask no read",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 400,
+          "event": "tick"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": null,
+          "due": null,
+          "outcome": "unbound",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": []
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a role bound to nothing holds the dead-man for good (§2.2, §2.11)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "vehicle-01/safety",
+        "vehicle-01/teleop",
+        "vehicle-01/autopilot"
+      ],
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 0,
+          "event": "sample",
+          "key": "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd"
+        },
+        {
+          "at": 5,
+          "event": "sample",
+          "key": "zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd"
+        },
+        {
+          "at": 90,
+          "event": "sample",
+          "key": "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd"
+        },
+        {
+          "at": 105,
+          "event": "tick"
+        },
+        {
+          "at": 110,
+          "event": "sample",
+          "key": "zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "vehicle-01/teleop",
+          "due": 100,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "vehicle-01/teleop"
+            }
+          ]
+        },
+        {
+          "active": "vehicle-01/safety",
+          "due": 105,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "vehicle-01/teleop",
+              "to": "vehicle-01/safety"
+            }
+          ]
+        },
+        {
+          "active": "vehicle-01/safety",
+          "due": 105,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "vehicle-01/safety",
+          "due": 105,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "vehicle-01/teleop",
+          "due": 190,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "vehicle-01/safety",
+              "to": "vehicle-01/teleop"
+            }
+          ]
+        },
+        {
+          "active": "vehicle-01/safety",
+          "due": 210,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": "vehicle-01/teleop",
+              "to": "vehicle-01/safety"
+            }
+          ]
+        }
+      ],
+      "interface": "twist_cmd.v1",
+      "note": "the walkthrough: twist_cmd.v1, deadline 100 ms, safety silent then back",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    }
+  ],
+  "description": "arbitration.v1 §2.5 to §2.11: one consumer's arbitrated role, and the events its runtime hands it in order -> after each event, what it decides. The role: interface (the required interface's id), resource (the stream's kind token and template), params (its parameter bindings, resolved), deadline_ms, and bindings (the entries in their configured order, as rankings.json reads them). Each event has at, an instant in ms on the consumer's monotonic clock, never decreasing, and event: \"start\" (first, once); \"sample\" with key (base-relative), and expired: true (timing.v1 reads it expired) or incumbent: false (the required interface is governed and redundancy.v1 §2.10 does not accept it), each absent otherwise; \"declared\" or \"withdrawn\" with token, an interface token's key zk2/<system>/<service>/@zk/alive/<iface>/<instance>/<fp16> the watch heard (one of another interface, or at an address no entry matches, is ignored); \"read\" with address, complete and held (the instance ids holding the required interface's token there, as the read shows them); \"moved\" (the watch session's transport closed or opened); \"stood\" (the round trip asked after the last move stands); \"tick\" (the timer fired). The rules: a provider is eligible at t when it is not withdrawn and its last arrival a (since its last re-admission) has t < a + deadline_ms. Each event at t first decides the time: an active provider not eligible at t is left for the eligible provider of highest rank at t, or none, cause deadline. Then the event: a sample's outcome is the first of wild (its key holds *), unresolved (not zk2/<system>/<service>/<interface>/<token>/<chunks> with the chunks matching the template and every parameter's chunk equal to params' value), unbound (no entry matches the address), expired, not_incumbent; otherwise it is an arrival, which sets the provider's last arrival unless it is withdrawn, and its outcome is delivered when its provider is active after the event, else not_active. A declaration adds its instance to those known held at its address and re-admits it (withdrawn ends; its arrivals stay forgotten). A withdrawal removes its instance; when none is then known held, the provider is withdrawn, its last arrival forgotten, and a read again asked (reread). A read: complete replaces the instances known held there, not complete adds to them; any then known held re-admits it; a read never withdraws. From a moved until a stood, declarations, withdrawals and reads are kept and change nothing; at that stood they are applied in order to the instances known held, as one change: an address left with none known held, a withdrawal of it among them, ends withdrawn (arrivals forgotten, reread); one withdrawn before them and left with one known held ends re-admitted; any other is unchanged. A stood with nothing pending changes nothing. After the event the active provider is the eligible provider of highest rank, or none: a change is a switch, cause sample when the event is an arrival of the provider now active, else withdrawn. \"start\" makes one switch, from null to null, cause start: the dead-man. expect[i] is, after event i: switches (each {from, to, cause}, null meaning none, the dead-man; at most a deadline one then the event's own), active (an address or null), due (the active provider's last arrival + deadline_ms, or null), outcome (for a sample), and reread (the addresses to read again, in rank order, when any)."
+}
