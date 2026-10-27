@@ -34,6 +34,7 @@ use zenkey_model::redundancy;
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::telemetry::{self, Datum, Declaration, MetricKind, TypeView};
 use zenkey_model::template::Template;
+use zenkey_model::timing::{self, Mono};
 
 /// The fixtures this crate runs, as (profile directory, file name).
 const KNOWN: &[(&str, &str)] = &[
@@ -76,6 +77,11 @@ const KNOWN: &[(&str, &str)] = &[
     ("redundancy", "lifecycle.json"),
     ("redundancy", "conclusions.json"),
     ("redundancy", "polls.json"),
+    ("timing", "declarations.json"),
+    ("timing", "deadlines.json"),
+    ("timing", "lifespans.json"),
+    ("timing", "periods.json"),
+    ("timing", "conclusions.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -3240,4 +3246,311 @@ fn redundancy_examples_are_governed() {
         redundancy::declaration_of(&c, true),
         redundancy::Declaration::NotGoverned
     );
+}
+
+// --- timing.v1 ---------------------------------------------------------------------
+
+/// Milliseconds, exact to the nanosecond, as `timing/conformance/` writes
+/// them.
+fn ms_nanos(v: &Value) -> i128 {
+    (v.as_f64().expect("milliseconds") * 1e6).round() as i128
+}
+
+fn tm_mono(v: &Value) -> Mono {
+    Mono::from_nanos(u64::try_from(ms_nanos(v)).expect("an instant"))
+}
+
+fn tm_duration(v: &Value) -> Duration {
+    Duration::from_nanos(u64::try_from(ms_nanos(v)).expect("a duration"))
+}
+
+/// A duration as the fixtures write it: whole milliseconds as an integer.
+fn tm_ms(d: Duration) -> Value {
+    let ns = d.as_nanos();
+    if ns.is_multiple_of(1_000_000) {
+        json!(u64::try_from(ns / 1_000_000).expect("fits"))
+    } else {
+        json!(ns as f64 / 1e6)
+    }
+}
+
+/// A resource as `timing/conformance/` writes it: its kind, and its
+/// annotations, given or merged from its layers (core §9.3).
+fn tm_resource(r: &Value) -> (Kind, BTreeMap<String, Value>) {
+    let kind = match r["kind"].as_str().expect("kind") {
+        "stream" => Kind::Stream,
+        "state" => Kind::State,
+        "event" => Kind::Event,
+        "operation" => Kind::Operation,
+        other => panic!("kind {other:?}"),
+    };
+    let annotations = match r.get("layers") {
+        Some(l) => {
+            let mut m = BTreeMap::new();
+            for layer in ["defaults", "kind_defaults", "resource"] {
+                m.extend(annotations(&l[layer]));
+            }
+            m
+        }
+        None => annotations(&r["annotations"]),
+    };
+    (kind, annotations)
+}
+
+fn tm_declaration_json(d: &timing::Declaration) -> Value {
+    match d {
+        timing::Declaration::Declared(x) => json!({
+            "declaration": d.as_str(),
+            "period_ms": x.period.map(tm_ms),
+            "deadline_ms": x.deadline.map(tm_ms),
+            "lifespan_ms": x.lifespan.map(tm_ms),
+            "below_period": x.below_period(),
+        }),
+        timing::Declaration::Invalid(r) => json!({
+            "declaration": d.as_str(),
+            "reasons": r.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
+        }),
+        timing::Declaration::Ignored | timing::Declaration::NotThisProfiles => {
+            json!({"declaration": d.as_str()})
+        }
+    }
+}
+
+/// `timing/conformance/declarations.json`: a resolved resource, or a
+/// requirement, → its declaration (timing.v1 §2.2, §2.3, §2.5).
+#[test]
+fn timing_declarations() {
+    let path = profiles().join("timing/conformance/declarations.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let d = if let Some(req) = case.get("requirement") {
+            timing::requirement_declaration(&annotations(&req["annotations"]))
+        } else {
+            let (kind, ann) = tm_resource(&case["resource"]);
+            timing::declaration(kind, &ann)
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, tm_declaration_json(&d), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn tm_report_json(r: &timing::Report) -> Value {
+    let at = tm_ms(r.at().since_origin());
+    match r {
+        timing::Report::Missed {
+            member,
+            due,
+            by,
+            owner,
+            ..
+        } => json!({
+            "at_ms": at, "event": r.as_str(), "member": member,
+            "due_ms": tm_ms(due.since_origin()), "by_ms": tm_ms(by.since_origin()),
+            "owner": owner.as_str(),
+        }),
+        timing::Report::Ended { member, reason, .. } => json!({
+            "at_ms": at, "event": r.as_str(), "member": member, "reason": reason.as_str(),
+        }),
+        timing::Report::Met { member, .. } | timing::Report::BeyondBound { member, .. } => {
+            json!({"at_ms": at, "event": r.as_str(), "member": member})
+        }
+    }
+}
+
+/// `timing/conformance/deadlines.json`: one reader's deadline tracker over a
+/// timeline of events → its reports, the members it holds, and when a miss
+/// is next due (timing.v1 §2.5).
+#[test]
+fn timing_deadlines() {
+    let path = profiles().join("timing/conformance/deadlines.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let known: Vec<String> = case["known"]
+            .as_array()
+            .expect("known")
+            .iter()
+            .map(|m| m.as_str().expect("a member").to_owned())
+            .collect();
+        let mut t = timing::Tracker::new(
+            tm_duration(&case["deadline_ms"]),
+            case["bound"].as_u64(),
+            known,
+        );
+        let mut reports = Vec::new();
+        for e in case["events"].as_array().expect("events") {
+            let at = tm_mono(&e["at_ms"]);
+            let member = e["member"].as_str().unwrap_or_default();
+            let event = match e["event"].as_str().expect("event") {
+                "start" => timing::Event::Start,
+                "arrival" => timing::Event::Arrival {
+                    member,
+                    expired: e["expired"] == json!(true),
+                },
+                "owner" => timing::Event::Owner(
+                    timing::OwnerState::parse(e["state"].as_str().expect("state"))
+                        .expect("a state"),
+                ),
+                "member_gone" => timing::Event::MemberGone(member),
+                "tick" => timing::Event::Tick,
+                other => panic!("event {other:?}"),
+            };
+            reports.extend(t.observe(at, event));
+        }
+        let got = json!({
+            "transitions": reports.iter().map(tm_report_json).collect::<Vec<_>>(),
+            "held": t.held().collect::<Vec<_>>(),
+            "next_due_ms": t.next_due().map(|m| tm_ms(m.since_origin())),
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn tm_sample_json(s: timing::Sample) -> Value {
+    json!({"verdict": s.verdict.as_str(), "reason": s.reason.as_str()})
+}
+
+/// `timing/conformance/lifespans.json`: one reader's samples of a member in
+/// one reading → each sample's lifespan (timing.v1 §2.6).
+#[test]
+fn timing_lifespans() {
+    let path = profiles().join("timing/conformance/lifespans.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let (kind, ann) = tm_resource(&case["resource"]);
+        let d = timing::declaration(kind, &ann);
+        let epsilon = case["epsilon_ms"]
+            .as_f64()
+            .map(|_| tm_duration(&case["epsilon_ms"]));
+        let owners: Vec<u128> = case["owners"]
+            .as_array()
+            .expect("owners")
+            .iter()
+            .filter_map(|o| timing::zid_value(o.as_str().expect("a zid")))
+            .collect();
+        let mut r = timing::LifespanReader::new(kind, &d, epsilon, owners);
+        let got: Vec<Value> = case["samples"]
+            .as_array()
+            .expect("samples")
+            .iter()
+            .map(|s| {
+                let stamp = match &s["stamp"] {
+                    Value::Null => None,
+                    st => {
+                        let ns = ms_nanos(&st["age_ms"]);
+                        let d = Duration::from_nanos(u64::try_from(ns.unsigned_abs()).unwrap());
+                        Some(timing::Stamped {
+                            age: if ns < 0 {
+                                StampAge::ahead(d)
+                            } else {
+                                StampAge::behind(d)
+                            },
+                            id: timing::zid_value(st["id"].as_str().expect("an id"))
+                                .expect("a zid"),
+                        })
+                    }
+                };
+                tm_sample_json(r.judge(stamp))
+            })
+            .collect();
+        let what = format!("{}", case["note"]);
+        expect(case, json!(got), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `timing/conformance/periods.json`: one member's arrivals over a window →
+/// its period (timing.v1 §2.7).
+#[test]
+fn timing_periods() {
+    let path = profiles().join("timing/conformance/periods.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let arrivals: Vec<Mono> = case["arrivals_ms"]
+            .as_array()
+            .expect("arrivals_ms")
+            .iter()
+            .map(tm_mono)
+            .collect();
+        let ended = (!case["ended_ms"].is_null()).then(|| tm_mono(&case["ended_ms"]));
+        let p = timing::period_window(
+            tm_duration(&case["period_ms"]),
+            tm_mono(&case["window"]["from_ms"]),
+            tm_mono(&case["window"]["to_ms"]),
+            case["known"] == json!(true),
+            ended,
+            &arrivals,
+        );
+        let got = json!({
+            "verdict": p.verdict.as_str(),
+            "arrivals": p.arrivals,
+            "span_ms": p.span.map(tm_ms),
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn tm_judged(j: timing::Judged) -> Value {
+    json!({"answer": j.answer.as_str(), "reason": j.reason.as_str()})
+}
+
+/// `timing/conformance/conclusions.json`: a tool's reading of one member
+/// over one window → §5's three questions (timing.v1 §2.7, §5).
+#[test]
+fn timing_conclusions() {
+    let path = profiles().join("timing/conformance/conclusions.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let (kind, ann) = tm_resource(&case["resource"]);
+        let d = timing::declaration(kind, &ann);
+        let r = &case["reading"];
+        let w = timing::Window {
+            across_face: r["across_face"] == json!(true),
+            lost: r["lost"] == json!(true),
+            owner_present: r["owner_present"] == json!(true),
+        };
+        let dl = &r["deadline"];
+        let count = |v: &Value| u32::try_from(v.as_u64().expect("a count")).expect("fits");
+        let account = timing::DeadlineAccount {
+            held: tm_duration(&dl["held_ms"]),
+            missed_present: count(&dl["missed_present"]),
+            missed_not_present: count(&dl["missed_not_present"]),
+            ended: dl["ended"] == json!(true),
+        };
+        let period =
+            timing::PeriodVerdict::parse(r["period"].as_str().expect("period")).expect("a verdict");
+        let samples: Vec<timing::Sample> = r["lifespan"]
+            .as_array()
+            .expect("lifespan")
+            .iter()
+            .map(|s| timing::Sample {
+                verdict: timing::SampleVerdict::parse(s["verdict"].as_str().expect("verdict"))
+                    .expect("a verdict"),
+                reason: timing::Reason::parse(s["reason"].as_str().expect("reason"))
+                    .expect("a reason"),
+            })
+            .collect();
+        let got = json!({
+            "deadline": tm_judged(timing::deadline_met(kind, &d, &w, &account)),
+            "period": tm_judged(timing::period_kept(kind, &d, &w, period)),
+            "lifespan": tm_judged(timing::lifespan_expired(kind, &d, &samples)),
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
 }
