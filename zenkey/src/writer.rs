@@ -177,6 +177,13 @@ impl Slot for PubSlot {
 /// publisher is declared only while the instance serves the interface, and
 /// a put while it stands by is refused, [`Error::Standby`], with nothing
 /// published (§2.4).
+///
+/// On a stream that declares `timing.lifespan_ms` (`timing.v1` §2.6,
+/// [`crate::timing`]), each put is stamped from its service's clock, the
+/// stamp's id the session's zid, which the descriptor states as
+/// `meta.zid`, so a reader can age the sample against its owner's clock.
+/// Its period is the application's to keep (§2.4): the writer publishes
+/// only what it is given, and never a sample again on its own.
 pub struct Writer {
     key: zenoh::key_expr::KeyExpr<'static>,
     slot: Arc<PubSlot>,
@@ -186,6 +193,11 @@ pub struct Writer {
     json_typed: bool,
     budget: Option<Arc<Budget>>,
     meter: Option<Meter>,
+    /// The resource's `timing.v1` values, when it is a timed stream.
+    timing: Option<zenkey_model::timing::Declared>,
+    /// The clock each put is stamped from: a timed stream that declares a
+    /// lifespan (`timing.v1` §2.6).
+    clock: Option<Arc<crate::state::Minter>>,
 }
 
 impl Writer {
@@ -238,7 +250,33 @@ impl Writer {
             json_typed: matches!(d.type_, TypeId::JsonSchema { .. }),
             budget: None,
             meter: None,
+            timing: zenkey_model::timing::declaration_of(r).declared().copied(),
+            clock: None,
         })
+    }
+
+    /// Stamps each put from `clock`, its service's, when the resource
+    /// declares a lifespan (`timing.v1` §2.6).
+    pub(crate) fn clocked(mut self, clock: &Arc<crate::state::Minter>) -> Self {
+        if self.timing.is_some_and(|t| t.lifespan.is_some()) {
+            self.clock = Some(Arc::clone(clock));
+        }
+        self
+    }
+
+    /// The resource's `timing.v1` values (`timing.v1` §2.2), when it is a
+    /// timed stream: its period, the cadence the application's loop keeps
+    /// (§2.4), its deadline and its lifespan.
+    #[must_use]
+    pub fn timing(&self) -> Option<&zenkey_model::timing::Declared> {
+        self.timing.as_ref()
+    }
+
+    /// Whether each put is stamped from the service's clock (`timing.v1`
+    /// §2.6).
+    #[must_use]
+    pub fn is_stamped(&self) -> bool {
+        self.clock.is_some()
     }
 
     /// Keeps `budget`, its resource's in its service (§2.7).
@@ -387,9 +425,17 @@ impl Writer {
             return Err(self.standby());
         };
         self.admit()?;
-        match inner {
-            Inner::Plain(p) => p.put(payload).attachment(attachment).await,
-            Inner::Advanced(p) => p.put(payload).attachment(attachment).await,
+        // timing.v1 §2.6: a lifespan's sample carries its owner's stamp.
+        let ts = self.clock.as_ref().map(|c| c.now());
+        match (inner, ts) {
+            (Inner::Plain(p), None) => p.put(payload).attachment(attachment).await,
+            (Inner::Advanced(p), None) => p.put(payload).attachment(attachment).await,
+            (Inner::Plain(p), Some(ts)) => {
+                p.put(payload).attachment(attachment).timestamp(ts).await
+            }
+            (Inner::Advanced(p), Some(ts)) => {
+                p.put(payload).attachment(attachment).timestamp(ts).await
+            }
         }
         .map_err(zenoh)?;
         drop(held);

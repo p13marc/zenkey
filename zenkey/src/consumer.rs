@@ -15,6 +15,14 @@
 //! - **R7:** where presence cannot be observed (a constrained face),
 //!   liveness is judged from the freshness of what crosses, and silence is
 //!   *unobservable*, never *down*.
+//!
+//! **`timing.v1`** (#908): every [`Delivery`] carries its arrival, taken in
+//! the subscriber's callback, its stamp and its lifespan's judgement. A
+//! subscription to a timed stream judges each provider's members' deadline
+//! and each sample's lifespan, as [`crate::timing`] says, and hands its
+//! events to [`Consumer::subscribe_timed`]'s second callback; a sample that
+//! arrives expired is discarded, counted ([`Subscription::expired`]), and
+//! never delivered.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,9 +40,11 @@ use zenkey_model::template::{Bindings, Segment};
 use zenoh::key_expr::OwnedKeyExpr;
 use zenoh::pubsub::Subscriber;
 use zenoh::sample::Sample;
+use zenoh::time::Timestamp;
 
 use crate::error::{Error, Result, zenoh};
 use crate::state::{Current, StateAnswer, StateGet};
+use crate::timing::{self, LifespanSample, MemberState, OwnerState, TimingEvent};
 
 /// One bound provider address: a position is `None` for `*`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +138,16 @@ pub struct Delivery {
     /// The template's parameters, unslugged.
     pub values: Bindings,
     pub sample: Sample,
+    /// When it arrived, on this host's monotonic clock, read in the
+    /// subscriber's callback (`timing.v1` §2.5): a replay's, when its reply
+    /// was read.
+    pub arrival: Instant,
+    /// Its Zenoh timestamp, if it carries one (core §4.1).
+    pub stamp: Option<Timestamp>,
+    /// Its lifespan's judgement at its arrival (`timing.v1` §2.6): live, or
+    /// unobservable or not asked with why. An expired sample is never
+    /// delivered.
+    pub lifespan: LifespanSample,
 }
 
 /// A role's consumer, compiled against the required interface's contract
@@ -140,14 +160,24 @@ pub struct Consumer {
     providers: Vec<Provider>,
     params: BTreeMap<String, String>,
     presence: Presence,
+    /// A watch session of the consumer's own (core §8.1, 0.37), where its
+    /// timed subscriptions follow their owners' tokens (`timing.v1` §2.5).
+    watch: Option<zenoh::Session>,
+    /// ε, the deployment's stated bound on how far an owner's stamps and
+    /// this host's wall clock disagree (`timing.v1` §2.6). `None`: nothing
+    /// is discarded.
+    epsilon: Option<Duration>,
 }
 
-/// A live subscription through a role. Dropping it undeclares it.
+/// A live subscription through a role. Dropping it undeclares it, and
+/// stops its `timing.v1` engine.
 pub struct Subscription {
     _subs: Vec<Subscriber<()>>,
     seen: Arc<Seen>,
-    /// When it was declared: how long it has listened (`freshness.v1` §2.5).
+    /// When it was declared: how long it has listened (`freshness.v1` §2.5),
+    /// and the origin of its deadlines (`timing.v1` §2.5).
     since: Instant,
+    timing: Option<timing::Running>,
 }
 
 #[derive(Default)]
@@ -200,6 +230,8 @@ impl Consumer {
             providers,
             params,
             presence: Presence::Observable,
+            watch: None,
+            epsilon: None,
         })
     }
 
@@ -225,6 +257,35 @@ impl Consumer {
     pub fn with_presence(mut self, presence: Presence) -> Self {
         self.presence = presence;
         self
+    }
+
+    /// Follows its timed subscriptions' owners on `watch`, a session of the
+    /// consumer's own that holds their liveliness subscribers (`timing.v1`
+    /// §2.5, core §8.1, 0.37): a known member is then waited for from its
+    /// owner's presence, and a member ends when its member tokens are gone.
+    /// The consumer's own session goes on making every read. Without one, a
+    /// member is judged from its first arrival, and ends only forgotten.
+    #[must_use]
+    pub fn with_watch(mut self, watch: zenoh::Session) -> Self {
+        self.watch = Some(watch);
+        self
+    }
+
+    /// ε (`timing.v1` §2.6): the deployment's stated bound on how far an
+    /// owner's stamps and this host's wall clock disagree, under which a
+    /// sample older than its lifespan is discarded. A service's consumer
+    /// takes it from its binding's `clock_bound_ms`; `None` states none, and
+    /// nothing is discarded. Never the HLC's delta.
+    #[must_use]
+    pub fn with_clock_bound(mut self, epsilon: Option<Duration>) -> Self {
+        self.epsilon = epsilon;
+        self
+    }
+
+    /// The ε it judges lifespans under, if one is stated.
+    #[must_use]
+    pub fn clock_bound(&self) -> Option<Duration> {
+        self.epsilon
     }
 
     #[must_use]
@@ -304,23 +365,55 @@ impl Consumer {
     /// discarded and counted (R6). A sample on a concrete key that does not
     /// resolve to a member of the resource through a bound provider is
     /// dropped and counted apart ([`Subscription::unresolved`]); every other
-    /// one is delivered attributed.
+    /// one is delivered attributed, but one that arrives expired
+    /// (`timing.v1` §2.6), which is counted ([`Subscription::expired`]).
+    ///
+    /// [`Consumer::subscribe_timed`], its timing events dropped.
     pub async fn subscribe<C>(&self, resource: &str, callback: C) -> Result<Subscription>
     where
         C: Fn(Delivery) + Send + Sync + 'static,
     {
+        self.subscribe_timed(resource, callback, |_| {}).await
+    }
+
+    /// [`Consumer::subscribe`], handing `on_timing` what the subscription
+    /// judges of a timed stream (`timing.v1`, [`crate::timing`]): each
+    /// provider's members missed, met, ended, or past its bound (§2.5), and
+    /// each sample discarded as expired (§2.6), in the order judged, from a
+    /// task of its own. A resource that is not a timed stream has none.
+    pub async fn subscribe_timed<C, T>(
+        &self,
+        resource: &str,
+        callback: C,
+        on_timing: T,
+    ) -> Result<Subscription>
+    where
+        C: Fn(Delivery) + Send + Sync + 'static,
+        T: Fn(TimingEvent) + Send + Sync + 'static,
+    {
         let r = self.resource(resource)?.clone();
         let name = format!("{}/{}", r.token, r.template);
         let seen = Arc::new(Seen::default());
+        let plan = timing::Plan::new(
+            &r,
+            &self.contract.iface,
+            &self.providers,
+            &self.params,
+            self.epsilon,
+        );
+        let premise = plan.premise();
         let since = Instant::now();
+        let prepared = timing::prepare(plan, since);
+        let engine = prepared.as_ref().map(|p| Arc::clone(&p.engine));
         let callback = Arc::new(callback);
         let mut subs = Vec::new();
         for ke in self.selectors(resource)? {
-            let (seen, callback, r, name) = (
+            let (seen, callback, r, name, engine) = (
                 Arc::clone(&seen),
                 Arc::clone(&callback),
                 r.clone(),
                 name.clone(),
+                engine.clone(),
             );
             let iface = self.contract.iface.clone();
             let providers = self.providers.clone();
@@ -328,6 +421,10 @@ impl Consumer {
                 self.session
                     .declare_subscriber(ke)
                     .callback(move |sample: Sample| {
+                        // timing.v1 §2.5, §2.6: its arrival, on both clocks,
+                        // read here, before anything else.
+                        let arrival = Instant::now();
+                        let wall = SystemTime::now();
                         let key = sample.key_expr().as_str();
                         if key.contains('*') {
                             seen.discarded.fetch_add(1, Ordering::Relaxed);
@@ -355,7 +452,19 @@ impl Consumer {
                             seen.unresolved.fetch_add(1, Ordering::Relaxed);
                             return;
                         };
-                        let now = Instant::now();
+                        let lifespan = match &engine {
+                            Some(e) => match e
+                                .lock()
+                                .expect("not poisoned")
+                                .arrive(&addr, key, &chunks, &sample, arrival, wall)
+                            {
+                                Some(l) => l,
+                                // Expired: discarded, counted, no arrival.
+                                None => return,
+                            },
+                            None => premise,
+                        };
+                        let now = arrival;
                         seen.last
                             .lock()
                             .expect("not poisoned")
@@ -374,21 +483,40 @@ impl Consumer {
                                 .and_modify(|m| m.record(offset))
                                 .or_insert(ClockMeasure::new(offset));
                         }
+                        let stamp = sample.timestamp().copied();
                         callback(Delivery {
                             provider: addr,
                             resource: name.clone(),
                             values,
                             sample,
+                            arrival,
+                            stamp,
+                            lifespan,
                         });
                     })
                     .await
                     .map_err(zenoh)?,
             );
         }
+        let timing = match prepared {
+            Some(p) => Some(
+                p.run(
+                    timing::Sources {
+                        session: self.session.clone(),
+                        watch: self.watch.clone(),
+                        providers: self.providers.clone(),
+                    },
+                    on_timing,
+                )
+                .await,
+            ),
+            None => None,
+        };
         Ok(Subscription {
             _subs: subs,
             seen,
             since,
+            timing,
         })
     }
 
@@ -443,11 +571,23 @@ impl Consumer {
                 }
                 let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
                 if let Some(values) = r.template.matches(&refs) {
+                    let stamp = sample.timestamp().copied();
                     out.push(Delivery {
                         provider: addr,
                         resource: name.clone(),
                         values,
                         sample,
+                        arrival: Instant::now(),
+                        stamp,
+                        // An event has no lifespan (timing.v1 §2.3).
+                        lifespan: timing::Plan::new(
+                            &r,
+                            &self.contract.iface,
+                            &[],
+                            &self.params,
+                            self.epsilon,
+                        )
+                        .premise(),
                     });
                 }
             }
@@ -647,6 +787,43 @@ impl Consumer {
 }
 
 impl Subscription {
+    /// Samples discarded as expired (`timing.v1` §2.6): older than their
+    /// lifespan on a stated ε, never delivered, and no arrival.
+    #[must_use]
+    pub fn expired(&self) -> u64 {
+        self.timing
+            .as_ref()
+            .map_or(0, |t| t.expired.load(Ordering::Relaxed))
+    }
+
+    /// The owner of `provider` as this subscription's presence follower last
+    /// observed it (`timing.v1` §0): unseen without a watch session.
+    #[must_use]
+    pub fn owner_state(&self, provider: &Addr) -> OwnerState {
+        self.timing.as_ref().map_or(OwnerState::Unseen, |t| {
+            t.engine.lock().expect("not poisoned").owner_state(provider)
+        })
+    }
+
+    /// Where the member `key` of `provider` stands against its deadline
+    /// (`timing.v1` §2.5), if it is held.
+    #[must_use]
+    pub fn deadline_state(&self, provider: &Addr, key: &str) -> Option<MemberState> {
+        self.timing
+            .as_ref()?
+            .engine
+            .lock()
+            .expect("not poisoned")
+            .member_state(provider, key)
+    }
+
+    /// The instant this subscription was declared: its deadlines' origin
+    /// (`timing.v1` §2.5).
+    #[must_use]
+    pub fn since(&self) -> Instant {
+        self.since
+    }
+
     /// Samples discarded because their key was not concrete (R6).
     #[must_use]
     pub fn discarded(&self) -> u64 {

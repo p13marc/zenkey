@@ -77,7 +77,13 @@
 //! its resources is declared only while the instance serves it, a write
 //! while it stands by is refused, a takeover runs core §8.2's steps and a
 //! step-down their reverse, and `external` serves only with the
-//! application's lock.
+//! application's lock; `timing.v1` is [`timing`] (#908): a consumer's
+//! subscription to a timed stream carries each arrival's instant and stamp
+//! in its [`consumer::Delivery`], judges each provider's members' deadline
+//! with `zenkey_model::timing`'s tracker, on a one-shot timer, its owners'
+//! presence followed on a watch session handed in, and discards a sample
+//! that arrives expired on the binding's stated clock bound; a writer of a
+//! stream declaring a lifespan stamps each put from the service's clock.
 
 #[cfg(feature = "zenoh")]
 pub mod alarms;
@@ -124,6 +130,8 @@ pub mod shm;
 #[cfg(feature = "zenoh")]
 pub mod state;
 pub mod telemetry;
+#[cfg(feature = "zenoh")]
+pub mod timing;
 #[cfg(feature = "zenoh")]
 pub mod typed;
 #[cfg(feature = "zenoh")]
