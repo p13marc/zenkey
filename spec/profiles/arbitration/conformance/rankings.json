@@ -1,0 +1,316 @@
+{
+  "cases": [
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": []
+      },
+      "heard": [],
+      "note": "three exact entries, nothing heard: each ranks at its position, heard or not (§2.4)"
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/safety",
+          "lab/teleop",
+          "lab/autopilot"
+        ],
+        "shadowed": [],
+        "unbound": [
+          "lab/intruder"
+        ],
+        "wildcards": []
+      },
+      "heard": [
+        "lab/intruder",
+        "lab/teleop"
+      ],
+      "note": "an address no entry matches is no provider"
+    },
+    {
+      "bindings": [
+        "vehicle-01/safety",
+        "vehicle-01/teleop",
+        "vehicle-01/autopilot"
+      ],
+      "expect": {
+        "ranked": [
+          "vehicle-01/safety",
+          "vehicle-01/teleop",
+          "vehicle-01/autopilot"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": []
+      },
+      "heard": [],
+      "note": "the walkthrough's binding, in priority order"
+    },
+    {
+      "bindings": [
+        "vehicle-01/safety",
+        "vehicle-01/*"
+      ],
+      "expect": {
+        "ranked": [
+          "vehicle-01/safety",
+          "vehicle-01/autopilot",
+          "vehicle-01/teleop"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": [
+          1
+        ]
+      },
+      "heard": [
+        "vehicle-01/teleop",
+        "vehicle-01/autopilot",
+        "vehicle-01/safety"
+      ],
+      "note": "a wildcard after an exact entry: its addresses at its position, by service byte order (autopilot before teleop)"
+    },
+    {
+      "bindings": [
+        "*/teleop"
+      ],
+      "expect": {
+        "ranked": [
+          "a/teleop",
+          "a-b/teleop",
+          "a.b/teleop",
+          "a_b/teleop"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": [
+          0
+        ]
+      },
+      "heard": [
+        "a_b/teleop",
+        "a.b/teleop",
+        "a/teleop",
+        "a-b/teleop"
+      ],
+      "note": "by system, then by service, never the address's text whole: system a before a-b before a.b before a_b, where the text would put a/teleop third"
+    },
+    {
+      "bindings": [
+        "*/*"
+      ],
+      "expect": {
+        "ranked": [
+          "w/z",
+          "x/a",
+          "x/b"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": [
+          0
+        ]
+      },
+      "heard": [
+        "x/b",
+        "x/a",
+        "w/z"
+      ],
+      "note": "*/*: by system, then service"
+    },
+    {
+      "bindings": [
+        "lab/*",
+        "lab/safety"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/safety",
+          "lab/teleop"
+        ],
+        "shadowed": [
+          1
+        ],
+        "unbound": [],
+        "wildcards": [
+          0
+        ]
+      },
+      "heard": [
+        "lab/teleop",
+        "lab/safety"
+      ],
+      "note": "an exact entry after a wildcard matching it is shadowed: safety ranks inside the wildcard, by byte order"
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/safety"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/safety",
+          "lab/teleop"
+        ],
+        "shadowed": [
+          2
+        ],
+        "unbound": [],
+        "wildcards": []
+      },
+      "heard": [],
+      "note": "an exact entry listed twice: its second entry shadowed, the address ranked at its first"
+    },
+    {
+      "bindings": [
+        "lab/*",
+        "lab/*"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/teleop"
+        ],
+        "shadowed": [
+          1
+        ],
+        "unbound": [],
+        "wildcards": [
+          0,
+          1
+        ]
+      },
+      "heard": [
+        "lab/teleop"
+      ],
+      "note": "a wildcard after one matching every address it does is shadowed"
+    },
+    {
+      "bindings": [
+        "*/*",
+        "lab/safety",
+        "lab/*"
+      ],
+      "expect": {
+        "ranked": [
+          "a/b",
+          "lab/safety"
+        ],
+        "shadowed": [
+          1,
+          2
+        ],
+        "unbound": [],
+        "wildcards": [
+          0,
+          2
+        ]
+      },
+      "heard": [
+        "lab/safety",
+        "a/b"
+      ],
+      "note": "*/* shadows every later entry"
+    },
+    {
+      "bindings": [
+        "lab/*",
+        "*/teleop"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/teleop",
+          "site/teleop"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": [
+          0,
+          1
+        ]
+      },
+      "heard": [
+        "site/teleop",
+        "lab/teleop"
+      ],
+      "note": "lab/* does not shadow */teleop: site/teleop is the second's own"
+    },
+    {
+      "bindings": [
+        "*/teleop",
+        "lab/*"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/teleop",
+          "site/teleop",
+          "lab/autopilot"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": [
+          0,
+          1
+        ]
+      },
+      "heard": [
+        "lab/autopilot",
+        "site/teleop",
+        "lab/teleop"
+      ],
+      "note": "*/teleop does not shadow lab/*: lab/autopilot is the second's own, ranked after every teleop"
+    },
+    {
+      "bindings": [],
+      "expect": {
+        "ranked": [],
+        "shadowed": [],
+        "unbound": [
+          "lab/safety"
+        ],
+        "wildcards": []
+      },
+      "heard": [
+        "lab/safety"
+      ],
+      "note": "a binding with no entry ranks nothing"
+    },
+    {
+      "bindings": [
+        "lab/*"
+      ],
+      "expect": {
+        "ranked": [
+          "lab/teleop"
+        ],
+        "shadowed": [],
+        "unbound": [],
+        "wildcards": [
+          0
+        ]
+      },
+      "heard": [
+        "lab/teleop",
+        "lab/teleop"
+      ],
+      "note": "an address heard twice is one provider"
+    }
+  ],
+  "description": "arbitration.v1 §2.4: a binding (its entries in their configured order, each <system>/<service>, a chunk possibly *) and the addresses heard -> the providers in rank order. An entry matches an address when each of its chunks is * or equal to the address's. An address ranks at the first entry that matches it; addresses at one entry are ordered by system, then by service, each compared byte by byte (never the text <system>/<service> whole). expect.ranked: every exact entry's address (heard or not) and every heard address some entry matches, once each, in rank order; expect.unbound: the heard addresses no entry matches, ordered by system then service, once each; expect.wildcards: the 0-based positions of the entries with a * chunk; expect.shadowed: the 0-based positions of the entries that can rank no address of their own, an entry at position j being shadowed when an earlier entry i < j matches every address it does (each chunk of i is * or equal to j's)."
+}

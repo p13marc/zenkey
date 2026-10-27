@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.53** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.54** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -73,8 +73,10 @@ and flow that rule holds for, and where a recorder can hear a read that
 freezes a node, and in 0.52 whose answers the admin read reaches, and in
 0.53 what `timing.v1` needed: its vocabulary published, a session's HLC
 moved by a later stamp it receives, and a stamp's time counted from the
-Unix epoch). Every change goes through [`CHANGELOG.md`](CHANGELOG.md),
-amendment-style.
+Unix epoch, and in 0.54 what `arbitration.v1` needed: a binding an
+ordered list, its order kept by the descriptor, a withdrawal heard live
+acted on without concluding absence, and its vocabulary published). Every
+change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
 applications built on Zenoh. It is written so that an implementation in any
@@ -709,16 +711,27 @@ the required interface, and MUST NOT be empty.
 
 | # | Rule | Evidence |
 |---|---|---|
-| R1 | **Deployment:** a role MUST be bound by configuration, never in code. A binding is a list of service addresses, exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface). A provider on the service's own system is spelled `self.system/<service>`, or `self.system/*` for every service on it that implements the interface (0.20, below). The binding configuration's format is a recommendation, not a rule. | `[Sc: bindings.md §1, §5]` |
+| R1 | **Deployment:** a role MUST be bound by configuration, never in code. A binding is an ordered list of service addresses, exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface). A provider on the service's own system is spelled `self.system/<service>`, or `self.system/*` for every service on it that implements the interface (0.20, below). The order is the configuration's, and it is significant only where a profile says so (0.54, below). The binding configuration's format is a recommendation, not a rule. | `[Sc: bindings.md §1, §5, §6]` |
 | R2 | **Deployment:** a template parameter MAY be bound too. `{vehicle} = self.system` (or `self.service`) binds the consumer to its own slice of a provider's collection. | `[Sc: bindings.md §2]` |
-| R3 | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings and parameter bindings as configured, a `self.system` provider resolved (0.20, below). **Tool:** the data-flow graph is read from descriptors, never inferred. | `[Sc: bindings.md §3, §5]` |
+| R3 | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings, in their configured order, and its parameter bindings, as configured, a `self.system` provider resolved in its place (0.20, 0.54, below). **Tool:** the data-flow graph is read from descriptors, never inferred. | `[Sc: bindings.md §3, §5, §6]` `[F: descriptors/ok-binding-order]` |
 | R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.8). | `[F: compat/]` |
 | R5 | A consumer MAY wait on presence for its bound providers. A binding resolves at once without it. | `[Sc: bindings.md §1]` |
 | R6 | **Consumer:** MUST discard a sample, or a GET reply, whose key expression is not concrete. Zenoh delivers a put on a wildcard key with the publisher's key. | `[Sc: bindings.md §4]` |
 | R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it (0.21). Where nothing crosses, liveness is *unobservable*, and a tool MUST say so rather than report the provider down. A `health.v1` status that crosses is such evidence, and its health is unobservable where the face closes it ([`health.v1`](profiles/health/v1.md) §2.8, 0.23). | `[Sc: constrained.md §3]` |
 
-When several providers are bound, choosing between them is the consumer's
-(`arbitration.v1`).
+When several providers are bound, choosing between them is the consumer's.
+[`arbitration.v1`](profiles/arbitration/v1.md) says how, for a role whose
+contract declares a policy (0.54); a `many` role without one receives
+from every bound provider.
+
+- **A binding is ordered** (0.54). A runtime keeps a role's bindings in the
+  order its configuration gives them, an address listed twice included,
+  and its descriptor lists them so (R3). The core reads no order: a
+  binding means the same set of providers in any order, and a checker
+  reads neither the order nor a repeat (§3.3, cascade 8). A profile MAY
+  give the order a meaning for a role whose contract uses it:
+  `arbitration.v1` reads it as a priority, the first entry the highest
+  (its §2.4). `[Sc: bindings.md §6]` `[F: descriptors/ok-binding-order]`
 
 - **A provider on the service's own system** (0.20). A runtime MUST
   resolve a provider whose system position is `self.system` into the
@@ -849,8 +862,9 @@ gate does not name.
   `declared_by`. A role declared by the component's manifest names `null`.
   A role the configuration leaves unbound is listed with `"bindings": []`
   (§3.2). A `self.system` provider is listed resolved, as
-  `<system>/<service>` (R1, 0.20). `[F: descriptors/d009-*]`
-  `[Sc: bindings.md §5]`
+  `<system>/<service>` (R1, 0.20). The bindings keep their configured
+  order, an address listed twice included (R3, 0.54).
+  `[F: descriptors/d009-*, ok-binding-order]` `[Sc: bindings.md §5, §6]`
   - **`optional`** (0.10) is `true` for a role the instance works without,
     and absent otherwise: absent is required, and `false` written out is
     the same as absent. For a manifest role it is the only place a tool
@@ -956,6 +970,10 @@ and reports these codes. `[F: descriptors/]`
      contract uses is not a finding `[F: descriptors/ok-derivation-profile]`;
    - the order of `profiles` (0.20): an owner writes it, and a tool reads
      the list as a set;
+   - the order of a role's `bindings`, and an address listed twice
+     (0.54): an owner writes them as configured (R3), and a profile that
+     gives the order a meaning says what a repeat means
+     (`arbitration.v1` §2.4) `[F: descriptors/ok-binding-order]`;
    - that a `self.system` provider was resolved (0.20): `self.system` is a
      plain chunk, so an unresolved one reads as a system of that name.
      `bindings.md §5` checks the runtime instead;
@@ -2018,6 +2036,16 @@ Liveliness tokens carry no payload; everything is in the key.
       held, so it owes no read: another instance holds throughout.
     - A read not made (above) leaves the withdrawal unconfirmed until the
       reader's session reaches a node again and a read is made.
+    - **Acting on a withdrawal** (0.54). A reader MAY act on a withdrawal
+      heard live where the act concludes no absence, and fails toward what
+      the reader does without the token's holder: it reports nothing
+      absent from it, and reads again as above. What the read then shows
+      held undoes the act. [`arbitration.v1`](profiles/arbitration/v1.md)
+      so stops following a provider at its withdrawal, ineligible and never
+      absent, and re-admits it only when a token is heard declared or a
+      read shows one held (its §2.7), while a move of its watch session
+      holds back what the move makes it hear until its round trip stands
+      (its §2.8). `[Sc: profiles/arbitration/scenarios.md §3, §4, §7]`
 
     `[Sc: presence.md §8]`
   - **The read that establishes absence goes on a session with no
@@ -3223,7 +3251,9 @@ here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
 [`freshness.v1`](profiles/freshness/v1.md) for a value's age,
 [`telemetry.v1`](profiles/telemetry/v1.md) for a counter's epoch,
 [`desired.v1`](profiles/desired/v1.md) for store-and-forward,
-[`redundancy.v1`](profiles/redundancy/v1.md) for exclusivity), it names
+[`redundancy.v1`](profiles/redundancy/v1.md) for exclusivity,
+[`arbitration.v1`](profiles/arbitration/v1.md) for choosing between bound
+providers), it names
 the standard way to meet the rule, which the core states in its own
 terms. A profile contributes through these four points, and through no
 other:
@@ -3266,10 +3296,14 @@ other:
    ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35),
    `desired.v1`'s ([`profiles/desired/v1.md`](profiles/desired/v1.md) §4,
    0.36), `redundancy.v1`'s
-   ([`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4, 0.39)
-   and `timing.v1`'s ([`profiles/timing/v1.md`](profiles/timing/v1.md) §4,
-   0.53) followed. `[F: contracts/w105-redundancy-epoch,
-   w105-timing-max-rate]`
+   ([`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4, 0.39),
+   `timing.v1`'s ([`profiles/timing/v1.md`](profiles/timing/v1.md) §4,
+   0.53) and `arbitration.v1`'s, the first read on a requirement
+   ([`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4, 0.54)
+   followed. `[F: contracts/w105-redundancy-epoch,
+   w105-timing-max-rate, w105-arbitration-deadline]` A requirement's
+   annotations are checked as a resource's are (§9.2).
+   `[F: contracts/e020-requirement]`
    A profile may publish an empty one, as `alarms.v1` does
    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4, 0.34): it
    defines no key, so W105 warns of every key under its name.
@@ -3842,7 +3876,7 @@ reader, clients, some under CPU load:
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27); §12 S4's check reads beside a router that is declaring (0.48), where its recorder can hear a read that freezes a node (0.51) |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46), at what period its output is sampled (0.47), and one that prints nothing while its link is cut (0.49); Appendix B |
-| `scenarios/bindings.md` | §3.2 |
+| `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor (0.54) |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion (0.50) |
@@ -3853,6 +3887,7 @@ reader, clients, some under CPU load:
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
 | `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36), and an owner silent within the timeout across a cut, its own answer after the heal (§10, 0.37) |
+| `profiles/arbitration/scenarios.md` §3, §4, §7, §9 | §3.2, §3.3 a binding's order kept by the descriptor, and read as a priority (§9); §8.1 a withdrawal heard live acted on without concluding absence, and undone by a token or a read (§3, §4), and what a move of the watch session makes a reader hear held back until its round trip stands (§7) (0.54) |
 | `profiles/redundancy/scenarios.md` §1, §5, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby (0.39); §8.1 a refused read on the claim's own session, and peers that link (§5, 0.40) |
 | `profiles/timing/scenarios.md` §4, §5 | §4.1 a stream sample stamped by its owner's HLC, by a router when its owner's session has none, and unstamped through a router that stamps nothing; §3.3 `meta.zid` attributing a stamp (0.53) |
 
@@ -3892,6 +3927,7 @@ profile's own table replaces its interim one.
 | `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 (0.36) |
 | `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 (0.39) |
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 (0.53) |
+| `arbitration` | `policy`, on a requirement | [`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4 (0.54) |
 
 `link.downsample_ms` left with the interim `link` row (0.29): a face's
 rate is its face policy's `interval_s` (`link.v1` §2.8), a deployment
@@ -3924,12 +3960,20 @@ among them, since a period is a floor on an owner's cadence, never a
 ceiling (`timing.v1` §2.4), and how often an event may occur is `rate`'s
 (§2.6). `[F: contracts/w105-timing-max-rate]`
 
+`arbitration.v1` publishes the interim `arbitration` row's one key
+unchanged (0.54): `policy`, which a contract writes on a requirement
+(`[requires.<role>]`), never on a resource (`arbitration.v1` §2.2). Its
+value `priority` is defined; `freshest` and `lease` are reserved, and a
+declaration naming one is invalid until a text defines it. A contract
+that writes any other `arbitration.<key>`, a deadline tightened on the
+requirement among them, draws W105: no deadline is tightened at 1.0 (its
+§2.15). `[F: contracts/w105-arbitration-deadline]`
+
 **Interim annotation vocabularies** (W105 outside them, until each profile
 publishes its own):
 
 | Profile | Keys |
 |---|---|
-| `arbitration` | `policy` |
 | `media` | `tiers`, `tier_param`, `frame_clock`, `control`, `receiver_report` |
 | `views` | `document` (an extra's id, `sha256:…`; §9.6) |
 

@@ -1,0 +1,1518 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "thruster.v1's cmd over twist_cmd.v1, as the walkthrough writes them: arbitrated, priority, deadline 100 ms, period 20 ms (§2.2, §2.3, Appendix B)",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_arbitrated"
+      },
+      "note": "no policy, cardinality many: not arbitrated, the merged stream of core §3.2",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {},
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_arbitrated"
+      },
+      "note": "no policy on a role of cardinality one, its contract using arbitration.v1: not arbitrated",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {},
+        "cardinality": "one",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_arbitrated"
+      },
+      "note": "the policy under another major only (arbitration.v2): that major's, not this profile's",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v2"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_used"
+        ]
+      },
+      "note": "the policy carried, uses naming no major of arbitration: not_used (core E020's; a reader of annotations from elsewhere)",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "timing.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "manifest_role"
+        ]
+      },
+      "note": "a component's manifest declares the role: manifest_role, its policy reaching no descriptor",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": null,
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "policy_unsupported"
+        ]
+      },
+      "note": "freshest is reserved: policy_unsupported",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "freshest"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "policy_unsupported"
+        ]
+      },
+      "note": "lease is reserved: policy_unsupported",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "lease"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "a policy no text defines, e020-requirement's: value",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "first"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "a policy that is not a string: value",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": 1
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "the policy compared as written: Priority is not priority, value",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "Priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "cardinality"
+        ]
+      },
+      "note": "cardinality one: cardinality",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "one",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "resources unnamed over an interface whose one resource is a stream: everything is that stream, arbitrated (core §3.1)",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": null
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "resource"
+        ]
+      },
+      "note": "resources unnamed over an interface with a stream and a state: two resources, resource",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          },
+          {
+            "annotations": {},
+            "template": "status",
+            "token": "state"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": null
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "resource"
+        ]
+      },
+      "note": "the one resource named is a state: resource",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          },
+          {
+            "annotations": {},
+            "template": "status",
+            "token": "state"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "status"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "resource"
+        ]
+      },
+      "note": "the resource named is not in the revision held: none consumed, resource",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "nope"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "resource"
+        ]
+      },
+      "note": "two streams named: resource",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          },
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "trim",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd",
+          "trim"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "@stream/cmd"
+      },
+      "note": "an explicit stream (@stream) is a stream: arbitrated",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "@stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "no deadline written, a period only: no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a deadline below its period is none: no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 10,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 20,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "a deadline equal to its period is one: arbitrated",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 20,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 300,
+        "declaration": "arbitrated",
+        "period_ms": null,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "a deadline with no period written: arbitrated, period null",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 300
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a deadline of 0 is none: no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 0
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a deadline written as a string is none: no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": "100"
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a deadline that is not an integer is none: no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 1.5
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "an integral float is that integer (timing.v1 §2.2): a deadline of 100.0 is 100 ms",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100.0,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a deadline above 2^53-1 is no value: timing's declaration invalid, no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 9007199254740992
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 9007199254740991,
+        "declaration": "arbitrated",
+        "period_ms": null,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "the largest value, 2^53-1, is one: arbitrated",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 9007199254740991
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a lifespan that is no value makes timing's declaration invalid whole (timing.v1 §2.2): no_deadline, the deadline beside it valid",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": "x",
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a period that is no value, the same: no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": -20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": null,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "another timing key beside the deadline is W105's and makes nothing invalid (timing.v1 §2.2)",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.max_rate": 5
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "params_unbound"
+        ]
+      },
+      "note": "a templated stream, its parameter unbound: params_unbound",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd/{target}",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd/{target}"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd/{target}"
+      },
+      "note": "a templated stream, its parameter bound to self.service: arbitrated (core R2)",
+      "params": {
+        "target": "self.service"
+      },
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd/{target}",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd/{target}"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd/{target}"
+      },
+      "note": "a templated stream, its parameter bound to a value: arbitrated",
+      "params": {
+        "target": "rudder-l"
+      },
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd/{target}",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd/{target}"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "params_unbound"
+        ]
+      },
+      "note": "a templated stream, another parameter bound: params_unbound",
+      "params": {
+        "other": "x"
+      },
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd/{target}",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd/{target}"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline",
+          "params_unbound"
+        ]
+      },
+      "note": "no deadline and a parameter unbound: both, in order",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {},
+            "template": "cmd/{target}",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd/{target}"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "unread"
+      },
+      "note": "no revision of the required interface held, the first five checks passing: unread",
+      "params": {},
+      "provider": null,
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "policy_unsupported"
+        ]
+      },
+      "note": "no revision held, the policy reserved: invalid, policy_unsupported, the checks that need a revision unread",
+      "params": {},
+      "provider": null,
+      "role": {
+        "annotations": {
+          "arbitration.policy": "freshest"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "manifest_role",
+          "policy_unsupported",
+          "cardinality"
+        ]
+      },
+      "note": "a manifest's role, reserved, of cardinality one: three reasons in order",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "lease"
+        },
+        "cardinality": "one",
+        "declared_by": null,
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_used",
+          "value",
+          "cardinality",
+          "resource"
+        ]
+      },
+      "note": "not used, a wrong value, cardinality one, a state: four reasons in order, no deadline unread",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {},
+            "template": "status",
+            "token": "state"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "x"
+        },
+        "cardinality": "one",
+        "declared_by": {
+          "uses": []
+        },
+        "resources": [
+          "status"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "another arbitration key beside the policy is W105's, and makes nothing invalid",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.deadline_ms": 50,
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    }
+  ],
+  "description": "arbitration.v1 §2.2, §2.3: one role and the revision of its required interface the consumer holds -> its declaration. role.declared_by is {uses: [profile ids <name>.v<major>]}, the declaring contract's uses, or null for a role a component's manifest declares; role.resources is the requirement's resources (templates), or null when it names none (it consumes every resource); role.cardinality is \"one\" or \"many\"; role.annotations is the requirement's annotations. provider is the revision held: its interface, and each resource's kind token (\"stream\", \"@stream\", \"state\", \"@state\", \"events\", \"@op\"), template and resolved annotations; or null when none is held. params is the role's parameter bindings as configured (core R2), a value self.system or self.service binding its parameter. expect.declaration is \"not_arbitrated\" (no arbitration.policy; or uses lists another major of arbitration and not v1, that major's); \"arbitrated\", with policy, resource (the stream's <token>/<template>), deadline_ms and period_ms (null when not written); \"unread\" (provider null, checks 1 to 5 passing); or \"invalid\", with reasons, in this order, each checked alone: not_used (the policy carried, the declaring contract's uses naming no major of arbitration), manifest_role (declared_by null), policy_unsupported (the string freshest or lease), value (not one of the strings priority, freshest, lease), cardinality (not many), resource (what the role consumes, every resource whose template it names or every resource, is not exactly one resource of token stream or @stream), no_deadline (that stream has no deadline as timing.v1 §2.2 and §2.5 read it: its declaration invalid, a value of timing.period_ms, timing.deadline_ms or timing.lifespan_ms not a whole number of milliseconds from 1 to 2^53-1, an integral float being that integer; or timing.deadline_ms absent; or the deadline below timing.period_ms; read only when resource passes), params_unbound (a parameter of that stream's template is not a key of params; read only when resource passes). With provider null, resource, no_deadline and params_unbound are not read. Another arbitration.<key> makes nothing invalid (W105's)."
+}

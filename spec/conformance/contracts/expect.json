@@ -472,6 +472,12 @@
       ],
       "fingerprint": "sha256:d14962adf71bc5a6da2de2474ca463ede40991ae514476025a9195f5bfcd50ce"
     },
+    "w105-arbitration-deadline": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:2c12c8a989df82d1b42a2f2e3964a89140d5c2e55ac0fde146caa602c5a779f6"
+    },
     "w105-desired-target": {
       "codes": [
         "W105"

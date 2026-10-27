@@ -230,3 +230,49 @@ fn every_example_timing_declaration_is_valid() {
         "twist_cmd.v1's cmd and nav.v2's position"
     );
 }
+
+/// `arbitration.v1` (#909, BA): the walkthrough's `thruster.v1` role `cmd`
+/// over `twist_cmd.v1`'s `cmd` reads arbitrated, `priority`, deadline
+/// 100 ms and period 20 ms, as its contracts are written (arbitration.v1
+/// §2.2, §2.3, Appendix B); it is the one example role carrying a policy,
+/// and every other reads not arbitrated, the merged stream of core §3.2.
+#[test]
+fn every_example_arbitrated_role_is_valid() {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+    use zenkey_model::arbitration::{self, Declaration};
+    let contracts: Vec<(String, Contract)> = contract_files(&examples())
+        .into_iter()
+        .map(|p| {
+            let rel = p.strip_prefix(examples()).unwrap().display().to_string();
+            (rel, load_path(&p).contract.expect("validated above"))
+        })
+        .collect();
+    let by_iface: BTreeMap<String, &Contract> = contracts
+        .iter()
+        .map(|(_, c)| (c.iface.to_string(), c))
+        .collect();
+    let mut arbitrated = Vec::new();
+    for (rel, c) in &contracts {
+        for (role, req) in &c.requires {
+            let provider = by_iface.get(&req.interface.to_string()).copied();
+            let d = arbitration::declaration_of(c, role, provider, &BTreeMap::new())
+                .expect("the role is declared");
+            match d {
+                Declaration::NotArbitrated => {}
+                Declaration::Arbitrated(a) => arbitrated.push((rel.clone(), role.clone(), a)),
+                other => panic!("{rel}: requires.{role}: {other:?}"),
+            }
+        }
+    }
+    assert_eq!(arbitrated.len(), 1, "{arbitrated:#?}");
+    let (rel, role, a) = &arbitrated[0];
+    assert_eq!(
+        (rel.as_str(), role.as_str()),
+        ("walkthrough/thruster.v1.toml", "cmd")
+    );
+    assert_eq!(a.iface.to_string(), "twist_cmd.v1");
+    assert_eq!(a.resource(), "stream/cmd");
+    assert_eq!(a.deadline, Duration::from_millis(100));
+    assert_eq!(a.period, Some(Duration::from_millis(20)));
+}

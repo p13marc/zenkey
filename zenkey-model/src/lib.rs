@@ -109,11 +109,22 @@
 //!   three questions (`spec/profiles/timing/v1.md`, #908). The subscription,
 //!   the timer, the presence it follows and the stamps it reads are the
 //!   runtime's.
+//! - [`arbitration`]: `arbitration.v1`'s vocabulary, a role's declaration
+//!   read from its contract's requirement and the revision of the required
+//!   interface held (the first profile to read a requirement's
+//!   annotations), the ranking of a binding's providers, one role's
+//!   arbitration as a pure state machine (eligibility by the deadline and
+//!   by withdrawals, re-admission by a token or a read, a move of the watch
+//!   held back, the active provider and its switches, the dead-man), and
+//!   §5's three questions (`spec/profiles/arbitration/v1.md`, #909). The
+//!   subscription, the watch, the reads, the timer and the safe value are
+//!   the runtime's and the application's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
 
 pub mod alarms;
+pub mod arbitration;
 pub mod authoring;
 pub mod budget;
 pub mod bundle;

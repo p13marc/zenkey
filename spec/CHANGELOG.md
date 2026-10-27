@@ -3,6 +3,99 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.54 — 2026-10-27: what `arbitration.v1` needed of the core (#909)
+
+`arbitration.v1`'s first text (#909, BA) is the profile the core has left
+the choice between bound providers to since 0.1: "when several providers
+are bound, choosing between them is the consumer's (`arbitration.v1`)"
+(§3.2). Its priority is a binding's order, and the core never said a
+binding has one: R1 called it "a list of service addresses", R3 asked the
+descriptor to list the bindings "as configured", and the descriptor's
+`bindings` is a plain array no checker reads the order of. Its consumer
+also acts on a withdrawal heard live, which §8.1 (0.37) says is "a reason
+to read again, never absence by itself". The text is written against
+0.54 and `timing.v1` text 0.1, whose vocabulary 0.53 publishes (#908). No
+fixture case changed; two are added, one descriptor and one contract, and
+one scenario section.
+
+**Changed: a binding is an ordered list (§3.2 R1, R3; §3.3).**
+- **R1:** a binding is an ordered list of service addresses. The order is
+  the configuration's, and significant only where a profile says so.
+- **R3:** the descriptor lists each requirement's bindings in their
+  configured order, a `self.system` provider resolved in its place, and an
+  address listed twice kept. `[Sc: bindings.md §6]`
+- **"A binding is ordered"** (§3.2, new): the core reads no order, a
+  binding meaning the same providers in any order; a profile may give the
+  order a meaning for a role whose contract uses it, as `arbitration.v1`
+  reads it as a priority (its §2.4). The sentence after R7 names
+  `arbitration.v1` as the way to choose for a role whose contract declares
+  a policy, and says that a `many` role without one receives from every
+  bound provider.
+- **§3.3's `requires`** says the bindings keep their order, a repeat
+  included; cascade 8 adds the order of a role's `bindings` and a repeat
+  to what a checker does not read. `[F: descriptors/ok-binding-order]`:
+  `nav.v2`'s descriptor with a role bound in an order no sort gives, a
+  wildcard between two exact entries and an address listed twice, no code.
+
+**Changed: acting on a withdrawal heard live (§8.1).** A new bullet under
+"Absence is established only by a complete read": a reader MAY act on a
+withdrawal heard live where the act concludes no absence and fails toward
+what the reader does without the token's holder; it reports nothing
+absent from it, reads again as before, and what the read shows held undoes
+the act. `arbitration.v1` makes a provider ineligible at its withdrawal,
+never absent, re-admits it only by a token heard declared or a read
+showing one held, and holds back what a move of its watch session makes it
+hear until the round trip after the move stands (its §2.7, §2.8).
+`[Sc: profiles/arbitration/scenarios.md §3, §4, §7]`
+- **Why in the core.** 0.37's MUST NOT ("a reader MUST NOT conclude
+  absence from a withdrawal alone") can be read to forbid any act on a
+  withdrawal, and a profile cannot loosen a core MUST. The bullet says what
+  the MUST NOT never forbade: an act that is no conclusion. Spike S11
+  measured the gain, a crashed commander seen in 4–5 ms by liveliness
+  where its deadline took 100.
+
+**Changed: `arbitration.v1`'s vocabulary published (Appendix D, §10).**
+- **The rule.** `arbitration.v1` §4 publishes the interim row's one key
+  unchanged, `policy`, written on a requirement, never on a resource:
+  `priority` defined, `freshest` and `lease` reserved and invalid until a
+  text defines them. Appendix D's published table gains `arbitration`, and
+  the interim row is gone. W105 reads it as it reads any other, on a
+  requirement as on a resource (§9.2): a contract writing
+  `arbitration.policy` draws nothing, and one writing another
+  `arbitration.<key>`, a deadline tightened on the requirement among
+  them, draws W105. `[F: contracts/w105-arbitration-deadline]`
+- **§10** names `arbitration.v1` among the profiles the core names, for
+  choosing between bound providers, and its vocabulary beside the
+  published ones (point 2), the first read on a requirement. Appendix C
+  lists the profile's scenarios that observe core rules, and
+  `bindings.md` §6.
+
+**Also, outside the text:** `examples/zk2/README.md`'s interim vocabulary
+table marks `arbitration.v1`'s row published, as the other published
+profiles' rows are.
+
+**Deliberately not changed.**
+- **No order in the core's own reading.** A tool drawing the data-flow
+  graph (R3) reads the bindings as a set; the order means something only
+  to a profile that says so, and only for a role whose contract uses it.
+- **The descriptor's format** stays `zk2-descriptor/0.1`, and its
+  `bindings` the array it was: an owner that kept the configured order
+  writes the record it wrote before, and one that sorted or deduplicated
+  its bindings now departs from R3.
+- **No descriptor member naming the revision of a required interface its
+  consumer holds.** It would let a tool read a consumer's own deadline;
+  `arbitration.v1` §2.14 reads every revision the tool holds instead, and
+  answers `revisions_disagree` where they disagree.
+- **No duplicate check.** An address listed twice is no D009: a
+  configuration may repeat one, and `arbitration.v1` ranks it at its first
+  entry and warns of the rest as shadowed (its §2.4, §2.14).
+- **§8.1's reading rules,** 0.37's to 0.45's, are unchanged and are not
+  restated. The new bullet adds a MAY, and its read again is the existing
+  SHOULD; a move's watch-session rules (0.41 to 0.45) are the ones
+  `arbitration.v1` §2.8 holds back for.
+- **The profiles' "Written against" lines** stay as they were, but
+  `arbitration.v1`'s, which is 0.54.
+
 ## 0.53 — 2026-10-27: what `timing.v1` needed of the core (#908)
 
 `timing.v1`'s first text (#908, MA) states a stream's period, its deadline
