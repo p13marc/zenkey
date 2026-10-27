@@ -490,6 +490,12 @@
       ],
       "fingerprint": "sha256:2fa4909975cb88c06a5c5da5bd59e504f37c6d159ce9b93ce4b88773082eafc2"
     },
+    "w105-timing-max-rate": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:ef61796ca67c97438b34a131f6f9c0718ea5d96df5521ab43c5996e6cbb8241f"
+    },
     "w105-vocabulary": {
       "codes": [
         "W105"

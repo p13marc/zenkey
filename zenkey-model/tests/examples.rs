@@ -182,3 +182,51 @@ fn every_example_telemetry_declaration_is_valid() {
         "ZenSight's Point-typed resources: sysinfo 136, snmp 127, netring 75, parallax 17"
     );
 }
+
+/// Every example's `timing.v1` declaration is valid (timing.v1 §2.2,
+/// §2.3), and none writes the vocabulary where it means nothing: the
+/// walkthrough's `twist_cmd.v1` `cmd` (a period, a deadline and a lifespan)
+/// and `nav.v2` `position` (a period and a lifespan, no deadline), no
+/// deadline below its period, and each contract carrying a key listing
+/// `timing.v1` in `uses`.
+#[test]
+fn every_example_timing_declaration_is_valid() {
+    use zenkey_model::timing::{self, Declaration};
+    let mut failures = Vec::new();
+    let (mut periods, mut deadlines, mut lifespans) = (0, 0, 0);
+    for p in contract_files(&examples()) {
+        let rel = p.strip_prefix(examples()).unwrap().display().to_string();
+        let c = load_path(&p).contract.expect("validated above");
+        for r in &c.resources {
+            let at = format!("{rel}: {} {}", r.token.as_str(), r.template.as_str());
+            match timing::declaration_of(r) {
+                Declaration::Declared(d) => {
+                    periods += usize::from(d.period.is_some());
+                    deadlines += usize::from(d.deadline.is_some());
+                    lifespans += usize::from(d.lifespan.is_some());
+                    if d.below_period() {
+                        failures.push(format!("{at}: a deadline below its period"));
+                    }
+                    assert!(
+                        c.uses.iter().any(|u| u.to_string() == timing::PROFILE),
+                        "{at}: a contract writing the vocabulary lists timing.v1"
+                    );
+                }
+                Declaration::Invalid(why) => failures.push(format!("{at}: {why:?}")),
+                Declaration::Ignored => failures.push(format!("{at}: ignored")),
+                Declaration::NotThisProfiles => {}
+            }
+        }
+        for (role, req) in &c.requires {
+            if timing::requirement_declaration(&req.annotations) != Declaration::NotThisProfiles {
+                failures.push(format!("{rel}: requirement {role}: ignored"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(
+        (periods, deadlines, lifespans),
+        (2, 1, 2),
+        "twist_cmd.v1's cmd and nav.v2's position"
+    );
+}

@@ -3,6 +3,78 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.53 — 2026-10-27: what `timing.v1` needed of the core (#908)
+
+`timing.v1`'s first text (#908, MA) states a stream's period, its deadline
+and its lifespan, the three keys Appendix D's interim `timing` row has
+carried since draft 1, and that `twist_cmd.v1` and `nav.v2` write. Its
+lifespan judges a sample's age against its owner's stamp, only on a bound
+ε the deployment states on how far the owner's stamps and the reader's
+clock disagree, and writing that rule found two zenoh facts the core used
+without stating them. No fixture case changed; one is added.
+
+**Changed: `timing.v1`'s vocabulary published (Appendix D, §10).**
+- **The rule.** `timing.v1` §4 publishes the interim row's three keys
+  unchanged: `period_ms`, `deadline_ms` and `lifespan_ms`, each a whole
+  number of milliseconds from 1 to 2^53−1, meaningful on a stream (its
+  §2.2, §2.3). Appendix D's published table gains `timing`, and the
+  interim row is gone. W105 reads it as it reads any other (0.21): a
+  contract writing the three keys draws nothing, on a resource,
+  `[defaults]` or `[defaults.stream]`, and one writing another
+  `timing.<key>` draws W105. `[F: contracts/w105-timing-max-rate]`
+- **`timing.max_rate`,** which zenoh-modem's README once proposed for
+  occurrence streams, is the fixture's other key: a period is a floor on
+  an owner's cadence, never a ceiling (`timing.v1` §2.4), and how often an
+  event may occur is `rate`'s (§2.6, 0.24).
+- **§10** names `timing.v1`'s vocabulary beside the published ones
+  (point 2). Appendix C lists the profile's scenarios that observe core
+  rules: a stream sample stamped by its owner's HLC, by a router when its
+  owner's session has none, and unstamped through a router that stamps
+  nothing (§4.1), and `meta.zid` attributing a stamp (§3.3).
+
+**Changed: an HLC follows the stamps it receives (§4.1, Appendix B).**
+- **The gap.** §4.1 said that a session whose HLC is enabled stamps every
+  put it is not given a stamp for, and that routers re-stamp a put stamped
+  beyond their delta. It did not say that a node's HLC moves to a later
+  stamp it receives: zenoh 1.10.1's routing (`dispatcher/pubsub.rs`,
+  `treat_timestamp`) calls uhlc's `update_with_timestamp` on every put a
+  node routes, a client session's put to its own subscriber included, and
+  uhlc then keeps the later of its own clock and the stamp, refusing one
+  more than its delta ahead.
+- **Why it matters.** An owner's stamps can then run ahead of its host's
+  clock by up to its delta, pulled by a clock ahead elsewhere in the
+  presence domain. `timing.v1` §2.6's ε bounds the stamps against the
+  reader's wall clock, so a deployment that keeps its hosts' clocks within
+  ε, and lets one clock run further ahead, has not kept its word. And a
+  reader that took its own HLC for its clock would read every stamp it
+  received as no later than its own.
+- **The rule.** §4.1 states the fact, and Appendix B its source. A node
+  that refuses a stamp re-stamps the put from its own clock or drops it,
+  as a router does, which was already the fact for a router.
+
+**Changed: a stamp's epoch (Appendix B).** A stamp's NTP64 time counts
+from the Unix epoch, 1970-01-01T00:00:00Z: an HLC's physical clock is its
+host's wall clock (uhlc's `system_time_clock`). `freshness.v1` §2.6 and
+`timing.v1` §2.6 subtract a stamp's time from a reader's wall clock, which
+needs the epoch; the core gave only the unit.
+
+**Deliberately not changed.**
+- **§4.3 still asks the HLC only of a session that serves state.** An
+  owner of a stream resource whose contract declares `timing.lifespan_ms`
+  MUST stamp its samples and state its `meta.zid`, which is `timing.v1`
+  §2.6's rule, not the core's, as `redundancy.v1` §2.10 keeps its own: the
+  core depends on no profile, and a stream with no lifespan needs no
+  stamp.
+- **No core lint reads the keys' values.** A value `timing.v1` §2.2 reads
+  as invalid (`0`, a fraction, a string), or a key on a state or a
+  requirement, still loads, as `freshness.ttl_s` and `telemetry.*` values
+  do (0.21, 0.35). A linter SHOULD warn.
+- **No deadline in the core.** A missed member is never "down" (`timing.v1`
+  §2.5): presence stays §8.1's, and R7's liveness across a face stays
+  `freshness.v1`'s.
+- **The profiles' "Written against" lines** stay as they are, but for
+  `timing.v1`'s, which is 0.53.
+
 ## 0.52 — 2026-10-26: whose answers the admin read reaches (round 75's F-258)
 
 zk2py round 75 (PR #901) was the final cold read of the admin-space line,

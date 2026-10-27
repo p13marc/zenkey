@@ -930,7 +930,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   F-225, #840 DG: a requirement whose declaring contract the descriptor
   names and the tool does not hold is unread, no binding problem read,
   unobservable `no_report` beside `requirement_unread`, never every
-  resource), and `redundancy.v1`'s
+  resource), `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
   from every resource, invalid `not_used`, `value`, `disagrees` or
@@ -954,7 +954,25 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   no holder, `polls.json`; text 0.4, F-220 to F-223, #841 RD: a standby
   probe's wildcards and the MUST never to ask one that would run an
   operation, `[Sc: §12]`; text 0.5, F-226: §12 step 9, the MUST's
-  offline half).
+  offline half), and `timing.v1`'s (`timing`, #908 MA: the vocabulary,
+  `period_ms`, `deadline_ms` and `lifespan_ms`, the interim row published
+  unchanged by core 0.53; `declaration`/`declaration_of` over a resolved
+  resource, whole milliseconds from 1 to 2^53−1, invalid whole
+  (`period_value`, `deadline_value`, `lifespan_value`), `ignored` off a
+  stream and on a requirement, `below_period` no deadline; `Tracker`, one
+  reader's deadline tracker per provider and resource, a pure state
+  machine over (`Mono`, `Event`: start, arrival, the owner present,
+  unconfirmed or absent, member_gone, tick) reporting `missed` (due, by =
+  due + max(deadline/50, 1 ms), the owner's state), `met`, `ended` (gone
+  by a complete read, or forgotten an hour after a miss) and
+  `beyond_bound`, a known member never heard waited for while its owner
+  is present, with `next_due` for a one-shot timer; `LifespanReader`, each
+  sample on the deployment's stated ε, never the HLC's delta, the owner's
+  `meta.zid` by value, a clock seen more than ε ahead unobservable for the
+  reading (freshness's `StampAge` and `ClockMeasure`); `period_window`,
+  kept when (arrivals + 2) × period covers the span; and §5's
+  `deadline_met`, `period_kept`, `lifespan_expired` and `roll_up`;
+  text 0.1).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1201,7 +1219,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.52 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.53 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1232,7 +1250,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     to F-255; 0.51: that rule under `deny` and on an ingress `query`, an
     `allow` block unprotected, and where §12's recorder hears a freezing
     read, round 74's F-256 and F-257; 0.52: the admin read reaches every
-    node's admin space, round 75's F-258; changes go through
+    node's admin space, round 75's F-258; 0.53: `timing.v1`'s vocabulary
+    published, an HLC following the stamps it receives, and a stamp's time
+    counted from the Unix epoch, #908; changes go through
     `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

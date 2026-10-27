@@ -557,11 +557,12 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// `severity_default`), `telemetry.v1` the interim row's four keys
 /// (`telemetry::VOCABULARY`, core 0.35), `desired.v1` `target_param`
 /// alone (`desired::VOCABULARY`, core 0.36, which retires the interim
-/// `target`), and `redundancy.v1` the interim row's `election`
-/// (`redundancy::VOCABULARY`, core 0.39).
+/// `target`), `redundancy.v1` the interim row's `election`
+/// (`redundancy::VOCABULARY`, core 0.39), and `timing.v1` the interim
+/// row's three keys (`timing::VOCABULARY`, core 0.53).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
-    ("timing", &["period_ms", "deadline_ms", "lifespan_ms"]),
+    (crate::timing::NAME, crate::timing::VOCABULARY),
     (crate::telemetry::NAME, crate::telemetry::VOCABULARY),
     (crate::link::NAME, crate::link::VOCABULARY),
     ("arbitration", &["policy"]),

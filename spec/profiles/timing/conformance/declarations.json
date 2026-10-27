@@ -1,0 +1,672 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 100,
+        "declaration": "declared",
+        "lifespan_ms": 100,
+        "period_ms": 20
+      },
+      "note": "twist_cmd.v1's cmd: every 20 ms, missed after 100 ms, expired past 100 ms (examples/zk2/walkthrough)",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": null,
+        "declaration": "declared",
+        "lifespan_ms": 500,
+        "period_ms": 100
+      },
+      "note": "nav.v2's position: a period and a lifespan, no deadline",
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": 500,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": null,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 100
+      },
+      "note": "core ok-kinds' position: a period alone",
+      "resource": {
+        "annotations": {
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 250,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": null
+      },
+      "note": "an explicit @stream is a stream (§2.3)",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 250
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 1,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": null
+      },
+      "note": "the smallest value, 1 ms",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 1
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": null,
+        "declaration": "declared",
+        "lifespan_ms": 9007199254740991,
+        "period_ms": null
+      },
+      "note": "the largest value, 2^53-1 (§2.2, core §9.5)",
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": 9007199254740991
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 100,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 20
+      },
+      "note": "an integral float is that integer: JCS writes 20.0 as 20 (§2.2)",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100.0,
+          "timing.period_ms": 20.0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 9007199254740991,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": null
+      },
+      "note": "2^53-1 written as a float is that integer",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 9007199254740991.0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": true,
+        "deadline_ms": 50,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 100
+      },
+      "note": "a deadline below the period is no deadline: declared, below_period, which a linter warns of (§2.5)",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 50,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 100,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 100
+      },
+      "note": "a deadline equal to the period is a deadline",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 5,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": null
+      },
+      "note": "a deadline without a period is never below one",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 5
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "period_value"
+        ]
+      },
+      "note": "0 is no value: a resource with no period omits the key (§2.2)",
+      "resource": {
+        "annotations": {
+          "timing.period_ms": 0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "lifespan_value"
+        ]
+      },
+      "note": "-0.0 is 0, no value",
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": -0.0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "deadline_value"
+        ]
+      },
+      "note": "a negative deadline",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": -100
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "period_value"
+        ]
+      },
+      "note": "a fraction is no value",
+      "resource": {
+        "annotations": {
+          "timing.period_ms": 20.5
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "deadline_value"
+        ]
+      },
+      "note": "above 2^53-1",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 9007199254740992
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "deadline_value"
+        ]
+      },
+      "note": "above 2^53-1, written as a float",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 9007199254740992.0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "deadline_value"
+        ]
+      },
+      "note": "a string is no value",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": "100"
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "lifespan_value"
+        ]
+      },
+      "note": "a boolean is no value",
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": true
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "period_value"
+        ]
+      },
+      "note": "an array is no value",
+      "resource": {
+        "annotations": {
+          "timing.period_ms": [
+            20
+          ]
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "deadline_value"
+        ]
+      },
+      "note": "a table is no value",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": {
+            "ms": 100
+          }
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "period_value",
+          "deadline_value",
+          "lifespan_value"
+        ]
+      },
+      "note": "every key checked alone, each a reason, in the order period, deadline, lifespan",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": "x",
+          "timing.lifespan_ms": 1.5,
+          "timing.period_ms": 0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "deadline_value",
+          "lifespan_value"
+        ]
+      },
+      "note": "one wrong value makes the declaration invalid whole, a right period beside it",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 0,
+          "timing.lifespan_ms": -1,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": null,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 20
+      },
+      "note": "a key outside the vocabulary is W105's and makes nothing invalid (§2.2)",
+      "resource": {
+        "annotations": {
+          "timing.max_rate": 50,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "a key outside the vocabulary alone: no key of this profile's",
+      "resource": {
+        "annotations": {
+          "timing.max_rate": 50
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "other profiles' annotations only",
+      "resource": {
+        "annotations": {
+          "freshness.ttl_s": 5
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "a stream with no annotation",
+      "resource": {
+        "annotations": {},
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "on a state, nothing, which a linter warns of: freshness.v1 ages a state (§2.3)",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 500,
+          "timing.period_ms": 100
+        },
+        "kind": "state"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "on a state, whatever the value: the kind is read first",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": "x"
+        },
+        "kind": "state"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "on an event, nothing: core rate bounds an event (§2.3)",
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": 1000
+        },
+        "kind": "event"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "on an operation, nothing: it has no sample",
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100
+        },
+        "kind": "operation"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "a state with no timing key",
+      "resource": {
+        "annotations": {
+          "freshness.ttl_s": 60
+        },
+        "kind": "state"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "an event with only a key outside the vocabulary",
+      "resource": {
+        "annotations": {
+          "timing.max_rate": 5
+        },
+        "kind": "event"
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 100,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 20
+      },
+      "note": "[defaults] reaches a stream (core §9.3)",
+      "resource": {
+        "kind": "stream",
+        "layers": {
+          "defaults": {
+            "timing.deadline_ms": 100,
+            "timing.period_ms": 20
+          },
+          "kind_defaults": {},
+          "resource": {}
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "[defaults] reaches a state too, where it means nothing, and a linter warns: [defaults.stream] says the same of streams alone (§2.3)",
+      "resource": {
+        "kind": "state",
+        "layers": {
+          "defaults": {
+            "timing.deadline_ms": 100,
+            "timing.period_ms": 20
+          },
+          "kind_defaults": {},
+          "resource": {}
+        }
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 200,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 50
+      },
+      "note": "[defaults.stream]",
+      "resource": {
+        "kind": "stream",
+        "layers": {
+          "defaults": {},
+          "kind_defaults": {
+            "timing.deadline_ms": 200,
+            "timing.period_ms": 50
+          },
+          "resource": {}
+        }
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 100,
+        "declaration": "declared",
+        "lifespan_ms": 200,
+        "period_ms": 20
+      },
+      "note": "the resource's own key over [defaults.stream]'s over [defaults]'s, key by key",
+      "resource": {
+        "kind": "stream",
+        "layers": {
+          "defaults": {
+            "timing.deadline_ms": 1000,
+            "timing.lifespan_ms": 200
+          },
+          "kind_defaults": {
+            "timing.deadline_ms": 500
+          },
+          "resource": {
+            "timing.deadline_ms": 100,
+            "timing.period_ms": 20
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "below_period": false,
+        "deadline_ms": 100,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": null
+      },
+      "note": "a wrong [defaults] value the resource's own replaces is read no more",
+      "resource": {
+        "kind": "stream",
+        "layers": {
+          "defaults": {
+            "timing.deadline_ms": 0
+          },
+          "kind_defaults": {},
+          "resource": {
+            "timing.deadline_ms": 100
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "period_value"
+        ]
+      },
+      "note": "a wrong resource value over a right default",
+      "resource": {
+        "kind": "stream",
+        "layers": {
+          "defaults": {
+            "timing.period_ms": 20
+          },
+          "kind_defaults": {},
+          "resource": {
+            "timing.period_ms": "20"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "below_period": true,
+        "deadline_ms": 40,
+        "declaration": "declared",
+        "lifespan_ms": null,
+        "period_ms": 100
+      },
+      "note": "a deadline below a defaulted period",
+      "resource": {
+        "kind": "stream",
+        "layers": {
+          "defaults": {
+            "timing.period_ms": 100
+          },
+          "kind_defaults": {},
+          "resource": {
+            "timing.deadline_ms": 40
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "on a requirement, nothing at 1.0, which a linter warns of: a requirement's descriptor entry carries no annotations (§2.3)",
+      "requirement": {
+        "annotations": {
+          "timing.deadline_ms": 50
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "a requirement with no timing key",
+      "requirement": {
+        "annotations": {}
+      }
+    }
+  ],
+  "description": "timing.v1 §2.2, §2.3, §2.5: a resolved resource, or a requirement, -> its declaration. resource.kind is the authoring kind (stream, state, event, operation; @stream is read as stream). Its annotations are either annotations, already resolved, or layers {defaults, kind_defaults, resource}, which a reader merges key by key, resource over kind_defaults over defaults (core §9.3). A requirement case gives requirement.annotations, a [requires.<role>]'s own. The vocabulary is timing.period_ms, timing.deadline_ms and timing.lifespan_ms; another key under timing. is no key of it. expect.declaration is one of: \"not_this_profiles\" (no key of the vocabulary); \"ignored\" (a key of the vocabulary, whatever its value, on a state, an event, an operation or a requirement: it means nothing there, and a linter warns of it); \"invalid\", with reasons, in this order, each key checked alone: period_value, deadline_value, lifespan_value (a key present whose value is not an integer from 1 to 2^53-1; an integral float is that integer, so 20.0 is 20, and -0.0 is 0, which is no value; a string, a boolean, an array or a table is no value); or \"declared\", for a stream, with period_ms, deadline_ms and lifespan_ms, each the integer, or null when absent, and below_period: true exactly when both a period and a deadline are declared and the deadline is below the period (no deadline, §2.5)."
+}

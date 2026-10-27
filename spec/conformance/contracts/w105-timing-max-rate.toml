@@ -1,0 +1,19 @@
+# `timing.v1` publishes its vocabulary (core 0.53): the interim row's three
+# keys unchanged, written here on `[defaults.stream]`, where they reach the
+# stream alone and draw nothing. A period is a floor on an owner's cadence,
+# never a ceiling (timing.v1 §2.4), and how often an event may occur is core
+# `rate` (§2.6), so `timing.max_rate` is outside the table and draws W105,
+# once, where it is written.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["timing.v1"]
+
+[defaults.stream]
+annotations = { "timing.period_ms" = 20, "timing.deadline_ms" = 100, "timing.lifespan_ms" = 100 }
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "timing.max_rate" = 50 }

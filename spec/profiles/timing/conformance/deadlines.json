@@ -1,0 +1,1822 @@
+{
+  "cases": [
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 10,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 30,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 50,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 70,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 90,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 150,
+          "event": "tick"
+        },
+        {
+          "at_ms": 190,
+          "event": "tick"
+        },
+        {
+          "at_ms": 191,
+          "event": "tick"
+        },
+        {
+          "at_ms": 250,
+          "event": "tick"
+        },
+        {
+          "at_ms": 300,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 320,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 420,
+        "transitions": [
+          {
+            "at_ms": 191,
+            "by_ms": 192,
+            "due_ms": 190,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          },
+          {
+            "at_ms": 300,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "twist_cmd.v1's commander at its 20 ms period, then paused: missed once, then met (§2.5)"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 10,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 30,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 200,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 300,
+        "transitions": [
+          {
+            "at_ms": 200,
+            "by_ms": 132,
+            "due_ms": 130,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 200,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [],
+      "note": "an arrival after a silence no evaluation saw: the miss, then met, both at the arrival (§2.5)"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 100,
+          "event": "tick"
+        },
+        {
+          "at_ms": 100,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 200,
+          "event": "tick"
+        },
+        {
+          "at_ms": 200,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 300,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 300,
+        "transitions": []
+      },
+      "known": [],
+      "note": "exactly the deadline apart is in time: missed only when more than the deadline has passed"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 100.000001,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 100.000001,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          }
+        ]
+      },
+      "known": [],
+      "note": "a nanosecond past the due is missed"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 100,
+          "event": "start"
+        },
+        {
+          "at_ms": 199,
+          "event": "tick"
+        },
+        {
+          "at_ms": 200,
+          "event": "tick"
+        },
+        {
+          "at_ms": 201,
+          "event": "tick"
+        },
+        {
+          "at_ms": 350,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 450,
+        "transitions": [
+          {
+            "at_ms": 201,
+            "by_ms": 202,
+            "due_ms": 200,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          },
+          {
+            "at_ms": 350,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "a known member never heard, its owner present before the subscription: missed the deadline after the start (§2.5)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 300,
+          "event": "tick"
+        },
+        {
+          "at_ms": 400,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 450,
+          "event": "tick"
+        },
+        {
+          "at_ms": 501,
+          "event": "tick"
+        },
+        {
+          "at_ms": 520,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 620,
+        "transitions": [
+          {
+            "at_ms": 501,
+            "by_ms": 502,
+            "due_ms": 500,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          },
+          {
+            "at_ms": 520,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "a known member never heard, its owner present after the start: counted from the owner (§2.5)"
+    },
+    {
+      "bound": 4,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 500,
+          "event": "tick"
+        },
+        {
+          "at_ms": 1000,
+          "event": "tick"
+        },
+        {
+          "at_ms": 1100,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 1201,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "axis/x"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 1201,
+            "by_ms": 1202,
+            "due_ms": 1200,
+            "event": "missed",
+            "member": "axis/x",
+            "owner": "present"
+          }
+        ]
+      },
+      "known": [],
+      "note": "a member not known is judged from its first arrival: nothing before it, its owner present or not (§2.5)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 500,
+          "event": "tick"
+        },
+        {
+          "at_ms": 1000,
+          "event": "tick"
+        },
+        {
+          "at_ms": 1000,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 1101,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 1101,
+            "by_ms": 1102,
+            "due_ms": 1100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "a known member whose owner was never seen: nothing waited for, until it is present"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 50,
+          "event": "owner",
+          "state": "unconfirmed"
+        },
+        {
+          "at_ms": 60,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 200,
+          "event": "tick"
+        },
+        {
+          "at_ms": 300,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 401,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 401,
+            "by_ms": 402,
+            "due_ms": 400,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "its owner absent before the due: the wait stops, and starts again when it is present again (§2.5)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 50,
+          "event": "owner",
+          "state": "unconfirmed"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        },
+        {
+          "at_ms": 150,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 200,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 300,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unconfirmed"
+          },
+          {
+            "at_ms": 200,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "its owner unconfirmed: the wait goes on, and the miss says so"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 50,
+          "event": "owner",
+          "state": "unconfirmed"
+        },
+        {
+          "at_ms": 80,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "present again after unconfirmed, never absent: the wait counts from where it was"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        },
+        {
+          "at_ms": 150,
+          "event": "owner",
+          "state": "unconfirmed"
+        },
+        {
+          "at_ms": 160,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 300,
+          "event": "tick"
+        },
+        {
+          "at_ms": 400,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 500,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          },
+          {
+            "at_ms": 400,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "a miss already reported stands when its owner goes absent, until an arrival: a miss is never down (§2.5)"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "a"
+        },
+        {
+          "at_ms": 50,
+          "event": "owner",
+          "state": "unconfirmed"
+        },
+        {
+          "at_ms": 60,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "a"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "a",
+            "owner": "absent"
+          }
+        ]
+      },
+      "known": [],
+      "note": "a heard member is judged whatever presence says: missed with its owner absent"
+    },
+    {
+      "bound": 2,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "a"
+        },
+        {
+          "at_ms": 10,
+          "event": "arrival",
+          "member": "b"
+        },
+        {
+          "at_ms": 20,
+          "event": "arrival",
+          "member": "c"
+        },
+        {
+          "at_ms": 111,
+          "event": "tick"
+        },
+        {
+          "at_ms": 150,
+          "event": "arrival",
+          "member": "c"
+        }
+      ],
+      "expect": {
+        "held": [
+          "a",
+          "b"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 20,
+            "event": "beyond_bound",
+            "member": "c"
+          },
+          {
+            "at_ms": 111,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "a",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 111,
+            "by_ms": 112,
+            "due_ms": 110,
+            "event": "missed",
+            "member": "b",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 150,
+            "event": "beyond_bound",
+            "member": "c"
+          }
+        ]
+      },
+      "known": [],
+      "note": "the bound: a third member past a bound of 2 is not held, and not judged (§2.5, core §2.7)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 5,
+          "event": "arrival",
+          "member": "axis/y"
+        }
+      ],
+      "expect": {
+        "held": [
+          "axis/x"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 5,
+            "event": "beyond_bound",
+            "member": "axis/y"
+          }
+        ]
+      },
+      "known": [
+        "axis/x"
+      ],
+      "note": "known members count toward the bound, and are held whatever it is"
+    },
+    {
+      "bound": 4,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "x"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "y"
+        },
+        {
+          "at_ms": 50,
+          "event": "arrival",
+          "member": "x"
+        },
+        {
+          "at_ms": 50,
+          "event": "arrival",
+          "member": "y"
+        },
+        {
+          "at_ms": 60,
+          "event": "member_gone",
+          "member": "y"
+        },
+        {
+          "at_ms": 151,
+          "event": "tick"
+        },
+        {
+          "at_ms": 200,
+          "event": "arrival",
+          "member": "y"
+        },
+        {
+          "at_ms": 301,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "x",
+          "y"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 60,
+            "event": "ended",
+            "member": "y",
+            "reason": "gone"
+          },
+          {
+            "at_ms": 151,
+            "by_ms": 152,
+            "due_ms": 150,
+            "event": "missed",
+            "member": "x",
+            "owner": "present"
+          },
+          {
+            "at_ms": 301,
+            "by_ms": 302,
+            "due_ms": 300,
+            "event": "missed",
+            "member": "y",
+            "owner": "present"
+          }
+        ]
+      },
+      "known": [],
+      "note": "a member whose member tokens are gone ends, reported ended once heard; heard again, it is a new member (§2.5)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "a"
+        },
+        {
+          "at_ms": 10,
+          "event": "arrival",
+          "member": "b"
+        },
+        {
+          "at_ms": 20,
+          "event": "member_gone",
+          "member": "a"
+        },
+        {
+          "at_ms": 30,
+          "event": "arrival",
+          "member": "b"
+        }
+      ],
+      "expect": {
+        "held": [
+          "b"
+        ],
+        "next_due_ms": 130,
+        "transitions": [
+          {
+            "at_ms": 10,
+            "event": "beyond_bound",
+            "member": "b"
+          },
+          {
+            "at_ms": 20,
+            "event": "ended",
+            "member": "a",
+            "reason": "gone"
+          }
+        ]
+      },
+      "known": [],
+      "note": "a member gone frees its place under the bound"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "a"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        },
+        {
+          "at_ms": 150,
+          "event": "member_gone",
+          "member": "a"
+        }
+      ],
+      "expect": {
+        "held": [],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "a",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 150,
+            "event": "ended",
+            "member": "a",
+            "reason": "gone"
+          }
+        ]
+      },
+      "known": [],
+      "note": "a missed member gone: ended"
+    },
+    {
+      "bound": 4,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 50,
+          "event": "member_gone",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 200,
+          "event": "tick"
+        },
+        {
+          "at_ms": 250,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 260,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 400,
+          "event": "tick"
+        },
+        {
+          "at_ms": 500,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 601,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "axis/x"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 50,
+            "event": "ended",
+            "member": "axis/x",
+            "reason": "gone"
+          },
+          {
+            "at_ms": 601,
+            "by_ms": 602,
+            "due_ms": 600,
+            "event": "missed",
+            "member": "axis/x",
+            "owner": "present"
+          }
+        ]
+      },
+      "known": [
+        "axis/x"
+      ],
+      "note": "a known member gone: ended, and not waited for again, its owner present or not; judged again from its next arrival"
+    },
+    {
+      "bound": 4,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 50,
+          "event": "member_gone",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 151,
+          "event": "tick"
+        },
+        {
+          "at_ms": 200,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 300,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 500,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "axis/x"
+        ],
+        "next_due_ms": null,
+        "transitions": []
+      },
+      "known": [
+        "axis/x"
+      ],
+      "note": "a known member never heard, gone while waited for: no ended, since nothing was reported of it"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 10,
+          "event": "member_gone",
+          "member": "z"
+        }
+      ],
+      "expect": {
+        "held": [],
+        "next_due_ms": null,
+        "transitions": []
+      },
+      "known": [],
+      "note": "member_gone of a member not held: nothing"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 50,
+          "event": "arrival",
+          "expired": true,
+          "member": "cmd"
+        },
+        {
+          "at_ms": 90,
+          "event": "arrival",
+          "expired": true,
+          "member": "cmd"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        },
+        {
+          "at_ms": 120,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 220,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 120,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [],
+      "note": "an expired sample is not an arrival (§2.6)"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 10,
+          "event": "arrival",
+          "expired": true,
+          "member": "x"
+        },
+        {
+          "at_ms": 500,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [],
+        "next_due_ms": null,
+        "transitions": []
+      },
+      "known": [],
+      "note": "an expired first sample does not make a member heard"
+    },
+    {
+      "bound": 2,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "a"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        },
+        {
+          "at_ms": 3599999,
+          "event": "tick"
+        },
+        {
+          "at_ms": 3600000,
+          "event": "tick"
+        },
+        {
+          "at_ms": 3600100,
+          "event": "arrival",
+          "member": "a"
+        }
+      ],
+      "expect": {
+        "held": [
+          "a"
+        ],
+        "next_due_ms": 3600200,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "a",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 3600000,
+            "event": "ended",
+            "member": "a",
+            "reason": "forgotten"
+          }
+        ]
+      },
+      "known": [],
+      "note": "forgotten: not known, missed, its last arrival an hour or more before; heard again, a new member (§2.5, core §2.7)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        },
+        {
+          "at_ms": 7200000,
+          "event": "tick"
+        },
+        {
+          "at_ms": 7200001,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 7200101,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          },
+          {
+            "at_ms": 7200001,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "a known member is never forgotten"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 7200000,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "a"
+        },
+        {
+          "at_ms": 3600000,
+          "event": "tick"
+        },
+        {
+          "at_ms": 7200001,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 7200001,
+            "by_ms": 7344000,
+            "due_ms": 7200000,
+            "event": "missed",
+            "member": "a",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 7200001,
+            "event": "ended",
+            "member": "a",
+            "reason": "forgotten"
+          }
+        ]
+      },
+      "known": [],
+      "note": "a member in time is not forgotten: under a deadline of two hours, the miss first, then forgotten at once"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 101,
+          "event": "tick"
+        },
+        {
+          "at_ms": 150,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 200,
+          "event": "tick"
+        },
+        {
+          "at_ms": 251,
+          "event": "tick"
+        },
+        {
+          "at_ms": 300,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 320,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 420,
+        "transitions": [
+          {
+            "at_ms": 101,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 150,
+            "event": "met",
+            "member": "cmd"
+          },
+          {
+            "at_ms": 251,
+            "by_ms": 252,
+            "due_ms": 250,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          },
+          {
+            "at_ms": 300,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [],
+      "note": "met, missed again: one edge each (§2.5)"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "a"
+        },
+        {
+          "at_ms": 50,
+          "event": "arrival",
+          "member": "b"
+        },
+        {
+          "at_ms": 120,
+          "event": "arrival",
+          "member": "b"
+        }
+      ],
+      "expect": {
+        "held": [
+          "a",
+          "b"
+        ],
+        "next_due_ms": 220,
+        "transitions": [
+          {
+            "at_ms": 120,
+            "by_ms": 102,
+            "due_ms": 100,
+            "event": "missed",
+            "member": "a",
+            "owner": "unseen"
+          }
+        ]
+      },
+      "known": [],
+      "note": "an arrival of one member judges every member held"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 30,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 31,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 31,
+            "by_ms": 31,
+            "due_ms": 30,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          }
+        ]
+      },
+      "known": [],
+      "note": "the detection bound's floor: deadline/50 is 0.6 ms below 1 ms, so the bound is 1 ms (§2.5, E14 relaxed below 50 ms)"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 50,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 51,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 51,
+            "by_ms": 51,
+            "due_ms": 50,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          }
+        ]
+      },
+      "known": [],
+      "note": "at 50 ms, deadline/50 is the floor"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 75,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 76,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 76,
+            "by_ms": 76.5,
+            "due_ms": 75,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          }
+        ]
+      },
+      "known": [],
+      "note": "deadline/50 above the floor: 1.5 ms at 75 ms"
+    },
+    {
+      "bound": null,
+      "deadline_ms": 100000,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 100001,
+          "event": "tick"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 100001,
+            "by_ms": 102000,
+            "due_ms": 100000,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "unseen"
+          }
+        ]
+      },
+      "known": [],
+      "note": "deadline/50 at 100 s: 2 s"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 500,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 5,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 105,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 205,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 305,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 405,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 505,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 605,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 705,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 805,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 905,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1005,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1105,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1205,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1305,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1405,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1505,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1605,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1705,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1805,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 1905,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 2405,
+          "event": "tick"
+        },
+        {
+          "at_ms": 2406,
+          "event": "tick"
+        },
+        {
+          "at_ms": 4405,
+          "event": "arrival",
+          "member": "cmd"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "next_due_ms": 4905,
+        "transitions": [
+          {
+            "at_ms": 2406,
+            "by_ms": 2415,
+            "due_ms": 2405,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          },
+          {
+            "at_ms": 4405,
+            "event": "met",
+            "member": "cmd"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "pace.v1's cmd (scenarios.md): 500 ms, a 10 ms bound"
+    }
+  ],
+  "description": "timing.v1 §2.5: one reader's deadline tracker for one provider and resource -> the reports it makes. deadline_ms is the resource's deadline; bound is the resource's bound (core §2.7), null for none; known lists the members the reader can name without hearing them. events are in order, each at_ms an instant of the reader's monotonic clock in milliseconds, exact to the nanosecond: start (the subscription declared), arrival of member (expired true: an expired sample, which is no arrival, §2.6), owner with state present, unconfirmed or absent (the owner's token as the reader observes it, v1.md §0), member_gone (a complete read shows no member token of member), and tick (an instant the reader judges at). At every event's instant the reader first judges every member it holds, in member order (byte order of the names): a member heard is missed when the instant is more than deadline_ms after its last arrival (due = last arrival + deadline), a known member never heard and waited for when it is more than deadline_ms after the instant its wait began (due = that instant + deadline); then a member that is not known, missed, and whose last arrival is 3,600,000 ms or more before the instant is forgotten. Then it applies the event. start: each known member is waited for from the later of the start and the instant the owner became present, if the owner is present. arrival (ignored before start, and when expired): a held member becomes heard at that instant, reporting met if it was missed; a member not held is held, heard, when fewer than bound members are held, else reported beyond_bound and not held; a first arrival reports nothing. owner present: from unseen or absent, the owner became present at that instant, and every known member never heard and not ended is waited for from it (if started); from unconfirmed, nothing changes. owner unconfirmed: nothing changes but the state. owner absent: every waited-for member is no longer waited for (a missed one stays missed). member_gone: a held member ends, reported ended (reason gone) when it was heard or missed; a known member stays held, not waited for, until its next arrival; another is no longer held. A forgotten member is reported ended (reason forgotten) and no longer held. Known members are always held, count toward the bound, and are never forgotten. expect.transitions are the reports in order: missed (member, due_ms, by_ms = due + max(deadline/50, 1 ms), and owner, the owner's state at the report: present, unconfirmed, absent, or unseen when no state was given), met, ended (reason), beyond_bound; each at_ms the instant it is reported. expect.held is the members held after the last event, in member order; expect.next_due_ms the earliest due among held members heard or waited for, null when none."
+}

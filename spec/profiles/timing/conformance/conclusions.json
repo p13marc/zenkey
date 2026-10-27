@@ -1,0 +1,1165 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "twist_cmd.v1's commander over a 10 s window, clean: every pole the one that is no finding",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "no",
+          "reason": "missed"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "no",
+          "reason": "not_kept"
+        }
+      },
+      "note": "a miss while its owner was present, nothing lost: the finding (§5); the period not kept, the owner present throughout",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 1
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "not_kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "lost"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "lost"
+        }
+      },
+      "note": "a miss while present, and a delivery lost: only a finding the loss cannot explain reads from such a window (§2.7)",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 1
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": true,
+        "owner_present": true,
+        "period": "not_kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "owner_not_present"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "owner_not_present"
+        }
+      },
+      "note": "a miss only after the owner was gone: a clean stop, seen before the deadline (scenarios.md §6 step 4)",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 1,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": false,
+        "period": "not_kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "no",
+          "reason": "missed"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "owner_not_present"
+        }
+      },
+      "note": "a miss while present, and one after: the first is the finding",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 1,
+          "missed_present": 1
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": false,
+        "period": "not_kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "not_asked",
+          "reason": "ended"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "the member ended in the window, no miss: not asked of the rest; its period over its own span",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": true,
+          "held_ms": 1000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "no",
+          "reason": "missed"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "no",
+          "reason": "not_kept"
+        }
+      },
+      "note": "the member ended after a miss while present: the miss stands",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": true,
+          "held_ms": 1000,
+          "missed_not_present": 0,
+          "missed_present": 1
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "not_kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "owner_not_present"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "owner_not_present"
+        }
+      },
+      "note": "a miss after its owner was gone, then the member ended: the owner's absence read first",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": true,
+          "held_ms": 1000,
+          "missed_not_present": 1,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": false,
+        "period": "not_kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "window_too_short"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "window_too_short"
+        }
+      },
+      "note": "held for exactly the deadline: no silence longer than it could have been seen",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 100,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "too_short"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "window_too_short"
+        }
+      },
+      "note": "held a millisecond longer than the deadline, no miss: met",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 101,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "too_short"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        }
+      },
+      "note": "across a constrained face: presence does not cross, and a face's rate is not the owner's (§2.8); the lifespan is judged as anywhere",
+      "reading": {
+        "across_face": true,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 1
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "not_kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "kept, though a delivery was lost: what arrived kept it",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": true,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "kept, though the owner was not present throughout",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": false,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "not_asked",
+          "reason": "not_heard"
+        },
+        "lifespan": {
+          "answer": "unobservable",
+          "reason": "no_sample"
+        },
+        "period": {
+          "answer": "not_asked",
+          "reason": "not_heard"
+        }
+      },
+      "note": "a member never held in the window: nothing to ask of it",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 0,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [],
+        "lost": false,
+        "owner_present": true,
+        "period": "not_heard"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "below_period"
+        },
+        "lifespan": {
+          "answer": "not_asked",
+          "reason": "no_lifespan"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "a deadline below the period: no deadline (§2.5)",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 50,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        },
+        "lifespan": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        }
+      },
+      "note": "an invalid declaration: every question unobservable, whatever the reading (§2.2)",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 1
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        },
+        "lifespan": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        },
+        "period": {
+          "answer": "unobservable",
+          "reason": "invalid"
+        }
+      },
+      "note": "an invalid period, no deadline written: still invalid, read before the key",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.period_ms": 0
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        },
+        "lifespan": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        },
+        "period": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        }
+      },
+      "note": "a state writing timing keys: not this profile's (§2.3)",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 500,
+          "timing.period_ms": 100
+        },
+        "kind": "state"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        },
+        "lifespan": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        },
+        "period": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        }
+      },
+      "note": "a state with no timing key: not this profile's, the kind read first",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {},
+        "kind": "state"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        },
+        "lifespan": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        },
+        "period": {
+          "answer": "not_this_profiles",
+          "reason": "kind"
+        }
+      },
+      "note": "an event with an invalid timing key: the kind read first",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": "x"
+        },
+        "kind": "event"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "not_asked",
+          "reason": "no_deadline"
+        },
+        "lifespan": {
+          "answer": "not_asked",
+          "reason": "no_lifespan"
+        },
+        "period": {
+          "answer": "not_asked",
+          "reason": "no_period"
+        }
+      },
+      "note": "a stream with no timing key: not asked",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {},
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "not_asked",
+          "reason": "no_deadline"
+        },
+        "lifespan": {
+          "answer": "yes",
+          "reason": "expired"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "nav.v2's position: no deadline; a sample expired among live ones is the finding",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          },
+          {
+            "reason": "expired",
+            "verdict": "expired"
+          },
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.lifespan_ms": 500,
+          "timing.period_ms": 100
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "unobservable",
+          "reason": "no_bound"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "no bound stated: every sample unobservable, nothing discarded",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "no_bound",
+            "verdict": "unobservable"
+          },
+          {
+            "reason": "no_bound",
+            "verdict": "unobservable"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "unobservable",
+          "reason": "foreign_stamp"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "an unobservable sample and none expired: the first one's reason",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          },
+          {
+            "reason": "foreign_stamp",
+            "verdict": "unobservable"
+          },
+          {
+            "reason": "unstamped",
+            "verdict": "unobservable"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "yes",
+          "reason": "expired"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "an expired sample beside unobservable ones: the finding",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "clock_disagrees",
+            "verdict": "unobservable"
+          },
+          {
+            "reason": "expired",
+            "verdict": "expired"
+          }
+        ],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "unobservable",
+          "reason": "no_sample"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "no sample of the member: unobservable",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [],
+        "lost": false,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    },
+    {
+      "expect": {
+        "deadline": {
+          "answer": "yes",
+          "reason": "met"
+        },
+        "lifespan": {
+          "answer": "no",
+          "reason": "live"
+        },
+        "period": {
+          "answer": "yes",
+          "reason": "kept"
+        }
+      },
+      "note": "a delivery lost, no miss: met all the same",
+      "reading": {
+        "across_face": false,
+        "deadline": {
+          "ended": false,
+          "held_ms": 10000,
+          "missed_not_present": 0,
+          "missed_present": 0
+        },
+        "lifespan": [
+          {
+            "reason": "live",
+            "verdict": "live"
+          }
+        ],
+        "lost": true,
+        "owner_present": true,
+        "period": "kept"
+      },
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      }
+    }
+  ],
+  "description": "timing.v1 §2.7, §5: a tool's reading of one member over one window -> §5's three questions. resource is {kind, annotations}, read as declarations.json reads one. reading.across_face is true when the tool reads through a constrained face; reading.lost when it knows it lost a delivery of the member, or its receive path stalled, in the window; reading.owner_present when the owner was present (v1.md §0) throughout the window. reading.deadline is the tracker's account of the member (deadlines.json): held_ms, how long it held the member in the window; missed_present and missed_not_present, the misses it reported while the owner was present, and while it was unconfirmed, absent or unseen; ended, whether the member ended in the window. reading.period is periods.json's verdict for the member. reading.lifespan lists each sample's lifespans.json judgement, in arrival order. Each expect entry is {answer, reason}, answer one of yes, no, unobservable, not_asked, not_this_profiles, by the first step that holds. Every question starts: the resource is not a stream: not_this_profiles, kind; the declaration is invalid: unobservable, invalid. deadline: no timing.deadline_ms: not_asked, no_deadline; the deadline is below the period: unobservable, below_period; across_face: unobservable, across_face; missed_present above 0: unobservable, lost when lost, else no, missed; missed_not_present above 0: unobservable, owner_not_present; ended: not_asked, ended; held_ms 0: not_asked, not_heard; held_ms at most the deadline: unobservable, window_too_short; otherwise yes, met. period: no timing.period_ms: not_asked, no_period; across_face: unobservable, across_face; not_heard: not_asked, not_heard; too_short: unobservable, window_too_short; kept: yes, kept; lost: unobservable, lost; not owner_present: unobservable, owner_not_present; otherwise no, not_kept. lifespan: no timing.lifespan_ms: not_asked, no_lifespan; a sample expired: yes, expired; a sample unobservable: unobservable, with the first such sample's reason; a sample live: no, live; no sample: unobservable, no_sample."
+}

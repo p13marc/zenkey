@@ -100,6 +100,15 @@
 //!   step down), and §5's four questions of an address and an instance
 //!   (`spec/profiles/redundancy/v1.md`, #841). The reads, the watch, the
 //!   timers, the lock and the acts in core §8.2's order are the runtime's.
+//! - [`timing`]: `timing.v1`'s vocabulary, the declaration read from a
+//!   resolved resource (a stream's period, deadline and lifespan), a
+//!   reader's deadline tracker for one provider and resource as a pure state
+//!   machine (missed, met and ended, edge-triggered, its detection bound,
+//!   the members it holds under the bound), one sample's lifespan on the
+//!   deployment's stated bound, the period over a tool's window, and §5's
+//!   three questions (`spec/profiles/timing/v1.md`, #908). The subscription,
+//!   the timer, the presence it follows and the stamps it reads are the
+//!   runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -131,6 +140,7 @@ pub mod slug;
 mod strict;
 pub mod telemetry;
 pub mod template;
+pub mod timing;
 mod toml10;
 mod unbundle;
 pub mod validate;
