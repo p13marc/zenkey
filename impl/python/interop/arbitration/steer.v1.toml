@@ -1,0 +1,17 @@
+# arbitration.v1's scenarios' commander contract, copied from
+# spec/profiles/arbitration/scenarios.md ("The contracts"): what a commander
+# provides. The reference keeps it as zenkey/tests/contracts/steer.v1.toml.
+[interface]
+name  = "steer"
+major = 1
+minor = 0
+uses  = ["timing.v1"]
+
+[resources.cmd]                  # one command every 50 ms, missed 300 ms after the last
+kind        = "stream"
+type        = { raw = "text/plain" }
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "real_time"
+express     = true
+annotations = { "timing.period_ms" = 50, "timing.deadline_ms" = 300 }

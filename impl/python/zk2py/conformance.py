@@ -1236,6 +1236,49 @@ def _timing_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _arbitration_declarations(path: Path) -> list[Result]:
+    """arbitration.v1 §2.2, §2.3: one role and the revision of its required
+    interface held -> its declaration."""
+    from . import arbitration as ab
+
+    return [_check(f"declarations #{i}: {c['note']}", ab.declaration_of(c).expect(), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _arbitration_rankings(path: Path) -> list[Result]:
+    """arbitration.v1 §2.4: a binding and the addresses heard -> the
+    providers in rank order, the unbound, the wildcards and the shadowed."""
+    from . import arbitration as ab
+
+    return [_check(f"rankings #{i}: {c['note']}", ab.ranking(c["bindings"], c["heard"]), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _arbitration_arbitrations(path: Path) -> list[Result]:
+    """arbitration.v1 §2.5 to §2.11: one consumer's role and its events in
+    order -> what it decides after each."""
+    from . import arbitration as ab
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        a = ab.arbiter_of(c.get("role", c))
+        got = [a.event(e).expect() for e in c["events"]]
+        out.append(_check(f"arbitrations #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _arbitration_conclusions(path: Path) -> list[Result]:
+    """arbitration.v1 §2.14, §5: a tool's reading of one consumer's role ->
+    §5's three questions."""
+    from . import arbitration as ab
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = {q: a.expect() for q, a in ab.conclude(*ab.reading_of(c["reading"])).items()}
+        out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -1263,6 +1306,8 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "timing": {"declarations.json": _timing_declarations, "deadlines.json": _timing_deadlines,
                "lifespans.json": _timing_lifespans, "periods.json": _timing_periods,
                "conclusions.json": _timing_conclusions},
+    "arbitration": {"declarations.json": _arbitration_declarations, "rankings.json": _arbitration_rankings,
+                    "arbitrations.json": _arbitration_arbitrations, "conclusions.json": _arbitration_conclusions},
 }
 
 
@@ -3352,8 +3397,72 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
-        + _timing_readings(root)
+        + _timing_readings(root) + _arbitration_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _arbitration_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """arbitration.v1 0.1 in :mod:`zk2py.arbitration` (#609, round 77): the
+    walkthrough's arbitrated role and its binding, the scenarios' contracts,
+    the linter, and the arbiter fed F-268's two orders. No session is
+    opened."""
+    import tomllib
+
+    from . import arbitration as ab
+    from .contract import load_contract
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "arbitration.v1 0.1"
+    repo = root.parent.parent
+    walk = repo / "examples/zk2/walkthrough"
+    thruster, twist = load_contract(walk / "thruster.v1.toml"), load_contract(walk / "twist_cmd.v1.toml")
+    want = {"declaration": "arbitrated", "policy": "priority", "resource": "stream/cmd", "deadline_ms": 100,
+            "period_ms": 20}
+    out.append((f"{label} Appendix B: thruster.v1's cmd over twist_cmd.v1, as the walkthrough writes them",
+                ab.declaration(ab.role_of(thruster.canonical, "cmd"), ab.provider_of(twist.canonical)).expect(), want))
+    out.append((f"{label} §2.2: thruster.v1 draws no warning of the profile's linter, twist_cmd.v1 held",
+                ab.lint(thruster.canonical, {"twist_cmd.v1": twist.canonical}), []))
+    enr = tomllib.loads((repo / "examples/zk2/acl/walkthrough.enrollment.toml").read_text())
+    binds = [s["bindings"]["cmd"]["providers"] for s in enr.get("service", []) if "cmd" in s.get("bindings", {})]
+    out.append((f"{label} §2.4: the walkthrough enrollment's two thrusters bind cmd in priority order, exact entries",
+                [ab.ranking(b, []) for b in binds],
+                [{"ranked": ["vehicle-01/safety", "vehicle-01/teleop", "vehicle-01/autopilot"], "unbound": [],
+                  "wildcards": [], "shadowed": []}] * 2))
+    idir = repo / "impl/python/interop/arbitration"
+    rudder, steer = load_contract(idir / "rudder.v1.toml"), load_contract(idir / "steer.v1.toml")
+    out.append((f"{label}: the scenarios' rudder.v1 over steer.v1, a 300 ms deadline and a 50 ms period",
+                ab.declaration(ab.role_of(rudder.canonical, "cmd"), ab.provider_of(steer.canonical)).expect(),
+                {**want, "deadline_ms": 300, "period_ms": 50}))
+    bad = {"uses": ["arbitration.v1"], "requires": {"cmd": {"interface": "steer.v1", "resources": ["cmd"],
+                                                            "cardinality": "one",
+                                                            "annotations": {"arbitration.policy": "freshest"}}}}
+    out.append((f"{label} §2.2: the linter's checks 1 to 5 without the required interface, 6 and 7 with it",
+                (ab.lint(bad), ab.lint({**bad, "requires": {"cmd": {**bad["requires"]["cmd"], "cardinality": "many",
+                                                                    "annotations": {"arbitration.policy": "priority"},
+                                                                    "resources": ["nope"]}}},
+                                      {"steer.v1": steer.canonical})),
+                ([("cmd", "policy_unsupported"), ("cmd", "cardinality")], [("cmd", "resource")])))
+    # F-268: the close's withdrawals heard before the move's event, as
+    # zenoh-python 1.10.1 tells them, against the move heard first.
+    tok = "zk2/lab/{}/@zk/alive/steer.v1/00000000000000a{}/6f2b0c1d9e8a7b65"
+    seq = [{"at": 0, "event": "start"}, {"at": 1, "event": "declared", "token": tok.format("safety", 1)},
+           {"at": 2, "event": "declared", "token": tok.format("teleop", 2)},
+           {"at": 10, "event": "sample", "key": "zk2/lab/safety/steer.v1/stream/cmd"},
+           {"at": 15, "event": "sample", "key": "zk2/lab/teleop/steer.v1/stream/cmd"}]
+    close = [{"at": 20, "event": "withdrawn", "token": tok.format("safety", 1)},
+             {"at": 20, "event": "withdrawn", "token": tok.format("teleop", 2)}]
+    reopen = [{"at": 40, "event": "moved"}, {"at": 41, "event": "declared", "token": tok.format("safety", 1)},
+              {"at": 41, "event": "declared", "token": tok.format("teleop", 2)}, {"at": 50, "event": "stood"}]
+    for name, events, want_sw in (
+            ("the move's event after its withdrawals: withdrawn, to the dead-man", seq + close
+             + [{"at": 20, "event": "moved"}] + reopen,
+             [("lab/safety", "lab/teleop", "withdrawn"), ("lab/teleop", None, "withdrawn")]),
+            ("the move begun at the first withdrawal heard with no link: nothing", seq
+             + [{"at": 20, "event": "moved"}] + close + [{"at": 20, "event": "moved"}] + reopen, [])):
+        a = ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab/safety", "lab/teleop"])
+        got = [s for e in events[len(seq):] for s in a.event(e).switches] if all(a.event(e) for e in seq) else []
+        out.append((f"{label} §2.8 (F-268): {name}", [(s.from_, s.to, s.cause) for s in got], want_sw))
+    return out
 
 
 def _timing_readings(root: Path) -> list[tuple[str, Any, Any]]:
