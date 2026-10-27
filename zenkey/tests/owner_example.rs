@@ -2051,3 +2051,126 @@ async fn the_owner_example_starts_at_go_on_its_standard_input() {
         .unwrap()
         .unwrap();
 }
+
+/// `timing.v1` in the owner example (#908, MB): `--timing` implements the
+/// scenarios' `pace.v1`, embedded, `cmd` paused until resumed; each sample
+/// stamped by its writer with the session's zid (§2.6); an axis's member
+/// token declared before its first sample and withdrawn after its last;
+/// `timing stamp none` puts raw, with no stamp, under `--no-hlc`; every
+/// answer one JSON line.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_drives_timing() {
+    let (_r1, ep) = router_with_timestamping_off().await;
+    let tool = client(&ep).await;
+    let data = tool
+        .declare_subscriber("zk2/ex/pace/pace.v1/stream/**")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let members = tool
+        .liveliness()
+        .declare_subscriber("zk2/ex/pace/@zk/member/pace.v1/**")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let o = spawn_owner(&["--connect", &ep, "--no-hlc", "--timing", "ex/pace"]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let _ready = line(&o.lines).await;
+    let zid = ask_json(&o, "timing zid").await["zid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // cmd starts paused: nothing published.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(data.try_recv().is_err(), "cmd starts paused");
+    let r = ask_json(&o, "timing resume cmd").await;
+    assert_eq!(r["on"], true);
+    let s = tokio::time::timeout(SETTLE, data.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(s.key_expr().as_str(), "zk2/ex/pace/pace.v1/stream/cmd");
+    let t = s.timestamp().expect("§2.6: a lifespan's sample is stamped");
+    assert_eq!(t.get_id().to_string(), zid, "the owner's own stamp");
+    assert_eq!(ask_json(&o, "timing writers").await["stamped"]["cmd"], true);
+    // timing stamp none: raw, unstamped through a router that stamps nothing.
+    ask_json(&o, "timing stamp none").await;
+    let unstamped = loop {
+        let s = tokio::time::timeout(SETTLE, data.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        if s.timestamp().is_none() {
+            break s;
+        }
+    };
+    let ns: u128 = String::from_utf8_lossy(&unstamped.payload().to_bytes())
+        .parse()
+        .unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    assert!(now - ns >= 9_000_000_000, "a payload time 10 s old");
+    ask_json(&o, "timing stamp own").await;
+    ask_json(&o, "timing pause cmd").await;
+    // An axis: its member token, then its samples; removed, the token goes.
+    let r = ask_json(&o, "timing add x").await;
+    assert_eq!(r["member"], "axis/x");
+    let tok = tokio::time::timeout(SETTLE, members.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(tok.kind(), SampleKind::Put);
+    assert!(tok.key_expr().as_str().contains("/@zk/member/pace.v1/x/"));
+    loop {
+        let s = tokio::time::timeout(SETTLE, data.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        if s.key_expr().as_str().ends_with("/axis/x") {
+            break;
+        }
+    }
+    ask_json(&o, "timing remove x").await;
+    let gone = tokio::time::timeout(SETTLE, members.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(gone.kind(), SampleKind::Delete);
+    let published = ask_json(&o, "timing published").await;
+    assert!(
+        published["members"]["cmd"].as_u64().unwrap() >= 2,
+        "{published}"
+    );
+    assert!(
+        o.ask("timing offset x")
+            .await
+            .starts_with("refused timing offset x")
+    );
+    assert_eq!(ask_json(&o, "timing offset -700").await["ms"], -700);
+    o.stop().await;
+}
+
+/// A router whose timestamping is off: an unstamped put stays so.
+async fn router_with_timestamping_off() -> (zenoh::Session, String) {
+    common::router_with(None, &[("timestamping/enabled", "false")]).await
+}
+
+#[test]
+fn the_help_documents_the_timing_surface() {
+    for piece in [
+        "--timing",
+        "--no-hlc",
+        "timing pause|resume <member>",
+        "timing add <axis>",
+        "timing remove <axis>",
+        "timing offset <ms>",
+        "timing stamp own|none",
+        "timing published",
+        "timing zid",
+        "consume --timing",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}
