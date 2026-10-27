@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use zenkey_model::alarms;
+use zenkey_model::arbitration;
 use zenkey_model::authoring::Kind;
 use zenkey_model::bundle::Bundle;
 use zenkey_model::config::{
@@ -82,6 +83,10 @@ const KNOWN: &[(&str, &str)] = &[
     ("timing", "lifespans.json"),
     ("timing", "periods.json"),
     ("timing", "conclusions.json"),
+    ("arbitration", "declarations.json"),
+    ("arbitration", "rankings.json"),
+    ("arbitration", "arbitrations.json"),
+    ("arbitration", "conclusions.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -3546,6 +3551,371 @@ fn timing_conclusions() {
             "deadline": tm_judged(timing::deadline_met(kind, &d, &w, &account)),
             "period": tm_judged(timing::period_kept(kind, &d, &w, period)),
             "lifespan": tm_judged(timing::lifespan_expired(kind, &d, &samples)),
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+// --- arbitration.v1 (#909, BA) ----------------------------------------------------
+//
+// The expectations were written by an independent transcription of the text
+// (the BA chunk's, before this module ran), so these runners check them; a
+// bless claims the reference and the text agree.
+
+fn ab_ifaces(v: &Value) -> Vec<zenkey_model::grammar::IfaceId> {
+    v.as_array()
+        .expect("uses")
+        .iter()
+        .map(|u| u.as_str().expect("a profile").parse().expect("a profile id"))
+        .collect()
+}
+
+fn ab_params(v: &Value) -> BTreeMap<String, String> {
+    v.as_object()
+        .expect("params")
+        .iter()
+        .map(|(k, v)| (k.clone(), v.as_str().expect("a value").to_owned()))
+        .collect()
+}
+
+fn ab_addr(v: &Value) -> zenkey_model::grammar::Addr {
+    v.as_str()
+        .expect("an address")
+        .parse()
+        .expect("<system>/<service>")
+}
+
+fn ab_addr_json(a: Option<&zenkey_model::grammar::Addr>) -> Value {
+    a.map_or(Value::Null, |a| json!(a.to_string()))
+}
+
+fn ab_invalid(s: &str) -> arbitration::Invalid {
+    use arbitration::Invalid as I;
+    match s {
+        "not_used" => I::NotUsed,
+        "manifest_role" => I::ManifestRole,
+        "policy_unsupported" => I::PolicyUnsupported,
+        "value" => I::Value,
+        "cardinality" => I::Cardinality,
+        "resource" => I::Resource,
+        "no_deadline" => I::NoDeadline,
+        "params_unbound" => I::ParamsUnbound,
+        other => panic!("reason {other:?}"),
+    }
+}
+
+fn ab_declaration_json(d: &arbitration::Declaration) -> Value {
+    match d {
+        arbitration::Declaration::Arbitrated(a) => json!({
+            "declaration": d.as_str(),
+            "policy": a.policy.as_str(),
+            "resource": a.resource(),
+            "deadline_ms": u64::try_from(a.deadline.as_millis()).unwrap(),
+            "period_ms": a.period.map(|p| u64::try_from(p.as_millis()).unwrap()),
+        }),
+        arbitration::Declaration::Invalid(why) => json!({
+            "declaration": d.as_str(),
+            "reasons": why.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
+        }),
+        _ => json!({"declaration": d.as_str()}),
+    }
+}
+
+/// `arbitration/conformance/declarations.json`: one role and the revision
+/// of its required interface held → its declaration (arbitration.v1 §2.2,
+/// §2.3).
+#[test]
+fn arbitration_declarations() {
+    use zenkey_model::authoring::RequireCardinality;
+    let path = profiles().join("arbitration/conformance/declarations.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let role = &case["role"];
+        let uses = (!role["declared_by"].is_null()).then(|| ab_ifaces(&role["declared_by"]["uses"]));
+        let resources: Option<Vec<String>> = role["resources"].as_array().map(|a| {
+            a.iter()
+                .map(|r| r.as_str().expect("a template").to_owned())
+                .collect()
+        });
+        let anns = annotations(&role["annotations"]);
+        let r = arbitration::Role {
+            declared_by: uses.as_deref(),
+            resources: resources.as_deref(),
+            cardinality: match role["cardinality"].as_str().expect("cardinality") {
+                "many" => RequireCardinality::Many,
+                "one" => RequireCardinality::One,
+                other => panic!("cardinality {other:?}"),
+            },
+            annotations: &anns,
+        };
+        let p = &case["provider"];
+        let (iface, puses, offered): (
+            Option<zenkey_model::grammar::IfaceId>,
+            Vec<zenkey_model::grammar::IfaceId>,
+            Vec<(KindToken, Template, BTreeMap<String, Value>)>,
+        ) = if p.is_null() {
+            (None, Vec::new(), Vec::new())
+        } else {
+            (
+                Some(p["interface"].as_str().expect("interface").parse().expect("an id")),
+                ab_ifaces(&p["uses"]),
+                p["resources"]
+                    .as_array()
+                    .expect("resources")
+                    .iter()
+                    .map(|r| {
+                        (
+                            link_token(&r["token"]),
+                            Template::parse(r["template"].as_str().expect("template"))
+                                .expect("a template"),
+                            annotations(&r["annotations"]),
+                        )
+                    })
+                    .collect(),
+            )
+        };
+        let rev = iface.as_ref().map(|iface| arbitration::Revision {
+            iface,
+            uses: &puses,
+            resources: offered
+                .iter()
+                .map(|(token, template, annotations)| arbitration::Offered {
+                    token: *token,
+                    template,
+                    annotations,
+                })
+                .collect(),
+        });
+        let d = arbitration::declaration(&r, rev.as_ref(), &ab_params(&case["params"]));
+        let what = format!("{}", case["note"]);
+        expect(case, ab_declaration_json(&d), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `arbitration/conformance/rankings.json`: a binding and the addresses
+/// heard → the providers in rank order (arbitration.v1 §2.4).
+#[test]
+fn arbitration_rankings() {
+    let path = profiles().join("arbitration/conformance/rankings.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let entries: Vec<String> = case["bindings"]
+            .as_array()
+            .expect("bindings")
+            .iter()
+            .map(|e| e.as_str().expect("an entry").to_owned())
+            .collect();
+        let b = arbitration::Binding::parse(&entries).expect("a binding");
+        let heard: Vec<zenkey_model::grammar::Addr> =
+            case["heard"].as_array().expect("heard").iter().map(ab_addr).collect();
+        let names = |v: Vec<zenkey_model::grammar::Addr>| -> Vec<String> {
+            v.iter().map(ToString::to_string).collect()
+        };
+        let got = json!({
+            "ranked": names(b.ranked(&heard)),
+            "unbound": names(b.unbound(&heard)),
+            "wildcards": b.wildcards(),
+            "shadowed": b.shadowed(),
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn ab_step(a: &arbitration::Arbiter, s: &arbitration::Step) -> Value {
+    let switches: Vec<Value> = s
+        .switches
+        .iter()
+        .map(|w| {
+            json!({
+                "from": ab_addr_json(w.from.as_ref()),
+                "to": ab_addr_json(w.to.as_ref()),
+                "cause": w.cause.as_str(),
+            })
+        })
+        .collect();
+    let mut v = json!({
+        "switches": switches,
+        "active": ab_addr_json(a.active()),
+        "due": a.due().map(|d| u64::try_from(d.as_millis()).unwrap()),
+    });
+    if let Some(o) = s.outcome {
+        v["outcome"] = json!(o.as_str());
+    }
+    if !s.reread.is_empty() {
+        v["reread"] = json!(s.reread.iter().map(ToString::to_string).collect::<Vec<_>>());
+    }
+    v
+}
+
+/// `arbitration/conformance/arbitrations.json`: one role's events in order
+/// → after each, its switches, its active provider, its due instant, a
+/// sample's outcome and the reads again it asks (arbitration.v1 §2.5 to
+/// §2.11).
+#[test]
+fn arbitration_arbitrations() {
+    let path = profiles().join("arbitration/conformance/arbitrations.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let r = &case["resource"];
+        let declared = arbitration::Arbitrated {
+            policy: arbitration::Policy::Priority,
+            iface: case["interface"].as_str().expect("interface").parse().expect("an id"),
+            token: link_token(&r["token"]),
+            template: Template::parse(r["template"].as_str().expect("template")).expect("a template"),
+            deadline: Duration::from_millis(case["deadline_ms"].as_u64().expect("deadline_ms")),
+            period: None,
+        };
+        let entries: Vec<String> = case["bindings"]
+            .as_array()
+            .expect("bindings")
+            .iter()
+            .map(|e| e.as_str().expect("an entry").to_owned())
+            .collect();
+        let mut a = arbitration::Arbiter::new(
+            &declared,
+            arbitration::Binding::parse(&entries).expect("a binding"),
+            ab_params(&case["params"]),
+        );
+        let mut got = Vec::new();
+        for e in case["events"].as_array().expect("events") {
+            let at = Duration::from_millis(e["at"].as_u64().expect("at"));
+            let step = match e["event"].as_str().expect("event") {
+                "start" => a.start(at),
+                "sample" => a.observe(
+                    at,
+                    arbitration::Event::Sample(arbitration::Sample {
+                        key: e["key"].as_str().expect("key"),
+                        expired: e["expired"] == json!(true),
+                        not_incumbent: e["incumbent"] == json!(false),
+                    }),
+                ),
+                "declared" => a.observe(
+                    at,
+                    arbitration::Event::Declared(e["token"].as_str().expect("token")),
+                ),
+                "withdrawn" => a.observe(
+                    at,
+                    arbitration::Event::Withdrawn(e["token"].as_str().expect("token")),
+                ),
+                "read" => a.observe(
+                    at,
+                    arbitration::Event::Read {
+                        address: ab_addr(&e["address"]),
+                        complete: e["complete"].as_bool().expect("complete"),
+                        held: e["held"]
+                            .as_array()
+                            .expect("held")
+                            .iter()
+                            .map(rd_id)
+                            .collect(),
+                    },
+                ),
+                "moved" => a.observe(at, arbitration::Event::Moved),
+                "stood" => a.observe(at, arbitration::Event::Stood),
+                "tick" => a.observe(at, arbitration::Event::Tick),
+                other => panic!("event {other:?}"),
+            };
+            got.push(ab_step(&a, &step));
+        }
+        let what = format!("{}", case["note"]);
+        expect(case, json!(got), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn ab_held(d: &Value) -> arbitration::Held {
+    use arbitration::{Declaration, Held};
+    match d["declaration"].as_str().expect("declaration") {
+        "no_contract" => Held::NoContract,
+        "revisions_disagree" => Held::RevisionsDisagree,
+        "not_arbitrated" => Held::Read(Declaration::NotArbitrated),
+        "unread" => Held::Read(Declaration::Unread),
+        "invalid" => Held::Read(Declaration::Invalid(
+            d["reasons"]
+                .as_array()
+                .expect("reasons")
+                .iter()
+                .map(|r| ab_invalid(r.as_str().expect("a reason")))
+                .collect(),
+        )),
+        "arbitrated" => {
+            let (token, template) = d["resource"]
+                .as_str()
+                .expect("resource")
+                .split_once('/')
+                .expect("<token>/<template>");
+            Held::Read(Declaration::Arbitrated(arbitration::Arbitrated {
+                policy: arbitration::Policy::Priority,
+                iface: "steer.v1".parse().expect("an id"),
+                token: token.parse().expect("a token"),
+                template: Template::parse(template).expect("a template"),
+                deadline: Duration::from_millis(d["deadline_ms"].as_u64().expect("deadline_ms")),
+                period: d["period_ms"].as_u64().map(Duration::from_millis),
+            }))
+        }
+        other => panic!("declaration {other:?}"),
+    }
+}
+
+fn ab_judged(j: arbitration::Judged) -> Value {
+    json!({"answer": j.answer.as_str(), "reason": j.reason.as_str()})
+}
+
+/// `arbitration/conformance/conclusions.json`: a tool's reading of one
+/// consumer's role → §5's three questions (arbitration.v1 §2.14).
+#[test]
+fn arbitration_conclusions() {
+    let path = profiles().join("arbitration/conformance/conclusions.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let r = &case["reading"];
+        let entries: Vec<String> = r["bindings"]
+            .as_array()
+            .expect("bindings")
+            .iter()
+            .map(|e| e.as_str().expect("an entry").to_owned())
+            .collect();
+        let view = r.get("view").map(|v| arbitration::View {
+            listened: Duration::from_millis(v["listened_ms"].as_u64().expect("listened_ms")),
+            lost: v["lost"].as_bool().expect("lost"),
+            active: (!v["active"].is_null()).then(|| ab_addr(&v["active"])),
+        });
+        let reading = arbitration::Reading {
+            declaration: ab_held(&r["declaration"]),
+            binding: arbitration::Binding::parse(&entries).expect("a binding"),
+            view,
+        };
+        let (dj, why) = arbitration::judge_declaration(&reading);
+        let mut declaration = ab_judged(dj);
+        if !why.is_empty() {
+            declaration["reasons"] = json!(why.iter().map(|r| r.as_str()).collect::<Vec<_>>());
+        }
+        let (sj, provider) = arbitration::judge_selection(&reading);
+        let mut selection = ab_judged(sj);
+        if let Some(p) = provider {
+            selection["provider"] = json!(p.to_string());
+        }
+        let (bj, wildcards, shadowed) = arbitration::judge_binding(&reading);
+        let mut binding = ab_judged(bj);
+        binding["wildcards"] = json!(wildcards);
+        binding["shadowed"] = json!(shadowed);
+        let got = json!({
+            "declaration": declaration,
+            "selection": selection,
+            "binding": binding,
         });
         let what = format!("{}", case["note"]);
         expect(case, got, &what);
