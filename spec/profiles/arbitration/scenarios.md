@@ -54,8 +54,9 @@ tool's, and the reference tool runs it as a test of zenctl (#909's BC).
   annotations = { "arbitration.policy" = "priority" }
   ```
 
-  The deadline is 300 ms, and `timing.v1`'s detection bound 306 ms
-  (300 + max(300/50, 1)). The numbers are a loaded runner's: a sample in
+  The deadline is 300 ms, and `timing.v1` §2.5's detection bound 306 ms
+  (300 + max(300/50, 1)): a commander is missed once more than 300 ms has
+  passed since its last arrival, and the miss is seen by 306 ms. The numbers are a loaded runner's: a sample in
   six lost before a miss, and a bound tens of times the scheduling jitter.
 - **The commanders.** `C_s`, `C_t` and `C_a` are owners of `steer.v1` at
   `lab/safety`, `lab/teleop` and `lab/autopilot`, each in a process of its
@@ -64,8 +65,9 @@ tool's, and the reference tool runs it as a test of zenctl (#909's BC).
   holds its instance and interface tokens as core §8.1 says. A commander
   **holds** when it stops putting, keeping its tokens and its session, and
   **resumes** when it starts putting again. The reference's commanders are
-  `zenkey/examples/owner.rs` in its commander mode (`timing.v1`'s, #908's
-  MB), driven from stdin. Where a section needs what no owner's runtime
+  owners its test builds (`zenkey::ServiceBuilder`), each in a process of
+  its own, or `zenkey/examples/owner.rs` driven from stdin once it has a
+  commander mode (#908's MB, #909's BB). Where a section needs what no owner's runtime
   does, a raw session `X` plays the commander, declaring its tokens by hand
   at the keys core §8.1 gives and putting by hand.
 - **The actuators.** `A_l` and `A_r` are instances of `lab/rudder-l` and
@@ -107,7 +109,7 @@ tool's, and the reference tool runs it as a test of zenctl (#909's BC).
 - **Margins.** A switch's own instants (`at_ms − last_ms`) are the
   actuator's, so they hold on a loaded runner as far as its timer does:
   the test allows the runner 50 ms of scheduling beyond the detection
-  bound, and records the largest it saw. An instant the test takes itself
+  bound, and records the largest it saw, as `timing.v1`'s scenarios do. An instant the test takes itself
   (a kill, a cut) is allowed 200 ms on loopback.
 
 ## §1 The dead-man at start, and each higher priority taking over (§2.9–§2.11)
@@ -136,7 +138,7 @@ tool's, and the reference tool runs it as a test of zenctl (#909's BC).
    `unresolved` and `unbound` are 0. `A_l` and `A_r` decided apart: each
    printed its own `start` line and its own three switches.
 
-## §2 A commander silent past its deadline (§2.3, §2.6, §2.9; `timing.v1` §2.? (deadline))
+## §2 A commander silent past its deadline (§2.3, §2.6, §2.9; `timing.v1` §2.5)
 
 **Setup.** §1's end: all three commanders run, and each actuator follows
 safety.
@@ -147,7 +149,7 @@ safety.
 
 **Expected.**
 1. Each actuator switches to `lab/teleop`, cause `deadline`, with
-   `at_ms − last_ms` at least 300 (never before the deadline) and at most
+   `at_ms − last_ms` above 300 (never before the deadline) and at most
    306, the detection bound, within the margin. No line before it in the
    hold. At safety's first arrival after it resumes, each switches back to
    `lab/safety`, cause `sample`: a miss needs no re-admission (§2.7).
@@ -227,7 +229,7 @@ the first 16 digits of `steer.v1`'s fingerprint), then puts `cmd` every
 1. To `lab/teleop`, cause `deadline`.
 2. To `lab/autopilot`, cause `deadline`.
 3. To none, `{"from": "lab/autopilot", "to": null, "cause": "deadline"}`,
-   with `at_ms − last_ms` at least 300 and at most 306 within the margin:
+   with `at_ms − last_ms` above 300 and at most 306 within the margin:
    never before the deadline, so no stop while any commander's samples
    still arrive. S sees no `angle` put of either actuator from then until
    step 4.

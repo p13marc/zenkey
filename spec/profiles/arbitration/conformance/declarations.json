@@ -22,9 +22,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -60,9 +57,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -96,9 +90,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -132,9 +123,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -173,9 +161,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -214,9 +199,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -251,9 +233,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -292,9 +271,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -333,9 +309,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -374,9 +347,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -415,9 +385,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -456,9 +423,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -498,9 +462,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -542,9 +503,6 @@
             "template": "status",
             "token": "state"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -586,9 +544,6 @@
             "template": "status",
             "token": "state"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -627,9 +582,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -676,9 +628,6 @@
             "template": "trim",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -718,9 +667,6 @@
             "template": "cmd",
             "token": "@stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -757,9 +703,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -797,9 +740,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -838,9 +778,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -878,9 +815,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -917,9 +851,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -956,9 +887,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -995,9 +923,44 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "an integral float is that integer (timing.v1 §2.2): a deadline of 100.0 is 100 ms",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100.0,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
         ]
       },
       "role": {
@@ -1022,7 +985,80 @@
           "no_deadline"
         ]
       },
-      "note": "timing keys on a revision whose uses lists no timing.v1 are not timing's: no_deadline",
+      "note": "a deadline above 2^53-1 is no value: timing's declaration invalid, no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 9007199254740992
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 9007199254740991,
+        "declaration": "arbitrated",
+        "period_ms": null,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "the largest value, 2^53-1, is one: arbitrated",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 9007199254740991
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a lifespan that is no value makes timing's declaration invalid whole (timing.v1 §2.2): no_deadline, the deadline beside it valid",
       "params": {},
       "provider": {
         "interface": "twist_cmd.v1",
@@ -1030,14 +1066,88 @@
           {
             "annotations": {
               "timing.deadline_ms": 100,
-              "timing.lifespan_ms": 100,
+              "timing.lifespan_ms": "x",
               "timing.period_ms": 20
             },
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": []
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "no_deadline"
+        ]
+      },
+      "note": "a period that is no value, the same: no_deadline",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.period_ms": -20
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": null,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "another timing key beside the deadline is W105's and makes nothing invalid (timing.v1 §2.2)",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.max_rate": 5
+            },
+            "template": "cmd",
+            "token": "stream"
+          }
+        ]
       },
       "role": {
         "annotations": {
@@ -1074,9 +1184,6 @@
             "template": "cmd/{target}",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1117,9 +1224,6 @@
             "template": "cmd/{target}",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1160,9 +1264,6 @@
             "template": "cmd/{target}",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1202,9 +1303,6 @@
             "template": "cmd/{target}",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1240,9 +1338,6 @@
             "template": "cmd/{target}",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1330,9 +1425,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1366,9 +1458,6 @@
             "template": "status",
             "token": "state"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1406,9 +1495,6 @@
             "template": "cmd",
             "token": "stream"
           }
-        ],
-        "uses": [
-          "timing.v1"
         ]
       },
       "role": {
@@ -1428,5 +1514,5 @@
       }
     }
   ],
-  "description": "arbitration.v1 §2.2, §2.3: one role and the revision of its required interface the consumer holds -> its declaration. role.declared_by is {uses: [profile ids <name>.v<major>]}, the declaring contract's uses, or null for a role a component's manifest declares; role.resources is the requirement's resources (templates), or null when it names none (it consumes every resource); role.cardinality is \"one\" or \"many\"; role.annotations is the requirement's annotations. provider is the revision held: its uses, and each resource's kind token (\"stream\", \"@stream\", \"state\", \"@state\", \"events\", \"@op\"), template and resolved annotations; or null when none is held. params is the role's parameter bindings as configured (core R2), a value self.system or self.service binding its parameter. expect.declaration is \"not_arbitrated\" (no arbitration.policy; or uses lists another major of arbitration and not v1, that major's); \"arbitrated\", with policy, resource (the stream's <token>/<template>), deadline_ms and period_ms (null when not written); \"unread\" (provider null, checks 1 to 5 passing); or \"invalid\", with reasons, in this order, each checked alone: not_used (the policy carried, the declaring contract's uses naming no major of arbitration), manifest_role (declared_by null), policy_unsupported (the string freshest or lease), value (not one of the strings priority, freshest, lease), cardinality (not many), resource (what the role consumes, every resource whose template it names or every resource, is not exactly one resource of token stream or @stream), no_deadline (that stream has no deadline as timing.v1 reads it: the revision's uses list timing.v1, timing.deadline_ms is an integer of 1 or more, timing.period_ms absent or an integer of 1 or more and not above the deadline; read only when resource passes), params_unbound (a parameter of that stream's template is not a key of params; read only when resource passes). With provider null, resource, no_deadline and params_unbound are not read. Another arbitration.<key> makes nothing invalid (W105's)."
+  "description": "arbitration.v1 §2.2, §2.3: one role and the revision of its required interface the consumer holds -> its declaration. role.declared_by is {uses: [profile ids <name>.v<major>]}, the declaring contract's uses, or null for a role a component's manifest declares; role.resources is the requirement's resources (templates), or null when it names none (it consumes every resource); role.cardinality is \"one\" or \"many\"; role.annotations is the requirement's annotations. provider is the revision held: its interface, and each resource's kind token (\"stream\", \"@stream\", \"state\", \"@state\", \"events\", \"@op\"), template and resolved annotations; or null when none is held. params is the role's parameter bindings as configured (core R2), a value self.system or self.service binding its parameter. expect.declaration is \"not_arbitrated\" (no arbitration.policy; or uses lists another major of arbitration and not v1, that major's); \"arbitrated\", with policy, resource (the stream's <token>/<template>), deadline_ms and period_ms (null when not written); \"unread\" (provider null, checks 1 to 5 passing); or \"invalid\", with reasons, in this order, each checked alone: not_used (the policy carried, the declaring contract's uses naming no major of arbitration), manifest_role (declared_by null), policy_unsupported (the string freshest or lease), value (not one of the strings priority, freshest, lease), cardinality (not many), resource (what the role consumes, every resource whose template it names or every resource, is not exactly one resource of token stream or @stream), no_deadline (that stream has no deadline as timing.v1 §2.2 and §2.5 read it: its declaration invalid, a value of timing.period_ms, timing.deadline_ms or timing.lifespan_ms not a whole number of milliseconds from 1 to 2^53-1, an integral float being that integer; or timing.deadline_ms absent; or the deadline below timing.period_ms; read only when resource passes), params_unbound (a parameter of that stream's template is not a key of params; read only when resource passes). With provider null, resource, no_deadline and params_unbound are not read. Another arbitration.<key> makes nothing invalid (W105's)."
 }

@@ -3573,7 +3573,12 @@ fn ab_ifaces(v: &Value) -> Vec<zenkey_model::grammar::IfaceId> {
     v.as_array()
         .expect("uses")
         .iter()
-        .map(|u| u.as_str().expect("a profile").parse().expect("a profile id"))
+        .map(|u| {
+            u.as_str()
+                .expect("a profile")
+                .parse()
+                .expect("a profile id")
+        })
         .collect()
 }
 
@@ -3638,7 +3643,8 @@ fn arbitration_declarations() {
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
         let role = &case["role"];
-        let uses = (!role["declared_by"].is_null()).then(|| ab_ifaces(&role["declared_by"]["uses"]));
+        let uses =
+            (!role["declared_by"].is_null()).then(|| ab_ifaces(&role["declared_by"]["uses"]));
         let resources: Option<Vec<String>> = role["resources"].as_array().map(|a| {
             a.iter()
                 .map(|r| r.as_str().expect("a template").to_owned())
@@ -3656,13 +3662,13 @@ fn arbitration_declarations() {
             annotations: &anns,
         };
         let p = &case["provider"];
-        let iface: Option<zenkey_model::grammar::IfaceId> = (!p.is_null())
-            .then(|| p["interface"].as_str().expect("interface").parse().expect("an id"));
-        let puses = if p.is_null() {
-            Vec::new()
-        } else {
-            ab_ifaces(&p["uses"])
-        };
+        let iface: Option<zenkey_model::grammar::IfaceId> = (!p.is_null()).then(|| {
+            p["interface"]
+                .as_str()
+                .expect("interface")
+                .parse()
+                .expect("an id")
+        });
         let offered: Vec<AbOffer> = p["resources"]
             .as_array()
             .map(|rs| {
@@ -3680,7 +3686,6 @@ fn arbitration_declarations() {
             .unwrap_or_default();
         let rev = iface.as_ref().map(|iface| arbitration::Revision {
             iface,
-            uses: &puses,
             resources: offered
                 .iter()
                 .map(|(token, template, annotations)| arbitration::Offered {
@@ -3713,8 +3718,12 @@ fn arbitration_rankings() {
             .map(|e| e.as_str().expect("an entry").to_owned())
             .collect();
         let b = arbitration::Binding::parse(&entries).expect("a binding");
-        let heard: Vec<zenkey_model::grammar::Addr> =
-            case["heard"].as_array().expect("heard").iter().map(ab_addr).collect();
+        let heard: Vec<zenkey_model::grammar::Addr> = case["heard"]
+            .as_array()
+            .expect("heard")
+            .iter()
+            .map(ab_addr)
+            .collect();
         let names = |v: Vec<zenkey_model::grammar::Addr>| -> Vec<String> {
             v.iter().map(ToString::to_string).collect()
         };
@@ -3747,7 +3756,9 @@ fn ab_step(a: &arbitration::Arbiter, s: &arbitration::Step) -> Value {
     let mut v = json!({
         "switches": switches,
         "active": ab_addr_json(a.active()),
-        "due": a.due().map(|d| u64::try_from(d.as_millis()).unwrap()),
+        "due": a
+            .due()
+            .map(|d| u64::try_from(d.since_origin().as_millis()).unwrap()),
     });
     if let Some(o) = s.outcome {
         v["outcome"] = json!(o.as_str());
@@ -3770,9 +3781,14 @@ fn arbitration_arbitrations() {
         let r = &case["resource"];
         let declared = arbitration::Arbitrated {
             policy: arbitration::Policy::Priority,
-            iface: case["interface"].as_str().expect("interface").parse().expect("an id"),
+            iface: case["interface"]
+                .as_str()
+                .expect("interface")
+                .parse()
+                .expect("an id"),
             token: link_token(&r["token"]),
-            template: Template::parse(r["template"].as_str().expect("template")).expect("a template"),
+            template: Template::parse(r["template"].as_str().expect("template"))
+                .expect("a template"),
             deadline: Duration::from_millis(case["deadline_ms"].as_u64().expect("deadline_ms")),
             period: None,
         };
@@ -3789,13 +3805,16 @@ fn arbitration_arbitrations() {
         );
         let mut got = Vec::new();
         for e in case["events"].as_array().expect("events") {
-            let at = Duration::from_millis(e["at"].as_u64().expect("at"));
+            let at = zenkey_model::timing::Mono::after(Duration::from_millis(
+                e["at"].as_u64().expect("at"),
+            ));
             let step = match e["event"].as_str().expect("event") {
                 "start" => a.start(at),
                 "sample" => a.observe(
                     at,
                     arbitration::Event::Sample(arbitration::Sample {
                         key: e["key"].as_str().expect("key"),
+                        delete: e["delete"] == json!(true),
                         expired: e["expired"] == json!(true),
                         not_incumbent: e["incumbent"] == json!(false),
                     }),

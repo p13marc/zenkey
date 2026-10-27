@@ -246,6 +246,10 @@
         {
           "at": 310,
           "event": "tick"
+        },
+        {
+          "at": 311,
+          "event": "tick"
         }
       ],
       "expect": [
@@ -290,6 +294,11 @@
           "switches": []
         },
         {
+          "active": "lab/safety",
+          "due": 310,
+          "switches": []
+        },
+        {
           "active": "lab/teleop",
           "due": 470,
           "switches": [
@@ -302,7 +311,95 @@
         }
       ],
       "interface": "steer.v1",
-      "note": "the active misses its deadline at its due instant, not before: the next eligible, cause deadline (§2.6, §2.9)",
+      "note": "the active misses its deadline once more than the deadline has passed: in time at its due instant, missed after it, cause deadline (§2.6, §2.9; timing.v1 §2.5)",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 310,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 611,
+          "event": "tick"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "not_active",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 610,
+          "outcome": "delivered",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": null
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "an arrival exactly the deadline after the last is in time: no switch",
       "params": {},
       "resource": {
         "template": "cmd",
@@ -332,7 +429,7 @@
           "key": "zk2/lab/teleop/steer.v1/stream/cmd"
         },
         {
-          "at": 310,
+          "at": 311,
           "event": "tick"
         },
         {
@@ -589,11 +686,11 @@
           "key": "zk2/lab/teleop/steer.v1/stream/cmd"
         },
         {
-          "at": 310,
+          "at": 311,
           "event": "tick"
         },
         {
-          "at": 320,
+          "at": 321,
           "event": "tick"
         },
         {
@@ -2027,7 +2124,7 @@
           "key": "zk2/lab/safety/steer.v1/stream/cmd"
         },
         {
-          "at": 330,
+          "at": 331,
           "event": "tick"
         }
       ],
@@ -2741,7 +2838,7 @@
           "key": "zk2/lab/teleop/steer.v1/stream/cmd"
         },
         {
-          "at": 310,
+          "at": 311,
           "event": "tick"
         },
         {
@@ -3454,7 +3551,7 @@
           "key": "zk2/lab/safety/steer.v1/stream/cmd"
         },
         {
-          "at": 310,
+          "at": 311,
           "event": "tick"
         }
       ],
@@ -3502,6 +3599,96 @@
       ],
       "interface": "steer.v1",
       "note": "an expired sample (timing.v1) is no arrival: counted, never delivered, and the deadline runs from the last arrival",
+      "params": {},
+      "resource": {
+        "template": "cmd",
+        "token": "stream"
+      }
+    },
+    {
+      "bindings": [
+        "lab/safety",
+        "lab/teleop",
+        "lab/autopilot"
+      ],
+      "deadline_ms": 300,
+      "events": [
+        {
+          "at": 0,
+          "event": "start"
+        },
+        {
+          "at": 10,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 20,
+          "delete": true,
+          "event": "sample",
+          "key": "zk2/lab/safety/steer.v1/stream/cmd"
+        },
+        {
+          "at": 30,
+          "delete": true,
+          "event": "sample",
+          "key": "zk2/lab/teleop/steer.v1/stream/cmd"
+        },
+        {
+          "at": 311,
+          "event": "tick"
+        }
+      ],
+      "expect": [
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "start",
+              "from": null,
+              "to": null
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "delivered",
+          "switches": [
+            {
+              "cause": "sample",
+              "from": null,
+              "to": "lab/safety"
+            }
+          ]
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "deleted",
+          "switches": []
+        },
+        {
+          "active": "lab/safety",
+          "due": 310,
+          "outcome": "deleted",
+          "switches": []
+        },
+        {
+          "active": null,
+          "due": null,
+          "switches": [
+            {
+              "cause": "deadline",
+              "from": "lab/safety",
+              "to": null
+            }
+          ]
+        }
+      ],
+      "interface": "steer.v1",
+      "note": "a delete sample is no arrival (timing.v1 §2.5): counted, never delivered, and it keeps no provider eligible",
       "params": {},
       "resource": {
         "template": "cmd",
@@ -3932,7 +4119,7 @@
           "key": "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd"
         },
         {
-          "at": 105,
+          "at": 106,
           "event": "tick"
         },
         {
@@ -4022,5 +4209,5 @@
       }
     }
   ],
-  "description": "arbitration.v1 §2.5 to §2.11: one consumer's arbitrated role, and the events its runtime hands it in order -> after each event, what it decides. The role: interface (the required interface's id), resource (the stream's kind token and template), params (its parameter bindings, resolved), deadline_ms, and bindings (the entries in their configured order, as rankings.json reads them). Each event has at, an instant in ms on the consumer's monotonic clock, never decreasing, and event: \"start\" (first, once); \"sample\" with key (base-relative), and expired: true (timing.v1 reads it expired) or incumbent: false (the required interface is governed and redundancy.v1 §2.10 does not accept it), each absent otherwise; \"declared\" or \"withdrawn\" with token, an interface token's key zk2/<system>/<service>/@zk/alive/<iface>/<instance>/<fp16> the watch heard (one of another interface, or at an address no entry matches, is ignored); \"read\" with address, complete and held (the instance ids holding the required interface's token there, as the read shows them); \"moved\" (the watch session's transport closed or opened); \"stood\" (the round trip asked after the last move stands); \"tick\" (the timer fired). The rules: a provider is eligible at t when it is not withdrawn and its last arrival a (since its last re-admission) has t < a + deadline_ms. Each event at t first decides the time: an active provider not eligible at t is left for the eligible provider of highest rank at t, or none, cause deadline. Then the event: a sample's outcome is the first of wild (its key holds *), unresolved (not zk2/<system>/<service>/<interface>/<token>/<chunks> with the chunks matching the template and every parameter's chunk equal to params' value), unbound (no entry matches the address), expired, not_incumbent; otherwise it is an arrival, which sets the provider's last arrival unless it is withdrawn, and its outcome is delivered when its provider is active after the event, else not_active. A declaration adds its instance to those known held at its address and re-admits it (withdrawn ends; its arrivals stay forgotten). A withdrawal removes its instance; when none is then known held, the provider is withdrawn, its last arrival forgotten, and a read again asked (reread). A read: complete replaces the instances known held there, not complete adds to them; any then known held re-admits it; a read never withdraws. From a moved until a stood, declarations, withdrawals and reads are kept and change nothing; at that stood they are applied in order to the instances known held, as one change: an address left with none known held, a withdrawal of it among them, ends withdrawn (arrivals forgotten, reread); one withdrawn before them and left with one known held ends re-admitted; any other is unchanged. A stood with nothing pending changes nothing. After the event the active provider is the eligible provider of highest rank, or none: a change is a switch, cause sample when the event is an arrival of the provider now active, else withdrawn. \"start\" makes one switch, from null to null, cause start: the dead-man. expect[i] is, after event i: switches (each {from, to, cause}, null meaning none, the dead-man; at most a deadline one then the event's own), active (an address or null), due (the active provider's last arrival + deadline_ms, or null), outcome (for a sample), and reread (the addresses to read again, in rank order, when any)."
+  "description": "arbitration.v1 §2.5 to §2.11: one consumer's arbitrated role, and the events its runtime hands it in order -> after each event, what it decides. The role: interface (the required interface's id), resource (the stream's kind token and template), params (its parameter bindings, resolved), deadline_ms, and bindings (the entries in their configured order, as rankings.json reads them). Each event has at, an instant in ms on the consumer's monotonic clock, never decreasing, and event: \"start\" (first, once); \"sample\" with key (base-relative), and delete: true (a delete sample), expired: true (timing.v1 reads it expired) or incumbent: false (the required interface is governed and redundancy.v1 §2.10 does not accept it), each absent otherwise; \"declared\" or \"withdrawn\" with token, an interface token's key zk2/<system>/<service>/@zk/alive/<iface>/<instance>/<fp16> the watch heard (one of another interface, or at an address no entry matches, is ignored); \"read\" with address, complete and held (the instance ids holding the required interface's token there, as the read shows them); \"moved\" (the watch session's transport closed or opened); \"stood\" (the round trip asked after the last move stands); \"tick\" (the timer fired). The rules: a provider is eligible at t when it is not withdrawn and its last arrival a (since its last re-admission) has t <= a + deadline_ms (timing.v1 §2.5: missed once more than the deadline has passed). Each event at t first decides the time: an active provider not eligible at t is left for the eligible provider of highest rank at t, or none, cause deadline. Then the event: a sample's outcome is the first of wild (its key holds *), unresolved (not zk2/<system>/<service>/<interface>/<token>/<chunks> with the chunks matching the template and every parameter's chunk equal to params' value), unbound (no entry matches the address), deleted, expired, not_incumbent; otherwise it is an arrival, which sets the provider's last arrival unless it is withdrawn, and its outcome is delivered when its provider is active after the event, else not_active. A declaration adds its instance to those known held at its address and re-admits it (withdrawn ends; its arrivals stay forgotten). A withdrawal removes its instance; when none is then known held, the provider is withdrawn, its last arrival forgotten, and a read again asked (reread). A read: complete replaces the instances known held there, not complete adds to them; any then known held re-admits it; a read never withdraws. From a moved until a stood, declarations, withdrawals and reads are kept and change nothing; at that stood they are applied in order to the instances known held, as one change: an address left with none known held, a withdrawal of it among them, ends withdrawn (arrivals forgotten, reread); one withdrawn before them and left with one known held ends re-admitted; any other is unchanged. A stood with nothing pending changes nothing. After the event the active provider is the eligible provider of highest rank, or none: a change is a switch, cause sample when the event is an arrival of the provider now active, else withdrawn. \"start\" makes one switch, from null to null, cause start: the dead-man. expect[i] is, after event i: switches (each {from, to, cause}, null meaning none, the dead-man; at most a deadline one then the event's own), active (an address or null), due (the active provider's last arrival + deadline_ms, or null), outcome (for a sample), and reread (the addresses to read again, in rank order, when any)."
 }

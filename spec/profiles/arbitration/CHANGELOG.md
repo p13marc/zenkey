@@ -61,7 +61,7 @@ reopened here).
 - **Who implements it** (§2.1); **the declaration**, with a closed list of
   eight reasons in their order, and **unread** for a reader holding no
   revision of the required interface (§2.2); **the deadline** (§2.3);
-  **the ranking** (§2.4); **samples and who sent them**, six outcomes in
+  **the ranking** (§2.4); **samples and who sent them**, seven outcomes in
   their order (§2.5); **eligibility** (§2.6); **withdrawals and
   re-admission** (§2.7); **a move of the watch session** (§2.8);
   **selection and delivery** (§2.9); **switches** (§2.10); **the
@@ -80,11 +80,12 @@ reopened here).
   §3.3, `descriptors/ok-binding-order`), a reader that may act on a
   withdrawal heard live without concluding absence (§8.1), Appendix D's
   published row, and W105's fixture `contracts/w105-arbitration-deadline`.
-- **Evidence:** `conformance/declarations.json` (36 cases),
-  `conformance/rankings.json` (14), `conformance/arbitrations.json` (39),
-  `conformance/conclusions.json` (19), 108 in all. Each expectation was
+- **Evidence:** `conformance/declarations.json` (41 cases),
+  `conformance/rankings.json` (14), `conformance/arbitrations.json` (41),
+  `conformance/conclusions.json` (19), 115 in all. Each expectation was
   computed by an independent transcription of this text before
-  `zenkey_model::arbitration` ran it. Ten scenario sections, nine the
+  `zenkey_model::arbitration` ran it, and the reference agreed with every
+  one at its first run. Ten scenario sections, nine the
   runtime's and one a tool's, over two test contracts, `steer.v1` (a
   stream with a 300 ms deadline) and `rudder.v1` (its arbitrated role).
 - **The examples need no new revision.** `thruster.v1`'s `cmd` over
@@ -123,9 +124,21 @@ reopened here).
   or before its instant, as the timer would have, cause `deadline`, then
   the event itself; one event can so make two switches. The cause of a
   switch then never depends on whether the timer or a sample came first.
-- **The miss's instant.** A provider whose last arrival was at `a` has
-  missed at `a` + deadline, as `timing.v1`'s "from the deadline after its
-  last arrival" reads; phase 2 aligns it with `timing.v1`'s text.
+- **The deadline is `timing.v1`'s, read and judged by its rules.** No
+  deadline is the stream's `timing.v1` declaration invalid (any value not
+  a whole number of milliseconds from 1 to 2^53−1, a lifespan's included),
+  no deadline written, or one below the period (`timing.v1` §2.2, §2.5);
+  the revision's `uses` is not read for it, as `timing.v1` reads values
+  alone. A provider is missed once more than the deadline has passed since
+  its last arrival, so it is still eligible at exactly `a` + deadline
+  (`timing.v1` §2.5); the reference judges each provider's one key with
+  `zenkey_model::timing`'s `Tracker`.
+- **A delete sample is no arrival** (`timing.v1` §2.5), a seventh outcome,
+  `deleted`, counted for its provider.
+- **History.** A stream's history is replayed at a subscription's start,
+  each sample an arrival (`timing.v1` §2.5), which would make a commander
+  that stopped eligible for a deadline after a consumer's start: a
+  contract SHOULD NOT declare `history` on an arbitrated role's stream.
 - **`not_used`, `manifest_role`, `cardinality`, `resource`,
   `params_unbound`** name the defaults' conditions; `value` is
   `redundancy.v1`'s word for a value no text defines.

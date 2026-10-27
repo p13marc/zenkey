@@ -12,7 +12,7 @@
 //! | Rule | Item |
 //! |---|---|
 //! | §2.2 the declaration: arbitrated, invalid, unread | [`declaration`], [`declaration_of`], [`Declaration`], [`Invalid`], [`Role`], [`Revision`] |
-//! | §2.3 the deadline, from the revision held | [`deadline_of`], [`Arbitrated::deadline`] |
+//! | §2.3 the deadline, from the revision held | [`deadline_of`], [`Arbitrated::deadline`], [`crate::timing`]'s declaration |
 //! | §2.4 the ranking, wildcards, shadowed entries | [`Binding`], [`Entry`], [`Rank`] |
 //! | §2.5 samples and who sent them | [`Arbiter::identify`], [`Sample`], [`Outcome`] |
 //! | §2.6 to §2.8 eligibility, withdrawals, a move | [`Arbiter`], [`Event`] |
@@ -27,9 +27,9 @@
 //! judge_declaration / _selection / _binding ─▶ §5's questions, in five states                                         §2.14
 //! ```
 //!
-//! There is no I/O and no clock here. Every instant is a [`Duration`] since
-//! an origin the caller chooses on its own monotonic clock (`timing.v1`'s
-//! deadline runs on the consumer's). A consumer's runtime starts the
+//! There is no I/O and no clock here. Every instant is a [`Mono`], a
+//! reading of the consumer's monotonic clock (`timing.v1` §2.5's deadline
+//! runs on it). A consumer's runtime starts the
 //! [`Arbiter`] at its start, hands it each sample of the role's
 //! subscription ([`Event::Sample`]), each interface token its watch hears
 //! declared or withdrawn ([`Event::Declared`], [`Event::Withdrawn`]), each
@@ -40,9 +40,11 @@
 //! delivers a sample whose [`Outcome`] is [`Outcome::Delivered`], and
 //! tells its application of each [`Switch`].
 //!
-//! `timing.v1`'s own declaration is read here by [`deadline_of`] as
-//! `arbitration.v1` text 0.1 cites it; once `zenkey_model::timing` lands
-//! (#908), it is that module's.
+//! The deadline is `timing.v1`'s, never restated: [`deadline_of`] reads it
+//! through [`crate::timing::declaration`] (`timing.v1` §2.2, §2.3, §2.5),
+//! and the [`Arbiter`] judges each provider's one key with a
+//! [`crate::timing::Tracker`] of its own, eligible while that tracker holds
+//! it heard and not missed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -50,10 +52,11 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::authoring::RequireCardinality;
+use crate::authoring::{Kind, RequireCardinality};
 use crate::contract::{Contract, Requirement};
 use crate::grammar::{Addr, IfaceId, InstanceId, KeyError, KindToken, Name, ZkKey, parse};
 use crate::template::Template;
+use crate::timing::{self, MemberState, Mono, Tracker};
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "arbitration.v1";
@@ -68,12 +71,6 @@ pub const POLICY: &str = "arbitration.policy";
 /// W105 reads in place of core Appendix D's interim row (core 0.54), the
 /// same key.
 pub const VOCABULARY: &[&str] = &["policy"];
-
-/// `timing.v1`'s profile name, and the keys of its this profile reads
-/// (§2.3).
-const TIMING: &str = "timing";
-const DEADLINE_MS: &str = "timing.deadline_ms";
-const PERIOD_MS: &str = "timing.period_ms";
 
 // --- §2.2: the declaration -------------------------------------------------------
 
@@ -283,7 +280,6 @@ pub struct Offered<'a> {
 #[derive(Debug, Clone)]
 pub struct Revision<'a> {
     pub iface: &'a IfaceId,
-    pub uses: &'a [IfaceId],
     pub resources: Vec<Offered<'a>>,
 }
 
@@ -293,7 +289,6 @@ impl<'a> Revision<'a> {
     pub fn of(c: &'a Contract) -> Self {
         Self {
             iface: &c.iface,
-            uses: &c.uses,
             resources: c
                 .resources
                 .iter()
@@ -307,33 +302,29 @@ impl<'a> Revision<'a> {
     }
 }
 
-/// The deadline and the period of one stream of a revision, as `timing.v1`
-/// reads them (§2.3, §2.2 check 7; `timing.v1` §2.? (declaration)): its
-/// revision's `uses` lists `timing.v1`; `timing.deadline_ms` is an integer
-/// of 1 or more; `timing.period_ms` is absent or an integer of 1 or more,
-/// and not above the deadline. `None` is no deadline.
+/// The resource kind a kind token carries (core §1.3).
+fn kind_of(token: KindToken) -> Kind {
+    match token {
+        KindToken::Stream | KindToken::ExplicitStream => Kind::Stream,
+        KindToken::State | KindToken::ExplicitState => Kind::State,
+        KindToken::Events => Kind::Event,
+        KindToken::Op => Kind::Operation,
+    }
+}
+
+/// The deadline and the period of one resource of a revision, as
+/// `timing.v1` reads them (§2.3, §2.2 check 7): its declaration
+/// ([`timing::declaration`], `timing.v1` §2.2, §2.3) valid, and its judged
+/// deadline ([`timing::Declared::judged_deadline`], `timing.v1` §2.5) one:
+/// declared, and not below its period. `None` is no deadline: none
+/// declared, one below the period, or a declaration invalid whole.
 #[must_use]
-pub fn deadline_of(rev: &Revision<'_>, r: &Offered<'_>) -> Option<(Duration, Option<Duration>)> {
-    if !rev
-        .uses
-        .iter()
-        .any(|u| u.name() == TIMING && u.major() == 1)
-    {
-        return None;
-    }
-    let ms = |v: &Value| v.as_u64().filter(|n| *n > 0);
-    let deadline = ms(r.annotations.get(DEADLINE_MS)?)?;
-    let period = match r.annotations.get(PERIOD_MS) {
-        None => None,
-        Some(v) => Some(ms(v)?),
+pub fn deadline_of(r: &Offered<'_>) -> Option<(Duration, Option<Duration>)> {
+    let d = match timing::declaration(kind_of(r.token), r.annotations) {
+        timing::Declaration::Declared(d) => d,
+        _ => return None,
     };
-    if period.is_some_and(|p| deadline < p) {
-        return None;
-    }
-    Some((
-        Duration::from_millis(deadline),
-        period.map(Duration::from_millis),
-    ))
+    Some((d.judged_deadline()?, d.period))
 }
 
 /// Reads a role's declaration (§2.2) from the role, the revision of the
@@ -397,7 +388,7 @@ pub fn declaration(
     };
     let mut deadline = None;
     if let Some(r) = one {
-        deadline = deadline_of(rev, r);
+        deadline = deadline_of(r);
         if deadline.is_none() {
             why.push(Invalid::NoDeadline);
         }
@@ -637,7 +628,9 @@ pub enum Outcome {
     Unresolved,
     /// No entry matches its address.
     Unbound,
-    /// `timing.v1` reads it expired: no arrival.
+    /// A delete sample: no arrival (`timing.v1` §2.5).
+    Deleted,
+    /// `timing.v1` reads it expired: no arrival (`timing.v1` §2.6).
     Expired,
     /// A governed interface's sample `redundancy.v1` §2.10 does not
     /// accept: no arrival.
@@ -654,6 +647,7 @@ impl Outcome {
             Self::Wild => "wild",
             Self::Unresolved => "unresolved",
             Self::Unbound => "unbound",
+            Self::Deleted => "deleted",
             Self::Expired => "expired",
             Self::NotIncumbent => "not_incumbent",
         }
@@ -671,7 +665,10 @@ impl Outcome {
 pub struct Sample<'a> {
     /// Its key, base-relative (core §1.6).
     pub key: &'a str,
-    /// `timing.v1` reads it expired, on the deployment's stated bound.
+    /// A delete sample, which is no arrival (`timing.v1` §2.5).
+    pub delete: bool,
+    /// `timing.v1` reads it expired, on the deployment's stated bound
+    /// (`timing.v1` §2.6).
     pub expired: bool,
     /// The required interface is governed, and `redundancy.v1` §2.10 does
     /// not accept it.
@@ -679,11 +676,12 @@ pub struct Sample<'a> {
 }
 
 impl<'a> Sample<'a> {
-    /// A sample neither expired nor refused by `redundancy.v1`.
+    /// A put sample, neither expired nor refused by `redundancy.v1`.
     #[must_use]
     pub fn new(key: &'a str) -> Self {
         Self {
             key,
+            delete: false,
             expired: false,
             not_incumbent: false,
         }
@@ -773,6 +771,7 @@ pub struct Step {
 pub struct Counts {
     pub delivered: u64,
     pub not_active: u64,
+    pub deleted: u64,
     pub expired: u64,
     pub not_incumbent: u64,
 }
@@ -785,11 +784,28 @@ pub struct Discards {
     pub unbound: u64,
 }
 
+/// The member a provider's tracker holds: its one key in the role (§2.2
+/// check 8), so a provider's deadline is `timing.v1` §2.5's per (address,
+/// key).
+const MEMBER: &str = "key";
+
+/// A deadline tracker for one provider's one key (`timing.v1` §2.5), its
+/// bound one member, started at `start` when given: a tracker counts no
+/// arrival before its start.
+fn tracker(deadline: Duration, start: Option<Mono>) -> Tracker {
+    let mut t = Tracker::new(deadline, Some(1), [MEMBER]);
+    if let Some(at) = start {
+        t.observe(at, timing::Event::Start);
+    }
+    t
+}
+
 #[derive(Debug, Clone)]
 struct Provider {
     addr: Addr,
-    /// Its last arrival since its last re-admission (§2.6).
-    last: Option<Duration>,
+    /// Its key's deadline (`timing.v1` §2.5): its arrivals since its last
+    /// re-admission, a withdrawal starting it anew (§2.6, §2.7).
+    tracker: Tracker,
     withdrawn: bool,
     /// The instances known holding the required interface's token (§2.7).
     held: BTreeSet<InstanceId>,
@@ -797,13 +813,27 @@ struct Provider {
 }
 
 impl Provider {
-    fn new(addr: Addr) -> Self {
+    fn new(addr: Addr, deadline: Duration, start: Option<Mono>) -> Self {
         Self {
             addr,
-            last: None,
+            tracker: tracker(deadline, start),
             withdrawn: false,
             held: BTreeSet::new(),
             counts: Counts::default(),
+        }
+    }
+
+    /// Withdrawn: ineligible, its arrivals forgotten (§2.7).
+    fn withdraw(&mut self, deadline: Duration, at: Mono) {
+        self.withdrawn = true;
+        self.tracker = tracker(deadline, Some(at));
+    }
+
+    /// Its last arrival, while its key is in time or not yet judged missed.
+    fn last(&self) -> Option<Mono> {
+        match self.tracker.state(MEMBER) {
+            Some(MemberState::Heard { last }) => Some(last),
+            _ => None,
         }
     }
 }
@@ -850,7 +880,7 @@ impl Arbiter {
             .entries()
             .iter()
             .filter_map(Entry::exact)
-            .filter_map(|a| Some((binding.rank(&a)?, Provider::new(a))))
+            .filter_map(|a| Some((binding.rank(&a)?, Provider::new(a, declared.deadline, None))))
             .collect();
         Self {
             iface: declared.iface.clone(),
@@ -895,13 +925,15 @@ impl Arbiter {
         self.active.is_none()
     }
 
-    /// The instant to arm the timer for: the active provider's last arrival
-    /// plus the deadline. `None` in the dead-man, where only an arrival can
-    /// make a provider eligible (§2.9).
+    /// The active provider's due instant: its last arrival plus the
+    /// deadline, after which it has missed (`timing.v1` §2.5). The runtime
+    /// arms its timer to fire after it, within the detection bound. `None`
+    /// in the dead-man, where only an arrival can make a provider eligible
+    /// (§2.9).
     #[must_use]
-    pub fn due(&self) -> Option<Duration> {
+    pub fn due(&self) -> Option<Mono> {
         let p = self.providers.get(self.active.as_ref()?)?;
-        Some(p.last?.saturating_add(self.deadline))
+        Some(p.last()?.saturating_add(self.deadline))
     }
 
     /// Whether a move is pending (§2.8).
@@ -974,13 +1006,17 @@ impl Arbiter {
         Ok(addr)
     }
 
-    /// Starts: the dead-man, cause `start` (§2.11). Called once.
-    pub fn start(&mut self, _at: Duration) -> Step {
+    /// Starts: the dead-man, cause `start` (§2.11), every provider's
+    /// tracker started (`timing.v1` §2.5). Called once.
+    pub fn start(&mut self, at: Mono) -> Step {
         if self.started {
             return Step::default();
         }
         self.started = true;
         self.active = None;
+        for p in self.providers.values_mut() {
+            p.tracker.observe(at, timing::Event::Start);
+        }
         Step {
             switches: vec![Switch {
                 from: None,
@@ -993,7 +1029,7 @@ impl Arbiter {
 
     /// Hands it an event at instant `at`, never before the last one's: it
     /// decides the time first, then the event, then selects (§2.9).
-    pub fn observe(&mut self, at: Duration, event: Event<'_>) -> Step {
+    pub fn observe(&mut self, at: Mono, event: Event<'_>) -> Step {
         let mut step = Step::default();
         if !self.started {
             return step;
@@ -1018,9 +1054,12 @@ impl Arbiter {
                     step.outcome = Some(o);
                 }
                 Ok(addr) => {
-                    let r = self.provider(addr);
+                    let r = self.provider(addr, at);
                     let p = self.providers.get_mut(&r).expect("just inserted");
-                    if s.expired {
+                    if s.delete {
+                        p.counts.deleted += 1;
+                        step.outcome = Some(Outcome::Deleted);
+                    } else if s.expired {
                         p.counts.expired += 1;
                         step.outcome = Some(Outcome::Expired);
                     } else if s.not_incumbent {
@@ -1028,14 +1067,20 @@ impl Arbiter {
                         step.outcome = Some(Outcome::NotIncumbent);
                     } else {
                         if !p.withdrawn {
-                            p.last = Some(at);
+                            p.tracker.observe(
+                                at,
+                                timing::Event::Arrival {
+                                    member: MEMBER,
+                                    expired: false,
+                                },
+                            );
                         }
                         arrival = Some(r);
                     }
                 }
             },
             Event::Declared(key) => {
-                if let Some((r, i)) = self.token(key) {
+                if let Some((r, i)) = self.token(key, at) {
                     if self.moving {
                         self.kept.push(Kept::Declared(r, i));
                     } else {
@@ -1046,15 +1091,14 @@ impl Arbiter {
                 }
             }
             Event::Withdrawn(key) => {
-                if let Some((r, i)) = self.token(key) {
+                if let Some((r, i)) = self.token(key, at) {
                     if self.moving {
                         self.kept.push(Kept::Withdrawn(r, i));
                     } else {
                         let p = self.providers.get_mut(&r).expect("known");
                         p.held.remove(&i);
                         if p.held.is_empty() {
-                            p.withdrawn = true;
-                            p.last = None;
+                            p.withdraw(self.deadline, at);
                             reread.push(r);
                         }
                     }
@@ -1066,7 +1110,7 @@ impl Arbiter {
                 held,
             } => {
                 if self.binding.rank(&address).is_some() {
-                    let r = self.provider(address);
+                    let r = self.provider(address, at);
                     if self.moving {
                         self.kept.push(Kept::Read(r, complete, held));
                     } else {
@@ -1081,7 +1125,7 @@ impl Arbiter {
             Event::Moved => self.moving = true,
             Event::Stood => {
                 if self.moving {
-                    self.stand(&mut reread);
+                    self.stand(at, &mut reread);
                 }
             }
             Event::Tick => {}
@@ -1118,17 +1162,19 @@ impl Arbiter {
         step
     }
 
-    /// Whether a provider is eligible at `at` (§2.6).
-    fn eligible(&self, r: &Rank, at: Duration) -> bool {
+    /// Whether a provider is eligible at `at` (§2.6): not withdrawn, and
+    /// its key heard and not missed, a miss holding once more than the
+    /// deadline has passed since its last arrival (`timing.v1` §2.5).
+    fn eligible(&self, r: &Rank, at: Mono) -> bool {
         self.providers.get(r).is_some_and(|p| {
             !p.withdrawn
-                && p.last
-                    .is_some_and(|l| at < l.saturating_add(self.deadline))
+                && p.last()
+                    .is_some_and(|l| at <= l.saturating_add(self.deadline))
         })
     }
 
     /// The eligible provider of highest rank at `at` (§2.9).
-    fn select(&self, at: Duration) -> Option<Rank> {
+    fn select(&self, at: Mono) -> Option<Rank> {
         self.providers
             .keys()
             .find(|r| self.eligible(r, at))
@@ -1150,18 +1196,20 @@ impl Arbiter {
         switch
     }
 
-    /// A bound address's provider, known from now on (§2.4).
-    fn provider(&mut self, addr: Addr) -> Rank {
+    /// A bound address's provider, known from now on (§2.4): one first
+    /// heard at `at` has its tracker started then.
+    fn provider(&mut self, addr: Addr, at: Mono) -> Rank {
         let r = self.binding.rank(&addr).expect("a bound address");
+        let deadline = self.deadline;
         self.providers
             .entry(r.clone())
-            .or_insert_with(|| Provider::new(addr));
+            .or_insert_with(|| Provider::new(addr, deadline, Some(at)));
         r
     }
 
     /// An interface token of the required interface at a bound address:
     /// its provider and its instance. Any other key is ignored (§2.7).
-    fn token(&mut self, key: &str) -> Option<(Rank, InstanceId)> {
+    fn token(&mut self, key: &str, at: Mono) -> Option<(Rank, InstanceId)> {
         let Ok(ZkKey::Alive {
             addr,
             iface,
@@ -1174,12 +1222,12 @@ impl Arbiter {
         if iface != self.iface || self.binding.rank(&addr).is_none() {
             return None;
         }
-        Some((self.provider(addr), instance))
+        Some((self.provider(addr, at), instance))
     }
 
     /// The round trip after the last move stands: what was kept, applied in
     /// order as one change (§2.8).
-    fn stand(&mut self, reread: &mut Vec<Rank>) {
+    fn stand(&mut self, at: Mono, reread: &mut Vec<Rank>) {
         self.moving = false;
         // Per provider: withdrawn before, and whether a withdrawal was kept.
         let mut touched: BTreeMap<Rank, (bool, bool)> = BTreeMap::new();
@@ -1205,8 +1253,7 @@ impl Arbiter {
         for (r, (before, withdrawal)) in touched {
             let p = self.providers.get_mut(&r).expect("known");
             if p.held.is_empty() && withdrawal {
-                p.withdrawn = true;
-                p.last = None;
+                p.withdraw(self.deadline, at);
                 reread.push(r);
             } else if !p.held.is_empty() && before {
                 p.withdrawn = false;
@@ -1383,10 +1430,9 @@ pub struct Reading {
 fn premises(r: &Reading) -> Result<(), Judged> {
     match &r.declaration {
         Held::NoContract => Err(Judged::new(Answer::Unobservable, Reason::NoContract)),
-        Held::Read(Declaration::NotArbitrated) => Err(Judged::new(
-            Answer::NotThisProfiles,
-            Reason::NotArbitrated,
-        )),
+        Held::Read(Declaration::NotArbitrated) => {
+            Err(Judged::new(Answer::NotThisProfiles, Reason::NotArbitrated))
+        }
         _ => Ok(()),
     }
 }
@@ -1473,7 +1519,11 @@ pub fn judge_binding(r: &Reading) -> (Judged, Vec<usize>, Vec<usize>) {
             shadowed,
         );
     }
-    (Judged::new(Answer::No, Reason::Exact), Vec::new(), Vec::new())
+    (
+        Judged::new(Answer::No, Reason::Exact),
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
 #[cfg(test)]
@@ -1505,7 +1555,7 @@ mod tests {
     #[test]
     fn nothing_before_the_start_and_one_start() {
         let mut a = arbiter();
-        let ms = Duration::from_millis;
+        let ms = |n| Mono::after(Duration::from_millis(n));
         assert_eq!(
             a.observe(ms(0), Event::Sample(Sample::new(SAFETY))),
             Step::default()
