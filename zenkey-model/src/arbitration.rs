@@ -726,6 +726,9 @@ pub struct Switch {
     pub from: Option<Addr>,
     pub to: Option<Addr>,
     pub cause: Cause,
+    /// `from`'s last arrival, `None` when `from` is: what a consumer prints
+    /// beside the switch as `last_ms` (`scenarios.md`, its conventions).
+    pub last: Option<Mono>,
 }
 
 /// What the runtime tells an [`Arbiter`], each at its instant.
@@ -810,6 +813,9 @@ struct Provider {
     /// The instances known holding the required interface's token (§2.7).
     held: BTreeSet<InstanceId>,
     counts: Counts,
+    /// Its last arrival its tracker took, kept across a withdrawal: a
+    /// switch's `last` (never a decision's input).
+    arrived: Option<Mono>,
 }
 
 impl Provider {
@@ -820,6 +826,7 @@ impl Provider {
             withdrawn: false,
             held: BTreeSet::new(),
             counts: Counts::default(),
+            arrived: None,
         }
     }
 
@@ -867,6 +874,8 @@ pub struct Arbiter {
     moving: bool,
     kept: Vec<Kept>,
     discards: Discards,
+    /// The instant of the last event, which no later one may precede.
+    last: Option<Mono>,
 }
 
 impl Arbiter {
@@ -895,6 +904,7 @@ impl Arbiter {
             moving: false,
             kept: Vec::new(),
             discards: Discards::default(),
+            last: None,
         }
     }
 
@@ -1014,6 +1024,7 @@ impl Arbiter {
         }
         self.started = true;
         self.active = None;
+        self.last = Some(at);
         for p in self.providers.values_mut() {
             p.tracker.observe(at, timing::Event::Start);
         }
@@ -1022,6 +1033,7 @@ impl Arbiter {
                 from: None,
                 to: None,
                 cause: Cause::Start,
+                last: None,
             }],
             ..Step::default()
         }
@@ -1034,6 +1046,12 @@ impl Arbiter {
         if !self.started {
             return step;
         }
+        debug_assert!(
+            self.last.is_none_or(|l| at >= l),
+            "an event at {at:?} precedes the last one, at {:?}",
+            self.last
+        );
+        self.last = Some(at);
         // The time first: the active provider's miss at or before `at`.
         if let Some(r) = self.active.clone()
             && !self.eligible(&r, at)
@@ -1054,28 +1072,33 @@ impl Arbiter {
                     step.outcome = Some(o);
                 }
                 Ok(addr) => {
-                    let r = self.provider(addr, at);
-                    let p = self.providers.get_mut(&r).expect("just inserted");
-                    if s.delete {
-                        p.counts.deleted += 1;
-                        step.outcome = Some(Outcome::Deleted);
-                    } else if s.expired {
-                        p.counts.expired += 1;
-                        step.outcome = Some(Outcome::Expired);
-                    } else if s.not_incumbent {
-                        p.counts.not_incumbent += 1;
-                        step.outcome = Some(Outcome::NotIncumbent);
-                    } else {
-                        if !p.withdrawn {
-                            p.tracker.observe(
-                                at,
-                                timing::Event::Arrival {
-                                    member: MEMBER,
-                                    expired: false,
-                                },
-                            );
+                    // `identify` found an entry matching it, so `provider`
+                    // knows it from here on.
+                    if let Some(r) = self.provider(addr, at)
+                        && let Some(p) = self.providers.get_mut(&r)
+                    {
+                        if s.delete {
+                            p.counts.deleted += 1;
+                            step.outcome = Some(Outcome::Deleted);
+                        } else if s.expired {
+                            p.counts.expired += 1;
+                            step.outcome = Some(Outcome::Expired);
+                        } else if s.not_incumbent {
+                            p.counts.not_incumbent += 1;
+                            step.outcome = Some(Outcome::NotIncumbent);
+                        } else {
+                            if !p.withdrawn {
+                                p.tracker.observe(
+                                    at,
+                                    timing::Event::Arrival {
+                                        member: MEMBER,
+                                        expired: false,
+                                    },
+                                );
+                                p.arrived = Some(at);
+                            }
+                            arrival = Some(r);
                         }
-                        arrival = Some(r);
                     }
                 }
             },
@@ -1083,8 +1106,7 @@ impl Arbiter {
                 if let Some((r, i)) = self.token(key, at) {
                     if self.moving {
                         self.kept.push(Kept::Declared(r, i));
-                    } else {
-                        let p = self.providers.get_mut(&r).expect("known");
+                    } else if let Some(p) = self.providers.get_mut(&r) {
                         p.held.insert(i);
                         p.withdrawn = false;
                     }
@@ -1094,8 +1116,7 @@ impl Arbiter {
                 if let Some((r, i)) = self.token(key, at) {
                     if self.moving {
                         self.kept.push(Kept::Withdrawn(r, i));
-                    } else {
-                        let p = self.providers.get_mut(&r).expect("known");
+                    } else if let Some(p) = self.providers.get_mut(&r) {
                         p.held.remove(&i);
                         if p.held.is_empty() {
                             p.withdraw(self.deadline, at);
@@ -1109,12 +1130,10 @@ impl Arbiter {
                 complete,
                 held,
             } => {
-                if self.binding.rank(&address).is_some() {
-                    let r = self.provider(address, at);
+                if let Some(r) = self.provider(address, at) {
                     if self.moving {
                         self.kept.push(Kept::Read(r, complete, held));
-                    } else {
-                        let p = self.providers.get_mut(&r).expect("known");
+                    } else if let Some(p) = self.providers.get_mut(&r) {
                         read_into(&mut p.held, complete, held);
                         if !p.held.is_empty() {
                             p.withdrawn = false;
@@ -1136,21 +1155,30 @@ impl Arbiter {
                 Cause::Sample
             } else {
                 // Only a withdrawal makes the active provider ineligible
-                // within an event (§2.10).
+                // within an event (§2.10): the time is settled above, and
+                // an arrival makes no provider ineligible.
+                debug_assert!(
+                    self.active
+                        .as_ref()
+                        .and_then(|r| self.providers.get(r))
+                        .is_some_and(|p| p.withdrawn),
+                    "a switch at {at:?} that is no arrival's, from a provider not withdrawn"
+                );
                 Cause::Withdrawn
             };
             step.switches.push(self.switch_to(next, cause));
         }
         if let Some(r) = arrival {
             let delivered = self.active.as_ref() == Some(&r);
-            let p = self.providers.get_mut(&r).expect("known");
-            step.outcome = Some(if delivered {
-                p.counts.delivered += 1;
-                Outcome::Delivered
-            } else {
-                p.counts.not_active += 1;
-                Outcome::NotActive
-            });
+            if let Some(p) = self.providers.get_mut(&r) {
+                step.outcome = Some(if delivered {
+                    p.counts.delivered += 1;
+                    Outcome::Delivered
+                } else {
+                    p.counts.not_active += 1;
+                    Outcome::NotActive
+                });
+            }
         }
         reread.sort();
         reread.dedup();
@@ -1191,20 +1219,26 @@ impl Arbiter {
             from: addr(&self.active),
             to: addr(&next),
             cause,
+            last: self
+                .active
+                .as_ref()
+                .and_then(|r| self.providers.get(r))
+                .and_then(|p| p.arrived),
         };
         self.active = next;
         switch
     }
 
     /// A bound address's provider, known from now on (§2.4): one first
-    /// heard at `at` has its tracker started then.
-    fn provider(&mut self, addr: Addr, at: Mono) -> Rank {
-        let r = self.binding.rank(&addr).expect("a bound address");
+    /// heard at `at` has its tracker started then. `None` for an address
+    /// no entry matches, which is no provider.
+    fn provider(&mut self, addr: Addr, at: Mono) -> Option<Rank> {
+        let r = self.binding.rank(&addr)?;
         let deadline = self.deadline;
         self.providers
             .entry(r.clone())
             .or_insert_with(|| Provider::new(addr, deadline, Some(at)));
-        r
+        Some(r)
     }
 
     /// An interface token of the required interface at a bound address:
@@ -1219,10 +1253,10 @@ impl Arbiter {
         else {
             return None;
         };
-        if iface != self.iface || self.binding.rank(&addr).is_none() {
+        if iface != self.iface {
             return None;
         }
-        Some((self.provider(addr, at), instance))
+        Some((self.provider(addr, at)?, instance))
     }
 
     /// The round trip after the last move stands: what was kept, applied in
@@ -1251,7 +1285,9 @@ impl Arbiter {
             }
         }
         for (r, (before, withdrawal)) in touched {
-            let p = self.providers.get_mut(&r).expect("known");
+            let Some(p) = self.providers.get_mut(&r) else {
+                continue;
+            };
             if p.held.is_empty() && withdrawal {
                 p.withdraw(self.deadline, at);
                 reread.push(r);
@@ -1325,6 +1361,9 @@ pub enum Reason {
     Wildcard,
     Shadowed,
     Exact,
+    /// The tool read no consumer's descriptor: no binding, and no view
+    /// (text 0.2, F-272).
+    NoDescriptor,
 }
 
 impl Reason {
@@ -1347,6 +1386,7 @@ impl Reason {
             Self::Wildcard => "wildcard",
             Self::Shadowed => "shadowed",
             Self::Exact => "exact",
+            Self::NoDescriptor => "no_descriptor",
         }
     }
 }
@@ -1419,8 +1459,10 @@ pub struct View {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reading {
     pub declaration: Held,
-    /// The descriptor's binding, in order.
-    pub binding: Binding,
+    /// The descriptor's binding, in order; `None` when the tool read no
+    /// consumer's descriptor, a contract read offline with no consumer
+    /// (text 0.2, F-272).
+    pub binding: Option<Binding>,
     /// Its own view, `None` when it did not listen.
     pub view: Option<View>,
 }
@@ -1469,9 +1511,16 @@ pub fn judge_declaration(r: &Reading) -> (Judged, Vec<Invalid>) {
 
 /// §5's second question, "which provider does the tool's view select?"
 /// (§2.14), with the provider when it selects one. Its answer is the
-/// tool's own view, never the consumer's.
+/// tool's own view, never the consumer's. With no consumer's descriptor
+/// read, after the premises, it is not asked (text 0.2, F-272).
 #[must_use]
 pub fn judge_selection(r: &Reading) -> (Judged, Option<Addr>) {
+    if let Err(j) = premises(r) {
+        return (j, None);
+    }
+    let Some(binding) = &r.binding else {
+        return (Judged::new(Answer::NotAsked, Reason::NoDescriptor), None);
+    };
     let deadline = match &r.declaration {
         Held::Read(Declaration::Arbitrated(a)) => a.deadline,
         Held::Read(Declaration::Invalid(_)) => {
@@ -1481,7 +1530,7 @@ pub fn judge_selection(r: &Reading) -> (Judged, Option<Addr>) {
         // answer, without its reasons.
         _ => return (judge_declaration(r).0, None),
     };
-    if r.binding.is_empty() {
+    if binding.is_empty() {
         return (Judged::new(Answer::No, Reason::Unbound), None);
     }
     let Some(view) = &r.view else {
@@ -1501,14 +1550,22 @@ pub fn judge_selection(r: &Reading) -> (Judged, Option<Addr>) {
 
 /// §5's third question, "does the binding leave a priority to an order
 /// nobody chose?" (§2.4, §2.14), with the wildcard and the shadowed
-/// entries' positions. Yes is the finding, a warning.
+/// entries' positions. Yes is the finding, a warning. With no consumer's
+/// descriptor read, after the premises, it is not asked (text 0.2, F-272).
 #[must_use]
 pub fn judge_binding(r: &Reading) -> (Judged, Vec<usize>, Vec<usize>) {
     if let Err(j) = premises(r) {
         return (j, Vec::new(), Vec::new());
     }
-    let wild = r.binding.wildcards();
-    let shadowed = r.binding.shadowed();
+    let Some(binding) = &r.binding else {
+        return (
+            Judged::new(Answer::NotAsked, Reason::NoDescriptor),
+            Vec::new(),
+            Vec::new(),
+        );
+    };
+    let wild = binding.wildcards();
+    let shadowed = binding.shadowed();
     if !wild.is_empty() {
         return (Judged::new(Answer::Yes, Reason::Wildcard), wild, shadowed);
     }
@@ -1567,6 +1624,44 @@ mod tests {
         assert_eq!(s.outcome, Some(Outcome::Delivered));
         assert_eq!(a.due(), Some(ms(303)));
         assert_eq!(a.counts(&"lab/safety".parse().unwrap()).delivered, 1);
+    }
+
+    /// A switch carries `from`'s last arrival, kept across its withdrawal;
+    /// none from the dead-man.
+    #[test]
+    fn a_switch_carries_its_froms_last_arrival() {
+        let mut a = arbiter();
+        let ms = |n| Mono::after(Duration::from_millis(n));
+        assert_eq!(a.start(ms(0)).switches[0].last, None);
+        let s = a.observe(ms(10), Event::Sample(Sample::new(SAFETY)));
+        assert_eq!(s.switches[0].last, None, "from the dead-man");
+        a.observe(ms(20), Event::Sample(Sample::new(SAFETY)));
+        let s = a.observe(ms(400), Event::Tick);
+        assert_eq!(s.switches[0].cause, Cause::Deadline);
+        assert_eq!(s.switches[0].last, Some(ms(20)));
+        a.observe(ms(410), Event::Sample(Sample::new(SAFETY)));
+        let s = a.observe(
+            ms(420),
+            Event::Withdrawn("zk2/lab/safety/@zk/alive/steer.v1/000000000000000a/0123456789abcdef"),
+        );
+        assert_eq!(s.switches[0].cause, Cause::Withdrawn);
+        assert_eq!(
+            s.switches[0].last,
+            Some(ms(410)),
+            "kept across the withdrawal"
+        );
+    }
+
+    /// An event before the last one's instant is the runtime's fault: a
+    /// debug build says so.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "precedes the last one")]
+    fn an_event_never_goes_back_in_time() {
+        let mut a = arbiter();
+        let ms = |n| Mono::after(Duration::from_millis(n));
+        a.start(ms(10));
+        a.observe(ms(5), Event::Tick);
     }
 
     /// An entry's text round-trips, `*` included; a malformed one is

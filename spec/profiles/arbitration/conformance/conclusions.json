@@ -704,7 +704,147 @@
           "lost": false
         }
       }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "not_asked",
+          "reason": "no_descriptor",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "no",
+          "reason": "invalid",
+          "reasons": [
+            "policy_unsupported"
+          ]
+        },
+        "selection": {
+          "answer": "not_asked",
+          "reason": "no_descriptor"
+        }
+      },
+      "note": "scenarios §10 step 4 (text 0.2, F-272): a copy of the role read offline with no consumer running, so no descriptor: the declaration answered; the selection and the binding not asked, no_descriptor, never no, exact",
+      "reading": {
+        "bindings": null,
+        "declaration": {
+          "declaration": "invalid",
+          "reasons": [
+            "policy_unsupported"
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "not_asked",
+          "reason": "no_descriptor",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "yes",
+          "reason": "valid"
+        },
+        "selection": {
+          "answer": "not_asked",
+          "reason": "no_descriptor"
+        }
+      },
+      "note": "a valid declaration read with no consumer's descriptor: the selection and the binding not asked, no_descriptor, a view or not",
+      "reading": {
+        "bindings": null,
+        "declaration": {
+          "deadline_ms": 300,
+          "declaration": "arbitrated",
+          "period_ms": 50,
+          "policy": "priority",
+          "resource": "stream/cmd"
+        },
+        "view": {
+          "active": "lab/safety",
+          "listened_ms": 2000,
+          "lost": false
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "not_asked",
+          "reason": "no_descriptor",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "unobservable",
+          "reason": "no_provider_contract"
+        },
+        "selection": {
+          "answer": "not_asked",
+          "reason": "no_descriptor"
+        }
+      },
+      "note": "no revision held and no descriptor: the selection not asked before the declaration's unobservable",
+      "reading": {
+        "bindings": null,
+        "declaration": {
+          "declaration": "unread"
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "unobservable",
+          "reason": "no_contract",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "unobservable",
+          "reason": "no_contract"
+        },
+        "selection": {
+          "answer": "unobservable",
+          "reason": "no_contract"
+        }
+      },
+      "note": "the premises come before no_descriptor: the declaring contract not held",
+      "reading": {
+        "bindings": null,
+        "declaration": {
+          "declaration": "no_contract"
+        }
+      }
+    },
+    {
+      "expect": {
+        "binding": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated",
+          "shadowed": [],
+          "wildcards": []
+        },
+        "declaration": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated"
+        },
+        "selection": {
+          "answer": "not_this_profiles",
+          "reason": "not_arbitrated"
+        }
+      },
+      "note": "the premises come before no_descriptor: no policy",
+      "reading": {
+        "bindings": null,
+        "declaration": {
+          "declaration": "not_arbitrated"
+        }
+      }
     }
   ],
-  "description": "arbitration.v1 §2.14, §5: a tool's reading of one consumer's role -> §5's three questions. reading.declaration is what the tool reads of the role: as declarations.json's expect writes one (\"arbitrated\" with deadline_ms, \"invalid\" with reasons, \"not_arbitrated\", \"unread\": no revision of the required interface held), or \"no_contract\" (the declaring contract not held) or \"revisions_disagree\" (the revisions of the required interface held give two declarations). reading.bindings is the descriptor's, in order. reading.view, absent when the tool did not listen, is the tool's own view: listened_ms, how long it has listened; lost, whether it knows it lost samples within the last deadline; active, the provider its view selects (arbitrations.json's rules over its own events), or null. Each answer is {answer, reason}, answer one of yes, no, unobservable, not_asked, not_this_profiles. declaration: no_contract -> unobservable, no_contract; not_arbitrated -> not_this_profiles, not_arbitrated; revisions_disagree -> unobservable, revisions_disagree; unread -> unobservable, no_provider_contract; invalid -> no, invalid, with reasons; arbitrated -> yes, valid. selection: the declaration's answer for the first four (without reasons); invalid -> unobservable, invalid; then bindings empty -> no, unbound; view absent -> not_asked, not_listened; lost -> unobservable, lost; active -> yes, selected, with provider; listened_ms < deadline_ms -> unobservable, listening; else no, dead_man. binding, with wildcards and shadowed as rankings.json computes them (both empty on a premise's answer): no_contract -> unobservable, no_contract; not_arbitrated -> not_this_profiles, not_arbitrated; otherwise (the role carries a policy) a wildcard entry -> yes, wildcard; else a shadowed entry -> yes, shadowed; else no, exact."
+  "description": "arbitration.v1 §2.14, §5: a tool's reading of one consumer's role -> §5's three questions. reading.declaration is what the tool reads of the role: as declarations.json's expect writes one (\"arbitrated\" with deadline_ms, \"invalid\" with reasons, \"not_arbitrated\", \"unread\": no revision of the required interface held), or \"no_contract\" (the declaring contract not held) or \"revisions_disagree\" (the revisions of the required interface held give two declarations). reading.bindings is the descriptor's, in order, or null when the tool read no consumer's descriptor: a contract read offline with no consumer (text 0.2, F-272). reading.view, absent when the tool did not listen, is the tool's own view: listened_ms, how long it has listened; lost, whether it knows it lost samples within the last deadline; active, the provider its view selects (arbitrations.json's rules over its own events), or null. Each answer is {answer, reason}, answer one of yes, no, unobservable, not_asked, not_this_profiles. declaration: no_contract -> unobservable, no_contract; not_arbitrated -> not_this_profiles, not_arbitrated; revisions_disagree -> unobservable, revisions_disagree; unread -> unobservable, no_provider_contract; invalid -> no, invalid, with reasons; arbitrated -> yes, valid. selection: the declaration's answer for no_contract and not_arbitrated (the premises); then bindings null -> not_asked, no_descriptor; then the declaration's answer for revisions_disagree and unread (without reasons); invalid -> unobservable, invalid; then bindings empty -> no, unbound; view absent -> not_asked, not_listened; lost -> unobservable, lost; active -> yes, selected, with provider; listened_ms < deadline_ms -> unobservable, listening; else no, dead_man. binding, with wildcards and shadowed as rankings.json computes them (both empty on a premise's answer): no_contract -> unobservable, no_contract; not_arbitrated -> not_this_profiles, not_arbitrated; bindings null -> not_asked, no_descriptor; otherwise (the role carries a policy, and a descriptor was read) a wildcard entry -> yes, wildcard; else a shadowed entry -> yes, shadowed; else no, exact."
 }
