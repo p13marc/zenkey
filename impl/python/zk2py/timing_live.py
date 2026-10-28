@@ -1,4 +1,4 @@
-"""``timing.v1`` on a bus (profile text 0.1, core 0.53; #609, round 76).
+"""``timing.v1`` on a bus (profile text 0.2, core 0.55; #609, rounds 76 and 78).
 
 - :class:`Reader` is a consumer of a timed resource (§2.1, §2.5, §2.6) for
   one provider address: a :class:`zk2py.timing.Tracker` per resource with a
@@ -6,8 +6,11 @@
   one-shot wait at the earliest instant a miss is due, §2.5), fed the
   owner's token as :class:`zk2py.presence.PresenceFollower` observes it (a
   liveliness subscriber on a watch session, reads on a session that never
-  held one, a read 100 ms after a withdrawal, core §8.1, 0.37) and each
-  member's end at a complete read that shows no member token of it; a
+  held one, a read 100 ms after a withdrawal, core §8.1, 0.37), each
+  member token of an epoch template seen (heard declared or withdrawn, or
+  shown by a read: text 0.2, F-261), and each member's end at a complete
+  read that shows no member token of it once one was seen; no tracker at
+  all where the declaration judges no deadline (F-259); a
   :class:`zk2py.timing.LifespanReading` per resource, on the ε it is given,
   against the ``meta.zid`` of every descriptor of the address it holds. It
   subscribes to the address's instance keys, so it holds a new instance's
@@ -127,11 +130,19 @@ class Reader:
             base = f"zk2/{address}/{self.iface}/{r['token']}"
             known = self._known(base, r)
             bound = self._bound(r)
-            dl = decl.judged_deadline_ms
-            tracker = None if dl is None else tm.Tracker(dl, bound, known)
+            # text 0.2 (F-259): no tracker under an invalid declaration, a
+            # deadline below the period, or none; an epoch template's known
+            # member waited for from its member token (F-261)
+            tracker = tm.tracker_for(decl, bound, known, epoch=bool(r.get("epoch")))
             self.resources[rid] = _Resource(rid, r, decl, f"{base}/{_template_expr(r['template'])}", known, tracker,
                                             tm.LifespanReading(decl, epsilon_ms), r.get("epoch"))
         self._folds_seen = 0
+        #: how far the follower's heard events and reads were scanned for
+        #: member tokens seen (F-261)
+        self._events_scanned = 0
+        self._reads_scanned = 0
+        #: each member's first member token seen, as handed to its tracker
+        self.member_seen_at: dict[str, list[int]] = {}
         self.subs: list[Any] = []
         self.start_ns: int | None = None
         if subscribe_first:
@@ -343,18 +354,59 @@ class Reader:
                         return True
         return False
 
+    def _epoch_members(self, res: _Resource, chunk: str) -> list[str]:
+        """The members of an epoch resource whose epoch parameter's chunk is
+        ``chunk``: those held, and the one key a template whose one
+        parameter is the epoch names."""
+        from .slug import slug
+        from . import templates
+
+        tpl = templates.parse_template(res.r["template"])
+        prefix = f"zk2/{self.address}/{self.iface}/{res.r['token']}/"
+        out = []
+        held = res.tracker.held() if res.tracker is not None else []
+        for m in held:
+            b = templates.match(tpl, m[len(prefix):].split("/")) if m.startswith(prefix) else None
+            if b and res.epoch in b and slug(b[res.epoch][0]) == chunk:
+                out.append(m)
+        names = [x.text for x in tpl.segments if x.kind != templates.LITERAL]
+        if names == [res.epoch]:
+            key = prefix + "/".join(chunk if x.kind != templates.LITERAL else x.text for x in tpl.segments)
+            if key not in out:
+                out.append(key)
+        return out
+
+    def _sightings(self) -> list[str]:
+        """The member chunks of this address's interface whose member tokens
+        the follower heard declared or withdrawn, or a read showed, since
+        the last scan, in the order had (the follower's lock held)."""
+        from .presence import holder_of
+
+        f = self.follower
+        out: list[str] = []
+        events = f.view.events[self._events_scanned:]
+        self._events_scanned = len(f.view.events)
+        reads = f.view.reads[self._reads_scanned:]
+        self._reads_scanned = len(f.view.reads)
+        for key in [k for _, k, _ in events] + [k for r in reads for k in r.keys]:
+            h = holder_of(key)
+            if h is not None and h[0] == "member" and h[1:4] == (self.system, self.service, self.iface):
+                out.append(h[4])
+        return out
+
     def _presence_changed(self) -> None:
-        """The owner's token as observed (v1.md §0), and each held member of
-        an epoch template whose member tokens a complete read shows gone:
-        any complete, ordered read showing none of it, as the text and
-        deadlines.json's ``member_gone`` say, whether or not one was ever
-        seen (F-261)."""
+        """The owner's token as observed (v1.md §0); each member token of an
+        epoch template seen, heard or shown (text 0.2, F-261); and each held
+        member of an epoch template whose member tokens a complete read
+        shows gone, which its tracker takes only after a token of it was
+        seen."""
         from .slug import slug
         from . import templates
 
         tokenless = self._tokenless()
         f = self.follower
         with f.lock:
+            sightings = self._sightings()
             if tokenless:
                 st, _ = f.view.state(("instance", self.system, self.service))
             else:
@@ -397,6 +449,14 @@ class Reader:
                 for res in self.resources.values():
                     if res.tracker is not None:
                         self._apply(res, res.tracker.owner(now, state))
+            for chunk in sightings:
+                for res in self.resources.values():
+                    if res.tracker is None or not res.epoch:
+                        continue
+                    for m in self._epoch_members(res, chunk):
+                        if m not in res.tracker.seen:
+                            self.member_seen_at.setdefault(m, []).append(now)
+                        self._apply(res, res.tracker.member_seen(now, m))
             for rid, members in gone.items():
                 res = self.resources[rid]
                 for m in members:
