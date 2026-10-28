@@ -14781,3 +14781,411 @@ failure F-269's strict first arrival.
   - **F-270** is a test missing.
   - **F-272** changes a tool's test.
 - **Resolved:** every other entry.
+
+## At timing.v1 0.2, arbitration.v1 0.2 and core 0.56 (#908, #909)
+
+Round 78 read `timing.v1` 0.2, `arbitration.v1` 0.2 and core 0.55 and
+0.56 cold, on main ae9cf9b7 (PR #915, #909's BB). It ran both profiles'
+scenarios live in every pairing of zk2py's runtime with the reference's.
+The reference's parties ran as black boxes (`owner`, `consume` and `zk2`
+in `/srv/dev/targets/zenkey-tier/blackbox/`, their `--help` read, their
+source never). It read, as a newcomer would:
+- `spec/profiles/timing/v1.md` and `scenarios.md` 0.2, whole, and the
+  CHANGELOG's 0.2 entry;
+- `spec/profiles/arbitration/v1.md` and `scenarios.md` 0.2, whole, and
+  the CHANGELOG's 0.2 entry;
+- core 0.55's and 0.56's CHANGELOG entries and the text they changed:
+  §4.1's new bullet, §4.2's unstamped sample, §8.1's two new bullets under
+  "A round trip stands until the watch session's transport moves",
+  Appendix B's three facts and Appendix C's row;
+- every fixture case that changed, with its file's description:
+  `timing/deadlines.json` (44, eleven new), `timing/conclusions.json` (39,
+  twelve new) and `arbitration/conclusions.json` (24, five new).
+
+**timing.v1 0.2 in zk2py.**
+- **`zk2py.timing`:**
+  - `Tracker` takes `epoch` (F-261). A known member of an epoch template
+    is waited for from the later of the start and its first member token
+    seen (`member_seen`), never from its owner's presence. `member_gone`
+    ends nothing before a token of the member was seen since it last
+    ended. A known member gone is waited for again from a token seen
+    again.
+  - `beyond_bound` is reported once, while the member stays past the
+    bound (F-260).
+  - `tracker_for` builds no tracker under an invalid declaration, a
+    deadline below the period, a resource that is not a stream, or no
+    deadline (F-259).
+- **The fixtures:** `deadlines.json` 44 and `conclusions.json` 39, 175 of
+  175. The roll-ups passed through round 76's `rollup` unchanged. The one
+  fix was the runner's: it reads a case's `resource` in place of its
+  deadline, and the `rollup` cases.
+- **`zk2py.timing_live`:** the `Reader` builds its trackers by
+  `tracker_for`. It hands them each member token seen, heard declared or
+  withdrawn or shown by a read, before that read's ends.
+
+**arbitration.v1 0.2 in zk2py.**
+- **`zk2py.arbitration`:**
+  - `conclude` takes `bindings` None, no consumer's descriptor read: after
+    the premises, the selection and the binding are not asked,
+    `no_descriptor` (F-272);
+  - `counts_line` gives every provider known, in rank order, with its five
+    counts (F-271).
+- **The fixtures:** `conclusions.json` 24, 120 of 120.
+- **`zk2py.arbitration_live`:**
+  - The `Actuator` follows a governed required interface (F-270). A
+    sample counts as an arrival only when stamped by the `meta.zid` of
+    the lowest instance known holding the interface's token at its
+    address, as the watch and the reads show it. At its start, after its
+    watch's round trip, it reads each entry's presence once and gets each
+    holder's descriptor (§2.5 outcome 6). Round 77's refusal of a governed
+    interface is gone.
+  - It asks the round trip after an open 100 ms after the event (core
+    §8.1, 0.56).
+  - It prints its instants exact to the nanosecond, as the reference's
+    lines do.
+  - The `Commander` puts its first sample 500 ms after its tokens (F-269).
+    As a `redundancy.v1` candidate (`--standby`, over zk2py's
+    `Candidate`), its writer refuses while it stands by, and each refusal
+    is counted. `commander raw on` puts round the writer, through its
+    session, stamped by its HLC, payload `standby <n>`.
+- **`zk2py.arbitration_owner`** takes the reference owner's `commander …`
+  and `arbitrate counts|reads|state` words, and answers them in its JSON,
+  so that one runner drives either.
+- **`steer-governed.v1.toml`** was written from §11's setup, which gives no
+  listing. It loads with no finding. Its fingerprint, `sha256:26b19c8c…`,
+  is the reference CLI's, and `compat` against minor 0 is a review
+  (`uses_changed`, `annotations_changed`) in both.
+
+**`just py-conformance`: 3439 of 3439.** `readings` is now 506 (500
+before):
+- F-261's two orders through an epoch tracker, beside one of round 76's
+  0.1 readings, kept to show what 0.2 changed;
+- F-260's report, once per stay past the bound;
+- F-259's trackers;
+- F-275's reading;
+- the counts line's order;
+- §11's revision.
+
+**Live, every pairing.** On in-process zenoh-python 1.10.1 routers, every
+listener on a free loopback port, all of it under `taskset -c 0-1`:
+- `python -m zk2py.timing_interop` runs `timing.v1` §1 to §5 in four
+  pairings, and §6 with zk2py's tool beside each owner;
+- `python -m zk2py.arbitration_scenarios --pair …` runs `arbitration.v1`
+  §1 to §11 in four pairings.
+
+"py" is zk2py's party, "rs" the reference's black box, the owner (or the
+commanders) first.
+
+`timing.v1`, checks passed in each of two runs:
+
+| Section | py→py | rs→py | py→rs | rs→rs |
+|---|---|---|---|---|
+| §1 a commander paused, then resumed | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| §2 a member gone, and a member silent | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §3 a member never heard, step 5 included | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+| §4 the lifespan on a stated bound | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| §5 an unstamped owner | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §6 a tool's window, zk2py's tool | 4 of 4 | 4 of 4 | | |
+
+`arbitration.v1`, checks passed in each of two full runs:
+
+| Section | py→py | rs→py | py→rs | rs→rs |
+|---|---|---|---|---|
+| §1 the dead-man at start, each higher priority taking over | 9 of 9 | 9 of 9 | 9 of 9 | 9 of 9 |
+| §2 a commander silent past its deadline | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §3 a commander killed | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 |
+| §4 a clean stop that publishes after its withdrawal | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+| §5 a re-mint with no drop | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §6 all silent: the dead-man | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §7 the watch session's own transport moves | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+| §8 an invalid declaration, refused at start | 11 of 11 | 11 of 11 | 6 of 11 (F-274) | 6 of 11 (F-274) |
+| §9 a wildcard binding's order | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| §10 a tool's questions, zk2py's tool | 6 of 6 | 6 of 6 | 6 of 6 | 6 of 6 |
+| §11 a governed commander's standby | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 |
+
+§8 counts each step twice: the refusal, then "nothing put". Each pairing
+also ran its setup checks, and py→py the two measurements below: 253
+checks a run, 243 passed, the ten failures F-274's.
+
+- **Every miss and every deadline switch came within its bound.**
+  - `timing.v1`: zk2py's reader reported each miss 0.09–0.15 ms after its
+    due, and the reference's 0.6–1.9 ms after.
+  - `arbitration.v1`: zk2py's actuators switched at `at_ms − last_ms`
+    300.06–300.18 ms, and the reference's at 300.09–301.90 ms, against the
+    306 ms bound.
+  - So the runners' 50 ms allowance was never used.
+- **The two implementations' lines agree.** In every section and pairing
+  both actuators printed the same switches, with the same causes, in the
+  same order, and both readers made the same reports, with the same dues
+  and owner states. Where the lines differ in form:
+  - The reference lists every exact entry's provider in its counts, with
+    zeros, before any sample. zk2py now does too: the conventions' "every
+    provider known".
+  - The reference writes the counts' keys in another order.
+  - zk2py's actuator rounded its instants to the microsecond. It now
+    prints them exact to the nanosecond, as the reference does.
+- **§8 with the reference's actuator** fails one half of each step. The
+  refusal is right: exit 1, no token, no switch, the reason named. But one
+  put of `angle`, `ok`, is made (F-274).
+- **Core 0.56's two facts, on zenoh-python.**
+  - **A close's withdrawals before its transport event.** §7's control
+    (`--only 7c`: zk2py's actuator beginning a move at the event alone)
+    heard a withdrawal before the move's event at 1 to 2 of each
+    actuator's 3 closes in both runs, as in round 77. It switched
+    `withdrawn` while safety's commands never stopped.
+  - **An open told before the interests** (`--only open`). Of 60 round
+    trips asked at the open event, all 60 stood after the reopen's
+    telling: the telling came 0.07–44 ms before the reply, 42 of them
+    within 1 ms. Of 60 asked 100 ms after, all 60 did too, and so did
+    each run's 10 and 10. zk2py did not
+    see the race the reference measured (6 of 60) on zenoh-python, whose
+    round trip is asked after a thread's start. It asks 100 ms after all
+    the same.
+- **Not run.**
+  - `timing.v1` §3 step 5 with the reference's owner as written: its
+    `timing add` publishes at once (F-276). A raw session of the runner's
+    declared `x`'s member token at `lab/pace`'s address instead, and both
+    readers passed.
+  - §2.8 of either profile, across a constrained face, and a tokenless
+    provider: no scenario asks them. The fixtures' `across_face` and
+    tokenless cases read them.
+  - The reference's tools (#908's MC, #909's BC). §6 and §10 ran with
+    zk2py's own tool, beside both implementations' parties.
+
+### The evidence
+
+`timing.v1` 0.2, each MUST and MUST NOT against what shows it:
+
+| Rule | Evidence | Runs |
+|---|---|---|
+| §2.2 read the keys as the fixture does | `declarations.json` | yes |
+| §2.2 judge nothing under an invalid declaration: no tracker | `declarations.json`, `deadlines.json` #39–#43, `conclusions.json` | yes (F-259) |
+| §2.4 no runtime publishes on the owner's behalf | §1 Expected 2 | yes, four pairings |
+| §2.5 judge the deadline as the fixture does | `deadlines.json`, §1–§3 | yes, four pairings |
+| §2.5 never against a stamp, a wall clock or a payload's time | §4, §5 | yes, four pairings |
+| §2.5 the detection bound | `deadlines.json`'s `by_ms`, §1, §3 | yes, every miss within 2 ms of its due |
+| §2.5 `beyond_bound` once | `deadlines.json` #13, #16 | the fixture only |
+| §2.5 a miss is never "down" | §1 Expected 4 | yes, four pairings |
+| §2.6 the owner stamps and states `meta.zid` | §4, §5 | yes, both owners |
+| §2.6 never the HLC's delta for ε | `lifespans.json` #4, §4 step 4 | yes, four pairings |
+| §2.6 discard an expired sample, and no other | `deadlines.json` #21, #22, §4 | yes, four pairings |
+| §2.6 never a payload's time | §5 | yes, four pairings |
+
+`arbitration.v1` 0.2:
+
+| Rule | Evidence | Runs |
+|---|---|---|
+| §2.2 read the declaration as the fixture does | `declarations.json` | yes |
+| §2.2 refuse an invalid declaration at start | §8 | five of the eight reasons, both actuators; the reference's puts `angle` (F-274) |
+| §2.4 rank as the fixture does | `rankings.json`, §9 | yes, four pairings |
+| §2.5 attribute and count as the fixture does | `arbitrations.json`, §1 | yes, four pairings |
+| §2.5 count only what `redundancy.v1` §2.10 accepts | `arbitrations.json` #35, §11 | yes, four pairings (F-270) |
+| §2.6 eligibility | `arbitrations.json`, §2, §6 | yes, four pairings |
+| §2.7 withdraw at a withdrawal, never otherwise; never re-admit on a sample | `arbitrations.json`, §3, §4 | yes, four pairings |
+| §2.8 keep and apply as one change, a move begun at its first sign | `arbitrations.json`, §7 | yes, four pairings; the control zk2py's alone |
+| §2.9 select and deliver | `arbitrations.json`, §1 | yes, four pairings |
+| §2.10, §2.11 every switch, the dead-man | `arbitrations.json`, §1–§9, §11 | yes, four pairings |
+| §2.14 conclude as the fixture does | `conclusions.json`, §10 | yes, zk2py's tool beside both actuators |
+
+### F-259 to F-272 at 0.2
+
+Each is resolved.
+- **F-259.** §2.2 now says "A consumer holds no tracker of it, and
+  reports no deadline event", and §2.5 says the same below the period.
+  `deadlines.json` #39–#43 give the resource in place of the deadline,
+  with `tracker` in the expectation. The test that was missing is there,
+  and zk2py's `tracker_for` passes it.
+- **F-260.** §2.5: "A reader MUST report it `beyond_bound` once". #13
+  expects one report. zk2py had reported one at each such arrival, as
+  0.1's fixture did; it now reports one.
+- **F-261.** §2.5's new bullet: "waited for from the later of the
+  subscription's start and the instant the reader first sees a member
+  token of it, never from its owner's presence", and "after a token of it
+  was seen" for the end. `deadlines.json` adds `epoch` and `member_seen`,
+  #33–#37, and scenarios §3 adds step 5. Round 76's two orders now give
+  one verdict, and §3 step 5 passed in every pairing.
+- **F-262.** The description says "never heard, not missed and not
+  ended", and #38 pins it. zk2py already read it so.
+- **F-263.** §2.7 adds "Its start", and §0 names `unseen`. §6's setup
+  takes the order. zk2py's window already opened so, and §6 passed beside
+  both owners.
+- **F-264.** §5 reads each question by its finding, with twelve roll-up
+  cases, #27–#38. zk2py's `rollup` passed them unchanged.
+- **F-265.** Core 0.55's §4.1 bullet, and §4.2's "through no node that
+  stamps, the reader's own session included". §2.6 adds "A reader's own
+  HLC", and the scenarios say "C's sessions have no HLC". The reference's
+  C says it has none (its `--help`), and both C's read §5 step 2
+  `unstamped`.
+- **F-266.** The conventions add "Two instants the runner keeps", and
+  §2.6 "How a reader holds `meta.zid`", which cites the measurement.
+  zk2py's runner already kept both. With the reference's C, whose `state`
+  answers its `owner_zids`, it waits the same way. Where C states no ε,
+  the reference's C reads no `meta.zid`, and the runner waits for its
+  owner present instead (§4 step 4).
+- **F-267.** §2.7 and §6: "each member it held in the window, at any
+  instant of it".
+- **F-268.** `arbitration.v1` §2.8 adds "Where a move begins", and core
+  0.56 states the order in §8.1 and Appendix B. The reference measured it
+  in Rust (40 of 40 closes) as zk2py had on zenoh-python, and §7 adds the
+  control. zk2py already began a move so, and §7 passed in every pairing.
+- **F-269.** The commanders put 500 ms after their tokens, and §3
+  Expected 2 says "after the actuator's watch heard its token". zk2py's
+  commander leads too, and §3's strict check passed in every pairing:
+  none of the new instance's samples was counted `not_active` before the
+  switch. In round 77, 4 of 12 actuator runs failed it.
+- **F-270.** §11, and §2.5's "Learning the incumbent". zk2py's actuator
+  follows the incumbent now, and §11 passed in every pairing:
+  `not_incumbent` grew by 20 a second with X's puts, and none reached an
+  `angle`.
+- **F-271.** The counts line carries `deleted`, and "Every provider known
+  has its five counts … in rank order". zk2py printed `deleted` already.
+  It now lists every exact entry's provider and keeps rank order, as the
+  reference does.
+- **F-272.** §2.14 adds "No consumer's descriptor", and §5's table
+  `no_descriptor`, with five cases (#19–#23). §10 step 4 checks it.
+
+### F-273 · gap · timing.v1 scenarios §4: an owner's clock offset with its HLC on
+
+> scenarios.md, conventions: "**The owner** is `lab/pace` … Its session's
+> HLC is on … unless a section says otherwise." "**The owner's clock.**
+> Where a section offsets the owner's stamping clock from C's wall clock,
+> the runner sets the owner's, as `freshness.v1`'s scenarios §4 does".
+
+> §4 step 3: "The owner's clock runs 400 ms ahead of C's for the first
+> second, and agrees with it for the second."
+
+> v1.md §2.6: "an owner may set each sample's stamp itself, from
+> `Session::new_timestamp()`, which is its HLC's when one is enabled";
+> "a session moves its HLC forward to a later stamp it receives".
+
+§4 says nothing otherwise, so its owner's HLC is on. An owner whose stamps
+are its HLC's cannot run 400 ms ahead and then agree: its first stamp
+ahead moves its own HLC there (core §4.1, 0.53).
+
+Measured, the reference's owner (`owner --timing`, its HLC on, `timing
+offset 400`):
+- its first sample was stamped 399.5 ms ahead;
+- each later one carried about the same time, aged −299, −199, −99.6 ms,
+  then about 0 within 400 ms: its stamping clock stood still, held by its
+  HLC.
+
+Its `--help` gives `--no-hlc` for this: "the stamps are the session's wall
+clock with its zid, so `timing offset` shifts them alone (an HLC would
+follow them)". With `--no-hlc`, the first second's ages were −399.7 to
+−399.4 ms. zk2py's owner stamps from its wall clock plus the offset under
+its zid, its HLC on, and ran 400 ms ahead for the whole second.
+
+No verdict moves: every sample reads `clock_disagrees` either way,
+falsified at the first. A test changes: a runner that checks the offset
+itself fails with an owner whose HLC is on, as zk2py's did (the first
+second's ages below −300 ms). zk2py's runner starts the reference's owner
+with `--no-hlc` for §4. Wording that would remove it: §4's setup "The
+owner's session has no HLC, so the runner's offset moves its stamps alone
+(v1.md §2.6, 'Without an HLC too')".
+
+### F-274 · bug · the owner example's `--arbitrate`: a refused start puts `angle`
+
+> v1.md §2.2: "A consumer's runtime MUST refuse to start an instance
+> holding a role whose declaration is invalid, as core §8.2 step 2
+> refuses: no instance token appears, and nothing of the instance is
+> declared or put". `[Sc: §8]`
+
+> scenarios.md §8, Expected: "no instance token of `lab/rudder-l` appears
+> within 5 s, nothing of it is declared or put, and it prints no switch."
+
+> `owner --help`: "It is refused at start when the declaration is invalid
+> … exit 1, nothing declared." "(at its start angle holds ok, the owner's
+> raw state value)"
+
+S watches `zk2/lab/**`. At each of §8's five refusals, in both pairings
+with the reference's actuator and in both runs (20 of 20), S received:
+- one put on `zk2/lab/rudder-l/rudder.v1/state/angle`, payload `ok`,
+  about 10 ms after the process started;
+- no token.
+
+The refusal is otherwise right: exit 1, no switch, and stderr's `not
+started: … arbitration.v1 invalid: <reason>`. zk2py's actuator put
+nothing.
+
+The owner example puts its raw state's held value before the arbitration
+check refuses it. That breaks §2.2's MUST, which the text and the
+scenario state plainly. It changes the reference, and the text needs
+nothing.
+
+### F-275 · ambiguity · timing.v1 §2.5: an owner absent, beside an epoch template's known member
+
+> §2.5: "If its owner is absent before the miss is due, the reader waits
+> for nothing until the owner is present again, and counts from then."
+
+> §2.5: "A known member of a template that declares `epoch` … is waited
+> for from the later of the subscription's start and the instant the
+> reader first sees a member token of it, never from its owner's
+> presence".
+
+> `deadlines.json`: "owner absent: without epoch, every waited-for member
+> is no longer waited for".
+
+The first bullet sits under "A member never heard", which since 0.2 covers
+both kinds of known member, and nothing exempts an epoch template's.
+- **Read with the text:** an epoch member's wait stops at its owner's
+  absence, and "counts from" its owner's presence again, which the second
+  bullet forbids.
+- **Read with the description:** the wait goes on, and the member ends
+  only when a read shows its token gone.
+
+They differ when a complete read shows the owner's interface token gone
+while the member's token is still shown, as between the two withdrawals
+of a stop, or when an owner holds its member tokens on another instance.
+Take: `epoch`, `axis/x` known, start 0, `member_seen` 0, owner present 0,
+owner absent 50, tick 101. The description misses it, due 100; the text
+reports nothing.
+
+No case covers it: #18 and #19 end the member before the owner goes.
+zk2py follows the description, so the owner's presence plays no part on
+an epoch template. It changes a verdict, only in that sequence. Wording:
+"If its owner is absent before the miss is due, a member waited for from
+its owner's presence waits for nothing …", or one `deadlines.json` case.
+
+### F-276 · bug · the black boxes beside the scenarios: three things a runner must work round
+
+Each changes a test only, and the text needs nothing.
+- **The commander's raw payload.** arbitration scenarios §11 step 1: "`X`,
+  `C_s2`'s own session, puts `cmd` every 50 ms raw … payload `standby
+  <n>`". The reference's `commander raw on` puts `safety <n>`, its own
+  `<service> <n>`, so Expected 1's "S sees no `standby` payload on any
+  `angle`" cannot be read by the payload. zk2py's runner tells X's
+  samples by their stamp's id, `C_s2`'s zid.
+- **A member token without a sample.** timing scenarios §3 step 5: "the
+  owner declares `x`'s member token … and publishes nothing on it".
+  `owner --timing`'s `timing add x` declares the token and publishes at
+  once: S heard the token 0.7–1.2 ms after the command and the first
+  sample 2.2–2.4 ms after it. No command declares the token alone. zk2py's runner declares it from a raw session
+  at the owner's address.
+- **`wall_ns`.** `consume --help` gives each arrival's `"wall_ns": <ns
+  since the Unix epoch>`, but an expired arrival (`delivered` false)
+  prints `"wall_ns": null`.
+
+**Not findings.**
+- **"How a reader holds `meta.zid`"** (§2.6, 0.2) includes "a GET again
+  when a stamp's id is none it holds". zk2py's reader gets the descriptor
+  of each instance presence shows, never at an unknown stamp's id. No
+  scenario tells the two apart, once the runner keeps F-266's instant.
+- **§2.9's "One order, instants that never go back".** zk2py's actuator
+  reads its clock under its one lock, so its instants never go back.
+- **§11's `C_t`** is a candidate too: `redundancy.v1` §2.5's "An instance
+  of a governed interface whose election is `claim` MUST elect". The
+  reference refuses to start a commander of `steer.v1` minor 1 without
+  `--standby`, as zk2py's runner learned.
+- **§2.8's margin after an open** is in the MUST's paragraph, and core
+  0.56 makes it a SHOULD. "So a consumer asks it a margin after the open"
+  reads as the way to meet the MUST, not a second rule.
+
+**Counts at timing.v1 0.2, arbitration.v1 0.2 and core 0.56:** 276
+entries.
+- **Open: F-273 to F-276,** four.
+  - **A verdict:** F-275, only in a sequence no case covers.
+  - **A test:** F-273, and F-276, the black boxes'.
+  - **The reference:** F-274, a MUST the owner example breaks.
+- **Resolved:** every other entry.
+  - `timing.v1` 0.2 and core 0.55 resolved F-259 to F-267.
+  - `arbitration.v1` 0.2 and core 0.56 resolved F-268 to F-272.
