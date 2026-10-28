@@ -17,6 +17,8 @@
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
 //!     [--timing] [--no-hlc]
+//!     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
+//!     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -484,6 +486,20 @@
 //! `--connect`: an HLC follows the stamps its own session puts (core §4.1),
 //! so an offset would grow under one. Each command is answered by one JSON
 //! line; `--help` lists them. The reader is `consume --timing`.
+//!
+//! **`arbitration.v1`** (`spec/profiles/arbitration/v1.md`, #909) is the
+//! runtime's ([`zenkey::arbitration`]), on the scenarios' `rudder.v1` and
+//! `steer.v1` (`zenkey/tests/contracts/`, embedded). `--arbitrate
+//! <entry>,…` makes the owner an actuator: `rudder.v1` implemented, its
+//! role `cmd` bound to the entries in order and arbitrated over the
+//! `steer.v1` it holds (a `steer.v1` file given, else the embedded one),
+//! refused at start, exit 1, when the declaration is invalid; it prints
+//! each switch, one JSON line, as `scenarios.md`'s conventions write it,
+//! and puts every command it delivers on `angle`. `--commander` makes it a
+//! commander: `steer.v1`'s `cmd` put at its period, `<service> <n>`, from
+//! `--commander-lead-ms` after its tokens (F-269). `arbitrate …` and
+//! `commander …` lines are answered by one JSON line each; `--help` lists
+//! them.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -516,6 +532,9 @@ pub mod drive;
 
 #[path = "owner/timing.rs"]
 pub mod timing_drive;
+
+#[path = "owner/arbitrate.rs"]
+pub mod arbitrate;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -631,6 +650,26 @@ pub struct Options {
     pub timing: bool,
     /// `--no-hlc`: with `--connect`, the session's HLC off.
     pub no_hlc: bool,
+    /// `--arbitrate <entry>,…`: `rudder.v1` implemented, its role `cmd`
+    /// bound to the entries in their order and arbitrated
+    /// (`arbitration.v1`, #909), unless a contract file implements it.
+    pub arbitrate: Option<Vec<String>>,
+    /// `--arbitrate-no-watch`: the actuator holds no watch session, and
+    /// judges every provider by its deadline alone (§2.7, §2.12).
+    pub arbitrate_watch: bool,
+    /// `--watch-connect <endpoint>`: the actuator's watch session a client
+    /// of that endpoint, rather than `--connect`'s (`scenarios.md` §7's
+    /// link the runner cuts alone).
+    pub watch_connect: Option<String>,
+    /// `--clock-bound-ms <ms>`: ε, the arbitrated binding's
+    /// `clock_bound_ms` (`timing.v1` §2.6).
+    pub clock_bound_ms: Option<u64>,
+    /// `--commander`: `steer.v1` implemented and its `cmd` put at its
+    /// period, unless a contract file implements it.
+    pub commander: bool,
+    /// `--commander-lead-ms <ms>`: how long after its tokens the commander
+    /// starts putting (500 by default; text 0.2, F-269).
+    pub commander_lead_ms: u64,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -669,6 +708,8 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
     [--timing] [--no-hlc]
+    [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
+    [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
 
 Standard output, first:
@@ -690,6 +731,8 @@ Command words:
   desired ...                             desired.v1 (--desired-*), below
   redundancy ...                          redundancy.v1 (--standby), below
   timing ...                              timing.v1 (--timing), below
+  arbitrate ...                           arbitration.v1's actuator (--arbitrate), below
+  commander ...                           arbitration.v1's commander (--commander), below
 
 alarms.v1 (spec/profiles/alarms/v1.md)
   Implemented by the runtime with --alarms, implied by any --alarms-* option,
@@ -965,6 +1008,83 @@ timing.v1 (spec/profiles/timing/v1.md)
     refused <line>: <why>
 
   The reader is `consume --timing` (its --help).
+
+arbitration.v1 (spec/profiles/arbitration/v1.md)
+  On the scenarios' contracts (spec/profiles/arbitration/scenarios.md, its
+  conventions), embedded as zenkey/tests/contracts/ keeps them: rudder.v1, the
+  actuator's (sha256:dfcdac25...), and steer.v1, the commanders'
+  (sha256:5162db05...). A rudder.v1 contract file given is implemented instead
+  of the embedded one; a steer.v1 file given is the revision the actuator
+  holds, and the one a commander implements.
+
+  The actuator (--arbitrate) implements rudder.v1, its role cmd bound to the
+  entries in their order, the first the highest (core R1, R3), and arbitrated
+  over the steer.v1 it holds, by the runtime's Consumer::arbitrate. It is
+  refused at start when the declaration is invalid (arbitration.v1 §2.2):
+  stderr says `not started: <system>/<service>: role \"cmd\" (steer.v1):
+  arbitration.v1 invalid: <reason>[, <reason>...] (...)`, exit 1, nothing
+  declared. Its sessions: the service's, which holds the subscription and
+  makes every read again; and a watch session of its own, a client of
+  --watch-connect's endpoint or --connect's, where it hears withdrawals.
+  It puts every command it delivers on angle, its payload unchanged (at its
+  start angle holds ok, the owner's raw state value).
+
+  --arbitrate <entry>,...         implement rudder.v1, cmd bound to these
+                                  <system>/<service> entries (either chunk *), in order
+  --arbitrate-no-watch            no watch session: every provider judged by its
+                                  deadline alone (§2.7, §2.12)
+  --watch-connect <endpoint>      the watch session a client of this endpoint
+  --clock-bound-ms <ms>           ε, the binding's clock_bound_ms: a sample older than
+                                  its lifespan by it is expired (timing.v1 §2.6)
+
+  Standard output, after ready, one JSON line per switch, as it tells its
+  application (§2.10), the first its start's:
+    {\"switch\": {\"from\": <address>|null, \"to\": <address>|null,
+      \"cause\": \"start\"|\"sample\"|\"deadline\"|\"withdrawn\"}, \"at_ms\": <ms>,
+      \"last_ms\": <ms>|null}
+    null is no provider, the dead-man; at_ms the instant of the event that made
+    the switch, last_ms from's last arrival (null when from is null), each in
+    milliseconds since the actuator's start on its monotonic clock, a float
+    exact to the nanosecond.
+
+  arbitrate counts                {\"counts\": {\"providers\": {<address>: {\"delivered\": <n>,
+                                  \"not_active\": <n>, \"deleted\": <n>, \"expired\": <n>,
+                                  \"not_incumbent\": <n>}, ...}, \"wild\": <n>,
+                                  \"unresolved\": <n>, \"unbound\": <n>}} (§2.5), every
+                                  provider known, in rank order
+  arbitrate state                 {\"arbitrate\": \"state\", \"active\": <address>|null,
+                                  \"providers\": [...], \"withdrawn\": [...], \"moving\": <bool>,
+                                  \"watching\": <bool>, \"deadline_ms\": <ms>}
+  arbitrate reads                 {\"arbitrate\": \"reads\", \"reads\": <n>, \"not_made\": <n>,
+                                  \"round_trips\": <n>}: the reads again made (§2.7), those
+                                  not made (cut off), and the watch session's round trips
+                                  (the one at its start, then one after each move, §2.8)
+
+  The commander (--commander) implements steer.v1 and puts cmd at its period,
+  each sample `<service> <n>`, n counting from 0, through the runtime's writer,
+  from --commander-lead-ms after its tokens (500 by default: text 0.2, F-269).
+  With --standby on a governed steer.v1 (one listing redundancy.v1), its
+  writer refuses while it stands by, and each refusal is counted.
+
+  --commander                     implement and drive steer.v1
+  --commander-lead-ms <ms>        the lead before its first put
+
+  commander hold|resume           stop or start putting, the tokens kept
+  commander raw on|off            on: every put raw through the session, round the
+                                  writer, stamped by the session's HLC: a standby's
+                                  samples (scenarios.md §11)
+  commander sent                  {\"commander\": \"sent\", \"sent\": <n>, \"refused\": <n>}
+  commander new-epoch             a re-mint, make-before-break (core §8.1)
+  commander zid                   the session's zid
+
+  Answers, one JSON line each:
+    {\"commander\": \"hold\"|\"resume\", \"on\": <bool>}
+    {\"commander\": \"raw\", \"raw\": <bool>}
+    {\"commander\": \"new-epoch\", \"instance\": <id>}
+    {\"commander\": \"zid\", \"zid\": <zid>}
+    refused <line>: <why>
+
+  A crash is the process's: kill it (scenarios.md §3).
 ";
 
 fn level_name(l: Option<Level>) -> String {
@@ -992,6 +1112,9 @@ impl Options {
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
              [--timing] [--no-hlc] \
+             [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] \
+             [--watch-connect <endpoint>] [--clock-bound-ms <ms>] \
+             [--commander] [--commander-lead-ms <ms>] \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -1039,6 +1162,12 @@ impl Options {
             wait_go: false,
             timing: false,
             no_hlc: false,
+            arbitrate: None,
+            arbitrate_watch: true,
+            watch_connect: None,
+            clock_bound_ms: None,
+            commander: false,
+            commander_lead_ms: 500,
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -1307,6 +1436,44 @@ impl Options {
                     o.no_hlc = true;
                     rest = tail;
                 }
+                [flag, value, tail @ ..] if flag == "--arbitrate" => {
+                    let entries: Vec<String> = value
+                        .split(',')
+                        .filter(|e| !e.is_empty())
+                        .map(str::to_owned)
+                        .collect();
+                    zenkey::arbitration::Binding::parse(&entries)
+                        .map_err(|e| format!("--arbitrate {value:?}: {e}"))?;
+                    o.arbitrate = Some(entries);
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--arbitrate-no-watch" => {
+                    o.arbitrate_watch = false;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--watch-connect" => {
+                    o.watch_connect = Some(value.clone());
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--clock-bound-ms" => {
+                    o.clock_bound_ms = Some(
+                        value
+                            .parse()
+                            .map_err(|e| format!("--clock-bound-ms {value:?}: {e}"))?,
+                    );
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--commander" => {
+                    o.commander = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--commander-lead-ms" => {
+                    o.commander_lead_ms = value
+                        .parse()
+                        .map_err(|e| format!("--commander-lead-ms {value:?}: {e}"))?;
+                    o.commander = true;
+                    rest = tail;
+                }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
                 _ => break,
             }
@@ -1334,6 +1501,18 @@ impl Options {
         }
         if o.peer && o.connect.is_none() {
             return Err("--peer: give --connect, the peers' only endpoint".to_owned());
+        }
+        if o.arbitrate.is_none()
+            && (!o.arbitrate_watch || o.watch_connect.is_some() || o.clock_bound_ms.is_some())
+        {
+            return Err(
+                "--arbitrate-no-watch, --watch-connect and --clock-bound-ms are the actuator's: \
+                 give --arbitrate"
+                    .to_owned(),
+            );
+        }
+        if o.arbitrate.is_some() && o.connect.is_none() {
+            return Err("--arbitrate: give --connect, the actuator's router".to_owned());
         }
         o.address = address.clone();
         o.contracts = files.iter().map(PathBuf::from).collect();
@@ -1405,6 +1584,7 @@ pub async fn run_with(
     let target = opts.desired_target.is_some() || opts.desired_unbound;
     let mut tasking = None;
     let mut worker = None;
+    let mut arb_steer = None;
     for f in &opts.contracts {
         let l = load_path(f);
         let Some(c) = l.contract else {
@@ -1450,6 +1630,14 @@ pub async fn run_with(
             worker = Some(imp);
             continue;
         }
+        // arbitration.v1 (#909): a steer.v1 file is the revision the
+        // actuator holds, and implemented only by a commander.
+        if opts.arbitrate.is_some() && imp.iface() == &arbitrate::steer_iface() {
+            arb_steer = Some(imp.shared_contract());
+            if !opts.commander {
+                continue;
+            }
+        }
         imps.push(imp);
     }
     let desired_ctx = if opts.desired_author || target {
@@ -1482,6 +1670,28 @@ pub async fn run_with(
     if opts.timing && !imps.iter().any(|i| i.iface() == &timing_drive::iface()) {
         imps.push(Implementation::new(timing_drive::contract()?));
     }
+    // arbitration.v1 (#909): the scenarios' rudder.v1 and steer.v1, unless
+    // a file has them.
+    if opts.commander && !imps.iter().any(|i| i.iface() == &arbitrate::steer_iface()) {
+        imps.push(Implementation::new(arbitrate::steer()?));
+    }
+    let arb_steer = match &opts.arbitrate {
+        Some(entries) => {
+            if !imps.iter().any(|i| i.iface() == &arbitrate::rudder_iface()) {
+                imps.push(Implementation::new(arbitrate::rudder()?));
+            }
+            let entries: Vec<&str> = entries.iter().map(String::as_str).collect();
+            config = config.bind(arbitrate::ROLE, &entries);
+            if let Some(b) = config.bindings.get_mut(arbitrate::ROLE) {
+                b.clock_bound_ms = opts.clock_bound_ms;
+            }
+            Some(match arb_steer {
+                Some(c) => c,
+                None => Arc::new(arbitrate::steer()?),
+            })
+        }
+        None => None,
+    };
 
     // hostid.v1 §2.7: the system is minted before the session opens, and a
     // host without an id stops here, with nothing declared (§2.6).
@@ -1570,6 +1780,25 @@ pub async fn run_with(
         d.watch = Some(zenoh::open(w).await?);
     }
 
+    // arbitration.v1 §2.7 (#909): the actuator's watch session, a client
+    // of its own endpoint.
+    let arb_watch = match (&opts.arbitrate, opts.arbitrate_watch) {
+        (Some(_), true) => {
+            let at = opts.watch_connect.as_ref().unwrap_or(&endpoint);
+            let mut w = zenoh::Config::default();
+            w.insert_json5("scouting/multicast/enabled", "false")?;
+            w.insert_json5("mode", "\"client\"")?;
+            w.insert_json5("connect/endpoints", &serde_json::to_string(&[at])?)?;
+            w.insert_json5(
+                "connect/retry",
+                "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
+            )?;
+            Some(zenoh::open(w).await?)
+        }
+        _ => None,
+    };
+    let (lines_out, lines_in) = flume::unbounded::<String>();
+
     // config.v1: the rf owner's startup, and its simulated device.
     let configured = opts.config.then(|| {
         let startup = config::rf_startup(
@@ -1593,6 +1822,9 @@ pub async fn run_with(
         red,
         calls: Arc::default(),
         first_up: std::sync::atomic::AtomicBool::new(true),
+        arb_steer,
+        arb_watch,
+        lines: lines_out,
     };
     // --wait-go (F-216): every session is open; the service starts at `go`.
     if opts.wait_go {
@@ -1621,7 +1853,12 @@ pub async fn run_with(
                 }
                 Err(_) => open = false,
             },
+            // arbitration.v1's switches, as the actuator tells them.
+            Ok(line) = lines_in.recv_async() => say(line),
         }
+    }
+    while let Ok(line) = lines_in.try_recv() {
+        say(line);
     }
     while let Ok(line) = commands.try_recv() {
         let answer;
@@ -1630,6 +1867,9 @@ pub async fn run_with(
     }
     up.close().await?;
     if let Some(w) = ctx.desired.as_ref().and_then(|d| d.watch.as_ref()) {
+        w.close().await?;
+    }
+    if let Some(w) = &ctx.arb_watch {
         w.close().await?;
     }
     if let Some(r) = &ctx.red {
@@ -1724,6 +1964,12 @@ struct Ctx<'a> {
     calls: Arc<std::sync::atomic::AtomicU64>,
     /// Whether the next bring-up is the first: `--instance-id` is its.
     first_up: std::sync::atomic::AtomicBool,
+    /// arbitration.v1's revision of steer.v1 held, with `--arbitrate`.
+    arb_steer: Option<Arc<Contract>>,
+    /// The actuator's watch session, with `--arbitrate`.
+    arb_watch: Option<zenoh::Session>,
+    /// Lines said between commands: the actuator's switches.
+    lines: flume::Sender<String>,
 }
 
 /// desired.v1's part of every bring-up (#840).
@@ -1755,10 +2001,16 @@ struct Up {
     drive: Option<Arc<drive::Drive>>,
     /// timing.v1's drive, with `--timing`.
     timing: Option<timing_drive::Drive>,
+    /// arbitration.v1's actuator, with `--arbitrate`.
+    actuator: Option<arbitrate::Actuator>,
+    /// arbitration.v1's commander, with `--commander`.
+    commander: Option<arbitrate::Commander>,
 }
 
 impl Up {
     async fn close(self) -> Result<(), BoxError> {
+        drop(self.actuator);
+        drop(self.commander);
         drop(self.timing);
         drop(self.members);
         self.svc.close().await?;
@@ -1790,6 +2042,21 @@ impl Ctx<'_> {
         }
         if line.split_whitespace().next() == Some("redundancy") {
             let answer = redundancy_command(line, &mut up, self.red.as_ref(), self.session).await;
+            return Ok((answer, up));
+        }
+        if line.split_whitespace().next() == Some("arbitrate") {
+            let answer = match &up.actuator {
+                Some(a) => arbitrate::command(line, a),
+                None => format!("refused {line}: no actuator here (--arbitrate)"),
+            };
+            return Ok((answer, up));
+        }
+        if line.split_whitespace().next() == Some("commander") {
+            let Up { svc, commander, .. } = &mut up;
+            let answer = match commander.as_ref() {
+                Some(c) => arbitrate::commander_command(line, svc, c).await,
+                None => format!("refused {line}: no commander here (--commander)"),
+            };
             return Ok((answer, up));
         }
         if line.split_whitespace().collect::<Vec<_>>() != ["config", "restart"] {
@@ -2098,6 +2365,11 @@ impl Ctx<'_> {
             }
             None => None,
         };
+        // arbitration.v1 §2.2 (#909): the role's declaration read at start
+        // over the revision held.
+        if let Some(steer) = &self.arb_steer {
+            b.arbitrate(arbitrate::ROLE, Arc::clone(steer))?;
+        }
         let svc = b.start().await?;
         if let Some((r, _)) = &red
             && opts.hold_heal
@@ -2106,6 +2378,37 @@ impl Ctx<'_> {
         }
         let timing = if opts.timing {
             Some(timing_drive::Drive::start(&svc, self.session).await?)
+        } else {
+            None
+        };
+        let actuator = match &self.arb_steer {
+            Some(steer) => {
+                let angle = states
+                    .iter()
+                    .find(|(i, _)| *i == arbitrate::rudder_iface())
+                    .map(|(_, w)| Arc::clone(w));
+                Some(
+                    arbitrate::Actuator::start(
+                        &svc,
+                        Arc::clone(steer),
+                        self.arb_watch.clone(),
+                        angle,
+                        self.lines.clone(),
+                    )
+                    .await?,
+                )
+            }
+            None => None,
+        };
+        let commander = if opts.commander {
+            Some(
+                arbitrate::Commander::start(
+                    &svc,
+                    self.session,
+                    Duration::from_millis(opts.commander_lead_ms),
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -2123,6 +2426,8 @@ impl Ctx<'_> {
             target,
             drive: drive_,
             timing,
+            actuator,
+            commander,
         })
     }
 }

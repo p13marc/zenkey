@@ -3,6 +3,68 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.56 — 2026-10-28: a close's withdrawals come before its transport event, and an open before its interests (round 77's F-268, #909)
+
+zk2py round 77 read `arbitration.v1` 0.1 and core 0.54 cold, and ran its
+scenarios live. On zenoh-python 1.10.1 the watch session's liveliness
+subscriber was told a close's withdrawals 0.15–0.5 ms **before** the
+session's transport events listener heard the close, so an actuator that
+began holding back at the event applied them as heard, and switched
+`withdrawn` while safety's commands never stopped (scenarios §7's
+control). `arbitration.v1` text 0.2's §2.8 answers it: a move begins at
+its transport event, or at a withdrawal the watch hears while the watch
+session holds no link, whichever comes first. Before the core stated the
+order, the reference measured it in Rust on zenoh 1.10.1, as 0.40's facts
+were measured; it matches. No fixture case changed.
+
+**Changed: §8.1, under "A round trip stands until the watch session's
+transport moves".** A new bullet: in zenoh 1.10.1 a watch session's
+subscribers are told a close's withdrawals before its transport event, and
+the session holds no link when each is told. A reader that holds back what
+a move makes it hear SHOULD begin the move at its transport event or at a
+withdrawal heard while the watch session holds no link, whichever comes
+first. `[Sc: profiles/arbitration/scenarios.md §7]`
+
+**Changed: Appendix B.** The order and its source: a closing transport's
+links, then its routing face, which tells the subscribers each token
+withdrawn, then the transport, whose close the listener hears. Measured by
+the reference (`zenkey/tests/presence.rs`,
+`f268_a_close_tells_its_withdrawals_before_its_transport_event`): at 40 of
+40 closes in eight runs, every withdrawal 0.025–0.51 ms before the event,
+and no link held when each was heard; a subscriber without history told no
+token heard nothing at its first close.
+
+**Changed: §8.1, an open told before the interests (what the reference's
+runtime found).** Running §7 three times under nextest, the reference's
+actuators failed two: at a heal they applied the cut's withdrawals without
+the reopen's declarations. zenoh 1.10.1 hands a transport that opens to
+the session's handlers, the transport events listener's among them, before
+the router's `new_transport_unicast` makes its face and declares the
+subscribers' interests again, so a round trip asked at once at the open
+can find no face, and stand at once, complete and empty, before the
+reopen's telling. A new bullet: a reader SHOULD ask the round trip after
+an open a margin after its event (the reference: 100 ms), and take what
+its watch heard before the round trip's reply as heard before it.
+Appendix B gives the source and the measurement (6 of 60 round trips asked
+at the event stood before the telling, 0 of 60 asked 100 ms later); with
+both, §7 passed six runs of six.
+
+**Changed: Appendix C.** `arbitration.v1`'s scenarios §7 evidences the
+order, by its control step, a move begun at the first sign of it, and the
+round trip after an open asked a margin after it.
+
+**Deliberately not changed.**
+- **"Read again at once, when its watch session's transport closes or
+  opens"** stands: a reader that reads again at the event loses nothing by
+  the withdrawals coming first, since a read is made on its other session
+  after its round trip, and none is made through a session cut off (0.42).
+  Only a reader that holds back what a move makes it hear, as
+  `arbitration.v1` does, acts on the withdrawals in between.
+- **No rule of a move's end.** The round trip that ends it is still the one
+  asked after the last move (0.41 to 0.45), and none is asked through a
+  session cut off, so a move begun at a withdrawal ends with a round trip
+  asked once the transport is up again.
+
 ## 0.55 — 2026-10-27: a node with an HLC stamps an unstamped put it routes (round 76's F-265, #908)
 
 zk2py round 76 read `timing.v1` 0.1 and core 0.53 cold, and ran its

@@ -664,3 +664,223 @@ async fn w4_3_commanding_an_intermittently_connected_vehicle() {
         "converged, last-known marked"
     );
 }
+
+/// A commander of walkthrough §4.2: `twist_cmd.v1` at `vehicle-01/<name>`,
+/// on a session behind a link of its own (its crash: the link closed),
+/// putting an empty `Twist` every 20 ms from 500 ms after its tokens
+/// while `on`.
+struct Commander {
+    _svc: Service,
+    link: common::Link,
+    on: Arc<std::sync::atomic::AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Commander {
+    async fn start(ep: &str, name: &str) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let link = common::link_to(ep).await;
+        let s = client(link.endpoint()).await;
+        let twist = iface("twist_cmd.v1");
+        let mut b = ServiceBuilder::new(&s, config(&format!("vehicle-01/{name}")));
+        b.implement(Implementation::new(example("walkthrough/twist_cmd.v1")))
+            .unwrap();
+        let w = b
+            .declare_writer(&twist, "stream/cmd", &Bindings::new())
+            .await
+            .unwrap();
+        let svc = b.start().await.unwrap();
+        let on = Arc::new(AtomicBool::new(true));
+        let o = Arc::clone(&on);
+        let period = w.timing().and_then(|t| t.period).unwrap();
+        let task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let mut tick = tokio::time::interval(period);
+            loop {
+                tick.tick().await;
+                if o.load(Ordering::SeqCst) {
+                    // An empty `twist_cmd.v1.Twist` is a valid message.
+                    let _ = w.put(Vec::<u8>::new()).await;
+                }
+            }
+        });
+        Self {
+            _svc: svc,
+            link,
+            on,
+            task,
+        }
+    }
+
+    fn hold(&self) {
+        self.on.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn resume(&self) {
+        self.on.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// A crash: its link closed, its router withdrawing its tokens.
+    fn crash(&self) {
+        self.task.abort();
+        self.link.cut();
+    }
+}
+
+impl Drop for Commander {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// A thruster of walkthrough §4.2: `thruster.v1`, whose `cmd` is
+/// arbitrated (`arbitration.v1`, #909), bound as the walkthrough's
+/// enrollment binds it, in priority order; its switches as it told them.
+async fn thruster(
+    ep: &str,
+    name: &str,
+) -> (
+    Service,
+    zenkey::arbitration::Arbitration,
+    Arc<Mutex<Vec<zenkey::arbitration::Switched>>>,
+) {
+    let th = iface("thruster.v1");
+    let s = client(ep).await;
+    let watch = client(ep).await;
+    let mut b = ServiceBuilder::new(
+        &s,
+        config(&format!("vehicle-01/{name}")).bind(
+            "cmd",
+            &[
+                "vehicle-01/safety",
+                "vehicle-01/teleop",
+                "vehicle-01/autopilot",
+            ],
+        ),
+    );
+    b.implement(Implementation::new(example("walkthrough/thruster.v1")))
+        .unwrap();
+    for r in ["state/status", "stream/telemetry", "@op/arm", "@op/disarm"] {
+        b.expose(&th, r).unwrap();
+    }
+    let twist = Arc::new(example("walkthrough/twist_cmd.v1"));
+    b.arbitrate("cmd", Arc::clone(&twist)).unwrap();
+    let svc = b.start().await.unwrap();
+    let switches: Arc<Mutex<Vec<zenkey::arbitration::Switched>>> = Arc::default();
+    let sw = Arc::clone(&switches);
+    let arb = svc
+        .consumer("cmd", twist)
+        .unwrap()
+        .with_watch(watch)
+        .arbitrate(move |ev| {
+            if let zenkey::arbitration::ArbitrationEvent::Switched(s) = ev {
+                sw.lock().unwrap().push(s);
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(arb.deadline(), Duration::from_millis(100), "twist_cmd.v1's");
+    (svc, arb, switches)
+}
+
+/// Walkthrough §4.2, the control loop (r4 §4.2, spike S11; `arbitration.v1`,
+/// #909): two thrusters bound to `[safety, teleop, autopilot]` on
+/// `twist_cmd.v1`, deadline 100 ms. The dead-man at their start; a takeover
+/// at each higher commander's first sample; safety silent, caught by its
+/// deadline (detection bound 102 ms); safety crashed, caught by its token's
+/// withdrawal before its deadline; every commander silent, the dead-man.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn w4_2_a_control_loop_arbitrated() {
+    use zenkey::arbitration::Cause;
+    let (_r1, ep) = router(None).await;
+    let deadline = Duration::from_millis(100);
+    let bound = Duration::from_millis(102) + Duration::from_millis(50);
+    let autopilot = Commander::start(&ep, "autopilot").await;
+    let mut thrusters = Vec::new();
+    for n in ["thruster-l", "thruster-r"] {
+        thrusters.push(thruster(&ep, n).await);
+    }
+    // Following `who` by the arbiter and by the last switch told: the
+    // switch reaches the application from a task of its own.
+    let follows = |who: &'static str| {
+        let t: Vec<_> = thrusters.iter().map(|(_, a, sw)| (a, sw)).collect();
+        async move {
+            for (a, sw) in t {
+                eventually(&format!("following {who}"), || async {
+                    let told = sw.lock().unwrap().last().map(|s| s.to.clone());
+                    a.active().map(|x| x.to_string()).as_deref() == Some(who)
+                        && told.flatten().is_some_and(|t| t.to_string() == who)
+                })
+                .await;
+            }
+        }
+    };
+    let last = |sw: &Arc<Mutex<Vec<zenkey::arbitration::Switched>>>| {
+        sw.lock().unwrap().last().cloned().unwrap()
+    };
+    follows("vehicle-01/autopilot").await;
+    for (_, _, sw) in &thrusters {
+        let s = sw.lock().unwrap().clone();
+        assert_eq!(
+            (s[0].from.clone(), s[0].to.clone(), s[0].cause),
+            (None, None, Cause::Start)
+        );
+        assert_eq!(s[1].cause, Cause::Sample);
+    }
+    // Takeover: teleop, then safety, each at its first sample.
+    let teleop = Commander::start(&ep, "teleop").await;
+    follows("vehicle-01/teleop").await;
+    let safety = Commander::start(&ep, "safety").await;
+    follows("vehicle-01/safety").await;
+    for (_, a, sw) in &thrusters {
+        assert_eq!(last(sw).cause, Cause::Sample);
+        assert_eq!(
+            a.counts(&common::addr("vehicle-01/safety")).not_active,
+            0,
+            "no hysteresis"
+        );
+    }
+    // Silence: safety holds, its deadline hands teleop the role.
+    safety.hold();
+    follows("vehicle-01/teleop").await;
+    for (_, _, sw) in &thrusters {
+        let s = last(sw);
+        assert_eq!(s.cause, Cause::Deadline);
+        let gap = s.at.duration_since(s.last.unwrap());
+        assert!(gap > deadline && gap <= bound, "{gap:?}");
+    }
+    safety.resume();
+    follows("vehicle-01/safety").await;
+    // A crash: caught by liveliness, before the deadline.
+    safety.crash();
+    follows("vehicle-01/teleop").await;
+    for (_, a, sw) in &thrusters {
+        let s = last(sw);
+        assert_eq!(s.cause, Cause::Withdrawn);
+        assert!(s.at.duration_since(s.last.unwrap()) < deadline);
+        assert!(a.withdrawn(&common::addr("vehicle-01/safety")));
+    }
+    // Every commander silent: the dead-man, at the deadline.
+    teleop.hold();
+    autopilot.hold();
+    for (_, a, sw) in &thrusters {
+        eventually("the dead-man", || async {
+            a.dead_man() && sw.lock().unwrap().last().is_some_and(|s| s.to.is_none())
+        })
+        .await;
+        let s = last(sw);
+        assert_eq!((s.to.clone(), s.cause), (None, Cause::Deadline));
+        let gap = s.at.duration_since(s.last.unwrap());
+        assert!(gap > deadline && gap <= bound, "{gap:?}");
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for (_, a, _) in &thrusters {
+        assert!(a.dead_man(), "nothing eligible");
+    }
+    autopilot.resume();
+    follows("vehicle-01/autopilot").await;
+    for (svc, arb, _) in thrusters {
+        drop(arb);
+        svc.close().await.unwrap();
+    }
+}

@@ -1008,7 +1008,13 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `withdrawn`, the dead-man at start, `due` for a one-shot timer and
   `reread` for §8.1's read again; §5's `judge_declaration`,
   `judge_selection` (the tool's own view) and `judge_binding`, and
-  `held_over` across the revisions a tool holds; text 0.1).
+  `held_over` across the revisions a tool holds; text 0.1; text 0.2,
+  F-268 to F-272, #909 BB: debug asserts that an event never precedes the
+  last one's instant and that a switch no arrival made moves from a
+  withdrawn provider, `Switch::last` (from's last arrival, kept across
+  its withdrawal, the line's `last_ms`), and a tool with no consumer's
+  descriptor (`Reading::binding` `None`) answering the selection and the
+  binding not asked, `no_descriptor`).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1243,6 +1249,41 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `tests/contracts/pace.v1.toml`; the owner example's `--timing` (with
   `--no-hlc`) drives `pace.v1` from stdin, and `consume --timing` is
   scenarios.md's C as a black box, one JSON line per event.
+  `arbitration` (#909, BB) is `arbitration.v1`'s runtime over
+  `zenkey_model::arbitration`'s `Arbiter`, deciding nothing itself.
+  `ServiceBuilder::arbitrate(role, revision)` hands the start the revision
+  of the required interface held, and `start()` reads every role carrying
+  `arbitration.policy` over it (checks 1 to 5 without one), refusing an
+  invalid declaration with nothing declared: `not started: <address>: role
+  "cmd" (steer.v1): arbitration.v1 invalid: <reason>`.
+  `Consumer::arbitrate(on_event)` subscribes the role's one stream per
+  entry (a sample two entries' subscribers hear handed over once, by the
+  first), hands the arbiter each sample at its instant (never earlier
+  than the last event's), `timing.v1`'s expiry from `subscribe_timed`'s
+  engine with its deadline left to the arbiter, a governed interface's
+  sample not the incumbent's `not_incumbent` (the lowest holder's
+  `meta.zid`, its holders read once at start, redundancy.v1 §2.10), and
+  tells `ArbitrationEvent::{Switched{from, to, cause, at, last},
+  Delivered{source, delivery}}` in decision order from a task of its own,
+  the `start` switch to the dead-man first. Withdrawals and declarations
+  come from a liveliness subscriber per entry on the watch session handed
+  in (`Consumer::with_watch`), without one the deadline alone; a read again
+  0.1 s after a withdrawal leaving none known held, on the consumer's
+  session. A move begins at the watch session's transport event or at a
+  withdrawal heard while it holds no link (F-268, core 0.56); its round
+  trip is asked 100 ms after it (an open is told before the subscribers'
+  interests are declared again, core 0.56), what the watch heard before
+  the reply taken first, and asked again until one stands. A one-shot
+  timer at `Arbiter::due`. `Arbitration` reads `active`, `counts`,
+  `discards`, `reads`, `round_trips`, `moving`, `watching`. Scenarios
+  §1–§9 and §11 are `tests/profile_arbitration.rs` over
+  `tests/contracts/{steer,rudder,steer-governed}.v1.toml`, §7 with its
+  control; `tests/walkthrough.rs`'s `w4_2_a_control_loop_arbitrated` is
+  architecture §4.2. The owner example's `--arbitrate <entry>,...` is an
+  actuator printing its switches as JSON lines and answering `arbitrate
+  counts|state|reads`, and `--commander` a commander (`commander
+  hold|resume|raw on|off|sent|new-epoch|zid`, its first put 500 ms after
+  its tokens).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
@@ -1282,7 +1323,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.55 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.56 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1319,7 +1360,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     whose order the descriptor keeps, a withdrawal heard live acted on
     without concluding absence, and `arbitration.v1`'s vocabulary
     published, #909; 0.55: a node with an HLC stamps an unstamped put it
-    routes, its own subscriber's included, round 76's F-265, #908;
+    routes, its own subscriber's included, round 76's F-265, #908; 0.56:
+    a watch session told a close's withdrawals before its transport event,
+    and an open before its subscribers' interests are declared again,
+    round 77's F-268, #909 BB;
     changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

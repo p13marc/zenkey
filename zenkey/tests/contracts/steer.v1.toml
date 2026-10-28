@@ -1,0 +1,15 @@
+# steer.v1.toml: what a commander provides
+[interface]
+name  = "steer"
+major = 1
+minor = 0
+uses  = ["timing.v1"]
+
+[resources.cmd]                  # one command every 50 ms, missed 300 ms after the last
+kind        = "stream"
+type        = { raw = "text/plain" }
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "real_time"
+express     = true
+annotations = { "timing.period_ms" = 50, "timing.deadline_ms" = 300 }

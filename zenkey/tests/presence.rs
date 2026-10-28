@@ -2139,3 +2139,263 @@ async fn a_round_trip_in_flight_is_taken_up_not_asked_again() {
     assert!(barrier.establish_within(Duration::from_secs(5)).await);
     assert_eq!(presence::liveliness_gets(&watch).settles - asked, 2);
 }
+
+/// F-268 measured in Rust (`arbitration.v1` text 0.2, core 0.56, #909's
+/// BB): on zenoh 1.10.1, when a watch session's transport closes, which
+/// does it hear first, the close's withdrawals on its liveliness
+/// subscriber, or the close on its transport events listener? zk2py
+/// measured the withdrawals 0.15–0.5 ms before the event on zenoh-python
+/// 1.10.1.
+///
+/// A token holder through R1 declares three interface tokens; the watch
+/// session, a client of R1 through a link the test cuts and heals, holds a
+/// subscriber without history and a transport events listener, and records
+/// each callback's instant; a task the subscriber's callback spawns reads
+/// whether the session still holds a link. The first cut tells nothing (a
+/// subscriber without history was told of no token, core §8.1, 0.41); the
+/// reopen tells every token (0.44); each later cut tells the three
+/// withdrawals. [`F268_CUTS`] cuts, each one's order asserted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn f268_a_close_tells_its_withdrawals_before_its_transport_event() {
+    use std::time::{Duration, Instant};
+    let (_r1, ep) = router(None).await;
+    let holder = client(&ep).await;
+    let keys: Vec<String> = (1..=3)
+        .map(|i| format!("zk2/lab/safety/@zk/alive/steer.v1/000000000000000{i}/0123456789abcdef"))
+        .collect();
+    let mut _tokens = Vec::new();
+    for k in &keys {
+        _tokens.push(holder.liveliness().declare_token(k.as_str()).await.unwrap());
+    }
+    let link = common::link_to(&ep).await;
+    let watch = common::retrying_client(link.endpoint()).await;
+    // (instant, put, key) heard; (instant, opened) per transport event;
+    // (instant, links held) read after each withdrawal.
+    type Told = Arc<Mutex<Vec<(Instant, bool, String)>>>;
+    let told: Told = Arc::default();
+    let events: Arc<Mutex<Vec<(Instant, bool)>>> = Arc::default();
+    let links: Arc<Mutex<Vec<(Instant, bool)>>> = Arc::default();
+    let e = Arc::clone(&events);
+    let _listener = watch
+        .info()
+        .transport_events_listener()
+        .callback(move |ev| {
+            let at = Instant::now();
+            let opened = ev.kind() == SampleKind::Put;
+            e.lock().unwrap().push((at, opened));
+        })
+        .await
+        .unwrap();
+    let (t, l, w, rt) = (
+        Arc::clone(&told),
+        Arc::clone(&links),
+        watch.clone(),
+        tokio::runtime::Handle::current(),
+    );
+    let _sub = presence::declare_subscriber(&watch, "zk2/lab/*/@zk/alive/**")
+        .history(false)
+        .callback(move |s: Sample| {
+            let at = Instant::now();
+            let put = s.kind() == SampleKind::Put;
+            t.lock()
+                .unwrap()
+                .push((at, put, s.key_expr().as_str().to_owned()));
+            if !put {
+                let (l, w) = (Arc::clone(&l), w.clone());
+                rt.spawn(async move {
+                    let held = !presence::cut_off(&w).await;
+                    l.lock().unwrap().push((at, held));
+                });
+            }
+        })
+        .await
+        .unwrap();
+    assert!(
+        presence::settle(&watch, "zk2/lab/*/@zk/alive/**", T)
+            .await
+            .unwrap()
+    );
+    let mut rows = Vec::new();
+    for cut in 0..F268_CUTS {
+        let (told_before, events_before) =
+            (told.lock().unwrap().len(), events.lock().unwrap().len());
+        link.cut();
+        eventually("the close's transport event", || async {
+            events.lock().unwrap()[events_before..]
+                .iter()
+                .any(|(_, o)| !o)
+        })
+        .await;
+        if cut > 0 {
+            eventually("the close's three withdrawals", || async {
+                told.lock().unwrap()[told_before..]
+                    .iter()
+                    .filter(|(_, put, _)| !put)
+                    .count()
+                    == keys.len()
+            })
+            .await;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let closed = events.lock().unwrap()[events_before..]
+            .iter()
+            .find(|(_, o)| !o)
+            .map(|(at, _)| *at)
+            .unwrap();
+        let gone: Vec<Instant> = told.lock().unwrap()[told_before..]
+            .iter()
+            .filter(|(_, put, _)| !put)
+            .map(|(at, ..)| *at)
+            .collect();
+        if cut == 0 {
+            assert!(gone.is_empty(), "the first close tells nothing: {gone:?}");
+        } else {
+            let first = *gone.iter().min().unwrap();
+            let last = *gone.iter().max().unwrap();
+            let ahead = |a: Instant| -> f64 {
+                if a <= closed {
+                    closed.duration_since(a).as_secs_f64() * 1e3
+                } else {
+                    -(a.duration_since(closed).as_secs_f64() * 1e3)
+                }
+            };
+            rows.push((cut, ahead(first), ahead(last)));
+        }
+        let told_at_heal = told.lock().unwrap().len();
+        link.heal();
+        eventually("the reopen tells every token", || async {
+            told.lock().unwrap()[told_at_heal..]
+                .iter()
+                .filter(|(_, put, _)| *put)
+                .count()
+                >= keys.len()
+        })
+        .await;
+        eventually("the session holds a link again", || async {
+            !presence::cut_off(&watch).await
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let held: Vec<bool> = links.lock().unwrap().iter().map(|(_, h)| *h).collect();
+    eprintln!("F-268: (cut, first withdrawal ms before the close event, last) {rows:?}");
+    eprintln!("F-268: a link held when each withdrawal's check ran: {held:?}");
+    assert_eq!(rows.len(), F268_CUTS - 1);
+    for (cut, first, last) in &rows {
+        assert!(
+            *first > 0.0 && *last > 0.0,
+            "cut {cut}: every withdrawal heard before the close's transport event \
+             ({first:.3} ms, {last:.3} ms before it)"
+        );
+    }
+    assert!(
+        held.iter().all(|h| !h),
+        "no link held when a close's withdrawal was heard: {held:?}"
+    );
+}
+
+/// F-268's cuts: the first tells nothing, the five after it each three
+/// withdrawals.
+const F268_CUTS: usize = 6;
+
+/// What `arbitration.v1`'s runtime found (text 0.2, core 0.56, #909's
+/// BB): zenoh 1.10.1 tells a session's transport events listener that a
+/// transport opened before its router re-declares the session's
+/// subscribers' interests on it (`net/runtime/mod.rs`, `new_unicast`: the
+/// session's handlers, the listener's among them, then the router's
+/// `new_transport_unicast`, which re-propagates them). A round trip asked
+/// at once at the open can find no face to go to, and is answered at
+/// once, complete and empty, before the reopen tells the subscribers a
+/// token: its standing says nothing. One asked 100 ms after the open
+/// follows the reopen's telling, every time.
+///
+/// A watch session through a link the test cuts and heals, its three
+/// subscribers without history over three tokens. [`OPEN_ROUNDS`] reopens;
+/// at each, a round trip asked at the open event, then one 100 ms after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_round_trip_asked_at_the_open_event_can_precede_the_reopen() {
+    use std::time::{Duration, Instant};
+    let (_r1, ep) = router(None).await;
+    let holder = client(&ep).await;
+    let mut _tokens = Vec::new();
+    for i in 1..=3 {
+        _tokens.push(
+            holder
+                .liveliness()
+                .declare_token(format!(
+                    "zk2/lab/s{i}/@zk/alive/steer.v1/000000000000000{i}/0123456789abcdef"
+                ))
+                .await
+                .unwrap(),
+        );
+    }
+    let link = common::link_to(&ep).await;
+    let watch = common::retrying_client(link.endpoint()).await;
+    let told: Arc<Mutex<Vec<Instant>>> = Arc::default();
+    let mut _subs = Vec::new();
+    for i in 1..=3 {
+        let t = Arc::clone(&told);
+        _subs.push(
+            presence::declare_subscriber(&watch, format!("zk2/lab/s{i}/@zk/alive/**"))
+                .history(false)
+                .callback(move |s: Sample| {
+                    if s.kind() == SampleKind::Put {
+                        t.lock().unwrap().push(Instant::now());
+                    }
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    let key = "zk2/lab/s1/@zk/settle";
+    assert!(presence::settle_at(&watch, key, T).await.unwrap());
+    let (tx, rx) = flume::unbounded::<Instant>();
+    let _listener = watch
+        .info()
+        .transport_events_listener()
+        .callback(move |ev| {
+            if ev.kind() == SampleKind::Put {
+                let _ = tx.send(Instant::now());
+            }
+        })
+        .await
+        .unwrap();
+    let mut at_once_before = 0;
+    for round in 0..OPEN_ROUNDS {
+        link.cut();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let from = told.lock().unwrap().len();
+        link.heal();
+        let opened = rx.recv_async().await.unwrap();
+        // At once at the open event.
+        assert!(presence::settle_at(&watch, key, T).await.unwrap());
+        let replied = Instant::now();
+        let early = told.lock().unwrap()[from..]
+            .iter()
+            .filter(|at| **at <= replied)
+            .count();
+        // 100 ms after it.
+        tokio::time::sleep_until((opened + Duration::from_millis(100)).into()).await;
+        assert!(presence::settle_at(&watch, key, T).await.unwrap());
+        let later = Instant::now();
+        let after = told.lock().unwrap()[from..]
+            .iter()
+            .filter(|at| **at <= later)
+            .count();
+        assert_eq!(
+            after, 3,
+            "round {round}: the reopen's telling before the later reply"
+        );
+        if early < 3 {
+            at_once_before += 1;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    eprintln!(
+        "a round trip asked at the open event stood before the reopen's telling at \
+         {at_once_before} of {OPEN_ROUNDS} reopens"
+    );
+}
+
+/// The reopens of the test above.
+const OPEN_ROUNDS: usize = 10;

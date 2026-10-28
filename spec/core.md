@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.55** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.56** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -77,7 +77,10 @@ Unix epoch, and in 0.54 what `arbitration.v1` needed: a binding an
 ordered list, its order kept by the descriptor, a withdrawal heard live
 acted on without concluding absence, and its vocabulary published, and
 in 0.55 what `timing.v1`'s runtime found: a node with an HLC stamps an
-unstamped put it routes, its own subscriber's included). Every change goes
+unstamped put it routes, its own subscriber's included, and in 0.56 what
+`arbitration.v1`'s runtime measured: a watch session told a close's
+withdrawals before its transport event, and an open before its
+subscribers' interests are declared again). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -2142,6 +2145,29 @@ Liveliness tokens carry no payload; everything is in the key.
         is told when the transport opens again, unordered with the
         reader's reads: in zenoh 1.10.1 the reopening tells a subscriber
         without history every token it matches (Appendix B).
+      - **A close's withdrawals come before its transport event** (0.56,
+        `arbitration.v1` F-268). In zenoh 1.10.1 a watch session's
+        subscribers are told the withdrawals of a close before the
+        session's transport events listener hears the close, and the
+        session holds no link by the time each is told (Appendix B). No
+        withdrawal reaches a session with no link but a close's own
+        telling, so a reader that holds back what a move makes it hear
+        SHOULD begin the move at its transport event or at a withdrawal
+        its watch hears while the watch session holds no link, whichever
+        comes first; one that begins it at the event alone applies the
+        close's withdrawals as heard. A subscriber without history that
+        was told no token hears no withdrawal at its first close (above).
+        `[Sc: profiles/arbitration/scenarios.md §7]`
+      - **An open is told before the subscribers' interests are declared
+        again** (0.56). In zenoh 1.10.1 a session's transport events
+        listener hears a transport open before the session's router face
+        on it declares the subscribers' interests again, so a round trip
+        asked at once at the open can find no face, and is answered at
+        once, complete and empty, before the reopen tells a token
+        (Appendix B): it stands and says nothing. A reader SHOULD ask the
+        round trip after an open a margin after its event (the reference:
+        100 ms), and SHOULD take what its watch heard before the round
+        trip's reply as heard before it. `[Sc: profiles/arbitration/scenarios.md §7]`
       - **The round trip after a move waits for the population** (0.44,
         F-239). The reopening's telling comes first, and the round trip's
         final reply follows it, as a history's does. Beside 10,000 tokens
@@ -3818,6 +3844,31 @@ Appendix B. These are the ones the rules above cite:
   read it, after a stalled callback returns (`unicast/universal/
   transport.rs`, `delete`), and a link's removal as soon as its task
   fails (`del_link`, `link.rs`).
+- **A close's withdrawals come before its transport event** (0.56,
+  `arbitration.v1` F-268). A closing transport's links go first, then its
+  routing face, which tells the session's liveliness subscribers each
+  token learned through it withdrawn, then the transport itself, whose
+  close the transport events listener hears (the order 0.38's cut-off
+  check reads). Measured by the reference
+  (`zenkey/tests/presence.rs`,
+  `f268_a_close_tells_its_withdrawals_before_its_transport_event`): a
+  watch session through a link the test cut and healed, its subscriber
+  without history on three interface tokens, heard each close's three
+  withdrawals 0.025–0.51 ms before its listener heard the close, at 40 of
+  40 closes in eight runs, and held no link when each was heard; its first
+  close, before it had been told the tokens, told nothing. zk2py measured
+  0.15–0.5 ms on zenoh-python 1.10.1 (round 77).
+- **An open is told before the subscribers' interests are declared again**
+  (0.56). A transport that opens is handed to the session's handlers
+  first, the transport events listener's among them, and only then to the
+  router, whose `new_transport_unicast` makes the face and re-propagates
+  the subscribers' interests (`net/runtime/mod.rs`, `new_unicast`;
+  `hat/client/mod.rs`). Measured by the reference (`zenkey/tests/presence.rs`,
+  `a_round_trip_asked_at_the_open_event_can_precede_the_reopen`): a round
+  trip asked at the open event stood before the reopen's telling at 6 of
+  60 reopens in six runs (0 to 2 of each run's 10), in 0.24 ms where one
+  that reached the router took 41–45 ms; one asked 100 ms after the event
+  followed the telling at 60 of 60.
 - A reliable sample takes any link when no reliable one is up: over a UDP
   link alone it travels best-effort (link selection in
   `unicast/universal/tx.rs`).
@@ -3900,7 +3951,7 @@ reader, clients, some under CPU load:
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
 | `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36), and an owner silent within the timeout across a cut, its own answer after the heal (§10, 0.37) |
-| `profiles/arbitration/scenarios.md` §3, §4, §7, §9 | §3.2, §3.3 a binding's order kept by the descriptor, and read as a priority (§9); §8.1 a withdrawal heard live acted on without concluding absence, and undone by a token or a read (§3, §4), and what a move of the watch session makes a reader hear held back until its round trip stands (§7) (0.54) |
+| `profiles/arbitration/scenarios.md` §3, §4, §7, §9 | §3.2, §3.3 a binding's order kept by the descriptor, and read as a priority (§9); §8.1 a withdrawal heard live acted on without concluding absence, and undone by a token or a read (§3, §4), and what a move of the watch session makes a reader hear held back until its round trip stands (§7) (0.54); a close's withdrawals told before its transport event, and a move begun at the first (§7's control, 0.56); the round trip after an open asked a margin after its event (§7, 0.56) |
 | `profiles/redundancy/scenarios.md` §1, §5, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby (0.39); §8.1 a refused read on the claim's own session, and peers that link (§5, 0.40) |
 | `profiles/timing/scenarios.md` §4, §5 | §4.1 a stream sample stamped by its owner's HLC, by a router when its owner's session has none, and unstamped through a router that stamps nothing; §3.3 `meta.zid` attributing a stamp (0.53) |
 

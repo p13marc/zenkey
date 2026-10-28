@@ -1237,12 +1237,19 @@ async fn s7_an_owner_keeps_its_rate() {
         .await
         .expect("the rate bounds each member");
     o.heard_event("/alarms/b/").await;
-    let heard_a = o
-        .keys
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|k| k.contains("/alarms/a/"))
-        .count();
-    assert_eq!(heard_a, 3, "the fourth never left");
+    // Each occurrence is a fresh key, so b's can be heard before a's third:
+    // wait for a's three, never count them at b's receipt.
+    let heard_a = || {
+        o.keys
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|k| k.contains("/alarms/a/"))
+            .count()
+    };
+    eventually("a's three occurrences are heard", || async {
+        heard_a() >= 3
+    })
+    .await;
+    assert_eq!(heard_a(), 3, "the fourth never left");
 }

@@ -244,6 +244,14 @@ impl Plan {
         }
     }
 
+    /// The plan with no deadline judged: an `arbitration.v1` role's
+    /// subscription, whose deadline its arbiter judges, takes the engine
+    /// for each sample's lifespan alone (#909).
+    pub(crate) fn without_deadline(mut self) -> Self {
+        self.deadline = None;
+        self
+    }
+
     /// Whether the subscription runs an engine: a stream whose declaration
     /// judges a deadline or a lifespan.
     pub(crate) fn engaged(&self) -> bool {

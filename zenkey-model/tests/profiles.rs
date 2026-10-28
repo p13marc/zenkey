@@ -3952,12 +3952,15 @@ fn arbitration_conclusions() {
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
         let r = &case["reading"];
-        let entries: Vec<String> = r["bindings"]
-            .as_array()
-            .expect("bindings")
-            .iter()
-            .map(|e| e.as_str().expect("an entry").to_owned())
-            .collect();
+        // `bindings` null: the tool read no consumer's descriptor (text
+        // 0.2, F-272).
+        let binding = r["bindings"].as_array().map(|entries| {
+            let entries: Vec<&str> = entries
+                .iter()
+                .map(|e| e.as_str().expect("an entry"))
+                .collect();
+            arbitration::Binding::parse(&entries).expect("a binding")
+        });
         let view = r.get("view").map(|v| arbitration::View {
             listened: Duration::from_millis(v["listened_ms"].as_u64().expect("listened_ms")),
             lost: v["lost"].as_bool().expect("lost"),
@@ -3965,7 +3968,7 @@ fn arbitration_conclusions() {
         });
         let reading = arbitration::Reading {
             declaration: ab_held(&r["declaration"]),
-            binding: arbitration::Binding::parse(&entries).expect("a binding"),
+            binding,
             view,
         };
         let (dj, why) = arbitration::judge_declaration(&reading);

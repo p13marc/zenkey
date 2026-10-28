@@ -174,6 +174,10 @@ pub struct ServiceBuilder {
     pub(crate) refused: Vec<String>,
     /// `redundancy.v1`, once [`ServiceBuilder::redundancy`] configured it.
     redundancy: Option<crate::redundancy::Redundancy>,
+    /// `arbitration.v1`'s roles (#909): each the revision of its required
+    /// interface the consumer holds (§2.3), which [`ServiceBuilder::start`]
+    /// reads the declaration over.
+    arbitrated: BTreeMap<String, Arc<zenkey_model::contract::Contract>>,
 }
 
 /// Why a profile's owner the runtime implements is refused on a governed
@@ -292,6 +296,7 @@ impl ServiceBuilder {
             alarms: None,
             desired_authors: Vec::new(),
             desired_targets: Vec::new(),
+            arbitrated: BTreeMap::new(),
             refused: Vec::new(),
             redundancy: None,
         }
@@ -323,6 +328,62 @@ impl ServiceBuilder {
         let r = crate::redundancy::Redundancy::new(&self.session, startup)?;
         self.redundancy = Some(r.clone());
         Ok(r)
+    }
+
+    /// Holds `role` as an arbitrated role (`arbitration.v1`, #909,
+    /// [`crate::arbitration`]), compiled against `required`, the revision
+    /// of its required interface the consumer holds (§2.3, core R4):
+    /// [`ServiceBuilder::start`] reads the role's declaration over it, and
+    /// refuses to start when it is invalid (§2.2), nothing declared. The
+    /// consumer arbitrates once the service runs:
+    /// [`Service::consumer`] on the same revision, then
+    /// [`crate::consumer::Consumer::arbitrate`].
+    ///
+    /// Refused for a role this service does not hold, one another
+    /// interface's revision is given for, one a component's manifest
+    /// declares (§2.2's `manifest_role`: 1.0 arbitrates contracts' roles
+    /// only), and one carrying no `arbitration.policy`. A role carrying one
+    /// that is not given here is still checked at start, by §2.2's checks 1
+    /// to 5, which need no revision.
+    pub fn arbitrate(
+        &mut self,
+        role: &str,
+        required: Arc<zenkey_model::contract::Contract>,
+    ) -> Result<&mut Self> {
+        let r = self
+            .roles
+            .iter()
+            .find(|r| r.role == role)
+            .ok_or_else(|| Error::Contract(format!("this service has no role {role:?}")))?;
+        if r.interface != required.iface {
+            return Err(Error::Contract(format!(
+                "role {role:?} requires {}, not {}",
+                r.interface, required.iface
+            )));
+        }
+        let Some(by) = r.declared_by.as_ref() else {
+            return Err(Error::Contract(format!(
+                "role {role:?}: arbitration.v1 {}",
+                crate::arbitration::invalid_words(&[crate::arbitration::Invalid::ManifestRole])
+            )));
+        };
+        let carries = find(&self.impls, by)?
+            .imp
+            .contract()
+            .requires
+            .get(role)
+            .is_some_and(|req| {
+                req.annotations
+                    .contains_key(zenkey_model::arbitration::POLICY)
+            });
+        if !carries {
+            return Err(Error::Contract(format!(
+                "role {role:?} carries no arbitration.policy in {by}: it is not arbitrated \
+                 (arbitration.v1 §2.2)"
+            )));
+        }
+        self.arbitrated.insert(role.to_owned(), required);
+        Ok(self)
     }
 
     /// A test's hook: the instance id this service comes up with, in place
@@ -965,6 +1026,15 @@ impl ServiceBuilder {
                 )));
             }
         }
+        // arbitration.v1 §2.2 (#909): every role carrying a policy read
+        // over the revision held, refused when invalid, nothing declared.
+        check_arbitration(
+            &self.roles,
+            &self.impls,
+            &self.config,
+            &self.arbitrated,
+            &addr,
+        )?;
         // O3: `unavailable` answered for the optional operations not served.
         let ops = crate::operation::Ops::start(&self).await?;
         let served = Arc::new(Served {
@@ -1065,6 +1135,47 @@ impl ServiceBuilder {
         }
         Ok(svc)
     }
+}
+
+/// `arbitration.v1` §2.2 at start (#909): each role whose declaring
+/// contract's requirement carries `arbitration.policy`, read over the
+/// revision of its required interface [`ServiceBuilder::arbitrate`] gave
+/// (checks 1 to 5 alone without one) and the role's parameter bindings as
+/// configured. An invalid declaration refuses the start, as §8.2 step 2
+/// refuses (`redundancy.v1` §2.2's precedent).
+fn check_arbitration(
+    roles: &[Role],
+    impls: &[ImplState],
+    config: &ServiceConfig,
+    held: &BTreeMap<String, Arc<zenkey_model::contract::Contract>>,
+    addr: &Addr,
+) -> Result<()> {
+    use zenkey_model::arbitration::{self, Declaration};
+    for r in roles {
+        let Some(by) = r.declared_by.as_ref() else {
+            continue;
+        };
+        let Ok(s) = find(impls, by) else { continue };
+        let Some(req) = s.imp.contract().requires.get(&r.role) else {
+            continue;
+        };
+        let role = arbitration::Role::of(s.imp.contract(), req);
+        let rev = held.get(&r.role).map(|c| arbitration::Revision::of(c));
+        let params = config
+            .bindings
+            .get(&r.role)
+            .map(|b| b.params.clone())
+            .unwrap_or_default();
+        if let Declaration::Invalid(why) = arbitration::declaration(&role, rev.as_ref(), &params) {
+            return Err(Error::NotExposed(format!(
+                "{addr}: role {:?} ({}): arbitration.v1 {}",
+                r.role,
+                r.interface,
+                crate::arbitration::invalid_words(&why)
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Validates §8.2 step 2 for every implemented interface.
@@ -1468,6 +1579,13 @@ impl Service {
             )));
         }
         let b = self.config.bindings.get(role).cloned().unwrap_or_default();
+        // arbitration.v1 §2.2: the role's requirement, from the contract
+        // declaring it.
+        let declaring = r
+            .declared_by
+            .as_ref()
+            .and_then(|by| find(&self.impls, by).ok())
+            .map(|s| s.imp.shared_contract());
         Ok(Consumer::new(
             &self.session,
             Some(&self.addr),
@@ -1477,7 +1595,8 @@ impl Service {
             &b.params,
         )?
         // timing.v1 §2.6: ε, the binding's.
-        .with_clock_bound(b.clock_bound_ms.map(std::time::Duration::from_millis)))
+        .with_clock_bound(b.clock_bound_ms.map(std::time::Duration::from_millis))
+        .with_declaring(declaring))
     }
 
     fn exposed(&self, iface: &IfaceId, resource: &str) -> Result<zenkey_model::contract::Resource> {
