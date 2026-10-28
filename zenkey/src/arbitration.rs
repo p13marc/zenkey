@@ -913,8 +913,9 @@ struct Follower {
     reads: Arc<AtomicU64>,
     not_made: Arc<AtomicU64>,
     /// A move begun at a withdrawal whose transport event has not come
-    /// yet (F-268).
-    awaiting_event: Option<()>,
+    /// yet (F-268): the barrier's count of transport events when it began,
+    /// so any event counted since ends the wait, whichever branch saw it.
+    awaiting_event: Option<u64>,
 }
 
 type Trip = std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>;
@@ -996,7 +997,7 @@ impl Follower {
                     let established = barrier.as_ref().is_some_and(crate::presence::Barrier::established);
                     // A move begun at a withdrawal (F-268) stands only by a
                     // round trip asked after its transport event.
-                    if stood && established && self.awaiting_event.is_none() {
+                    if stood && established && !self.awaiting() {
                         // What the watch heard before the round trip's
                         // final reply is the move's: the reopen's telling
                         // comes first (core §8.1, 0.44), and waits in the
@@ -1019,14 +1020,20 @@ impl Follower {
     /// A token heard, to the arbiter and the incumbents: a withdrawal heard
     /// with no link held beginning a move first.
     async fn heard(&mut self, h: Heard) {
-        self.move_begins(&h).await;
-        let held = lock(&self.core).token(&h.key, h.put);
+        let begins = self.move_begins(&h).await;
         let ev = if h.put {
             Event::Declared(&h.key)
         } else {
             Event::Withdrawn(&h.key)
         };
-        lock(&self.core).presence(h.at, ev, held);
+        // One guard for the move, the token and the event, so no sample's
+        // event is decided between them.
+        let mut c = lock(&self.core);
+        if begins && !c.arbiter.moving() {
+            c.presence(h.at, Event::Moved, None);
+        }
+        let held = c.token(&h.key, h.put);
+        c.presence(h.at, ev, held);
     }
 
     /// A withdrawal heard while the watch session holds no link begins a
@@ -1036,13 +1043,25 @@ impl Follower {
     /// withdrawal itself; and until the transport event comes, no round
     /// trip stands for it: one asked before the event would find the
     /// barrier standing still.
-    async fn move_begins(&mut self, h: &Heard) {
+    async fn move_begins(&mut self, h: &Heard) -> bool {
         if h.put || !self.cut_off().await {
-            return;
+            return false;
         }
-        self.awaiting_event = Some(());
-        if !lock(&self.core).arbiter.moving() {
-            lock(&self.core).presence(h.at, Event::Moved, None);
+        self.awaiting_event = Some(
+            self.barrier
+                .as_ref()
+                .map_or(0, crate::presence::Barrier::moves),
+        );
+        true
+    }
+
+    /// Whether a move begun at a withdrawal still waits for its transport
+    /// event: none counted since it began.
+    fn awaiting(&self) -> bool {
+        match (self.awaiting_event, &self.barrier) {
+            (Some(at), Some(b)) => b.moves() == at,
+            (Some(_), None) => true,
+            (None, _) => false,
         }
     }
 

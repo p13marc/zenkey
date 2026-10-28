@@ -2052,12 +2052,9 @@ impl Ctx<'_> {
             return Ok((answer, up));
         }
         if line.split_whitespace().next() == Some("commander") {
-            let answer = match &up.commander {
-                Some(_) => {
-                    let Up { svc, commander, .. } = &mut up;
-                    arbitrate::commander_command(line, svc, commander.as_ref().expect("checked"))
-                        .await
-                }
+            let Up { svc, commander, .. } = &mut up;
+            let answer = match commander.as_ref() {
+                Some(c) => arbitrate::commander_command(line, svc, c).await,
                 None => format!("refused {line}: no commander here (--commander)"),
             };
             return Ok((answer, up));

@@ -102,6 +102,20 @@ impl Actuator {
         // instant: the first event it hands over.
         let origin: Arc<std::sync::OnceLock<Instant>> = Arc::default();
         let o = Arc::clone(&origin);
+        // The puts on `angle`, in delivery order: one task takes them from a
+        // channel, so the last value put is the last command delivered.
+        let puts = angle.map(|w| {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<zenoh::bytes::ZBytes>();
+            tokio::spawn(async move {
+                let mut rx = rx;
+                while let Some(payload) = rx.recv().await {
+                    if let Err(e) = w.put(payload).await {
+                        eprintln!("arbitration: a put on angle failed: {e}");
+                    }
+                }
+            });
+            tx
+        });
         let arb = c
             .arbitrate(move |ev| match ev {
                 ArbitrationEvent::Switched(s) => {
@@ -109,13 +123,8 @@ impl Actuator {
                     let _ = out.send(switch_line(&s, origin));
                 }
                 ArbitrationEvent::Delivered { delivery, .. } => {
-                    if let Some(w) = &angle {
-                        let (w, payload) = (Arc::clone(w), delivery.sample.payload().clone());
-                        tokio::spawn(async move {
-                            if let Err(e) = w.put(payload).await {
-                                eprintln!("arbitration: a put on angle failed: {e}");
-                            }
-                        });
+                    if let Some(tx) = &puts {
+                        let _ = tx.send(delivery.sample.payload().clone());
                     }
                 }
             })
