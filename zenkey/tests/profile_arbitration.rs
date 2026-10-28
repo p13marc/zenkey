@@ -107,7 +107,6 @@ async fn session(ep: &str) -> zenoh::Session {
 
 /// A commander: its service, its link, and its putting loop.
 struct Commander {
-    name: &'static str,
     svc: Option<Service>,
     session: zenoh::Session,
     link: common::Link,
@@ -149,7 +148,6 @@ impl Commander {
         let on = Arc::new(AtomicBool::new(true));
         let task = put_loop(Arc::new(w), name, Arc::clone(&on));
         Self {
-            name,
             svc: Some(svc),
             session: s,
             link,
@@ -174,10 +172,6 @@ impl Commander {
 
     fn svc(&mut self) -> &mut Service {
         self.svc.as_mut().unwrap()
-    }
-
-    fn addr(&self) -> Addr {
-        a(&format!("lab/{}", self.name))
     }
 }
 
@@ -1333,14 +1327,9 @@ async fn s11_a_governed_commanders_standby() {
     let (_r1, ep) = router(None).await;
     let s = Tool::new(&ep).await;
     let governed = contract("steer-governed.v1");
-    let mut acts = Vec::new();
-    for n in ["rudder-l", "rudder-r"] {
-        let mut o = Build::new(n, &ep);
-        o.steer = governed.clone();
-        acts.push(actuator(&ep, o).await.unwrap());
-    }
-    let t = Commander::start_on(&ep, "teleop", governed.clone(), Some(0x0b)).await;
-    // C_s1 serves (the lower id), C_s2 stands by.
+    // The commanders first: C_t, then C_s1, which serves (the lower id),
+    // then C_s2, which stands by.
+    let _t = Commander::start_on(&ep, "teleop", governed.clone(), Some(0x0b)).await;
     let s1 = Commander::start_on(&ep, "safety", governed.clone(), Some(0x0a)).await;
     let s1_red = s1.svc.as_ref().unwrap().redundancy().unwrap().clone();
     tokio::time::timeout(SETTLE, s1_red.until(&steer(), Role::Serving))
@@ -1351,13 +1340,25 @@ async fn s11_a_governed_commanders_standby() {
     tokio::time::timeout(SETTLE, s2_red.until(&steer(), Role::Standby))
         .await
         .expect("C_s2 stands by");
-    for act in &acts {
+    // Then the actuators, whose watch was told no token: each learns the
+    // incumbents by its read at start, and their descriptors (§2.5).
+    let mut acts = Vec::new();
+    for n in ["rudder-l", "rudder-r"] {
+        let mut o = Build::new(n, &ep);
+        o.steer = governed.clone();
+        o.binding = &["lab/safety", "lab/teleop"];
+        let started = Instant::now();
+        let act = actuator(&ep, o).await.unwrap();
         eventually("follows safety", || async {
             act.active().as_deref() == Some("lab/safety")
         })
         .await;
+        assert!(
+            started.elapsed() <= Duration::from_secs(1) + T,
+            "{n}: following safety within 1 s of its start"
+        );
+        acts.push(act);
     }
-    let _ = (&t, s1.addr());
     // 1. The standby puts raw samples on safety's key, its own stamps.
     let raw = s2.session.clone();
     let raw_on = Arc::new(AtomicBool::new(true));
@@ -1400,6 +1401,7 @@ async fn s11_a_governed_commanders_standby() {
         );
     }
     // 2. The incumbent holds; the standby goes on putting.
+    let held = Instant::now();
     s1.hold();
     for (act, b) in acts.iter().zip(&base) {
         let sw_ = nth_switch(act, *b, "to teleop").await;
@@ -1410,7 +1412,8 @@ async fn s11_a_governed_commanders_standby() {
         );
         check_deadline(&sw_, "§11 step 2");
     }
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // 3. 2 s after the hold, the incumbent resumes.
+    tokio::time::sleep(held + Duration::from_secs(2) - Instant::now()).await;
     for (act, r) in acts.iter().zip(&refused) {
         assert!(
             act.arb().counts(&a_("lab/safety")).not_incumbent > *r,
@@ -1418,7 +1421,6 @@ async fn s11_a_governed_commanders_standby() {
         );
         assert_eq!(act.active().as_deref(), Some("lab/teleop"));
     }
-    // 3. The incumbent resumes.
     s1.resume();
     for (act, b) in acts.iter().zip(&base) {
         let back = nth_switch(act, b + 1, "back to safety").await;

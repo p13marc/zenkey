@@ -3,6 +3,87 @@
 Amendments to [`v1.md`](v1.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.2 — 2026-10-28: what the runtime showed, and round 77's answers (#909, BB)
+
+The reference runtime (`zenkey::arbitration`, #909's BB) ran scenarios §1
+to §9 and the new §11, three times each, and the second implementation
+read 0.1 cold (zk2py round 77: 115 of 115 fixture cases, every live
+section on zenoh-python 1.10.1, zk2py alone). Round 77 filed F-268 to
+F-272, all accepted on #909 (issuecomment-37069); this text answers them,
+and says what writing the runtime found. It is written against core 0.56,
+which states F-268's order, and `timing.v1` text 0.2.
+
+**Changed: rules (round 77).**
+- **Where a move begins** (§2.8; F-268). A move begins at the watch
+  session's transport event, or at a withdrawal the watch hears while the
+  watch session holds no link, whichever comes first. zenoh 1.10.1 tells a
+  close's withdrawals before the close's transport event: zk2py measured
+  0.15–0.5 ms on zenoh-python, the reference 0.025–0.51 ms in Rust, at 25
+  of 25 closes, with no link held when each was heard (core 0.56, §8.1 and
+  Appendix B). An actuator that began the move at the event alone applied
+  them as heard, and switched `withdrawn` while safety never stopped, once
+  to the dead-man: the reference's did so too with the rule switched off,
+  and passes §7 with it. Changes a verdict (§7 Expected 1). Scenarios §7
+  gains the control that shows the order.
+- **A tool with no consumer's descriptor** (§2.14, §5; F-272). After the
+  premises, the selection and the binding are not asked, `no_descriptor`:
+  never "no, `exact`" of a binding nobody read. `conclusions.json` takes
+  `bindings` null for it, and gains five cases (§10 step 4's reading, a
+  valid declaration, an unread one, and the two premises before it), 24
+  in all; §10 Expected 4 says so. Changes a tool's test.
+
+**Changed: scenarios (round 77).**
+- **The commanders put 500 ms after their tokens** (conventions, §3; F-269).
+  An actuator hears a commander's token on its watch session and its first
+  sample on another, unordered, so a first sample put at the token could
+  be counted `not_active` as a withdrawn provider's. §3 Expected 2 says
+  the switch comes "at the new instance's first arrival after the
+  actuator's watch heard its token". §2.7's rule stands.
+- **A governed commander's standby**, §11 (§2.5; F-270): the commanders'
+  contract uses `redundancy.v1`; a standby puts raw samples on its
+  address's key; the actuator counts them `not_incumbent`, delivers none,
+  and leaves the address at its incumbent's deadline. The reference keeps
+  its contract as `zenkey/tests/contracts/steer-governed.v1.toml`
+  (`steer.v1` minor 1).
+- **The counts line gains `deleted`** (conventions; F-271), as §2.5 counts
+  it: five counts per provider.
+
+**Changed: what writing the runtime found.**
+- **A governed interface's incumbents need a read at start** (§2.5,
+  outcome 6; §2.8's "at start"). `redundancy.v1` §2.10 accepts nothing
+  with no incumbent seen, and a watch without history is told no token
+  declared before it (core §8.1, 0.41). A consumer that relied on its
+  watch alone would count every sample of a commander up before it
+  `not_incumbent`, and never follow it. A consumer of a governed
+  interface SHOULD read each entry's presence once at its start, after its
+  watch's round trip, and get each holder's descriptor whose `meta.zid` it
+  does not hold. §11 starts its actuators after its commanders, so the
+  read at start is what it shows.
+- **One order, instants that never go back** (§2.9). Samples of several
+  subscribers, the watch's tokens and the timer reach a consumer on
+  several threads, each reading the clock before the events are ordered;
+  an event decided after a later reading is decided at the last one's
+  instant. Stated, with no rule of its own: `zenkey_model::arbitration`'s
+  `Arbiter` now asserts it in debug builds.
+- **The round trip that ends a move begun at a withdrawal** (§2.8) is asked
+  once the watch session's transport is up again: none is asked through a
+  session cut off (core §8.1, 0.42). The reference's barrier counts moves
+  by transport events, so a round trip asked before the close's event
+  would have read as standing; it waits for the event's.
+
+**Deliberately not changed.**
+- **No fixture for where a move begins.** The fixture's events are the
+  arbiter's (`moved`, `withdrawn`), and a withdrawal heard with no link is
+  the runtime's to turn into `moved` then `withdrawn`; the scenario's
+  control shows it.
+- **§2.7's re-admission** stands: F-269 is a test's ordering, not a rule's.
+- **`not_incumbent` stays outcome 6,** after `deleted` and `expired`.
+
+**Evidence:** `conformance/declarations.json` (41 cases),
+`conformance/rankings.json` (14), `conformance/arbitrations.json` (41),
+`conformance/conclusions.json` (24), 120 in all. Eleven scenario sections,
+ten the runtime's and one a tool's.
+
 ## 0.1 — 2026-10-27: the first text, draft (#909, BA)
 
 `arbitration.v1` is the profile zk2 left the choice between bound

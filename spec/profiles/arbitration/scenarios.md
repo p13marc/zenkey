@@ -2,10 +2,11 @@
 
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
-a setup, steps, and expected observations. §1 to §9 are the runtime's:
-the reference runs them as tests of `zenkey`, one test per section, named
-after it (`zenkey/tests/profile_arbitration.rs`, #909's BB). §10 is a
-tool's, and the reference tool runs it as a test of zenctl (#909's BC).
+a setup, steps, and expected observations. §1 to §9 and §11 are the
+runtime's: the reference runs them as tests of `zenkey`, one test per
+section, named after it (`zenkey/tests/profile_arbitration.rs`, #909's
+BB). §10 is a tool's, and the reference tool runs it as a test of zenctl
+(#909's BC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -61,15 +62,20 @@ tool's, and the reference tool runs it as a test of zenctl (#909's BC).
 - **The commanders.** `C_s`, `C_t` and `C_a` are owners of `steer.v1` at
   `lab/safety`, `lab/teleop` and `lab/autopilot`, each in a process of its
   own, its HLC on. Each puts `cmd` every 50 ms with the payload `<service>
-  <n>`, `n` counting from 0 at its start (`safety 0`, `safety 1`, …), and
-  holds its instance and interface tokens as core §8.1 says. A commander
-  **holds** when it stops putting, keeping its tokens and its session, and
-  **resumes** when it starts putting again. The reference's commanders are
-  owners its test builds (`zenkey::ServiceBuilder`), each in a process of
-  its own, or `zenkey/examples/owner.rs` driven from stdin once it has a
-  commander mode (#908's MB, #909's BB). Where a section needs what no owner's runtime
-  does, a raw session `X` plays the commander, declaring its tokens by hand
-  at the keys core §8.1 gives and putting by hand.
+  <n>`, `n` counting from 0 at its start (`safety 0`, `safety 1`, …), its
+  first put **500 ms after its tokens** (text 0.2, F-269: an actuator hears
+  a token on its watch session and a sample on another, unordered, so a
+  first sample put at the token could be a withdrawn provider's arrival,
+  as §4's X avoids too), and holds its instance and interface tokens as
+  core §8.1 says. A commander **holds** when it stops putting, keeping its
+  tokens and its session, and **resumes** when it starts putting again.
+  The reference's commanders are `zenkey/examples/owner.rs` run with
+  `--commander` (`--commander-lead-ms`, 500 by default; `owner --help`),
+  or owners its test builds (`zenkey::ServiceBuilder`), each on a session
+  of its own behind a link of its own, which the test closes for a kill.
+  Where a section needs what no owner's runtime does, a raw session `X`
+  plays the commander, declaring its tokens by hand at the keys core §8.1
+  gives and putting by hand.
 - **The actuators.** `A_l` and `A_r` are instances of `lab/rudder-l` and
   `lab/rudder-r`, implementing `rudder.v1`, each binding `cmd` to
   `["lab/safety", "lab/teleop", "lab/autopilot"]` unless a section says
@@ -93,12 +99,15 @@ tool's, and the reference tool runs it as a test of zenctl (#909's BC).
   counts (§2.5):
 
   ```json
-  {"counts": {"providers": {"lab/safety": {"delivered": 40, "not_active": 0, "expired": 0, "not_incumbent": 0}}, "wild": 0, "unresolved": 0, "unbound": 0}}
+  {"counts": {"providers": {"lab/safety": {"delivered": 40, "not_active": 0, "deleted": 0, "expired": 0, "not_incumbent": 0}}, "wild": 0, "unresolved": 0, "unbound": 0}}
   ```
 
-  The reference's actuators are `zenkey/examples/owner.rs` run with
-  `--arbitrate` (#909's BB), whose `owner --help` is the interface a
-  black-box runner drives, as for `alarms.v1`. Two implementations are
+  Every provider known has its five counts, `deleted` among them (text
+  0.2, F-271), in rank order. The reference's actuators are
+  `zenkey/examples/owner.rs` run with `--arbitrate <entry>,…` (#909's BB),
+  which answers `arbitrate counts` so, and whose `owner --help` is the
+  interface a black-box runner drives, as for `alarms.v1`; its watch
+  session connects to `--watch-connect`'s endpoint where §7 cuts it. Two implementations are
   compared on these lines and on what S sees (§2.10; core `presence.md`
   §10, 0.46).
 - **S** is a tool session that subscribes to `zk2/lab/**` and follows
@@ -163,7 +172,8 @@ safety.
 **Steps.**
 1. The test kills `C_s`'s process (SIGKILL), at instant K: its host's
    kernel closes its links, and R1 withdraws its tokens at once.
-2. 2 s later, `C_s` starts again, a new instance.
+2. 2 s later, `C_s` starts again, a new instance, putting 500 ms after its
+   tokens (the conventions).
 
 **Expected.**
 1. Each actuator switches to `lab/teleop`, cause `withdrawn`, before
@@ -172,8 +182,9 @@ safety.
    SHOULD; the reference makes one read), finds no token held, and stays on
    teleop.
 2. When S sees the new instance's interface token, the actuators switch
-   nothing; at the new instance's first arrival, each switches to
-   `lab/safety`, cause `sample`.
+   nothing; at the new instance's first arrival after the actuator's watch
+   heard its token, each switches to `lab/safety`, cause `sample` (text
+   0.2, F-269): with the commander's lead, its first, `safety 0`.
 
 ## §4 A clean stop that publishes after its withdrawal (§2.7; core §8.2)
 
@@ -239,7 +250,11 @@ the first 16 digits of `steer.v1`'s fingerprint), then puts `cmd` every
 
 **Setup.** As §2's setup, but each actuator's watch session is a client
 of R1 through a link the test can cut and heal, alone: its service's
-session and its reader keep their own links.
+session and its reader keep their own links. The control: a watch
+session `W` of the test's, a client of R1 through the same link, holding
+a liveliness subscriber without history on `zk2/lab/safety/@zk/alive/**`
+and listening to its own transport events, each recorded with its
+instant (text 0.2, F-268).
 
 **Steps.**
 1. The test cuts each actuator's watch link for 1 s, then heals it. It
@@ -255,6 +270,13 @@ session and its reader keep their own links.
    withdrawals as heard would switch to teleop, cause `withdrawn`, and
    fails. After each heal, each actuator asks one round trip on its watch
    session (core §8.1, 0.44; the reference counts its own).
+   - **The control** (F-268): at a cut after the first, `W` hears safety's
+     interface token withdrawn **before** its transport event tells it the
+     close; at the first it hears nothing, having been told no token
+     (core §8.1, 0.41), and at the reopen it is told the token (0.44). So
+     the move begins at that withdrawal (v1.md §2.8): an actuator that
+     began it at its transport event alone would apply the close's
+     withdrawals as heard, switch `withdrawn`, and fail.
 2. Each actuator switches to `lab/teleop`, cause `deadline`, with
    `at_ms − last_ms` within §2's bounds: safety's withdrawal is never told
    to a watch whose transport is down (core §8.1, 0.42), and its deadline
@@ -324,6 +346,43 @@ and says each selection is its own view:
 2. The selection: no, `dead_man`.
 3. The selection: yes, `selected`, `lab/autopilot`; the binding: yes,
    `wildcard`, naming entry 1.
-4. The declaration: no, `invalid`, `policy_unsupported`.
+4. The declaration: no, `invalid`, `policy_unsupported`; the selection
+   and the binding: not asked, `no_descriptor` (text 0.2, F-272): with no
+   consumer, T read no descriptor, so no binding and no view.
 5. The declaration and the selection: unobservable, `revisions_disagree`.
 6. The selection: unobservable, `listening`.
+
+## §11 A governed commander's standby (§2.5's `not_incumbent`; `redundancy.v1` §2.10)
+
+Text 0.2, F-270: a sample `redundancy.v1` §2.10 does not accept is no
+arrival, so a standby's writes cannot keep its address eligible.
+
+**Setup.** R1 up. The commanders' contract is `steer.v1` minor 1, which
+lists `redundancy.v1` in `uses`, its election `claim` on `[defaults]`,
+`cmd` as minor 0 declares it (the reference keeps it as
+`zenkey/tests/contracts/steer-governed.v1.toml`). `C_t` serves
+`lab/teleop`. `C_s1` and `C_s2` are two instances of `lab/safety`, each a
+candidate (`redundancy.v1` §2.5) with its HLC on, `C_s1` of the lower
+instance id: `C_s1` serves, `C_s2` stands by, holding its instance token
+and no interface token. Then `A_l` and `A_r` start, each holding `steer.v1`
+minor 1 as its revision of the required interface (v1.md §2.3), `cmd`
+bound to `["lab/safety", "lab/teleop"]`.
+
+**Steps.**
+1. `X`, `C_s2`'s own session, puts `cmd` every 50 ms raw, round its
+   runtime's writer, payload `standby <n>`, stamped by its own HLC.
+2. 1 s later, `C_s1` holds; `X` goes on putting.
+3. 2 s later, `C_s1` resumes.
+
+**Expected.**
+1. Each actuator follows `lab/safety` within 1 s of its start, its
+   incumbent `C_s1`, learned by its read at start (its watch was told no
+   token declared before it) and `C_s1`'s descriptor's `meta.zid`
+   (v1.md §2.5). Through step 1 it prints no line; S sees no `standby`
+   payload on any `angle`; and its `not_incumbent` count for
+   `lab/safety` grows with `X`'s puts, about 20 a second.
+2. Each switches to `lab/teleop`, cause `deadline`, with `at_ms −
+   last_ms` within §2's bounds: `X`'s samples, counted `not_incumbent`,
+   keep nothing eligible.
+3. At `C_s1`'s first arrival, each switches to `lab/safety`, cause
+   `sample`.
