@@ -246,6 +246,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
     report.cases.extend(config_cases(obs));
     report.cases.extend(alarm_cases(obs));
     report.cases.extend(telemetry_cases(obs));
+    report.cases.extend(timing_cases(obs));
     report.cases.extend(desired_cases(obs));
     report.cases.extend(redundancy_cases(obs));
     if let Some(r) = &obs.redundancy {
@@ -254,6 +255,9 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             .extend(r.probes.iter().flatten().map(|p| p.selector.clone()));
     }
     if let Some(t) = &obs.telemetry {
+        report.asked.extend(t.asked.iter().cloned());
+    }
+    if let Some(t) = &obs.timing {
         report.asked.extend(t.asked.iter().cloned());
     }
     let mut seen = BTreeSet::new();
@@ -1097,6 +1101,134 @@ fn telemetry_cases(obs: &ConformObservation) -> Vec<ConformCase> {
             &members,
             t.book.reads_presence(),
         ));
+    }
+    out
+}
+
+/// `timing.v1`'s cases (#908, MC), per timed stream of the interface the
+/// service exposes, with a declared period (`timing-period`) or deadline
+/// (`timing-deadline`): §5's question of each member the profile's tool
+/// reader held over the window, read over the resource by its finding
+/// (F-264). Every answer is `zenkey_model::timing`'s, through the fleet's
+/// book and judge; the owner present throughout and nothing lost (this
+/// run's queue and its own receive path) are the window's premises there.
+/// A resource whose declaration is invalid is asked both, and answers
+/// both unobservable (`invalid`).
+fn timing_cases(obs: &ConformObservation) -> Vec<ConformCase> {
+    use crate::report::TimingAnswerToken as T;
+    use zenkey_model::timing::Question;
+    let Some(rev) = &obs.revision else {
+        return Vec::new();
+    };
+    let exposed: BTreeSet<String> = obs
+        .exposed()
+        .into_iter()
+        .map(zenkey::implementation::resource_name)
+        .collect();
+    let report = obs.timing.as_ref().map(crate::judge::timing::judge);
+    let mut resources = crate::model::timing::timed_resources(&obs.address, rev);
+    resources.retain(|r| exposed.contains(&r.resource));
+    resources.sort_by(|a, b| a.resource.cmp(&b.resource));
+    let mut out = Vec::new();
+    for r in resources {
+        let declared = r.declaration.declared().copied();
+        let cases = [
+            (
+                CaseId::TimingPeriod,
+                Question::Period,
+                declared.is_none_or(|d| d.period.is_some()),
+            ),
+            (
+                CaseId::TimingDeadline,
+                Question::Deadline,
+                declared.is_none_or(|d| d.deadline.is_some()),
+            ),
+        ];
+        for (case, q, declares) in cases {
+            if !declares {
+                continue;
+            }
+            let name = &r.resource;
+            let (Some(t), Some(rep)) = (&obs.timing, &report) else {
+                out.push(ConformCase::unobservable(
+                    case,
+                    name,
+                    "the timing reader did not run: the presence read could not be made",
+                ));
+                continue;
+            };
+            if let Some(why) = &t.unobservable {
+                out.push(ConformCase::unobservable(case, name, why));
+                continue;
+            }
+            let Some(row) = rep
+                .resources
+                .iter()
+                .find(|x| x.resource == *name && x.iface == obs.iface.to_string())
+            else {
+                out.push(ConformCase::unobservable(
+                    case,
+                    name,
+                    "the timing reader held no revision declaring it",
+                ));
+                continue;
+            };
+            let roll = match q {
+                Question::Period => &row.questions.period,
+                _ => &row.questions.deadline,
+            };
+            let first = format!(
+                "{}: {}",
+                roll.first.as_deref().unwrap_or("?"),
+                roll.reason
+                    .as_deref()
+                    .map_or("", crate::judge::timing::reason_says)
+            );
+            let counted = roll
+                .members
+                .iter()
+                .map(|(a, n)| format!("{n} {a}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(match (roll.finding, roll.answer) {
+                (true, _) => ConformCase::failed(
+                    case,
+                    name,
+                    format!(
+                        "{first} over {:.1}s, the owner present throughout and nothing lost \
+                         ({counted} of {} member(s))",
+                        rep.window_s, row.members
+                    ),
+                ),
+                (false, T::Yes | T::No) => ConformCase::passed(
+                    case,
+                    name,
+                    format!(
+                        "every one of its {} member(s) held over {:.1}s answered {} ({})",
+                        row.members,
+                        rep.window_s,
+                        roll.answer.as_str(),
+                        roll.reason.as_deref().unwrap_or("")
+                    ),
+                ),
+                (false, T::NotAsked | T::NotThisProfiles) => ConformCase::unobservable(
+                    case,
+                    name,
+                    format!(
+                        "no member of it was held over the {:.1}s window, so none was asked{}",
+                        rep.window_s,
+                        if counted.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({counted})")
+                        }
+                    ),
+                ),
+                (false, T::Unobservable) => {
+                    ConformCase::unobservable(case, name, format!("{first} ({counted})"))
+                }
+            });
+        }
     }
     out
 }
@@ -3931,6 +4063,7 @@ mod tests {
             config: None,
             alarms: None,
             telemetry: None,
+            timing: None,
             desired: None,
             redundancy: None,
         };
@@ -5538,6 +5671,110 @@ mod tests {
                 if reason.contains("1 of its 1 counter") && reason.contains("no pair formed")),
             "{once:?}"
         );
+    }
+
+    /// `timing-*` (#908, MC), over `pace.v1`'s `cmd` as the profile's tool
+    /// reader holds it: a second's pause with the owner present
+    /// throughout, nothing lost, is the deadline's violation and the
+    /// period's; `axis/{axis}`, nothing held of it, answers neither.
+    #[test]
+    fn timing_cases_read_the_profiles_tool_reader() {
+        use crate::bus::timing::{TimingObservation, TimingSpec};
+        use crate::model::timing::{TimedSample, TimingBook, TimingScope, timed_resources};
+        use std::time::{Instant, SystemTime};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/pace.v1.toml");
+        let (set, _) = crate::model::catalog::ContractSet::load_path(&path);
+        let rev = Arc::clone(set.iter().next().expect("pace.v1"));
+        let addr: zenkey_model::grammar::Addr = "lab/pace".parse().unwrap();
+        let mut o = conforming();
+        o.address = addr.clone();
+        o.iface = "pace.v1".parse().unwrap();
+        o.served = Some(Ok(ContractState::Held(Arc::clone(&rev))));
+        o.revision = Some(Arc::clone(&rev));
+        let instance = format!("zk2/lab/pace/@zk/instance/{INST}");
+        let alive = format!("zk2/lab/pace/@zk/alive/pace.v1/{INST}/0123456789abcdef");
+        let mut p = Observed::from_keys(
+            "zk2/lab/pace/@zk/**",
+            &[instance.clone(), alive.clone()],
+            true,
+        );
+        p.descriptors = Some(BTreeMap::from([(
+            (addr.clone(), INST.parse().unwrap()),
+            DescriptorRead::Served(Box::new(
+                serde_json::from_value(json!({
+                    "format": "zk2-descriptor/0.1",
+                    "service": "lab/pace",
+                    "instance": INST,
+                    "interfaces": [{"iface": "pace.v1",
+                                    "contract": rev.fingerprint().to_string(), "minor": 0}],
+                }))
+                .unwrap(),
+            )),
+        )]));
+        o.presence = Ok(p.clone());
+        let t0 = Instant::now();
+        let mut book = TimingBook::new(timed_resources(&addr, &rev), None, false, t0);
+        book.seed(&p, true, t0);
+        book.start(t0);
+        let ms = Duration::from_millis;
+        for n in 1..50u64 {
+            if !(20..30).contains(&n) {
+                book.sample(&TimedSample {
+                    key: "zk2/lab/pace/pace.v1/stream/cmd".into(),
+                    delete: false,
+                    stamp: None,
+                    arrival: t0 + ms(n * 100),
+                    wall: SystemTime::now(),
+                });
+            }
+            book.tick(t0 + ms(n * 100 + 50));
+        }
+        book.finish(t0 + ms(5000));
+        o.timing = Some(TimingObservation {
+            namespace: "acme".into(),
+            spec: TimingSpec::new(Duration::from_secs(1), Duration::from_secs(5)),
+            scope: TimingScope::of(&addr),
+            book,
+            asked: vec![],
+            opening: None,
+            discarded: 0,
+            skipped: vec![],
+            unobservable: None,
+        });
+        let cases = timing_cases(&o);
+        let verdict = |case: CaseId, subject: &str| {
+            cases
+                .iter()
+                .find(|c| c.case == case && c.subject == subject)
+                .unwrap_or_else(|| panic!("{case} {subject}: {cases:#?}"))
+                .clone()
+        };
+        let code = |c: &ConformCase| judgement_exit_code(&c.verdict);
+        assert_eq!(
+            cases.len(),
+            4,
+            "two cases for each of pace.v1's two: {cases:#?}"
+        );
+        let missed = verdict(CaseId::TimingDeadline, "stream/cmd");
+        assert_eq!(code(&missed), 1, "{missed:?}");
+        assert!(
+            missed
+                .detail
+                .as_deref()
+                .is_some_and(|d| d.contains("owner was present")),
+            "{missed:?}"
+        );
+        let slow = verdict(CaseId::TimingPeriod, "stream/cmd");
+        assert_eq!(code(&slow), 1, "{slow:?}");
+        for case in [CaseId::TimingPeriod, CaseId::TimingDeadline] {
+            let axis = verdict(case, "stream/axis/{axis}");
+            assert_eq!(
+                code(&axis),
+                2,
+                "nothing held of it answers nothing: {axis:?}"
+            );
+        }
     }
 
     fn scenario(name: &str) -> Contract {

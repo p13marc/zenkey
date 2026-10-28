@@ -344,6 +344,13 @@ pub struct ConformObservation {
     /// conformance, and each pair's continuity with presence. `None` when
     /// the presence read failed.
     pub telemetry: Option<crate::bus::telemetry::TelemetryObservation>,
+    /// The service's timed streams of the interface (#908, MC), read over
+    /// the same window by `timing.v1`'s tool reader: each arrival read in
+    /// its subscriber's callback, the owner's presence followed, this
+    /// run's stalls and losses counted. `None` when the presence read
+    /// failed, or both `timing-*` cases are skipped (a skipped case sends
+    /// nothing).
+    pub timing: Option<crate::bus::timing::TimingObservation>,
     /// The service as a `desired.v1` target (#840, DD), read as `zenctl
     /// desired` reads it, after the suite: its roles, its reports and each
     /// slice from its author. `None` when its claimed revision declares no
@@ -542,6 +549,30 @@ pub async fn observe(
             .await,
         )
     };
+    let timing = async {
+        if presence.is_err()
+            || !(spec.skip.asks(CaseId::TimingPeriod) || spec.skip.asks(CaseId::TimingDeadline))
+        {
+            return None;
+        }
+        let mut tspec = crate::bus::timing::TimingSpec::new(t, spec.window);
+        tspec.lease = spec.lease;
+        tspec.wait_before_close = spec.wait_before_close;
+        let scope = crate::model::timing::TimingScope::of(&address).with_iface(iface.clone());
+        Some(
+            crate::bus::timing::observe(
+                session,
+                bus.watch.as_ref(),
+                &bus.namespace,
+                scope,
+                &store,
+                offline,
+                tspec,
+                |_| {},
+            )
+            .await,
+        )
+    };
     let suite = suite(
         bus,
         offline,
@@ -552,12 +583,13 @@ pub async fn observe(
         presence.clone(),
         admin,
     );
-    let (mut obs, health, config, alarms, telemetry) =
-        tokio::join!(suite, health, config, alarms, telemetry);
+    let (mut obs, health, config, alarms, telemetry, timing) =
+        tokio::join!(suite, health, config, alarms, telemetry, timing);
     obs.health = health;
     obs.config = config;
     obs.alarms = alarms;
     obs.telemetry = telemetry;
+    obs.timing = timing;
     // desired.v1 (#840, DD): a revision that declares a requirement or
     // holds a report resource is a target's to judge.
     let target = obs.revision.as_ref().is_some_and(|r| {
@@ -626,6 +658,7 @@ async fn suite(
         config: None,
         alarms: None,
         telemetry: None,
+        timing: None,
         desired: None,
         redundancy: None,
     };
