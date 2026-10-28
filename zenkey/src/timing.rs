@@ -477,6 +477,9 @@ impl Engine {
             let _ = self.refresh.send(addr.clone());
         }
         if expired {
+            // §2.6: only a stamped sample can be expired (its age is the
+            // stamp's), so the count and the event agree.
+            debug_assert!(stamp.is_some(), "an expired sample without a stamp");
             self.expired.fetch_add(1, Ordering::Relaxed);
             if let Some(stamp) = stamp {
                 let _ = self.events.send(TimingEvent::Expired {
@@ -843,8 +846,8 @@ impl Prepared {
             };
             // Seeded before the subscription is handed back: the owner's
             // presence as a read after the round trip shows it.
-            follower.seed().await;
-            tasks.push(tokio::spawn(follower.run(heard_rx)));
+            let seeded = follower.seed().await;
+            tasks.push(tokio::spawn(follower.run(heard_rx, seeded)));
         }
         // §2.5: the timer, a one-shot at the earliest due, re-armed whenever
         // a due may have moved earlier.
@@ -942,8 +945,12 @@ enum Owed {
 }
 
 impl Follower {
-    async fn run(mut self, mut heard: tokio::sync::mpsc::UnboundedReceiver<Heard>) {
+    async fn run(mut self, mut heard: tokio::sync::mpsc::UnboundedReceiver<Heard>, seeded: bool) {
         let (owe_tx, mut owe_rx) = tokio::sync::mpsc::unbounded_channel::<Owed>();
+        // A seed that did not stand is made again a timeout later, never
+        // left to the next move: the owner's state would stand stale.
+        let again = || Box::pin(tokio::time::sleep(READ_TIMEOUT));
+        let mut retry = (!seeded).then(again);
         let mut moves_seen = self
             .barrier
             .as_ref()
@@ -953,6 +960,12 @@ impl Follower {
             let moved = async {
                 match &barrier {
                     Some(b) => b.moved_since(moves_seen).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            let retried = async {
+                match retry.as_mut() {
+                    Some(r) => r.await,
                     None => std::future::pending::<()>().await,
                 }
             };
@@ -968,7 +981,10 @@ impl Follower {
                 // it told may be behind, so presence is read again.
                 () = moved => {
                     moves_seen = barrier.as_ref().map_or(moves_seen, crate::presence::Barrier::moves);
-                    self.seed().await;
+                    retry = (!self.seed().await).then(again);
+                }
+                () = retried => {
+                    retry = (!self.seed().await).then(again);
                 }
             }
         }
@@ -979,8 +995,9 @@ impl Follower {
     }
 
     /// Reads every provider's interface tokens: the owner present where it
-    /// holds one, absent where a complete read shows none.
-    async fn seed(&mut self) {
+    /// holds one, absent where a complete read shows none. Whether every
+    /// read stood, after a round trip that stood.
+    async fn seed(&mut self) -> bool {
         let settled = match &self.barrier {
             Some(b) => b.establish().await,
             None => true,
@@ -1018,16 +1035,19 @@ impl Follower {
                 reads[i] = Some((alive, members));
             }
         }
+        let mut stood = settled;
         for (p, got) in self.providers.clone().into_iter().zip(reads) {
             let Some((alive, members)) = got else {
+                stood = false;
                 continue;
             };
             let (read, now) = match alive {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(
-                        "timing.v1: presence was not read ({e}): the owner's state stands"
+                        "timing.v1: presence was not read ({e}): the owner's state stands until it is read again"
                     );
+                    stood = false;
                     continue;
                 }
             };
@@ -1064,6 +1084,9 @@ impl Follower {
                 self.engine().owner(&a, OwnerState::Present, now);
             }
             // F-261: the member tokens held, each a member seen.
+            if matches!(members, Some(Err(_))) {
+                stood = false;
+            }
             if let Some(Ok((read, now))) = members {
                 for k in &read.keys {
                     if let Ok(ZkKey::Member { addr, member, .. }) = parse(k) {
@@ -1076,6 +1099,7 @@ impl Follower {
                 }
             }
         }
+        stood
     }
 
     fn heard(&mut self, h: Heard, owe: &tokio::sync::mpsc::UnboundedSender<Owed>) {
