@@ -381,6 +381,13 @@ impl Consumer {
     /// provider's members missed, met, ended, or past its bound (§2.5), and
     /// each sample discarded as expired (§2.6), in the order judged, from a
     /// task of its own. A resource that is not a timed stream has none.
+    ///
+    /// It returns once its first reads stand: the providers' descriptors
+    /// (with a lifespan) and their presence after the watch session's round
+    /// trip (with a deadline), each provider's at once. On a session cut
+    /// off from every router that is about one [`timing::READ_TIMEOUT`] per
+    /// kind of read, beside the round trip's own wait. Samples are
+    /// delivered from the data subscribers' declaration on.
     pub async fn subscribe_timed<C, T>(
         &self,
         resource: &str,
@@ -453,9 +460,7 @@ impl Consumer {
                             return;
                         };
                         let lifespan = match &engine {
-                            Some(e) => match e
-                                .lock()
-                                .expect("not poisoned")
+                            Some(e) => match timing::lock(e)
                                 .arrive(&addr, key, &chunks, &sample, arrival, wall)
                             {
                                 Some(l) => l,
@@ -536,6 +541,10 @@ impl Consumer {
         }
         let name = format!("{}/{}", r.token, r.template);
         let since = std::time::SystemTime::now() - retention;
+        // An event has no lifespan (timing.v1 §2.3): one premise for every
+        // delivery.
+        let premise =
+            timing::Plan::new(&r, &self.contract.iface, &[], &self.params, self.epsilon).premise();
         let mut out = Vec::new();
         for ke in self.selectors(resource)? {
             let rx = self
@@ -579,15 +588,7 @@ impl Consumer {
                         sample,
                         arrival: Instant::now(),
                         stamp,
-                        // An event has no lifespan (timing.v1 §2.3).
-                        lifespan: timing::Plan::new(
-                            &r,
-                            &self.contract.iface,
-                            &[],
-                            &self.params,
-                            self.epsilon,
-                        )
-                        .premise(),
+                        lifespan: premise,
                     });
                 }
             }
@@ -801,7 +802,7 @@ impl Subscription {
     #[must_use]
     pub fn owner_state(&self, provider: &Addr) -> OwnerState {
         self.timing.as_ref().map_or(OwnerState::Unseen, |t| {
-            t.engine.lock().expect("not poisoned").owner_state(provider)
+            timing::lock(&t.engine).owner_state(provider)
         })
     }
 
@@ -809,12 +810,7 @@ impl Subscription {
     /// (`timing.v1` §2.5), if it is held.
     #[must_use]
     pub fn deadline_state(&self, provider: &Addr, key: &str) -> Option<MemberState> {
-        self.timing
-            .as_ref()?
-            .engine
-            .lock()
-            .expect("not poisoned")
-            .member_state(provider, key)
+        timing::lock(&self.timing.as_ref()?.engine).member_state(provider, key)
     }
 
     /// The `meta.zid`s this subscription holds of `provider`'s instances,
@@ -823,9 +819,7 @@ impl Subscription {
     #[must_use]
     pub fn owner_zids(&self, provider: &Addr) -> Vec<u128> {
         self.timing.as_ref().map_or_else(Vec::new, |t| {
-            t.engine
-                .lock()
-                .expect("not poisoned")
+            timing::lock(&t.engine)
                 .owner_zids(provider)
                 .into_iter()
                 .collect()

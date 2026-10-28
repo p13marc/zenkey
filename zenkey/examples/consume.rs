@@ -70,7 +70,7 @@ usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>
 
   Standard output, one JSON line each; every *_ms an instant in milliseconds
   since the reader's origin, on its monotonic clock (origin: just before it
-  subscribed), exact to the nanosecond:
+  subscribed), a float exact to the nanosecond below 2^53 ns (about 104 days):
     {\"timing\": \"subscribed\", \"resource\": <name>, \"since_ms\": <ms>, \"zid\": <zid>,
       \"watch\": <zid>|null, \"clock_bound_ms\": <ms>|null}
     {\"timing\": \"arrival\", \"provider\": <sys/svc>, \"key\": <key>, \"at_ms\": <ms>,

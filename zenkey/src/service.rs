@@ -1120,8 +1120,12 @@ fn check_lifespan_zid(
     let Some(stated) = config.meta.get("zid") else {
         return Ok(());
     };
+    // A session's zid is lowercase hexadecimal (core Appendix B), so it
+    // always reads as a value; a stated zid that does not read as one
+    // states no zid this session holds.
     let own = zenkey_model::timing::zid_value(&session.zid().to_string());
-    if stated.as_str().and_then(zenkey_model::timing::zid_value) == own {
+    let stated_value = stated.as_str().and_then(zenkey_model::timing::zid_value);
+    if own.is_some() && stated_value == own {
         return Ok(());
     }
     for s in impls {
@@ -1131,7 +1135,8 @@ fn check_lifespan_zid(
                 .is_some_and(|d| d.lifespan.is_some());
             if lifespan {
                 return Err(Error::NotExposed(format!(
-                    "{} {:?} declares timing.lifespan_ms, so its owner states its session's zid                      {} as meta.zid, and the configuration states {stated} (timing.v1 §2.6)",
+                    "{} {:?} declares timing.lifespan_ms, so its owner states its session's zid \
+                     {} as meta.zid, and the configuration states {stated} (timing.v1 §2.6)",
                     s.imp.iface(),
                     resource_name(r),
                     session.zid()

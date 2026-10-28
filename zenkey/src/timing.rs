@@ -25,7 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
 use zenkey_model::authoring::Kind;
@@ -54,6 +54,12 @@ pub const READ_TIMEOUT: Duration = Duration::from_secs(1);
 /// How often an idle timer wakes to forget (§2.5): a member is forgotten
 /// an hour after its last arrival, so a minute late is nothing.
 const IDLE: Duration = Duration::from_secs(60);
+
+/// How many times a descriptor GET is asked for one unknown stamp id, and
+/// how far apart: a GET made before a late descriptor stood is asked again,
+/// never at every sample.
+const ASK_LIMIT: u32 = 5;
+const ASK_EVERY: Duration = Duration::from_secs(1);
 
 /// What a subscription to a timed resource reports beside its deliveries
 /// (`timing.v1` §2.5, §2.6), each about one member of one provider. The
@@ -251,14 +257,24 @@ impl Plan {
     }
 }
 
+/// Locks a subscription's engine. Zenoh's callbacks lock it, so a panic
+/// on another path must not turn every later sample's callback into a
+/// panic: a poisoned lock is taken up as it stands, as `presence`'s
+/// callbacks take theirs.
+pub(crate) fn lock(engine: &Mutex<Engine>) -> MutexGuard<'_, Engine> {
+    engine.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// One provider's judging.
 struct ProviderTiming {
     tracker: Option<Tracker>,
     lifespan: Option<LifespanReader>,
     /// The `meta.zid`s held of the provider's instances.
     owners: BTreeSet<u128>,
-    /// The stamp ids a descriptor GET was asked for, so each is asked once.
-    asked: BTreeSet<u128>,
+    /// The stamp ids a descriptor GET was asked for: how many times, and
+    /// when last, so each is asked at most [`ASK_LIMIT`] times,
+    /// [`ASK_EVERY`] apart.
+    asked: BTreeMap<u128, (u32, Instant)>,
     /// Each held member's epoch chunk, for its member token (core §8.1).
     epochs: BTreeMap<String, String>,
     /// The epoch chunks a member token of which was seen and not since
@@ -331,7 +347,7 @@ impl Engine {
                     tracker,
                     lifespan,
                     owners: BTreeSet::new(),
-                    asked: BTreeSet::new(),
+                    asked: BTreeMap::new(),
                     epochs,
                     seen: BTreeSet::new(),
                 },
@@ -410,8 +426,15 @@ impl Engine {
             (Some(reader), false) => {
                 let stamped = stamp.and_then(|t| {
                     let id = stamp_id(&t)?;
-                    if !p.owners.contains(&id) && p.asked.insert(id) {
-                        refresh = true;
+                    if !p.owners.contains(&id) {
+                        let asked = p.asked.entry(id).or_insert((0, arrival));
+                        if asked.0 == 0
+                            || (asked.0 < ASK_LIMIT
+                                && arrival.saturating_duration_since(asked.1) >= ASK_EVERY)
+                        {
+                            *asked = (asked.0 + 1, arrival);
+                            refresh = true;
+                        }
                     }
                     Some(Stamped {
                         age: StampAge::between(t.get_time().to_system_time(), wall),
@@ -702,7 +725,7 @@ impl Prepared {
             mut refresh_rx,
         } = self;
         let (lifespan, deadline, epoch, iface) = {
-            let e = engine.lock().expect("not poisoned");
+            let e = lock(&engine);
             (
                 e.plan.lifespan,
                 e.plan.deadline.is_some(),
@@ -722,6 +745,7 @@ impl Prepared {
         // before its first sample), and a GET of those already up.
         let mut descriptors = Vec::new();
         if lifespan {
+            let mut gets = tokio::task::JoinSet::new();
             for p in &sources.providers {
                 let (sys, svc) = p.chunks();
                 let sel = format!("zk2/{sys}/{svc}/@zk/instance/*");
@@ -731,9 +755,7 @@ impl Prepared {
                     .declare_subscriber(sel.clone())
                     .callback(move |s: Sample| {
                         if let Some((addr, zid)) = descriptor_zid(&s) {
-                            e.lock()
-                                .expect("not poisoned")
-                                .set_owners(&addr, [zid].into());
+                            lock(&e).set_owners(&addr, [zid].into());
                         }
                     })
                     .await;
@@ -743,8 +765,14 @@ impl Prepared {
                         "timing.v1: the descriptors' subscription failed, so a stamp is attributed by GET alone: {e}"
                     ),
                 }
-                for (addr, zids) in read_descriptors(&sources.session, &sel).await {
-                    engine.lock().expect("not poisoned").set_owners(&addr, zids);
+                // Every provider's GET at once: a cut-off session costs one
+                // timeout, not one per provider.
+                let session = sources.session.clone();
+                gets.spawn(async move { read_descriptors(&session, &sel).await });
+            }
+            while let Some(got) = gets.join_next().await {
+                for (addr, zids) in got.unwrap_or_default() {
+                    lock(&engine).set_owners(&addr, zids);
                 }
             }
             let (e, session) = (Arc::clone(&engine), sources.session.clone());
@@ -752,7 +780,7 @@ impl Prepared {
                 while let Some(addr) = refresh_rx.recv().await {
                     let sel = format!("zk2/{}/{}/@zk/instance/*", addr.system, addr.service);
                     for (a, zids) in read_descriptors(&session, &sel).await {
-                        e.lock().expect("not poisoned").set_owners(&a, zids);
+                        lock(&e).set_owners(&a, zids);
                     }
                 }
             }));
@@ -824,7 +852,7 @@ impl Prepared {
             let e = Arc::clone(&engine);
             tasks.push(tokio::spawn(async move {
                 loop {
-                    let due = e.lock().expect("not poisoned").next_due();
+                    let due = lock(&e).next_due();
                     let wake = match due {
                         // A miss holds at any instant after its due.
                         Some(d) => d + Duration::from_micros(1),
@@ -832,7 +860,7 @@ impl Prepared {
                     };
                     tokio::select! {
                         () = tokio::time::sleep_until(wake.into()) => {
-                            e.lock().expect("not poisoned").tick(Instant::now());
+                            lock(&e).tick(Instant::now());
                         }
                         () = rearm.notified() => {}
                     }
@@ -947,7 +975,7 @@ impl Follower {
     }
 
     fn engine(&self) -> std::sync::MutexGuard<'_, Engine> {
-        self.engine.lock().expect("not poisoned")
+        lock(&self.engine)
     }
 
     /// Reads every provider's interface tokens: the owner present where it
@@ -957,20 +985,52 @@ impl Follower {
             Some(b) => b.establish().await,
             None => true,
         };
-        for p in self.providers.clone() {
+        // Every provider's reads at once, so a cut-off session costs one
+        // timeout, not one per provider; applied in the providers' order.
+        let mut set = tokio::task::JoinSet::new();
+        for (i, p) in self.providers.iter().enumerate() {
             let (sys, svc) = p.chunks();
-            let sel = format!("zk2/{sys}/{svc}/@zk/alive/{}/**", self.iface);
-            let read =
-                match crate::presence::liveliness_read(&self.session, &sel, READ_TIMEOUT).await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::warn!(
-                            "timing.v1: presence was not read ({e}): the owner's state stands"
-                        );
-                        continue;
+            let alive = format!("zk2/{sys}/{svc}/@zk/alive/{}/**", self.iface);
+            let members = self
+                .epoch
+                .then(|| format!("zk2/{sys}/{svc}/@zk/member/{}/**", self.iface));
+            let session = self.session.clone();
+            set.spawn(async move {
+                let read = |sel: String| {
+                    let session = session.clone();
+                    async move {
+                        crate::presence::liveliness_read(&session, &sel, READ_TIMEOUT)
+                            .await
+                            .map(|r| (r, Instant::now()))
                     }
                 };
-            let now = Instant::now();
+                let alive = read(alive).await;
+                let members = match (&alive, members) {
+                    (Ok(_), Some(sel)) => Some(read(sel).await),
+                    _ => None,
+                };
+                (i, alive, members)
+            });
+        }
+        let mut reads: Vec<Option<_>> = self.providers.iter().map(|_| None).collect();
+        while let Some(joined) = set.join_next().await {
+            if let Ok((i, alive, members)) = joined {
+                reads[i] = Some((alive, members));
+            }
+        }
+        for (p, got) in self.providers.clone().into_iter().zip(reads) {
+            let Some((alive, members)) = got else {
+                continue;
+            };
+            let (read, now) = match alive {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        "timing.v1: presence was not read ({e}): the owner's state stands"
+                    );
+                    continue;
+                }
+            };
             let mut found: BTreeMap<Addr, BTreeSet<String>> = BTreeMap::new();
             for k in &read.keys {
                 if let Ok(ZkKey::Alive { addr, .. }) = parse(k) {
@@ -1004,14 +1064,7 @@ impl Follower {
                 self.engine().owner(&a, OwnerState::Present, now);
             }
             // F-261: the member tokens held, each a member seen.
-            if self.epoch {
-                let sel = format!("zk2/{sys}/{svc}/@zk/member/{}/**", self.iface);
-                let Ok(read) =
-                    crate::presence::liveliness_read(&self.session, &sel, READ_TIMEOUT).await
-                else {
-                    continue;
-                };
-                let now = Instant::now();
+            if let Some(Ok((read, now))) = members {
                 for k in &read.keys {
                     if let Ok(ZkKey::Member { addr, member, .. }) = parse(k) {
                         self.members
