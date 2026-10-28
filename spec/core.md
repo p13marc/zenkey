@@ -3854,8 +3854,8 @@ Appendix B. These are the ones the rules above cite:
   `f268_a_close_tells_its_withdrawals_before_its_transport_event`): a
   watch session through a link the test cut and healed, its subscriber
   without history on three interface tokens, heard each close's three
-  withdrawals 0.025–0.51 ms before its listener heard the close, at 25 of
-  25 closes in five runs, and held no link when each was heard; its first
+  withdrawals 0.025–0.51 ms before its listener heard the close, at 40 of
+  40 closes in eight runs, and held no link when each was heard; its first
   close, before it had been told the tokens, told nothing. zk2py measured
   0.15–0.5 ms on zenoh-python 1.10.1 (round 77).
 - **An open is told before the subscribers' interests are declared again**
@@ -3865,9 +3865,10 @@ Appendix B. These are the ones the rules above cite:
   the subscribers' interests (`net/runtime/mod.rs`, `new_unicast`;
   `hat/client/mod.rs`). Measured by the reference (`zenkey/tests/presence.rs`,
   `a_round_trip_asked_at_the_open_event_can_precede_the_reopen`): a round
-  trip asked at the open event stood before the reopen's telling at 2 of
-  30 reopens, in 0.24 ms where one that reached the router took 41–45 ms;
-  one asked 100 ms after the event followed the telling at 30 of 30.
+  trip asked at the open event stood before the reopen's telling at 6 of
+  60 reopens in six runs (0 to 2 of each run's 10), in 0.24 ms where one
+  that reached the router took 41–45 ms; one asked 100 ms after the event
+  followed the telling at 60 of 60.
 - A reliable sample takes any link when no reliable one is up: over a UDP
   link alone it travels best-effort (link selection in
   `unicast/universal/tx.rs`).

@@ -18,8 +18,8 @@ which states F-268's order, and `timing.v1` text 0.2.
   session's transport event, or at a withdrawal the watch hears while the
   watch session holds no link, whichever comes first. zenoh 1.10.1 tells a
   close's withdrawals before the close's transport event: zk2py measured
-  0.15–0.5 ms on zenoh-python, the reference 0.025–0.51 ms in Rust, at 25
-  of 25 closes, with no link held when each was heard (core 0.56, §8.1 and
+  0.15–0.5 ms on zenoh-python, the reference 0.025–0.51 ms in Rust, at 40
+  of 40 closes, with no link held when each was heard (core 0.56, §8.1 and
   Appendix B). An actuator that began the move at the event alone applied
   them as heard, and switched `withdrawn` while safety never stopped, once
   to the dead-man: the reference's did so too with the rule switched off,
@@ -81,7 +81,7 @@ which states F-268's order, and `timing.v1` text 0.2.
   applied the cut's withdrawals without the reopen's declarations, and
   switched `withdrawn`, to the dead-man once. zenoh 1.10.1 tells an open
   before its router declares the watch's interests again, so a round trip
-  asked at the event can stand with nothing told (2 of 30 measured); and a
+  asked at the event can stand with nothing told (6 of 60 measured); and a
   telling heard before the reply can still wait in the consumer's queue
   when the reply wakes it. The reference asks the round trip 100 ms after
   the open, and takes what is queued first; §7 then passed six of six.

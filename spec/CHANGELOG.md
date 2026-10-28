@@ -29,8 +29,8 @@ first. `[Sc: profiles/arbitration/scenarios.md §7]`
 links, then its routing face, which tells the subscribers each token
 withdrawn, then the transport, whose close the listener hears. Measured by
 the reference (`zenkey/tests/presence.rs`,
-`f268_a_close_tells_its_withdrawals_before_its_transport_event`): at 25 of
-25 closes in five runs, every withdrawal 0.025–0.51 ms before the event,
+`f268_a_close_tells_its_withdrawals_before_its_transport_event`): at 40 of
+40 closes in eight runs, every withdrawal 0.025–0.51 ms before the event,
 and no link held when each was heard; a subscriber without history told no
 token heard nothing at its first close.
 
@@ -45,8 +45,8 @@ can find no face, and stand at once, complete and empty, before the
 reopen's telling. A new bullet: a reader SHOULD ask the round trip after
 an open a margin after its event (the reference: 100 ms), and take what
 its watch heard before the round trip's reply as heard before it.
-Appendix B gives the source and the measurement (2 of 30 round trips asked
-at the event stood before the telling, 0 of 30 asked 100 ms later); with
+Appendix B gives the source and the measurement (6 of 60 round trips asked
+at the event stood before the telling, 0 of 60 asked 100 ms later); with
 both, §7 passed six runs of six.
 
 **Changed: Appendix C.** `arbitration.v1`'s scenarios §7 evidences the

@@ -924,7 +924,7 @@ type Trip = std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>;
 /// open to its listener before its router re-declares the session's
 /// subscribers' interests on it, and a round trip asked in between finds no
 /// face, and stands at once, complete and empty, before the reopen's
-/// telling (measured: 2 of 30 asked at the event; 0 of 30 asked 100 ms
+/// telling (measured: 6 of 60 asked at the event; 0 of 60 asked 100 ms
 /// after, `tests/presence.rs`).
 const AFTER_OPEN: Duration = Duration::from_millis(100);
 
