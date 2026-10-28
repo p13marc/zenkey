@@ -871,7 +871,8 @@ impl ServiceBuilder {
             Writer::declare_gated(&self.session, key.into_keyexpr(), &r, values, gate)
                 .await?
                 .bounded(budget)
-                .metered(meter),
+                .metered(meter)
+                .clocked(&self.minter),
         )
     }
 
@@ -908,6 +909,11 @@ impl ServiceBuilder {
         }
         // Exposure.
         check_exposure(&self.impls, &self.config)?;
+        // timing.v1 §2.6 (#908): an owner of a stream declaring a lifespan
+        // states its session's zid as `meta.zid`, the id its writers stamp
+        // with; a configuration stating another would make every stamp of
+        // it foreign to its readers, so it is refused, nothing declared.
+        check_lifespan_zid(&self.impls, &self.config, &self.session)?;
         // §4.4, §8.2 step 2 (0.17): an archive is never tokenless. The set
         // is the deployment's configuration, so naming the archive in it is
         // refused whether or not this owner implements it.
@@ -1103,6 +1109,44 @@ fn check_exposure(impls: &[ImplState], config: &ServiceConfig) -> Result<()> {
     }
 }
 
+/// `timing.v1` §2.6: a service implementing a stream that declares a
+/// lifespan, whose configuration's `meta` states a `zid` other than its
+/// session's (by value, core §3.3), is refused.
+fn check_lifespan_zid(
+    impls: &[ImplState],
+    config: &ServiceConfig,
+    session: &zenoh::Session,
+) -> Result<()> {
+    let Some(stated) = config.meta.get("zid") else {
+        return Ok(());
+    };
+    // A session's zid is lowercase hexadecimal (core Appendix B), so it
+    // always reads as a value; a stated zid that does not read as one
+    // states no zid this session holds.
+    let own = zenkey_model::timing::zid_value(&session.zid().to_string());
+    let stated_value = stated.as_str().and_then(zenkey_model::timing::zid_value);
+    if own.is_some() && stated_value == own {
+        return Ok(());
+    }
+    for s in impls {
+        for r in &s.imp.contract().resources {
+            let lifespan = zenkey_model::timing::declaration_of(r)
+                .declared()
+                .is_some_and(|d| d.lifespan.is_some());
+            if lifespan {
+                return Err(Error::NotExposed(format!(
+                    "{} {:?} declares timing.lifespan_ms, so its owner states its session's zid \
+                     {} as meta.zid, and the configuration states {stated} (timing.v1 §2.6)",
+                    s.imp.iface(),
+                    resource_name(r),
+                    session.zid()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Whether an interface exposes at least one resource now (§8.1): the
 /// condition for holding its interface token.
 pub(crate) fn exposes_any(s: &ImplState, held: &BTreeSet<String>) -> bool {
@@ -1245,7 +1289,8 @@ impl Service {
         )
         .await?
         .bounded(budget)
-        .metered(meter))
+        .metered(meter)
+        .clocked(&self.minter))
     }
 
     /// A [`StateWriter`] on a member of an exposed state resource, for
@@ -1423,14 +1468,16 @@ impl Service {
             )));
         }
         let b = self.config.bindings.get(role).cloned().unwrap_or_default();
-        Consumer::new(
+        Ok(Consumer::new(
             &self.session,
             Some(&self.addr),
             role,
             contract,
             &b.providers,
             &b.params,
-        )
+        )?
+        // timing.v1 §2.6: ε, the binding's.
+        .with_clock_bound(b.clock_bound_ms.map(std::time::Duration::from_millis)))
     }
 
     fn exposed(&self, iface: &IfaceId, resource: &str) -> Result<zenkey_model::contract::Resource> {

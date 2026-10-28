@@ -249,6 +249,25 @@ pub fn requirement_declaration(annotations: &BTreeMap<String, Value>) -> Declara
     }
 }
 
+/// The tracker a reader judges a resource of `kind` and declaration `d`
+/// by (§2.2, §2.5): `None` when it judges no deadline, the resource not a
+/// stream, its declaration invalid, no deadline declared, or the deadline
+/// below the period (text 0.2, F-259). `bound` and `known` are
+/// [`Tracker::new`]'s.
+#[must_use]
+pub fn tracker_for<S: Into<String>>(
+    kind: Kind,
+    d: &Declaration,
+    bound: Option<u64>,
+    known: impl IntoIterator<Item = S>,
+) -> Option<Tracker> {
+    if kind != Kind::Stream {
+        return None;
+    }
+    let deadline = d.declared()?.judged_deadline()?;
+    Some(Tracker::new(deadline, bound, known))
+}
+
 /// The detection bound of a deadline (§2.5): max(deadline/50, 1 ms). A
 /// reader reports a miss at most this long after it is due.
 #[must_use]
@@ -351,7 +370,14 @@ pub enum Event<'a> {
     Arrival { member: &'a str, expired: bool },
     /// The owner's token as the reader now observes it.
     Owner(OwnerState),
-    /// A complete read shows no member token of `member` (core §8.1).
+    /// A member token of `member` seen (core §8.1): heard declared, heard
+    /// withdrawn, or shown by a read. On a template that declares `epoch`,
+    /// a known member is waited for from the first (§2.5, text 0.2,
+    /// F-261).
+    MemberSeen(&'a str),
+    /// A complete read shows no member token of `member` (core §8.1). On a
+    /// template that declares `epoch`, it ends a member only after a token
+    /// of it was seen (text 0.2, F-261).
     MemberGone(&'a str),
     /// An instant the reader judges at: its timer.
     Tick,
@@ -475,6 +501,14 @@ pub struct Tracker {
     owner: OwnerState,
     owner_since: Option<Mono>,
     held: BTreeMap<String, Held>,
+    /// The template declares `epoch` (core §2.3): its members' tokens, not
+    /// the owner's presence, say when a known member exists (F-261).
+    epoch: bool,
+    /// The members a token of which was seen since they last ended, and
+    /// the instant the first was.
+    seen: BTreeMap<String, Mono>,
+    /// The members reported past the bound, until one is held (F-260).
+    beyond: BTreeSet<String>,
 }
 
 impl Tracker {
@@ -507,7 +541,21 @@ impl Tracker {
             owner: OwnerState::Unseen,
             owner_since: None,
             held,
+            epoch: false,
+            seen: BTreeMap::new(),
+            beyond: BTreeSet::new(),
         }
+    }
+
+    /// The tracker of a template that declares `epoch` (core §2.3, §8.1;
+    /// §2.5, text 0.2, F-261): a known member is waited for from the
+    /// instant a member token of it is first seen, never from its owner's
+    /// presence, since a member exists from its owner's first declaration
+    /// of it; and its member tokens gone end it only after one was seen.
+    #[must_use]
+    pub fn with_epoch(mut self) -> Self {
+        self.epoch = true;
+        self
     }
 
     /// The deadline judged.
@@ -614,7 +662,18 @@ impl Tracker {
                     return;
                 }
                 self.start = Some(at);
-                if self.owner == OwnerState::Present {
+                if self.epoch {
+                    for (name, h) in &mut self.held {
+                        if let Some(seen) = self.seen.get(name)
+                            && h.known
+                            && matches!(h.state, MemberState::Idle { .. })
+                        {
+                            h.state = MemberState::Waiting {
+                                since: (*seen).max(at),
+                            };
+                        }
+                    }
+                } else if self.owner == OwnerState::Present {
                     let since = self.owner_since.map_or(at, |s| s.max(at));
                     self.wait_known(since);
                 }
@@ -636,11 +695,15 @@ impl Tracker {
                     .bound
                     .is_some_and(|b| u64::try_from(self.held.len()).unwrap_or(u64::MAX) >= b)
                 {
-                    out.push(Report::BeyondBound {
-                        at,
-                        member: member.to_owned(),
-                    });
+                    // Once, at its first arrival past the bound (F-260).
+                    if self.beyond.insert(member.to_owned()) {
+                        out.push(Report::BeyondBound {
+                            at,
+                            member: member.to_owned(),
+                        });
+                    }
                 } else {
+                    self.beyond.remove(member);
                     self.held.insert(
                         member.to_owned(),
                         Held {
@@ -654,7 +717,9 @@ impl Tracker {
                 (OwnerState::Unseen | OwnerState::Absent, OwnerState::Present) => {
                     self.owner = OwnerState::Present;
                     self.owner_since = Some(at);
-                    if let Some(start) = self.start {
+                    if let Some(start) = self.start
+                        && !self.epoch
+                    {
                         self.wait_known(at.max(start));
                     }
                 }
@@ -663,15 +728,35 @@ impl Tracker {
                 (_, OwnerState::Absent) => {
                     self.owner = OwnerState::Absent;
                     self.owner_since = None;
-                    for h in self.held.values_mut() {
-                        if matches!(h.state, MemberState::Waiting { .. }) {
-                            h.state = MemberState::Idle { after_end: false };
+                    if !self.epoch {
+                        for h in self.held.values_mut() {
+                            if matches!(h.state, MemberState::Waiting { .. }) {
+                                h.state = MemberState::Idle { after_end: false };
+                            }
                         }
                     }
                 }
                 _ => {}
             },
+            Event::MemberSeen(member) => {
+                if !self.epoch || self.seen.contains_key(member) {
+                    return;
+                }
+                self.seen.insert(member.to_owned(), at);
+                if self.start.is_some()
+                    && let Some(h) = self.held.get_mut(member)
+                    && h.known
+                    && matches!(h.state, MemberState::Idle { .. })
+                {
+                    h.state = MemberState::Waiting { since: at };
+                }
+            }
             Event::MemberGone(member) => {
+                // A read that shows none before any was seen ends nothing
+                // (F-261).
+                if self.epoch && self.seen.remove(member).is_none() {
+                    return;
+                }
                 let Some(h) = self.held.get_mut(member) else {
                     return;
                 };
@@ -1320,23 +1405,75 @@ pub fn lifespan_expired(kind: Kind, d: &Declaration, samples: &[Sample]) -> Judg
     Judged::new(A::Unobservable, R::NoSample)
 }
 
-/// §5's roll-up over a resource or a run: no when any answer is no; yes
-/// when every answer asked is yes, and there is at least one; unobservable
-/// otherwise. A member not asked, or not this profile's, is set aside.
-#[must_use]
-pub fn roll_up(answers: impl IntoIterator<Item = Answer>) -> Answer {
-    let mut yes = false;
-    let mut other = false;
-    for a in answers {
-        match a {
-            Answer::No => return Answer::No,
-            Answer::Yes => yes = true,
-            Answer::Unobservable => other = true,
-            Answer::NotAsked | Answer::NotThisProfiles => {}
+/// §5's three questions, each with the pole that is its finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Question {
+    /// Did this member meet its deadline? No is the finding.
+    Deadline,
+    /// Did the owner keep its period? No is the finding.
+    Period,
+    /// Did a sample arrive expired? Yes is the finding.
+    Lifespan,
+}
+
+impl Question {
+    /// The fixture's token.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Deadline => "deadline",
+            Self::Period => "period",
+            Self::Lifespan => "lifespan",
         }
     }
-    if yes && !other {
+
+    /// Parses the fixture's token.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "deadline" => Self::Deadline,
+            "period" => Self::Period,
+            "lifespan" => Self::Lifespan,
+            _ => return None,
+        })
+    }
+
+    /// The answer that is the finding.
+    #[must_use]
+    pub fn finding(self) -> Answer {
+        match self {
+            Self::Deadline | Self::Period => Answer::No,
+            Self::Lifespan => Answer::Yes,
+        }
+    }
+}
+
+/// §5's roll-up of one question over a resource or a run, read by its
+/// finding (text 0.2, F-264): the finding when any member's answer is the
+/// finding; the other pole when every member's answer is that pole, and
+/// there is at least one; unobservable otherwise. A member not asked, or
+/// not this profile's, is set aside.
+#[must_use]
+pub fn roll_up(question: Question, answers: impl IntoIterator<Item = Answer>) -> Answer {
+    let finding = question.finding();
+    let other = if finding == Answer::Yes {
+        Answer::No
+    } else {
         Answer::Yes
+    };
+    let (mut poles, mut unestablished) = (0u64, false);
+    for a in answers {
+        if a == finding {
+            return finding;
+        }
+        match a {
+            Answer::NotAsked | Answer::NotThisProfiles => {}
+            a if a == other => poles += 1,
+            _ => unestablished = true,
+        }
+    }
+    if poles > 0 && !unestablished {
+        other
     } else {
         Answer::Unobservable
     }
@@ -1447,13 +1584,17 @@ mod tests {
     }
 
     #[test]
-    fn the_roll_up_sets_not_asked_aside() {
-        assert_eq!(roll_up([Answer::Yes, Answer::NotAsked]), Answer::Yes);
+    fn the_roll_up_reads_each_questions_finding() {
+        let d = Question::Deadline;
+        assert_eq!(roll_up(d, [Answer::Yes, Answer::NotAsked]), Answer::Yes);
         assert_eq!(
-            roll_up([Answer::Yes, Answer::Unobservable]),
+            roll_up(d, [Answer::Yes, Answer::Unobservable]),
             Answer::Unobservable
         );
-        assert_eq!(roll_up([Answer::Unobservable, Answer::No]), Answer::No);
-        assert_eq!(roll_up([]), Answer::Unobservable);
+        assert_eq!(roll_up(d, [Answer::Unobservable, Answer::No]), Answer::No);
+        assert_eq!(roll_up(d, []), Answer::Unobservable);
+        let l = Question::Lifespan;
+        assert_eq!(roll_up(l, [Answer::No, Answer::Yes]), Answer::Yes, "F-264");
+        assert_eq!(roll_up(l, [Answer::No, Answer::No]), Answer::No);
     }
 }

@@ -3,6 +3,42 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.55 — 2026-10-27: a node with an HLC stamps an unstamped put it routes (round 76's F-265, #908)
+
+zk2py round 76 read `timing.v1` 0.1 and core 0.53 cold, and ran its
+scenarios live. Through a router that stamps nothing, a client whose own
+HLC was on received 20 of 20 samples of an unstamped owner stamped with
+its own zid. 0.53's §4.1 said what a node does with a stamped put it
+routes, and not that a node with an HLC stamps an unstamped one; §4.2
+called an unstamped sample one "put by a session with no HLC through no
+router that stamps", which leaves the reader's own session out. The
+reference reads the same in zenoh 1.10.1: `treat_timestamp`
+(`dispatcher/pubsub.rs`) stamps a put that carries no timestamp, "add
+one", on any node whose HLC is enabled, the session's own routing to its
+subscriber included. No fixture case changed.
+
+**Changed: §4.1 and Appendix B.** A node whose HLC is enabled stamps each
+put it routes that carries no stamp, a put for its own subscriber
+included, from its own clock, as a router does. So a reader whose session
+has an HLC never holds an unstamped sample. Appendix B gives the source
+and the measurement.
+
+**Changed: §4.2, a late joiner's unstamped sample.** It is "put by a
+session with no HLC through no node that stamps, the reader's own session
+included".
+
+**Deliberately not changed.**
+- **No rule of the merge.** An unstamped sample still ranks below every
+  stamped one, and is kept as before; what changes is which reader can
+  hold one. A seeded reader whose session has an HLC holds a foreign key's
+  unstamped put as stamped at its receipt, by its own zid, and merges it
+  by that stamp (read, not measured).
+- **`timing.v1`'s poles.** A lifespan reader whose session has an HLC
+  reads such a sample `foreign_stamp`, not `unstamped`: both unobservable,
+  nothing discarded (`timing.v1` text 0.2, its §2.6). Its scenarios say
+  that C's sessions have no HLC.
+- **§4.3** still asks the HLC only of a session that serves state.
+
 ## 0.54 — 2026-10-27: what `arbitration.v1` needed of the core (#909)
 
 `arbitration.v1`'s first text (#909, BA) is the profile the core has left

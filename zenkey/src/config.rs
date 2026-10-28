@@ -163,6 +163,13 @@ pub struct Binding {
     /// `vehicle = "self.system"`.
     #[serde(default)]
     pub params: BTreeMap<String, String>,
+    /// ε, in milliseconds (`timing.v1` §2.6): the deployment's stated bound
+    /// on how far the role's providers' stamps and this host's wall clock
+    /// disagree. A sample of a stream declaring `timing.lifespan_ms` that
+    /// arrives older than its lifespan by it is discarded. Absent: no bound
+    /// is stated, and nothing is discarded; never the HLC's delta.
+    #[serde(default)]
+    pub clock_bound_ms: Option<u64>,
 }
 
 impl Binding {
@@ -185,6 +192,7 @@ impl Binding {
         Self {
             providers,
             params: self.params.clone(),
+            clock_bound_ms: self.clock_bound_ms,
         }
     }
 }
@@ -432,6 +440,7 @@ mod tests {
                 "*/self.system".into(),
             ],
             params: [("vehicle".to_owned(), "self.system".to_owned())].into(),
+            clock_bound_ms: None,
         };
         let r = b.resolved(&Name::new("system", "h-bbd1aa1db10b").unwrap());
         assert_eq!(

@@ -3,9 +3,9 @@
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §5 are the runtime's:
-the reference runs them as tests of `zenkey`, one test per section, named
-after it (#908, MB). §6 is a tool's, and the reference tool runs it
-(#908, MC).
+the reference runs them as tests of `zenkey`
+(`zenkey/tests/profile_timing.rs`, one test per section, named after it;
+#908, MB). §6 is a tool's, and the reference tool runs it (#908, MC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.5) are v1.md's rules; core
@@ -56,6 +56,24 @@ after it (#908, MB). §6 is a tool's, and the reference tool runs it
   judgement, and whether it handed the sample to its application; and each
   deadline report, `missed` with its due instant, `met` and `ended`, with
   the instant it reported it. Its ε, where it states one, is its section's.
+  **C's sessions have no HLC** (text 0.2, F-265): a session whose HLC is
+  enabled stamps an unstamped put it receives (core §4.1, 0.55), so §5
+  step 2's `unstamped` holds only for a reader whose sessions have none;
+  one with an HLC reads it `foreign_stamp`.
+- **Two instants the runner keeps** (text 0.2, F-266):
+  - **C stops a deadline or less after the owner's last sample** of a
+    step, or takes its last reading before then: a deadline later the
+    member is missed, owner present or gone, and no section's expected
+    observations count that miss.
+  - **The owner publishes once C holds its descriptor,** where C judges a
+    lifespan (§4, §5): C learns `meta.zid` from the descriptor's put and
+    its GET (v1.md §2.6), and a sample handled before it reads
+    `unattributed`, rightly, which no expected observation counts.
+- **The black box** (#908, MB). The reference's owner is
+  `zenkey/examples/owner.rs` run with `--timing`, its reader
+  `zenkey/examples/consume.rs` run with `--timing`; each one's `--help` is
+  the interface a black-box runner drives and reads, every answer and
+  report one JSON line.
 - **The host.** A gap between two arrivals carries the bus's jitter, and
   the owner's 100 ms period is a fifth of the deadline, so no step expects
   a miss from jitter, even on a loaded runner. A report's due instant is
@@ -126,6 +144,10 @@ after it (#908, MB). §6 is a tool's, and the reference tool runs it
 4. C2, a second consumer, declares its subscription to
    `zk2/lab/pace/pace.v1/stream/axis/*` while the owner runs and publishes
    no axis, and listens 2 s.
+5. C3, a third consumer, binds the template's parameter to `x` (core R2),
+   so `axis/x` is known, and listens 1 s while the owner runs and declares
+   no axis. Then the owner declares `x`'s member token, at instant M as C3
+   first sees it, and publishes nothing on it (text 0.2, F-261).
 
 **Expected.**
 1. C reports nothing: `cmd` is known, but its owner is not present, so
@@ -134,6 +156,10 @@ after it (#908, MB). §6 is a tool's, and the reference tool runs it
    plus the deadline, within the bound.
 3. C reports `met` at the arrival.
 4. C2 reports nothing: no axis member is known, and none arrived.
+5. C3 reports nothing in its first second, its owner present: an epoch
+   template's known member is waited for from its member token, never
+   from its owner's presence. Then `missed` for `axis/x`, due at M + 500
+   ms, within the bound.
 
 ## §4 The lifespan on a stated bound (§2.5, §2.6)
 
@@ -198,11 +224,13 @@ sample expired if a reader aged by it. C states ε = 100 ms.
 
 ## §6 A tool's window (§2.7, §5)
 
-**Setup.** T, a tool, reads `lab/pace` over a 5 s window: it subscribes to
-`cmd` and to `axis/*`, follows the owner's presence as C does, reads its
-descriptor, and states ε = 100 ms. It answers §5's three questions of
-each member it holds at the end of the window. The owner publishes
-`axis/x` every 100 ms in every step.
+**Setup.** T, a tool, reads `lab/pace` over a 5 s window. Before the
+window starts it follows the owner's presence as C does and holds its
+descriptor (v1.md §2.7, text 0.2, F-263); then it subscribes to `cmd` and
+to `axis/*`, the window's start its subscription's start, and states ε =
+100 ms. It answers §5's three questions of each member it held in the
+window, at any instant of it (F-267). The owner publishes `axis/x` every
+100 ms in every step.
 
 **Steps.**
 1. The owner publishes `cmd` every 100 ms throughout. T reads.

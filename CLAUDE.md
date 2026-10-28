@@ -972,7 +972,14 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   reading (freshness's `StampAge` and `ClockMeasure`); `period_window`,
   kept when (arrivals + 2) × period covers the span; and §5's
   `deadline_met`, `period_kept`, `lifespan_expired` and `roll_up`;
-  text 0.1), and `arbitration.v1`'s (`arbitration`, #909 BA: the
+  text 0.1; text 0.2, F-259 to F-267, #908 MB: `tracker_for`, none under
+  an invalid declaration or a deadline below the period; `beyond_bound`
+  once, at a member's first arrival past the bound; `Tracker::with_epoch`
+  and `Event::MemberSeen`, an epoch template's known member waited for
+  from its first member token seen, its tokens gone ending it only after
+  one was seen; `roll_up(Question, …)`, read by each question's finding;
+  a tool's window opened once it follows presence and holds the
+  descriptors, §0's `unseen`), and `arbitration.v1`'s (`arbitration`, #909 BA: the
   vocabulary, `policy` on a requirement, the interim row published
   unchanged by core 0.54, the first read on a requirement;
   `declaration`/`declaration_of` over a role (its contract's `uses`, or a
@@ -1209,6 +1216,33 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `Service::holds_member` (#841, RD) says whether a member token is held,
   so an application declaring members at each takeover never cycles one
   by declaring it twice.
+  `timing` (#908, MB) is `timing.v1`'s runtime over
+  `zenkey_model::timing`, never re-deriving a verdict. Every `Delivery`
+  carries its `arrival` (an `Instant` read in the subscriber's callback),
+  its `stamp` and its `lifespan`'s judgement. A subscription to a timed
+  stream runs an engine: a `Tracker` per provider address, member = key,
+  a one-shot timer at `next_due` re-armed at each change, never an idle
+  tick; the owners' interface and member tokens followed on a watch
+  session handed in (`Consumer::with_watch`), each withdrawal leaving
+  none read again 100 ms later on the consumer's own session, absent
+  only by a complete read, a member token seen at the seed, heard
+  declared or withdrawn; a `LifespanReader` per provider under ε, the
+  binding's `clock_bound_ms` (`Consumer::with_clock_bound` for a tool),
+  `meta.zid` from the descriptors' puts, a GET at the start and again at
+  an id not held. An expired sample is discarded, counted
+  (`Subscription::expired`) and no arrival.
+  `Consumer::subscribe_timed` hands `TimingEvent` (missed, met, ended,
+  beyond_bound, expired) to a second callback, in order, from a task of
+  its own; `subscribe` drops them, so its callers are unchanged. Without
+  a watch session the owner stays unseen: no never-heard wait, a member
+  ended only forgotten. A writer of a stream declaring a lifespan stamps
+  each put from the service's `Minter` clock, its id the session's zid
+  (`Writer::is_stamped`, `Writer::timing` for the period), and a
+  configuration stating another `meta.zid` is refused at start, nothing
+  declared. Scenarios §1–§5 are `tests/profile_timing.rs` over
+  `tests/contracts/pace.v1.toml`; the owner example's `--timing` (with
+  `--no-hlc`) drives `pace.v1` from stdin, and `consume --timing` is
+  scenarios.md's C as a black box, one JSON line per event.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
@@ -1248,7 +1282,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.54 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.55 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1284,7 +1318,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     counted from the Unix epoch, #908; 0.54: a binding an ordered list
     whose order the descriptor keeps, a withdrawal heard live acted on
     without concluding absence, and `arbitration.v1`'s vocabulary
-    published, #909; changes go through `spec/CHANGELOG.md`):
+    published, #909; 0.55: a node with an HLC stamps an unstamped put it
+    routes, its own subscriber's included, round 76's F-265, #908;
+    changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a

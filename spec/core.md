@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.54** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.55** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -75,8 +75,10 @@ freezes a node, and in 0.52 whose answers the admin read reaches, and in
 moved by a later stamp it receives, and a stamp's time counted from the
 Unix epoch, and in 0.54 what `arbitration.v1` needed: a binding an
 ordered list, its order kept by the descriptor, a withdrawal heard live
-acted on without concluding absence, and its vocabulary published). Every
-change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
+acted on without concluding absence, and its vocabulary published, and
+in 0.55 what `timing.v1`'s runtime found: a node with an HLC stamps an
+unstamped put it routes, its own subscriber's included). Every change goes
+through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
 applications built on Zenoh. It is written so that an implementation in any
@@ -1012,6 +1014,12 @@ and reports these codes. `[F: descriptors/]`
   owner's stamps and a reader's clock disagree must hold of the stamps,
   not of the hosts' clocks alone ([`timing.v1`](profiles/timing/v1.md)
   §2.6).
+- **An HLC stamps an unstamped put it routes** (0.55, F-265). A node whose
+  HLC is enabled, a session's included, stamps each put it routes that
+  carries no stamp, a put it receives for its own subscriber included,
+  from its own clock, as a router does. So a reader whose own session has
+  an HLC never holds an unstamped sample: it holds one stamped with its
+  own zid at its receipt.
 - `Latest` consolidation keeps, per key, the reply with the greatest
   timestamp, ranks an unstamped reply lowest, and delivers at query
   completion.
@@ -1073,7 +1081,8 @@ from S4's GET and follows a subscription.
   - **An unstamped sample** (0.27) ranks below every stamped one, as
     `Latest` ranks an unstamped reply lowest (§4.1). It is no owner's
     (S1): it is a foreign key's (§1.7), put by a session with no HLC
-    through no router that stamps.
+    through no node that stamps, the reader's own session included (0.55,
+    §4.1).
     - It is kept on a key that holds nothing, or only unstamped samples,
       and never over a stamped one.
     - Two unstamped samples of a key have no order but their arrival, so
@@ -3658,7 +3667,11 @@ Appendix B. These are the ones the rules above cite:
   clock moves to a later stamp, and a stamp more than its delta ahead of
   its clock is refused, the put re-stamped or dropped
   (`dispatcher/pubsub.rs`, `treat_timestamp`; uhlc 0.8's
-  `update_with_timestamp`; 0.53, §4.1).
+  `update_with_timestamp`; 0.53, §4.1). A put it routes with no stamp it
+  stamps from its own HLC (`treat_timestamp`: "Timestamp not present; add
+  one"; measured by the second implementation: a client whose HLC is on
+  received 20 of 20 samples of an unstamped owner, through a router that
+  stamps nothing, stamped with its own zid; 0.55, §4.1).
 - Timestamps order by time, then by id. An id is stored as the 16 bytes
   of its 128-bit value little-endian, and compared as that byte array
   (uhlc 0.8's derived `Ord` on `Timestamp` and `ID`), so its least

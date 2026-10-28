@@ -1159,7 +1159,161 @@
         },
         "kind": "stream"
       }
+    },
+    {
+      "expect": {
+        "answer": "yes"
+      },
+      "note": "F-264: one member expired beside one live: the finding, yes",
+      "rollup": {
+        "answers": [
+          "yes",
+          "no"
+        ],
+        "question": "lifespan"
+      }
+    },
+    {
+      "expect": {
+        "answer": "no"
+      },
+      "note": "every member live: no",
+      "rollup": {
+        "answers": [
+          "no",
+          "no"
+        ],
+        "question": "lifespan"
+      }
+    },
+    {
+      "expect": {
+        "answer": "yes"
+      },
+      "note": "expired beside unobservable: still the finding",
+      "rollup": {
+        "answers": [
+          "unobservable",
+          "yes"
+        ],
+        "question": "lifespan"
+      }
+    },
+    {
+      "expect": {
+        "answer": "unobservable"
+      },
+      "note": "live beside unobservable: unobservable",
+      "rollup": {
+        "answers": [
+          "no",
+          "unobservable"
+        ],
+        "question": "lifespan"
+      }
+    },
+    {
+      "expect": {
+        "answer": "no"
+      },
+      "note": "a member not asked is set aside",
+      "rollup": {
+        "answers": [
+          "not_asked",
+          "no"
+        ],
+        "question": "lifespan"
+      }
+    },
+    {
+      "expect": {
+        "answer": "unobservable"
+      },
+      "note": "no member at all: unobservable",
+      "rollup": {
+        "answers": [],
+        "question": "lifespan"
+      }
+    },
+    {
+      "expect": {
+        "answer": "unobservable"
+      },
+      "note": "only members not this profile's: unobservable, every one set aside",
+      "rollup": {
+        "answers": [
+          "not_this_profiles",
+          "not_asked"
+        ],
+        "question": "lifespan"
+      }
+    },
+    {
+      "expect": {
+        "answer": "no"
+      },
+      "note": "the deadline: a miss beside a met is the finding, no",
+      "rollup": {
+        "answers": [
+          "yes",
+          "no"
+        ],
+        "question": "deadline"
+      }
+    },
+    {
+      "expect": {
+        "answer": "yes"
+      },
+      "note": "every member met, one not asked: yes",
+      "rollup": {
+        "answers": [
+          "yes",
+          "yes",
+          "not_asked"
+        ],
+        "question": "deadline"
+      }
+    },
+    {
+      "expect": {
+        "answer": "unobservable"
+      },
+      "note": "met beside unobservable: unobservable",
+      "rollup": {
+        "answers": [
+          "yes",
+          "unobservable"
+        ],
+        "question": "deadline"
+      }
+    },
+    {
+      "expect": {
+        "answer": "no"
+      },
+      "note": "the period: not kept beside unobservable is the finding",
+      "rollup": {
+        "answers": [
+          "unobservable",
+          "no"
+        ],
+        "question": "period"
+      }
+    },
+    {
+      "expect": {
+        "answer": "yes"
+      },
+      "note": "kept beside a member not this profile's: yes",
+      "rollup": {
+        "answers": [
+          "not_this_profiles",
+          "yes"
+        ],
+        "question": "period"
+      }
     }
   ],
-  "description": "timing.v1 §2.7, §5: a tool's reading of one member over one window -> §5's three questions. resource is {kind, annotations}, read as declarations.json reads one. reading.across_face is true when the tool reads through a constrained face; reading.lost when it knows it lost a delivery of the member, or its receive path stalled, in the window; reading.owner_present when the owner was present (v1.md §0) throughout the window. reading.deadline is the tracker's account of the member (deadlines.json): held_ms, how long it held the member in the window; missed_present and missed_not_present, the misses it reported while the owner was present, and while it was unconfirmed, absent or unseen; ended, whether the member ended in the window. reading.period is periods.json's verdict for the member. reading.lifespan lists each sample's lifespans.json judgement, in arrival order. Each expect entry is {answer, reason}, answer one of yes, no, unobservable, not_asked, not_this_profiles, by the first step that holds. Every question starts: the resource is not a stream: not_this_profiles, kind; the declaration is invalid: unobservable, invalid. deadline: no timing.deadline_ms: not_asked, no_deadline; the deadline is below the period: unobservable, below_period; across_face: unobservable, across_face; missed_present above 0: unobservable, lost when lost, else no, missed; missed_not_present above 0: unobservable, owner_not_present; ended: not_asked, ended; held_ms 0: not_asked, not_heard; held_ms at most the deadline: unobservable, window_too_short; otherwise yes, met. period: no timing.period_ms: not_asked, no_period; across_face: unobservable, across_face; not_heard: not_asked, not_heard; too_short: unobservable, window_too_short; kept: yes, kept; lost: unobservable, lost; not owner_present: unobservable, owner_not_present; otherwise no, not_kept. lifespan: no timing.lifespan_ms: not_asked, no_lifespan; a sample expired: yes, expired; a sample unobservable: unobservable, with the first such sample's reason; a sample live: no, live; no sample: unobservable, no_sample."
+  "description": "timing.v1 §2.7, §5: a tool's reading of one member over one window -> §5's three questions; or a roll-up of one question over a resource or a run. A roll-up case gives rollup.question (deadline, period or lifespan) and rollup.answers, each member's answer, and expect.answer is, read by the question's finding (no for deadline and period, yes for lifespan; text 0.2, F-264): the finding when any member's answer is the finding; the other pole when every member's answer is that pole, and there is at least one; unobservable otherwise, a member not_asked or not_this_profiles set aside. A member case: resource is {kind, annotations}, read as declarations.json reads one. reading.across_face is true when the tool reads through a constrained face; reading.lost when it knows it lost a delivery of the member, or its receive path stalled, in the window; reading.owner_present when the owner was present (v1.md §0) throughout the window. reading.deadline is the tracker's account of the member (deadlines.json): held_ms, how long it held the member in the window; missed_present and missed_not_present, the misses it reported while the owner was present, and while it was unconfirmed, absent or unseen; ended, whether the member ended in the window. reading.period is periods.json's verdict for the member. reading.lifespan lists each sample's lifespans.json judgement, in arrival order. Each expect entry is {answer, reason}, answer one of yes, no, unobservable, not_asked, not_this_profiles, by the first step that holds. Every question starts: the resource is not a stream: not_this_profiles, kind; the declaration is invalid: unobservable, invalid. deadline: no timing.deadline_ms: not_asked, no_deadline; the deadline is below the period: unobservable, below_period; across_face: unobservable, across_face; missed_present above 0: unobservable, lost when lost, else no, missed; missed_not_present above 0: unobservable, owner_not_present; ended: not_asked, ended; held_ms 0: not_asked, not_heard; held_ms at most the deadline: unobservable, window_too_short; otherwise yes, met. period: no timing.period_ms: not_asked, no_period; across_face: unobservable, across_face; not_heard: not_asked, not_heard; too_short: unobservable, window_too_short; kept: yes, kept; lost: unobservable, lost; not owner_present: unobservable, owner_not_present; otherwise no, not_kept. lifespan: no timing.lifespan_ms: not_asked, no_lifespan; a sample expired: yes, expired; a sample unobservable: unobservable, with the first such sample's reason; a sample live: no, live; no sample: unobservable, no_sample."
 }

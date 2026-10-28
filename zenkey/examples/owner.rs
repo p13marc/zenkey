@@ -16,6 +16,7 @@
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
+//!     [--timing] [--no-hlc]
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -467,6 +468,22 @@
 //! re-mint in this session (core §8.1): a serving interface's token is
 //! re-minted make-before-break, and the election knows its new id (F-209).
 //! **A crash is the process's**: kill it, as the scenarios' §1 and §10 do.
+//!
+//! **`timing.v1`** (`spec/profiles/timing/v1.md`, #908) is the runtime's
+//! ([`zenkey::timing`]): with `--timing` the owner implements `pace.v1`,
+//! the scenarios' contract (`spec/profiles/timing/scenarios.md`,
+//! `zenkey/tests/contracts/pace.v1.toml`, embedded), unless a contract file
+//! given is `pace.v1`, and drives it from standard input: each member
+//! published at its period while it is on, `cmd` paused at the start and
+//! each axis on once added (`timing add <axis>`, its member token first),
+//! every sample its sequence number as text, stamped by the runtime's
+//! writer from the service's clock. `timing offset <ms>` shifts that clock
+//! (§4's skewed owner), and `timing stamp none` puts raw through the
+//! session with no stamp set, its payload a wall clock 10 s old (§5's
+//! unstamped owner). `--no-hlc` leaves the session's HLC off with
+//! `--connect`: an HLC follows the stamps its own session puts (core §4.1),
+//! so an offset would grow under one. Each command is answered by one JSON
+//! line; `--help` lists them. The reader is `consume --timing`.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -496,6 +513,9 @@ pub mod config;
 
 #[path = "owner/desired.rs"]
 pub mod drive;
+
+#[path = "owner/timing.rs"]
+pub mod timing_drive;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -606,6 +626,11 @@ pub struct Options {
     /// `--wait-go`: the service starts at a `go` line on standard input,
     /// its sessions open before (`redundancy.v1` scenarios §3; F-216).
     pub wait_go: bool,
+    /// `--timing`: `pace.v1`, `timing.v1`'s scenarios' contract,
+    /// implemented and driven (#908), unless a contract file implements it.
+    pub timing: bool,
+    /// `--no-hlc`: with `--connect`, the session's HLC off.
+    pub no_hlc: bool,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -643,6 +668,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
+    [--timing] [--no-hlc]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
 
 Standard output, first:
@@ -663,6 +689,7 @@ Command words:
   telemetry ...                           telemetry.v1's writers, below
   desired ...                             desired.v1 (--desired-*), below
   redundancy ...                          redundancy.v1 (--standby), below
+  timing ...                              timing.v1 (--timing), below
 
 alarms.v1 (spec/profiles/alarms/v1.md)
   Implemented by the runtime with --alarms, implied by any --alarms-* option,
@@ -893,6 +920,51 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
     refused <line>: <why>
 
   A crash is the process's: kill it (scenarios.md §1, §10).
+
+timing.v1 (spec/profiles/timing/v1.md)
+  --timing implements pace.v1, the scenarios' contract
+  (spec/profiles/timing/scenarios.md, its fingerprint sha256:6528b66a...),
+  unless a contract file given is pace.v1: cmd (period 100 ms, deadline
+  500 ms, lifespan 300 ms) and axis/{axis} (period 100 ms, deadline 500 ms,
+  a member token per axis). Every member publishes at its period while it
+  is on, each sample its sequence number as text, through the runtime's
+  writer, which stamps each from the service's clock (its id the session's
+  zid, the descriptor's meta.zid, timing.v1 §2.6). cmd starts paused; an
+  axis starts on once added.
+
+  --timing                        implement and drive pace.v1
+  --no-hlc                        with --connect, the session's HLC off: the
+                                  stamps are the session's wall clock with its
+                                  zid, so `timing offset` shifts them alone (an
+                                  HLC would follow them, core §4.1); and `timing
+                                  stamp none` puts unstamped, as §5 has it
+
+  timing pause|resume <member>    stop or start publishing <member>: cmd, or
+                                  axis/<axis>
+  timing add <axis>               declare axis/<axis>'s member token (core §8.1),
+                                  then publish it at the period
+  timing remove <axis>            stop axis/<axis>, then withdraw its member token
+  timing offset <ms>              the stamping clock's offset (negative: behind)
+  timing stamp own|none           none: every member put raw through the session,
+                                  no stamp set, its payload the owner's wall clock
+                                  less 10 s in nanoseconds since the Unix epoch, as
+                                  text (scenarios.md §5); own: the writers again
+  timing published                the samples each member published
+  timing zid                      the session's zid
+  timing writers                  whether each member's writer stamps its puts
+
+  Answers, one JSON line each:
+    {\"timing\": \"pause\"|\"resume\", \"member\": <member>, \"key\": <key>, \"on\": <bool>}
+    {\"timing\": \"add\", \"member\": <member>, \"key\": <key>, \"epoch\": <id>}
+    {\"timing\": \"remove\", \"member\": <member>}
+    {\"timing\": \"offset\", \"ms\": <ms>}
+    {\"timing\": \"stamp\", \"mode\": \"own\"|\"none\"}
+    {\"timing\": \"published\", \"members\": {<member>: <n>, ...}}
+    {\"timing\": \"zid\", \"zid\": <zid>}
+    {\"timing\": \"writers\", \"stamped\": {<member>: <bool>, ...}}
+    refused <line>: <why>
+
+  The reader is `consume --timing` (its --help).
 ";
 
 fn level_name(l: Option<Level>) -> String {
@@ -919,6 +991,7 @@ impl Options {
              [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
+             [--timing] [--no-hlc] \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -964,6 +1037,8 @@ impl Options {
             hold_heal: false,
             peer: false,
             wait_go: false,
+            timing: false,
+            no_hlc: false,
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -1224,6 +1299,14 @@ impl Options {
                     o.wait_go = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--timing" => {
+                    o.timing = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--no-hlc" => {
+                    o.no_hlc = true;
+                    rest = tail;
+                }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
                 _ => break,
             }
@@ -1395,6 +1478,10 @@ pub async fn run_with(
     if opts.telemetry && !imps.iter().any(|i| i.iface().to_string() == "meter.v1") {
         imps.push(Implementation::new(meter_contract()?));
     }
+    // timing.v1 (#908): the scenarios' pace.v1, unless a file has it.
+    if opts.timing && !imps.iter().any(|i| i.iface() == &timing_drive::iface()) {
+        imps.push(Implementation::new(timing_drive::contract()?));
+    }
 
     // hostid.v1 §2.7: the system is minted before the session opens, and a
     // host without an id stops here, with nothing declared (§2.6).
@@ -1434,7 +1521,7 @@ pub async fn run_with(
             // §4.3: a session that serves state enables its HLC. A simulated
             // offset leaves it off (the module doc): the HLC would re-stamp
             // the offset clock's stamps before they leave.
-            if opts.clock_offset_ms == 0 {
+            if opts.clock_offset_ms == 0 && !opts.no_hlc {
                 z.insert_json5("timestamping/enabled", "true")?;
             }
             let session = zenoh::open(z).await?;
@@ -1666,10 +1753,13 @@ struct Up {
     author: Option<desired::Author>,
     target: Option<desired::Target>,
     drive: Option<Arc<drive::Drive>>,
+    /// timing.v1's drive, with `--timing`.
+    timing: Option<timing_drive::Drive>,
 }
 
 impl Up {
     async fn close(self) -> Result<(), BoxError> {
+        drop(self.timing);
         drop(self.members);
         self.svc.close().await?;
         drop(self.servers);
@@ -1686,6 +1776,16 @@ impl Ctx<'_> {
             let answer = telemetry_command(line, &mut up, self.session)
                 .await
                 .unwrap_or_else(|why| format!("refused {}: {why}", words.join(" ")));
+            return Ok((answer, up));
+        }
+        if line.split_whitespace().next() == Some("timing") {
+            let answer = match &up.timing {
+                Some(_) => {
+                    let Up { svc, timing, .. } = &mut up;
+                    timing_drive::command(line, svc, timing.as_ref().expect("checked")).await
+                }
+                None => format!("refused {line}: timing.v1 is not driven here (--timing)"),
+            };
             return Ok((answer, up));
         }
         if line.split_whitespace().next() == Some("redundancy") {
@@ -2004,6 +2104,11 @@ impl Ctx<'_> {
         {
             r.hold_heal(true);
         }
+        let timing = if opts.timing {
+            Some(timing_drive::Drive::start(&svc, self.session).await?)
+        } else {
+            None
+        };
         Ok(Up {
             svc,
             servers,
@@ -2017,6 +2122,7 @@ impl Ctx<'_> {
             author,
             target,
             drive: drive_,
+            timing,
         })
     }
 }

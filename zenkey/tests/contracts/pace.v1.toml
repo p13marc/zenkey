@@ -1,0 +1,18 @@
+[interface]
+name  = "pace"
+major = 1
+minor = 0
+uses  = ["timing.v1"]
+
+[resources.cmd]                    # every 100 ms; missed after 500 ms, seen within 510 ms; expired past 300 ms
+kind        = "stream"
+type        = { raw = "text/plain" }
+annotations = { "timing.period_ms" = 100, "timing.deadline_ms" = 500, "timing.lifespan_ms" = 300 }
+
+[resources."axis/{axis}"]          # one member token per axis
+kind        = "stream"
+type        = { raw = "text/plain" }
+params      = { axis = "string" }
+cardinality = 4
+epoch       = "axis"
+annotations = { "timing.period_ms" = 100, "timing.deadline_ms" = 500 }
