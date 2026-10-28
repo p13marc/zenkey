@@ -76,6 +76,15 @@ which states F-268's order, and `timing.v1` text 0.2.
   session cut off (core §8.1, 0.42). The reference's barrier counts moves
   by transport events, so a round trip asked before the close's event
   would have read as standing; it waits for the event's.
+- **And not at once at the open** (§2.8; core §8.1, 0.56). §7 failed two
+  of three runs of the reference under nextest: at a heal its actuators
+  applied the cut's withdrawals without the reopen's declarations, and
+  switched `withdrawn`, to the dead-man once. zenoh 1.10.1 tells an open
+  before its router declares the watch's interests again, so a round trip
+  asked at the event can stand with nothing told (2 of 30 measured); and a
+  telling heard before the reply can still wait in the consumer's queue
+  when the reply wakes it. The reference asks the round trip 100 ms after
+  the open, and takes what is queued first; §7 then passed six of six.
 
 **Deliberately not changed.**
 - **No fixture for where a move begins.** The fixture's events are the
