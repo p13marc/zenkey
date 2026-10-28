@@ -77,7 +77,9 @@ usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>
       \"wall_ns\": <ns since the Unix epoch>, \"stamp\": {\"time\": <NTP64>, \"id\": <zid>,
       \"age_ms\": <wall at arrival less the stamp>}|null,
       \"lifespan\": {\"verdict\": <verdict>, \"reason\": <reason>}, \"delivered\": <bool>}
-      (delivered false: expired, discarded and no arrival; §2.6)
+      (delivered false: expired, discarded and no arrival; §2.6). wall_ns is the
+      wall clock read in the subscriber's callback at the arrival, the one
+      age_ms is taken against, for an expired arrival too (text 0.3, F-276)
     {\"timing\": \"missed\", \"provider\", \"key\", \"at_ms\", \"due_ms\", \"by_ms\",
       \"owner\": \"present\"|\"unconfirmed\"|\"absent\"|\"unseen\"}
     {\"timing\": \"met\", \"provider\", \"key\", \"at_ms\"}
@@ -165,7 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 /// `--timing`: a reader of one timed stream (`timing.v1`, #908).
-mod timing {
+pub mod timing {
     use std::collections::BTreeMap;
     use std::io::BufRead;
     use std::sync::Arc;
@@ -246,6 +248,36 @@ mod timing {
         at.saturating_duration_since(origin).as_nanos() as f64 / 1e6
     }
 
+    /// One report's line, as `--help` writes it, its instants from
+    /// `origin`. An expired arrival's `wall_ns` is the wall clock the
+    /// engine read at its arrival, its age's (text 0.3, F-276).
+    pub fn event_line(origin: Instant, ev: &TimingEvent) -> serde_json::Value {
+        match ev {
+            TimingEvent::Missed { provider, key, at, due, by, owner } => serde_json::json!({
+                "timing": "missed", "provider": provider.to_string(), "key": key,
+                "at_ms": ms(origin, *at), "due_ms": ms(origin, *due), "by_ms": ms(origin, *by),
+                "owner": owner.as_str(),
+            }),
+            TimingEvent::Met { provider, key, at } | TimingEvent::BeyondBound { provider, key, at } => serde_json::json!({
+                "timing": ev.as_str(), "provider": provider.to_string(), "key": key,
+                "at_ms": ms(origin, *at),
+            }),
+            TimingEvent::Ended { provider, key, at, reason } => serde_json::json!({
+                "timing": "ended", "provider": provider.to_string(), "key": key,
+                "at_ms": ms(origin, *at), "reason": reason.as_str(),
+            }),
+            TimingEvent::Expired { provider, key, arrival, wall, stamp, age } => serde_json::json!({
+                "timing": "arrival", "provider": provider.to_string(), "key": key,
+                "at_ms": ms(origin, *arrival),
+                "wall_ns": wall.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_string(),
+                "stamp": {"time": stamp.get_time().as_u64().to_string(), "id": stamp.get_id().to_string(),
+                          "age_ms": age.nanos() as f64 / 1e6},
+                "lifespan": {"verdict": "expired", "reason": "expired"},
+                "delivered": false,
+            }),
+        }
+    }
+
     fn stamp_json(t: &Timestamp, wall: SystemTime) -> serde_json::Value {
         let age = StampAge::between(t.get_time().to_system_time(), wall);
         serde_json::json!({
@@ -314,33 +346,7 @@ mod timing {
                     });
                     println!("{line}");
                 },
-                move |ev| {
-                    let line = match &ev {
-                        TimingEvent::Missed { provider, key, at, due, by, owner } => serde_json::json!({
-                            "timing": "missed", "provider": provider.to_string(), "key": key,
-                            "at_ms": ms(origin, *at), "due_ms": ms(origin, *due), "by_ms": ms(origin, *by),
-                            "owner": owner.as_str(),
-                        }),
-                        TimingEvent::Met { provider, key, at } | TimingEvent::BeyondBound { provider, key, at } => serde_json::json!({
-                            "timing": ev.as_str(), "provider": provider.to_string(), "key": key,
-                            "at_ms": ms(origin, *at),
-                        }),
-                        TimingEvent::Ended { provider, key, at, reason } => serde_json::json!({
-                            "timing": "ended", "provider": provider.to_string(), "key": key,
-                            "at_ms": ms(origin, *at), "reason": reason.as_str(),
-                        }),
-                        TimingEvent::Expired { provider, key, arrival, stamp, age } => serde_json::json!({
-                            "timing": "arrival", "provider": provider.to_string(), "key": key,
-                            "at_ms": ms(origin, *arrival),
-                            "wall_ns": null,
-                            "stamp": {"time": stamp.get_time().as_u64().to_string(), "id": stamp.get_id().to_string(),
-                                      "age_ms": age.nanos() as f64 / 1e6},
-                            "lifespan": {"verdict": "expired", "reason": "expired"},
-                            "delivered": false,
-                        }),
-                    };
-                    println!("{line}");
-                },
+                move |ev| println!("{}", event_line(origin, &ev)),
             )
             .await?;
         println!(

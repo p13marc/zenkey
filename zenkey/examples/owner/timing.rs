@@ -1,7 +1,7 @@
 //! `timing.v1`'s owner drive (#908, MB): `pace.v1`, the scenarios'
 //! contract (`spec/profiles/timing/scenarios.md`), published at its
-//! period, each member paused, resumed, added or removed from standard
-//! input; its stamps offset, or left unset, for §4 and §5.
+//! period, each member paused, resumed, declared, added or removed from
+//! standard input; its stamps offset, or left unset, for §4 and §5.
 //!
 //! Every member starts paused: `cmd` is published once `timing resume
 //! cmd` says so, an axis once added. Each sample's payload is its sequence
@@ -159,6 +159,21 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             serde_json::json!({"timing": verb, "member": member, "key": m.key, "on": on})
                 .to_string()
         }
+        ["timing", "declare", axis] => {
+            // Scenarios §3 step 5 (text 0.3, F-276): the member's token
+            // alone, nothing published on it until `timing add`.
+            let name = format!("axis/{axis}");
+            if svc.holds_member(&iface(), axis) {
+                return refused(format!("{name}'s member token is held already"));
+            }
+            match svc.declare_member(&iface(), axis).await {
+                Ok(epoch) => {
+                    serde_json::json!({"timing": "declare", "member": name, "epoch": epoch.to_string()})
+                        .to_string()
+                }
+                Err(e) => refused(e.to_string()),
+            }
+        }
         ["timing", "add", axis] => {
             let name = format!("axis/{axis}");
             if d.members.lock().expect("not poisoned").contains_key(&name) {
@@ -166,10 +181,15 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             }
             let values: Bindings = [("axis".to_owned(), vec![(*axis).to_owned()])].into();
             // Core §8.1: a member exists from its owner's first declaration
-            // of it, its token before its first sample.
-            let epoch = match svc.declare_member(&iface(), axis).await {
-                Ok(e) => e,
-                Err(e) => return refused(e.to_string()),
+            // of it, its token before its first sample; one `timing
+            // declare` declared is kept, never declared twice.
+            let epoch = if svc.holds_member(&iface(), axis) {
+                None
+            } else {
+                match svc.declare_member(&iface(), axis).await {
+                    Ok(e) => Some(e),
+                    Err(e) => return refused(e.to_string()),
+                }
             };
             let w = match svc.writer(&iface(), AXIS, &values).await {
                 Ok(w) => w,
@@ -177,16 +197,18 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             };
             let key = w.key_expr().as_str().to_owned();
             d.add(&name, w);
-            serde_json::json!({"timing": "add", "member": name, "key": key, "epoch": epoch.to_string()})
+            serde_json::json!({"timing": "add", "member": name, "key": key, "epoch": epoch.map(|e| e.to_string())})
                 .to_string()
         }
         ["timing", "remove", axis] => {
             let name = format!("axis/{axis}");
-            let Some(m) = d.members.lock().expect("not poisoned").remove(&name) else {
+            let published = d.members.lock().expect("not poisoned").remove(&name);
+            let declared = svc.holds_member(&iface(), axis);
+            if published.is_none() && !declared {
                 return refused(format!("no member {name:?}"));
-            };
-            drop(m);
-            if let Err(e) = svc.remove_member(&iface(), axis).await {
+            }
+            drop(published);
+            if declared && let Err(e) = svc.remove_member(&iface(), axis).await {
                 return refused(e.to_string());
             }
             serde_json::json!({"timing": "remove", "member": name}).to_string()
@@ -226,8 +248,8 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             serde_json::json!({"timing": "writers", "stamped": members}).to_string()
         }
         _ => refused(
-            "timing pause|resume <member>, add|remove <axis>, offset <ms>, stamp own|none, \
-             published, zid or writers"
+            "timing pause|resume <member>, declare|add|remove <axis>, offset <ms>, stamp \
+             own|none, published, zid or writers"
                 .to_owned(),
         ),
     }

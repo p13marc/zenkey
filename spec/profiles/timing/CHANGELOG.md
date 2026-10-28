@@ -4,6 +4,48 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-28: round 78's answers, and the tools (#908, MC)
+
+The second implementation ran 0.2 against the reference runtime (zk2py
+round 78) and filed F-273, F-275 and F-276 against `timing.v1`, all
+accepted on #908. The reference's tools (`zenctl timing`, the doctor's
+`timing-declaration`, `check conform`'s `timing-period` and
+`timing-deadline`, and zengui's Inspector, #908's MC) ran §6. This text
+answers the findings and says what the tools found. It is written
+against core 0.55, as 0.2 was.
+
+**Changed: rules (round 78).**
+- **An owner absent, beside an epoch template's known member** (§2.5;
+  F-275). "If its owner is absent before the miss is due" stops only a
+  wait that began at the owner's presence: an epoch template's known
+  member is waited for from its member token, and waits on until a read
+  shows that token gone. The reference's `Tracker` already read it so,
+  and so did zk2py; 0.2's bullet, under "a member never heard", read as
+  though it stopped both. Changes a verdict in that sequence alone.
+  `deadlines.json` gains its case (start 0, its token seen 0, the owner
+  present 0 and absent 50, a tick at 101: missed, due 100), and its
+  description says what `owner absent` does with `epoch`.
+
+**Changed: the scenarios (round 78).**
+- **§4's owner has no HLC** (F-273): the runner's offset moves its stamps
+  alone, as §2.6's "Without an HLC too" lets an owner stamp. An owner whose
+  HLC is on follows its own first stamp ahead (core §4.1, 0.53), so its
+  clock stands still and its stamps cannot run 400 ms ahead and then
+  agree. No verdict moves: every sample of step 3 reads `clock_disagrees`
+  either way. The reference's §4 test states the owner's HLC off rather
+  than leaving it to a client's default.
+- **The black box's commands** (F-276): the conventions name the owner's
+  standard input for each step, `timing declare <axis>` among them, which
+  declares a member's token and publishes nothing (§3 step 5), where
+  `timing add` publishes at once; and `consume --timing` prints an expired
+  arrival's `wall_ns`, the wall clock it read at the arrival, as its
+  `--help` promised, where 0.2's printed null.
+
+**Deliberately not changed.**
+- **No verdict of a lifespan or a period,** and no tracker's but F-275's
+  sequence.
+- **The core version.** Nothing here needs core 0.56.
+
 ## 0.2 — 2026-10-27: what the runtime showed, and round 76's answers (#908, MB)
 
 The reference runtime (`zenkey::timing`, #908's MB) ran scenarios §1 to

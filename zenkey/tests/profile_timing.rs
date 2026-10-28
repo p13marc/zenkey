@@ -462,6 +462,21 @@ async fn s3_a_member_never_heard() {
     o.svc.close().await.unwrap();
 }
 
+/// A client of the router at `ep` whose HLC is off, stated rather than
+/// left to a client's default: `new_timestamp()` is then its wall clock
+/// with its zid (core §4.1).
+async fn client_without_hlc(ep: &str) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", "\"client\"").unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .unwrap();
+    c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
+        .unwrap();
+    c.insert_json5("timestamping/enabled", "false").unwrap();
+    zenoh::open(c).await.unwrap()
+}
+
 /// One step of §4: a new owner, its clock offset, and a new C under ε.
 async fn lifespan_step(
     ep: &str,
@@ -469,7 +484,10 @@ async fn lifespan_step(
     offset_ms: Arc<AtomicI64>,
     change_after: Option<(Duration, i64)>,
 ) -> (Arc<Heard>, u64, zenoh::Session, Instant, Instant) {
-    let (cs, cw, os) = (client(ep).await, client(ep).await, client(ep).await);
+    // §4's setup (text 0.3, F-273): the owner's session has no HLC, so the
+    // offset moves its stamps alone; one would follow its own first stamp
+    // ahead (core §4.1, 0.53), and its clock would stand still.
+    let (cs, cw, os) = (client(ep).await, client(ep).await, client_without_hlc(ep).await);
     let heard = Arc::new(Heard::default());
     // C is a service's consumer here, its ε its binding's clock_bound_ms.
     let mut cfg = config("lab/reader").bind("cmd", &[ADDR]);

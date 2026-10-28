@@ -71,9 +71,17 @@ the reference runs them as tests of `zenkey`
     `unattributed`, rightly, which no expected observation counts.
 - **The black box** (#908, MB). The reference's owner is
   `zenkey/examples/owner.rs` run with `--timing`, its reader
-  `zenkey/examples/consume.rs` run with `--timing`; each one's `--help` is
-  the interface a black-box runner drives and reads, every answer and
-  report one JSON line.
+  `zenkey/examples/consume.rs` run with `--timing`, and its tool `zenctl
+  timing` (§6, #908, MC); each one's `--help` is the interface a
+  black-box runner drives and reads, every answer and report one JSON
+  line. The owner's steps are its standard input's: `timing resume cmd`
+  and `timing pause cmd` start and stop `cmd`, `timing add <axis>`
+  declares an axis's member token and publishes it, `timing declare
+  <axis>` declares the token alone and publishes nothing (§3 step 5, text
+  0.3, F-276), `timing remove <axis>` stops it and withdraws its token,
+  `timing offset <ms>` offsets its stamping clock, and `timing stamp none`
+  puts unstamped (§5). For §4 and §5's step 1 and 2 it runs with
+  `--no-hlc` (text 0.3, F-273).
 - **The host.** A gap between two arrivals carries the bus's jitter, and
   the owner's 100 ms period is a fifth of the deadline, so no step expects
   a miss from jitter, even on a loaded runner. A report's due instant is
@@ -147,7 +155,8 @@ the reference runs them as tests of `zenkey`
 5. C3, a third consumer, binds the template's parameter to `x` (core R2),
    so `axis/x` is known, and listens 1 s while the owner runs and declares
    no axis. Then the owner declares `x`'s member token, at instant M as C3
-   first sees it, and publishes nothing on it (text 0.2, F-261).
+   first sees it, and publishes nothing on it (text 0.2, F-261; the
+   reference's owner: `timing declare x`, text 0.3, F-276).
 
 **Expected.**
 1. C reports nothing: `cmd` is known, but its owner is not present, so
@@ -164,9 +173,12 @@ the reference runs them as tests of `zenkey`
 ## §4 The lifespan on a stated bound (§2.5, §2.6)
 
 **Setup.** Each step runs a new instance of the owner and a new C, whose
-subscription to `cmd` is declared before the owner starts. The owner
-publishes `cmd` every 100 ms for 2 s. C states ε = 100 ms unless the step
-says otherwise.
+subscription to `cmd` is declared before the owner starts. The owner's
+session has no HLC, so the runner's offset moves its stamps alone (v1.md
+§2.6, "Without an HLC too"): an HLC follows the first stamp of its own
+that runs ahead (core §4.1, 0.53), and its clock would then stand still
+(text 0.3, F-273). The owner publishes `cmd` every 100 ms for 2 s. C
+states ε = 100 ms unless the step says otherwise.
 
 **Steps.**
 1. The owner's clock agrees with C's.
