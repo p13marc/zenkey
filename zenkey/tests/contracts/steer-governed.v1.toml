@@ -1,0 +1,22 @@
+# steer.v1, minor 1: the commanders' stream governed by redundancy.v1, for
+# arbitration.v1's scenarios §11 (text 0.2, F-270): an actuator holding it
+# counts as arrivals only the incumbent's samples (redundancy.v1 §2.10).
+# The election is written once on [defaults] (redundancy.v1 §2.2); the
+# stream is steer.v1 0's.
+[interface]
+name  = "steer"
+major = 1
+minor = 1
+uses  = ["timing.v1", "redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.cmd]                  # one command every 50 ms, missed 300 ms after the last
+kind        = "stream"
+type        = { raw = "text/plain" }
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "real_time"
+express     = true
+annotations = { "timing.period_ms" = 50, "timing.deadline_ms" = 300 }

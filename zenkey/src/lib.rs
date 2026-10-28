@@ -83,10 +83,20 @@
 //! with `zenkey_model::timing`'s tracker, on a one-shot timer, its owners'
 //! presence followed on a watch session handed in, and discards a sample
 //! that arrives expired on the binding's stated clock bound; a writer of a
-//! stream declaring a lifespan stamps each put from the service's clock.
+//! stream declaring a lifespan stamps each put from the service's clock;
+//! `arbitration.v1` is [`arbitration`] (#909): a role whose contract
+//! declares `arbitration.policy` is refused at
+//! [`ServiceBuilder::start`] when its declaration is invalid, and
+//! [`consumer::Consumer::arbitrate`] follows one provider at a time, in
+//! the binding's order, by `zenkey_model::arbitration`'s `Arbiter`: only
+//! the active provider's arrivals delivered, each switch told, the
+//! dead-man at start, withdrawals heard on a watch session and held back
+//! across its moves.
 
 #[cfg(feature = "zenoh")]
 pub mod alarms;
+#[cfg(feature = "zenoh")]
+pub mod arbitration;
 #[cfg(feature = "zenoh")]
 pub mod archive;
 pub mod budget;

@@ -167,6 +167,11 @@ pub struct Consumer {
     /// this host's wall clock disagree (`timing.v1` §2.6). `None`: nothing
     /// is discarded.
     epsilon: Option<Duration>,
+    /// The contract declaring the role (core §3.3): what
+    /// [`Consumer::arbitrate`] reads its requirement from. `None` for a
+    /// role a component's manifest declares, and for a tool's consumer
+    /// until [`Consumer::declared_by`].
+    declaring: Option<Arc<Contract>>,
 }
 
 /// A live subscription through a role. Dropping it undeclares it, and
@@ -232,6 +237,7 @@ impl Consumer {
             presence: Presence::Observable,
             watch: None,
             epsilon: None,
+            declaring: None,
         })
     }
 
@@ -280,6 +286,59 @@ impl Consumer {
     pub fn with_clock_bound(mut self, epsilon: Option<Duration>) -> Self {
         self.epsilon = epsilon;
         self
+    }
+
+    /// Names the contract declaring the role and the role's name, for a
+    /// tool's consumer ([`Consumer::for_tool`]), whose role a contract it
+    /// holds declares: what [`Consumer::arbitrate`] reads the role's
+    /// requirement from. A service's consumer has its own already.
+    #[must_use]
+    pub fn declared_by(mut self, declaring: Arc<Contract>, role: &str) -> Self {
+        self.declaring = Some(declaring);
+        role.clone_into(&mut self.role);
+        self
+    }
+
+    pub(crate) fn with_declaring(mut self, declaring: Option<Arc<Contract>>) -> Self {
+        self.declaring = declaring;
+        self
+    }
+
+    /// Follows one provider at a time (`arbitration.v1`, #909,
+    /// [`crate::arbitration`]): the role's declaration read from the
+    /// contract declaring it and this consumer's, the revision held (§2.2,
+    /// §2.3), refused unless arbitrated; its one stream subscribed through
+    /// every bound provider, ranked in the binding's order (§2.4); its
+    /// withdrawals heard on [`Consumer::with_watch`]'s session, and read
+    /// again on this one (§2.7), unless presence is unavailable (R7,
+    /// §2.12), when the deadline alone judges; each sample's lifespan on
+    /// [`Consumer::with_clock_bound`]'s ε (§2.5). `on_event` is handed, in
+    /// decision order and from a task of its own, the `start` switch to
+    /// the dead-man, each later switch, and each arrival of the active
+    /// provider, nothing else. It returns once the watch's round trip
+    /// stood, or ran to its timeout.
+    pub async fn arbitrate<C>(&self, on_event: C) -> Result<crate::arbitration::Arbitration>
+    where
+        C: Fn(crate::arbitration::ArbitrationEvent) + Send + Sync + 'static,
+    {
+        let watch = match self.presence {
+            Presence::Observable => self.watch.clone(),
+            Presence::Unavailable => None,
+        };
+        let mut inputs = crate::arbitration::Inputs {
+            session: &self.session,
+            watch,
+            role: &self.role,
+            declaring: self.declaring.as_deref(),
+            required: &self.contract,
+            providers: &self.providers,
+            params: &self.params,
+            epsilon: self.epsilon,
+            selectors: Vec::new(),
+        };
+        let declared = crate::arbitration::arbitrated(&inputs)?;
+        inputs.selectors = self.selectors(&declared.resource())?;
+        crate::arbitration::start(inputs, on_event).await
     }
 
     /// The ε it judges lifespans under, if one is stated.
