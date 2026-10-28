@@ -253,20 +253,40 @@ pub mod timing {
     /// engine read at its arrival, its age's (text 0.3, F-276).
     pub fn event_line(origin: Instant, ev: &TimingEvent) -> serde_json::Value {
         match ev {
-            TimingEvent::Missed { provider, key, at, due, by, owner } => serde_json::json!({
+            TimingEvent::Missed {
+                provider,
+                key,
+                at,
+                due,
+                by,
+                owner,
+            } => serde_json::json!({
                 "timing": "missed", "provider": provider.to_string(), "key": key,
                 "at_ms": ms(origin, *at), "due_ms": ms(origin, *due), "by_ms": ms(origin, *by),
                 "owner": owner.as_str(),
             }),
-            TimingEvent::Met { provider, key, at } | TimingEvent::BeyondBound { provider, key, at } => serde_json::json!({
+            TimingEvent::Met { provider, key, at }
+            | TimingEvent::BeyondBound { provider, key, at } => serde_json::json!({
                 "timing": ev.as_str(), "provider": provider.to_string(), "key": key,
                 "at_ms": ms(origin, *at),
             }),
-            TimingEvent::Ended { provider, key, at, reason } => serde_json::json!({
+            TimingEvent::Ended {
+                provider,
+                key,
+                at,
+                reason,
+            } => serde_json::json!({
                 "timing": "ended", "provider": provider.to_string(), "key": key,
                 "at_ms": ms(origin, *at), "reason": reason.as_str(),
             }),
-            TimingEvent::Expired { provider, key, arrival, wall, stamp, age } => serde_json::json!({
+            TimingEvent::Expired {
+                provider,
+                key,
+                arrival,
+                wall,
+                stamp,
+                age,
+            } => serde_json::json!({
                 "timing": "arrival", "provider": provider.to_string(), "key": key,
                 "at_ms": ms(origin, *arrival),
                 "wall_ns": wall.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_string(),

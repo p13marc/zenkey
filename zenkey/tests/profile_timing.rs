@@ -487,7 +487,11 @@ async fn lifespan_step(
     // §4's setup (text 0.3, F-273): the owner's session has no HLC, so the
     // offset moves its stamps alone; one would follow its own first stamp
     // ahead (core §4.1, 0.53), and its clock would stand still.
-    let (cs, cw, os) = (client(ep).await, client(ep).await, client_without_hlc(ep).await);
+    let (cs, cw, os) = (
+        client(ep).await,
+        client(ep).await,
+        client_without_hlc(ep).await,
+    );
     let heard = Arc::new(Heard::default());
     // C is a service's consumer here, its ε its binding's clock_bound_ms.
     let mut cfg = config("lab/reader").bind("cmd", &[ADDR]);

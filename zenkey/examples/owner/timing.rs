@@ -38,11 +38,13 @@ pub fn iface() -> IfaceId {
     "pace.v1".parse().expect("an interface")
 }
 
-/// One member published at the period.
+/// One member published at the period, or every `every_ms` once `timing
+/// every` sets it.
 struct Member {
     writer: Arc<Writer>,
     key: String,
     on: Arc<AtomicBool>,
+    every_ms: Arc<AtomicU64>,
     published: Arc<AtomicU64>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -88,21 +90,28 @@ impl Drive {
         let writer = Arc::new(writer);
         let on = Arc::new(AtomicBool::new(name != "cmd"));
         let published = Arc::new(AtomicU64::new(0));
+        let every_ms = Arc::new(AtomicU64::new(
+            u64::try_from(self.period.as_millis()).unwrap_or(u64::MAX),
+        ));
         let task = {
-            let (w, on, n, raw, session, period, key) = (
+            let (w, on, n, raw, session, every, key) = (
                 Arc::clone(&writer),
                 Arc::clone(&on),
                 Arc::clone(&published),
                 Arc::clone(&self.raw),
                 self.session.clone(),
-                self.period,
+                Arc::clone(&every_ms),
                 key.clone(),
             );
             tokio::spawn(async move {
-                let mut tick = tokio::time::interval(period);
+                // Each tick a whole interval after the last, never drifting
+                // with the puts; the interval read anew at each (`timing
+                // every`).
+                let mut next = tokio::time::Instant::now();
                 let mut seq = 0u64;
                 loop {
-                    tick.tick().await;
+                    next += Duration::from_millis(every.load(Ordering::Relaxed).max(1));
+                    tokio::time::sleep_until(next).await;
                     if !on.load(Ordering::Relaxed) {
                         continue;
                     }
@@ -136,6 +145,7 @@ impl Drive {
                 writer,
                 key,
                 on,
+                every_ms,
                 published,
                 task,
             },
@@ -158,6 +168,23 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             m.on.store(on, Ordering::Relaxed);
             serde_json::json!({"timing": verb, "member": member, "key": m.key, "on": on})
                 .to_string()
+        }
+        ["timing", "every", member, ms] => {
+            // Scenarios §6 step 3 (text 0.3, MC-found): a member published
+            // slower or faster than its period, which the period does not
+            // forbid (§2.4).
+            let members = d.members.lock().expect("not poisoned");
+            let Some(m) = members.get(*member) else {
+                return refused(format!("no member {member:?}: cmd, or an axis added"));
+            };
+            match ms.parse::<u64>() {
+                Ok(n) if n > 0 => {
+                    m.every_ms.store(n, Ordering::Relaxed);
+                    serde_json::json!({"timing": "every", "member": member, "key": m.key, "ms": n})
+                        .to_string()
+                }
+                _ => refused(format!("{ms:?}: a whole number of milliseconds above 0")),
+            }
         }
         ["timing", "declare", axis] => {
             // Scenarios §3 step 5 (text 0.3, F-276): the member's token
@@ -248,8 +275,8 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             serde_json::json!({"timing": "writers", "stamped": members}).to_string()
         }
         _ => refused(
-            "timing pause|resume <member>, declare|add|remove <axis>, offset <ms>, stamp \
-             own|none, published, zid or writers"
+            "timing pause|resume <member>, every <member> <ms>, declare|add|remove <axis>, \
+             offset <ms>, stamp own|none, published, zid or writers"
                 .to_owned(),
         ),
     }

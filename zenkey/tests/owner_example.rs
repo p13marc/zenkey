@@ -2117,6 +2117,26 @@ async fn the_owner_example_drives_timing() {
         .as_nanos();
     assert!(now - ns >= 9_000_000_000, "a payload time 10 s old");
     ask_json(&o, "timing stamp own").await;
+    // `timing every cmd 250` (§6 step 3): slower than its period.
+    let r = ask_json(&o, "timing every cmd 250").await;
+    assert_eq!(r["ms"], 250);
+    let before = ask_json(&o, "timing published").await["members"]["cmd"]
+        .as_u64()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let after = ask_json(&o, "timing published").await["members"]["cmd"]
+        .as_u64()
+        .unwrap();
+    assert!(
+        (3..=5).contains(&(after - before)),
+        "about four in a second at 250 ms: {before} → {after}"
+    );
+    assert!(
+        o.ask("timing every cmd 0")
+            .await
+            .starts_with("refused timing every cmd 0")
+    );
+    ask_json(&o, "timing every cmd 100").await;
     ask_json(&o, "timing pause cmd").await;
     // An axis: its member token, then its samples; removed, the token goes.
     let r = ask_json(&o, "timing add x").await;
@@ -2210,6 +2230,7 @@ fn the_help_documents_the_timing_surface() {
         "--timing",
         "--no-hlc",
         "timing pause|resume <member>",
+        "timing every <member> <ms>",
         "timing declare <axis>",
         "timing add <axis>",
         "timing remove <axis>",
@@ -2247,7 +2268,11 @@ fn an_expired_arrival_prints_its_wall_clock() {
         age: StampAge::between(stamped, wall),
     };
     let line = consume::timing::event_line(origin, &ev);
-    let ns = wall.duration_since(UNIX_EPOCH).unwrap().as_nanos().to_string();
+    let ns = wall
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
+        .to_string();
     assert_eq!(line["wall_ns"], serde_json::Value::String(ns), "{line}");
     assert_eq!(line["delivered"], false);
     assert_eq!(line["lifespan"]["verdict"], "expired");

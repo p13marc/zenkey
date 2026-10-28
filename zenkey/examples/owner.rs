@@ -985,6 +985,9 @@ timing.v1 (spec/profiles/timing/v1.md)
 
   timing pause|resume <member>    stop or start publishing <member>: cmd, or
                                   axis/<axis>
+  timing every <member> <ms>      publish <member> every <ms> rather than at its
+                                  period (scenarios.md §6 step 3: slower than
+                                  its period, within its deadline)
   timing declare <axis>           declare axis/<axis>'s member token alone (core
                                   §8.1), publishing nothing on it (scenarios.md §3
                                   step 5)
@@ -1003,6 +1006,7 @@ timing.v1 (spec/profiles/timing/v1.md)
 
   Answers, one JSON line each:
     {\"timing\": \"pause\"|\"resume\", \"member\": <member>, \"key\": <key>, \"on\": <bool>}
+    {\"timing\": \"every\", \"member\": <member>, \"key\": <key>, \"ms\": <ms>}
     {\"timing\": \"declare\", \"member\": <member>, \"epoch\": <id>}
     {\"timing\": \"add\", \"member\": <member>, \"key\": <key>, \"epoch\": <id>|null}
       (epoch null: the token `timing declare` declared, kept)
