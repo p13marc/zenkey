@@ -15179,6 +15179,50 @@ Each changes a test only, and the text needs nothing.
 - **§2.8's margin after an open** is in the MUST's paragraph, and core
   0.56 makes it a SHOULD. "So a consumer asks it a margin after the open"
   reads as the way to meet the MUST, not a second rule.
+- **The lowest holder, and an id that is not one** (review-bot on PR
+  #916). `redundancy.v1` §2.3: "Instance ids compare as their 16
+  lowercase hexadecimal digits (core §3.3, D002), character by character,
+  which is their order as unsigned 64-bit integers." Core §1.2 makes an
+  instance id exactly that, so ids of different lengths never meet. A
+  token whose id is anything else is no zk2 token key (core §1.1). zk2py's
+  key parser refuses it, so the actuator never holds it, and its
+  incumbent is the least of the valid ids in that order, with no tie and
+  no order left to a set. The text leaves nothing open here.
+- **A sample before its holder's `meta.zid` is held** (review-bot on PR
+  #916). `redundancy.v1` §2.10: "A sample it cannot attribute,
+  unstamped, or under an id that is no incumbent's `meta.zid`, it
+  discards", and `arbitration.v1` §2.5's outcome 6 counts what §2.10 does
+  not accept as `not_incumbent`. A sample is decided at its arrival, once
+  (§2.9). So one that arrives before the holder's descriptor is held is
+  `not_incumbent`, and is never judged again: no verdict moves.
+  - The descriptor's put precedes the tokens (core §3.3), and §2.5 asks
+    for each holder's descriptor at the start, so the window is at most
+    one GET.
+  - zk2py's actuator subscribes to the descriptors' puts, gets each
+    holder's descriptor at its start and at each token it hears, and says
+    why when a GET fails.
+
+**After review-bot on PR #916.**
+- The incumbent is the least valid instance id, ordered as above
+  (`Actuator.incumbent_of`).
+- The commander tells a standby's refusal by its own type,
+  `zk2py.owner.StandbyRefused`. Any other failed put is counted apart
+  (`failed` in its `commander sent` line, zk2py's own field) and said on
+  stderr.
+- §8's check of zk2py's actuator is strict again: nothing at all on its
+  standard output. The reference's prints `connected <endpoint>` first,
+  so its check stays no switch and no `ready` line.
+- §8's "nothing put" with the reference's actuator prints XFAIL, naming
+  F-274. It is still counted as failed, and listed in the summary
+  (`26 passed, 10 failed (10 of them known: F-274)`). The run exits 0
+  only when every failure is a known one.
+- Both runners skip the `rs` pairings with a line saying so when the
+  black boxes are missing, and exit 2 when an `rs` pairing was asked for
+  by name; `ZK2PY_BLACKBOX` still overrides the path.
+
+After the fixes: `just py-conformance` 3439 of 3439. `arbitration.v1` §8
+and §11, in the four pairings: 62 of 72, the ten failures F-274's,
+XFAIL. `timing.v1` §3 and §4, with the reference's reader: 18 of 18.
 
 **Counts at timing.v1 0.2, arbitration.v1 0.2 and core 0.56:** 276
 entries.

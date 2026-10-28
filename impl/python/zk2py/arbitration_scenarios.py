@@ -59,13 +59,20 @@ EXACT = ["lab/safety", "lab/teleop", "lab/autopilot"]
 
 
 class Report:
+    """Each check's row: its section, name, outcome, detail, and the open
+    finding it is known to fail by, if any. A known failure prints XFAIL,
+    naming the finding, and still counts as failed; one that passes prints
+    XPASS, so a fix shows."""
+
     def __init__(self) -> None:
-        self.rows: list[tuple[str, str, bool, str]] = []
+        self.rows: list[tuple[str, str, bool, str, str | None]] = []
         self.late_ms: list[float] = []
 
-    def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
-        self.rows.append((section, name, ok, detail))
-        print(f"{'PASS' if ok else 'FAIL'} [{section}] {name}" + (f": {detail}" if detail else ""), flush=True)
+    def check(self, section: str, name: str, ok: bool, detail: str = "", known: str | None = None) -> bool:
+        self.rows.append((section, name, ok, detail, known))
+        mark = ("XPASS" if ok else "XFAIL") if known else ("PASS" if ok else "FAIL")
+        why = f" (known: {known})" if known else ""
+        print(f"{mark} [{section}] {name}{why}" + (f": {detail}" if detail else ""), flush=True)
         return ok
 
     def note(self, section: str, text: str) -> None:
@@ -934,14 +941,20 @@ def section8(report: Report, oi: str = "py", ci: str = "py") -> None:
             with bus.lock:
                 puts = [(k, p_) for tt, k, p_ in bus.seen if tt >= t and "/lab/rudder-l/" in k]
             err = " ".join(a.err)
+            # zk2py's actuator prints nothing on its standard output when it
+            # refuses; the reference's prints "connected <endpoint>" first (its
+            # --help's first line), which the text does not call a switch, so
+            # for it the check is no switch and no ready line
+            silent = not a.lines() if a.impl == "py" else (
+                not a.switches() and not any(x.startswith("ready ") for x in a.lines()))
             report.check(sec, f"step {name}: A_l refuses to start: exit 1, no token of lab/rudder-l, no switch "
                               f"printed, the refusal naming {reason}",
-                         code == 1 and not appeared and not a.switches()
-                         and not any(x.startswith("ready ") for x in a.lines())
+                         code == 1 and not appeared and silent
                          and f"invalid: {reason}" in err and "not started:" in err,
-                         f"exit {code}; stderr {err!r}; {len(appeared)} tokens")
+                         f"exit {code}; stderr {err!r}; {len(appeared)} tokens; stdout {a.lines()}")
             report.check(sec, f"step {name}: nothing of A_l is put (§2.2: \"nothing of the instance is declared or "
-                              f"put\")", not put, f"{len(put)} puts: {puts}")
+                              f"put\")", not put, f"{len(put)} puts: {puts}",
+                         known="F-274" if a.impl == "rs" else None)
         for c in cs.values():
             c.stop()
     finally:
@@ -1284,7 +1297,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pair", action="append", choices=PAIRS, help="commanders:actuators, each py or rs")
     args = ap.parse_args(argv)
     report = Report()
-    for pair in args.pair or ["py:py"]:
+    pairs = args.pair or ["py:py"]
+    if any("rs" in p for p in pairs) and not os.access(OWNER, os.X_OK):
+        # the reference's black box is a path on this machine, ZK2PY_BLACKBOX
+        # its override: with none there, the rs pairings cannot run
+        msg = (f"the reference's owner black box is not at {OWNER} (set ZK2PY_BLACKBOX to the directory "
+               f"holding owner)")
+        if args.pair:
+            print(f"error: {msg}", file=sys.stderr)
+            return 2
+        print(f"SKIP the rs pairings: {msg}", flush=True)
+        pairs = [p for p in pairs if "rs" not in p]
+    for pair in pairs:
         oi, ci = pair.split(":")
         for name, fn in SECTIONS.items():
             if args.only and name not in args.only:
@@ -1300,13 +1324,20 @@ def main(argv: list[str] | None = None) -> int:
                 report.check(f"§{name} [{oi}→{ci}]", "the section ran to its end", False, f"{type(e).__name__}: {e}")
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
+    known = [r for r in report.rows if not r[2] and r[4]]
+    findings = sorted({r[4] for r in known if r[4]})
     late = max(report.late_ms, default=0.0)
-    print(f"arbitration scenarios: {passed} passed, {failed} failed; the largest lateness past the detection bound "
-          f"{late:.3f} ms")
-    for sec, name, ok, detail in report.rows:
+    print(f"arbitration scenarios: {passed} passed, {failed} failed"
+          + (f" ({len(known)} of them known: {', '.join(findings)})" if known else "")
+          + f"; the largest lateness past the detection bound {late:.3f} ms")
+    for sec, name, ok, detail, why in report.rows:
         if not ok:
-            print(f"FAIL [{sec}] {name}: {detail}")
-    return 1 if failed else 0
+            print(f"{'XFAIL' if why else 'FAIL'} [{sec}] {name}" + (f" (known: {why})" if why else "") + f": {detail}")
+        elif why:
+            print(f"XPASS [{sec}] {name} (known: {why}): passes now")
+    # exit 1 on a failure no open finding explains; a known one is counted
+    # and printed, and leaves the exit 0
+    return 1 if failed > len(known) else 0
 
 
 if __name__ == "__main__":

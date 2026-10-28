@@ -507,6 +507,8 @@ class RsC:
         self.start_ns = self.origin + self.start_c
         self._present: int | None = None
         self._zids: list[str] = []
+        #: the owner's state as the last ``state`` answer gave it
+        self._state: str | None = None
         self._polling = threading.Event()
         self._polled_at = 0
         self.closed = False
@@ -1083,7 +1085,18 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     report = Report()
     names = {"py": "zk2py", "rs": "rust"}
-    for pair in args.pair or PAIRS:
+    pairs = list(args.pair or PAIRS)
+    missing = [str(BLACKBOX / b) for b in ("owner", "consume") if not os.access(BLACKBOX / b, os.X_OK)]
+    if any("rs" in p for p in pairs) and missing:
+        # the reference's black boxes are a path on this machine, ZK2PY_BLACKBOX
+        # their override: with them missing, the rs pairings cannot run
+        msg = f"the reference's black boxes are missing: {', '.join(missing)} (set ZK2PY_BLACKBOX to their directory)"
+        if args.pair:
+            print(f"error: {msg}", file=sys.stderr)
+            return 2
+        print(f"SKIP the rs pairings: {msg}", flush=True)
+        pairs = [p for p in pairs if "rs" not in p]
+    for pair in pairs:
         oi, ci = pair.split(":")
         for name, fn in SECTIONS.items():
             if args.only and name not in args.only:
@@ -1097,7 +1110,7 @@ def main(argv: list[str] | None = None) -> int:
                 report.check(f"§{name} [{names[oi]}→{names[ci]}]", "the section ran to its end", False,
                              f"{type(e).__name__}: {e}")
     if not args.only or "6" in args.only:
-        for oi in sorted({p.split(':')[0] for p in (args.pair or PAIRS)}):
+        for oi in sorted({p.split(':')[0] for p in pairs}):
             try:
                 section6(report, oi)
             except Exception as e:  # noqa: BLE001

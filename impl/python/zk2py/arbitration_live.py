@@ -48,6 +48,7 @@ from typing import Any, Callable
 from . import arbitration as ab
 from . import live
 from . import timing as tm
+from .owner import StandbyRefused
 
 NS = 1_000_000_000
 MS = 1_000_000
@@ -219,15 +220,39 @@ class Actuator:
         if p is None or p["form"] != "data":
             return True  # an earlier outcome decides it
         address = f"{p['system']}/{p['service']}"
-        prov = self.arb.providers.get(address)
-        if prov is None or not prov.known or stamp_id is None:
+        lowest = self.incumbent_of(address)
+        if lowest is None or stamp_id is None:
             return False
-        lowest = min(prov.known, key=lambda i: int(i, 16) if all(c in "0123456789abcdef" for c in i) else 1 << 64)
         zid = self.zids.get((address, lowest))
         if zid is None:
+            # redundancy.v1 §2.10: "A sample it cannot attribute, unstamped, or
+            # under an id that is no incumbent's meta.zid, it discards", and
+            # §2.5's outcome 6 counts what §2.10 does not accept
+            # not_incumbent. A sample is judged at its arrival, once (§2.9:
+            # "Decided at every event"), so one that came before the holder's
+            # descriptor stays counted so: the descriptor's put precedes its
+            # tokens (core §3.3), this actuator subscribes to those puts, and
+            # it gets each holder's descriptor at its start and at each token
+            # it hears, so the window is a GET's at most.
             self._get_descriptor(address, lowest)
             return False
         return tm.zid_value(stamp_id) is not None and tm.zid_value(stamp_id) == tm.zid_value(zid)
+
+    def incumbent_of(self, address: str) -> str | None:
+        """``redundancy.v1`` §2.10's incumbent as §2.5's outcome 6 learns it:
+        the lowest instance known holding the interface's token at
+        ``address``. Instance ids "compare as their 16 lowercase hexadecimal
+        digits (core §3.3, D002), character by character, which is their
+        order as unsigned 64-bit integers" (§2.3). Every id here came through
+        :func:`zk2py.keys.parse`, which takes a token only when its id is 16
+        lowercase hex digits (core §1.2); anything else is no token of the
+        interface, so it holds nothing and is left out, never ranked (the
+        lock held)."""
+        from .lexical import INSTANCE_ID
+
+        prov = self.arb.providers.get(address)
+        ids = sorted(i for i in (prov.known if prov is not None else ()) if INSTANCE_ID.fullmatch(i))
+        return ids[0] if ids else None
 
     def _read_at_start(self) -> None:
         """§2.5 outcome 6 (text 0.2): "a consumer of a governed interface
@@ -271,8 +296,12 @@ class Actuator:
                         except ValueError:
                             pass
                         break
-            except Exception:  # noqa: BLE001 - closed meanwhile
-                pass
+            except Exception as e:  # noqa: BLE001 - a GET that fails holds no zid; said, and asked again
+                with self.lock:
+                    closed = self.closed
+                if not closed:
+                    self.warn(f"descriptor of {address} {inst}: {type(e).__name__}: {e}; asked again at its next "
+                              f"sample")
             finally:
                 with self.lock:
                     self._getting.discard((address, inst))
@@ -545,7 +574,12 @@ class Commander:
         self.lead_s = lead_s
         self.lock = threading.Lock()
         self.n = 0
+        #: puts the writer refused while standing by (redundancy.v1 §2.4)
         self.refused = 0
+        #: puts that failed otherwise, and the last such failure, said on
+        #: stderr: a failure that shows, never a refusal
+        self.failed = 0
+        self.last_failure: str | None = None
         self.raw_n = 0
         self.raw = threading.Event()
         self.held = threading.Event()
@@ -590,23 +624,30 @@ class Commander:
                 n = self.n
             try:
                 self.owner.publish(self.key, f"{self.service} {n}".encode())
-            except Exception as e:  # noqa: BLE001 - standing by, or closed while putting
-                if self.candidate is not None and "stand" in str(e).lower():
-                    with self.lock:
-                        self.refused += 1
-                    continue
-                if self.owner.session is None:
-                    return
+            except StandbyRefused:
+                # the writer refuses while it stands by (redundancy.v1 §2.4)
                 with self.lock:
                     self.refused += 1
+                continue
+            except Exception as e:  # noqa: BLE001 - any other failure counted apart and said
+                if self.stop.is_set() or self.owner.session is None:
+                    return  # closed while putting
+                with self.lock:
+                    self.failed += 1
+                    first = self.last_failure is None
+                    self.last_failure = f"{type(e).__name__}: {e}"
+                if first or self.failed % 100 == 0:
+                    print(f"zk2py commander {self.service}: put {n} failed ({self.failed} so far): "
+                          f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
                 continue
             with self.lock:
                 self.n += 1
 
-    def sent(self) -> tuple[int, int]:
-        """The puts made through the writer, and those it refused."""
+    def sent(self) -> tuple[int, int, int]:
+        """The puts made through the writer, those it refused while standing
+        by, and those that failed otherwise."""
         with self.lock:
-            return self.n, self.refused
+            return self.n, self.refused, self.failed
 
     def count(self) -> int:
         """The puts made so far."""

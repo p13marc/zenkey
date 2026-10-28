@@ -75,8 +75,10 @@ def _commander(args: argparse.Namespace) -> int:
                 (c.raw.set if cmd.endswith("on") else c.raw.clear)()
                 say({"commander": "raw", "raw": c.raw.is_set()})
             elif cmd == "commander sent":
-                n, refused = c.sent()
-                say({"commander": "sent", "sent": n, "refused": refused})
+                n, refused, failed = c.sent()
+                # "failed" is zk2py's own: a put that failed otherwise than a
+                # standby's refusal (the reference's line has sent and refused)
+                say({"commander": "sent", "sent": n, "refused": refused, "failed": failed})
             elif cmd == "commander new-epoch":
                 _, new = c.remint()
                 say({"commander": "new-epoch", "instance": new})

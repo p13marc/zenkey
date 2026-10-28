@@ -2253,7 +2253,11 @@ cold, and ran the scenarios against the Rust runtime:
   and `open` (core 0.56's open, measured: 0 of 60 round trips asked at the
   event stood before the reopen's telling) are zk2py's alone. The
   reference's actuators' instants are placed on the runner's clock by
-  their `start` line's arrival.
+  their `start` line's arrival. A check an open finding is known to fail
+  prints XFAIL naming it (F-274), is counted as failed and listed in the
+  summary, and leaves the exit 0. With the black boxes missing, both
+  runners skip the `rs` pairings with a line, or exit 2 when one was
+  asked for by name; `ZK2PY_BLACKBOX` overrides their directory.
 
 ## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.49)
 
