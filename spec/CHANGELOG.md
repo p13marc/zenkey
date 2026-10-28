@@ -3,7 +3,7 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.56 — 2026-10-28: a close's withdrawals come before its transport event (round 77's F-268, #909)
+## 0.56 — 2026-10-28: a close's withdrawals come before its transport event, and an open before its interests (round 77's F-268, #909)
 
 zk2py round 77 read `arbitration.v1` 0.1 and core 0.54 cold, and ran its
 scenarios live. On zenoh-python 1.10.1 the watch session's liveliness
@@ -34,8 +34,24 @@ the reference (`zenkey/tests/presence.rs`,
 and no link held when each was heard; a subscriber without history told no
 token heard nothing at its first close.
 
+**Changed: §8.1, an open told before the interests (what the reference's
+runtime found).** Running §7 three times under nextest, the reference's
+actuators failed two: at a heal they applied the cut's withdrawals without
+the reopen's declarations. zenoh 1.10.1 hands a transport that opens to
+the session's handlers, the transport events listener's among them, before
+the router's `new_transport_unicast` makes its face and declares the
+subscribers' interests again, so a round trip asked at once at the open
+can find no face, and stand at once, complete and empty, before the
+reopen's telling. A new bullet: a reader SHOULD ask the round trip after
+an open a margin after its event (the reference: 100 ms), and take what
+its watch heard before the round trip's reply as heard before it.
+Appendix B gives the source and the measurement (2 of 30 round trips asked
+at the event stood before the telling, 0 of 30 asked 100 ms later); with
+both, §7 passed six runs of six.
+
 **Changed: Appendix C.** `arbitration.v1`'s scenarios §7 evidences the
-order, by its control step, and a move begun at the first sign of it.
+order, by its control step, a move begun at the first sign of it, and the
+round trip after an open asked a margin after it.
 
 **Deliberately not changed.**
 - **"Read again at once, when its watch session's transport closes or
