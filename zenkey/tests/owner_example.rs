@@ -2174,3 +2174,150 @@ fn the_help_documents_the_timing_surface() {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
 }
+
+/// The next switch line of an actuator, as JSON.
+async fn switch_line(o: &Running) -> serde_json::Value {
+    loop {
+        let l = line(&o.lines).await;
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&l)
+            && v.get("switch").is_some()
+        {
+            return v;
+        }
+    }
+}
+
+/// `arbitration.v1` in the owner example (#909, BB): `--commander` puts
+/// `steer.v1`'s `cmd` at its period, `<service> <n>`, from its lead after
+/// its tokens, held and resumed from stdin; `--arbitrate` is an actuator
+/// on `rudder.v1`, printing each switch as the scenarios' conventions
+/// write it, its first `start`'s to the dead-man, and its counts on
+/// `arbitrate counts`, `deleted` among them (text 0.2, F-271); an invalid
+/// declaration refuses its start, nothing declared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_arbitrates() {
+    let (_r1, ep) = router(None).await;
+    let a = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--arbitrate",
+        "lab/safety,lab/teleop",
+        "lab/rudder-l",
+    ]);
+    assert_eq!(line(&a.lines).await, format!("connected {ep}"));
+    assert!(line(&a.lines).await.starts_with("ready "));
+    let start = switch_line(&a).await;
+    assert_eq!(
+        start["switch"],
+        serde_json::json!({"from": null, "to": null, "cause": "start"})
+    );
+    assert_eq!(start["last_ms"], serde_json::Value::Null);
+    let t = spawn_owner(&["--connect", &ep, "--commander", "lab/teleop"]);
+    assert_eq!(line(&t.lines).await, format!("connected {ep}"));
+    let _ready = line(&t.lines).await;
+    let to_teleop = switch_line(&a).await;
+    assert_eq!(
+        to_teleop["switch"],
+        serde_json::json!({"from": null, "to": "lab/teleop", "cause": "sample"})
+    );
+    assert!(to_teleop["at_ms"].as_f64().unwrap() > 0.0);
+    let s = spawn_owner(&["--connect", &ep, "--commander", "lab/safety"]);
+    assert_eq!(line(&s.lines).await, format!("connected {ep}"));
+    let _ready = line(&s.lines).await;
+    let to_safety = switch_line(&a).await;
+    assert_eq!(
+        to_safety["switch"],
+        serde_json::json!({"from": "lab/teleop", "to": "lab/safety", "cause": "sample"})
+    );
+    assert_eq!(ask_json(&s, "commander hold").await["on"], false);
+    let back = switch_line(&a).await;
+    assert_eq!(
+        back["switch"],
+        serde_json::json!({"from": "lab/safety", "to": "lab/teleop", "cause": "deadline"})
+    );
+    let gap = back["at_ms"].as_f64().unwrap() - back["last_ms"].as_f64().unwrap();
+    assert!(gap > 300.0 && gap <= 356.0, "{gap}");
+    let counts = ask_json(&a, "arbitrate counts").await;
+    let safety = &counts["counts"]["providers"]["lab/safety"];
+    for k in [
+        "delivered",
+        "not_active",
+        "deleted",
+        "expired",
+        "not_incumbent",
+    ] {
+        assert!(safety[k].is_u64(), "{k} in {counts}");
+    }
+    assert!(safety["delivered"].as_u64().unwrap() > 0);
+    assert_eq!(counts["counts"]["unbound"], 0);
+    let state = ask_json(&a, "arbitrate state").await;
+    assert_eq!(state["active"], "lab/teleop");
+    assert_eq!(state["watching"], true);
+    assert_eq!(state["deadline_ms"], 300);
+    assert!(
+        ask_json(&a, "arbitrate reads").await["round_trips"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+    assert!(
+        ask_json(&s, "commander sent").await["sent"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    s.stop().await;
+    t.stop().await;
+    a.stop().await;
+
+    // A reserved policy: refused at start, exit 1 from main.
+    let dir = tempfile::tempdir().unwrap();
+    let freshest = dir.path().join("rudder.v1.toml");
+    std::fs::write(
+        &freshest,
+        owner::arbitrate::RUDDER_TOML.replace("\"priority\"", "\"freshest\""),
+    )
+    .unwrap();
+    let args: Vec<String> = [
+        "--connect",
+        ep.as_str(),
+        "--arbitrate",
+        "lab/safety",
+        "lab/rudder-l",
+        freshest.to_str().unwrap(),
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect();
+    let opts = owner::Options::parse(&args).unwrap();
+    let e = owner::run(opts, |_| {}, async {}).await.unwrap_err();
+    let e = e.to_string();
+    assert!(
+        e.starts_with("not started: lab/rudder-l: role \"cmd\" (steer.v1): arbitration.v1 invalid: policy_unsupported"),
+        "{e}"
+    );
+}
+
+#[test]
+fn the_help_documents_the_arbitration_surface() {
+    for piece in [
+        "--arbitrate <entry>",
+        "--arbitrate-no-watch",
+        "--watch-connect <endpoint>",
+        "--clock-bound-ms <ms>",
+        "--commander",
+        "--commander-lead-ms <ms>",
+        "arbitrate counts",
+        "arbitrate state",
+        "arbitrate reads",
+        "\"deleted\"",
+        "commander hold|resume",
+        "commander raw on|off",
+        "commander sent",
+        "commander new-epoch",
+        "\"switch\"",
+        "not started: <system>/<service>",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}
