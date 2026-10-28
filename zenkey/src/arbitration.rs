@@ -270,6 +270,25 @@ impl Core {
     }
 }
 
+/// A role's tasks, aborted when dropped: with its [`Arbitration`], or with
+/// a start that failed half-way, so that none outlives it holding the core.
+#[derive(Default)]
+struct Tasks(Vec<tokio::task::JoinHandle<()>>);
+
+impl Tasks {
+    fn push(&mut self, t: tokio::task::JoinHandle<()>) {
+        self.0.push(t);
+    }
+}
+
+impl Drop for Tasks {
+    fn drop(&mut self) {
+        for t in &self.0 {
+            t.abort();
+        }
+    }
+}
+
 /// One role's arbitration, running: its subscribers, its watch, its timer.
 /// Dropping it undeclares them and stops its tasks.
 pub struct Arbitration {
@@ -278,7 +297,7 @@ pub struct Arbitration {
     watch: Option<zenoh::Session>,
     reads: Arc<AtomicU64>,
     not_made: Arc<AtomicU64>,
-    tasks: Vec<tokio::task::JoinHandle<()>>,
+    _tasks: Tasks,
     _subs: Vec<Subscriber<()>>,
     _watch_subs: Vec<Subscriber<()>>,
     _lifespan: Option<timing::Running>,
@@ -291,14 +310,6 @@ impl std::fmt::Debug for Arbitration {
             .field("deadline", &self.deadline)
             .field("watching", &self.watching())
             .finish_non_exhaustive()
-    }
-}
-
-impl Drop for Arbitration {
-    fn drop(&mut self) {
-        for t in &self.tasks {
-            t.abort();
-        }
     }
 }
 
@@ -501,7 +512,7 @@ where
     let (reread_tx, reread_rx) = tokio::sync::mpsc::unbounded_channel::<Addr>();
     let (describe_tx, describe_rx) = tokio::sync::mpsc::unbounded_channel::<(Addr, InstanceId)>();
     let rearm = Arc::new(tokio::sync::Notify::new());
-    let mut tasks = Vec::new();
+    let mut tasks = Tasks::default();
     // The dispatcher: every event, in the order decided.
     tasks.push(tokio::spawn(async move {
         while let Some(ev) = rx.recv().await {
@@ -768,7 +779,7 @@ where
         watch: i.watch,
         reads,
         not_made,
-        tasks,
+        _tasks: tasks,
         _subs: subs,
         _watch_subs: watch_subs,
         _lifespan: lifespan,
