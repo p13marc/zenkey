@@ -71,7 +71,10 @@
 //! declaration, each member's samples and pairs in the fixtures' tokens,
 //! #819). DD gave `desired.v1` its domain (`desired`: each target's roles
 //! with §5's four answers, what was read beside them and how long a
-//! target was behind, #840).
+//! target was behind, #840). MC gave `timing.v1` its domain (`timing`: each
+//! timed member's three answers over a window, rolled up per resource and
+//! per run by each question's finding, and what the window opened on,
+//! #908).
 
 mod acl;
 mod admin;
@@ -106,6 +109,7 @@ mod storage;
 mod tape;
 mod telemetry;
 mod timeline;
+mod timing;
 mod watch;
 mod why;
 
@@ -142,5 +146,6 @@ pub use storage::*;
 pub use tape::*;
 pub use telemetry::*;
 pub use timeline::*;
+pub use timing::*;
 pub use watch::*;
 pub use why::*;

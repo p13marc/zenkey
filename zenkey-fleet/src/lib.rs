@@ -85,7 +85,11 @@
 //!   queue, presence seeded, state seeded by S4's GET, #819), and
 //!   `desired` (a `desired.v1` tool's reading of each target's roles: the
 //!   targets' and authors' presence, the contracts, the target's reports
-//!   and S4's GET of each slice, made again within a window, #840). The
+//!   and S4's GET of each slice, made again within a window, #840), and
+//!   `timing` (a `timing.v1` tool's window: the timed streams the
+//!   descriptors declare, their members' arrivals read in the subscriber's
+//!   callback and the owners' tokens in one queue, the window started once
+//!   presence and every descriptor stand, a withdrawal's re-read, #908). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -133,6 +137,10 @@
 //!   #819), `desired` (a role's slice resolved from the author's
 //!   declaration and the target's binding, its reading projected into
 //!   `zenkey_model::desired`'s, and how long a target was behind, #840),
+//!   `timing` (one tool's window over timed members: the model's tracker
+//!   and lifespan reader per provider and resource, each member's span
+//!   held, misses with the owner's state, arrivals and lifespans, in one
+//!   order whose instants never go back, #908),
 //!   `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
@@ -148,7 +156,9 @@
 //!   the revision it claims, #703), `health` (`health.v1`'s verdicts,
 //!   #721), `config` (`config.v1`'s §5 answers, #768), `alarms`
 //!   (`alarms.v1`'s §5 answers, #800), `telemetry` (`telemetry.v1`'s,
-//!   #819) and `desired` (`desired.v1`'s, each the model's, #840), and
+//!   #819), `desired` (`desired.v1`'s, each the model's, #840) and
+//!   `timing` (`timing.v1`'s three questions per member, rolled up by each
+//!   question's finding, #908), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -333,11 +343,19 @@ pub use bus::telemetry::{
     TelemetrySpec, metric_resources, observe as observe_telemetry, run_telemetry,
 };
 pub use judge::telemetry::judge as judge_telemetry;
+// `timing.v1` (#908, MC): a scope's timed streams over one window, as the
+// profile's tool reads them — the reads, the session-free book they fold
+// into, and the judge.
+pub use bus::timing::{
+    TimingObservation, TimingSpec, observe as observe_timing, run_timing, timed_resources_in_scope,
+};
+pub use judge::timing::judge as judge_timing;
 pub use model::config::{Assignment, Given, TypedValues};
 pub use model::telemetry::{
     MemberBook, MetricResource, MetricSample, MetricType, PairPresence, PairSeen, PairTally,
     SampleVia as MetricVia, TelemetryBook, TelemetryScope,
 };
+pub use model::timing::{MemberWindow, TimedResource, TimedSample, TimingBook, TimingScope};
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
@@ -592,6 +610,18 @@ const _: () = {
             &store,
             &offline,
             crate::TelemetrySpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
+            |_| {},
+        ));
+        // A timing window holds its subscriptions, its queue, its reads in
+        // flight and its receive path's watch across awaits (#908, MC).
+        is_send(&crate::run_timing(
+            session,
+            None,
+            "",
+            crate::TimingScope::all(),
+            &store,
+            &offline,
+            crate::TimingSpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
             |_| {},
         ));
     }

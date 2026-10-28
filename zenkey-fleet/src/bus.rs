@@ -53,6 +53,7 @@ pub mod session;
 pub mod stall;
 pub(crate) mod teardown;
 pub mod telemetry;
+pub mod timing;
 pub mod watch;
 pub mod why;
 pub mod write;

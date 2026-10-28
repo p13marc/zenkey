@@ -255,20 +255,32 @@ impl TelemetryScope {
     /// key expression, or the selector where that is narrower. `None` when
     /// the two do not intersect.
     pub fn subscription(&self, r: &MetricResource) -> Option<String> {
-        if !self.selects_owner(&r.address) || self.iface.as_ref().is_some_and(|i| *i != r.iface) {
+        self.subscription_to(&r.address, &r.iface, &r.selector)
+    }
+
+    /// [`TelemetryScope::subscription`] of any resource: its owner, its
+    /// interface and its members' key expression, base-relative (a
+    /// `timing.v1` reading's scope is this one, #908).
+    pub fn subscription_to(
+        &self,
+        address: &Addr,
+        iface: &IfaceId,
+        selector: &str,
+    ) -> Option<String> {
+        if !self.selects_owner(address) || self.iface.as_ref().is_some_and(|i| i != iface) {
             return None;
         }
         let Some((given, sel)) = &self.selector else {
-            return Some(r.selector.clone());
+            return Some(selector.to_owned());
         };
-        let ours = KeyExpr::try_from(r.selector.as_str()).ok()?;
+        let ours = KeyExpr::try_from(selector).ok()?;
         if !sel.intersects(&ours) {
             return None;
         }
         Some(if ours.includes(sel) {
             given.clone()
         } else {
-            r.selector.clone()
+            selector.to_owned()
         })
     }
 

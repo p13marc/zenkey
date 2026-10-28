@@ -86,4 +86,5 @@ pub mod structural;
 pub mod target;
 pub mod telemetry;
 pub mod timeline;
+pub mod timing;
 pub mod tree;
