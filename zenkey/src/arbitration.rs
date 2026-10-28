@@ -919,6 +919,15 @@ struct Follower {
 
 type Trip = std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>;
 
+/// How long after a move of the watch session the round trip that ends it
+/// is asked (text 0.2; core §8.1, 0.56): zenoh 1.10.1 tells a transport's
+/// open to its listener before its router re-declares the session's
+/// subscribers' interests on it, and a round trip asked in between finds no
+/// face, and stands at once, complete and empty, before the reopen's
+/// telling (measured: 2 of 30 asked at the event; 0 of 30 asked 100 ms
+/// after, `tests/presence.rs`).
+const AFTER_OPEN: Duration = Duration::from_millis(100);
+
 impl Follower {
     async fn run(
         mut self,
@@ -952,16 +961,7 @@ impl Follower {
             };
             tokio::select! {
                 h = heard.recv(), if heard_open => match h {
-                    Some(h) => {
-                        self.move_begins(&h).await;
-                        let held = lock(&self.core).token(&h.key, h.put);
-                        let ev = if h.put {
-                            Event::Declared(&h.key)
-                        } else {
-                            Event::Withdrawn(&h.key)
-                        };
-                        lock(&self.core).presence(h.at, ev, held);
-                    }
+                    Some(h) => self.heard(h).await,
                     None => heard_open = false,
                 },
                 a = reread.recv() => match a {
@@ -985,7 +985,11 @@ impl Follower {
                     moves_seen = barrier.as_ref().map_or(moves_seen, crate::presence::Barrier::moves);
                     self.awaiting_event = None;
                     lock(&self.core).presence(Instant::now(), Event::Moved, None);
-                    trip = Some(self.ask_trip(Duration::ZERO));
+                    // Not at the event's instant: zenoh 1.10.1 tells an
+                    // open before its router declares the subscribers'
+                    // interests again, and a round trip asked in between
+                    // stands with nothing told (core §8.1, 0.56).
+                    trip = Some(self.ask_trip(AFTER_OPEN));
                 }
                 stood = tripped => {
                     trip = None;
@@ -993,6 +997,13 @@ impl Follower {
                     // A move begun at a withdrawal (F-268) stands only by a
                     // round trip asked after its transport event.
                     if stood && established && self.awaiting_event.is_none() {
+                        // What the watch heard before the round trip's
+                        // final reply is the move's: the reopen's telling
+                        // comes first (core §8.1, 0.44), and waits in the
+                        // channel, so it is taken before the move ends.
+                        while let Ok(h) = heard.try_recv() {
+                            self.heard(h).await;
+                        }
                         lock(&self.core).presence(Instant::now(), Event::Stood, None);
                     } else if !self.cut_off().await {
                         // Not through a session cut off: asked again until
@@ -1003,6 +1014,19 @@ impl Follower {
                 }
             }
         }
+    }
+
+    /// A token heard, to the arbiter and the incumbents: a withdrawal heard
+    /// with no link held beginning a move first.
+    async fn heard(&mut self, h: Heard) {
+        self.move_begins(&h).await;
+        let held = lock(&self.core).token(&h.key, h.put);
+        let ev = if h.put {
+            Event::Declared(&h.key)
+        } else {
+            Event::Withdrawn(&h.key)
+        };
+        lock(&self.core).presence(h.at, ev, held);
     }
 
     /// A withdrawal heard while the watch session holds no link begins a

@@ -800,12 +800,16 @@ async fn w4_2_a_control_loop_arbitrated() {
     for n in ["thruster-l", "thruster-r"] {
         thrusters.push(thruster(&ep, n).await);
     }
+    // Following `who` by the arbiter and by the last switch told: the
+    // switch reaches the application from a task of its own.
     let follows = |who: &'static str| {
-        let t: Vec<_> = thrusters.iter().map(|(_, a, _)| a).collect();
+        let t: Vec<_> = thrusters.iter().map(|(_, a, sw)| (a, sw)).collect();
         async move {
-            for a in t {
+            for (a, sw) in t {
                 eventually(&format!("following {who}"), || async {
+                    let told = sw.lock().unwrap().last().map(|s| s.to.clone());
                     a.active().map(|x| x.to_string()).as_deref() == Some(who)
+                        && told.flatten().is_some_and(|t| t.to_string() == who)
                 })
                 .await;
             }
@@ -860,7 +864,10 @@ async fn w4_2_a_control_loop_arbitrated() {
     teleop.hold();
     autopilot.hold();
     for (_, a, sw) in &thrusters {
-        eventually("the dead-man", || async { a.dead_man() }).await;
+        eventually("the dead-man", || async {
+            a.dead_man() && sw.lock().unwrap().last().is_some_and(|s| s.to.is_none())
+        })
+        .await;
         let s = last(sw);
         assert_eq!((s.to.clone(), s.cause), (None, Cause::Deadline));
         let gap = s.at.duration_since(s.last.unwrap());

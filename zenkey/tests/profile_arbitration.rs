@@ -252,6 +252,19 @@ impl Actuator {
         self.arb().active().map(|a| a.to_string())
     }
 
+    /// Whether it follows `who`, by its arbiter and by the last switch it
+    /// told: the switch reaches the application from a task of its own,
+    /// after the arbiter decided it.
+    fn follows(&self, who: &str) -> bool {
+        self.active().as_deref() == Some(who)
+            && self
+                .rec
+                .switches()
+                .last()
+                .and_then(|s| s.to.as_ref())
+                .is_some_and(|t| t.to_string() == who)
+    }
+
     fn angle_key(&self) -> String {
         format!("zk2/lab/{}/rudder.v1/state/angle", self.name)
     }
@@ -445,7 +458,7 @@ impl World {
     async fn all_follow(&self, who: &str) {
         for act in &self.acts {
             eventually(&format!("{} follows {who}", act.name), || async {
-                act.active().as_deref() == Some(who)
+                act.follows(who)
             })
             .await;
         }
@@ -855,10 +868,7 @@ async fn s4_a_clean_stop_that_publishes_after_its_withdrawal() {
     tokio::time::sleep(LEAD).await;
     x.on.store(true, Ordering::SeqCst);
     for act in &acts {
-        eventually("follows safety", || async {
-            act.active().as_deref() == Some("lab/safety")
-        })
-        .await;
+        eventually("follows safety", || async { act.follows("lab/safety") }).await;
     }
     let base: Vec<usize> = acts.iter().map(|a| a.rec.switches().len()).collect();
     let tail_from: Vec<u64> = acts
@@ -1266,7 +1276,7 @@ async fn s9_a_wildcard_bindings_order() {
     let cmd = found.requires.iter().find(|r| r.role == "cmd").unwrap();
     assert_eq!(cmd.bindings, ["lab/safety", "lab/*"], "in that order");
     eventually("follows autopilot", || async {
-        act.active().as_deref() == Some("lab/autopilot")
+        act.follows("lab/autopilot")
     })
     .await;
     // §2.4: an address `lab/*` covers is one provider, each sample its
@@ -1371,10 +1381,7 @@ async fn s11_a_governed_commanders_standby() {
         o.binding = &["lab/safety", "lab/teleop"];
         let started = Instant::now();
         let act = actuator(&ep, o).await.unwrap();
-        eventually("follows safety", || async {
-            act.active().as_deref() == Some("lab/safety")
-        })
-        .await;
+        eventually("follows safety", || async { act.follows("lab/safety") }).await;
         assert!(
             started.elapsed() <= Duration::from_secs(1) + T,
             "{n}: following safety within 1 s of its start"

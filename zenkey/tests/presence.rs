@@ -2297,3 +2297,105 @@ async fn f268_a_close_tells_its_withdrawals_before_its_transport_event() {
 /// F-268's cuts: the first tells nothing, the five after it each three
 /// withdrawals.
 const F268_CUTS: usize = 6;
+
+/// What `arbitration.v1`'s runtime found (text 0.2, core 0.56, #909's
+/// BB): zenoh 1.10.1 tells a session's transport events listener that a
+/// transport opened before its router re-declares the session's
+/// subscribers' interests on it (`net/runtime/mod.rs`, `new_unicast`: the
+/// session's handlers, the listener's among them, then the router's
+/// `new_transport_unicast`, which re-propagates them). A round trip asked
+/// at once at the open can find no face to go to, and is answered at
+/// once, complete and empty, before the reopen tells the subscribers a
+/// token: its standing says nothing. One asked 100 ms after the open
+/// follows the reopen's telling, every time.
+///
+/// A watch session through a link the test cuts and heals, its three
+/// subscribers without history over three tokens. [`OPEN_ROUNDS`] reopens;
+/// at each, a round trip asked at the open event, then one 100 ms after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_round_trip_asked_at_the_open_event_can_precede_the_reopen() {
+    use std::time::{Duration, Instant};
+    let (_r1, ep) = router(None).await;
+    let holder = client(&ep).await;
+    let mut _tokens = Vec::new();
+    for i in 1..=3 {
+        _tokens.push(
+            holder
+                .liveliness()
+                .declare_token(format!(
+                    "zk2/lab/s{i}/@zk/alive/steer.v1/000000000000000{i}/0123456789abcdef"
+                ))
+                .await
+                .unwrap(),
+        );
+    }
+    let link = common::link_to(&ep).await;
+    let watch = common::retrying_client(link.endpoint()).await;
+    let told: Arc<Mutex<Vec<Instant>>> = Arc::default();
+    let mut _subs = Vec::new();
+    for i in 1..=3 {
+        let t = Arc::clone(&told);
+        _subs.push(
+            presence::declare_subscriber(&watch, format!("zk2/lab/s{i}/@zk/alive/**"))
+                .history(false)
+                .callback(move |s: Sample| {
+                    if s.kind() == SampleKind::Put {
+                        t.lock().unwrap().push(Instant::now());
+                    }
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    let key = "zk2/lab/s1/@zk/settle";
+    assert!(presence::settle_at(&watch, key, T).await.unwrap());
+    let (tx, rx) = flume::unbounded::<Instant>();
+    let _listener = watch
+        .info()
+        .transport_events_listener()
+        .callback(move |ev| {
+            if ev.kind() == SampleKind::Put {
+                let _ = tx.send(Instant::now());
+            }
+        })
+        .await
+        .unwrap();
+    let mut at_once_before = 0;
+    for round in 0..OPEN_ROUNDS {
+        link.cut();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let from = told.lock().unwrap().len();
+        link.heal();
+        let opened = rx.recv_async().await.unwrap();
+        // At once at the open event.
+        assert!(presence::settle_at(&watch, key, T).await.unwrap());
+        let replied = Instant::now();
+        let early = told.lock().unwrap()[from..]
+            .iter()
+            .filter(|at| **at <= replied)
+            .count();
+        // 100 ms after it.
+        tokio::time::sleep_until((opened + Duration::from_millis(100)).into()).await;
+        assert!(presence::settle_at(&watch, key, T).await.unwrap());
+        let later = Instant::now();
+        let after = told.lock().unwrap()[from..]
+            .iter()
+            .filter(|at| **at <= later)
+            .count();
+        assert_eq!(
+            after, 3,
+            "round {round}: the reopen's telling before the later reply"
+        );
+        if early < 3 {
+            at_once_before += 1;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    eprintln!(
+        "a round trip asked at the open event stood before the reopen's telling at \
+         {at_once_before} of {OPEN_ROUNDS} reopens"
+    );
+}
+
+/// The reopens of the test above.
+const OPEN_ROUNDS: usize = 10;
