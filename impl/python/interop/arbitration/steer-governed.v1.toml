@@ -1,0 +1,22 @@
+# arbitration.v1's scenarios §11 (text 0.2, F-270): steer.v1 minor 1, which
+# lists redundancy.v1 in uses, its election claim on [defaults], cmd as
+# minor 0 declares it. Written from spec/profiles/arbitration/scenarios.md
+# §11's setup, which gives no listing; the reference keeps its own as
+# zenkey/tests/contracts/steer-governed.v1.toml.
+[interface]
+name  = "steer"
+major = 1
+minor = 1
+uses  = ["timing.v1", "redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.cmd]                  # one command every 50 ms, missed 300 ms after the last
+kind        = "stream"
+type        = { raw = "text/plain" }
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "real_time"
+express     = true
+annotations = { "timing.period_ms" = 50, "timing.deadline_ms" = 300 }

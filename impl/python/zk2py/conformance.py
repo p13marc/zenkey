@@ -1184,12 +1184,23 @@ def _timing_deadlines(path: Path) -> list[Result]:
 
     out = []
     for i, c in enumerate(_load_json(path)["cases"]):
-        t = tm.Tracker(c["deadline_ms"], c["bound"], c["known"])
-        for e in c["events"]:
-            t.event(e)
-        due = t.next_due()
-        got = {"transitions": [r.expect() for r in t.reports], "held": t.held(),
-               "next_due_ms": None if due is None else tm.ns_to_ms(due)}
+        epoch = bool(c.get("epoch", False))
+        if "resource" in c:
+            # text 0.2, F-259: the resource in place of a deadline; a tracker
+            # only where the declaration judges one
+            t = tm.tracker_for(tm.declaration_of({"resource": c["resource"]}), c["bound"], c["known"], epoch)
+        else:
+            t = tm.Tracker(c["deadline_ms"], c["bound"], c["known"], epoch=epoch)
+        if t is None:
+            got: dict[str, Any] = {"transitions": [], "held": [], "next_due_ms": None}
+        else:
+            for e in c["events"]:
+                t.event(e)
+            due = t.next_due()
+            got = {"transitions": [r.expect() for r in t.reports], "held": t.held(),
+                   "next_due_ms": None if due is None else tm.ns_to_ms(due)}
+        if "tracker" in c["expect"]:
+            got["tracker"] = t is not None
         out.append(_check(f"deadlines #{i}: {c['note']}", got, c["expect"]))
     return out
 
@@ -1231,7 +1242,12 @@ def _timing_conclusions(path: Path) -> list[Result]:
 
     out = []
     for i, c in enumerate(_load_json(path)["cases"]):
-        got = {q: a.pair() for q, a in tm.conclude(tm.declaration_of(c), tm.Reading.of(c["reading"])).items()}
+        if "rollup" in c:
+            # text 0.2, F-264: one question over a resource or a run
+            r = c["rollup"]
+            got: dict[str, Any] = {"answer": tm.rollup(r["question"], [tm.Answer(a, "") for a in r["answers"]]).answer}
+        else:
+            got = {q: a.pair() for q, a in tm.conclude(tm.declaration_of(c), tm.Reading.of(c["reading"])).items()}
         out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
     return out
 
@@ -3462,6 +3478,26 @@ def _arbitration_readings(root: Path) -> list[tuple[str, Any, Any]]:
         a = ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab/safety", "lab/teleop"])
         got = [s for e in events[len(seq):] for s in a.event(e).switches] if all(a.event(e) for e in seq) else []
         out.append((f"{label} §2.8 (F-268): {name}", [(s.from_, s.to, s.cause) for s in got], want_sw))
+    # text 0.2 (round 78): the counts line in rank order, every provider
+    # known (F-271); scenarios §11's governed revision.
+    label2 = "arbitration.v1 0.2"
+    a = ab.Arbiter("steer.v1", "stream", "cmd", {}, 300, ["lab/safety", "lab/*"])
+    for e in ({"at": 0, "event": "start"}, {"at": 1, "event": "sample", "key": "zk2/lab/teleop/steer.v1/stream/cmd"},
+              {"at": 2, "event": "sample", "key": "zk2/lab/autopilot/steer.v1/stream/cmd", "delete": True},
+              {"at": 3, "event": "sample", "key": "zk2/lab/safety/steer.v1/stream/cmd", "incumbent": False}):
+        a.event(e)
+    line = a.counts_line()
+    out.append((f"{label2} scenarios' conventions (F-271): the counts line lists every provider known in rank order, "
+                f"five counts each: the exact entry first, then the wildcard's heard by system and service",
+                [(k, v["delivered"], v["deleted"], v["not_incumbent"], len(v)) for k, v in line["providers"].items()],
+                [("lab/safety", 0, 0, 1, 5), ("lab/autopilot", 0, 1, 0, 5), ("lab/teleop", 1, 0, 0, 5)]))
+    gov = load_contract(idir / "steer-governed.v1.toml")
+    out.append((f"{label2} scenarios §11: steer.v1 minor 1, governed (claim on [defaults]), loads with no finding, "
+                f"the reference CLI's fingerprint, and rudder.v1 over it is arbitrated as over minor 0",
+                (gov.valid, gov.codes, gov.fingerprint,
+                 ab.declaration(ab.role_of(rudder.canonical, "cmd"), ab.provider_of(gov.canonical)).expect()),
+                (True, [], "sha256:26b19c8cc407214e345624e20424da3be3b6ce761c6e56ceecb1773934d04f9c",
+                 {**want, "deadline_ms": 300, "period_ms": 50})))
     out += _arbitration_review_readings(root)
     return out
 
@@ -3641,21 +3677,67 @@ def _timing_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append((f"{label} §2.5 (F-262): a missed member, its owner absent then present again, is not waited for "
                 f"again: one missed, then met at its arrival",
                 [(r.event, tm.ns_to_ms(r.at_ns)) for r in t.reports], [("missed", 101), ("met", 450)]))
-    # F-261: a known member of an epoch template, ended by a complete read
-    # made before its owner declared it, is never waited for again.
+    # F-261, answered by text 0.2: a known member of an epoch template is
+    # waited for from its first member token seen, whichever came first, the
+    # reader's read or the owner's declaration.
+    label2 = "timing.v1 0.2"
+    t = tm.Tracker(100, 4, ["axis/x"], epoch=True)
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 5, "event": "member_gone", "member": "axis/x"},
+              {"at_ms": 50, "event": "owner", "state": "present"}, {"at_ms": 1000, "event": "tick"},
+              {"at_ms": 1200, "event": "member_seen", "member": "axis/x"}, {"at_ms": 1301, "event": "tick"}):
+        t.event(e)
+    out.append((f"{label2} §2.5 (F-261): a read before the owner declared a known epoch member ends nothing, its "
+                f"owner's presence waits for nothing, and its member token seen starts the wait",
+                [(r.event, tm.ns_to_ms(r.at_ns), r.due_ns and tm.ns_to_ms(r.due_ns)) for r in t.reports],
+                [("missed", 1301, 1300)]))
+    t = tm.Tracker(100, 4, ["axis/x"], epoch=True)
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 50, "event": "owner", "state": "present"},
+              {"at_ms": 60, "event": "member_seen", "member": "axis/x"}, {"at_ms": 161, "event": "tick"}):
+        t.event(e)
+    out.append((f"{label2} §2.5 (F-261): the same member, its token seen at the reader's first read, is missed a "
+                f"deadline after it",
+                [(r.event, tm.ns_to_ms(r.due_ns)) for r in t.reports], [("missed", 160)]))
+    # 0.1's reading, kept to show what 0.2 changed: without the epoch rule a
+    # read before the owner declared the member ended it for good.
     t = tm.Tracker(100, 4, ["axis/x"])
     for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 5, "event": "member_gone", "member": "axis/x"},
               {"at_ms": 50, "event": "owner", "state": "present"}, {"at_ms": 1000, "event": "tick"}):
         t.event(e)
-    out.append((f"{label} §2.5 (F-261): a known epoch member a complete read ended before its owner held its "
-                f"member token is never reported, however long the silence",
+    out.append((f"{label} §2.5 (F-261, as 0.1 read): with no epoch rule, that read ended the member for good",
                 ([r.expect() for r in t.reports], t.next_due()), ([], None)))
-    t = tm.Tracker(100, 4, ["axis/x"])
-    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 50, "event": "owner", "state": "present"},
-              {"at_ms": 151, "event": "tick"}):
+    # F-260: beyond_bound once, while the member stays past the bound; held
+    # later, it is a member first heard, and past the bound again reported
+    # again.
+    t = tm.Tracker(100, 1, [], epoch=True)
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 0, "event": "member_seen", "member": "a"},
+              {"at_ms": 0, "event": "arrival", "member": "a"}, {"at_ms": 10, "event": "arrival", "member": "b"},
+              {"at_ms": 20, "event": "arrival", "member": "b"}, {"at_ms": 30, "event": "member_gone", "member": "a"},
+              {"at_ms": 40, "event": "arrival", "member": "b"}, {"at_ms": 50, "event": "arrival", "member": "a"},
+              {"at_ms": 60, "event": "arrival", "member": "a"}):
         t.event(e)
-    out.append((f"{label} §2.5 (F-261): the same member, its owner's first read after its member token, is missed",
-                [r.event for r in t.reports], ["missed"]))
+    out.append((f"{label2} §2.5 (F-260): beyond_bound once per stay past the bound",
+                [(r.event, r.member, tm.ns_to_ms(r.at_ns)) for r in t.reports],
+                [("beyond_bound", "b", 10), ("ended", "a", 30), ("beyond_bound", "a", 50)]))
+    # F-259: no tracker under an invalid declaration, a deadline below the
+    # period, a state, or no deadline.
+    out.append((f"{label2} §2.2, §2.5 (F-259): a tracker only where a deadline is judged",
+                [tm.tracker_for(tm.declaration(k, a)) is not None for k, a in (
+                    ("stream", {"timing.deadline_ms": 100, "timing.lifespan_ms": "100"}),
+                    ("stream", {"timing.deadline_ms": 50, "timing.period_ms": 100}),
+                    ("state", {"timing.deadline_ms": 100}),
+                    ("stream", {"timing.lifespan_ms": 100}),
+                    ("@stream", {"timing.deadline_ms": 100, "timing.period_ms": 100}))],
+                [False, False, False, False, True]))
+    # F-275 (round 78): an epoch template's known member, its token seen,
+    # its owner absent before the due: zk2py follows deadlines.json's
+    # description, the wait going on, where §2.5's absent bullet would stop it.
+    t = tm.Tracker(100, 4, ["axis/x"], epoch=True)
+    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 0, "event": "member_seen", "member": "axis/x"},
+              {"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 50, "event": "owner", "state": "absent"},
+              {"at_ms": 101, "event": "tick"}):
+        t.event(e)
+    out.append((f"{label2} §2.5 (F-275): an epoch member's wait goes on when its owner is absent, missed at its "
+                f"due", [(r.event, tm.ns_to_ms(r.due_ns), r.owner) for r in t.reports], [("missed", 100, "absent")]))
     # §2.6: a zid of 33 digits states none; one of 32 is one.
     out.append((f"{label} §2.6: a meta.zid of 33 hexadecimal digits states none, one of 32 does",
                 (tm.zid_value("1" * 33), tm.zid_value("f" * 32) == 2**128 - 1), (None, True)))

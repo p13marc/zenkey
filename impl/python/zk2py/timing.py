@@ -1,15 +1,18 @@
 """``timing.v1``: a stream's cadence, its deadline and its lifespan (profile
-text 0.1, draft, written against core 0.53; ``spec/profiles/timing/v1.md``).
+text 0.2, draft, written against core 0.55; ``spec/profiles/timing/v1.md``).
 
 Read cold from the text, its fixtures and its scenarios alone (#609, round
-76). The session-free half:
+76; text 0.2 in round 78). The session-free half:
 - :func:`declaration` reads a resolved resource's three keys (§2.2, §2.3),
   as ``conformance/declarations.json`` does, and :func:`requirement` a
   ``[requires.<role>]``'s (§2.3: ignored at 1.0);
 - :class:`Tracker` is one reader's deadline tracker for one provider and
   resource (§2.5): edge-triggered ``missed`` and ``met``, ``ended`` (gone
-  or forgotten) and ``beyond_bound``, its due and its detection bound, as
-  ``conformance/deadlines.json`` drives it;
+  or forgotten) and ``beyond_bound`` (once, text 0.2's MUST), its due and
+  its detection bound, an epoch template's known member waited for from
+  its first member token seen (text 0.2, F-261), as
+  ``conformance/deadlines.json`` drives it; :func:`tracker_for` builds one
+  only for a declaration that judges a deadline (text 0.2, F-259);
 - :class:`LifespanReading` judges each sample at its arrival (§2.6), on
   the deployment's ε only, against the owner's own stamp, with a clock
   falsified for the rest of the reading once a stamp of it is more than ε
@@ -240,7 +243,8 @@ class _Member:
     ``wait``: the instant its wait began (a known member never heard);
     ``missed``: a miss reported and no arrival since; ``gone``: a known
     member whose member tokens are gone, held and waited for by nothing
-    until its next arrival."""
+    until its next arrival or, on an epoch template, a token of it seen
+    again."""
 
     known: bool
     last: int | None = None
@@ -255,27 +259,41 @@ class Tracker:
     holds at its instant, in member order (byte order of the names): the
     misses due, then the members forgotten; then the event applies.
 
+    Text 0.2:
+    - **A missed member stays missed** when its owner is present again
+      ("every known member never heard, not missed and not ended", F-262).
+    - **An epoch template** (``epoch``, F-261): a known member is waited for
+      from the later of the start and the instant a member token of it was
+      first seen, never from its owner's presence; ``member_gone`` ends
+      nothing before a token of the member was seen since it last ended.
+    - **``beyond_bound`` once** (F-260), at a member's first arrival past
+      the bound, and not again while it stays past it.
+
     Read beyond the fixture:
-    - **A missed member stays missed** when its owner is present again: the
-      description's "every known member never heard and not ended is waited
-      for from it" leaves a missed one out, since "a miss already reported
-      stands until an arrival" (§2.5) and nothing more is reported of it
-      before its next arrival (F-262).
     - **At the start, an unconfirmed owner** counts as present: "while its
       owner is unconfirmed, the wait goes on as it was".
+    - **A member not held** whose token is seen, then shown gone, forgets
+      the sighting: its tokens are gone, so a later read ends nothing until
+      one is seen again.
     """
 
     def __init__(self, deadline_ms: int, bound: int | None = None, known: Iterable[str] = (),
-                 forget_ns: int = FORGET_NS) -> None:
+                 forget_ns: int = FORGET_NS, epoch: bool = False) -> None:
         self.deadline_ms = deadline_ms
         self.deadline_ns = deadline_ms * MS
         self.bound_ns = detection_bound_ns(deadline_ms)
         self.bound = bound
         self.forget_ns = forget_ns
+        self.epoch = epoch
         self.started_at: int | None = None
         self.owner_state = UNSEEN
         self.present_since: int | None = None
         self.members: dict[str, _Member] = {k: _Member(True) for k in known}
+        #: epoch only: the instant a member token of each member was first
+        #: seen since the member last ended (§2.5, F-261)
+        self.seen: dict[str, int] = {}
+        #: the members reported ``beyond_bound`` and not held since (F-260)
+        self.beyond: set[str] = set()
         self.reports: list[Report] = []
 
     # -- what it holds --------------------------------------------------------------
@@ -319,6 +337,7 @@ class Tracker:
             if not m.known and m.missed and m.last is not None and t - m.last >= self.forget_ns:
                 out.append(Report(t, "ended", name, reason="forgotten"))
                 del self.members[name]
+                self.seen.pop(name, None)
         return out
 
     def _done(self, out: list[Report]) -> list[Report]:
@@ -330,10 +349,15 @@ class Tracker:
     def start(self, t: int) -> list[Report]:
         """The subscription declared: each known member is waited for from
         the later of the start and the instant the owner became present, if
-        it is present."""
+        it is present; on an epoch template, from the later of the start and
+        the instant a member token of it was first seen, if one was."""
         out = self._judge(t)
         self.started_at = t
-        if self.owner_state in (PRESENT, UNCONFIRMED) and self.present_since is not None:
+        if self.epoch:
+            for name, m in self.members.items():
+                if m.known and m.last is None and not m.missed and name in self.seen:
+                    m.wait, m.gone = max(t, self.seen[name]), False
+        elif self.owner_state in (PRESENT, UNCONFIRMED) and self.present_since is not None:
             for m in self.members.values():
                 if m.known and m.last is None and not m.gone and not m.missed:
                     m.wait = max(t, self.present_since)
@@ -351,7 +375,9 @@ class Tracker:
             m.last, m.wait, m.missed, m.gone = t, None, False, False
         elif self.bound is None or len(self.members) < self.bound:
             self.members[member] = _Member(False, last=t)
-        else:
+            self.beyond.discard(member)
+        elif member not in self.beyond:
+            self.beyond.add(member)
             out.append(Report(t, "beyond_bound", member))
         return self._done(out)
 
@@ -364,18 +390,36 @@ class Tracker:
         prev, self.owner_state = self.owner_state, state
         if state == PRESENT and prev in (UNSEEN, ABSENT):
             self.present_since = t
-            if self.started_at is not None:
+            if self.started_at is not None and not self.epoch:
                 for m in self.members.values():
                     if m.known and m.last is None and not m.gone and not m.missed:
                         m.wait = t
-        elif state == ABSENT:
+        elif state == ABSENT and not self.epoch:
             for m in self.members.values():
                 m.wait = None
         return self._done(out)
 
-    def member_gone(self, t: int, member: str) -> list[Report]:
-        """A complete read shows no member token of ``member`` (§2.5)."""
+    def member_seen(self, t: int, member: str) -> list[Report]:
+        """A member token of ``member`` seen: heard declared or withdrawn, or
+        shown by a read (§2.5, F-261). Epoch templates only."""
         out = self._judge(t)
+        if not self.epoch or member in self.seen:
+            return self._done(out)
+        self.seen[member] = t
+        m = self.members.get(member)
+        if m is not None and m.known and m.last is None and not m.missed and self.started_at is not None:
+            m.wait, m.gone = t, False
+        return self._done(out)
+
+    def member_gone(self, t: int, member: str) -> list[Report]:
+        """A complete read shows no member token of ``member`` (§2.5); on an
+        epoch template, only after a token of it was seen since it last
+        ended (F-261)."""
+        out = self._judge(t)
+        if self.epoch:
+            if member not in self.seen:
+                return self._done(out)
+            del self.seen[member]
         m = self.members.get(member)
         if m is None:
             return self._done(out)
@@ -401,11 +445,24 @@ class Tracker:
             return self.arrival(t, e["member"], bool(e.get("expired", False)))
         if what == "owner":
             return self.owner(t, e["state"])
+        if what == "member_seen":
+            return self.member_seen(t, e["member"])
         if what == "member_gone":
             return self.member_gone(t, e["member"])
         if what == "tick":
             return self.tick(t)
         raise ValueError(f"{what!r}: not an event")
+
+
+def tracker_for(decl: Declaration, bound: int | None = None, known: Iterable[str] = (),
+                epoch: bool = False) -> Tracker | None:
+    """A reader's tracker of a resource, or None: "A consumer holds no
+    tracker of it, and reports no deadline event" under an invalid
+    declaration (§2.2), a deadline below the period (§2.5), a resource that
+    is not a stream (§2.3) or one with no deadline (text 0.2, F-259)."""
+    if not decl.is_stream or decl.judged_deadline_ms is None:
+        return None
+    return Tracker(decl.judged_deadline_ms, bound, known, epoch=epoch)
 
 
 # -- §2.6 the lifespan ------------------------------------------------------------------
@@ -715,6 +772,6 @@ def lint(canonical: dict[str, Any]) -> list[Warning]:
 
 
 __all__ = ["PROFILE", "KEYS", "Declaration", "declaration", "requirement", "declaration_of", "merge", "value_ms",
-           "Tracker", "Report", "detection_bound_ns", "LifespanReading", "Stamp", "Verdict", "judge_lifespans",
+           "Tracker", "tracker_for", "Report", "detection_bound_ns", "LifespanReading", "Stamp", "Verdict", "judge_lifespans",
            "zid_value", "period", "Period", "conclude", "Reading", "DeadlineAccount", "Answer", "rollup",
            "rollup_literal", "lint", "ms_to_ns", "ns_to_ms"]
