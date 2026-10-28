@@ -212,8 +212,9 @@ pub fn member_row(book: &TimingBook, key: &str, m: &MemberWindow) -> TimingMembe
         unobservable: 0,
         reasons: Default::default(),
     };
+    // A sample of a resource that declares no lifespan is not asked, and
+    // judged none.
     for ((verdict, reason), n) in &m.lifespans {
-        lifespans.judged += n;
         match *verdict {
             "live" => lifespans.live += n,
             "expired" => lifespans.expired += n,
@@ -221,8 +222,9 @@ pub fn member_row(book: &TimingBook, key: &str, m: &MemberWindow) -> TimingMembe
                 lifespans.unobservable += n;
                 *lifespans.reasons.entry((*reason).to_owned()).or_insert(0) += n;
             }
-            _ => {}
+            _ => continue,
         }
+        lifespans.judged += n;
     }
     TimingMember {
         key: key.to_owned(),

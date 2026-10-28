@@ -546,6 +546,103 @@ pub fn health_report() -> HealthReport {
     }
 }
 
+/// `zenctl timing` (#908, MC): timing.v1 scenarios §6 step 2 in values,
+/// through the engine's own book and judge — `pace.v1`'s `cmd` paused for a
+/// second with its owner present throughout (deadline no, `missed`; period
+/// no, `not_kept`), under ε = 100 ms but unstamped (lifespan unobservable,
+/// `unstamped`), and `axis/x` heard every period (deadline yes, period yes,
+/// lifespan not asked) — the miss and the period the findings.
+pub fn timing_report() -> TimingReport {
+    use std::time::{Duration, Instant, SystemTime};
+    use zenkey_fleet::model::catalog::Observed;
+    use zenkey_fleet::{TimedResource, TimedSample, TimingBook, TimingScope, TimingSpec};
+    use zenkey_model::timing::{Declaration, Declared};
+    let ms = Duration::from_millis;
+    let addr: zenkey_model::grammar::Addr = "lab/pace".parse().expect("an address");
+    let iface: zenkey_model::grammar::IfaceId = "pace.v1".parse().expect("an interface");
+    let cmd = TimedResource::from_parts(
+        addr.clone(),
+        iface.clone(),
+        "stream/cmd",
+        Declaration::Declared(Declared {
+            period: Some(ms(100)),
+            deadline: Some(ms(500)),
+            lifespan: Some(ms(300)),
+        }),
+        Some(1),
+        None,
+        "zk2/lab/pace/pace.v1/stream/cmd",
+        true,
+    );
+    let axis = TimedResource::from_parts(
+        addr.clone(),
+        iface,
+        "stream/axis/{axis}",
+        Declaration::Declared(Declared {
+            period: Some(ms(100)),
+            deadline: Some(ms(500)),
+            lifespan: None,
+        }),
+        Some(4),
+        Some(1),
+        "zk2/lab/pace/pace.v1/stream/axis/*",
+        false,
+    );
+    let t0 = Instant::now();
+    let mut book = TimingBook::new(vec![cmd, axis], Some(ms(100)), false, t0);
+    let alive = "zk2/lab/pace/@zk/alive/pace.v1/00000000000000a1/0123456789abcdef".to_owned();
+    book.seed(
+        &Observed::from_keys("zk2/lab/pace/@zk/**", &[alive], true),
+        true,
+        t0,
+    );
+    book.start(t0);
+    let put = |key: &str, at: u64| TimedSample {
+        key: format!("zk2/lab/pace/pace.v1/stream/{key}"),
+        delete: false,
+        stamp: None,
+        arrival: t0 + ms(at),
+        wall: SystemTime::UNIX_EPOCH,
+    };
+    for n in 1..50u64 {
+        // The one-shot timer the reader sets at the earliest due (§2.5).
+        if let Some(due) = book.next_due()
+            && due <= t0 + ms(n * 100 + 5)
+        {
+            book.tick(due + ms(1));
+        }
+        if !(20..30).contains(&n) {
+            book.sample(&put("cmd", n * 100));
+        }
+        book.sample(&put("axis/x", n * 100 + 5));
+    }
+    book.finish(t0 + ms(5000));
+    let mut spec = TimingSpec::new(Duration::from_secs(5), Duration::from_secs(5));
+    spec.clock_bound = Some(ms(100));
+    zenkey_fleet::judge_timing(&zenkey_fleet::TimingObservation {
+        namespace: "acme".into(),
+        spec,
+        scope: TimingScope::of(&addr),
+        book,
+        asked: vec![
+            "zk2/lab/pace/@zk/**".into(),
+            "zk2/lab/pace/pace.v1/stream/axis/*".into(),
+            "zk2/lab/pace/pace.v1/stream/cmd".into(),
+        ],
+        opening: Some(TimingOpening {
+            presence: "complete".into(),
+            selector: "zk2/lab/pace/@zk/**".into(),
+            instances: 1,
+            descriptors: 1,
+            unanswered: vec![],
+            stood: true,
+        }),
+        discarded: 0,
+        skipped: vec![],
+        unobservable: None,
+    })
+}
+
 /// `zenctl telemetry` (#819, TC): §5's answers in every token — a Point
 /// counter whose epoch rides in-band, a bare counter whose epoch is had by
 /// presence and that went backwards within it, a gauge with no continuity

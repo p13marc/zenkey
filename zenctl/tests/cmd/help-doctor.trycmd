@@ -134,7 +134,7 @@ session opens — exit 2, clap's code, because it is your input.
 ```console
 $ zenctl doctor --check split-brian
 ? 2
-error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew, health-failed, health-degraded, health-stale, health-inconsistent, hostid-duplicate, population-over-bound, config-projection, config-overdue, config-unpersisted, config-desired, alarm-key, alarm-stale, telemetry-declaration, telemetry-sample, desired-refused, desired-behind, desired-last-known, redundancy-vacancy
+error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew, health-failed, health-degraded, health-stale, health-inconsistent, hostid-duplicate, population-over-bound, config-projection, config-overdue, config-unpersisted, config-desired, alarm-key, alarm-stale, telemetry-declaration, telemetry-sample, desired-refused, desired-behind, desired-last-known, redundancy-vacancy, timing-declaration
 
 For more information, try '--help'.
 

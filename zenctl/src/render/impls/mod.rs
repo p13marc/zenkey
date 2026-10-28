@@ -34,4 +34,5 @@ mod snapshot;
 pub mod storage;
 mod telemetry;
 mod timeline;
+mod timing;
 pub mod zk2;

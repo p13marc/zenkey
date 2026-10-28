@@ -308,7 +308,7 @@ is clap's refusal, which lists them.
 ```console
 $ zenctl check conform host-a/tc tc.netif.v1 --skip budgets
 ? 2
-error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window, config-projection, config-fresh, config-view, config-refusal, config-dry-run, alarm-key, alarm-document, telemetry-declaration, telemetry-sample, telemetry-continuity, desired-report, desired-binding, desired-author, redundancy-declaration, redundancy-standby
+error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window, config-projection, config-fresh, config-view, config-refusal, config-dry-run, alarm-key, alarm-document, telemetry-declaration, telemetry-sample, telemetry-continuity, desired-report, desired-binding, desired-author, redundancy-declaration, redundancy-standby, timing-period, timing-deadline
 
 For more information, try '--help'.
 

@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `timing.v1` in the tools: `timing`, the doctor, two conform cases (#908, MC)
+
+`timing.v1` (`spec/profiles/timing/v1.md`) says how often an owner
+publishes a stream, how long a reader waits before it reports a member
+missed, and how old a sample may arrive; §5's three questions of a member
+over a window become surfaces.
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `zenctl timing [SELECTOR] [--for SECS] [--clock-bound MS] [--across-face] [--owner-zid ZID]… [--settle SECS] [--lease SECS] [--wait-before-close SECS] [--contracts PATH]`: every timed stream's members over one window, "did it meet its deadline?", "did its owner keep its period?" and "did a sample arrive expired?", in the profile's tokens, rolled up per resource and per run by each question's finding; the window starts once presence and every descriptor stand (F-263), stderr's `listening` line saying what it stood on | exit 1 a deadline missed with the owner present and nothing lost, a period not kept likewise, or a sample expired; 0 every question asked answered on its other pole; 2 no verdict (a lifespan without `--clock-bound`, `no_bound`, among them) |
+| `doctor`: thirty-one checks | thirty-two: `timing-declaration` (warning: an invalid timing value, a deadline below its period, or timing keys on a state, an event, an operation or a requirement) | read from the contracts the descriptors name; no window |
+| `check conform`: twenty-nine cases | thirty-one: `timing-period` and `timing-deadline` (per exposed timed stream, read over the window by the profile's reader, each arrival in its subscriber's callback, the owner present throughout and nothing lost), rolled up over the resource's members | `--skip` takes each; both skipped, the reader sends nothing |
+
 ## Unreleased (`main`, zk2) — the admin read grants the tools' reads alone (#894, WL)
 
 | Before | Now | Notes |

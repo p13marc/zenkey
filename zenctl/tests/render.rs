@@ -434,6 +434,53 @@ health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 1 stale, 1 
     );
 }
 
+/// `zenctl timing` (#908, MC): one row per timed resource and per member,
+/// §5's three answers in the fixtures' tokens in every medium — a miss with
+/// its owner's state and its due, the period's span and arrivals, the
+/// lifespans counted by verdict — and the run's judgement, a finding,
+/// leading the envelope with the questions rolled up.
+#[test]
+fn a_timing_window_spells_every_answer_apart_in_every_medium() {
+    let report = fx::timing_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+timing under every timed stream in namespace "acme" — 2 timed resource(s), 2 member(s) held over 5.0s: deadline no (missed, zk2/lab/pace/pace.v1/stream/cmd), period no (not_kept, zk2/lab/pace/pace.v1/stream/cmd), lifespan unobservable (unstamped, zk2/lab/pace/pace.v1/stream/cmd)
+✓  lab/pace pace.v1 stream/cmd          period 100 ms, deadline 500 ms, seen within 510 ms, lifespan 300 ms; the owner present throughout; 1 member(s) held
+✓  lab/pace pace.v1 stream/axis/{axis}  period 100 ms, deadline 500 ms, seen within 510 ms; the owner present throughout; 1 member(s) held
+·  zk2/lab/pace/pace.v1/stream/axis/x  deadline yes (met), period yes (kept), lifespan not_asked (no_lifespan)
+    held 4895 ms, 49 arrival(s) over a 4895 ms span
+✗  zk2/lab/pace/pace.v1/stream/cmd     deadline no (missed), period no (not_kept), lifespan unobservable (unstamped)
+    held 5000 ms, 39 arrival(s) over a 5000 ms span
+    missed at 2401.0 ms, due 2400.0 ms (by 2410.0 ms), its owner present
+    lifespans: 0 live, 0 expired, 39 unobservable (unstamped ×39)
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "timing");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert_eq!(envelope["run"]["deadline"]["answer"], "no");
+    assert_eq!(envelope["run"]["lifespan"]["answer"], "unobservable");
+    assert!(envelope.get("members").is_none(), "members are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.resources.len() + report.members.len());
+    let cmd = rows
+        .iter()
+        .find(|r| r["key"] == "zk2/lab/pace/pace.v1/stream/cmd")
+        .expect("cmd");
+    assert_eq!(cmd["deadline"]["reason"], "missed");
+    assert_eq!(cmd["misses"][0]["owner"], "present");
+    assert_eq!(cmd["lifespan"]["reason"], "unstamped");
+    let said = notes(&report);
+    assert!(said.contains("a miss is never \"down\""), "{said}");
+    assert!(said.contains("ε = 100 ms"), "{said}");
+}
+
 /// `zenctl telemetry` (#819, TC): one row per metric resource and per
 /// member, §5's answers spelled apart in every medium — a mark and words in
 /// the table, the fixtures' tokens in `resource` and `member` rows — each

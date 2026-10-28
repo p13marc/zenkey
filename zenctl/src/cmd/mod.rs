@@ -53,6 +53,7 @@ pub mod storage;
 pub mod subscribe;
 pub mod telemetry;
 pub mod timeline;
+pub mod timing;
 pub mod watch;
 pub mod watchdog;
 pub mod why;
