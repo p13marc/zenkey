@@ -549,20 +549,33 @@ where
     let name = declared.resource();
     let template = declared.template.clone();
     let mut subs = Vec::new();
-    for ke in i.selectors {
-        let (core, engine, name, template) = (
+    // One subscriber per entry: a sample whose key two entries' selectors
+    // cover (an address matched twice, a wildcard over an exact entry, or
+    // a wild key) reaches each of them, and is the arbiter's once, from
+    // the first (§2.4: an address matched twice is one provider).
+    let selectors = Arc::new(i.selectors);
+    for (at, ke) in selectors.iter().enumerate() {
+        let (core, engine, name, template, all) = (
             Arc::clone(&core),
             engine.clone(),
             name.clone(),
             template.clone(),
+            Arc::clone(&selectors),
         );
         let sub = i
             .session
-            .declare_subscriber(ke)
+            .declare_subscriber(ke.clone())
             .callback(move |sample: Sample| {
                 // timing.v1 §2.5: its arrival, read here, before anything.
                 let arrival = Instant::now();
                 let wall = SystemTime::now();
+                if all
+                    .iter()
+                    .position(|k| k.intersects(sample.key_expr()))
+                    .is_some_and(|first| first != at)
+                {
+                    return;
+                }
                 let mut c = lock(&core);
                 let key = sample.key_expr().as_str().to_owned();
                 let addr = match c.arbiter.identify(&key) {

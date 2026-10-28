@@ -1269,6 +1269,16 @@ async fn s9_a_wildcard_bindings_order() {
         act.active().as_deref() == Some("lab/autopilot")
     })
     .await;
+    // §2.4: an address `lab/*` covers is one provider, each sample its
+    // arbiter's once, though two subscribers hear it.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let payloads: Vec<String> = act.rec.delivered().into_iter().map(|(_, _, p)| p).collect();
+    let distinct: std::collections::BTreeSet<&String> = payloads.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        payloads.len(),
+        "each delivered once: {payloads:?}"
+    );
     let lines = act.rec.lines();
     let to_autopilot = act
         .rec
@@ -1315,6 +1325,18 @@ async fn s9_a_wildcard_bindings_order() {
         sw(Some("lab/autopilot"), Some("lab/safety"), Cause::Sample),
         "the exact entry above the wildcard"
     );
+    // `lab/safety` is matched by both entries, and counted at its first.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let delivered = act
+        .rec
+        .delivered()
+        .into_iter()
+        .filter(|(_, src, _)| src.to_string() == "lab/safety")
+        .count() as u64;
+    assert_eq!(act.arb().counts(&a("lab/safety")).delivered, delivered);
+    let payloads: Vec<String> = act.rec.delivered().into_iter().map(|(_, _, p)| p).collect();
+    let distinct: std::collections::BTreeSet<&String> = payloads.iter().collect();
+    assert_eq!(distinct.len(), payloads.len(), "each delivered once");
     act.stop().await;
 }
 

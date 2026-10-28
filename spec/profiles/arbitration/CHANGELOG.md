@@ -65,6 +65,12 @@ which states F-268's order, and `timing.v1` text 0.2.
   an event decided after a later reading is decided at the last one's
   instant. Stated, with no rule of its own: `zenkey_model::arbitration`'s
   `Arbiter` now asserts it in debug builds.
+- **A sample two entries cover is one sample** (§2.4's "an address matched
+  twice … is one provider"). A consumer subscribing per entry hears a
+  sample of `lab/safety` bound as `["lab/safety", "lab/*"]` on both
+  subscriptions; the reference hands its arbiter each sample once, from
+  the first entry's, and §9 checks no delivery is doubled. Stated by 0.1
+  already; no rule changed.
 - **The round trip that ends a move begun at a withdrawal** (§2.8) is asked
   once the watch session's transport is up again: none is asked through a
   session cut off (core §8.1, 0.42). The reference's barrier counts moves
