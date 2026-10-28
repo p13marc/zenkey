@@ -82,7 +82,7 @@ case name. It exits with:
 | redundancy | profiles/redundancy §2.2–§2.15, §5 | `redundancy` | every file of `spec/profiles/redundancy/conformance/`: `declarations.json` (a contract's `uses` and resolved annotations, and the tokenless set -> governed with its election, not governed, or its reasons in order), `descriptors.json` (one entry's mark and §2.14's findings, `malformed` alone), `elections.json` (one read from the instance's view -> take over, or stand by and why), `heals.json` (two reads' holders -> step down to the lower, or stay and why), `lifecycle.json` (one candidate's events through the state machine -> each step and its role) and `conclusions.json` (§5's four questions over two reads a grace apart). An unknown file there fails. |
 | timing | profiles/timing §2.2–§2.7, §5 | `timing` | every file of `spec/profiles/timing/conformance/`: `declarations.json` (a resolved resource, its annotations or its three layers, or a requirement -> not this profile's, ignored, invalid with its reasons in order, or declared with `below_period`), `deadlines.json` (one reader's tracker for one provider and resource, driven by its events, each instant read exactly to the nanosecond -> its reports, what it holds, its next due), `lifespans.json` (one member's samples within one reading -> each sample's judgement, a clock falsified for the reading), `periods.json` (one member's arrivals over a window -> kept, not kept, too short or not heard, with its count and span) and `conclusions.json` (§5's three questions of one member over one window). An unknown file there fails. |
 | arbitration | profiles/arbitration §2.2–§2.11, §2.14, §5 | `arbitration` | every file of `spec/profiles/arbitration/conformance/`: `declarations.json` (one role and the revision of its required interface held -> not arbitrated, arbitrated with its policy, stream, deadline and period, unread, or invalid with its reasons in order), `rankings.json` (a binding and the addresses heard -> the providers in rank order, the unbound, the wildcard and shadowed entries), `arbitrations.json` (one consumer's role and its events -> after each, its switches, the active provider, its due, a sample's outcome, the reads again) and `conclusions.json` (§5's three questions over a tool's reading). An unknown file there fails. |
-| readings | | `alarms`, `telemetry`, `desired`, `redundancy`, `timing`, `arbitration`, `presence`, `live` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 500. Of `arbitration.v1` 0.1, 13: the walkthrough's `thruster.v1` over `twist_cmd.v1` arbitrated and lint-clean, its enrollment's two bindings exact, the scenarios' `rudder.v1` over `steer.v1`, the linter's checks with and without the required interface, and F-268's two orders through the arbiter; and six from review-bot on PR #912: a tick just past the due moving the state in every state `arbitrations.json` reaches, the round trip after a move asked until one stands (a later move ending it, a cut-off waiting for a link), and a binding entry that is not one refused. Of `timing.v1` 0.1, 18: the adopters (`twist_cmd.v1`'s `cmd`, `nav.v2`'s `position`, `pace.v1`'s two streams) declaring as the text reads them, each lint-clean; the profile's linter's four warnings; §5's roll-up by each question's finding beside the sentence as written (F-264); a missed member staying missed when its owner is present again (F-262); a known epoch member ended by a read before its member token, and the same member read after it (F-261); a `meta.zid` of 33 digits stating none. Of core 0.42's §8.1, 15: a watch session in no namespace on the wire keys (the wire selector and its round trip's key, a namespace with a slash at either end read as its chunks on the wire and stripped alike, each key heard stripped, one outside the namespace not the deployment's, `Stripped` counting it and handing on the rest, `watch_or_beside` in a namespace declaring on the wire key and making no GET on the reading session, the caller's drop hook and callback mode kept), zk2py's follower over fake sessions (its watch session cut off: no round trip and no read asked on either session, the read not made with the watch session's reason, what it would establish unobservable; linked: the round trip then an ordered read; the watch session's links gone at the read's end: unordered; in a namespace, without history on the wire key, keys stripped and one outside counted, never folded; handed a namespaced watch session, 0.41's history), and a read or a round trip on a session whose interests timeout zk2py cannot read saying its completeness rests on zenoh's 10 s. Of core 0.41's §8.1, 28: a read whose time reached its session's interests timeout possibly incomplete, saying so, and what zk2py records of a session (its interests timeout, 10 s for one it did not open; its namespace); the round trip's key under the subscribers' subtree, and when it stands (its final reply, no error reply, before the interests timeout, a link before and after; none made through a session cut off, nor one whose links cannot be read); the view's unordered reads (what they show up, what they do not unobservable, never down, a withdrawal keeping its reason, an ordered read owed after any of them) and a transport's move (what the reader held unobservable, a read owed, a withdrawal keeping its reason). Of `desired.v1` 0.8, 4 of a revision that does not read beside an unread requirement (no resources list shows nothing: unread, never `not_a_target`; a readable held revision declaring no desired resource beside one that does not read, `not_a_target`; read, a revision that does not read is not in hand, so the target alone). Of `redundancy.v1` 0.2, 5 of the kept events decided partway (F-199: a read deciding take_over keeps the appearances through the act and drops the withdrawal, one deciding step_down the reverse, a heal read ending the heal with three kept re-entering the rest in `heal_first`, and over every state reached under both elections each step re-entered asking nothing). Of `desired.v1` 0.4's §2.17, 6 of how long behind (F-211: every reading over the window, another answer or version starting it again, one reading enough only on a trusted clock). Of `desired.v1` 0.4's tool, 9: §2.10's choice of the report among a target's replies (the readable one claiming the slice, two differing unreadable, one twice one, an unreadable one beside none readable claiming it, a readable one beside an unreadable, none claiming), and §2.17's slice from the target alone (the requirement's template and binding, the kind token from the report's key, a parameter left unbound). Of core 0.38's §8.1, 3 more of `list_presence`'s guards: the check reads the links, a closing transport still listed notwithstanding, and says a read was cut off while it ran. Of desired.v1 0.3's live half, 20: zk2py's author's encoding (nine numbers written by their exact values and read back the same, members sorted, a non-finite number refused) and nine of §2.4's revision read exactly. Of core 0.37's §8.1, 28: zk2py's presence view (a withdrawal unobservable and owing a read, down only from a complete read, up again from one, unconfirmed still after a read not made or possibly incomplete, a re-mint owing none, one read for a burst, a reply sent before a withdrawal not bringing it back, each key's latest move since a read was asked deciding it, a withdrawal heard back owing no read, an address never heard of down or unobservable by the latest read over it, the three holders), a read's three kinds, and `list_presence`'s guards on fake sessions (a transports accessor that fails, before or after, leaves a read possibly incomplete; the registry prunes closed sessions, never hands an entry to a session with a reused id, and closes a closed reader's watch session; since 0.38 the accessor is the links). Of `desired.v1`, 73: Appendix B over the adopters' real contracts and bindings (the examples' eight desired resources, the walkthrough executor's slice, `zs.desired.v1`'s seven templates, `zs.thresholds.v1`'s requirement bound for the sysinfo sensor and unbound, its `applied/{topic}` no Report), the scenarios' slice `D`, zk2py's own refusal of a target address that is not `<system>/<service>` (five), zk2py's readings of round 52's F-162, F-163, F-166, F-167 and F-168, now 0.2's rules (the 16 ids remembered and the 17th forgetting the first, a restart forgetting every id, exact values from a payload's text, 256 and 257 deep), of the open F-181 (a report's `18446744073709551615.0` read as its double) and F-184 (an owner's waiting version re-delivered is the same version), §2.7's equality over values strict JSON cannot yield and over exponents of 10^9, 10^23 and 100,000 digits, each finishing at once, finiteness at the edge 2^1024 − 2^970 written four ways, §2.10's report puts, and a report's bytes no fixture gives (nested 100,000 and 300 deep, a byte-order mark, a lone surrogate). Of `telemetry.v1`, 66: Appendix B over the adopters' real contracts (zenoh-modem's 73 declared streams and 23 units, `sdu/dropped_total` a bare counter with no epoch, each ZenSight contract's revision 1.1 and both published bundles a Point declaring no kind, netring's two units, tcgui's resources none this profile's), three of §2.3's copies (a JCS-equal one keeps the id; a changed one is not the Point), two of F-148's state order, 14 of F-149's `null` members (a Point's `value`, each kind's Value, each Histogram member, and `epoch`, `unit` and `labels`), and four of 0.2's open F-150 (the double's edge, read as IEEE 754 rounds it) and F-151 (an Epoch attachment's lone surrogate, read strictly), three samples nested 100,000 deep, read as undecodable, never a crash, sixteen of §5's over many pairs and samples (`verdict`, per member since 0.4, over unobservable samples since 0.5), F-152's reading and F-157's among them, five of CBOR tag chains (an outer tag around a converted bignum, 100,000 tags), and three of §2.9's seed folded into a subscription's moves, the subscription's word winning. Of `alarms.v1`, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of §2.16's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.8's ten. |
+| readings | | `alarms`, `telemetry`, `desired`, `redundancy`, `timing`, `arbitration`, `presence`, `live` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 506. Of `arbitration.v1` 0.2, 2: the counts line every provider known in rank order, and §11's governed `steer.v1` minor 1 loading with the reference CLI's fingerprint, `rudder.v1` arbitrated over it. Of `timing.v1` 0.2, 5: F-261's two orders through an epoch tracker (a read before any member token seen ending nothing, the wait from the token seen), F-260's `beyond_bound` once per stay past the bound, F-259's trackers, and F-275's epoch member waited for through its owner's absence. Of `arbitration.v1` 0.1, 13: the walkthrough's `thruster.v1` over `twist_cmd.v1` arbitrated and lint-clean, its enrollment's two bindings exact, the scenarios' `rudder.v1` over `steer.v1`, the linter's checks with and without the required interface, and F-268's two orders through the arbiter; and six from review-bot on PR #912: a tick just past the due moving the state in every state `arbitrations.json` reaches, the round trip after a move asked until one stands (a later move ending it, a cut-off waiting for a link), and a binding entry that is not one refused. Of `timing.v1` 0.1, 17: the adopters (`twist_cmd.v1`'s `cmd`, `nav.v2`'s `position`, `pace.v1`'s two streams) declaring as the text reads them, each lint-clean; the profile's linter's four warnings; §5's roll-up by each question's finding beside the sentence as written (F-264); a missed member staying missed when its owner is present again (F-262); a known epoch member ended by a read before its member token, as 0.1 read it (F-261; its read after the token is 0.2's now); a `meta.zid` of 33 digits stating none. Of core 0.42's §8.1, 15: a watch session in no namespace on the wire keys (the wire selector and its round trip's key, a namespace with a slash at either end read as its chunks on the wire and stripped alike, each key heard stripped, one outside the namespace not the deployment's, `Stripped` counting it and handing on the rest, `watch_or_beside` in a namespace declaring on the wire key and making no GET on the reading session, the caller's drop hook and callback mode kept), zk2py's follower over fake sessions (its watch session cut off: no round trip and no read asked on either session, the read not made with the watch session's reason, what it would establish unobservable; linked: the round trip then an ordered read; the watch session's links gone at the read's end: unordered; in a namespace, without history on the wire key, keys stripped and one outside counted, never folded; handed a namespaced watch session, 0.41's history), and a read or a round trip on a session whose interests timeout zk2py cannot read saying its completeness rests on zenoh's 10 s. Of core 0.41's §8.1, 28: a read whose time reached its session's interests timeout possibly incomplete, saying so, and what zk2py records of a session (its interests timeout, 10 s for one it did not open; its namespace); the round trip's key under the subscribers' subtree, and when it stands (its final reply, no error reply, before the interests timeout, a link before and after; none made through a session cut off, nor one whose links cannot be read); the view's unordered reads (what they show up, what they do not unobservable, never down, a withdrawal keeping its reason, an ordered read owed after any of them) and a transport's move (what the reader held unobservable, a read owed, a withdrawal keeping its reason). Of `desired.v1` 0.8, 4 of a revision that does not read beside an unread requirement (no resources list shows nothing: unread, never `not_a_target`; a readable held revision declaring no desired resource beside one that does not read, `not_a_target`; read, a revision that does not read is not in hand, so the target alone). Of `redundancy.v1` 0.2, 5 of the kept events decided partway (F-199: a read deciding take_over keeps the appearances through the act and drops the withdrawal, one deciding step_down the reverse, a heal read ending the heal with three kept re-entering the rest in `heal_first`, and over every state reached under both elections each step re-entered asking nothing). Of `desired.v1` 0.4's §2.17, 6 of how long behind (F-211: every reading over the window, another answer or version starting it again, one reading enough only on a trusted clock). Of `desired.v1` 0.4's tool, 9: §2.10's choice of the report among a target's replies (the readable one claiming the slice, two differing unreadable, one twice one, an unreadable one beside none readable claiming it, a readable one beside an unreadable, none claiming), and §2.17's slice from the target alone (the requirement's template and binding, the kind token from the report's key, a parameter left unbound). Of core 0.38's §8.1, 3 more of `list_presence`'s guards: the check reads the links, a closing transport still listed notwithstanding, and says a read was cut off while it ran. Of desired.v1 0.3's live half, 20: zk2py's author's encoding (nine numbers written by their exact values and read back the same, members sorted, a non-finite number refused) and nine of §2.4's revision read exactly. Of core 0.37's §8.1, 28: zk2py's presence view (a withdrawal unobservable and owing a read, down only from a complete read, up again from one, unconfirmed still after a read not made or possibly incomplete, a re-mint owing none, one read for a burst, a reply sent before a withdrawal not bringing it back, each key's latest move since a read was asked deciding it, a withdrawal heard back owing no read, an address never heard of down or unobservable by the latest read over it, the three holders), a read's three kinds, and `list_presence`'s guards on fake sessions (a transports accessor that fails, before or after, leaves a read possibly incomplete; the registry prunes closed sessions, never hands an entry to a session with a reused id, and closes a closed reader's watch session; since 0.38 the accessor is the links). Of `desired.v1`, 73: Appendix B over the adopters' real contracts and bindings (the examples' eight desired resources, the walkthrough executor's slice, `zs.desired.v1`'s seven templates, `zs.thresholds.v1`'s requirement bound for the sysinfo sensor and unbound, its `applied/{topic}` no Report), the scenarios' slice `D`, zk2py's own refusal of a target address that is not `<system>/<service>` (five), zk2py's readings of round 52's F-162, F-163, F-166, F-167 and F-168, now 0.2's rules (the 16 ids remembered and the 17th forgetting the first, a restart forgetting every id, exact values from a payload's text, 256 and 257 deep), of the open F-181 (a report's `18446744073709551615.0` read as its double) and F-184 (an owner's waiting version re-delivered is the same version), §2.7's equality over values strict JSON cannot yield and over exponents of 10^9, 10^23 and 100,000 digits, each finishing at once, finiteness at the edge 2^1024 − 2^970 written four ways, §2.10's report puts, and a report's bytes no fixture gives (nested 100,000 and 300 deep, a byte-order mark, a lone surrogate). Of `telemetry.v1`, 66: Appendix B over the adopters' real contracts (zenoh-modem's 73 declared streams and 23 units, `sdu/dropped_total` a bare counter with no epoch, each ZenSight contract's revision 1.1 and both published bundles a Point declaring no kind, netring's two units, tcgui's resources none this profile's), three of §2.3's copies (a JCS-equal one keeps the id; a changed one is not the Point), two of F-148's state order, 14 of F-149's `null` members (a Point's `value`, each kind's Value, each Histogram member, and `epoch`, `unit` and `labels`), and four of 0.2's open F-150 (the double's edge, read as IEEE 754 rounds it) and F-151 (an Epoch attachment's lone surrogate, read strictly), three samples nested 100,000 deep, read as undecodable, never a crash, sixteen of §5's over many pairs and samples (`verdict`, per member since 0.4, over unobservable samples since 0.5), F-152's reading and F-157's among them, five of CBOR tag chains (an outer tag around a converted bignum, 100,000 tags), and three of §2.9's seed folded into a subscription's moves, the subscription's word winning. Of `alarms.v1`, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of §2.16's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.8's ten. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
@@ -102,7 +102,7 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings      500 passed     0 failed
+readings      506 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
@@ -112,15 +112,21 @@ alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
 desired       408 passed     0 failed
 redundancy    180 passed     0 failed
-timing        152 passed     0 failed
-arbitration   115 passed     0 failed
-total        3405 passed     0 failed
+timing        175 passed     0 failed
+arbitration   120 passed     0 failed
+total        3439 passed     0 failed
 ```
 
-The figures are against `core.md` 0.54, `hostid.v1` 0.7, `freshness.v1`
+The figures are against `core.md` 0.56, `hostid.v1` 0.7, `freshness.v1`
 0.4, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
 `telemetry.v1` 0.5, `desired.v1` 0.8, `redundancy.v1` 0.5, `timing.v1`
-0.1 and `arbitration.v1` 0.1.
+0.2 and `arbitration.v1` 0.2.
+`timing.v1` 0.2 grew `deadlines.json` to 44 cases and `conclusions.json`
+to 39 (175), and `arbitration.v1` 0.2 `conclusions.json` to 24 (120):
+zk2py passed them once its tracker read `epoch` and `member_seen` and
+reported `beyond_bound` once, its runner read a case's `resource` and the
+roll-ups, and `conclude` read `bindings` null. `readings` went to 506
+(round 78). Core 0.55 and 0.56 changed no fixture.
 `arbitration.v1` 0.1 added its four fixture files, 115 cases, which zk2py
 passed the first time they ran, once its runner read `arbitrations.json`'s
 role at the case's top level; `layout` now checks the eleven profiles'
@@ -2059,9 +2065,10 @@ against zk2py's owner:
 - `link_scenarios` 78, in two runs;
 - `desired_scenarios` 52, zk2py's author and target.
 
-## timing.v1 (profile text 0.1, core 0.53)
+## timing.v1 (profile text 0.2, core 0.55)
 
 ```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.timing_interop [--pair OWNER:READER]... [--only 1 … 6]...
 PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.timing_scenarios [--only 1 … 6|hlc|first]...
 ```
 
@@ -2121,10 +2128,40 @@ text:
   - `first` measures how often a new instance's first sample is handled
     before its descriptor (F-266).
 
-## arbitration.v1 (profile text 0.1, core 0.54)
+**Text 0.2 (round 78).** zk2py read `timing.v1` 0.2 and core 0.55 cold,
+and ran the scenarios against the Rust runtime:
+- **`zk2py.timing`:** `Tracker` takes `epoch`: a known member of an epoch
+  template waited for from its first member token seen (`member_seen`),
+  never from its owner's presence, and ended by a read only once a token
+  of it was seen (F-261); `beyond_bound` once while a member stays past the
+  bound (F-260); `tracker_for` builds no tracker where no deadline is
+  judged (F-259). 175 of 175 fixture cases (`deadlines.json` 44,
+  `conclusions.json` 39).
+- **`zk2py.timing_live`:** the `Reader` hands each tracker the member
+  tokens its follower hears or a read shows, and records each member's
+  first one seen (`member_seen_at`).
+- **`python -m zk2py.timing_interop`** runs `scenarios.md` §1 to §5 in the
+  four pairings of zk2py's owner and reader with the reference's black
+  boxes (`owner --timing`, `consume --timing`), and §6 with zk2py's tool
+  beside each owner: 84 of 84, in each of two runs.
+  - zk2py's owner is driven as the black box is (`PyPace`: `cmd` paused at
+    the start, an axis on once added, each member every 100 ms while on).
+  - The black box reader's instants are placed on the runner's clock by
+    its `subscribed` line's arrival, and its dues compared with its own
+    arrivals exactly; where a due counts from its first sight of its
+    owner, the runner polls its `state` every 10 ms and checks the due
+    falls between the owner's start and the first `present`.
+  - §4 runs the reference's owner with `--no-hlc`, its `--help`'s way of
+    offsetting its stamps alone (F-273); §3 step 5 declares `x`'s member
+    token from a raw session beside the reference's owner, whose `timing
+    add` publishes at once (F-276).
+  - Every miss was reported 0.09–0.15 ms after its due by zk2py's reader,
+    0.6–1.9 ms after by the reference's, all within the 10 ms bound.
+
+## arbitration.v1 (profile text 0.2, core 0.56)
 
 ```bash
-PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.arbitration_scenarios [--only 1 … 10|7c]...
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.arbitration_scenarios [--pair COMMANDERS:ACTUATORS]... [--only 1 … 11|7c|open]...
 ```
 
 `arbitration.v1` is the eleventh profile (`spec/profiles/arbitration/`): a
@@ -2185,6 +2222,42 @@ from the text, reading every deadline through its own `zk2py.timing`:
   failure the strict first arrival of F-269. `7c` is F-268's control: the
   move begun at the transport event alone. No Rust runtime exists for
   `arbitration.v1` yet (#909's BB), so there is no cross pairing.
+
+**Text 0.2 (round 78).** zk2py read `arbitration.v1` 0.2 and core 0.56
+cold, and ran the scenarios against the Rust runtime:
+- **`zk2py.arbitration`:** `conclude` answers the selection and the binding
+  not asked, `no_descriptor`, with no consumer's descriptor read (F-272);
+  `counts_line` lists every provider known in rank order, five counts each
+  (F-271). 120 of 120 fixture cases.
+- **`zk2py.arbitration_live`:**
+  - the `Actuator` follows a governed required interface's incumbent
+    (§2.5 outcome 6, F-270): a sample is an arrival only when stamped by
+    the `meta.zid` of the lowest instance known holding the interface's
+    token, its holders read once at its start after its watch's round
+    trip and their descriptors got;
+  - it asks the round trip after an open 100 ms after the event (core
+    0.56), and prints its instants exact to the nanosecond;
+  - the `Commander` leads its first put by 500 ms (F-269) and, with
+    `standby`, is a `redundancy.v1` candidate whose `raw` puts go round
+    its writer (scenarios §11).
+- **`zk2py.arbitration_owner`** also takes the reference owner's
+  `commander …` and `arbitrate counts|reads|state` words, in its JSON.
+- **`steer-governed.v1.toml`,** §11's revision, written from its setup
+  (the reference CLI's fingerprint, `sha256:26b19c8c…`).
+- **`python -m zk2py.arbitration_scenarios --pair C:A`** runs §1 to §11
+  with zk2py's (`py`) or the reference's (`rs`, the black box `owner
+  --commander` / `--arbitrate`) commanders and actuators, §10 with zk2py's
+  tool: every check passes in all four pairings but §8's "nothing put"
+  with the reference's actuator, which puts its `angle`'s `ok` at a
+  refused start (F-274), in each of two full runs. `7c` (F-268's control)
+  and `open` (core 0.56's open, measured: 0 of 60 round trips asked at the
+  event stood before the reopen's telling) are zk2py's alone. The
+  reference's actuators' instants are placed on the runner's clock by
+  their `start` line's arrival. A check an open finding is known to fail
+  prints XFAIL naming it (F-274), is counted as failed and listed in the
+  summary, and leaves the exit 0. With the black boxes missing, both
+  runners skip the `rs` pairings with a line, or exit 2 when one was
+  asked for by name; `ZK2PY_BLACKBOX` overrides their directory.
 
 ## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.49)
 
@@ -3547,11 +3620,16 @@ impl/python/
     timing_live.py    timing.v1 a consumer's deadline events and lifespan discard on a bus, a tool's window,
                                 an owner's offset stamping clock
     timing_scenarios.py timing.v1 scenarios.md §1–§6, zk2py only, and core 0.53's HLC facts measured
+    timing_interop.py timing.v1 scenarios.md §1–§5 in every pairing with the Rust owner and reader (black
+                                boxes), §6 with zk2py's tool beside each owner
     arbitration.py    arbitration.v1 the declaration, the ranking, the arbiter (§2.5–§2.11), §5's conclusions,
                                 the linter
-    arbitration_live.py arbitration.v1 an actuator's runtime on a bus, a commander, a tool's own view
-    arbitration_owner.py arbitration.v1 a commander or an actuator as a process, its switches as JSON lines
-    arbitration_scenarios.py arbitration.v1 scenarios.md §1–§10, zk2py only, and F-268's control
+    arbitration_live.py arbitration.v1 an actuator's runtime on a bus (a governed interface's incumbent
+                                followed), a commander (a redundancy.v1 candidate too), a tool's own view
+    arbitration_owner.py arbitration.v1 a commander or an actuator as a process, its switches as JSON lines,
+                                the reference owner's commander and arbitrate words too
+    arbitration_scenarios.py arbitration.v1 scenarios.md §1–§11 in every pairing with the Rust commanders and
+                                actuators (black boxes), F-268's control, core 0.56's open measured
     state_scenarios.py §4.2     scenarios/state.md §3 and §12 on a router process, §10 against zk2py's owner,
                                 and §11's open cases
     admin_records.py  §4.2 §11.1 the keys a node answers under its tables' read lock, shared by live and acl

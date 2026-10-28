@@ -118,6 +118,12 @@ class OwnerRefused(RuntimeError):
     """The owner must not start (§3.2, §8.2 step 2)."""
 
 
+class StandbyRefused(OwnerRefused):
+    """A write on a governed interface's key while the owner stands by on
+    it: "a standby puts and deletes none of its keys" (redundancy.v1 §2.4).
+    Its own type, so a caller tells it from a write that failed."""
+
+
 class BudgetExceeded(RuntimeError):
     """Core §2.7 (0.24): "An owner MUST NOT hold more live members of a
     templated stream, state or event than its bound", and MUST NOT publish
@@ -958,8 +964,8 @@ class Owner:
     def _refuse_standby_write(self, key: str) -> None:
         iface = self._standing_on(key)
         if iface is not None:
-            raise OwnerRefused(f"{key}: it stands by on {iface}, and a standby puts and deletes none of its "
-                               "keys (redundancy.v1 §2.4)")
+            raise StandbyRefused(f"{key}: it stands by on {iface}, and a standby puts and deletes none of its "
+                                 "keys (redundancy.v1 §2.4)")
 
     def new_epoch(self, new: str | None = None) -> str:
         """Core §1.5 and §8.1: a new instance id while running, "make-before-

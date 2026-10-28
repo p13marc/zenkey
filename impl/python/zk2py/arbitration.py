@@ -1,9 +1,9 @@
 """``arbitration.v1``: one commander at a time, in the binding's order
-(profile text 0.1, draft, written against core 0.54 and ``timing.v1`` text
-0.1; ``spec/profiles/arbitration/v1.md``).
+(profile text 0.2, draft, written against core 0.56 and ``timing.v1`` text
+0.2; ``spec/profiles/arbitration/v1.md``).
 
 Read cold from the text, its fixtures and its scenarios alone (#609, round
-77). The session-free half:
+77; text 0.2 in round 78). The session-free half:
 - :func:`declaration` reads one role against the revision of its required
   interface held (§2.2, §2.3), as ``conformance/declarations.json`` does:
   not arbitrated, arbitrated (its policy, its stream, its deadline and
@@ -20,7 +20,8 @@ Read cold from the text, its fixtures and its scenarios alone (#609, round
   stands, selection, switches and their causes, the dead-man, and the
   counts;
 - :func:`conclude` is §5's three questions over a tool's reading, as
-  ``conformance/conclusions.json`` does;
+  ``conformance/conclusions.json`` does, ``no_descriptor`` with no
+  consumer's descriptor read (text 0.2, F-272);
 - :func:`lint`, §2.2's linter SHOULD (checks 1 to 7), which has no core
   code.
 
@@ -168,6 +169,7 @@ def provider_of(canonical: dict[str, Any]) -> dict[str, Any]:
 #: §2.14's token for revisions that give two declarations
 REVISIONS_DISAGREE = "revisions_disagree"
 NO_CONTRACT = "no_contract"
+NO_DESCRIPTOR = "no_descriptor"  # §2.14, text 0.2, F-272
 
 
 def tool_declaration(role: dict[str, Any] | None, revisions: list[dict[str, Any]],
@@ -563,6 +565,19 @@ class Arbiter:
         self._time_first(t, out)
         return self._decision(out)
 
+    def counts_line(self) -> dict[str, Any]:
+        """The counts as the scenarios' line prints them (text 0.2, F-271):
+        "Every provider known has its five counts, deleted among them … in
+        rank order": every exact entry's address, which ranks whether or not
+        heard, and every address a wildcard matches that was heard from, a
+        sample counted, a token or a read (§2.4)."""
+        known = set(self.counts["providers"]) | set(self.providers)
+        known |= {e for e in self.bindings if not is_wild(e)}
+        ordered = sorted(known, key=lambda a: rank_of(self.bindings, a))  # type: ignore[arg-type, return-value]
+        zero = {k: 0 for k in PER_PROVIDER}
+        return {"providers": {a: dict(self.counts["providers"].get(a, zero)) for a in ordered},
+                WILD: self.counts[WILD], UNRESOLVED: self.counts[UNRESOLVED], UNBOUND: self.counts[UNBOUND]}
+
     def event(self, e: dict[str, Any]) -> Decision:
         """One of arbitrations.json's events."""
         t = tm.ms_to_ns(e["at"])
@@ -630,10 +645,12 @@ class View:
     active: str | None
 
 
-def conclude(declared: str | Declaration, bindings: list[str], view: View | None) -> dict[str, Answer]:
+def conclude(declared: str | Declaration, bindings: list[str] | None, view: View | None) -> dict[str, Answer]:
     """§5's three questions over a tool's reading (conclusions.json):
     ``declared`` is a :class:`Declaration` or ``no_contract`` /
-    ``revisions_disagree``."""
+    ``revisions_disagree``; ``bindings`` is None when the tool read no
+    consumer's descriptor (text 0.2, F-272): after the premises, the
+    selection and the binding are not asked, ``no_descriptor``."""
     kind = declared if isinstance(declared, str) else declared.declaration
     deadline_ms = None if isinstance(declared, str) else declared.deadline_ms
     # the declaration
@@ -648,8 +665,12 @@ def conclude(declared: str | Declaration, bindings: list[str], view: View | None
         decl = Answer("no", INVALID, (("reasons", list(declared.reasons)),))
     else:
         decl = Answer("yes", "valid")
-    # the selection
-    if kind in premise:
+    # the selection: the premises, then no descriptor, then the rest
+    if kind in (NO_CONTRACT, NOT_ARBITRATED):
+        sel = premise[kind]
+    elif bindings is None:
+        sel = Answer("not_asked", NO_DESCRIPTOR)
+    elif kind in premise:
         sel = premise[kind]
     elif kind == INVALID:
         sel = Answer("unobservable", INVALID)
@@ -668,6 +689,8 @@ def conclude(declared: str | Declaration, bindings: list[str], view: View | None
     # the binding
     if kind in (NO_CONTRACT, NOT_ARBITRATED):
         binding = Answer(premise[kind].answer, premise[kind].reason, (("wildcards", []), ("shadowed", [])))
+    elif bindings is None:
+        binding = Answer("not_asked", NO_DESCRIPTOR, (("wildcards", []), ("shadowed", [])))
     else:
         w, s = wildcards(bindings), shadowed(bindings)
         reason, ans = ("wildcard", "yes") if w else ("shadowed", "yes") if s else ("exact", "no")
@@ -675,7 +698,7 @@ def conclude(declared: str | Declaration, bindings: list[str], view: View | None
     return {"declaration": decl, "selection": sel, "binding": binding}
 
 
-def reading_of(r: dict[str, Any]) -> tuple[str | Declaration, list[str], View | None]:
+def reading_of(r: dict[str, Any]) -> tuple[str | Declaration, list[str] | None, View | None]:
     """conclusions.json's ``reading``."""
     d = r["declaration"]
     kind = d["declaration"]
@@ -690,7 +713,7 @@ def reading_of(r: dict[str, Any]) -> tuple[str | Declaration, list[str], View | 
         declared = Declaration(kind)
     v = r.get("view")
     view = None if v is None else View(tm.ms_to_ns(v["listened_ms"]), bool(v["lost"]), v.get("active"))
-    return declared, list(r["bindings"]), view
+    return declared, None if r["bindings"] is None else list(r["bindings"]), view
 
 
 # -- the contract linter (§2.2: SHOULD warn of checks 1 to 7) ------------------------------------

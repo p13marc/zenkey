@@ -2,13 +2,19 @@
 black boxes by :mod:`zk2py.arbitration_scenarios`::
 
     python -m zk2py.arbitration_owner commander SYSTEM/SERVICE CONTRACT.toml --connect EP [--period-ms 50]
+        [--lead-ms 500] [--standby] [--instance-id ID]
     python -m zk2py.arbitration_owner actuator SYSTEM/SERVICE CONTRACT.toml HELD.toml --connect EP
         --bind ENTRY[,ENTRY…] [--role cmd] [--param NAME=VALUE]... [--watch-connect EP] [--epsilon-ms N]
         [--no-infer-moves]
 
 **A commander** prints ``ready <instance key>`` once started, then answers
 one line per command on standard input: ``hold``, ``resume``, ``remint``
-(``reminted <old> <new>``), ``count`` (``count <n>``, the puts made).
+(``reminted <old> <new>``), ``count`` (``count <n>``, the puts made). Since
+round 78 it also takes the reference owner's ``commander hold|resume``,
+``commander raw on|off``, ``commander sent``, ``commander new-epoch`` and
+``commander zid``, answered in its JSON, and ``redundancy role`` with
+``--standby``; its first put is ``--lead-ms`` after its tokens (text 0.2,
+F-269).
 
 **An actuator** prints one JSON line per switch on standard output, as
 ``scenarios.md``'s conventions write it, its first the ``start`` switch;
@@ -17,7 +23,9 @@ started: <address>: invalid: <reasons>`` on standard error, exit 1, with
 nothing declared. Commands on standard input, each answered with one JSON
 line: ``counts`` (§2.5's counts), ``reads`` (each read again it made),
 ``trips`` (each round trip on its watch session) and ``log`` (each presence
-event as handed to the arbiter, a move included).
+event as handed to the arbiter, a move included); and the reference owner's
+``arbitrate counts``, ``arbitrate reads`` and ``arbitrate state``, in its
+JSON (round 78).
 
 Standard input closed is a clean stop: core §8.2's, its tokens first.
 """
@@ -36,9 +44,16 @@ def _commander(args: argparse.Namespace) -> int:
     from .arbitration_live import Commander
     from .contract import load_contract
 
-    c = Commander(args.address, load_contract(args.contract), args.connect, args.period_ms / 1000)
+    c = Commander(args.address, load_contract(args.contract), args.connect, args.period_ms / 1000,
+                  lead_s=args.lead_ms / 1000, standby=args.standby, instance=args.instance_id,
+                  contract_path=args.contract)
     c.start()
+    print(f"connected {args.connect}", flush=True)
     print(f"ready zk2/{args.address}/@zk/instance/{c.owner.instance}", flush=True)
+
+    def say(x: dict[str, Any]) -> None:
+        print(json.dumps(x), flush=True)
+
     try:
         for line in sys.stdin:
             cmd = line.strip()
@@ -53,8 +68,27 @@ def _commander(args: argparse.Namespace) -> int:
                 print(f"reminted {old} {new}", flush=True)
             elif cmd == "count":
                 print(f"count {c.count()}", flush=True)
+            elif cmd in ("commander hold", "commander resume"):
+                (c.hold if cmd.endswith("hold") else c.resume)()
+                say({"commander": cmd.split()[1], "on": not c.held.is_set()})
+            elif cmd in ("commander raw on", "commander raw off"):
+                (c.raw.set if cmd.endswith("on") else c.raw.clear)()
+                say({"commander": "raw", "raw": c.raw.is_set()})
+            elif cmd == "commander sent":
+                n, refused, failed = c.sent()
+                # "failed" is zk2py's own: a put that failed otherwise than a
+                # standby's refusal (the reference's line has sent and refused)
+                say({"commander": "sent", "sent": n, "refused": refused, "failed": failed})
+            elif cmd == "commander new-epoch":
+                _, new = c.remint()
+                say({"commander": "new-epoch", "instance": new})
+            elif cmd == "commander zid":
+                say({"commander": "zid", "zid": str(c.owner.session.zid())})
+            elif cmd == "redundancy role" and c.candidate is not None:
+                say({"redundancy": "role", "instance": c.candidate.instance,
+                     "interfaces": {c.candidate.iface: {"role": c.candidate.role}}})
             elif cmd:
-                print(f"unknown {cmd}", flush=True)
+                print(f"refused {cmd}: unknown command", flush=True)
     finally:
         c.close()
     return 0
@@ -81,8 +115,18 @@ def _actuator(args: argparse.Namespace) -> int:
         for line in sys.stdin:
             cmd = line.strip()
             out: dict[str, Any]
-            if cmd == "counts":
+            if cmd in ("counts", "arbitrate counts"):
                 out = {"counts": a.counts()}
+            elif cmd == "arbitrate reads":
+                with a.lock:
+                    out = {"arbitrate": "reads", "reads": sum(1 for r in a.reads if not r.get("at_start")),
+                           "not_made": 0, "round_trips": len(a.round_trips)}
+            elif cmd == "arbitrate state":
+                with a.lock:
+                    out = {"arbitrate": "state", "active": a.arb.active, "providers": list(a.arb.providers),
+                           "withdrawn": [x for x, p in a.arb.providers.items() if p.withdrawn],
+                           "moving": a.arb.pending, "watching": a.watch is not None,
+                           "deadline_ms": a.decl.deadline_ms}
             elif cmd == "reads":
                 with a.lock:
                     out = {"reads": list(a.reads)}
@@ -110,6 +154,9 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("contract")
     c.add_argument("--connect", required=True)
     c.add_argument("--period-ms", type=int, default=50)
+    c.add_argument("--lead-ms", type=int, default=500, help="the first put this long after the tokens (F-269)")
+    c.add_argument("--standby", action="store_true", help="a redundancy.v1 candidate (scenarios §11)")
+    c.add_argument("--instance-id")
     a = sub.add_parser("actuator")
     a.add_argument("address")
     a.add_argument("contract")
