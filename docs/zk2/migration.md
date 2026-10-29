@@ -20,8 +20,8 @@ calls v1's `zenkey_build` from its build script, and declares an
 | | The v1 line | The zk2 line |
 |---|---|---|
 | Branch | `v1` | `main` |
-| Rules | `rfcs/`, frozen at v1.50: errata only | `spec/core.md` 0.27, and three draft profiles |
-| Libraries | `zenkey` and `zenkey-build` 0.11.x, `zenkey-fleet` 0.18.x, on crates.io | `zenkey`, `zenkey-build` and `zenkey-fleet` 0.20.0, and the new `zenkey-model`: all `publish = false` until the spec issue, #606 |
+| Rules | `rfcs/`, frozen at v1.50: errata only | [`spec/core.md`](../../spec/core.md), its version in its header, and the profiles of [the index](../../spec/profiles/README.md#index) |
+| Libraries | `zenkey` and `zenkey-build` 0.11.x, `zenkey-fleet` 0.18.x, on crates.io | `zenkey`, `zenkey-build` and `zenkey-fleet` 0.20.0, and the new `zenkey-model`: all `publish = false`, waiting on the maintainer's call (#585, #929) |
 | Tools | zenctl, zengui and zenwatch, released as 0.14.x | the same three, ported. No release carries them yet: the last tag, 0.14.0, predates the port. |
 | Also | v1's sources and the `fixture-tests` corpus | a second implementation of the spec, [`impl/python/`](../../impl/python/README.md) |
 
@@ -53,9 +53,9 @@ calls v1's `zenkey_build` from its build script, and declares an
 | Five named QoS profiles: `sampled`, `refreshed`, `transition`, `alert`, `frame` (RFC 04 §3) | Four wire axes on each resource (`reliability`, `congestion`, `priority`, `express`), with defaults per kind. They are fingerprinted, and the generated writer applies them. | core §2.4 |
 | `ttl_s` required on every state subject | `freshness.ttl_s`, optional, on streams too. A re-put is a mutation with a fresh stamp. | freshness.v1 §2.3, §2.4, Appendix A |
 | `cardinality`, judged by tools | `cardinality` is required on every templated resource. The population budget is core, and the runtime refuses a new member past the bound. | core §2.2, §2.7 |
-| The framework state set (`common = "…"`, RFC 04 §1.4): health, alerts, evidence | Profiles' standard contracts (`health.v1` today) and the application's own interfaces, found through descriptors. A deployment may leave them tokenless. | core §8.1; health.v1 Appendix A |
+| The framework state set (`common = "…"`, RFC 04 §1.4): health, alerts, evidence | Profiles' standard contracts, `health.v1`'s among them, and the application's own interfaces, found through descriptors. A deployment may leave them tokenless. | core §8.1; health.v1 Appendix A |
 | `@rpc` procedures and `error/*` replies (RFC 05) | Operations on `@op`, under rules O1–O7: a concrete, `complete` queryable, and fan-out only where `fanout = "allowed"` (the default is forbidden; v1's reads defaulted to allowed). Failures carry the error envelope, whose `unavailable` names its cause: `build`, `config` or `capability`. A read that returns a document becomes state. | core §5; [tcgui](../../examples/zk2/tcgui/README.md), "Decisions recorded here" |
-| Configuration (RFC 05 §5.1) | `config.v1`, being specified under #613, and not yet in `spec/profiles/`. zenoh-modem's binding is its reference. | [`config.v1-binding.md`](../../examples/zk2/zenoh-modem/config.v1-binding.md) |
+| Configuration (RFC 05 §5.1) | [`config.v1`](../../spec/profiles/config/v1.md) (#768). zenoh-modem's binding was its reference. | [`config.v1-binding.md`](../../examples/zk2/zenoh-modem/config.v1-binding.md) |
 | A storage on `state/**` as the late joiner's seed (RFC 04 §3.5) | The owner answers, with S4's GET (target `All`, consolidation `Latest`). A deployment MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. A late joiner subscribes first, then GETs, and merges by the owner's stamp. Last-known state comes from an `archive.v1`, read explicitly and never shown as current. Union storages on `events/**` stay. | core §4.2, §4.4, §2.6 |
 | `alive` tokens (RFC 04 §5), the `sensor` document, and the roster built from them and `@catalog` | An instance token for every instance, pure consumers included, and an interface token per interface it exposes something of. The descriptor lists exposure, capabilities, bindings and profiles. Bring-up follows a fixed order, so alive means callable. | core §3.3, §8.1, §8.2 |
 | `introspect` and `describe` (RFC 08 §6, §7) | The descriptor, and each contract's bundle, retrieved by fingerprint and verified by its hash. | core §3.3, §8.4 |
@@ -204,26 +204,32 @@ rules become `instance-gone <system>/<service>`.
 
 ## 5. What zk2 does not have yet
 
-zk2 has three profiles, all drafts: `hostid.v1`, `freshness.v1` and
-`health.v1`. Archives have their core rules (core §4.4) and a minimal
-runtime (`zenkey::archive`), while the `archive.v1` text is #613's. The
-rest of #613 is not written:
+zk2's profiles are listed, each with its text version and status, in
+[the profiles index](../../spec/profiles/README.md#index). Archives have
+their core rules (core §4.4) and a minimal runtime (`zenkey::archive`),
+while the `archive.v1` text is #613's. The rest of #613 is not written:
 
 | Profile | What waits on it |
 |---|---|
-| `config.v1` | zenctl's `config`, zengui's Config tool, zenoh-modem's configuration plane |
 | `blob.v1` | zenctl's `blob`, zengui's Blob browser, ZenSight's artifacts |
 | `media.v1` | zengui's Media viewer, ZenSight's parallax. An explicit `@stream` carries frames meanwhile. |
-| `alarms.v1` | Specified (#800, text 0.8): the runtime's owner (`zenkey::alarms`), zenctl's `alarms`, the watchdog's and `record --on`'s `alert-firing`, the doctor's `alarm-key` and `alarm-stale`, zenwatch's `alerts` and `alert-firing` (#800's AD). Still waiting: ZenSight's alerts |
-| `redundancy.v1` | Specified (#841, text 0.1, core 0.39): a governed interface's claim election, its standby marked in the descriptor, a vacancy, the heal of a split, consumers following the incumbent, `external` for an actuator's own lock, and the session-free reading of each (`zenkey_model::redundancy`). Still waiting: the runtime's `ServiceBuilder::redundancy()` (#841's RB), the doctor reading the mark, `hostid.v1` §2.12's standby recognised and zenctl's questions (its RC); then ZenSight's catalog and desired singletons |
-| `desired.v1` | durable commands keyed by their target; ZenSight's desired state |
-| `link.v1` | per-resource exposure across a constrained face; zenoh-modem's RF and SBD faces |
-| `telemetry.v1` | Specified (#819, text 0.5): its vocabulary and standard schema, `telemetry.v1.Point`, and the session-free reading of a declaration, a sample's bytes, and a pair's continuity and rate (`zenkey_model::telemetry`); the runtime's writers refuse what a metric's declaration refuses and write the epoch, the instance id (`zenkey::telemetry`, #819's TB); the fleet's continuity reader (`zenkey_fleet::model::telemetry`), `zenctl telemetry`, `check conform`'s `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`, and the doctor's `telemetry-declaration` and `telemetry-sample`, in place of `kind-mismatch`, with every payload check reading a metric sample by the profile (#819's TC); zengui reads a metric's kind and unit, and plots its value and a counter as its rate (#819's TD); a counter or histogram that formed no pair, or only assumed ones, could not tell (text 0.4, #819's TE), and so could a window holding an undecodable sample or a member under an invalid declaration (text 0.5, #819's TF) |
 | `views.v1` | ZenSight's GUI's presentation documents |
-| `timing.v1` | Specified (#908, text 0.3, core 0.55): a stream's period, its deadline judged per member on the reader's monotonic clock (missed, met and ended, seen within max(deadline/50, 1 ms)), its lifespan on a clock bound the deployment states, and the session-free reading of each (`zenkey_model::timing`). The runtime (#908's MB, text 0.2, core 0.55): a consumer's deadline events and lifespan on its binding's `clock_bound_ms`, every `Delivery`'s arrival and stamp, an owner's stamps (`zenkey::timing`), and the owner example's `--timing` with `consume --timing`. The tools (#908's MC, text 0.3): the fleet's window (`zenkey_fleet::model::timing`, `run_timing`), `zenctl timing`, the doctor's `timing-declaration`, `check conform`'s `timing-period` and `timing-deadline`, and zengui's Inspector, a timed stream's declared values and its deadline and period over the recorded history. Still waiting: a zenwatch rule (`silent-for` watches a selector's silence meanwhile) |
-| `arbitration.v1` | Specified (#909, text 0.3, core 0.56): a role arbitrated on its requirement, the binding's order the priority, each provider eligible by `timing.v1`'s deadline and its interface token, the dead-man, the safe value the application's, and the session-free reading of each (`zenkey_model::arbitration`). The runtime (#909's BB): `ServiceBuilder::arbitrate` and `Consumer::arbitrate` (`zenkey::arbitration`), and the owner example's `--arbitrate` and `--commander`. The tools (#909's BC, text 0.3): the fleet's reading and the tool's own view (`zenkey_fleet::model::arbitration`, `run_arbitration`), `zenctl arbitration`, the doctor's `arbitration-declaration`, and zengui's Workbench row. Still waiting: a zenwatch rule |
 | `clock.v1` | simulated time |
 | `jobs.v1` | work that outlives a query timeout |
+
+Of the profiles specified, what zk2 has for these, and what still waits
+on each:
+
+| Profile | What zk2 has | Still waiting |
+|---|---|---|
+| `config.v1` (#768) | The owner (`zenkey::config_v1`), zenctl's `config` verbs, the doctor's `config-*` checks, `check conform`'s `config-*` cases, zengui's Config tool | zenoh-modem's configuration plane |
+| `link.v1` (#769) | A router's block compiled from a face policy (`zenctl acl gen --face-policy`) and judged (`zenctl check face`) | zenoh-modem's RF and SBD faces |
+| `alarms.v1` (#800) | The owner (`zenkey::alarms`), zenctl's `alarms`, the watchdog's and `record --on`'s `alert-firing`, the doctor's `alarm-key` and `alarm-stale`, zenwatch's `alerts` and `alert-firing` | ZenSight's alerts |
+| `telemetry.v1` (#819) | Its standard schema, `telemetry.v1.Point`; writers that refuse what a metric's declaration refuses and write its epoch (`zenkey::telemetry`); `zenctl telemetry`, the doctor's `telemetry-*` checks and `check conform`'s `telemetry-*` cases, in place of `kind-mismatch`, and a metric sample read by the profile wherever a payload is checked; zengui's metric kind, unit and rate | — |
+| `desired.v1` (#840) | The author and the target (`zenkey::desired`), `zenctl desired`, the doctor's `desired-*` checks, `check conform`'s `desired-*` cases | ZenSight's desired state |
+| `redundancy.v1` (#841) | The candidate (`ServiceBuilder::redundancy()`), `zenctl redundancy`, the doctor reading the standby mark and its `redundancy-vacancy`, `check conform`'s `redundancy-*` cases, `zenctl gen` and `serve` as candidates, zengui's Workbench | ZenSight's catalog and desired singletons |
+| `timing.v1` (#908) | A consumer's deadline events and a sample's lifespan (`zenkey::timing`), `zenctl timing`, the doctor's `timing-declaration`, `check conform`'s `timing-period` and `timing-deadline`, zengui's Inspector | a zenwatch rule (`silent-for` watches a selector's silence meanwhile) |
+| `arbitration.v1` (#909) | `ServiceBuilder::arbitrate` and `Consumer::arbitrate` (`zenkey::arbitration`), `zenctl arbitration`, the doctor's `arbitration-declaration`, zengui's Workbench | a zenwatch rule |
 
 - **Writing against them already works.** A contract may list one of these
   in `uses` and use draft 1's interim vocabulary for it (core §10,
@@ -254,10 +260,10 @@ A team that needs one of these stays on the v1 line until it exists. The
 subjects, 8 procedures) is mapped: three interfaces, `tc.netif.v1`,
 `tc.netem.v1` and `tc.scenario.v1`, plus `health.v1`, on the service `tc`
 of a system minted by `hostid.v1`. The frontend is a pure consumer that
-binds each interface to `*/tc`. It needs only the three published
-profiles. Its planned blob tier is out of the pilot. Its contracts already
-generate in `zenkey-build/fixtures/codegen-test`, and zengui's test scenes
-and demo traffic run them. The port is tcgui's own, in its repository; the
+binds each interface to `*/tc`. It needs only `hostid.v1`,
+`freshness.v1` and `health.v1`. Its planned blob tier is out of the pilot.
+Its contracts already generate in `zenkey-build/fixtures/codegen-test`,
+and zengui's test scenes and demo traffic run them. The port is tcgui's own, in its repository; the
 mapping's gap 4 asks it to drop the identity fields its payloads duplicate
 ([README](../../examples/zk2/tcgui/README.md)).
 
@@ -266,8 +272,9 @@ system that is the host id, implementing `modem.v3`: 86 resources, 80 of
 them optional with their v1 gates. `modem-contract` becomes a zk2 contract
 crate, without zenoh by default, and out-of-tree backends keep depending
 on `modem-device` unchanged ([`contract-crate.md`](../../examples/zk2/zenoh-modem/contract-crate.md)).
-Two profiles it needs are not written: `config.v1` for its configuration
-plane, whose types the crate depends on, and `link.v1` for its faces
+The two profiles it needs are specified: `config.v1` for its
+configuration plane, whose types the crate depends on, and `link.v1` for
+its faces
 ([`link.md`](../../examples/zk2/zenoh-modem/link.md)). Whether to split the
 SDU plane out of `modem.v3` must be decided before it freezes (the
 mapping's gap 6). Its constrained faces are core §8.5 and the constrained
@@ -279,10 +286,10 @@ procedures) are mapped on paper, with twelve representative contracts and
 debt is in the mapping's "Migration debt": identities inside payloads
 (artifact prefixes, alert references, historian series and the persisted
 timeline uids), 23 production sites that build keys by hand, and a web
-client that spells its keys by hand. Most of its planes need profiles
-that do not exist yet: alarms, desired state, redundancy, views, media,
-blobs and telemetry. Its presence also needs the tokenless set to stay
-within the budget (r4 §4.9).
+client that spells its keys by hand. Most of its planes need profiles:
+alarms, desired state, redundancy and telemetry are specified, and views,
+media and blobs do not exist yet. Its presence also needs the tokenless
+set to stay within the budget (r4 §4.9).
 
 **ZenSight's path is undecided.** There are three options, and this note
 recommends none:

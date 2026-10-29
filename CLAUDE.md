@@ -810,7 +810,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `serve`, `gen`, `scout`); `compat` compares two contract revisions
   offline, exit-coded like a judgement; a **judgement** is exit-coded
   (`check expect|probe|schema|face`, `doctor`, `health`, `alarms`,
-  `telemetry`, `timing`, `desired`, `redundancy`, `watchdog`).
+  `telemetry`, `timing`, `desired`, `redundancy`, `arbitration`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
@@ -953,7 +953,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 - **`main` is the zk2 line, in the strangler layout (#615).** Every tool on
   it is ported, and none links v1's crates since #614 (FL11b). zk2 reuses
   the crate names at 0.20.0. `zenkey-model` is new.
-- **`zenkey-model/`** (MIT, unpublished until #606) is zk2's session-free
+- **`zenkey-model/`** (MIT, unpublished: the maintainer's call, #585, #929) is zk2's session-free
   half (#608): keys, templates, §1.3's kind selectors and what a selector
   cannot see (`grammar::blind_spots`, #614 FL4), the authoring format
   (draft 1) and its lints with stable codes (`diag::CODES`), the canonical

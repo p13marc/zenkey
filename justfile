@@ -182,6 +182,11 @@ ci:
     # README.md is the newest entry's. CI runs it on both lanes: ci.yml for
     # code pushes, docs.yml for doc-only ones (#420).
     ./scripts/check-rfc-status.sh
+    # The zk2 spec's version and inventory, stated once (#922): core.md's
+    # header names spec/CHANGELOG.md's newest amendment, README.md and
+    # spec/README.md state no core version, and the profiles index lists
+    # every profile text. On both lanes too.
+    ./scripts/check-spec-status.sh
     # The type scale by role (#191), the interactive seam (#193), the
     # spacing grid (#192) and the colour gate (#534) — all run as CI's
     # type-scale job.
