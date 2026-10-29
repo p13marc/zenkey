@@ -104,7 +104,7 @@ impl NoticeKind {
 
 /// One notification — the unit a sink delivers.
 ///
-/// `state`/`prior` are the RFC 13 three states, never two: `unobservable`
+/// `state`/`prior` are the three states (observer §1), never two: `unobservable`
 /// rides through to the sink payload distinguishable from `ok`, because a
 /// consumer that folds them has turned "I could not tell" into "fine".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

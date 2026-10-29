@@ -30,7 +30,7 @@
 //!
 //! Bounded: the ledger keeps at most `state_max_entries`, least recently
 //! changed evicted first, and the eviction count rides the file so the
-//! cost is reported across restarts too (RFC 13 §3 O6).
+//! cost is reported across restarts too (tooling guide O6).
 
 use std::collections::BTreeMap;
 use std::path::Path;

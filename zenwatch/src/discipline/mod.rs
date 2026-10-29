@@ -13,7 +13,7 @@
 //!   silently (nothing was announced, so nothing resolves); `unobservable`
 //!   mid-wait **pauses** the timer rather than cancelling it, and is itself
 //!   announced only if it persists past `for` (silence is not evidence,
-//!   RFC 13 §3 O6).
+//!   tooling guide O6).
 //! - **dedup** — `(id, state, severity)` unchanged is suppressed; a
 //!   severity change is announced.
 //! - **repeat** — still firing `repeat_s` after the last delivery is sent
@@ -132,7 +132,7 @@ struct Queued {
     passthrough: bool,
 }
 
-/// What the discipline did, counted (RFC 13 §3 O6: every bound reports
+/// What the discipline did, counted (tooling guide O6: every bound reports
 /// its cost, and every suppression is a number somewhere). Published in
 /// `zenwatch.v1`'s `counters` (#614, FL3).
 #[derive(

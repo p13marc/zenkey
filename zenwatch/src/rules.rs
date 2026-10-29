@@ -239,10 +239,9 @@ fn alarm_selector(sel: &str, head: &str) -> Result<String, RuleError> {
 /// A wire selector, refused the way zenctl refuses one at the same seam.
 fn selector(sel: &str, head: &str) -> Result<String, RuleError> {
     if sel.contains("$*") {
-        // zenoh accepts it; the convention does not (RFC 03 §2, carried
-        // into zk2's grammar, spec §1.3).
+        // zenoh accepts it; the reference does not (tooling guide §8.2).
         return Err(RuleError(format!(
-            "{head} {sel:?}: `$*` is not in the convention's selector grammar (RFC 03 §2)"
+            "{head} {sel:?}: `$*` is not in the reference's selector grammar (tooling guide §8.2)"
         )));
     }
     zenoh::key_expr::KeyExpr::try_from(sel.to_string())
@@ -256,8 +255,8 @@ fn selector(sel: &str, head: &str) -> Result<String, RuleError> {
 }
 
 /// The chunk a rule's name slugs to — its `firing/{rule_id}` key and the
-/// head of its notification ids (RFC 03 §2's slug, lossless; zk2 slugs
-/// with the same rules, `zenkey_model::slug`).
+/// head of its notification ids (core §1.4's slug, lossless:
+/// `zenkey_model::slug`).
 pub fn rule_id(name: &str) -> String {
     zenkey_model::slug::chunk_slug(name)
 }
@@ -496,7 +495,7 @@ mod tests {
         assert!(e.contains("not a key expression"), "{e}");
         assert!(!e.contains(" at /"), "no source locations: {e}");
         // A selector zenoh refuses, and one zenoh accepts but the convention
-        // does not (`$*`, RFC 03 §2) — refused at parse, with the reason and
+        // does not (`$*`, tooling guide §8.2) — refused at parse, with the reason and
         // without a build-machine path in it.
         let e = parse_rule("liveliness-gone v1//x").unwrap_err().to_string();
         assert!(e.contains("not a key expression"), "{e}");
@@ -504,7 +503,7 @@ mod tests {
         let e = parse_rule("liveliness-gone v1/$*/x")
             .unwrap_err()
             .to_string();
-        assert!(e.contains("RFC 03 §2"), "{e}");
+        assert!(e.contains("tooling guide §8.2"), "{e}");
     }
 
     /// A rule's id is its name slugged, so a name with spaces or capitals is

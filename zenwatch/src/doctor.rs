@@ -32,7 +32,7 @@
 //! `resolved` (the reading `zenkey_fleet::doctor_delta`'s doc asks of a
 //! notifier).
 //!
-//! **The four poles ride through** (RFC 13 §1). A run that judged nothing
+//! **The four poles ride through** (observer §1). A run that judged nothing
 //! because nothing was in scope (#510, the report's `unobservable`) is an
 //! `unobservable` notification naming why, and the previous report is
 //! **retained**, never replaced with nothing; the run after it is
@@ -144,8 +144,8 @@ pub fn established(report: &DoctorReport, check: CheckId) -> bool {
     })
 }
 
-/// What the run covered, with every not-asked pole said out loud (RFC 13
-/// §1, §3 O4): the presence read and whether it completed, the routers'
+/// What the run covered, with every not-asked pole said out loud
+/// (observer §1): the presence read and whether it completed, the routers'
 /// admin space, the `health.v1` reading and its clock, and how many checks
 /// were established, unobservable or not asked — never a silent zero.
 pub fn coverage(r: &DoctorReport) -> String {
@@ -619,7 +619,7 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
                     "state: unobservable (was: ok)".to_string(),
                     format!("the doctor could not run at {ran_at}: {error}"),
                     "the previous report is retained on zenwatch.v1's state/doctor; nothing \
-                     here says the deployment is clean (RFC 13 §1)"
+                     here says the deployment is clean (observer §1)"
                         .to_string(),
                 ],
                 BTreeMap::new(),

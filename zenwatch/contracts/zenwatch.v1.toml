@@ -4,7 +4,7 @@
 #
 #   zk2/<system>/zenwatch/zenwatch.v1/state/firing/{rule_id}   one per rule with something announced
 #   zk2/<system>/zenwatch/zenwatch.v1/state/doctor             the scheduled doctor's last report
-#   zk2/<system>/zenwatch/zenwatch.v1/state/counters           what its bounds cost (RFC 13 §3 O6)
+#   zk2/<system>/zenwatch/zenwatch.v1/state/counters           what its bounds cost (tooling guide O6)
 #
 # The system is minted by hostid.v1 unless the configuration names one
 # (`publish.address`). Rust-first: every type is a struct the daemon already

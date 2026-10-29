@@ -7,7 +7,7 @@
 //! timestamp), so the cut lands on the part a reader can fetch from the bus
 //! anyway.
 //!
-//! Three sources, said out loud (RFC 13 §3 O4): typed fields through the
+//! Three sources, said out loud (observer §1): typed fields through the
 //! contract that declares the payload (spec §7.2); a structural reading
 //! when no contract resolves one, prefixed with why and bounded separately
 //! at [`RenderConfig::max_structural_bytes`]; and key-plus-timestamp when
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use zenkey_fleet::CondState;
 
 /// Where the fields a notification renders came from — said out loud,
-/// because "no severity" reads differently under each (RFC 13 §3 O4). The
+/// because "no severity" reads differently under each (observer §1). The
 /// wire words are v1's (`schema` | `structural` | `key_only`), kept so a
 /// sink consumer's switch survives the port (#614, FL2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

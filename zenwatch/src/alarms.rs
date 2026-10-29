@@ -229,7 +229,7 @@ impl Sight {
             Sight::Lost { lost } => format!(
                 "the reader of the alarms under {selector} lost {lost} delivery(ies) or stalled: \
                  every alarm under it is unobservable until a GET answers it (alarms.v1 §2.14 \
-                 step 4), and each keeps its last word until then (RFC 13 §3 O6)"
+                 step 4), and each keeps its last word until then (tooling guide O6)"
             ),
             Sight::Stopped(why) => format!(
                 "the alarms under {selector} are not being read: {why} — every alarm under it \

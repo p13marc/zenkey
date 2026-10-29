@@ -77,7 +77,7 @@ pub struct Config {
     /// world.
     pub state_file: Option<PathBuf>,
     /// How many notice entries the ledger keeps; the least recently changed
-    /// are evicted past it, counted and reported (RFC 13 §3 O6).
+    /// are evicted past it, counted and reported (tooling guide O6).
     #[serde(default = "default_state_max_entries")]
     pub state_max_entries: usize,
     /// The scheduled doctor (#390): zk2's `run_doctor` over the whole

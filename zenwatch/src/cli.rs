@@ -36,7 +36,7 @@ use clap::{Args, Parser, Subcommand};
         reaches, read in the deployment's namespace, is firing, resolved or unobservable \
         on its own; one notification per alarm). Three states ride every notification, \
         never two: ok / firing / unobservable, and a drop in the observer is \
-        unobservable, never ok (RFC 13 §3 O6).\n\n\
+        unobservable, never ok (tooling guide O6).\n\n\
         Exit codes: 0 clean, 1 the act failed, 2 refused input (`zenwatch/src/exit.rs`)."
 )]
 pub struct Cli {
