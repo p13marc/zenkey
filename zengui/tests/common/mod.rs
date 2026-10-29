@@ -235,6 +235,9 @@ pub struct World {
     /// Whether `lab/meter` and `site-a/rf0` publish beside the rest
     /// ([`World::metered`], #819, TD).
     metered: bool,
+    /// `robot1/teleop`'s `twist_cmd.v1` beside the rest ([`World::timed`],
+    /// #908, MC).
+    timed: bool,
     /// What the last tick published, as [`World::verdicts`] checks it.
     last: Vec<Published>,
 }
@@ -250,6 +253,19 @@ pub const HEALTH: &str = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
 
 /// `robot1/nav`'s position stream: a `nav.v2.Position` protobuf, valid.
 pub const POSITION: &str = "zk2/robot1/nav/nav.v2/stream/position";
+/// `robot1/teleop`'s command stream (#908, MC): `twist_cmd.v1`'s `cmd`, a
+/// `twist_cmd.v1.Twist` protobuf, timed (period 20 ms, deadline 100 ms,
+/// lifespan 100 ms) and published once a tick, 250 ms apart: missed
+/// between every two samples, its owner present.
+pub const TWIST_CMD: &str = "zk2/robot1/teleop/twist_cmd.v1/stream/cmd";
+/// The timed publisher ([`World::timed`]).
+const TIMED_FEEDS: &[(&str, &str, &str, &str, &str)] = &[(
+    TWIST_CMD,
+    "twist_cmd.v1",
+    "stream",
+    "cmd",
+    "application/protobuf",
+)];
 /// `robot1/nav`'s status state: a `nav.v2.Status` protobuf, valid.
 pub const NAV_STATUS: &str = "zk2/robot1/nav/nav.v2/state/status";
 /// `robot1/nav`'s origin state, carrying bytes that are no `nav.v2.Origin`:
@@ -682,6 +698,17 @@ impl World {
         World::build(contracts, &addresses, true)
     }
 
+    /// The world with `robot1/teleop` beside it (#908, MC): its timed
+    /// `twist_cmd.v1` command stream placed by presence and publishing each
+    /// tick ([`TWIST_CMD`]), from the walkthrough's contracts.
+    pub fn timed() -> World {
+        let mut addresses = World::ADDRESSES.to_vec();
+        addresses.push(("robot1/teleop", "twist_cmd.v1"));
+        let mut w = World::build(contracts(), &addresses, false);
+        w.timed = true;
+        w
+    }
+
     fn build(
         contracts: Arc<zengui::services::contracts::LoadedContracts>,
         addresses: &[(&str, &str)],
@@ -696,6 +723,7 @@ impl World {
             .map(|(key, ..)| *key)
             .chain(SYNTH_FEEDS.iter().map(|(key, ..)| *key))
             .chain(METERED_FEEDS.iter().map(|(key, ..)| *key))
+            .chain(TIMED_FEEDS.iter().map(|(key, ..)| *key))
             .map(|key| (key, Axes::declared(&lens, key)))
             .collect();
         World {
@@ -713,6 +741,7 @@ impl World {
             observed,
             axes,
             metered,
+            timed: false,
             last: Vec::new(),
         }
     }
@@ -1122,6 +1151,12 @@ impl World {
             for (key, payload, encoding) in METERED_FEEDS {
                 let (bytes, attachment) = payload(n);
                 out.push((key, bytes, encoding, attachment));
+            }
+        }
+        if self.timed {
+            for (key, iface, token, template, encoding) in TIMED_FEEDS {
+                let bytes = synth(&self.contracts.set, iface, token, template, n);
+                out.push((key, bytes, encoding, None));
             }
         }
         out.extend(
