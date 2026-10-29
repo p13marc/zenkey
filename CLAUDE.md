@@ -668,7 +668,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   and `<ns>/zk2/*/*/*/@state/**`, on `snapshot` the `@state` one alone,
   every verb's scope from `cmd::zk2::wire_scope`, refused beside a typed
   selector, exit 2; the three are the data plane but `@op` and `@zk`,
-  tooling guide O5, #924; `rate` and `field` keep one selector)
+  `observer.md` §8.2, #924; `rate` and `field` keep one selector)
   and resolve every key through one session-free **lens**
   (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
   `--namespace`, the contract each descriptor names, the rung named where
@@ -1487,9 +1487,29 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `zenkey-build/fixtures/codegen-test` (the walkthrough and tcgui contracts,
   on a bus and with an `Api` double) and `fixtures/contract-crate` (no zenoh
   by default).
-- **`spec/`** holds what every implementation must agree on:
-  `contract.schema.json`, generated from `zenkey-model`'s authoring types,
-  and `conformance/` fixtures. Both are checked by
+- **`spec/`** holds what every implementation must agree on. Its two
+  normative texts are `core.md`, what participants put on the wire and
+  how owners, consumers, callers and deployments behave, and
+  `observer.md` (#925), what a tool, or any participant reading presence,
+  state or the admin space, does with what it reads, when a read is
+  complete, and what it may conclude and tell a person. Each states its
+  version in its header and records every change in its own changelog
+  (`CHANGELOG.md`, `observer-CHANGELOG.md`), and
+  `scripts/check-spec-status.sh` keeps each header naming its changelog's
+  newest entry and README.md and spec/README.md stating neither number.
+  `observer.md` holds the reader's discipline core 0.58 moved out, word
+  for word, no rule changed (§8.1's "Reading presence" its §3, §2.7's
+  readings and conclusions its §5, §4.2's seed, admin-space and S1 checks
+  its §4, §6's split-brain diagnosis its §6, the tool's halves of R3, R7,
+  O3 and §7's decoding its §7), each old home a one-line pointer with the
+  section number kept, so `core §8.1` still leads there; and the tooling
+  guide's judgement shape, silence never a verdict and its O1, O4, O5 and
+  O7, promoted with their evidence (its §1, §2, §8). The guide
+  (`docs/zk2/tooling-guide.md`) keeps guidance: the polarity and exit
+  codes, O2, O3, O6, the reference's spellings, recording and replay, what
+  did not carry over from v1, and how the tools test themselves. Beside
+  them: `contract.schema.json`, generated from `zenkey-model`'s authoring
+  types, and `conformance/` fixtures. Both are checked by
   `zenkey-model/tests/conformance.rs`. After an intended change, run
   `ZK2_BLESS=1 cargo test -p zenkey-model --test conformance` and read the
   diff: a bless claims every changed expectation is right.
@@ -1509,51 +1529,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.57 is the current version
-    (0.37: what a complete presence read is, #839/#830; 0.38: the second
-    implementation's findings against it, #849; 0.39: the standby mark and
-    `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
-    tokens, and a peer's read covers only its routers' clients and its
-    linked peers, #841 RB; 0.41: a watch session's round trip matches no
-    token, its subscribers' history, a read at the interests timeout,
-    #851; 0.42: a watch session in no namespace on the wire keys, no round
-    trip through a watch session cut off, a move unconfirming what a reader
-    holds, a read's time and an unreadable interests timeout, zk2py round
-    66's F-227 to F-235, #875; 0.43: two of presence §10's steps worded
-    for any reader, round 67's F-236 and F-237; 0.44: a watch session's
-    reopen tells its subscribers every token and the round trip after it
-    waits for them, one round trip and one read at a time, a round trip at
-    the interests timeout not standing, round 68's F-238 to F-240, #882;
-    0.45: only the first round trip after a reopen waits for the
-    population, a GET in flight is at the reader and one its own timeout
-    ended cannot be taken up, §10 step 10's counts the reader's own,
-    round 69's F-241 to F-244; 0.46: a black box judged on what its
-    output shows, a session's first read the cost the round trip after a
-    reopen matches, round 70's F-245 to F-247; 0.47: a black box's
-    output sampled below the cut, a reader's seed the first read it can
-    time, round 71's F-248 and F-249; 0.48: no admin read a tool asks
-    unbidden reaches a router's declaration records, which zenoh 1.10.1
-    answers under its tables' read lock, #890; 0.49: the final cold read's
-    three wordings, round 72's F-250 to F-252; 0.50: the admin read is the
-    tools' three reads and admits no GET of any node's declaration
-    records, a query admitted by inclusion, #894, with round 73's F-253
-    to F-255; 0.51: that rule under `deny` and on an ingress `query`, an
-    `allow` block unprotected, and where §12's recorder hears a freezing
-    read, round 74's F-256 and F-257; 0.52: the admin read reaches every
-    node's admin space, round 75's F-258; 0.53: `timing.v1`'s vocabulary
-    published, an HLC following the stamps it receives, and a stamp's time
-    counted from the Unix epoch, #908; 0.54: a binding an ordered list
-    whose order the descriptor keeps, a withdrawal heard live acted on
-    without concluding absence, and `arbitration.v1`'s vocabulary
-    published, #909; 0.55: a node with an HLC stamps an unstamped put it
-    routes, its own subscriber's included, round 76's F-265, #908; 0.56:
-    a watch session told a close's withdrawals before its transport event,
-    and an open before its subscribers' interests are declared again,
-    round 77's F-268, #909 BB; 0.57: `cardinality = "unbounded"` (the
-    canonical form's 4294967295, `contracts/ok-cardinality-unbounded`), and
-    an informative "At scale." line opening §2.7, §3.3's `standby`, §8.1's
-    tokenless set and member tokens, and §8.3, no rule changed, #937;
-    changes go through `spec/CHANGELOG.md`):
+  - `spec/core.md` v0.1 is accepted; its current version is in its header
+    and every amendment in `spec/CHANGELOG.md` (since #922 the header is
+    the one place a version is stated), and `spec/observer.md`'s text
+    version is in its own header, with `spec/observer-CHANGELOG.md` (#925;
+    core 0.58 moved the reader's discipline there, no rule changed):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
