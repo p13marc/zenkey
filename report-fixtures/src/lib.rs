@@ -356,6 +356,13 @@ pub fn doctor_report() -> DoctorReport {
                 "1 interface(s) redundancy.v1 governs, none without an incumbent in both reads \
                  2.0s apart",
             ),
+            CheckReport::of(
+                CheckId::TimingDeclaration,
+                vec![],
+                vec![],
+                "2 timed resource(s) in 1 revision(s) named by descriptors, each declaration one \
+                 a reader judges",
+            ),
         ],
         unobservable: None,
     }

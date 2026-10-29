@@ -133,6 +133,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     ? unjudged lab/w3 task: its report's observed 100/a1 is earlier than its author lab/author's current version, its put 300/a1, the same id: not yet — how long it has been so cannot be told from one reading without a trusted clock: pass --clocks-synced
 ✓  desired-last-known (desired.v1 §2.9)       clean — 2 desired.v1 role(s), none running a document read from an archive
 ✓  redundancy-vacancy (redundancy.v1 §2.15)   clean — 1 interface(s) redundancy.v1 governs, none without an incumbent in both reads 2.0s apart
+✓  timing-declaration (timing.v1 §2.2)        clean — 2 timed resource(s) in 1 revision(s) named by descriptors, each declaration one a reader judges
 
 "#]]
     );
@@ -2269,6 +2270,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-plan",
         "telemetry",
         "timeline",
+        "timing",
         "why",
     ];
 
