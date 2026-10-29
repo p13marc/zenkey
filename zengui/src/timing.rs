@@ -4,9 +4,10 @@
 //! own view**, never a verdict about the deployment.
 //!
 //! **Session-free, and every verdict the model's.** [`read`] hands the
-//! slot's history ring, oldest first, to `zenkey_model::timing`'s
-//! [`Tracker`], with the owner's state as the presence link said it at the
-//! instants this window recorded ([`OwnerTrack`]), then judges §5's deadline
+//! slot's history ring, oldest first, to the model's
+//! [`Tracker`](zenkey_model::timing::Tracker), with the owner's state as
+//! the presence link said it at the instants this window recorded
+//! ([`OwnerTrack`]), then judges §5's deadline
 //! and period questions with `deadline_met` and `period_kept` over
 //! `period_window`. Nothing is computed here but what to hand the model.
 //!
