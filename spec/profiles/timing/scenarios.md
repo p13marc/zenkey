@@ -244,13 +244,15 @@ descriptor (v1.md §2.7, text 0.2, F-263); then it subscribes to `cmd` and
 to `axis/*`, the window's start its subscription's start, and states ε =
 100 ms. It answers §5's three questions of each member it held in the
 window, at any instant of it (F-267). The owner publishes `axis/x` every
-100 ms in every step.
+100 ms in every step but step 5.
 
 **The reference** (#908, MC). T is `zenctl timing 'zk2/lab/pace/**' --for
 5 --clock-bound 100 --format json`, a new run per step, its stderr's
 `timing: listening` line the window's start; the owner is the owner
 example's drive (`timing resume cmd`, `timing add x`, `timing pause cmd`
-and `timing resume cmd` for step 2, `timing every cmd 250` for step 3).
+and `timing resume cmd` for step 2, `timing every cmd 250` for step 3; for
+step 5 a new owner given no command, so it publishes nothing, and closed;
+for step 6 a new owner, `timing remove x` and `timing add x`; text 0.5).
 The reference runs the section as `zenctl/tests/live_zk2.rs`'s
 `timing_s6_a_tools_window`.
 
@@ -262,6 +264,15 @@ The reference runs the section as `zenctl/tests/live_zk2.rs`'s
    slower than its period, within its deadline.
 4. T reads again. 1 s into the window, the owner closes cleanly: its
    tokens are withdrawn at once.
+5. A new owner starts and publishes nothing: `cmd` is never published,
+   and no axis is declared. T reads it. 0.15 s into the window, before
+   `cmd`'s miss would be due at 0.5 s, the owner closes cleanly (text 0.5,
+   F-278).
+6. A new owner starts, publishing `cmd` and `axis/x` at the period. T
+   reads it. 1 s into the window, the owner stops `axis/x` and withdraws
+   its member token; 2 s into it, the owner declares `x`'s member token
+   again and publishes `axis/x` every 100 ms to the window's end (text
+   0.5, F-280).
 
 **Expected.**
 1. `cmd`: deadline yes (`met`), period yes (`kept`), lifespan no
@@ -281,3 +292,19 @@ The reference runs the section as `zenctl/tests/live_zk2.rs`'s
    its member token went with the owner, so T reports it `ended` at that
    read: deadline not asked (`ended`); period yes (`kept`), over its span,
    which ended with it.
+5. T hears the owner's tokens withdrawn, and its read after them is
+   complete and shows none of them, before `cmd`'s miss is due, so T
+   reports no miss. `cmd` was held only while T waited for it (v1.md §2.7):
+   from the window's start to that read, less than its deadline. `cmd`:
+   deadline unobservable (`window_too_short`), never `met`; period
+   unobservable (`owner_not_present`): no arrival in the 5 s span, not
+   kept, and the owner not present throughout; lifespan unobservable
+   (`no_sample`). No axis member is held. The run has no verdict.
+6. T hears `x`'s member token withdrawn, and its read after it is
+   complete and shows none, so T reports `axis/x` `ended` at that read,
+   long before a miss is due. Heard again from 2 s, `axis/x` is read over
+   its first life (v1.md §2.7): its span and its held time end at that
+   first end, about a second each. `axis/x`: deadline not asked (`ended`);
+   period yes (`kept`), over its first life's span, the second life's
+   arrivals not counted. `cmd`: deadline yes (`met`), period yes (`kept`),
+   lifespan no (`live`). The run is clean.
