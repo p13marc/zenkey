@@ -850,7 +850,9 @@ fn timing_declaration(p: &Presence<'_>) -> CheckReport {
                 Declaration::Ignored => warn(
                     name,
                     format!(
-                        "timing keys on a {} resource mean nothing (timing.v1 §2.3): only a                          stream has a period, a deadline or a lifespan; a key in [defaults]                          reaches every kind, where [defaults.stream] would not",
+                        "timing keys on a {} resource mean nothing (timing.v1 §2.3): only a \
+                         stream has a period, a deadline or a lifespan; a key in [defaults] \
+                         reaches every kind, where [defaults.stream] would not",
                         r.kind.as_str()
                     ),
                 ),
@@ -859,7 +861,8 @@ fn timing_declaration(p: &Presence<'_>) -> CheckReport {
                     warn(
                         name,
                         format!(
-                            "its timing declaration is invalid: {} — no reader judges its                              period, deadline or lifespan (timing.v1 §2.2)",
+                            "its timing declaration is invalid: {} — no reader judges its \
+                             period, deadline or lifespan (timing.v1 §2.2)",
                             why.iter()
                                 .map(|w| format!("{} ({})", w.says(), w.as_str()))
                                 .collect::<Vec<_>>()
@@ -875,7 +878,9 @@ fn timing_declaration(p: &Presence<'_>) -> CheckReport {
                         warn(
                             name,
                             format!(
-                                "its deadline, {} ms, is below its period, {} ms, so it is no                                  deadline: an owner keeping its period would be missed between                                  every two samples, and no reader judges one (timing.v1 §2.5)",
+                                "its deadline, {} ms, is below its period, {} ms, so it is no \
+                                 deadline: an owner keeping its period would be missed between \
+                                 every two samples, and no reader judges one (timing.v1 §2.5)",
                                 deadline.as_millis(),
                                 period.as_millis()
                             ),
@@ -888,7 +893,9 @@ fn timing_declaration(p: &Presence<'_>) -> CheckReport {
             if requirement_declaration(&req.annotations) == Declaration::Ignored {
                 warn(
                     format!("requires.{role}"),
-                    "timing keys on a requirement mean nothing at this version (timing.v1                      §2.3): a descriptor's requirement entry carries no annotations, and a                      tightened deadline belongs to a binding, which has no field for it"
+                    "timing keys on a requirement mean nothing at this version (timing.v1 \
+                     §2.3): a descriptor's requirement entry carries no annotations, and a \
+                     tightened deadline belongs to a binding, which has no field for it"
                         .to_owned(),
                 );
             }
@@ -899,7 +906,8 @@ fn timing_declaration(p: &Presence<'_>) -> CheckReport {
         findings,
         undecided,
         format!(
-            "{timed} timed resource(s) in {} revision(s) named by descriptors, each declaration              one a reader judges",
+            "{timed} timed resource(s) in {} revision(s) named by descriptors, each declaration \
+             one a reader judges",
             named.len()
         ),
     )
