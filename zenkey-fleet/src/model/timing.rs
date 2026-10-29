@@ -27,9 +27,12 @@
 //! - **per provider address and resource, the model's [`LifespanReader`]**
 //!   (§2.6), under the operator's ε (`None`: every sample `no_bound`), its
 //!   owners the `meta.zid`s of the address's descriptors held;
-//! - **per member**, what §2.7 asks over the window: how long it was held,
-//!   each miss with the owner's state at it ([`DeadlineAccount`]), whether
-//!   it ended, its arrivals for `period_window`, and its samples' lifespans.
+//! - **per member**, what §2.7 asks over the window: how long it was held
+//!   (the model's [`Holding`] over its tracker: a known member never heard
+//!   only while waited for, F-278, and every member to its first end,
+//!   F-280; text 0.5), each miss with the owner's state at it
+//!   ([`DeadlineAccount`]), whether it ended, its arrivals for
+//!   `period_window`, and its samples' lifespans.
 //!
 //! **One order, instants that never go back.** The bus folds every
 //! delivery in the one order its queue received it, and the book takes each
@@ -61,7 +64,7 @@ use zenkey_model::freshness::StampAge;
 use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey};
 use zenkey_model::template::Segment;
 use zenkey_model::timing::{
-    DeadlineAccount, Declaration, EndReason, Event, LifespanReader, MemberState, Mono, OwnerState,
+    DeadlineAccount, Declaration, EndReason, Event, Holding, LifespanReader, Mono, OwnerState,
     PeriodReading, Report, Sample, SampleVerdict, Stamped, Tracker, Window, declaration_of,
     period_window, zid_value,
 };
@@ -281,9 +284,9 @@ pub struct MemberWindow {
     /// The index of its resource in [`TimingBook::resources`].
     pub resource: usize,
     pub known: bool,
-    /// How long it was held in the window (§2.7), so far.
+    /// How long it was held in the window (§2.7), so far: its tracker's
+    /// [`Holding`] (text 0.5, F-278, F-280).
     pub held: Duration,
-    held_from: Option<Mono>,
     /// The tracker's account: misses by the owner's state, and whether it
     /// ended.
     pub account: DeadlineAccount,
@@ -312,7 +315,6 @@ impl MemberWindow {
             resource,
             known,
             held: Duration::ZERO,
-            held_from: None,
             account: DeadlineAccount::default(),
             misses: Vec::new(),
             mets: 0,
@@ -348,23 +350,14 @@ impl MemberWindow {
             self.samples.push(s);
         }
     }
-
-    fn hold(&mut self, held: Option<Mono>, at: Mono) {
-        match (self.held_from, held) {
-            (None, Some(from)) => self.held_from = Some(from.min(at)),
-            (Some(from), None) => {
-                self.held += at.saturating_since(from);
-                self.held_from = None;
-            }
-            _ => {}
-        }
-    }
 }
 
-/// One provider's resource: its tracker and its lifespan reader.
+/// One provider's resource: its tracker, how long it held each member in
+/// the window, and its lifespan reader.
 #[derive(Debug, Clone)]
 struct Judging {
     tracker: Option<Tracker>,
+    holding: Holding,
     lifespan: LifespanReader,
     /// Each held key's epoch chunk.
     epochs: BTreeMap<String, String>,
@@ -441,6 +434,7 @@ impl TimingBook {
                         t
                     }
                 }),
+                holding: Holding::new(),
                 lifespan: LifespanReader::new(r.kind, &r.declaration, epsilon, []),
                 epochs: BTreeMap::new(),
                 seen: BTreeSet::new(),
@@ -602,11 +596,15 @@ impl TimingBook {
     /// Hands `event` to resource `i`'s tracker at `at`, then counts what it
     /// reported and moves each member's held span.
     fn observe(&mut self, i: usize, at: Mono, event: Event<'_>) {
-        let Some(t) = self.judging[i].tracker.as_mut() else {
+        let j = &mut self.judging[i];
+        let Some(t) = j.tracker.as_mut() else {
             return;
         };
         let reports = t.observe(at, event);
         let in_window = self.started.is_some() && self.ended.is_none();
+        if in_window {
+            j.holding.observe(t, &reports, at);
+        }
         for r in reports {
             let key = r.member().to_owned();
             if let Report::BeyondBound { .. } = r {
@@ -636,30 +634,21 @@ impl TimingBook {
         }
     }
 
-    /// Each member of resource `i`'s held span, from its tracker's state.
+    /// Each member of resource `i`'s held time to `at`, its tracker's
+    /// [`Holding`]'s (§2.7; text 0.5, F-278, F-280): a member the tracker
+    /// held counted is given its row.
     fn restate_held(&mut self, i: usize, at: Mono) {
-        let Some(t) = self.judging[i].tracker.as_ref() else {
-            return;
-        };
-        let mut states: Vec<(String, Option<MemberState>)> =
-            t.held().map(|k| (k.to_owned(), t.state(k))).collect();
-        for (k, m) in &self.members {
-            if m.resource == i && !states.iter().any(|(s, _)| s == k) {
-                states.push((k.clone(), None));
-            }
-        }
-        for (key, state) in states {
-            let held = match state {
-                Some(MemberState::Waiting { since }) => Some(since),
-                Some(MemberState::Heard { last }) => Some(last),
-                Some(MemberState::Missed { .. }) => Some(at),
-                Some(MemberState::Idle { .. }) | None => None,
-            };
-            if held.is_none() && !self.members.contains_key(&key) {
+        let held: Vec<(String, Duration)> = self.judging[i]
+            .holding
+            .spans()
+            .map(|(k, s)| (k.to_owned(), s.held_to(at)))
+            .collect();
+        for (key, held) in held {
+            if held.is_zero() && !self.members.contains_key(&key) {
                 continue;
             }
             if let Some(m) = self.member_entry(&key, i) {
-                m.hold(held, at);
+                m.held = held;
             }
         }
     }
@@ -1191,8 +1180,9 @@ impl TimingBook {
         }
         self.tick(at);
         let at = self.last;
-        for m in self.members.values_mut() {
-            m.hold(None, at);
+        for i in 0..self.judging.len() {
+            self.judging[i].holding.close(at);
+            self.restate_held(i, at);
         }
         self.ended = Some(at);
     }
@@ -1368,6 +1358,105 @@ mod tests {
             owed.unwrap().selector(),
             "zk2/lab/pace/@zk/alive/pace.v1/**"
         );
+    }
+
+    /// Text 0.5, F-278 (scenarios.md §6 step 5 in values): `cmd` never
+    /// published, its owner closing 150 ms into the window and read absent
+    /// at 330: held only while waited for, 330 ms, so its deadline is
+    /// `window_too_short`, never `met`; its owner present again starts the
+    /// count again.
+    #[test]
+    fn a_known_member_is_held_only_while_it_is_waited_for() {
+        let t0 = Instant::now();
+        let mut book = TimingBook::new(vec![pace_cmd()], None, false, t0);
+        present(&mut book, t0);
+        book.start(t0);
+        let owed = book.token(&alive("00000000000000a1"), false, t0 + ms(150));
+        assert_eq!(
+            book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(330)),
+            None
+        );
+        book.tick(t0 + ms(600));
+        book.finish(t0 + ms(5000));
+        let m = book.members().next().unwrap().1.clone();
+        assert_eq!(m.held, ms(330), "the unconfirmed while waits on (§2.5)");
+        assert_eq!(m.missed(), 0, "the wait stopped before its due");
+        let r = &book.resources()[0];
+        let w = book.window_of(CMD).unwrap();
+        let d = deadline_met(r.kind, &r.declaration, &w, &m.deadline_account());
+        assert_eq!(
+            (d.answer, d.reason),
+            (Answer::Unobservable, Reason::WindowTooShort)
+        );
+        // Present again at 1000: the count starts again, to the end.
+        let mut book = TimingBook::new(vec![pace_cmd()], None, false, t0);
+        present(&mut book, t0);
+        book.start(t0);
+        let owed = book.token(&alive("00000000000000a1"), false, t0 + ms(150));
+        book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(330));
+        book.token(&alive("00000000000000a2"), true, t0 + ms(1000));
+        book.finish(t0 + ms(1200));
+        let m = book.members().next().unwrap().1;
+        assert_eq!(m.held, ms(330 + 200));
+    }
+
+    /// Text 0.5, F-280 (scenarios.md §6 step 6 in values): `axis/x` ended
+    /// by its member tokens gone and heard again is read over its first
+    /// life: its held time and its span end at its first end, and its
+    /// period is kept there.
+    #[test]
+    fn a_member_heard_again_is_read_over_its_first_life() {
+        const X: &str = "zk2/lab/pace/pace.v1/stream/axis/x";
+        let axis = TimedResource::from_parts(
+            ADDR.parse().unwrap(),
+            "pace.v1".parse().unwrap(),
+            "stream/axis/{axis}",
+            Declaration::Declared(Declared {
+                period: Some(ms(100)),
+                deadline: Some(ms(500)),
+                lifespan: None,
+            }),
+            Some(4),
+            Some(1),
+            "zk2/lab/pace/pace.v1/stream/axis/*",
+            false,
+        );
+        let t0 = Instant::now();
+        let mut book = TimingBook::new(vec![axis], None, false, t0);
+        let token = |e: &str| format!("zk2/lab/pace/@zk/member/pace.v1/x/{e}");
+        let read = Observed::from_keys(
+            "zk2/lab/pace/@zk/**",
+            &[alive("00000000000000a1"), token("00000000000000e1")],
+            true,
+        );
+        book.seed(&read, true, t0);
+        book.start(t0);
+        for n in 0..11 {
+            book.sample(&put(X, t0 + ms(50 + n * 100)));
+        }
+        let owed = book.token(&token("00000000000000e1"), false, t0 + ms(1060));
+        assert!(owed.is_some(), "a withdrawal leaving none owes a read");
+        book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(1160));
+        book.token(&token("00000000000000e2"), true, t0 + ms(2000));
+        for n in 0..30 {
+            book.sample(&put(X, t0 + ms(2050 + n * 100)));
+        }
+        book.finish(t0 + ms(5000));
+        let m = book.members().next().unwrap().1.clone();
+        assert_eq!(m.ended, Some((Mono::after(ms(1160)), EndReason::Gone)));
+        assert_eq!(m.held, ms(1160 - 50), "to the first end, never both lives");
+        let p = book.period(X).unwrap();
+        assert_eq!(
+            (p.arrivals, p.span),
+            (11, Some(ms(1110))),
+            "the second life's arrivals are not counted"
+        );
+        let r = &book.resources()[0];
+        let w = book.window_of(X).unwrap();
+        let k = period_kept(r.kind, &r.declaration, &w, p.verdict);
+        assert_eq!((k.answer, k.reason), (Answer::Yes, Reason::Kept));
+        let d = deadline_met(r.kind, &r.declaration, &w, &m.deadline_account());
+        assert_eq!((d.answer, d.reason), (Answer::NotAsked, Reason::Ended));
     }
 
     /// Instants never go back: an event earlier than the last is taken at
