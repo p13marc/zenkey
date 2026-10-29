@@ -45,9 +45,11 @@
 //!      [`REREAD`] later, one per burst, on the deployment's session (§2.7);
 //!      a move of the watch session's transport, or a withdrawal heard
 //!      while it holds no link (F-268), keeps what the watch hears until
-//!      the round trip asked [`AFTER_OPEN`] after it stands (§2.8; core
-//!      §8.1, 0.56), asked again until one does; and a one-shot timer at
-//!      the active provider's due instant (§2.9).
+//!      the round trip asked after it stands (§2.8), asked again until one
+//!      does, the barrier asking the one after an open
+//!      [`zenkey::presence::OPEN_MARGIN`] after it (core §8.1, 0.56,
+//!      #914); and a one-shot timer at the active provider's due instant
+//!      (§2.9).
 //!
 //! Nothing is judged here: [`crate::judge::arbitration`] answers §5.
 
@@ -80,12 +82,6 @@ pub const QUEUE: usize = 1024;
 /// How long after the first withdrawal of a burst a view reads the
 /// addresses it left none known held (§2.7; the reference's 0.1 s).
 pub const REREAD: Duration = Duration::from_millis(100);
-
-/// How long after a move of the watch session the round trip that ends it
-/// is asked (§2.8; core §8.1, 0.56): zenoh 1.10.1 tells an open before it
-/// declares the watch's interests again, and a round trip asked in between
-/// stands with nothing told.
-pub const AFTER_OPEN: Duration = Duration::from_millis(100);
 
 /// How long a view listens by default: several deadlines of the
 /// scenarios' 300 ms.
@@ -675,7 +671,9 @@ async fn listen(
                 moves_seen = barrier.as_ref().map_or(moves_seen, zenkey::presence::Barrier::moves);
                 v.awaiting_event = None;
                 book.moved(Instant::now());
-                trip = Some(v.ask_trip(AFTER_OPEN));
+                // Asked now: the barrier asks the round trip after an open
+                // `OPEN_MARGIN` after it (core §8.1, 0.56; #914).
+                trip = Some(v.ask_trip(Duration::ZERO));
                 l.round_trips += 1;
             }
             stood = tripped => {
@@ -929,11 +927,15 @@ impl Follow {
         }
     }
 
-    /// The round trip after a move, `after` from now.
+    /// The round trip after a move, `after` from now: through the
+    /// barrier, which waits out [`zenkey::presence::OPEN_MARGIN`] after an
+    /// open before it asks (#914).
     fn ask_trip(&self, after: Duration) -> Trip {
         let b = self.barrier.clone();
         Box::pin(async move {
-            tokio::time::sleep(after).await;
+            if !after.is_zero() {
+                tokio::time::sleep(after).await;
+            }
             match b {
                 Some(b) => b.establish().await,
                 None => false,
