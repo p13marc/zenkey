@@ -898,8 +898,24 @@ async fn owner(lowered: Option<u64>) -> Owner {
     if let Some(n) = lowered {
         b.cardinality(&iface(), "state/items/{item}", n).unwrap();
     }
+    let svc = b.start().await.unwrap();
+    // A put is dropped at its source until the owner's session holds the
+    // consumer's subscription (`CLAUDE.md`'s telemetry TG note), and a test
+    // puts at once: wait for it, through a publisher that puts nothing, on
+    // a key no test reads. Main's CI after PR #940 lost §7's `b`
+    // occurrence so, never heard in 20 s.
+    let probe = s
+        .declare_publisher("zk2/lab/budget/budget.v1/events/probe")
+        .await
+        .unwrap();
+    eventually(
+        "the owner's session holds the consumer's subscription",
+        || async { probe.matching_status().await.unwrap().matching() },
+    )
+    .await;
+    drop(probe);
     Owner {
-        svc: b.start().await.unwrap(),
+        svc,
         keys,
         reader: consumer,
         _r: r,
