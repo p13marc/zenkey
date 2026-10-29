@@ -653,7 +653,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   counter or histogram never decreasing, so the runtime's checked writer
   accepts it, #819 TB). `bench call` times each reply where it arrives and
   attributes it by key, envelopes and silence counted apart. `.zrec` is
-  version 3 (header `excluded`, rows `qos_axes`; 1 and 2 still read), and
+  version 3 (header `excluded`, `@op`, `@zk` and `@adv` alone under
+  `--explicit`; rows `qos_axes`; 1 and 2 still read), and
   `record --on` refuses the rules that judge v1.
   FJ8b's observers and checks: the raw observers (`echo`, `rate`, `field`,
   `timeline`, `snapshot`, `watchdog`, `record --on`; `watchdog`, `record
@@ -662,7 +663,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `zenkey_fleet::WatchSession` in no namespace on the wire keys, #875;
   `gen` and `serve`'s candidates keep a namespaced watch, the runtime's)
   keep a wire selector in
-  no namespace and resolve every key through one session-free **lens**
+  no namespace (the default `<ns>/zk2/**`; `--explicit` on `record`,
+  `record --on`, `echo` and `timeline` adds `<ns>/zk2/*/*/*/@stream/**`
+  and `<ns>/zk2/*/*/*/@state/**`, on `snapshot` the `@state` one alone,
+  every verb's scope from `cmd::zk2::wire_scope`, refused beside a typed
+  selector, exit 2; the three are the data plane but `@op` and `@zk`,
+  tooling guide O5, #924; `rate` and `field` keep one selector)
+  and resolve every key through one session-free **lens**
   (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
   `--namespace`, the contract each descriptor names, the rung named where
   resolution stops (O2). A `.zrec` reads through the same lens, so live and
@@ -816,7 +823,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   alone), `--watch` is a bare bool with `--every` as the one period,
   `--count` is a stop bound (`--at-least` asserts, `--calls` sizes a bench,
   `--times` repeats a publish), `--from` names an input source, `--i-know` is
-  one guard per verb. **Exit contract**, written once in `zenctl/src/exit.rs`
+  one guard per verb, `--explicit` is a bare bool opting a raw observer's
+  default scope into the explicit kinds, never a default (#924). **Exit
+  contract**, written once in `zenctl/src/exit.rs`
   and cited by every verb: 0 asked-and-clean, 1 asked-and-a-finding, 2 no
   verdict — which covers clap's
   usage errors, everything else this tool refuses of your input
