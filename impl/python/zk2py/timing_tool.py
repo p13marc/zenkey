@@ -71,6 +71,27 @@ def timed_rids(canonical: dict[str, Any], selector: str, address: str) -> list[s
     return out
 
 
+def unreached_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
+    """The timed streams of a contract the selector does not reach: an
+    explicit ``@stream`` under a selector ending ``**`` (observer §8.2,
+    "`*` and `**` never match a verbatim chunk"), or one outside it."""
+    every = timed_rids(canonical, f"zk2/{address}/*/@stream/**", address) \
+        + timed_rids(canonical, f"zk2/{address}/**", address)
+    reached = set(timed_rids(canonical, selector, address))
+    return sorted({r for r in every if r not in reached}, key=str.encode)
+
+
+#: Observer §8.3: "A tool says whose clock a time, an age or a latency is
+#: on." The report's times, and a lifespan's age.
+CLOCKS = {
+    "window": "zk2py's monotonic clock: at_ms, due_ms, held_ms and span_ms count from the window's start, "
+              "listening counted from its last subscription (timing.v1 §2.5, §2.7)",
+    "lifespan": "a sample's age is this host's wall clock at its arrival less its stamp's time, the stamp the "
+                "owner's when its id is the owner's meta.zid by value, else foreign (a router's, or a reader's "
+                "own session's), or none (timing.v1 §2.6; observer §4.4, §8.3)",
+}
+
+
 def _rolled(question: str, members: list[tuple[str, tm.Answer]]) -> dict[str, Any]:
     """§5's roll-up of one question over a resource's or the run's members
     (text 0.4), its reason and ``first`` the first member's giving its
@@ -115,6 +136,11 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
                 if canon is not None and canon not in contracts:
                     contracts.append(canon)
     plans = [(c, rids) for c in contracts if (rids := timed_rids(c, selector, address))]
+    # observer §8.2: a wildcard scope names what it cannot reach, the
+    # verbatim kinds and the timed streams of the revisions held it misses
+    unreached = sorted({f"{c['interface']} {r}" for c in contracts for r in unreached_rids(c, selector, address)},
+                       key=str.encode)
+    scope = {"selector": selector, "excluded": live.blind_spots(selector), "unreached": unreached}
     windows = [Window(session, watch, address, c, rids, epsilon_ms=clock_bound_ms, across_face=across_face,
                       owner_zids=owner_zids) for c, rids in plans]
     if listening is not None:
@@ -179,7 +205,7 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
     held = any(r["row"] == "member" for r in rows)
     code = 2 if not held else 1 if finding else 0 if clean else 2
     return {"report": "timing", "selector": selector, "across_face": across_face, "clock_bound_ms": clock_bound_ms,
-            "window_s": window_s, "rows": rows, "run": runq, "exit": code}
+            "window_s": window_s, "scope": scope, "clocks": CLOCKS, "rows": rows, "run": runq, "exit": code}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -199,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         print("timing: --owner-zid is the deployment's word across a face (§2.8): give --across-face",
               file=sys.stderr)
         return 2
+    # observer §7.4: a tool checks the limit at start, and says what it admits
+    print(f"timing: {live.memlock_note()}", file=sys.stderr, flush=True)
     offline = _load(args.contracts)
     session, watch = live.open_client(args.connect), live.open_client(args.connect)
 
@@ -212,6 +240,9 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         live.close(session)
         live.close(watch)
+    if doc["scope"]["unreached"]:
+        print(f"timing: {args.selector} reaches no {', '.join(doc['scope']['excluded']) or 'verbatim kind'}: "
+              f"not watched {', '.join(doc['scope']['unreached'])} (observer §8.2)", file=sys.stderr, flush=True)
     print(json.dumps(doc, indent=2))
     return doc["exit"]
 

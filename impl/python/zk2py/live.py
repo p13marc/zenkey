@@ -1266,6 +1266,61 @@ def _zid_value(text: Any) -> int | None:
     return int(text, 16)
 
 
+# -- observer §8.2 and §7.4, what a tool tells a person of its scope and its host -------
+
+#: Observer §8.2 (text 0.1, the tooling guide's O5 promoted): "`*` and `**`
+#: never match a verbatim chunk. So an ambient selector … never delivers"
+#: these, each given with a selector that reaches every key of its kind.
+#: ``@zk`` is a service's control keys and the location-free bundles;
+#: ``@adv`` is advanced publication's subtree under a plain stream or state
+#: (core §2.5: under a verbatim chunk zenoh-ext's ``@adv`` parser fails).
+VERBATIM_REACH = (
+    ("@stream", ("zk2/*/*/*/@stream/**",)),
+    ("@state", ("zk2/*/*/*/@state/**",)),
+    ("@op", ("zk2/*/*/*/@op/**",)),
+    ("@adv", ("zk2/*/*/*/*/**/@adv/**",)),
+    ("@zk", ("zk2/*/*/@zk/**", "zk2/@zk/**")),
+)
+
+
+def blind_spots(selector: str) -> list[str]:
+    """Observer §8.2: the verbatim kinds a base-relative selector never
+    reaches, in :data:`VERBATIM_REACH`'s order. "A tool that offers a
+    wildcard scope either names the verbatim kinds it watches beside it, or
+    states that they are excluded": a tool reports this list as excluded.
+    Read with zenoh's own intersection, as ``**`` crossing no verbatim chunk
+    is zenoh's (core §1.3)."""
+    sel = zenoh.KeyExpr(selector)
+    return [kind for kind, reach in VERBATIM_REACH if not any(sel.intersects(zenoh.KeyExpr(r)) for r in reach)]
+
+
+MIB = 1 << 20
+
+
+def memlock_note(limit: int | None = None) -> str:
+    """Observer §7.4 (core §7.4's until 0.58): "A tool SHOULD check the limit
+    at start: the ``RLIMIT_MEMLOCK`` that core §7.4 asks a deployment to set
+    to at least the pool plus 2 MiB". A tool does not know the pool, a
+    publisher's, so the note states the largest pool the soft limit admits.
+    ``limit`` stands in for the process's soft limit (a reading's input);
+    ``None`` reads it, and a limit that cannot be read says so."""
+    if limit is None:
+        try:
+            import resource
+
+            soft = resource.getrlimit(resource.RLIMIT_MEMLOCK)[0]
+            limit = -1 if soft == resource.RLIM_INFINITY else soft
+        except (ImportError, OSError, ValueError, AttributeError) as e:
+            return f"RLIMIT_MEMLOCK could not be read ({e}): what SHM pool it admits is unknown (core §7.4)"
+    if limit < 0:
+        return "RLIMIT_MEMLOCK is unlimited: it admits any SHM pool (core §7.4)"
+    if limit < 2 * MIB:
+        return (f"RLIMIT_MEMLOCK is {limit} bytes, below 2 MiB: it admits no SHM pool, which falls back to TCP, "
+                f"and a metadata segment that cannot be locked panics (core §7.4)")
+    return (f"RLIMIT_MEMLOCK is {limit} bytes: it admits an SHM pool of at most {limit - 2 * MIB} bytes, "
+            f"above which SHM falls back to TCP (core §7.4)")
+
+
 # -- §4.2 S4, through the routers' admin space (0.10 to 0.12, 0.48) ---------------
 
 #: §4.2 (0.11; the second selector since 0.48) "What the check reads".

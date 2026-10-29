@@ -31,7 +31,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-#: §2.2: "the no-ceiling value, 4294967295".
+#: §2.2: the no-ceiling value, written ``"unbounded"`` since 0.57, "the
+#: canonical form's 4294967295".
 NO_CEILING = 4294967295
 NS = 1_000_000_000
 HOUR_NS, MINUTE_NS = 3600 * NS, 60 * NS

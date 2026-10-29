@@ -22,6 +22,12 @@ from .shape import Checker, load_schema
 from .templates import REST, Template, TemplateError, overlap, parse_template
 
 FORMAT = "zk2-contract/draft-1"
+#: §2.2 (0.57): the no-ceiling value's name in the authoring format (draft 2),
+#: and what it is "from resolution on" (§9.1): the canonical form's
+#: 4294967295. "The two spellings have one canonical form (§9.5), so one
+#: fingerprint, and an implementation MUST read them alike."
+UNBOUNDED = "unbounded"
+NO_CEILING = 4294967295
 KINDS = ("stream", "state", "event", "operation")
 TYPE_FIELDS = ("type", "attachment", "request", "response", "error", "summary")
 
@@ -200,6 +206,13 @@ def _history(value: Any) -> dict[str, Any] | None:
     if value is True:
         return {"depth": 1, "miss_detection_ms": None}
     return {"depth": value["depth"], "miss_detection_ms": value.get("miss_detection_ms")}
+
+
+def resolve_cardinality(value: Any) -> Any:
+    """§9.1 (0.57): "`cardinality` is an integer or the string
+    `"unbounded"`, which is 4294967295 from resolution on". Any other string
+    never reaches here: ``contract.schema.json`` refuses it, E000."""
+    return NO_CEILING if value == UNBOUNDED else value
 
 
 class _Loader:
@@ -412,9 +425,11 @@ class _Loader:
                 self.diag("E011", f"{text}: params entry {p!r} is not in the template", text)
             elif (ptype == "path") != (p in rest):
                 self.diag("E012", f"{text}: parameter {p!r} of type {ptype}", text)
-        # E013: cardinality on a template with parameters.
+        # E013: cardinality on a template with parameters. "unbounded" (0.57)
+        # is the no-ceiling value, a positive integer like any other.
         if tparams and not spec.get("cardinality"):
-            self.diag("E013", f"{text}: cardinality is required and positive", text)
+            self.diag("E013", f"{text}: cardinality is required and positive: write a number, "
+                              f"the most members one instance will hold, or \"unbounded\"", text)
         # E016 / E017: gates (§2.3).
         gates = _gates(spec.get("gate"))
         # E016 (0.5): "a non-empty gate without optional = true"; an empty
@@ -580,7 +595,7 @@ class _Loader:
             "template": text,
             "kind": kind,
             "params": dict(spec.get("params", {})),
-            "cardinality": spec.get("cardinality"),
+            "cardinality": resolve_cardinality(spec.get("cardinality")),
             "epoch": spec.get("epoch"),
             "optional": spec.get("optional", False),
             "gate": sorted(set(_gates(spec.get("gate")))),
