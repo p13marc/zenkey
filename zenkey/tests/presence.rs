@@ -2400,6 +2400,10 @@ async fn a_round_trip_asked_at_the_open_event_can_precede_the_reopen() {
 /// The reopens of the test above.
 const OPEN_ROUNDS: usize = 10;
 
+/// How many times the move within the margin is tried before the test
+/// fails for want of one that lands in it.
+const MARGIN_ATTEMPTS: usize = 5;
+
 /// #914: the barrier asks the round trip after an open a margin after it
 /// (core §8.1, 0.56: "A reader SHOULD ask the round trip after an open a
 /// margin after its event (the reference: 100 ms)"). The test above's
@@ -2513,34 +2517,53 @@ async fn a_barrier_round_trip_after_an_open_follows_the_reopen() {
     );
 
     // A move within the margin: the round trip waiting it out ends unasked.
-    let seen = barrier.moves();
-    link.cut();
-    moved(seen).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let asked = presence::liveliness_gets(&watch).settles;
-    let seen = barrier.moves();
-    link.heal();
-    moved(seen).await;
-    let opened = Instant::now();
-    assert!(
-        !barrier.establish_within(Duration::ZERO).await,
-        "not asked within the margin"
-    );
-    assert!(barrier.in_flight(), "waiting out the margin");
-    let seen = barrier.moves();
-    link.cut();
-    moved(seen).await;
-    let closed = opened.elapsed();
-    eventually("the round trip ends", || async { !barrier.in_flight() }).await;
-    assert!(
-        !barrier.established(),
-        "a move within the margin: no barrier"
-    );
-    let trips = presence::liveliness_gets(&watch).settles - asked;
-    eprintln!("#914: a close {closed:?} after the open; {trips} round trip(s) asked");
     // Under load the close's event can come after the margin, when the
-    // round trip asks (through a session with no link, which asks nothing).
-    if closed + Duration::from_millis(10) < presence::OPEN_MARGIN {
-        assert_eq!(trips, 0, "a move within the margin ends it unasked");
+    // round trip asks (through a session with no link, which asks nothing),
+    // so it is tried until a close lands within it, and a run where none
+    // does fails rather than passing untested (review-bot on PR #932).
+    let seen = barrier.moves();
+    link.cut();
+    moved(seen).await;
+    let mut tested = None;
+    for attempt in 0..MARGIN_ATTEMPTS {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let asked = presence::liveliness_gets(&watch).settles;
+        let seen = barrier.moves();
+        link.heal();
+        moved(seen).await;
+        let opened = Instant::now();
+        assert!(
+            !barrier.establish_within(Duration::ZERO).await,
+            "attempt {attempt}: not asked within the margin"
+        );
+        assert!(
+            barrier.in_flight(),
+            "attempt {attempt}: waiting out the margin"
+        );
+        let seen = barrier.moves();
+        link.cut();
+        moved(seen).await;
+        let closed = opened.elapsed();
+        eventually("the round trip ends", || async { !barrier.in_flight() }).await;
+        assert!(
+            !barrier.established(),
+            "attempt {attempt}: a move within the margin: no barrier"
+        );
+        let trips = presence::liveliness_gets(&watch).settles - asked;
+        eprintln!(
+            "#914: attempt {attempt}: a close {closed:?} after the open; {trips} round trip(s) asked"
+        );
+        if closed + Duration::from_millis(10) < presence::OPEN_MARGIN {
+            assert_eq!(
+                trips, 0,
+                "attempt {attempt}: a move within the margin ends it unasked"
+            );
+            tested = Some(attempt);
+            break;
+        }
     }
+    assert!(
+        tested.is_some(),
+        "no close landed within the margin in {MARGIN_ATTEMPTS} attempts: the property went untested"
+    );
 }

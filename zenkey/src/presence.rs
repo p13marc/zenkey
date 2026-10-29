@@ -820,13 +820,16 @@ impl Barrier {
                 if !rest.is_zero() {
                     tokio::time::sleep(rest).await;
                 }
-                if moved.load(Ordering::SeqCst) != now {
-                    // It could not stand: the next waiter asks the new
-                    // state's, and no GET the router answers in full is
-                    // asked for nothing.
-                    let _ = tx.send(Some(false));
-                    return;
-                }
+            }
+            // A move since `now` was read — during the margin, or between
+            // that read and the open's, which then found no open at `now`
+            // and no margin — leaves a trip that could not stand: the next
+            // waiter asks the new state's, with its margin, and no GET the
+            // router answers in full is asked for nothing (review-bot on PR
+            // #932).
+            if moved.load(Ordering::SeqCst) != now {
+                let _ = tx.send(Some(false));
+                return;
             }
             let came = settle_at(&session, &key, bound).await.unwrap_or(false);
             // Checked, then stored, in two steps: a move between them leaves
