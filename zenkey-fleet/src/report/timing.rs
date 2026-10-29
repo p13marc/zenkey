@@ -204,7 +204,8 @@ pub struct TimingMember {
     /// A member the tool could name without hearing it (§0).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub known: bool,
-    /// How long it was held in the window (§2.7), milliseconds.
+    /// How long it was held in the window (§2.7): its longest unbroken
+    /// stretch, never the sum of its stretches (text 0.5), milliseconds.
     pub held_ms: f64,
     /// Its arrivals in the window: put samples, not expired.
     pub arrivals: u64,

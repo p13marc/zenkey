@@ -1272,7 +1272,9 @@ pub struct Window {
 /// The tracker's account of one member over the window (§2.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DeadlineAccount {
-    /// How long the member was held in the window.
+    /// How long the member was held in the window: its longest unbroken
+    /// stretch, never the sum of its stretches (§2.7, text 0.5;
+    /// [`Holding`]).
     pub held: Duration,
     /// Misses reported while the owner was present.
     pub missed_present: u32,
@@ -1298,24 +1300,25 @@ impl DeadlineAccount {
     }
 }
 
-/// How long a tool held one member in its window, so far (§2.7): see
-/// [`Holding`].
+/// How long a tool held one member in its window, so far (§2.7): its
+/// longest unbroken stretch, see [`Holding`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HeldSpan {
-    /// The time counted while the count stood stopped.
-    counted: Duration,
-    /// The instant the running count started, while it runs.
+    /// The longest stretch that ended.
+    longest: Duration,
+    /// The instant the running stretch started, while one runs.
     from: Option<Mono>,
-    /// Its first end in the window: the count stops there for good
-    /// (F-280).
+    /// Its first end in the window: no stretch starts after it (F-280).
     ended: Option<Mono>,
 }
 
 impl HeldSpan {
-    /// The time held up to `at`, a running count included.
+    /// The time held up to `at`: the longest stretch, the running one
+    /// included, never their sum (text 0.5).
     #[must_use]
     pub fn held_to(&self, at: Mono) -> Duration {
-        self.counted + self.from.map_or(Duration::ZERO, |f| at.saturating_since(f))
+        self.longest
+            .max(self.from.map_or(Duration::ZERO, |f| at.saturating_since(f)))
     }
 
     /// Its first end in the window, when it ended.
@@ -1338,23 +1341,26 @@ impl HeldSpan {
 
     fn stop(&mut self, at: Mono) {
         if let Some(f) = self.from.take() {
-            self.counted += at.saturating_since(f);
+            self.longest = self.longest.max(at.saturating_since(f));
         }
     }
 }
 
 /// How long a tool held each member of one tracker in its window (§2.7;
-/// text 0.5, F-278, F-280): the account [`DeadlineAccount::held`] reads.
+/// text 0.5, F-278, F-280): the account [`DeadlineAccount::held`] reads,
+/// the **longest unbroken stretch** it held the member, never the sum of
+/// its stretches.
 ///
 /// Handed the tracker after each event it observed in the window, with the
-/// reports it made, a member counts from the instant the tracker holds it
-/// heard, missed or waited for, and stops at the instant it holds it
-/// otherwise, or not at all:
-/// - **a known member never heard counts only while it is waited for**
-///   (§2.5): its owner's absence stops the count, and its presence again
-///   starts it (F-278), so a window whose owner left before the miss was
-///   due holds it for less than the deadline, and §5 answers
-///   `window_too_short`, never `met`;
+/// reports it made, a member's stretch runs from the instant the tracker
+/// holds it heard, missed or waited for, and stops at the instant it holds
+/// it otherwise, or not at all:
+/// - **a known member never heard is held only while it is waited for**
+///   (§2.5): its owner's absence stops the stretch, a pause, and its
+///   presence again starts a new one (F-278). A miss can only be reported
+///   within one stretch, since each wait counts from its own start, so two
+///   stretches each no longer than the deadline could not have shown one,
+///   whatever their sum: §5 answers `window_too_short`, never `met`;
 /// - **its first `ended` stops it for good** (F-280): a member heard again
 ///   after it ended is read over its first life, its held time and its span
 ///   ending at that first end.
@@ -1862,7 +1868,7 @@ mod tests {
             Some(Duration::from_millis(330)),
             "the unconfirmed while waits on (§2.5), the absence stops it"
         );
-        // Present again: the count starts again.
+        // Present again: a new stretch, the longer one held (text 0.5).
         let mut t = Tracker::new(Duration::from_millis(500), Some(1), ["cmd"]);
         let mut h = Holding::new();
         holding_of(&mut t, &mut h, 0, Event::Owner(OwnerState::Present));
@@ -1874,7 +1880,39 @@ mod tests {
         h.close(ms(2000));
         assert_eq!(
             h.span("cmd").map(|s| s.held_to(ms(2000))),
-            Some(Duration::from_millis(1330))
+            Some(Duration::from_millis(1000))
+        );
+    }
+
+    /// Text 0.5, the maintainer's ruling on ME: two waits never sum. Each
+    /// shorter than the deadline, 300 and 400 ms, 700 in all: neither could
+    /// have shown a miss, so the member is held 400, `window_too_short`.
+    #[test]
+    fn two_short_waits_hold_the_longer_never_their_sum() {
+        let mut t = Tracker::new(Duration::from_millis(500), Some(1), ["cmd"]);
+        let mut h = Holding::new();
+        holding_of(&mut t, &mut h, 0, Event::Owner(OwnerState::Present));
+        holding_of(&mut t, &mut h, 0, Event::Start);
+        holding_of(&mut t, &mut h, 300, Event::Owner(OwnerState::Absent));
+        holding_of(&mut t, &mut h, 1000, Event::Owner(OwnerState::Present));
+        holding_of(&mut t, &mut h, 1400, Event::Owner(OwnerState::Absent));
+        let r = holding_of(&mut t, &mut h, 3000, Event::Tick);
+        assert!(r.is_empty(), "no miss in either wait: {r:?}");
+        h.close(ms(3000));
+        let held = h.span("cmd").map(|s| s.held_to(ms(3000))).unwrap();
+        assert_eq!(held, Duration::from_millis(400));
+        let d = declaration(
+            Kind::Stream,
+            &ann(&[(DEADLINE_MS, json!(500)), (PERIOD_MS, json!(100))]),
+        );
+        let account = DeadlineAccount {
+            held,
+            ..DeadlineAccount::default()
+        };
+        let j = deadline_met(Kind::Stream, &d, &Window::default(), &account);
+        assert_eq!(
+            (j.answer, j.reason),
+            (Answer::Unobservable, Reason::WindowTooShort)
         );
     }
 

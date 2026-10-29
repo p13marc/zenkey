@@ -18,16 +18,29 @@ about a tool's window, F-278 to F-280, all accepted on #908
   window's end. An owner read absent before the miss was due stops that
   wait (§2.5), so no miss can be reported, and the member was still held
   to the end: §5 answered its deadline `met`, from a window that never
-  waited a whole deadline for it. Now such a member counts only while it
-  is waited for: its owner's absence stops the count, and its presence
-  again starts it, so that window answers `window_too_short`. Changes a
-  verdict, and with `pace.v1` a run's exit. `zenctl timing` already read
-  it so (`held_ms` 328 to 369 ms in round 80's probe). `deadlines.json`
-  gains a tool's window, an `end` event and `expect.held_ms` (#46 to #50:
-  the owner read absent at 330 before the due at 500, held 330; absent
-  and present again, the count started again; a heard member held to the
-  end whatever presence says; a known member whose owner was never seen,
-  held at nothing), and scenarios §6 gains step 5.
+  waited a whole deadline for it. Now such a member is held only while it
+  is waited for: its owner's absence stops the wait, and its presence
+  again starts a new one, so that window answers `window_too_short`.
+  Changes a verdict, and with `pace.v1` a run's exit. `zenctl timing`
+  already read it so (`held_ms` 328 to 369 ms in round 80's probe).
+  `deadlines.json` gains a tool's window, an `end` event and
+  `expect.held_ms` (#46 to #50: the owner read absent at 330 before the
+  due at 500, held 330; absent and present again, a new stretch; a heard
+  member held to the end whatever presence says; a known member whose
+  owner was never seen, held 0), and scenarios §6 gains step 5.
+- **The held time is the longest unbroken stretch, never the sum** (§2.7,
+  §5; ruled for 0.5 on a question ME raised). A known member waited for,
+  its owner absent, then waited for again, is held in two stretches.
+  Summed, two stretches each shorter than the deadline could exceed it and
+  answer `met`, the vacuous pass F-278 removes: a miss can only be
+  reported within one stretch, since each wait counts from its own start,
+  so neither could have shown one. The deadline's `met` and
+  `window_too_short` read the longest stretch the tool held the member in
+  the window, and §5's rows say "in one stretch" and "in every stretch".
+  One stretch, the common case, reads as before. `deadlines.json` #47
+  holds its longer stretch, 1,000 ms of 1,200 in all; #51 is two waits of
+  300 and 400 ms, 700 in all, held 400; and `conclusions.json` #50 reads
+  that account `window_too_short`.
 - **A member that ends in the window and is heard again** (§2.7; F-280).
   0.4 read one life of a member per window and did not say which end is
   "the member's end". Now the member is read over its first life: its
@@ -48,12 +61,13 @@ about a tool's window, F-278 to F-280, all accepted on #908
   to #42 give answers alone and state no reason.
 
 **The reference** (MC's tools, brought to the text).
-- `zenkey_model::timing::Holding` is the held time: a member counts while
-  its tracker holds it heard, missed or waited for, until its first
-  `ended`. The fleet's `TimingBook`, which `zenctl timing` and `check
-  conform`'s `timing-period` and `timing-deadline` read, takes it, so its
-  held time stops at a member's first end; it read F-278's rule from the
-  tracker's states already.
+- `zenkey_model::timing::Holding` is the held time: the longest stretch
+  in which its tracker held a member heard, missed or waited for, ended
+  for good by its first `ended`. The fleet's `TimingBook`, which `zenctl
+  timing` and `check conform`'s `timing-period` and `timing-deadline`
+  read, takes it, so its held time stops at a member's first end and two
+  waits no longer sum; it read F-278's stopped wait from the tracker's
+  states already, and summed the waits.
 - `zenkey_model::timing::roll_up_first` is the roll-up with its reason.
   The fleet's `roll` takes its `first` from it, in byte order of the keys
   whatever order its caller hands them in; the members reached it in key
@@ -70,10 +84,6 @@ about a tool's window, F-278 to F-280, all accepted on #908
   first end, whatever presence says after it: only a known member never
   heard is held only while waited for. A missed member counts held while
   it stays missed, and §5 reads its misses first.
-- **Two waits are one count.** A known member waited for, its owner
-  absent, then waited for again, counts both waits together, as §2.7's
-  "how long it held the member" reads a sum. Round 80's case is one wait
-  stopped before its due.
 - **No member at all** stays unobservable, with no reason (0.4's #33).
 - **zengui's Inspector** reads a member from its first arrival over the
   slot's ring, waits for no member it has not heard and ends none, so its

@@ -28,9 +28,10 @@
 //!   (§2.6), under the operator's ε (`None`: every sample `no_bound`), its
 //!   owners the `meta.zid`s of the address's descriptors held;
 //! - **per member**, what §2.7 asks over the window: how long it was held
-//!   (the model's [`Holding`] over its tracker: a known member never heard
-//!   only while waited for, F-278, and every member to its first end,
-//!   F-280; text 0.5), each miss with the owner's state at it
+//!   (the model's [`Holding`] over its tracker: its longest unbroken
+//!   stretch, a known member never heard held only while waited for,
+//!   F-278, and every member to its first end, F-280; text 0.5), each miss
+//!   with the owner's state at it
 //!   ([`DeadlineAccount`]), whether it ended, its arrivals for
 //!   `period_window`, and its samples' lifespans.
 //!
@@ -284,8 +285,9 @@ pub struct MemberWindow {
     /// The index of its resource in [`TimingBook::resources`].
     pub resource: usize,
     pub known: bool,
-    /// How long it was held in the window (§2.7), so far: its tracker's
-    /// [`Holding`] (text 0.5, F-278, F-280).
+    /// How long it was held in the window (§2.7), so far: its longest
+    /// unbroken stretch, its tracker's [`Holding`] (text 0.5, F-278,
+    /// F-280).
     pub held: Duration,
     /// The tracker's account: misses by the owner's state, and whether it
     /// ended.
@@ -1363,8 +1365,7 @@ mod tests {
     /// Text 0.5, F-278 (scenarios.md §6 step 5 in values): `cmd` never
     /// published, its owner closing 150 ms into the window and read absent
     /// at 330: held only while waited for, 330 ms, so its deadline is
-    /// `window_too_short`, never `met`; its owner present again starts the
-    /// count again.
+    /// `window_too_short`, never `met`.
     #[test]
     fn a_known_member_is_held_only_while_it_is_waited_for() {
         let t0 = Instant::now();
@@ -1388,16 +1389,39 @@ mod tests {
             (d.answer, d.reason),
             (Answer::Unobservable, Reason::WindowTooShort)
         );
-        // Present again at 1000: the count starts again, to the end.
+    }
+
+    /// Text 0.5, the maintainer's ruling on ME: two waits never sum.
+    /// `cmd` waited for 330 ms, its owner absent, then present again and
+    /// waited for 300 ms more: 630 in all, above the 500 ms deadline, and
+    /// neither wait could have shown a miss. Held its longest stretch,
+    /// 330 ms: `window_too_short`, never `met`.
+    #[test]
+    fn two_short_waits_hold_the_longer_never_their_sum() {
+        let t0 = Instant::now();
         let mut book = TimingBook::new(vec![pace_cmd()], None, false, t0);
         present(&mut book, t0);
         book.start(t0);
         let owed = book.token(&alive("00000000000000a1"), false, t0 + ms(150));
         book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(330));
-        book.token(&alive("00000000000000a2"), true, t0 + ms(1000));
-        book.finish(t0 + ms(1200));
-        let m = book.members().next().unwrap().1;
-        assert_eq!(m.held, ms(330 + 200));
+        assert_eq!(
+            book.token(&alive("00000000000000a2"), true, t0 + ms(1000)),
+            None
+        );
+        let owed = book.token(&alive("00000000000000a2"), false, t0 + ms(1200));
+        book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(1300));
+        book.tick(t0 + ms(1600));
+        book.finish(t0 + ms(5000));
+        let m = book.members().next().unwrap().1.clone();
+        assert_eq!(m.missed(), 0, "each wait stopped before its due");
+        assert_eq!(m.held, ms(330), "the longer stretch, never 330 + 300");
+        let r = &book.resources()[0];
+        let w = book.window_of(CMD).unwrap();
+        let d = deadline_met(r.kind, &r.declaration, &w, &m.deadline_account());
+        assert_eq!(
+            (d.answer, d.reason),
+            (Answer::Unobservable, Reason::WindowTooShort)
+        );
     }
 
     /// Text 0.5, F-280 (scenarios.md §6 step 6 in values): `axis/x` ended
