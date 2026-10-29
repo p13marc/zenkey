@@ -881,7 +881,10 @@ pub(crate) enum Command {
     /// desired-last-known (info: a target running a document read from an
     /// archive); and redundancy.v1's redundancy-vacancy (a warning: a
     /// governed interface with candidates and no incumbent in both of two
-    /// complete presence reads). A standby is never token-missing, and
+    /// complete presence reads); and timing.v1's timing-declaration (a
+    /// warning, from the contracts: an invalid timing value, a deadline
+    /// below its period, or timing keys on a resource that is not a stream
+    /// or on a requirement). A standby is never token-missing, and
     /// hostid-duplicate does not count a recognised one. The deployment is
     /// read through a session in its namespace; the routers' admin space and
     /// the presence domain through one in no namespace. A check whose input
@@ -1380,6 +1383,15 @@ pub(crate) enum CheckCmd {
     ///                    call before any handler runs, and a state one
     ///                    holding nothing answers nothing (redundancy.v1
     ///                    §2.4)
+    ///   timing-period    each exposed timed stream with a period kept it
+    ///                    over the window, read by timing.v1's tool reader:
+    ///                    not kept with the owner present throughout and
+    ///                    nothing lost is the violation (timing.v1 §2.7, §5)
+    ///   timing-deadline  each exposed timed stream with a deadline met it
+    ///                    over the window: a miss while the owner was
+    ///                    present, nothing lost, is the violation; one only
+    ///                    while it was not present is unobservable
+    ///                    (timing.v1 §2.5, §5)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
