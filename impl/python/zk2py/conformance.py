@@ -1257,7 +1257,7 @@ def _timing_conclusions(path: Path) -> list[Result]:
                 a = tm.rollup(r["question"], [(m["key"], tm.Answer(m["answer"], m["reason"])) for m in r["members"]])
                 got: dict[str, Any] = {"answer": a.answer, "reason": a.reason}
             else:
-                got = {"answer": tm.rollup(r["question"], [tm.Answer(a, "") for a in r["answers"]]).answer}
+                got = {"answer": tm.rollup_answer(r["question"], r["answers"])}
         else:
             got = {q: a.pair() for q, a in tm.conclude(tm.declaration_of(c), tm.Reading.of(c["reading"])).items()}
         out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
@@ -3693,21 +3693,27 @@ def _timing_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [(w.what, w.where) for w in tm.lint(canon)],
                 [("ignored_kind", "state/s"), ("invalid_value", "stream/a"), ("below_period", "stream/b"),
                  ("ignored_requirement", "requires.src")]))
-    # F-264: §5's roll-up over a resource, by each question's finding.
+    # F-264: §5's roll-up over a resource, by each question's finding. A
+    # roll-up whose reason is read takes (key, Answer) pairs (review-bot on
+    # PR #941): keyed here a, b, c… in the order listed, so byte order is it.
     expired, live = tm.Answer(tm.YES, "expired"), tm.Answer(tm.NO, "live")
     unobs = tm.Answer(tm.UNOBSERVABLE, "no_bound")
+
+    def keyed(answers: list[Any]) -> list[tuple[str, Any]]:
+        return [(chr(ord("a") + i), a) for i, a in enumerate(answers)]
+
     out.append((f"{label} §5 (F-264): the lifespan over a resource with an expired member beside a live one is the "
-                f"finding, yes", tm.rollup("lifespan", [live, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+                f"finding, yes", tm.rollup("lifespan", keyed([live, expired])).pair(), {"answer": "yes", "reason": "expired"}))
     out.append((f"{label} §5 (F-264): the sentence as written answers no there, hiding the finding",
                 tm.rollup_literal([live, expired]).pair(), {"answer": "no", "reason": "live"}))
     out.append((f"{label} §5 (F-264): an expired member beside an unobservable one is the finding",
-                tm.rollup("lifespan", [unobs, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+                tm.rollup("lifespan", keyed([unobs, expired])).pair(), {"answer": "yes", "reason": "expired"}))
     out.append((f"{label} §5: the deadline over a resource, one member missed, is no",
-                tm.rollup("deadline", [tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")]).pair(),
+                tm.rollup("deadline", keyed([tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")])).pair(),
                 {"answer": "no", "reason": "missed"}))
     out.append((f"{label} §5: a member not asked, or not this profile's, set aside: every other yes is yes",
-                tm.rollup("period", [tm.Answer(tm.NOT_ASKED, "not_heard"), tm.Answer(tm.YES, "kept"),
-                                     tm.Answer("not_this_profiles", "kind")]).pair(),
+                tm.rollup("period", keyed([tm.Answer(tm.NOT_ASKED, "not_heard"), tm.Answer(tm.YES, "kept"),
+                                           tm.Answer("not_this_profiles", "kind")])).pair(),
                 {"answer": "yes", "reason": "kept"}))
     # F-262: a missed member never heard stays missed when its owner is
     # present again: one missed, then met at the arrival.
@@ -3812,8 +3818,9 @@ def _timing_tool_readings() -> list[tuple[str, Any, Any]]:
     out.append(("timing.v1 0.5 §5 (F-277, F-279): a roll-up whose every member is set aside: not asked with the "
                 "first not-asked member's reason, not this profile's when every one is, unobservable with no reason "
                 "over no member, and a set-aside member beside one pole changing nothing",
-                [tm.rollup("lifespan", a).pair() for a in ([na, na], [nt, na], [nt, nt], [], [nt, tm.Answer(tm.NO, "live")],
-                                                           [na, tm.Answer(tm.UNOBSERVABLE, "no_bound")])],
+                [tm.rollup("lifespan", [(f"m{i}", x) for i, x in enumerate(a)]).pair()
+                 for a in ([na, na], [nt, na], [nt, nt], [], [nt, tm.Answer(tm.NO, "live")],
+                           [na, tm.Answer(tm.UNOBSERVABLE, "no_bound")])],
                 [{"answer": "not_asked", "reason": "no_lifespan"}, {"answer": "not_asked", "reason": "no_lifespan"},
                  {"answer": "not_this_profiles", "reason": "kind"}, {"answer": "unobservable", "reason": None},
                  {"answer": "no", "reason": "live"}, {"answer": "unobservable", "reason": "no_bound"}]))
@@ -3883,6 +3890,33 @@ def _timing_tool_readings() -> list[tuple[str, Any, Any]]:
                                        ("zk2/lab/pace/pace.v1/stream/axis/x",
                                         tm.Answer(tm.UNOBSERVABLE, "owner_not_present"))]).pair(),
                 {"answer": "unobservable", "reason": "owner_not_present"}))
+    # review-bot on PR #941: the roll-up's two forms are explicit, and a
+    # tool's window closes once. rollup takes (key, Answer) pairs alone,
+    # rollup_answer answer tokens alone; each refuses the other's, and a
+    # mix. A second end judges nothing and adds no report.
+    def refused(f: Any, arg: Any) -> bool:
+        try:
+            f("deadline", arg)
+        except TypeError:
+            return True
+        return False
+
+    met, missed = tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")
+    out.append(("timing.v1 0.5 §5 (F-279): rollup refuses bare answers and a mix of pairs and answers; rollup_answer "
+                "refuses pairs and Answers; each reads its own form",
+                ([refused(tm.rollup, a) for a in ([met], [("k", met), missed], [("k", "yes")])],
+                 [refused(tm.rollup_answer, a) for a in ([("k", met)], [met], ["yes", met])],
+                 tm.rollup("deadline", [("b", met), ("a", missed)]).pair(), tm.rollup_answer("deadline", ["yes", "no"])),
+                ([True, True, True], [True, True, True], {"answer": "no", "reason": "missed"}, "no")))
+    t = run(tm.Tracker(500, 1, ["cmd"]), [
+        {"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 0, "event": "start"},
+        {"at_ms": 1000, "event": "end"}])
+    n = len(t.reports)
+    again = t.end(2 * 1000 * tm.MS)
+    out.append((f"{label5}: a tool's window closes once: a second end, after a miss would be due, judges nothing, "
+                f"adds no report, and leaves the window's end and held time as the first end left them",
+                (n, again, len(t.reports), tm.ns_to_ms(t.window_end or 0), held(t)),
+                (1, [], 1, 1000, {"cmd": 1000})))
     # review-bot on PR #939: a tool's held time where it holds no tracker (a
     # resource with no deadline, which no answer reads): the end that counts
     # is the first at or after the instant the member was first held. An

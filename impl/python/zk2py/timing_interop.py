@@ -1333,6 +1333,10 @@ def section6(report: Report, oi: str) -> None:
             row = _member_row(doc, CMD)
             held = row.get("held_ms")
             axis = tool_answers(doc).get(("resource", RID_AXIS), {})
+            # held under the 500 ms deadline tells 0.5's held-while-waited-for
+            # (about 0.15–0.35 s: the close, plus the read 100 ms after the
+            # withdrawal, plus the windows' start skew) from round 80's letter,
+            # held to the window's end, 5,000 ms, which answered met
             report.check(tsec, "Expected 5: the owner closed 0.15 s in, before cmd's miss is due: no miss, cmd held "
                                "only while waited for, less than its deadline: deadline unobservable "
                                "(window_too_short), never met; period unobservable (owner_not_present), lifespan "
@@ -1370,6 +1374,11 @@ def section6(report: Report, oi: str) -> None:
             tsec = f"§6 [{oi}→{tool}]"
             row = _member_row(doc, kx)
             held, span = row.get("held_ms"), row.get("span_ms")
+            # 800–1,400 ms is "about a second": the first life (the remove
+            # 1 s after the later start, ended at the read about 100 ms on,
+            # the earlier tool's window up to about 110 ms longer) told from
+            # both lives summed (about 4 s) and from a span to the window's
+            # end (about 5 s); 30 arrivals or more show the second life heard
             report.check(tsec, "Expected 6: axis/x ended (gone) at the read after its withdrawal, no miss, heard "
                                "again from 2 s and read over its first life: held and span about a second each, "
                                "the second life's arrivals not counted; deadline not asked (ended), period yes "
@@ -1540,6 +1549,9 @@ def section6_again(report: Report, oi: str) -> None:
         for t, a in ans.items():
             x, row = a.get(("member", kx), {}), _member_row(got[t][1], kx)
             held, span = row.get("held_ms"), row.get("span_ms")
+            # 1,700–2,600 ms: the first life (about 2.0–2.2 s with the start
+            # skew and the read) told from both lives summed (about 6 s, round
+            # 80's zenctl) and a span to the window's end (about 8 s)
             report.check(sec, f"{t}: axis/x ended (gone) after its withdrawal {remove_s:g} s in, and heard again "
                               f"from {add_s:g} s: no miss, its deadline not asked (ended), its lifespan not asked; "
                               f"its held time and span over its first life, about {remove_s:g} s each (text 0.5)",
@@ -1624,6 +1636,8 @@ def section6_waits(report: Report, oi: str) -> None:
         for t, (code, doc) in got.items():
             c, row = tool_answers(doc).get(("member", CMD), {}), _member_row(doc, CMD)
             held = row.get("held_ms")
+            # held under 500 ms while the three stretches sum above it tells
+            # the longest stretch from the sum, which would answer met
             least = (close_a - (starts[t] or close_a) + sum(e - u for u, e in ups)) / MS + 3 * REREAD_MS
             report.check(sec, f"{t}: cmd waited for three times, its owner absent between, each wait shorter than "
                               f"the deadline and their sum longer: no miss; held its longest stretch, under 500 ms, "
@@ -1676,6 +1690,8 @@ def section6_missed(report: Report, oi: str) -> None:
                          and c.get("lifespan") == ("unobservable", "no_sample") and code == 1,
                          f"exit {code}; cmd {c}; {_fields(doc, CMD)}; misses {row.get('misses')}")
             held = row.get("held_ms")
+            # 2,900 ms or more is held to the window's end (3,000), told from
+            # a pause at the owner's absence after the miss (about 1.1–1.25 s)
             report.check(sec, f"{t}: cmd held while it stays missed, its owner's absence after the miss no pause: "
                               f"to the window's end",
                          isinstance(held, (int, float)) and held >= 2900, f"held {held} ms of 3,000")
@@ -1733,6 +1749,10 @@ def section6_stray(report: Report, oi: str) -> None:
         for t, (code, doc) in got.items():
             c, row = tool_answers(doc).get(("member", CMD), {}), _member_row(doc, CMD)
             held = row.get("held_ms")
+            # 1,700–2,100 ms is the new stretch from the first stray arrival
+            # (2 s, less the earlier tool's start skew), told from the first
+            # stretch alone (about 0.3 s, window_too_short) and from a member
+            # held from its first wait to the end (3,000 ms)
             report.check(sec, f"{t}: cmd paused by its owner's absence, then heard from 1 s with its owner absent: no "
                               f"miss; held from that arrival, about 2 s; its deadline yes (met); its period unobservable "
                               f"(owner_not_present); its lifespan unobservable (foreign_stamp)",

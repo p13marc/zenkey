@@ -597,6 +597,11 @@ class Window:
                              owner_zids=owner_zids)
         self.start_ns = self.reader.start_ns
         self.end_ns: int | None = None
+        #: each member's reading and its period span (§2.7; None with no
+        #: period declared), both filled by :meth:`end` over one member set,
+        #: the keys of what it returns (review-bot on PR #941)
+        self.readings: dict[str, tm.Reading] = {}
+        self.spans: dict[str, int | None] = {}
 
     def end(self) -> dict[str, dict[str, tm.Answer]]:
         """The window's end: every tracker evaluated there, then each
@@ -611,9 +616,7 @@ class Window:
         # refusal is known of one member alone
         unattributed = closed or gap_ms > self.stall.bound_ms
         out: dict[str, dict[str, tm.Answer]] = {}
-        self.readings: dict[str, tm.Reading] = {}
-        #: each member's period span, the window's (§2.7), None with no period
-        self.spans: dict[str, int | None] = {}
+        self.readings, self.spans = {}, {}
         start = self.start_ns
         assert start is not None
         with rd.lock:
@@ -628,6 +631,9 @@ class Window:
                 for m in sorted(members):
                     lost = tm.lost_for(m, (), unattributed)
                     out[m] = tm.conclude(res.decl, self._reading(res, m, start, end, lost, present_throughout))
+        # one member set: each member answered has its reading and its span
+        # (None only where no period is declared), never one without the other
+        assert set(out) == set(self.readings) == set(self.spans), (sorted(out), sorted(self.spans))
         return out
 
     @staticmethod

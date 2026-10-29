@@ -16385,6 +16385,30 @@ result.
   F-280's, named in its own bullet. The fixture holds six, #51 the two
   waits'.
 
+**After review-bot on PR #941.** Nothing blocking; its three
+should-fixes are made, and its nit.
+- **One member set.** The `Window` holds `readings` and `spans` from its
+  start, fills both in `end` over the members it answers, and asserts the
+  three key sets equal; `zk2py.timing_tool` indexes them, so a member
+  missing from either fails rather than printing `span_ms` null.
+- **`Tracker.end` is single-use:** a second call judges nothing and adds no
+  report, and the window's end and held times stay as the first left
+  them. A `readings` case pins it.
+- **The roll-up's two forms are explicit.** `rollup` takes `(key, Answer)`
+  pairs alone, read in byte order of the keys for its reason, and
+  `rollup_answer` answer tokens alone, for `conclusions.json`'s
+  `rollup.answers`, where no reason is read; each raises `TypeError` on the
+  other's form or a mix. Every caller that reads a reason passes pairs.
+  A `readings` case pins both refusals.
+- **The nit:** each live check's held-time range says what it must tell
+  apart (for instance §6 step 6's 800–1,400 ms: the first life against
+  both lives summed, about 4 s, and a span to the window's end, about
+  5 s), beside `PLACE_MS`'s.
+
+After them, `just py-conformance` passes 3474 of 3474 (`readings` 520),
+and §6's six steps and the six windows beside it, both tools beside both
+owners, 106 of 106.
+
 ### Counts at timing.v1 0.5 and core 0.56
 
 280 entries.

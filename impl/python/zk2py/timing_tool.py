@@ -140,7 +140,11 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
                                        for q in ("deadline", "period", "lifespan")}})
             start, end = w.start_ns or 0, w.end_ns or 0
             for m, a in sorted(mine.items()):
-                r = w.readings.get(m)
+                # ``mine`` is drawn from what ``end`` answered, whose keys are
+                # its readings' and spans' (one member set, asserted there):
+                # indexed, so a member missing from either fails, never a
+                # silent None (review-bot on PR #941)
+                r = w.readings[m]
                 arrivals = sum(1 for x in rd.arrivals if x.key == m and x.handed and start <= x.mono_ns <= end)
                 reps = [x for rid_, x in rd.reports if rid_ == rid and x.member == m and start <= x.at_ns <= end]
                 misses = [{"at_ms": tm.ns_to_ms(x.at_ns - start), "due_ms": tm.ns_to_ms((x.due_ns or 0) - start),
@@ -150,10 +154,11 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
                               for x in reps if x.event == "ended"), None)
                 rows.append({"row": "member", "key": m, "address": address, "iface": canon["interface"],
                              "resource": rid, "known": m in res.known, "arrivals": arrivals,
-                             "held_ms": None if r is None else tm.ns_to_ms(r.deadline.held_ns),
-                             "span_ms": None if w.spans.get(m) is None else tm.ns_to_ms(w.spans[m]),
-                             "missed_present": None if r is None else r.deadline.missed_present,
-                             "missed_not_present": None if r is None else r.deadline.missed_not_present,
+                             "held_ms": tm.ns_to_ms(r.deadline.held_ns),
+                             # None only where the resource declares no period
+                             "span_ms": None if (span := w.spans[m]) is None else tm.ns_to_ms(span),
+                             "missed_present": r.deadline.missed_present,
+                             "missed_not_present": r.deadline.missed_not_present,
                              "misses": misses, "ended": ended,
                              **{q: a[q].pair() for q in ("deadline", "period", "lifespan")}})
                 for q in members:

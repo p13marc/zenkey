@@ -803,6 +803,9 @@ def section6(report: Report) -> None:
         runs = {q: tm.rollup(q, [(k, v[q]) for k, v in got.items()]) for q in ("deadline", "period", "lifespan")}
         clean = all(a.answer == (tm.NO if tm.FINDING[q] == tm.YES else tm.YES) for q, a in runs.items()
                     if a.answer not in tm.SET_ASIDE)
+        # 800–1,400 ms is "about a second": the first life (the withdrawal
+        # 1 s in, ended at the read about 100 ms on) told from both lives
+        # summed (about 4 s) and a span to the window's end (about 5 s)
         report.check(sec, "Expected 6: axis/x ended (gone) at the read after its withdrawal, before a miss is due, "
                           "heard again from 2 s and read over its first life: held and span about a second each, "
                           "deadline not asked (ended), period yes (kept); cmd met, kept, live; the run clean",

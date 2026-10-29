@@ -415,13 +415,16 @@ class Tracker:
 
     def end(self, t: int) -> list[Report]:
         """A tool's window ends (§2.7): judged at as at a tick, then every
-        stretch closed there."""
+        stretch closed there. Single use: once the window is closed, a
+        second call judges nothing and adds no report (review-bot on PR
+        #941)."""
+        if self.window_end is not None:
+            return []
         out = self._judge(t)
         self._done(out, t)
-        if self.window_end is None and self.started_at is not None:
-            for name in list(self._stretch):
-                self._close(name, t)
-            self.window_end = t
+        for name in list(self._stretch):
+            self._close(name, t)
+        self.window_end = t
         return out
 
     def held_ns(self, member: str | None = None) -> dict[str, int] | int:
@@ -862,36 +865,13 @@ def _lifespan(decl: Declaration, r: Reading) -> Answer:
 SET_ASIDE = (NOT_ASKED, "not_this_profiles")
 
 
-def rollup(question: str, answers: Iterable[Answer] | Iterable[tuple[str, Answer]]) -> Answer:
-    """§5 "Over a resource, or a run", read by each question's finding
-    (F-264), a member not asked, or not this profile's, set aside (text
-    0.4):
-
-    - the finding when any member's answer is the finding;
-    - the other pole when every member's answer is that pole or set aside,
-      and at least one is that pole;
-    - when every member is set aside, and there is at least one, not this
-      profile's when every one is, else not asked (F-277): nobody put the
-      question of any of them;
-    - unobservable otherwise: a member unobservable and none the finding,
-      or no member at all.
-
-    Its reason (text 0.5, F-279) is "the reason of the first member giving
-    its answer, in byte order of the members' keys", and "Over no member
-    there is none" (``None``). ``answers`` are each member's
-    :class:`Answer`, or ``(key, Answer)`` pairs, which are read in byte
-    order of the keys whatever order they come in; bare answers are read in
-    the order given."""
+def _rolled(question: str, every: list[Answer]) -> Answer:
+    """§5's roll-up over the members' answers in the order given, its
+    reason the first member's giving the answer in that order."""
     finding = FINDING[question]
     other = YES if finding == NO else NO
-    items = list(answers)
-    if items and isinstance(items[0], tuple):
-        every = [a for _, a in sorted(items, key=lambda kv: kv[0].encode())]  # type: ignore[union-attr]
-    else:
-        every = list(items)  # type: ignore[arg-type]
 
     def first(answer: str) -> str | None:
-        # the first member giving the roll-up's answer, in the order read
         return next((a.reason for a in every if a.answer == answer), None)
 
     asked = [a for a in every if a.answer not in SET_ASIDE]
@@ -910,6 +890,47 @@ def rollup(question: str, answers: Iterable[Answer] | Iterable[tuple[str, Answer
     if not every:
         return Answer(UNOBSERVABLE, None, "no member at all: no reason (text 0.5, F-279)")
     return Answer(UNOBSERVABLE, first(UNOBSERVABLE), "no finding, and not every member clean")
+
+
+def rollup(question: str, members: Iterable[tuple[str, Answer]]) -> Answer:
+    """§5 "Over a resource, or a run", read by each question's finding
+    (F-264), a member not asked, or not this profile's, set aside (text
+    0.4):
+
+    - the finding when any member's answer is the finding;
+    - the other pole when every member's answer is that pole or set aside,
+      and at least one is that pole;
+    - when every member is set aside, and there is at least one, not this
+      profile's when every one is, else not asked (F-277): nobody put the
+      question of any of them;
+    - unobservable otherwise: a member unobservable and none the finding,
+      or no member at all.
+
+    Its reason (text 0.5, F-279) is "the reason of the first member giving
+    its answer, in byte order of the members' keys", and "Over no member
+    there is none" (``None``). ``members`` are ``(key, Answer)`` pairs, the
+    answer and its reason under the member's key, read in byte order of the
+    keys whatever order they come in; anything else raises ``TypeError``
+    (review-bot on PR #941). A roll-up read without a reason is
+    :func:`rollup_answer`'s."""
+    pairs = list(members)
+    for x in pairs:
+        if not (isinstance(x, tuple) and len(x) == 2 and isinstance(x[0], str) and isinstance(x[1], Answer)):
+            raise TypeError(f"rollup takes (key, Answer) pairs, got {x!r}: a bare answer is rollup_answer's")
+    return _rolled(question, [a for _, a in sorted(pairs, key=lambda kv: kv[0].encode())])
+
+
+def rollup_answer(question: str, answers: Iterable[str]) -> str:
+    """§5's roll-up of bare answers, the answer alone, where no reason is
+    read (``conclusions.json``'s ``rollup.answers``, #28 to #42, which state
+    none). Each answer is a token string; a pair or an :class:`Answer`
+    raises ``TypeError`` (review-bot on PR #941): a roll-up whose reason is
+    read takes pairs, :func:`rollup`."""
+    tokens = list(answers)
+    for x in tokens:
+        if not isinstance(x, str):
+            raise TypeError(f"rollup_answer takes answer tokens, got {x!r}: a reason is read through rollup's pairs")
+    return _rolled(question, [Answer(x, None) for x in tokens]).answer
 
 
 def rollup_literal(answers: Iterable[Answer]) -> Answer:
@@ -966,4 +987,4 @@ def lint(canonical: dict[str, Any]) -> list[Warning]:
 __all__ = ["PROFILE", "KEYS", "Declaration", "declaration", "requirement", "declaration_of", "merge", "value_ms",
            "Tracker", "tracker_for", "Report", "detection_bound_ns", "LifespanReading", "Stamp", "Verdict", "judge_lifespans",
            "zid_value", "period", "Period", "conclude", "Reading", "DeadlineAccount", "Answer", "rollup",
-           "rollup_literal", "lint", "ms_to_ns", "ns_to_ms"]
+           "rollup_answer", "rollup_literal", "lint", "ms_to_ns", "ns_to_ms"]
