@@ -8,10 +8,12 @@
 //! the span held, `period_kept` over `period_window`'s verdict,
 //! `lifespan_expired` over each sample's `LifespanReader` judgement, each
 //! under the window's premises (across a face, lost, the owner present
-//! throughout); and `roll_up` over a resource's members and the run's, read
-//! by each question's finding (text 0.2, F-264), every member set aside not
-//! asked (text 0.4, F-277). Nothing is re-derived
-//! here: this module maps the model's answers onto the report's tokens.
+//! throughout); and `roll_up_first` over a resource's members and the
+//! run's, read by each question's finding (text 0.2, F-264), every member
+//! set aside not asked (text 0.4, F-277), its reason the first member's
+//! giving its answer in byte order of the keys (text 0.5, F-279). Nothing
+//! is re-derived here: this module maps the model's answers onto the
+//! report's tokens.
 //!
 //! **The run's verdict** ([`TimingReport::judgement`]): a finding of any
 //! question over the run is the finding; every question asked answered on
@@ -19,7 +21,7 @@
 
 use zenkey_model::timing::{
     Answer, Declaration, Judged, Question, Reason, deadline_met, lifespan_expired, period_kept,
-    roll_up,
+    roll_up_first,
 };
 
 use crate::bus::timing::TimingObservation;
@@ -61,34 +63,30 @@ pub fn answer(q: Question, j: Judged) -> TimingAnswer {
 }
 
 /// One question over `members` (each its key and its answer), by the
-/// model's `roll_up` alone (F-264; text 0.4, F-277: every member set
+/// model's `roll_up_first` alone (F-264; text 0.4, F-277: every member set
 /// aside is not asked, or not this profile's when every one is; no member
-/// at all is unobservable).
+/// at all is unobservable), in whatever order they come: its reason is the
+/// first member's giving its answer in byte order of the keys, and none
+/// over no member (text 0.5, F-279).
 pub fn roll<'a>(
     q: Question,
-    members: impl IntoIterator<Item = (&'a str, &'a TimingAnswer)> + Clone,
+    members: impl IntoIterator<Item = (&'a str, &'a TimingAnswer)>,
 ) -> TimingRollUp {
     let mut counts = std::collections::BTreeMap::new();
-    for (_, a) in members.clone() {
-        *counts.entry(a.answer.as_str().to_owned()).or_insert(0) += 1;
-    }
-    let answer = token(roll_up(
-        q,
-        members
-            .clone()
-            .into_iter()
-            .map(|(_, a)| model_answer(a.answer)),
-    ));
-    let first = members
+    let members: Vec<(&str, Answer, &str)> = members
         .into_iter()
-        .find(|(_, a)| a.answer == answer)
-        .map(|(k, a)| (k.to_owned(), a.reason.clone()));
+        .map(|(k, a)| {
+            *counts.entry(a.answer.as_str().to_owned()).or_insert(0) += 1;
+            (k, model_answer(a.answer), a.reason.as_str())
+        })
+        .collect();
+    let (answer, first) = roll_up_first(q, members);
     TimingRollUp {
-        answer,
-        first: first.as_ref().map(|(k, _)| k.clone()),
-        reason: first.map(|(_, r)| r),
+        answer: token(answer),
+        first: first.map(|(k, _)| k.to_owned()),
+        reason: first.map(|(_, r)| r.to_owned()),
         members: counts,
-        finding: model_answer(answer) == q.finding(),
+        finding: answer == q.finding(),
     }
 }
 
@@ -413,5 +411,36 @@ mod tests {
             (r.answer, r.reason.as_deref()),
             (TimingAnswerToken::Unobservable, Some("no_bound"))
         );
+        assert_eq!(r.first.as_deref(), Some("u"));
+        assert_eq!(
+            (
+                roll(Question::Lifespan, std::iter::empty()).first,
+                roll(Question::Lifespan, std::iter::empty()).reason
+            ),
+            (None, None),
+            "F-279: over no member, no reason"
+        );
+    }
+
+    /// Text 0.5, F-279: the reason is the first member's giving the
+    /// answer in byte order of the keys, whatever order they are handed in.
+    #[test]
+    fn a_roll_ups_reason_is_the_first_in_byte_order() {
+        let (gone, short) = (
+            a(TimingAnswerToken::Unobservable, "owner_not_present"),
+            unobs_early(),
+        );
+        let cmd = "zk2/lab/pace/pace.v1/stream/cmd";
+        let x = "zk2/lab/pace/pace.v1/stream/axis/x";
+        let r = roll(Question::Deadline, [(cmd, &short), (x, &gone)]);
+        assert_eq!(
+            (r.first.as_deref(), r.reason.as_deref()),
+            (Some(x), Some("owner_not_present")),
+            "axis/x before cmd"
+        );
+        let upper = "zk2/lab/pace/pace.v1/stream/axis/B";
+        let lower = "zk2/lab/pace/pace.v1/stream/axis/a";
+        let r = roll(Question::Deadline, [(lower, &gone), (upper, &short)]);
+        assert_eq!(r.first.as_deref(), Some(upper), "bytes, never a locale");
     }
 }

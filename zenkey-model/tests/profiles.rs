@@ -3406,10 +3406,25 @@ fn timing_deadlines() {
             continue;
         };
         let mut reports = Vec::new();
-        for e in case["events"].as_array().expect("events") {
+        // A tool's window, when the case ends one (text 0.5, F-278, F-280):
+        // how long each member was held in it.
+        let mut holding = timing::Holding::new();
+        let mut window_end = None;
+        let events = case["events"].as_array().expect("events");
+        for (n, e) in events.iter().enumerate() {
             let at = tm_mono(&e["at_ms"]);
             let member = e["member"].as_str().unwrap_or_default();
             let event = match e["event"].as_str().expect("event") {
+                "end" => {
+                    assert_eq!(
+                        n + 1,
+                        events.len(),
+                        "end is the last event: {}",
+                        case["note"]
+                    );
+                    window_end = Some(at);
+                    timing::Event::Tick
+                }
                 "start" => timing::Event::Start,
                 "arrival" => timing::Event::Arrival {
                     member,
@@ -3424,7 +3439,9 @@ fn timing_deadlines() {
                 "tick" => timing::Event::Tick,
                 other => panic!("event {other:?}"),
             };
-            reports.extend(t.observe(at, event));
+            let made = t.observe(at, event);
+            holding.observe(&t, event, &made, at);
+            reports.extend(made);
         }
         let mut got = json!({
             "transitions": reports.iter().map(tm_report_json).collect::<Vec<_>>(),
@@ -3433,6 +3450,14 @@ fn timing_deadlines() {
         });
         if case.get("resource").is_some() {
             got["tracker"] = json!(true);
+        }
+        if let Some(end) = window_end {
+            holding.close(end);
+            got["held_ms"] = holding
+                .spans()
+                .map(|(m, s)| (m.to_owned(), tm_ms(s.held_to(end))))
+                .collect::<serde_json::Map<_, _>>()
+                .into();
         }
         let what = format!("{}", case["note"]);
         expect(case, got, &what);
@@ -3554,17 +3579,40 @@ fn timing_conclusions() {
     let path = profiles().join("timing/conformance/conclusions.json");
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
-        // §5's roll-up, read by the question's finding (text 0.2, F-264).
+        // §5's roll-up, read by the question's finding (text 0.2, F-264);
+        // with each member's key and reason, its first member's reason
+        // (text 0.5, F-279).
         if let Some(r) = case.get("rollup") {
             let q = timing::Question::parse(r["question"].as_str().expect("question"))
                 .expect("a question");
-            let answers: Vec<timing::Answer> = r["answers"]
-                .as_array()
-                .expect("answers")
-                .iter()
-                .map(|a| tm_answer(a.as_str().expect("an answer")))
-                .collect();
-            let got = json!({"answer": timing::roll_up(q, answers).as_str()});
+            let got = if let Some(members) = r.get("members") {
+                let members: Vec<(String, timing::Answer, timing::Reason)> = members
+                    .as_array()
+                    .expect("members")
+                    .iter()
+                    .map(|m| {
+                        (
+                            m["key"].as_str().expect("a key").to_owned(),
+                            tm_answer(m["answer"].as_str().expect("an answer")),
+                            timing::Reason::parse(m["reason"].as_str().expect("a reason"))
+                                .expect("a reason"),
+                        )
+                    })
+                    .collect();
+                let (answer, first) = timing::roll_up_first(q, members);
+                json!({
+                    "answer": answer.as_str(),
+                    "reason": first.map(|(_, r)| r.as_str()),
+                })
+            } else {
+                let answers: Vec<timing::Answer> = r["answers"]
+                    .as_array()
+                    .expect("answers")
+                    .iter()
+                    .map(|a| tm_answer(a.as_str().expect("an answer")))
+                    .collect();
+                json!({"answer": timing::roll_up(q, answers).as_str()})
+            };
             let what = format!("{}", case["note"]);
             expect(case, got, &what);
             continue;

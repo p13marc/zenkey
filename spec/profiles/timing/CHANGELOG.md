@@ -4,6 +4,96 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-29: round 80's answers (#908, ME)
+
+The second implementation made the final cold read of 0.4 against the
+reference runtime and both tools (zk2py round 80). It filed three findings
+about a tool's window, F-278 to F-280, all accepted on #908
+(issuecomment-37774). This text answers them. It is written against core
+0.55, as 0.4 was.
+
+**Changed: rules (round 80).**
+- **How long a tool held a known member never heard** (§2.7; F-278). 0.4
+  counted it held from the instant the tool began to wait for it to the
+  window's end. An owner read absent before the miss was due stops that
+  wait (§2.5), so no miss can be reported, and the member was still held
+  to the end: §5 answered its deadline `met`, from a window that never
+  waited a whole deadline for it. Now such a member is held only while it
+  is waited for: its owner's absence stops the wait, and its presence
+  again starts a new one, so that window answers `window_too_short`.
+  Changes a verdict, and with `pace.v1` a run's exit. `zenctl timing`
+  already read it so (`held_ms` 328 to 369 ms in round 80's probe).
+  `deadlines.json` gains a tool's window, an `end` event and
+  `expect.held_ms` (#46 to #50: the owner read absent at 330 before the
+  due at 500, held 330; absent and present again, a new stretch; a heard
+  member held to the end whatever presence says; a known member whose
+  owner was never seen, held 0), and scenarios §6 gains step 5.
+- **The held time is the longest unbroken stretch, never the sum** (§2.7,
+  §5; ruled for 0.5 on a question ME raised). A known member waited for,
+  its owner absent, then waited for again, is held in two stretches.
+  Summed, two stretches each shorter than the deadline could exceed it and
+  answer `met`, the vacuous pass F-278 removes: a miss can only be
+  reported within one stretch, since each wait counts from its own start,
+  so neither could have shown one. The deadline's `met` and
+  `window_too_short` read the longest stretch the tool held the member in
+  the window, and §5's rows say "in one stretch" and "in every stretch".
+  One stretch, the common case, reads as before. `deadlines.json` #47
+  holds its longer stretch, 1,000 ms of 1,200 in all; #51 is two waits of
+  300 and 400 ms, 700 in all, held 400; and `conclusions.json` #50 reads
+  that account `window_too_short`.
+- **A member that ends in the window and is heard again** (§2.7; F-280).
+  0.4 read one life of a member per window and did not say which end is
+  "the member's end". Now the member is read over its first life: its
+  span and its held time end at its first end, and its second life's
+  period is not judged. A miss reported in either life is a miss, since §5
+  reads the misses before `ended`, and each sample's lifespan is judged at
+  its arrival, in either life. Changes a verdict where the second life
+  would have moved the period. Both tools already ended the span at the
+  first end; the reference's held time, which summed both lives, now ends
+  there too. `periods.json` gains #21 (kept over the first life, not kept
+  to the window's end), `deadlines.json` #48, and scenarios §6 step 6.
+- **A roll-up's reason** (§5; F-279). 0.4 said how a resource's or a
+  run's answer is read, never its reason. It is the reason of the first
+  member giving that answer, in byte order of the members' keys, and over
+  no member there is none. Changes no verdict and no exit.
+  `conclusions.json`'s roll-up cases may now give each member's key and
+  reason (`rollup.members`) and state `expect.reason` (#43 to #49); #28
+  to #42 give answers alone and state no reason.
+
+**The reference** (MC's tools, brought to the text).
+- `zenkey_model::timing::Holding` is the held time: the longest stretch
+  in which its tracker held a member heard, missed or waited for, ended
+  for good by its first `ended`. The fleet's `TimingBook`, which `zenctl
+  timing` and `check conform`'s `timing-period` and `timing-deadline`
+  read, takes it, so its held time stops at a member's first end and two
+  waits no longer sum; it read F-278's stopped wait from the tracker's
+  states already, and summed the waits.
+- `zenkey_model::timing::roll_up_first` is the roll-up with its reason.
+  The fleet's `roll` takes its `first` from it, in byte order of the keys
+  whatever order its caller hands them in; the members reached it in key
+  order already, so no report moves. Over no member it gives none, as
+  before.
+- **Scenarios §6** runs six steps as `zenctl/tests/live_zk2.rs`'s
+  `timing_s6_a_tools_window`, six times in a row: step 5's `cmd` held
+  261 to 264 ms, and step 6's `axis/x` ended about 1.11 s in, held 1,080
+  to 1,103 ms, its span the same, its 39 arrivals over both lives.
+
+**Deliberately not changed.**
+- **A heard member** counts held from the instant it was first held (its
+  first arrival, or a known member's wait) to the window's end, or to its
+  first end, whatever presence says after it: only a known member never
+  heard is held only while waited for. A missed member counts held while
+  it stays missed, and §5 reads its misses first.
+- **No member at all** stays unobservable, with no reason (0.4's #33).
+- **zengui's Inspector** reads a member from its first arrival over the
+  slot's ring, waits for no member it has not heard and ends none, so its
+  window has no known member and no second life, and nothing it shows
+  moves.
+- **`arbitration.v1`'s "Uses `timing.v1`, text 0.3"**: 0.5 moves only a
+  tool's window (§2.7) and §5's roll-up, which arbitration does not read;
+  it reads §2.2, §2.5 and §2.6.
+- **The core version.** Nothing here needs core 0.56.
+
 ## 0.4 — 2026-10-29: round 79's answer (#908, MD)
 
 The second implementation read 0.3 cold and ran its own tool beside the

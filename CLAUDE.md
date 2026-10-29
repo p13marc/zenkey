@@ -256,14 +256,20 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   one known member: a tool holds no binding, text 0.3), the owner per
   (address, interface) present, unconfirmed, absent or unseen (a
   tokenless interface's owner its instance token, by the descriptor),
-  member tokens seen and gone (F-261), each member's span held, misses
-  with the owner's state, end, arrivals (for `period_window`, bounded)
+  member tokens seen and gone (F-261), each member's held time (the
+  model's `Holding` per tracker: its longest unbroken stretch, never a
+  sum, a known member never heard held only while waited for, every
+  member to its first end; text 0.5, F-278, F-280),
+  misses with the owner's state, its first end, arrivals (for
+  `period_window`, its span ending at that first end, bounded)
   and lifespans, in one order whose instants never go back; across a face
   every owner unseen and the `meta.zid`s the deployment's word
   (`--owner-zid`, text 0.3). `judge::timing` maps `deadline_met`,
   `period_kept` and `lifespan_expired` onto `report::timing`'s tokens and
-  rolls each question up per resource and per run by `roll_up` alone
-  (F-264; text 0.4, F-277: members all set aside, not asked);
+  rolls each question up per resource and per run by `roll_up_first`
+  alone (F-264; text 0.4, F-277: members all set aside, not asked; text
+  0.5, F-279: its `first` and `reason` the first member's giving its
+  answer, in byte order of the keys, none over no member);
   `TimingReport::judgement` is 1 on any question's finding, 0 every
   question asked on its other pole, 2 otherwise. The doctor's
   `timing-declaration` (warning, from the contracts: an invalid value, a
@@ -725,7 +731,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `timing-period` and `timing-deadline` (31 cases). timing scenarios §6
   runs as `live_zk2.rs`'s `timing_s6_a_tools_window`, on the owner
   example's timing drive compiled in (`timing every <member> <ms>` its
-  step 3, `timing declare <axis>` a member token alone).
+  step 3, `timing declare <axis>` a member token alone; text 0.5's step
+  5, an owner publishing nothing closed 0.15 s in, `window_too_short`,
+  F-278, and step 6, `timing remove x` then `timing add x`, read over its
+  first life, F-280).
   #909's BC added `arbitration [SYSTEM/SERVICE] [--role R] [--for SECS]
   [--lease] [--wait-before-close] [--contracts]`, a root judgement beside
   `timing` and `redundancy` over `run_arbitration`: §5's three questions
@@ -1110,7 +1119,18 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   a tool's window opened once it follows presence and holds the
   descriptors, §0's `unseen`; text 0.3, F-273 to F-276, #908 MC; text
   0.4, F-277, #908 MD: `roll_up` over members all set aside is not asked,
-  or not this profile's when every one is, and over none unobservable),
+  or not this profile's when every one is, and over none unobservable;
+  text 0.5, F-278 to F-280, #908 ME: `Holding`, how long a tool held
+  each member of one tracker in its window, its longest unbroken stretch
+  held heard, missed or waited for, never the sum of its stretches (a
+  miss can only be reported within one), so a known member never heard
+  is held only while waited for (its owner's absence a pause, its
+  presence again a new stretch, `window_too_short` where 0.4 gave a
+  vacuous `met`), and no stretch after its first `ended` (a member heard
+  again is read over its first life, its span and held time ending
+  there); `roll_up_first`, the roll-up's answer with the first member
+  giving it in byte order of the keys and its reason, none over no
+  member),
   and `arbitration.v1`'s (`arbitration`, #909 BA: the
   vocabulary, `policy` on a requirement, the interim row published
   unchanged by core 0.54, the first read on a requirement;

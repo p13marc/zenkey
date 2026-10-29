@@ -66,16 +66,18 @@ pub struct TimingAnswer {
 
 /// One question read over a resource or a run, by its finding (text 0.2,
 /// F-264): the finding when any member's answer is the finding; the other
-/// pole when every member's answer is that pole, and there is at least
-/// one; unobservable otherwise. A member not asked, or not this profile's,
-/// is set aside; `not_asked` here says no member was asked at all.
+/// pole when every member's answer is that pole or set aside, and at least
+/// one is that pole; when every member is set aside, not this profile's
+/// when every one is, else not asked (text 0.4, F-277); unobservable
+/// otherwise. A member not asked, or not this profile's, is set aside.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TimingRollUp {
     pub answer: TimingAnswerToken,
-    /// The first member whose answer is the roll-up's, when one is: its key.
+    /// The first member whose answer is the roll-up's, in byte order of
+    /// the members' keys (text 0.5, F-279): its key. Absent over no member.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first: Option<String>,
-    /// That member's reason.
+    /// That member's reason: the roll-up's (§5, F-279).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// How many members gave each answer.
@@ -202,7 +204,8 @@ pub struct TimingMember {
     /// A member the tool could name without hearing it (§0).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub known: bool,
-    /// How long it was held in the window (§2.7), milliseconds.
+    /// How long it was held in the window (§2.7): its longest unbroken
+    /// stretch, never the sum of its stretches (text 0.5), milliseconds.
     pub held_ms: f64,
     /// Its arrivals in the window: put samples, not expired.
     pub arrivals: u64,
