@@ -1,4 +1,4 @@
-//! Chunk lexical rules (r3 §3.1, inherited from v1's RFC 03 §2).
+//! Chunk lexical rules (core §1.2; r3 §3.1, inherited from v1's).
 //!
 //! A *plain* chunk is `[a-z0-9]([a-z0-9._-]*[a-z0-9])?`: lowercase ASCII
 //! letters, digits, `.`, `_` and `-`, starting and ending alphanumeric.
