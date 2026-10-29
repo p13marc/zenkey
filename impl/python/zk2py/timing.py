@@ -741,19 +741,36 @@ def _lifespan(decl: Declaration, r: Reading) -> Answer:
     return Answer(UNOBSERVABLE, "no_sample", "no sample of the member")
 
 
+SET_ASIDE = (NOT_ASKED, "not_this_profiles")
+
+
 def rollup(question: str, answers: Iterable[Answer]) -> Answer:
     """§5 "Over a resource, or a run", read by each question's finding
-    (F-264): the finding when any member's answer is the finding; the other
-    pole when every member's is, and there is at least one; unobservable
-    otherwise. A member not asked, or not this profile's, is set aside."""
+    (F-264), a member not asked, or not this profile's, set aside (text
+    0.4):
+
+    - the finding when any member's answer is the finding;
+    - the other pole when every member's answer is that pole or set aside,
+      and at least one is that pole;
+    - when every member is set aside, and there is at least one, not this
+      profile's when every one is, else not asked (F-277): nobody put the
+      question of any of them; the reason is the first such member's;
+    - unobservable otherwise: a member unobservable and none the finding,
+      or no member at all (``no_member``)."""
     finding = FINDING[question]
     other = YES if finding == NO else NO
-    asked = [a for a in answers if a.answer not in (NOT_ASKED, "not_this_profiles")]
+    every = list(answers)
+    asked = [a for a in every if a.answer not in SET_ASIDE]
     hit = [a for a in asked if a.answer == finding]
     if hit:
         return Answer(finding, hit[0].reason, f"{len(hit)} member(s) the finding")
     if asked and all(a.answer == other for a in asked):
         return Answer(other, asked[0].reason, f"{len(asked)} member(s)")
+    if every and not asked:
+        if all(a.answer == "not_this_profiles" for a in every):
+            return Answer("not_this_profiles", every[0].reason, f"{len(every)} member(s), none a stream")
+        first = next(a for a in every if a.answer == NOT_ASKED)
+        return Answer(NOT_ASKED, first.reason, f"{len(every)} member(s), every one set aside (F-277)")
     unobs = [a for a in asked if a.answer == UNOBSERVABLE]
     return Answer(UNOBSERVABLE, unobs[0].reason if unobs else "no_member", "no finding, and not every member clean")
 

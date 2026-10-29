@@ -2,8 +2,8 @@
 zk2py.timing_tool -c ENDPOINT [--for SECS] [--clock-bound MS]
 [--contracts PATH]... [--across-face [--owner-zid ZID]...] SELECTOR``.
 
-Written from ``spec/profiles/timing/v1.md`` (text 0.3) §2.7 and §5, as a
-tool's implementer reads them. ``SELECTOR`` names one owner's members,
+Written from ``spec/profiles/timing/v1.md`` (text 0.3, its roll-up text
+0.4's) §2.7 and §5, as a tool's implementer reads them. ``SELECTOR`` names one owner's members,
 ``zk2/<system>/<service>/**`` or narrower; for each timed stream it reaches
 (a ``stream`` or ``@stream`` resource with a ``timing.*`` annotation):
 
@@ -18,7 +18,9 @@ tool's implementer reads them. ``SELECTOR`` names one owner's members,
    path is every member's loss (text 0.3); ε is ``--clock-bound``, never
    the HLC's delta;
 3. §5's three questions of each member it held, and each read over its
-   resource and over the run by its finding (F-264).
+   resource and over the run by its finding (F-264), a question whose
+   every member is set aside not asked, or not this profile's (text 0.4,
+   F-277).
 
 Across a constrained face (``--across-face``) no presence and no descriptor
 cross: the contracts are ``--contracts``, the deployment's word, and each
@@ -28,8 +30,9 @@ one every lifespan is ``unattributed``.
 It prints one JSON document (``report``, ``rows``, ``run``, ``exit``), and
 exits 1 on a finding over the run (a deadline missed with its owner
 present and nothing lost, a period not kept likewise, a sample expired), 0
-when every question asked is answered on its other pole over the run, 2
-otherwise (no member held, a question unobservable).
+when every question asked over the run, at least one, is answered on its
+other pole (a question not asked, or not this profile's, set aside: text
+0.4), 2 otherwise (no member held, a question unobservable, none asked).
 """
 
 from __future__ import annotations
@@ -134,15 +137,18 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
                 for q in members:
                     members[q].append(a[q])
     runq = {q: tm.rollup(q, members[q]).pair() for q in members}
-    # §5 over the run, read by each question's finding (F-264): a question
-    # whose every member is set aside rolls up unobservable as the sentence
-    # and conclusions.json #33 read it, so such a run has no verdict here
+    # §5 over the run, read by each question's finding (F-264). A question
+    # whose every member is set aside rolls up not asked, or not this
+    # profile's (text 0.4, F-277): nobody put it, so it is set aside here
+    # too, and the run is clean when every question asked is on its other
+    # pole, at least one asked. With none asked there is no verdict.
     finding = any(runq[q]["answer"] == tm.FINDING[q] for q in runq)
-    clean = all(runq[q]["answer"] == (tm.NO if tm.FINDING[q] == tm.YES else tm.YES) for q in runq)
+    asked = [q for q in runq if runq[q]["answer"] not in tm.SET_ASIDE]
+    clean = bool(asked) and all(runq[q]["answer"] == (tm.NO if tm.FINDING[q] == tm.YES else tm.YES) for q in asked)
     # No member held, or no timed resource in scope, is no verdict: the
-    # empty roll-up is unobservable (conclusions.json #32, "no member at
-    # all", and #33, every one set aside), so a run with no member row can
-    # never exit 0, checked here by itself (review-bot on PR #919)
+    # empty roll-up is unobservable (conclusions.json #33, "no member at
+    # all"), so a run with no member row can never exit 0, checked here by
+    # itself (review-bot on PR #919)
     held = any(r["row"] == "member" for r in rows)
     code = 2 if not held else 1 if finding else 0 if clean else 2
     return {"report": "timing", "selector": selector, "across_face": across_face, "clock_bound_ms": clock_bound_ms,

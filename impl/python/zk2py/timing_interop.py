@@ -1,7 +1,7 @@
 """``timing.v1``'s scenarios (``spec/profiles/timing/scenarios.md``, text
-0.3) in every pairing of zk2py's runtime and the Rust reference's: ``python
--m zk2py.timing_interop [--pair OWNER:READER]... [--only 1 … 6]...``, each of
-OWNER and READER ``py`` or ``rs`` (#609, rounds 78 and 79).
+0.4) in every pairing of zk2py's runtime and the Rust reference's: ``python
+-m zk2py.timing_interop [--pair OWNER:READER]... [--only 1 … 6|face|gone|again]...``, each of
+OWNER and READER ``py`` or ``rs`` (#609, rounds 78 to 80).
 
 - **The bus** is the text's: R1, an in-process zenoh-python router with
   timestamping on and its HLC's delta the default; §5 step 2's R2 has
@@ -31,10 +31,18 @@ OWNER and READER ``py`` or ``rs`` (#609, rounds 78 and 79).
   0.3): zk2py's (``python -m zk2py.timing_tool``) and the reference's
   (``zenctl timing``, a black box), each a process, their windows' starts
   their ``timing: listening`` lines; each tool's answers checked against
-  Expected, then the two compared token by token. The checks an open
-  finding is known to fail are named one by one in :data:`KNOWN` (F-277's
-  roll-up): each prints XFAIL when it fails and XPASS when it passes, and
-  any other failing check fails the run (:mod:`zk2py.checks`).
+  Expected, each tool's roll-ups against §5's rule (text 0.4, F-277), then
+  the two compared token by token. The checks an open finding is known to
+  fail are named one by one in :data:`KNOWN`, each printing XFAIL when it
+  fails and XPASS when it passes; any other failing check fails the run
+  (:mod:`zk2py.checks`). None of §1 to §6 is there since text 0.4 (round
+  80): F-277's twelve went with it.
+- **Beside §6, not scenarios**, both tools beside each owner: ``face``
+  (§2.8, across a constrained face on the deployment's word, round 79) and
+  ``gone`` (§2.7, a known member never heard whose owner leaves before its
+  miss is due, round 80): the two tools' agreement there is F-278's, and a
+  roll-up's reason over no member F-279's, in :data:`KNOWN`; ``again``
+  (§2.7, a member ended and heard again in one window, round 80, F-280).
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -70,19 +78,32 @@ PERIOD_S = 0.1
 
 #: The two tools' readings across a face beside §6 (§2.8), by name.
 FACE_ZID, FACE_NONE = "the owner's zid on the deployment's word", "no zid stated"
-#: The name of the check, at each of §6's steps and §2.8's readings, that a
-#: roll-up whose every member is not asked reads alike in both tools.
-ROLLUP = ("a roll-up whose every member is not asked: the two tools agree (F-277: zk2py unobservable by §5's "
-          "sentence and conclusions.json #33, zenctl not_asked)")
+#: The name of the check, at each of §6's steps and §2.8's readings, that
+#: each tool's resource and run roll-ups are §5's over its own member rows
+#: (text 0.4, F-277), and that ``stream/axis/{axis}``'s lifespan, no
+#: member declaring one, is not asked.
+ROLLUP = ("§5's roll-up, each tool over its own members: a resource or run whose every member is set aside not "
+          "asked (text 0.4, F-277), axis's lifespan not_asked")
+#: The name of the check beside §6 (§2.7, not a scenario) that the two
+#: tools agree on a known member never heard whose owner leaves before its
+#: miss is due.
+GONE_AGREE = "the two tools' answers agree, token by token, and their exits"
+#: … and that a resource's roll-up over no member carries the same reason in
+#: both (F-279: zk2py ``no_member``, zenctl none; §5 states no roll-up's).
+GONE_EMPTY = "a roll-up over no member: the two tools' reasons agree"
 #: The checks an open finding is known to fail, each by its identity
-#: (section, name), never by a count (review-bot on PR #919): F-277's
-#: roll-up at each of §6's four steps and §2.8's two readings, beside each
-#: owner. A failing check not here fails the run; one here that passes
+#: (section, name), never by a count (review-bot on PR #919). Round 79's
+#: twelve F-277 entries went with text 0.4 (round 80), when every one
+#: passed. A failing check not here fails the run; one here that passes
 #: prints XPASS, so its entry is seen and removed.
 KNOWN: dict[tuple[str, str], str] = {
-    **{(f"§6 [{oi}→both tools]", f"step {n}: {ROLLUP}"): "F-277" for oi in ("py", "rs") for n in "1234"},
-    **{(f"§2.8 beside §6 [{oi}→both tools]", f"{reading}: {ROLLUP}"): "F-277"
-       for oi in ("py", "rs") for reading in (FACE_ZID, FACE_NONE)},
+    # F-278 (round 80): §2.7's held time of a known member never heard whose
+    # owner went absent before its miss was due, zk2py by the letter (to the
+    # window's end: yes, met), zenctl only while it waited (window_too_short)
+    **{(f"§2.7 beside §6 [{oi}→both tools]", GONE_AGREE): "F-278" for oi in ("py", "rs")},
+    # F-279 (round 80): §5 states no reason for a roll-up; over no member
+    # zk2py says ``no_member`` and zenctl prints none
+    **{(f"§2.7 beside §6 [{oi}→both tools]", GONE_EMPTY): "F-279" for oi in ("py", "rs")},
 }
 
 
@@ -1070,19 +1091,42 @@ def tool_answers(doc: dict[str, Any] | None) -> dict[tuple[str, str], dict[str, 
             # §2.7 (text 0.3): a tool's known members, beside the answers
             out[("member", r["key"])]["known"] = bool(r.get("known"))
         elif r.get("row") == "resource":
-            out[("resource", r["resource"])] = {q: (v["answer"], v["reason"]) for q, v in r["questions"].items()}
+            # a roll-up over no member carries no reason in zenctl's output
+            out[("resource", r["resource"])] = {q: (v["answer"], v.get("reason"))
+                                                for q, v in r["questions"].items()}
     if doc.get("run"):
-        out[("run", "")] = {q: (v["answer"], v["reason"]) for q, v in doc["run"].items()}
+        out[("run", "")] = {q: (v["answer"], v.get("reason")) for q, v in doc["run"].items()}
     return out
 
 
-def _rollup_diffs(diffs: list[tuple[Any, str, Any, Any]]) -> list[tuple[Any, str, Any, Any]]:
-    """The differences F-277 makes: a resource's or the run's roll-up whose
-    every member is not asked, zk2py unobservable (``no_member``), zenctl
-    not asked. Checked apart, under :data:`ROLLUP`, so the comparison of
-    everything else stays strict."""
-    return [d for d in diffs if d[0][0] in ("resource", "run") and d[3] is not None
-            and d[3][0] == "not_asked" and d[2] == ("unobservable", "no_member")]
+def rollup_mismatches(doc: dict[str, Any] | None) -> list[tuple[str, str, str, str]]:
+    """Each resource row's and the run's answer against §5's roll-up (text
+    0.4, :func:`zk2py.timing.rollup`) over the tool's own member rows, the
+    answer alone (``conclusions.json``'s roll-up cases give no reason):
+    ``(row, question, printed, by the rule)`` for each that differs, and
+    for ``stream/axis/{axis}``'s lifespan, which no member declares, any
+    answer but ``not_asked`` (F-277's case)."""
+    out: list[tuple[str, str, str, str]] = []
+    if not doc:
+        return [("document", "", "none", "")]
+    members = [r for r in doc.get("rows") or [] if r.get("row") == "member"]
+
+    def rolled(q: str, rows: list[dict[str, Any]]) -> str:
+        return tm.rollup(q, [tm.Answer(r[q]["answer"], r[q].get("reason", "")) for r in rows if q in r]).answer
+
+    for res in (r for r in doc.get("rows") or [] if r.get("row") == "resource"):
+        mine = [m for m in members if m.get("resource") == res.get("resource")
+                and m.get("address") == res.get("address") and m.get("iface") == res.get("iface")]
+        for q, v in (res.get("questions") or {}).items():
+            if v["answer"] != (want := rolled(q, mine)):
+                out.append((res["resource"], q, v["answer"], want))
+        if res.get("resource") == RID_AXIS and mine and (res.get("questions") or {}).get("lifespan", {}).get(
+                "answer") != "not_asked":
+            out.append((res["resource"], "lifespan", str(res["questions"].get("lifespan")), "not_asked"))
+    for q, v in (doc.get("run") or {}).items():
+        if v["answer"] != (want := rolled(q, members)):
+            out.append(("run", q, v["answer"], want))
+    return out
 
 
 def _member_row(doc: dict[str, Any] | None, key: str) -> dict[str, Any]:
@@ -1218,15 +1262,14 @@ def section6(report: Report, oi: str) -> None:
                     va, vb = ta.get(k, {}).get(q), tb.get(k, {}).get(q)
                     if va != vb:
                         diffs.append((k, q, va, vb))
-            rollups = _rollup_diffs(diffs)
-            other = [d for d in diffs if d not in rollups]
             results.append((step, {"diffs": diffs, "exits": (ca, cb)}))
             report.check(sec, f"step {step}: the two tools' answers agree, token by token, members, resources and "
                               f"the run",
-                         not other and ca == cb,
-                         f"exits zk2py {ca}, zenctl {cb}; differences {other or 'none'}")
-            report.check(sec, f"step {step}: {ROLLUP}", not rollups,
-                         f"{[(k, q, a, b) for k, q, a, b in rollups] or 'none'}")
+                         not diffs and ca == cb,
+                         f"exits zk2py {ca}, zenctl {cb}; differences {diffs or 'none'}")
+            bad = {t: rollup_mismatches(d) for t, (_, d) in got.items()}
+            report.check(sec, f"step {step}: {ROLLUP}", not any(bad.values()),
+                         "; ".join(f"{t} {v or 'none'}" for t, v in bad.items()))
             if step != "4":
                 time.sleep(0.5)
     finally:
@@ -1267,14 +1310,131 @@ def section6_face(report: Report, oi: str) -> None:
             diffs = [(k, q, ta.get(k, {}).get(q), tb.get(k, {}).get(q)) for k in sorted(set(ta) | set(tb))
                      for q in ("deadline", "period", "lifespan", "known")
                      if ta.get(k, {}).get(q) != tb.get(k, {}).get(q)]
-            rollups = _rollup_diffs(diffs)
-            other = [d for d in diffs if d not in rollups]
             report.check(sec, f"{name}: the two tools' answers agree, token by token, and their exits",
-                         not other and got["zk2py"][0] == got["zenctl"][0],
-                         f"exits zk2py {got['zk2py'][0]}, zenctl {got['zenctl'][0]}; differences {other or 'none'}")
-            report.check(sec, f"{name}: {ROLLUP}", not rollups,
-                         f"{[(k, q, a, b) for k, q, a, b in rollups] or 'none'}")
+                         not diffs and got["zk2py"][0] == got["zenctl"][0],
+                         f"exits zk2py {got['zk2py'][0]}, zenctl {got['zenctl'][0]}; differences {diffs or 'none'}")
+            bad = {t: rollup_mismatches(d) for t, (_, d) in got.items()}
+            report.check(sec, f"{name}: {ROLLUP}", not any(bad.values()),
+                         "; ".join(f"{t} {v or 'none'}" for t, v in bad.items()))
         o.pause("cmd")
+    finally:
+        bus.close()
+
+
+def section6_gone(report: Report, oi: str) -> None:
+    """Beside §6, not a scenario (round 80, F-278): a known member never
+    heard, ``cmd`` never published, its owner present at the window's start
+    and closing cleanly 0.15 s into a 3 s window, before ``cmd``'s miss is
+    due (500 ms). Its wait stops at the read that shows the owner absent
+    (§2.5: "waits for nothing until the owner is present again"), so no miss
+    is reported. §2.7 counts how long a tool held a known member "from …
+    the instant it began to wait for it … to the window's end, or to the
+    member's end", and a known member is never forgotten (§2.5): zk2py
+    holds it to the window's end, 3 s, and answers its deadline yes, met
+    (§5); the reference counts only while it waited, about 0.3 s, and
+    answers unobservable, window_too_short. Both read its period
+    unobservable (owner_not_present) and its lifespan unobservable
+    (no_sample)."""
+    sec = f"§2.7 beside §6 [{oi}→both tools]"
+    bus = Bus()
+    try:
+        o = bus.owner(oi)
+        time.sleep(0.3)
+        runs = {t: ToolRun(t, bus.endpoint, 3.0) for t in ("zk2py", "zenctl")}
+        ok = _wait(lambda: all(r.listening() is not None or r.p.poll() is not None for r in runs.values()), 15.0)
+        starts = [r.listening() for r in runs.values()]
+        if not ok or any(t is None for t in starts):
+            for r in runs.values():
+                r.p.kill()
+            report.check(sec, "both tools' windows start", False,
+                         "; ".join(f"{t}: {r.err[-3:]}" for t, r in runs.items()))
+            return
+        later = max(t for t in starts if t is not None)
+        _sleep_until(later + 150 * MS)
+        o.close()
+        got = {t: r.result() for t, r in runs.items()}
+        ans = {t: tool_answers(d) for t, (_, d) in got.items()}
+        for t, a in ans.items():
+            c, row = a.get(("member", CMD), {}), _member_row(got[t][1], CMD)
+            report.check(sec, f"{t}: cmd known, no miss and no arrival; its period unobservable "
+                              f"(owner_not_present), its lifespan unobservable (no_sample)",
+                         c.get("known") is True and not row.get("misses") and row.get("arrivals") == 0
+                         and c.get("period") == ("unobservable", "owner_not_present")
+                         and c.get("lifespan") == ("unobservable", "no_sample"),
+                         f"exit {got[t][0]}; cmd {c}; held_ms {row.get('held_ms')}")
+            report.note(sec, f"{t}: cmd's deadline {c.get('deadline')}, held {row.get('held_ms')} ms of 3,000")
+        ta, tb = ans["zk2py"], ans["zenctl"]
+        diffs = [(k, q, ta.get(k, {}).get(q), tb.get(k, {}).get(q)) for k in sorted(set(ta) | set(tb))
+                 for q in ("deadline", "period", "lifespan", "known")
+                 if ta.get(k, {}).get(q) != tb.get(k, {}).get(q)]
+        # a roll-up over no member (axis, none heard): its answer alike,
+        # its reason zk2py's ``no_member`` and none in zenctl's (F-279)
+        empty = [d for d in diffs if d[0][0] in ("resource", "run") and d[2] is not None and d[3] is not None
+                 and d[2][0] == d[3][0] == "unobservable" and d[2][1] == "no_member" and d[3][1] is None]
+        rest = [d for d in diffs if d not in empty]
+        report.check(sec, GONE_AGREE, not rest and got["zk2py"][0] == got["zenctl"][0],
+                     f"exits zk2py {got['zk2py'][0]}, zenctl {got['zenctl'][0]}; differences {rest or 'none'}")
+        report.check(sec, GONE_EMPTY, not empty, f"{empty or 'none'}")
+    finally:
+        bus.close()
+
+
+def section6_again(report: Report, oi: str) -> None:
+    """Beside §6, not a scenario (round 80, F-280): ``axis/x`` ends in the
+    window and is heard again. Its member token is withdrawn 1 s into a 5 s
+    window (``timing remove x``), so a tool ends it (gone) at its read, and
+    added again 2 s in (``timing add x``), so it is heard again, "judged
+    from that arrival, as a member first heard" (§2.5). §2.7's period span
+    runs "to the member's end when it ended in the window", and the text
+    reads no second life: both tools read the first end, its period kept
+    over its first life and its second life judged by neither; its deadline
+    not asked (``ended``). zk2py's round-80 first reading, an end followed
+    by an arrival dropped, counted the second's absence against the period:
+    no, not_kept, exit 1, beside zenctl's exit 0."""
+    sec = f"§2.7 again beside §6 [{oi}→both tools]"
+    bus = Bus()
+    try:
+        o = bus.owner(oi)
+        kx = f"{AXIS}/x"
+        o.add("x")
+        o.resume("cmd")
+        time.sleep(0.3)
+        runs = {t: ToolRun(t, bus.endpoint, 5.0) for t in ("zk2py", "zenctl")}
+        ok = _wait(lambda: all(r.listening() is not None or r.p.poll() is not None for r in runs.values()), 15.0)
+        starts = [r.listening() for r in runs.values()]
+        if not ok or any(t is None for t in starts):
+            for r in runs.values():
+                r.p.kill()
+            report.check(sec, "both tools' windows start", False,
+                         "; ".join(f"{t}: {r.err[-3:]}" for t, r in runs.items()))
+            return
+        later = max(t for t in starts if t is not None)
+        _sleep_until(later + 1 * NS)
+        o.remove("x")
+        _sleep_until(later + 2 * NS)
+        o.add("x")
+        _sleep_until(later + 5 * NS + 300 * MS)
+        o.pause("cmd")
+        got = {t: r.result() for t, r in runs.items()}
+        ans = {t: tool_answers(d) for t, (_, d) in got.items()}
+        for t, a in ans.items():
+            x, row = a.get(("member", kx), {}), _member_row(got[t][1], kx)
+            report.check(sec, f"{t}: axis/x ended (gone) about 1.1 s in and heard again: no miss, its deadline not "
+                              f"asked (ended), its period kept over its first life; the run clean, exit 0",
+                         _ended(row) == "gone" and not row.get("misses")
+                         and x.get("deadline") == ("not_asked", "ended") and x.get("period") == ("yes", "kept")
+                         and got[t][0] == 0,
+                         f"exit {got[t][0]}; axis/x {x}; ended {row.get('ended')}; held_ms {row.get('held_ms')}; "
+                         f"{row.get('arrivals')} arrivals")
+        ta, tb = ans["zk2py"], ans["zenctl"]
+        diffs = [(k, q, ta.get(k, {}).get(q), tb.get(k, {}).get(q)) for k in sorted(set(ta) | set(tb))
+                 for q in ("deadline", "period", "lifespan", "known")
+                 if ta.get(k, {}).get(q) != tb.get(k, {}).get(q)]
+        report.check(sec, "the two tools' answers agree, token by token, and their exits",
+                     not diffs and got["zk2py"][0] == got["zenctl"][0],
+                     f"exits zk2py {got['zk2py'][0]}, zenctl {got['zenctl'][0]}; differences {diffs or 'none'}")
+        report.note(sec, "axis/x held " + ", ".join(f"{t} {_member_row(got[t][1], kx).get('held_ms')} ms"
+                                                    for t in got) + " (not compared: §2.7 reads no second life)")
     finally:
         bus.close()
 
@@ -1287,8 +1447,10 @@ PAIRS = ["py:py", "rs:py", "py:rs", "rs:rs"]
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.timing_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--pair", action="append", choices=PAIRS, help="owner:reader, each py or rs")
-    ap.add_argument("--only", action="append", choices=[*SECTIONS, "6", "face"],
-                    help="run only these sections (face: §2.8 beside §6, both tools)")
+    ap.add_argument("--only", action="append", choices=[*SECTIONS, "6", "face", "gone", "again"],
+                    help="run only these sections (face: §2.8 beside §6, both tools; gone: §2.7 beside §6, a "
+                         "known member's owner gone before its miss is due, F-278; again: §2.7 beside §6, a "
+                         "member ended and heard again, F-280)")
     args = ap.parse_args(argv)
     report = Report()
     names = {"py": "zk2py", "rs": "rust"}
@@ -1321,7 +1483,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"SKIP §6: it runs both tools, and the reference's is missing: {BLACKBOX / 'zenctl'}", flush=True)
         six = False
     face = (not args.only or "face" in args.only) and os.access(BLACKBOX / "zenctl", os.X_OK)
-    for fn, on in ((section6, six), (section6_face, face)):
+    gone = (not args.only or "gone" in args.only) and os.access(BLACKBOX / "zenctl", os.X_OK)
+    again = (not args.only or "again" in args.only) and os.access(BLACKBOX / "zenctl", os.X_OK)
+    for fn, on in ((section6, six), (section6_face, face), (section6_gone, gone), (section6_again, again)):
         if not on:
             continue
         for oi in sorted({p.split(':')[0] for p in pairs}):
