@@ -33,6 +33,7 @@
 //! lives in [`crate::report`], not here (see that module's placement rule).
 
 pub mod alarms;
+pub mod arbitration;
 pub mod common;
 pub mod condition;
 pub mod config;

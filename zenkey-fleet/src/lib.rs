@@ -89,7 +89,11 @@
 //!   `timing` (a `timing.v1` tool's window: the timed streams the
 //!   descriptors declare, their members' arrivals read in the subscriber's
 //!   callback and the owners' tokens in one queue, the window started once
-//!   presence and every descriptor stand, a withdrawal's re-read, #908). The
+//!   presence and every descriptor stand, a withdrawal's re-read, #908), and
+//!   `arbitration` (an `arbitration.v1` tool's reading of each consumer's
+//!   arbitrated role: its descriptor, the declaring contract, every
+//!   revision of the required interface in hand, and the tool's own view
+//!   over a short listen, its watch on the watch session, #909). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -140,7 +144,11 @@
 //!   `timing` (one tool's window over timed members: the model's tracker
 //!   and lifespan reader per provider and resource, each member's span
 //!   held, misses with the owner's state, arrivals and lifespans, in one
-//!   order whose instants never go back, #908),
+//!   order whose instants never go back, #908), `arbitration` (a role's
+//!   subject read from its consumer's descriptor, its declaration over
+//!   every revision held, and the tool's own view: the model's arbiter
+//!   over the tool's events, a governed interface's incumbents beside it,
+//!   #909),
 //!   `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
@@ -158,7 +166,9 @@
 //!   (`alarms.v1`'s §5 answers, #800), `telemetry` (`telemetry.v1`'s,
 //!   #819), `desired` (`desired.v1`'s, each the model's, #840) and
 //!   `timing` (`timing.v1`'s three questions per member, rolled up by each
-//!   question's finding, #908), and
+//!   question's finding, #908), `arbitration` (`arbitration.v1`'s three
+//!   questions per role, each the model's, the selection the tool's own
+//!   view, #909), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -350,6 +360,15 @@ pub use bus::timing::{
     TimingObservation, TimingSpec, observe as observe_timing, run_timing, timed_resources_in_scope,
 };
 pub use judge::timing::judge as judge_timing;
+// `arbitration.v1` (#909, BC): each consumer's arbitrated role, as the
+// profile's tool reads it — the reads and the view, the session-free
+// projection and view book they fold into, and the judge.
+pub use bus::arbitration::{
+    ArbitrationObservation, ArbitrationSpec, DEFAULT_LISTEN as ARBITRATION_DEFAULT_LISTEN,
+    Listened as ArbitrationListened, RoleObserved, observe as observe_arbitration, run_arbitration,
+};
+pub use judge::arbitration::judge as judge_arbitration;
+pub use model::arbitration::{RoleRead, RoleSubject, ViewBook, roles_in as arbitrated_roles_in};
 pub use model::config::{Assignment, Given, TypedValues};
 pub use model::telemetry::{
     MemberBook, MetricResource, MetricSample, MetricType, PairPresence, PairSeen, PairTally,
@@ -623,6 +642,18 @@ const _: () = {
             &offline,
             crate::TimingSpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
             |_| {},
+        ));
+        // An arbitration reading holds its views' subscriptions, queues,
+        // reads in flight and receive paths' watches across awaits (#909,
+        // BC).
+        is_send(&crate::run_arbitration(
+            session,
+            None,
+            "",
+            None,
+            &store,
+            &offline,
+            crate::ArbitrationSpec::new(std::time::Duration::ZERO),
         ));
     }
 

@@ -1492,7 +1492,11 @@ async fn the_declaration_at_the_builder_and_at_start() {
     // before its tokens puts nothing of an instance that never starts.
     for (from, to, why) in [
         ("\"priority\"", "\"freshest\"", "policy_unsupported"),
-        ("cardinality = \"many\"", "cardinality = \"one\"", "cardinality"),
+        (
+            "cardinality = \"many\"",
+            "cardinality = \"one\"",
+            "cardinality",
+        ),
     ] {
         let mut b = ServiceBuilder::new(&s, cfg());
         b.implement(zenkey::Implementation::new(copy("rudder.v1", from, to)))

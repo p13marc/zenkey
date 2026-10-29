@@ -15,6 +15,7 @@
 //! | §2.3 the deadline, from the revision held | [`deadline_of`], [`Arbitrated::deadline`], [`crate::timing`]'s declaration |
 //! | §2.4 the ranking, wildcards, shadowed entries | [`Binding`], [`Entry`], [`Rank`] |
 //! | §2.5 samples and who sent them | [`Arbiter::identify`], [`Sample`], [`Outcome`] |
+//! | §2.5's outcome 6, a governed interface's incumbents (`redundancy.v1` §2.10) | [`Incumbents`], [`Holding`] |
 //! | §2.6 to §2.8 eligibility, withdrawals, a move | [`Arbiter`], [`Event`] |
 //! | §2.9 to §2.11 selection, switches, the dead-man | [`Arbiter::observe`], [`Step`], [`Switch`], [`Cause`] |
 //! | §2.14, §5 what a tool concludes | [`judge_declaration`], [`judge_selection`], [`judge_binding`], [`held_over`] |
@@ -1305,6 +1306,124 @@ fn read_into(known: &mut BTreeSet<InstanceId>, complete: bool, held: BTreeSet<In
         *known = held;
     } else {
         known.extend(held);
+    }
+}
+
+// --- §2.5's outcome 6: a governed interface's incumbents ------------------------------
+
+/// A presence event as the incumbents of a governed required interface
+/// follow it (`redundancy.v1` §2.10): kept through a move of the watch
+/// session, as the [`Arbiter`] keeps its own (§2.8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Holding {
+    /// The watch heard an interface token declared.
+    Declared(Addr, InstanceId),
+    /// The watch heard one withdrawn.
+    Withdrawn(Addr, InstanceId),
+    /// A read: whether it is complete, and the instances it shows holding
+    /// the interface's token at the address.
+    Read(Addr, bool, BTreeSet<InstanceId>),
+}
+
+impl Holding {
+    /// An interface token of `iface` at an address `binding` ranks,
+    /// declared (`put`) or withdrawn; `None` for any other key.
+    #[must_use]
+    pub fn of_token(key: &str, put: bool, iface: &IfaceId, binding: &Binding) -> Option<Self> {
+        let Ok(ZkKey::Alive {
+            addr,
+            iface: i,
+            instance,
+            ..
+        }) = parse(key)
+        else {
+            return None;
+        };
+        if i != *iface || binding.rank(&addr).is_none() {
+            return None;
+        }
+        Some(if put {
+            Self::Declared(addr, instance)
+        } else {
+            Self::Withdrawn(addr, instance)
+        })
+    }
+}
+
+/// The incumbent of each provider of a governed required interface (§2.5,
+/// outcome 6; `redundancy.v1` §2.10): the lowest instance holding the
+/// interface's token, as the watch and the reads show it, and the
+/// `meta.zid` its descriptor states. Session-free, so that a consumer's
+/// runtime and a tool's view (#909's BC) follow it alike: moved here from
+/// `zenkey::arbitration` at BC.
+#[derive(Debug, Clone, Default)]
+pub struct Incumbents {
+    holders: BTreeMap<Addr, BTreeSet<InstanceId>>,
+    zids: BTreeMap<(Addr, InstanceId), u128>,
+    kept: Vec<Holding>,
+}
+
+impl Incumbents {
+    /// A presence event: kept while a move is pending (`moving`, the
+    /// arbiter's [`Arbiter::moving`] before the event), else applied.
+    pub fn hear(&mut self, h: Holding, moving: bool) {
+        if moving {
+            self.kept.push(h);
+        } else {
+            self.apply(h);
+        }
+    }
+
+    /// The round trip after a move stands: what was kept, applied in the
+    /// order heard (§2.8).
+    pub fn stood(&mut self) {
+        for h in std::mem::take(&mut self.kept) {
+            self.apply(h);
+        }
+    }
+
+    fn apply(&mut self, h: Holding) {
+        match h {
+            Holding::Declared(a, i) => {
+                self.holders.entry(a).or_default().insert(i);
+            }
+            Holding::Withdrawn(a, i) => {
+                self.holders.entry(a).or_default().remove(&i);
+            }
+            Holding::Read(a, complete, held) => {
+                read_into(self.holders.entry(a).or_default(), complete, held)
+            }
+        }
+    }
+
+    /// The `meta.zid` an instance's descriptor states.
+    pub fn described(&mut self, addr: Addr, instance: InstanceId, zid: u128) {
+        self.zids.insert((addr, instance), zid);
+    }
+
+    /// Whether a sample of `addr` stamped by the clock `id` is the
+    /// incumbent's (`redundancy.v1` §2.10): `id` the lowest holder's
+    /// `meta.zid`, by value. Nothing is accepted with no incumbent seen, no
+    /// `meta.zid` held of it, or no stamp.
+    #[must_use]
+    pub fn accepts(&self, addr: &Addr, id: Option<u128>) -> bool {
+        let Some(lowest) = self.holders.get(addr).and_then(|h| h.iter().next()) else {
+            return false;
+        };
+        let Some(zid) = self.zids.get(&(addr.clone(), lowest.clone())) else {
+            return false;
+        };
+        id == Some(*zid)
+    }
+
+    /// The holders whose `meta.zid` is not held: whose descriptor to get.
+    #[must_use]
+    pub fn undescribed(&self) -> Vec<(Addr, InstanceId)> {
+        self.holders
+            .iter()
+            .flat_map(|(a, is)| is.iter().map(move |i| (a.clone(), i.clone())))
+            .filter(|k| !self.zids.contains_key(k))
+            .collect()
     }
 }
 

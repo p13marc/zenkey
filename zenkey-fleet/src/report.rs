@@ -74,11 +74,15 @@
 //! target was behind, #840). MC gave `timing.v1` its domain (`timing`: each
 //! timed member's three answers over a window, rolled up per resource and
 //! per run by each question's finding, and what the window opened on,
-//! #908).
+//! #908). BC gave `arbitration.v1` its domain (`arbitration`: each
+//! consumer's arbitrated role with §5's three answers, the selection always
+//! labelled the tool's own view, and that view's switches and counts,
+//! #909).
 
 mod acl;
 mod admin;
 mod alarms;
+mod arbitration;
 mod asked;
 mod bench;
 mod condition;
@@ -116,6 +120,7 @@ mod why;
 pub use acl::*;
 pub use admin::*;
 pub use alarms::*;
+pub use arbitration::*;
 pub use asked::*;
 pub use bench::*;
 pub use condition::*;
