@@ -605,7 +605,7 @@ impl TimingBook {
         let reports = t.observe(at, event);
         let in_window = self.started.is_some() && self.ended.is_none();
         if in_window {
-            j.holding.observe(t, &reports, at);
+            j.holding.observe(t, event, &reports, at);
         }
         for r in reports {
             let key = r.member().to_owned();

@@ -1381,10 +1381,17 @@ impl Holding {
         Self::default()
     }
 
-    /// After `tracker` observed an event at `at` and made `reports`: each
+    /// After `tracker` observed `event` at `at` and made `reports`: each
     /// member's count moved to where the tracker leaves it. Nothing after
     /// [`Holding::close`].
-    pub fn observe(&mut self, tracker: &Tracker, reports: &[Report], at: Mono) {
+    ///
+    /// An arrival, or a member token seen or gone, moves only its own
+    /// member's count and those `reports` name: no other member enters or
+    /// leaves a counting state at it, since only the start, the owner's
+    /// state and a member's end do that, and an end is reported. So those
+    /// cost one member each, and a start, an owner's move or a tick walks
+    /// every member held (review-bot on PR #940).
+    pub fn observe(&mut self, tracker: &Tracker, event: Event<'_>, reports: &[Report], at: Mono) {
         if self.closed {
             return;
         }
@@ -1395,31 +1402,59 @@ impl Holding {
                 s.ended.get_or_insert(at);
             }
         }
-        for name in tracker.held() {
-            let counts = matches!(
-                tracker.state(name),
-                Some(
-                    MemberState::Heard { .. }
-                        | MemberState::Missed { .. }
-                        | MemberState::Waiting { .. }
-                )
-            );
-            if !counts && !self.spans.contains_key(name) {
-                // Held and not counted: listed, at nothing.
-                self.spans.insert(name.to_owned(), HeldSpan::default());
-                continue;
+        let touched = match event {
+            Event::Arrival { member, .. }
+            | Event::MemberSeen(member)
+            | Event::MemberGone(member) => Some(member),
+            Event::Start | Event::Owner(_) | Event::Tick => None,
+        };
+        match touched {
+            Some(member) => {
+                let mut names: Vec<&str> = vec![member];
+                names.extend(reports.iter().map(Report::member));
+                names.sort_unstable();
+                names.dedup();
+                for name in names {
+                    self.move_one(tracker, name, at);
+                }
             }
-            let s = self.spans.entry(name.to_owned()).or_default();
-            if counts {
-                s.run(at);
-            } else {
-                s.stop(at);
+            None => {
+                for name in tracker.held() {
+                    self.move_one(tracker, name, at);
+                }
+                for (name, s) in &mut self.spans {
+                    if s.counting() && tracker.state(name).is_none() {
+                        s.stop(at);
+                    }
+                }
             }
         }
-        for (name, s) in &mut self.spans {
-            if s.counting() && tracker.state(name).is_none() {
+    }
+
+    /// `name`'s count moved to where the tracker leaves it: running while
+    /// it is heard, missed or waited for, stopped otherwise or when the
+    /// tracker no longer holds it.
+    fn move_one(&mut self, tracker: &Tracker, name: &str, at: Mono) {
+        let Some(state) = tracker.state(name) else {
+            if let Some(s) = self.spans.get_mut(name) {
                 s.stop(at);
             }
+            return;
+        };
+        let counts = matches!(
+            state,
+            MemberState::Heard { .. } | MemberState::Missed { .. } | MemberState::Waiting { .. }
+        );
+        if !counts && !self.spans.contains_key(name) {
+            // Held and not counted: listed, at nothing.
+            self.spans.insert(name.to_owned(), HeldSpan::default());
+            return;
+        }
+        let s = self.spans.entry(name.to_owned()).or_default();
+        if counts {
+            s.run(at);
+        } else {
+            s.stop(at);
         }
     }
 
@@ -1845,7 +1880,7 @@ mod tests {
 
     fn holding_of(t: &mut Tracker, h: &mut Holding, at: u64, e: Event<'_>) -> Vec<Report> {
         let r = t.observe(ms(at), e);
-        h.observe(t, &r, ms(at));
+        h.observe(t, e, &r, ms(at));
         r
     }
 

@@ -3440,7 +3440,7 @@ fn timing_deadlines() {
                 other => panic!("event {other:?}"),
             };
             let made = t.observe(at, event);
-            holding.observe(&t, &made, at);
+            holding.observe(&t, event, &made, at);
             reports.extend(made);
         }
         let mut got = json!({
