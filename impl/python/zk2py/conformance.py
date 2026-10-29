@@ -3499,6 +3499,37 @@ def _arbitration_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 (True, [], "sha256:26b19c8cc407214e345624e20424da3be3b6ce761c6e56ceecb1773934d04f9c",
                  {**want, "deadline_ms": 300, "period_ms": 50})))
     out += _arbitration_review_readings(root)
+    out += _arbitration_tool_readings(root)
+    return out
+
+
+def _arbitration_tool_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """arbitration.v1 0.3's tool (#609, round 79): what a view reads that no
+    descriptor carries, and when it has listened (§2.14). No session is
+    opened."""
+    from . import arbitration as ab
+    from .contract import load_contract
+
+    label = "arbitration.v1 0.3"
+    idir = root.parent.parent / "impl/python/interop/arbitration"
+    steer, gov = (load_contract(idir / f).canonical for f in ("steer.v1.toml", "steer-governed.v1.toml"))
+    out: list[tuple[str, Any, Any]] = []
+    out.append((f"{label} §2.14: a view reads outcome 6 only when every revision held lists redundancy.v1: none, "
+                f"minor 0, minor 1, both",
+                [ab.view_governed(r) for r in ([], [steer], [gov], [steer, gov])], [False, False, True, False]))
+    out.append((f"{label} §2.14: listening counts from the last subscription to the role's stream",
+                (ab.listened_ns([], 10), ab.listened_ns([4_000, 4_100], 4_400)), (0, 300)))
+    decl = ab.declaration(ab.role_of({"uses": ["arbitration.v1"], "requires": {"cmd": {
+        "interface": "steer.v1", "resources": ["cmd"], "cardinality": "many",
+        "annotations": {"arbitration.policy": "priority"}}}}, "cmd"), ab.provider_of(steer))
+    # a watch's round trip of 4 s after a reopen beside a large population,
+    # its subscriptions declared after it, the view asked 100 ms later
+    t_watch, t_subs, now = 0, 4_000 * 1_000_000, 4_100 * 1_000_000
+    out.append((f"{label} §2.14: a view in the dead-man 100 ms after its subscriptions, its watch's 4 s round trip "
+                f"before them: listening, never dead_man as a count from the watch would read it",
+                (ab.conclude(decl, ["lab/safety"], ab.View(ab.listened_ns([t_subs], now), False, None))["selection"]
+                 .reason, ab.conclude(decl, ["lab/safety"], ab.View(now - t_watch, False, None))["selection"].reason),
+                ("listening", "dead_man")))
     return out
 
 
@@ -3728,19 +3759,45 @@ def _timing_readings(root: Path) -> list[tuple[str, Any, Any]]:
                     ("stream", {"timing.lifespan_ms": 100}),
                     ("@stream", {"timing.deadline_ms": 100, "timing.period_ms": 100}))],
                 [False, False, False, False, True]))
-    # F-275 (round 78): an epoch template's known member, its token seen,
-    # its owner absent before the due: zk2py follows deadlines.json's
-    # description, the wait going on, where §2.5's absent bullet would stop it.
-    t = tm.Tracker(100, 4, ["axis/x"], epoch=True)
-    for e in ({"at_ms": 0, "event": "start"}, {"at_ms": 0, "event": "member_seen", "member": "axis/x"},
-              {"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 50, "event": "owner", "state": "absent"},
-              {"at_ms": 101, "event": "tick"}):
-        t.event(e)
-    out.append((f"{label2} §2.5 (F-275): an epoch member's wait goes on when its owner is absent, missed at its "
-                f"due", [(r.event, tm.ns_to_ms(r.due_ns), r.owner) for r in t.reports], [("missed", 100, "absent")]))
+    # F-275's reading (round 78) is deadlines.json's case since text 0.3.
     # §2.6: a zid of 33 digits states none; one of 32 is one.
     out.append((f"{label} §2.6: a meta.zid of 33 hexadecimal digits states none, one of 32 does",
                 (tm.zid_value("1" * 33), tm.zid_value("f" * 32) == 2**128 - 1), (None, True)))
+    out += _timing_tool_readings()
+    return out
+
+
+def _timing_tool_readings() -> list[tuple[str, Any, Any]]:
+    """timing.v1 0.3's tool (#609, round 79): §2.7's known members and its
+    loss without an owner, and §2.8's ``meta.zid`` on the deployment's word.
+    No session is opened."""
+    from . import timing as tm
+
+    label = "timing.v1 0.3"
+    out: list[tuple[str, Any, Any]] = []
+    out.append((f"{label} §2.7: a tool knows a member only when its template has no parameter, pace.v1's cmd and "
+                f"not axis/{{axis}}, a selector naming axis/x binding nothing",
+                [tm.tool_known(t) for t in ("cmd", "axis/{axis}", "a/b", "rest/{tail...}")],
+                [True, False, True, False]))
+    out.append((f"{label} §2.7: a loss the tool can attribute is its member's; one it cannot, a queue's refusal or a "
+                f"stall, every member's",
+                ([tm.lost_for(m, ["cmd"], False) for m in ("cmd", "axis/x")],
+                 [tm.lost_for(m, [], True) for m in ("cmd", "axis/x")]), ([True, False], [True, True])))
+    dec = tm.declaration("stream", {"timing.period_ms": 20, "timing.deadline_ms": 100, "timing.lifespan_ms": 100})
+    stamps = [tm.Stamp(5 * tm.MS, "1f"), tm.Stamp(250 * tm.MS, "1f")]
+    out.append((f"{label} §2.8: across a face a descriptor that did reach the reader states nothing there; the "
+                f"deployment's word alone: none, every sample unattributed; given, judged as anywhere",
+                [[v.reason for v in tm.judge_lifespans(dec, 100, tm.owners_held(True, ["1f"], zids), stamps)]
+                 for zids in ([], ["1F"])], [["unattributed", "unattributed"], ["live", "expired"]]))
+    out.append((f"{label} §2.6: away from a face the descriptors are the word, the deployment's set aside",
+                tm.owners_held(False, ["1f", "1f", "2a"], ["99"]), ["1f", "2a"]))
+    # F-277 (round 79): §5's roll-up over a resource whose every member was
+    # not asked a question, as the sentence and conclusions.json #33 read it;
+    # the reference tool answers not_asked there.
+    na = tm.Answer(tm.NOT_ASKED, "no_lifespan")
+    out.append((f"{label} §5 (F-277): a roll-up whose every member is not asked is unobservable as §5's sentence "
+                f"reads it, every member set aside",
+                tm.rollup("lifespan", [na, na]).answer, tm.UNOBSERVABLE))
     return out
 
 

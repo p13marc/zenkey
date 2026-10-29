@@ -1,8 +1,8 @@
 """``timing.v1``: a stream's cadence, its deadline and its lifespan (profile
-text 0.2, draft, written against core 0.55; ``spec/profiles/timing/v1.md``).
+text 0.3, draft, written against core 0.55; ``spec/profiles/timing/v1.md``).
 
 Read cold from the text, its fixtures and its scenarios alone (#609, round
-76; text 0.2 in round 78). The session-free half:
+76; text 0.2 in round 78, text 0.3 in round 79). The session-free half:
 - :func:`declaration` reads a resolved resource's three keys (§2.2, §2.3),
   as ``conformance/declarations.json`` does, and :func:`requirement` a
   ``[requires.<role>]``'s (§2.3: ignored at 1.0);
@@ -18,7 +18,11 @@ Read cold from the text, its fixtures and its scenarios alone (#609, round
   falsified for the rest of the reading once a stamp of it is more than ε
   ahead, as ``conformance/lifespans.json`` does;
 - :func:`period` is a tool's period over a window (§2.7), as
-  ``conformance/periods.json`` does;
+  ``conformance/periods.json`` does; :func:`tool_known` a tool's known
+  members (templates without parameters, text 0.3), :func:`lost_for` a
+  loss it cannot attribute counted for every member (text 0.3), and
+  :func:`owners_held` the ``meta.zid`` values a reader holds, across a
+  face only on its deployment's word (§2.8, text 0.3);
 - :func:`conclude` is §5's three questions of one member over one window,
   as ``conformance/conclusions.json`` does, and :func:`rollup` the answer
   over a resource or a run, by each question's finding (F-264);
@@ -395,6 +399,10 @@ class Tracker:
                     if m.known and m.last is None and not m.gone and not m.missed:
                         m.wait = t
         elif state == ABSENT and not self.epoch:
+            # text 0.3 (F-275): "a member waited for from its owner's presence
+            # waits for nothing until the owner is present again"; an epoch
+            # template's known member "is waited for from its member token
+            # …, so its owner's absence stops nothing"
             for m in self.members.values():
                 m.wait = None
         return self._done(out)
@@ -549,6 +557,36 @@ def judge_lifespans(decl: Declaration, epsilon_ms: int | float | None, owners: l
                     stamps: Iterable[Stamp | None]) -> list[Verdict]:
     r = LifespanReading(decl, epsilon_ms, list(owners))
     return [r.judge(s) for s in stamps]
+
+
+def owners_held(across_face: bool, descriptor_zids: Iterable[str], deployment_zids: Iterable[str]) -> list[str]:
+    """The ``meta.zid`` values a reader holds for §2.6 step 6 (text 0.3,
+    §2.8): its providers' descriptors anywhere but across a constrained face;
+    across one, where "A descriptor does not cross either", only its
+    deployment's word, "as it holds ε", and none without it, so every sample
+    reads ``unattributed``, the owner's own included. A descriptor that did
+    reach a reader across a face is not the owner's word there: the reader
+    takes none from it."""
+    return list(dict.fromkeys(deployment_zids if across_face else descriptor_zids))
+
+
+# -- §2.7 a tool's window ---------------------------------------------------------------
+
+def tool_known(template: str) -> bool:
+    """§2.7 (text 0.3): "A tool holds no binding, so a member is known to it
+    (§0) only when its template has no parameter: a selector naming a
+    concrete key binds nothing"."""
+    from . import templates
+
+    return all(s.kind == templates.LITERAL for s in templates.parse_template(template).segments)
+
+
+def lost_for(member: str, lost_members: Iterable[str], unattributed: bool) -> bool:
+    """§2.7 "Lost" (text 0.3): the tool knows it lost a delivery of the
+    member, or lost one "without knowing whose it was, a queue's refusal or
+    a stall", which "is lost for every member it holds: any of them may
+    have been the one"."""
+    return unattributed or member in set(lost_members)
 
 
 # -- §2.7 the period over a window ------------------------------------------------------
