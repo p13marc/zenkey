@@ -7,19 +7,44 @@ and `examples/zk2/`.
 
 ## Index
 
-| Profile | Text | Status | Core | Extension points (core §10) | What it is |
-|---|---|---|---|---|---|
-| [`hostid.v1`](hostid/v1.md) | 0.7 | draft | 0.40 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
-| [`freshness.v1`](freshness/v1.md) | 0.4 | draft | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
-| [`health.v1`](health/v1.md) | 0.4 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
-| [`config.v1`](config/v1.md) | 0.4 | draft | 0.28 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v1`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
-| [`link.v1`](link/v1.md) | 0.8 | draft | 0.32 | 2: `link.exposure`; 4 through `uses` | What crosses a constrained face: a deployment's face policy, one per router, and the contract's exposure, compiled into named denies, one downsampling rule per concrete key, the attachment, window floors and liveness evidence; `@zk` never crosses, and no other principal's credentials get across it (core §8.5, R7, S3) |
-| [`alarms.v1`](alarms/v1.md) | 0.8 | draft | 0.34 | 1: [`alarms.v1.toml`](alarms/alarms.v1.toml); 2: published empty; 4 through `uses` (`freshness.v1`) | The active alarms of one service, one state key per alarm, keyed from its document by ZenSight's recipe: raised, escalated, refreshed and resolved, the state read from the document; confirmed every 450 s while firing, so a hung owner's alarms read stale and an absent one's last-known, and "nothing fires" only from an owner's alarms known whole (core S2, S6, O5) |
-| [`telemetry.v1`](telemetry/v1.md) | 0.5 | draft | 0.35 | 1: a standard schema, [`telemetry.v1.json`](telemetry/telemetry.v1.json); 2: `kind`, `unit`, `buckets`, `semantic`; 4 through `uses` | What a metric is: a member's kind and unit, declared or carried by the Point, whose types are the profile's by their artifact's id; whether a sample conforms; a counter's or a histogram's epoch, in-band or from presence, a decrease within an established one the finding and one without evidence a reset; a counter's rate over one epoch; absent is not zero (core §1.5, §7.1, O5) |
-| [`desired.v1`](desired/v1.md) | 0.8 | draft | 0.39 | 1: a standard schema, [`desired.v1.json`](desired/desired.v1.json); 2: `target_param`; 4 through `uses` | A document an author keeps as its own state, keyed by its target: the target binds its own slice by R2, orders versions by its author's stamp, acts on each once per run and never on an older one, refuses whole what it cannot take with the previous kept in force, reverts on a delete and never on silence, and reports what is in force and what it last did in the standard `Report`; the author writes only on a change, and restarts from its record (core S1–S7, §4.2, §4.4, R2) |
-| [`redundancy.v1`](redundancy/v1.md) | 0.5 | draft | 0.40 | 2: `election`; 4 through `uses` | One instance serves a governed interface, the others stand by: a candidate's claim is its instance token, the incumbent the holder of the interface's token, a standby marked in its descriptor and exposing nothing, so a call finds none; a live incumbent wins, the lowest id of a complete read breaks a tie, a vacancy is a withdrawal confirmed by a complete read, and a healed split leaves the lower id; consumers follow the incumbent's stamps; `external` names an actuator's own lock; eventual single writer, never a fence (core §5.1 O1, §6, §8.1, §8.2) |
-| [`timing.v1`](timing/v1.md) | 0.5 | draft | 0.55 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
-| [`arbitration.v1`](arbitration/v1.md) | 0.3 | draft | 0.56 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
+Each row gives a profile's text version, its status (the process below
+says what each means), who uses it, and the core version its text is
+written against.
+
+**Used by** names the adopter mappings in [`examples/zk2/`](../../examples/zk2/)
+that use the profile and, after a semicolon, the shipped services that
+do, or reads `none`. A mapping or a service uses a profile where an
+instance's descriptor would list it (core §3.3): a contract it implements
+lists the profile in `uses`, it implements the profile's standard
+contract, or the profile mints its system. The walkthrough
+(`examples/zk2/walkthrough/`) is the design's, not an adopter's, and the
+tools read every profile, so neither counts.
+`zenkey-model/tests/profiles.rs` computes the column from the repository,
+and fails when a row's is stale.
+
+| Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
+|---|---|---|---|---|---|---|
+| [`hostid.v1`](hostid/v1.md) | 0.7 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.40 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
+| [`freshness.v1`](freshness/v1.md) | 0.4 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
+| [`health.v1`](health/v1.md) | 0.4 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
+| [`config.v1`](config/v1.md) | 0.5 | draft | zenoh-modem | 0.28 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v1`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
+| [`link.v1`](link/v1.md) | 0.8 | draft | zenoh-modem | 0.32 | 2: `link.exposure`; 4 through `uses` | What crosses a constrained face: a deployment's face policy, one per router, and the contract's exposure, compiled into named denies, one downsampling rule per concrete key, the attachment, window floors and liveness evidence; `@zk` never crosses, and no other principal's credentials get across it (core §8.5, R7, S3) |
+| [`alarms.v1`](alarms/v1.md) | 0.8 | draft | zensight | 0.34 | 1: [`alarms.v1.toml`](alarms/alarms.v1.toml); 2: published empty; 4 through `uses` (`freshness.v1`) | The active alarms of one service, one state key per alarm, keyed from its document by ZenSight's recipe: raised, escalated, refreshed and resolved, the state read from the document; confirmed every 450 s while firing, so a hung owner's alarms read stale and an absent one's last-known, and "nothing fires" only from an owner's alarms known whole (core S2, S6, O5) |
+| [`telemetry.v1`](telemetry/v1.md) | 0.5 | draft | zensight, zenoh-modem | 0.35 | 1: a standard schema, [`telemetry.v1.json`](telemetry/telemetry.v1.json); 2: `kind`, `unit`, `buckets`, `semantic`; 4 through `uses` | What a metric is: a member's kind and unit, declared or carried by the Point, whose types are the profile's by their artifact's id; whether a sample conforms; a counter's or a histogram's epoch, in-band or from presence, a decrease within an established one the finding and one without evidence a reset; a counter's rate over one epoch; absent is not zero (core §1.5, §7.1, O5) |
+| [`desired.v1`](desired/v1.md) | 0.8 | draft | zensight | 0.39 | 1: a standard schema, [`desired.v1.json`](desired/desired.v1.json); 2: `target_param`; 4 through `uses` | A document an author keeps as its own state, keyed by its target: the target binds its own slice by R2, orders versions by its author's stamp, acts on each once per run and never on an older one, refuses whole what it cannot take with the previous kept in force, reverts on a delete and never on silence, and reports what is in force and what it last did in the standard `Report`; the author writes only on a change, and restarts from its record (core S1–S7, §4.2, §4.4, R2) |
+| [`redundancy.v1`](redundancy/v1.md) | 0.5 | draft | zensight | 0.40 | 2: `election`; 4 through `uses` | One instance serves a governed interface, the others stand by: a candidate's claim is its instance token, the incumbent the holder of the interface's token, a standby marked in its descriptor and exposing nothing, so a call finds none; a live incumbent wins, the lowest id of a complete read breaks a tie, a vacancy is a withdrawal confirmed by a complete read, and a healed split leaves the lower id; consumers follow the incumbent's stamps; `external` names an actuator's own lock; eventual single writer, never a fence (core §5.1 O1, §6, §8.1, §8.2) |
+
+### Experimental: no adopter yet
+
+No adopter's mapping and no shipped service uses these yet. Their texts,
+fixtures, runtimes and tools are as complete as the others', and only
+the walkthrough exercises them. A profile leaves this table when one
+does (the process, below).
+
+| Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
+|---|---|---|---|---|---|---|
+| [`timing.v1`](timing/v1.md) | 0.5 | experimental | none | 0.55 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
+| [`arbitration.v1`](arbitration/v1.md) | 0.3 | experimental | none | 0.56 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
 
 ## Layout
 
@@ -43,7 +68,8 @@ thing in the same place.
 
 - **A header** gives:
   - the text version, `0.N`;
-  - the status, `draft` or `accepted`;
+  - the status: `experimental`, `draft` or `accepted`, as the process
+    below says;
   - the core version the text is written against;
   - the profiles it uses, or "none".
 - **§0, conventions.** By reference to core §0: the keywords, the roles and
@@ -79,8 +105,35 @@ thing in the same place.
 
 - **The text's version** `0.N` moves through the profile's own
   `CHANGELOG.md`, amendment-style. Each entry records what changed, and
-  what deliberately did not. A text is `draft` until the maintainer
-  accepts it, as the core's 0.1 was.
+  what deliberately did not.
+- **A text's status** is one of three:
+  - `experimental`: no adopter's mapping and no shipped service uses the
+    profile, and the index's **Used by** reads `none`. Its text, fixtures,
+    runtime and tools are kept as any other profile's, and the index lists
+    it in its second table, "Experimental: no adopter yet";
+  - `draft`: an adopter's mapping or a shipped service uses the profile,
+    and the maintainer has not accepted the text;
+  - `accepted`: the maintainer has accepted the text, as the core's 0.1
+    was.
+- **A profile leaves `experimental`** when an adopter's mapping
+  (`examples/zk2/zensight/`, `zenoh-modem/` or `tcgui/`) or a shipped
+  service (`zenwatch`) uses it. Its row then moves to the index's first
+  table, and its text becomes `draft`. A profile whose last user stops
+  using it goes back to `experimental`.
+- **A status moves without a text version.** The profile's `CHANGELOG.md`
+  records the move in an entry of its own, headed by the new status and
+  the date, which says that no rule changed. The text's header and the
+  index's row move with it. `zenkey-model/tests/profiles.rs` keeps them
+  agreeing: it fails when a row's **Used by** is stale, when a profile
+  nobody uses sits outside the experimental table or a used one inside
+  it, and when a row's text version, status or core version is not its
+  text's header's.
+- **No new tier before an adopter asks.** A new profile, among them the
+  tiers #613 still plans (media and views, blob and jobs, clock), is
+  written only once an adopter's mapping needs it, so that it enters the
+  index as `draft`, already used. `media.v1` is first in line:
+  ZenSight's mapping names it in `zs.parallax.v1`'s `uses`, for the
+  camera frames an explicit `@stream` carries meanwhile.
 - **The file name carries the wire major** (`v1.md`). A change that would
   change what a conforming participant puts on the wire, or the values it
   derives, is breaking. A breaking change is a new major, `v2.md` beside
@@ -170,6 +223,10 @@ thing in the same place.
     ```bash
     ZK2_BLESS=1 cargo test -p zenkey-model --test profiles
     ```
+  - The same test computes the index's **Used by** from the repository,
+    and checks each row against it and against its text's header
+    (`the_index_says_who_uses_each_profile`, whose doc comment lists what
+    it reads).
   - The same test walks every standard contract,
     `spec/profiles/<name>/<name>.v<major>.toml`: it loads with no finding,
     is named by its interface id, and is published in

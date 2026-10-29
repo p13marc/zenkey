@@ -251,6 +251,490 @@ fn every_standard_contract_is_published_and_compatible() {
     }
 }
 
+// ── Who uses each profile: the index's "Used by" (#938) ──────────────────
+
+/// The repository's root.
+fn repo() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
+}
+
+/// The adopter mappings, `examples/zk2/<name>/`, in the column's order.
+const ADOPTERS: &[&str] = &["zensight", "zenoh-modem", "tcgui"];
+
+/// The shipped services, after the adopters in the column: each one's
+/// name, its contracts' directory and its source's, from the repository's
+/// root.
+const SERVICES: &[(&str, &str, &str)] = &[("zenwatch", "zenwatch/contracts", "zenwatch/src")];
+
+/// What in a shipped service's source makes it follow a profile that no
+/// contract of its own lists: an address whose system `hostid.v1` mints,
+/// and the runtime's entry points (`zenkey`'s `ServiceBuilder` and
+/// `Consumer::arbitrate`).
+const ENTRY_POINTS: &[(&str, &str)] = &[
+    ("Address::HostId", "hostid.v1"),
+    (".health()", "health.v1"),
+    (".config_v1(", "config.v1"),
+    (".alarms(", "alarms.v1"),
+    (".alarms_with(", "alarms.v1"),
+    (".desired_author(", "desired.v1"),
+    (".desired_target(", "desired.v1"),
+    (".desired_config(", "desired.v1"),
+    (".redundancy(", "redundancy.v1"),
+    (".arbitrate(", "arbitration.v1"),
+];
+
+/// The index's second table (`spec/profiles/README.md`).
+const EXPERIMENTAL: &str = "### Experimental: no adopter yet";
+
+/// Every profile with a text, `spec/profiles/<name>/v<N>.md`, as
+/// `<name>.v<N>`, with that text.
+fn profile_texts() -> BTreeMap<String, PathBuf> {
+    let mut out = BTreeMap::new();
+    for dir in sorted_entries(&profiles()) {
+        let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        if !dir.is_dir() || name.starts_with('.') {
+            continue;
+        }
+        for file in sorted_entries(&dir) {
+            let f = file.file_name().unwrap().to_string_lossy().into_owned();
+            if let Some(major) = f.strip_prefix('v').and_then(|m| m.strip_suffix(".md"))
+                && !major.is_empty()
+                && major.bytes().all(|b| b.is_ascii_digit())
+            {
+                out.insert(format!("{name}.v{major}"), file);
+            }
+        }
+    }
+    out
+}
+
+/// The `uses` of every contract directly in `dir` (a `*.toml` that is not
+/// a deployment file, as `tests/examples.rs` reads them), and how many
+/// contracts there were.
+fn uses_in(dir: &Path) -> (BTreeSet<String>, usize) {
+    let mut uses = BTreeSet::new();
+    let mut contracts = 0;
+    for p in sorted_entries(dir) {
+        let n = p.file_name().unwrap().to_string_lossy().into_owned();
+        if !p.is_file()
+            || !n.ends_with(".toml")
+            || n.ends_with(".bindings.toml")
+            || n.ends_with(".enrollment.toml")
+            || n.ends_with(".face.toml")
+        {
+            continue;
+        }
+        let l = zenkey_model::contract::load_path(&p);
+        let c = l
+            .contract
+            .unwrap_or_else(|| panic!("{}: not a contract:\n{}", p.display(), l.report));
+        uses.extend(c.uses.iter().map(|u| u.to_string()));
+        contracts += 1;
+    }
+    (uses, contracts)
+}
+
+/// The profile ids `text` names, each one standing alone: `zs.desired.v1`
+/// and `modem_desired.v1` name no `desired.v1`, and `health.v1.toml`
+/// names `health.v1`.
+fn named_in<'a>(text: &str, ids: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for id in ids {
+        for (at, _) in text.match_indices(id.as_str()) {
+            let before = text[..at].chars().next_back();
+            let after = text[at + id.len()..].chars().next();
+            let joined_before =
+                before.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '-'));
+            let joined_after = after.is_some_and(|c| c.is_alphanumeric() || c == '_');
+            if !joined_before && !joined_after {
+                out.insert(id.clone());
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// The table rows of a mapping README's `## Shape` section: how its
+/// systems are minted and which interfaces its services implement.
+fn shape_table(readme: &Path) -> String {
+    let text =
+        std::fs::read_to_string(readme).unwrap_or_else(|e| panic!("{}: {e}", readme.display()));
+    let mut inside = false;
+    let mut rows = String::new();
+    for line in text.lines() {
+        if line.starts_with("## ") {
+            inside = line.starts_with("## Shape");
+        } else if inside && line.starts_with('|') {
+            rows.push_str(line);
+            rows.push('\n');
+        }
+    }
+    rows
+}
+
+/// `used`, with the `uses` of the standard contract of each profile in it
+/// (`health.v1`'s brings `freshness.v1`), to a fixed point: an instance
+/// implementing a standard contract lists its `uses` (core §3.3).
+fn with_standard_uses(mut used: BTreeSet<String>) -> BTreeSet<String> {
+    loop {
+        let mut more = BTreeSet::new();
+        for id in &used {
+            let (name, major) = id.rsplit_once(".v").expect("<name>.v<N>");
+            let contract = profiles().join(name).join(format!("{name}.v{major}.toml"));
+            if contract.is_file() {
+                let l = zenkey_model::contract::load_path(&contract);
+                let c = l.contract.expect("a standard contract loads");
+                more.extend(c.uses.iter().map(|u| u.to_string()));
+            }
+        }
+        if more.is_subset(&used) {
+            return used;
+        }
+        used.extend(more);
+    }
+}
+
+/// Every `.rs` file under `dir`.
+fn rust_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for p in sorted_entries(dir) {
+        if p.is_dir() {
+            out.extend(rust_files(&p));
+        } else if p.extension().is_some_and(|e| e == "rs") {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// The profiles a service's source follows through [`ENTRY_POINTS`]: each
+/// `.rs` file under `dir` read down to its test module (a `#[cfg(test)]`
+/// whose next line opens a `mod`, so a `#[cfg(test)]` helper before it
+/// cuts nothing), a line starting `//` skipped and string literals blanked.
+/// How many files there were.
+///
+/// **Its limit, by design** (review-bot on PR #945): a marker is a method
+/// name, so a method of that name on another type would count. The markers
+/// are the runtime's entry points, and a service has no reason to call an
+/// unrelated `.health()`; the check is a guard against a column going
+/// stale, not a proof of use.
+fn entry_points_in(dir: &Path) -> (BTreeSet<String>, usize) {
+    let mut out = BTreeSet::new();
+    let files = rust_files(dir);
+    for p in &files {
+        let text = std::fs::read_to_string(p).unwrap();
+        for line in code_before_tests(&text)
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+        {
+            let line = without_strings(line);
+            for (marker, profile) in ENTRY_POINTS {
+                if line.contains(marker) {
+                    out.insert((*profile).to_string());
+                }
+            }
+        }
+    }
+    (out, files.len())
+}
+
+/// `text` up to its test module: the first `#[cfg(test)]` line whose next
+/// non-empty line opens a `mod`.
+fn code_before_tests(text: &str) -> &str {
+    let mut at = 0;
+    let mut lines = text.split_inclusive('\n').peekable();
+    while let Some(line) = lines.next() {
+        if line.trim() == "#[cfg(test)]"
+            && lines
+                .clone()
+                .find(|l| !l.trim().is_empty())
+                .is_some_and(|l| {
+                    l.trim_start().starts_with("mod ") || l.trim_start().starts_with("pub mod ")
+                })
+        {
+            return &text[..at];
+        }
+        at += line.len();
+    }
+    text
+}
+
+/// `line` with each string literal's contents blanked, so a marker quoted
+/// in a message counts for nothing.
+fn without_strings(line: &str) -> String {
+    let (mut out, mut quoted, mut escaped) = (String::new(), false, false);
+    for c in line.chars() {
+        match (quoted, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (_, _, '"') => {
+                quoted = !quoted;
+                out.push(c);
+            }
+            (true, false, _) => {}
+            (false, _, _) => out.push(c),
+        }
+    }
+    out
+}
+
+/// A table row's cells, trimmed; a `\|` stays in its cell.
+fn cells(row: &str) -> Vec<String> {
+    let row = row.trim();
+    let row = row.strip_prefix('|').unwrap_or(row);
+    let row = row.strip_suffix('|').unwrap_or(row);
+    let mut out = vec![String::new()];
+    let mut escaped = false;
+    for c in row.chars() {
+        if c == '|' && !escaped {
+            out.push(String::new());
+        } else {
+            out.last_mut().unwrap().push(c);
+        }
+        escaped = c == '\\';
+    }
+    out.iter().map(|c| c.trim().to_string()).collect()
+}
+
+/// One row of the profiles index: its profile, whether it sits in the
+/// experimental table, and its cells by column.
+struct IndexRow {
+    id: String,
+    experimental: bool,
+    cells: BTreeMap<String, String>,
+}
+
+/// The rows of every table under the index's `## Index`.
+fn index_rows() -> Vec<IndexRow> {
+    let path = profiles().join("README.md");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let (mut inside, mut experimental) = (false, false);
+    let mut header: Option<Vec<String>> = None;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if line.starts_with("## ") {
+            (inside, experimental) = (line == "## Index", false);
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if line.starts_with("### ") {
+            experimental = line == EXPERIMENTAL;
+        }
+        if !line.starts_with('|') {
+            header = None;
+            continue;
+        }
+        let row = cells(line);
+        let Some(names) = &header else {
+            header = Some(row);
+            continue;
+        };
+        if row
+            .iter()
+            .all(|c| !c.is_empty() && c.chars().all(|c| matches!(c, '-' | ':')))
+        {
+            continue;
+        }
+        let id = row[0].split('`').nth(1).unwrap_or(&row[0]).to_string();
+        let cells = names.iter().cloned().zip(row).collect();
+        out.push(IndexRow {
+            id,
+            experimental,
+            cells,
+        });
+    }
+    out
+}
+
+/// A field of a profile text's header table (`| **Status** | draft |`).
+fn header_field(text: &Path, field: &str) -> String {
+    let s = std::fs::read_to_string(text).unwrap();
+    let prefix = format!("| **{field}** |");
+    let line = s
+        .lines()
+        .take_while(|l| !l.starts_with("## "))
+        .find(|l| l.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("{}: no {field} in its header", text.display()));
+    cells(line)[1].clone()
+}
+
+/// The **Used by** of one profile: its adopters, then its services after a
+/// semicolon, or `none`.
+fn used_by(adopters: &[&str], services: &[&str]) -> String {
+    match (adopters.is_empty(), services.is_empty()) {
+        (true, true) => "none".to_string(),
+        (false, true) => adopters.join(", "),
+        (true, false) => format!("none; {}", services.join(", ")),
+        (false, false) => format!("{}; {}", adopters.join(", "), services.join(", ")),
+    }
+}
+
+/// The profiles index's **Used by** column, computed from the repository,
+/// and the status that follows from it (`spec/profiles/README.md`, "The
+/// process"; #938).
+///
+/// An adopter mapping, `examples/zk2/<name>/` for each of [`ADOPTERS`],
+/// uses a profile when:
+/// - a contract in the directory lists it in `uses` (every `*.toml` there
+///   but the deployment files, read by `contract::load_path`);
+/// - its `README.md`'s `## Shape` table names it: the table says how the
+///   mapping's systems are minted (`hostid.v1`) and which interfaces its
+///   services implement (`health.v1`, `alarms.v1`, `config.v1`);
+/// - the standard contract of a profile it uses lists it in `uses`
+///   (`spec/profiles/<name>/<name>.v<N>.toml`; `health.v1` brings
+///   `freshness.v1`), as a descriptor lists it (core §3.3).
+///
+/// A shipped service, each of [`SERVICES`], uses a profile when a contract
+/// in its contracts' directory lists it in `uses`, when its source
+/// (`zenwatch/src`, every `.rs` file down to its `#[cfg(test)]`, `//` lines
+/// skipped) holds one of [`ENTRY_POINTS`], and through the standard
+/// contracts as above. A profile id is named only standing alone, never
+/// inside a longer name (`zs.desired.v1`), and an id with no text under
+/// `spec/profiles/` (`media.v1`) is no row's.
+///
+/// The walkthrough is the design's, not an adopter's, and the tools read
+/// every profile, so neither is read. Then each profile with a text has
+/// one row in the index, and that row:
+/// - reads the computed **Used by**;
+/// - sits in the table "Experimental: no adopter yet", its status
+///   `experimental`, exactly when that reads `none`;
+/// - states the text version, status and core version of its text's
+///   header.
+#[test]
+fn the_index_says_who_uses_each_profile() {
+    let texts = profile_texts();
+    let mut problems = Vec::new();
+
+    let mut adopters_of: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for adopter in ADOPTERS {
+        let dir = repo().join("examples/zk2").join(adopter);
+        let (mut used, contracts) = uses_in(&dir);
+        if contracts == 0 {
+            problems.push(format!("examples/zk2/{adopter}/ holds no contract"));
+        }
+        let shape = shape_table(&dir.join("README.md"));
+        if shape.is_empty() {
+            problems.push(format!(
+                "examples/zk2/{adopter}/README.md has no table under a `## Shape` heading"
+            ));
+        }
+        used.extend(named_in(&shape, texts.keys()));
+        for id in with_standard_uses(used) {
+            adopters_of.entry(id).or_default().push(*adopter);
+        }
+    }
+    let mut services_of: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for (service, contracts_dir, src) in SERVICES {
+        let (mut used, contracts) = uses_in(&repo().join(contracts_dir));
+        if contracts == 0 {
+            problems.push(format!("{contracts_dir}/ holds no contract"));
+        }
+        let (declared, files) = entry_points_in(&repo().join(src));
+        if files == 0 {
+            problems.push(format!("{src}/ holds no Rust source"));
+        }
+        used.extend(declared);
+        for id in with_standard_uses(used) {
+            services_of.entry(id).or_default().push(*service);
+        }
+    }
+
+    let rows = index_rows();
+    for id in texts.keys() {
+        let n = rows.iter().filter(|r| &r.id == id).count();
+        if n != 1 {
+            problems.push(format!(
+                "spec/profiles/README.md lists `{id}` in {n} rows; it has one"
+            ));
+        }
+    }
+    for row in &rows {
+        let id = row.id.as_str();
+        let Some(text) = texts.get(id) else {
+            problems.push(format!(
+                "spec/profiles/README.md's index lists `{id}`, which has no text"
+            ));
+            continue;
+        };
+        let cell = |column: &str| row.cells.get(column).map(String::as_str).unwrap_or("");
+        let should = used_by(
+            adopters_of.get(id).map(Vec::as_slice).unwrap_or_default(),
+            services_of.get(id).map(Vec::as_slice).unwrap_or_default(),
+        );
+        if cell("Used by") != should {
+            problems.push(format!(
+                "spec/profiles/README.md: `{id}`'s Used by reads {:?}; it should read {should:?}",
+                cell("Used by")
+            ));
+        }
+        let unused = should == "none";
+        if unused && !row.experimental {
+            problems.push(format!(
+                "`{id}` has no user, so its row belongs in the table {:?}, its status `experimental`",
+                EXPERIMENTAL.trim_start_matches("### ")
+            ));
+        }
+        if !unused && row.experimental {
+            problems.push(format!(
+                "`{id}` is used by {should}, so it leaves experimental: its row belongs in the first table"
+            ));
+        }
+        let status = cell("Status");
+        if row.experimental != (status == "experimental") {
+            problems.push(format!(
+                "spec/profiles/README.md: `{id}`'s status reads {status:?} in the {} table",
+                if row.experimental {
+                    "experimental"
+                } else {
+                    "first"
+                }
+            ));
+        }
+        let rel = text.strip_prefix(profiles()).unwrap().display().to_string();
+        // A header cell's version: its first `N.M` token, whatever follows
+        // it (`0.5 ([CHANGELOG.md](…))`, `core 0.56 (…)`), else the cell
+        // whole, which then fails the comparison by name (review-bot on PR
+        // #945).
+        let first_token = |s: &str| {
+            s.split_whitespace()
+                .find(|w| {
+                    w.split_once('.').is_some_and(|(a, b)| {
+                        !a.is_empty()
+                            && !b.is_empty()
+                            && a.bytes().all(|c| c.is_ascii_digit())
+                            && b.bytes().all(|c| c.is_ascii_digit())
+                    })
+                })
+                .unwrap_or(s)
+                .to_string()
+        };
+        let header = [
+            ("Text", first_token(&header_field(text, "Text version"))),
+            ("Status", header_field(text, "Status")),
+            (
+                "Core",
+                first_token(
+                    header_field(text, "Written against")
+                        .trim_start_matches("core")
+                        .trim_start(),
+                ),
+            ),
+        ];
+        for (column, said) in header {
+            if cell(column) != said {
+                problems.push(format!(
+                    "spec/profiles/README.md: `{id}`'s {column} reads {:?}; {rel}'s header says {said:?}",
+                    cell(column)
+                ));
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
 /// `hostid/conformance/vectors.json`: a machine id and a salt → the minted
 /// system, or `null` when the input is refused (hostid.v1 §2.1).
 #[test]

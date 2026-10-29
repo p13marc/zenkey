@@ -18,9 +18,13 @@
 #     (`version 0.40`, `Version **0.56**`). Line breaks count as
 #     characters, so a version wrapped onto the next line is still found;
 #   * profiles are listed once, in spec/profiles/README.md's index: every
-#     `spec/profiles/<name>/v<N>.md` has a row whose first cell is
+#     `spec/profiles/<name>/v<N>.md` has one row whose first cell is
 #     [`<name>.v<N>`](<name>/v<N>.md), and every row names a text that
-#     exists.
+#     exists. The index holds two tables since #938, the profiles in use
+#     and "Experimental: no adopter yet", and the rows of both count.
+#     Who uses each, and the status that follows, are
+#     zenkey-model/tests/profiles.rs's to check, since they read the
+#     contracts.
 #
 # Same shape as check-rfc-status.sh, which keeps v1's RFC headers.
 set -euo pipefail
@@ -89,10 +93,20 @@ if [ "$stated" -ne 0 ]; then
 fi
 
 # --- 3. the profiles index lists every profile text, and only those ---------
-# The index: the rows of the table under `## Index`, its header and
-# separator rows skipped.
-rows=$(awk '/^## / { inside = ($0 == "## Index") ; next } inside && /^\|/ { print }' "$index" \
-    | tail -n +3)
+# The index: the rows of every table under `## Index`, down to the next
+# `## ` heading, a `### ` subsection's included. Each table's header row
+# (the row just above a separator) and its separator are skipped.
+rows=$(awk '
+    function flush() { if (held != "") print held; held = "" }
+    /^## / { flush(); inside = ($0 == "## Index"); next }
+    !inside { next }
+    /^\|/ {
+        if ($0 ~ /^\|[-:| ]+\|[[:space:]]*$/) { held = ""; next }
+        flush(); held = $0; next
+    }
+    { flush() }
+    END { flush() }
+' "$index")
 if [ -z "$rows" ]; then
     echo "spec-status: $index has no table under '## Index'." >&2
     fail=1
@@ -119,6 +133,12 @@ while IFS= read -r row; do
         echo "spec-status: $index lists $name.v$major, and spec/profiles/$name/v$major.md does not exist." >&2
         fail=1
     fi
+    case " $listed " in
+        *" $name/v$major.md "*)
+            echo "spec-status: $index lists $name.v$major twice; a profile has one row." >&2
+            fail=1
+            ;;
+    esac
     listed="$listed $name/v$major.md"
 done <<< "$rows"
 
