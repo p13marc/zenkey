@@ -3791,13 +3791,53 @@ def _timing_tool_readings() -> list[tuple[str, Any, Any]]:
                  for zids in ([], ["1F"])], [["unattributed", "unattributed"], ["live", "expired"]]))
     out.append((f"{label} §2.6: away from a face the descriptors are the word, the deployment's set aside",
                 tm.owners_held(False, ["1f", "1f", "2a"], ["99"]), ["1f", "2a"]))
-    # F-277 (round 79): §5's roll-up over a resource whose every member was
-    # not asked a question, as the sentence and conclusions.json #33 read it;
-    # the reference tool answers not_asked there.
-    na = tm.Answer(tm.NOT_ASKED, "no_lifespan")
-    out.append((f"{label} §5 (F-277): a roll-up whose every member is not asked is unobservable as §5's sentence "
-                f"reads it, every member set aside",
-                tm.rollup("lifespan", [na, na]).answer, tm.UNOBSERVABLE))
+    # F-277 (round 79), resolved by text 0.4: §5's roll-up whose every
+    # member is set aside is not this profile's when every one is, else not
+    # asked, the first not-asked member's reason; no member at all stays
+    # unobservable. conclusions.json #34 and #40 to #42 give the answers
+    # alone; the reasons are zk2py's, as the reference tool prints them
+    # (round 79: `not_asked`, `no_lifespan`).
+    na, nt = tm.Answer(tm.NOT_ASKED, "no_lifespan"), tm.Answer("not_this_profiles", "kind")
+    out.append(("timing.v1 0.4 §5 (F-277): a roll-up whose every member is set aside: not asked with the first "
+                "not-asked member's reason, not this profile's when every one is, unobservable with none, and a "
+                "set-aside member beside one pole changing nothing",
+                [tm.rollup("lifespan", a).pair() for a in ([na, na], [nt, na], [nt, nt], [], [nt, tm.Answer(tm.NO, "live")],
+                                                           [na, tm.Answer(tm.UNOBSERVABLE, "no_bound")])],
+                [{"answer": "not_asked", "reason": "no_lifespan"}, {"answer": "not_asked", "reason": "no_lifespan"},
+                 {"answer": "not_this_profiles", "reason": "kind"}, {"answer": "unobservable", "reason": "no_member"},
+                 {"answer": "no", "reason": "live"}, {"answer": "unobservable", "reason": "no_bound"}]))
+    # F-278 (round 80, open): a known member never heard, its owner present
+    # at the window's start and absent before its miss was due, waited for
+    # 0.33 s of a 3 s window and never missed. §2.7 holds it "to the
+    # window's end", so §5 reads it met; the reference holds it only while
+    # it waited, window_too_short.
+    dl = tm.declaration("stream", {"timing.deadline_ms": 500})
+    out.append(("timing.v1 0.4 §2.7, §5 (F-278, open): a known member never heard whose wait its owner's absence "
+                "stopped, held to the window's end as the text writes it: met; held only while waited for, as the "
+                "reference reads it: window_too_short",
+                [tm.conclude(dl, tm.Reading(tm.DeadlineAccount(held), tm.NOT_HEARD, (), False, False, False))
+                 ["deadline"].pair() for held in (3000 * tm.MS, 330 * tm.MS)],
+                [{"answer": "yes", "reason": "met"}, {"answer": "unobservable", "reason": "window_too_short"}]))
+    # F-280 (round 80, open): a member ended 1.1 s into a 5 s window and
+    # heard again from 2 s, every 100 ms. "To the member's end when it ended
+    # in the window" is its first end: kept over its first life (both
+    # tools); zk2py's 0.3 reading, the end dropped once heard again, counted
+    # the second's absence: not kept.
+    arr = [70 * tm.MS + i * 100 * tm.MS for i in range(10)] + [2000 * tm.MS + i * 100 * tm.MS for i in range(31)]
+    out.append(("timing.v1 0.4 §2.7 (F-280, open): a member ended in the window and heard again, its period over "
+                "the span to its first end: kept; to the window's end, its absence counted: not kept",
+                [tm.period(100, 0, 5000 * tm.MS, False, e, arr).verdict for e in (1100 * tm.MS, None)],
+                [tm.KEPT, tm.NOT_KEPT]))
+    # review-bot on PR #939: the end that counts is the first at or after
+    # the instant the member was first held in the window. An earlier one
+    # (100 ms, the member first held at 200 ms) ends nothing: held to the
+    # window's end, never 0 and never ended; one after (1.5 s) ends it there.
+    ms = tm.MS
+    out.append(("timing.v1 0.4 §2.7 (F-280, open): a member's end before the instant it was first held in the window "
+                "ends nothing; the first end at or after it does; a member never held was held 0",
+                [tm.window_held(0, 3000 * ms, 200 * ms, e) for e in ([100 * ms], [100 * ms, 1500 * ms, 2500 * ms], [])]
+                + [tm.window_held(0, 3000 * ms, None, [])],
+                [(2800 * ms, None), (1300 * ms, 1500 * ms), (2800 * ms, None), (0, None)]))
     return out
 
 

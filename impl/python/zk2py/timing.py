@@ -665,6 +665,25 @@ class Reading:
                    bool(r["across_face"]), bool(r["lost"]), bool(r["owner_present"]))
 
 
+def window_held(start_ns: int, end_ns: int, first_held_ns: int | None,
+                ends_ns: Iterable[int]) -> tuple[int, int | None]:
+    """§2.7, a tool's account of one member over its window: ``(held_ns,
+    ended_ns)``. It holds the member "from the later of the window's start
+    and the instant it first held it … to the window's end, or to the
+    member's end when it ended in the window". The end that counts is the
+    first at or after the instant it first held the member in the window,
+    whether or not it was heard again after it (round 80, F-280, open: the
+    text reads one life); an earlier end ends nothing, so it can give no
+    held time of 0, and no ``ended``, of a member held after it (review-bot
+    on PR #939). A member never held was held for 0 ns."""
+    held_from = start_ns if first_held_ns is None else max(start_ns, first_held_ns)
+    after = sorted(t for t in ends_ns if held_from <= t <= end_ns)
+    ended = after[0] if after else None
+    if first_held_ns is None:
+        return 0, ended
+    return max(0, (ended if ended is not None else end_ns) - held_from), ended
+
+
 def conclude(decl: Declaration, r: Reading) -> dict[str, Answer]:
     """§5's three questions, each read "the kind first, then the
     declaration, then its key, then the window" (conclusions.json's
@@ -741,19 +760,39 @@ def _lifespan(decl: Declaration, r: Reading) -> Answer:
     return Answer(UNOBSERVABLE, "no_sample", "no sample of the member")
 
 
+SET_ASIDE = (NOT_ASKED, "not_this_profiles")
+
+
 def rollup(question: str, answers: Iterable[Answer]) -> Answer:
     """§5 "Over a resource, or a run", read by each question's finding
-    (F-264): the finding when any member's answer is the finding; the other
-    pole when every member's is, and there is at least one; unobservable
-    otherwise. A member not asked, or not this profile's, is set aside."""
+    (F-264), a member not asked, or not this profile's, set aside (text
+    0.4):
+
+    - the finding when any member's answer is the finding;
+    - the other pole when every member's answer is that pole or set aside,
+      and at least one is that pole;
+    - when every member is set aside, and there is at least one, not this
+      profile's when every one is, else not asked (F-277): nobody put the
+      question of any of them; the reason is the first such member's;
+    - unobservable otherwise: a member unobservable and none the finding,
+      or no member at all (``no_member``)."""
     finding = FINDING[question]
     other = YES if finding == NO else NO
-    asked = [a for a in answers if a.answer not in (NOT_ASKED, "not_this_profiles")]
+    every = list(answers)
+    asked = [a for a in every if a.answer not in SET_ASIDE]
     hit = [a for a in asked if a.answer == finding]
     if hit:
         return Answer(finding, hit[0].reason, f"{len(hit)} member(s) the finding")
     if asked and all(a.answer == other for a in asked):
         return Answer(other, asked[0].reason, f"{len(asked)} member(s)")
+    if every and not asked:
+        if all(a.answer == "not_this_profiles" for a in every):
+            return Answer("not_this_profiles", every[0].reason, f"{len(every)} member(s), none a stream")
+        first = next((a for a in every if a.answer == NOT_ASKED), None)
+        # every member set aside and not every one not this profile's: one
+        # at least is not asked (SET_ASIDE holds the two)
+        assert first is not None, "a set-aside answer that is neither not_asked nor not_this_profiles"
+        return Answer(NOT_ASKED, first.reason, f"{len(every)} member(s), every one set aside (F-277)")
     unobs = [a for a in asked if a.answer == UNOBSERVABLE]
     return Answer(UNOBSERVABLE, unobs[0].reason if unobs else "no_member", "no finding, and not every member clean")
 

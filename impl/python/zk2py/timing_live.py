@@ -630,12 +630,16 @@ class Window:
         mine = [r for rid, r in rd.reports if rid == res.rid and r.member == m and start <= r.at_ns <= end]
         arr = [a.mono_ns for a in rd.arrivals if a.key == m and a.handed]
         ends = [r.at_ns for r in mine if r.event == "ended"]
-        ended_at = ends[-1] if ends and not any(t > ends[-1] for t in arr) else None
-        first = res.first_held.get(m)
-        held = 0 if first is None else max(0, (ended_at if ended_at is not None else end) - max(start, first))
+        # §2.7: "to the window's end, or to the member's end when it ended in
+        # the window": the first end at or after the instant it first held
+        # the member, whether or not it was heard again after it (round 80,
+        # F-280: the text reads no second life; to 0.3, zk2py dropped an end
+        # followed by an arrival, and so counted the member's absence against
+        # its period). An earlier end ends nothing (review-bot on PR #939).
+        held, ended_at = tm.window_held(start, end, res.first_held.get(m), ends)
         missed = [r for r in mine if r.event == "missed"]
         acct = tm.DeadlineAccount(held, sum(1 for r in missed if r.owner == tm.PRESENT),
-                                  sum(1 for r in missed if r.owner != tm.PRESENT), bool(ends))
+                                  sum(1 for r in missed if r.owner != tm.PRESENT), ended_at is not None)
         known = m in res.known
         # conclude() reads the kind, the declaration, the key and the face
         # before the period's verdict, so with no period this is never read
