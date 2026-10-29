@@ -16062,3 +16062,359 @@ entries.
   at every step of §10 and beside §11, and every runtime section passing
   in all four pairings.
 - **Resolved:** every other entry. `timing.v1` 0.4 resolved F-277.
+
+## At timing.v1 0.5 and core 0.56: the final cold read (#908)
+
+Round 81 read `timing.v1` 0.5 cold, on main f70d3e27 (PR #940), as the
+final cold read of the profile. It ran the runtime's scenarios again in
+every pairing of zk2py's parties with the reference's, §6's six steps with
+both tools, zk2py's and the reference's `zenctl timing`, and
+`arbitration.v1`'s scenarios as a regression check. The reference's
+parties and its tool ran as black boxes (`owner`, `consume`, `zk2` and
+`zenctl` in `/srv/dev/targets/zenkey-tier/blackbox/`, built 2026-10-29
+12:38, their `--help` read, their source never). It read, as a newcomer
+would:
+- `spec/profiles/timing/v1.md` 0.5 and `scenarios.md`, whole, and the
+  CHANGELOG's 0.5 entry;
+- the description of each of the five fixture files against its cases:
+  `declarations.json` (42), `deadlines.json` (51, six new), `lifespans.json`
+  (32), `periods.json` (21, one new) and `conclusions.json` (50, eight
+  new), and the CHANGELOG's case numbers against the files (1-based: #46
+  to #51, #21, #43 to #50);
+- every MUST and SHOULD of the text against its evidence (the table
+  below);
+- timing §2.7, §2.8 and §5, and arbitration §2.14 and §5, as a tool's
+  implementer reads them. Where the scenarios make no shape a rule speaks
+  of, it asked both tools on the same bus: three windows beside §6.
+
+Since round 80, `spec/` changed in four commits, 48402102, 89deb232,
+3d252a18 and 8cc9dffb (timing 0.5: `v1.md` §2.7 and §5, `scenarios.md` §6,
+the CHANGELOG, three fixture files, `profiles/README.md`'s row). Core 0.56
+and `arbitration.v1` 0.3 are unchanged.
+
+### F-278 to F-280 at 0.5: resolved
+
+**F-278, resolved.**
+
+> §2.7 (0.5): "how long it held the member in the window: the **longest
+> stretch** it held it without a pause, never the sum of its stretches …
+> A pause is the owner's absence stopping a wait: a known member never
+> heard is held only while it is waited for (§2.5), so its owner's
+> absence stops the stretch, and its presence again starts a new one."
+
+It is resolved as round 80 preferred, the reference's reading: a known
+member never heard whose owner is read absent before its miss is due is
+held only while it was waited for, and §5 answers its deadline
+`window_too_short`, never `met`. The ruling beside it, the longest stretch
+and never the sum, closes the same vacuous pass for an owner that comes
+and goes. `deadlines.json` #46, #47 and #51 and `conclusions.json` #50 pin
+it, and scenarios §6 step 5 runs it. zk2py's tool held `cmd` 160–185 ms in
+step 5 (zenctl 254 ms) and 253–259 ms in round 80's `gone` (zenctl
+317–340 ms), and both answered `window_too_short`.
+
+**F-279, resolved.**
+
+> §5 (0.5): "**A roll-up's reason** (text 0.5, F-279) is the reason of
+> the first member giving its answer, in byte order of the members' keys
+> … Over no member there is none."
+
+It is the wording round 80 proposed, and `conclusions.json` #43 to #49
+give each member's key and reason and state the roll-up's. zk2py's
+`rollup` now orders `(key, answer)` pairs by their keys' bytes, and over no
+member gives no reason, where round 80 printed `no_member`. Both tools'
+roll-ups over the axis resource with no member read `unobservable` with no
+reason, and every resource's and run's reason agreed at every step and
+window.
+
+**F-280, resolved.**
+
+> §2.7 (0.5): "A member that ended in the window and is heard again in
+> it, judged from that arrival as a member first heard (§2.5), is read
+> over its **first life**: its span and its held time end at its first
+> end, and its second life's period is not judged."
+
+It is round 80's first wording. `periods.json` #21 (kept over the first
+life, not kept to the window's end) and `deadlines.json` #48 (held 1,050 ms
+of the first life, the second life's miss reported) pin it, and §6 step 6
+runs it. The two tools' held times now agree on the life they count:
+`axis/x` held 1,003–1,021 ms by zk2py and 1,104–1,123 ms by zenctl in step
+6, and 2,021–2,036 ms against 2,123–2,138 ms in `again`, where round 80's
+zenctl summed both lives (5,933–6,037 ms). Each tool's span equalled its
+held time.
+
+### timing.v1 0.5 in zk2py
+
+- **`zk2py.timing`:**
+  - the `Tracker` takes an `end` event, a tool's window closing, and keeps
+    each member's held time: its longest unbroken stretch, a stretch
+    running while it holds the member heard, missed or waited for
+    (`deadlines.json`'s description), so a known member never heard
+    pauses at its owner's absence and starts a new stretch at its presence
+    again, and the member's first `ended` stops it for good (`held_ns`,
+    `first_end`, `held_in_window`);
+  - `rollup` takes `(key, Answer)` pairs, reads its reason from the first
+    member giving its answer in byte order of the keys, and gives none over
+    no member; `Answer.reason` may be `None`.
+- **The runner:** `deadlines.json`'s `end` and `expect.held_ms`, and
+  `conclusions.json`'s `rollup.members` and `expect.reason`. The first
+  `rollup.members` case crashed the family until it read them; then all
+  fifteen new cases passed the first time they ran, `periods.json` #21
+  with no change. `timing` 196 of 196.
+- **`zk2py.timing_live`:** the `Window` ends each tracker's window at its
+  end and reads each member's held time and first end from the tracker; a
+  resource holding no tracker (no deadline judged) keeps
+  `window_held`, which no answer reads. Only samples within the window
+  are judged for the lifespan.
+- **`zk2py.timing_tool`:** each roll-up gives its `reason` and `first`
+  only when there is a member, as `zenctl timing` does; a member row gives
+  its `span_ms`, its first end as `ended`, and its arrivals within the
+  window.
+- **`readings`:** 518 (516 before). F-278's and F-280's readings went, the
+  fixtures holding them now; four of 0.5 are new: a missed member held
+  through its owner's absence, a paused member heard while its owner is
+  absent (a new stretch), a member ended and not heard again keeping its
+  held time, and a run's reason in byte order over pairs handed in row
+  order. F-277's reading reads no reason over no member.
+- **`zk2py.timing_scenarios`:** §6 steps 5 and 6, both passing.
+- **`just py-conformance`: 3472 of 3472.**
+
+### Live, every pairing
+
+On in-process zenoh-python 1.10.1 routers, every listener on a free
+loopback port, all of it under `taskset -c 0-1`:
+- `python -m zk2py.timing_interop` runs `timing.v1` §1 to §5 in four
+  pairings, §6's six steps with both tools beside each owner, and beside
+  §6, not scenarios, `face` (§2.8), `gone`, `again` and round 81's
+  `waits`, `missed` and `stray` (§2.7), each with both tools beside each
+  owner;
+- `python -m zk2py.arbitration_scenarios --pair …` runs `arbitration.v1`
+  §1 to §11 in four pairings, §10 with both tools, and §11 with both tools
+  beside its step 2.
+
+"py" is zk2py's party, "rs" the reference's black box, the owner (or the
+commanders) first. Each runner ran twice.
+
+`timing.v1`, checks passed in each run:
+
+| Section | py→py | rs→py | py→rs | rs→rs |
+|---|---|---|---|---|
+| §1 a commander paused, then resumed | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| §2 a member gone, and a member silent | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §3 a member never heard | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+| §4 the lifespan on a stated bound, no HLC | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| §5 an unstamped owner | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+
+The tool sections, each tool beside each owner: §6's Expected 1 to 6 and
+§2.7's known members, and the windows beside §6.
+
+| Section | py owner, zk2py's tool | py owner, `zenctl timing` | rs owner, zk2py's tool | rs owner, `zenctl timing` |
+|---|---|---|---|---|
+| §6 a tool's window, steps 1 to 6 | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 |
+| §2.8 across a face, not a scenario | 2 of 2 | 2 of 2 | 2 of 2 | 2 of 2 |
+| §2.7 `gone` (F-278), not a scenario | 1 of 1 | 1 of 1 | 1 of 1 | 1 of 1 |
+| §2.7 `again` (F-280), not a scenario | 1 of 1 | 1 of 1 | 1 of 1 | 1 of 1 |
+| §2.7 `waits`, not a scenario | 1 of 1 | 1 of 1 | 1 of 1 | 1 of 1 |
+| §2.7 `missed`, not a scenario | 2 of 2 | 2 of 2 | 2 of 2 | 2 of 2 |
+| §2.7 `stray`, not a scenario | 1 of 1 | 1 of 1 | 1 of 1 | 1 of 1 |
+
+The two tools, compared token by token beside each owner (every member's
+three answers and its `known`, every resource's and the run's answers and
+reasons, the exits), and each tool's roll-ups against 0.4's answer and
+0.5's reason:
+
+| Comparison | beside the py owner | beside the rs owner |
+|---|---|---|
+| §6, steps 1 to 6: answers and exits | 6 of 6 | 6 of 6 |
+| §6, steps 1 to 6: roll-ups and their reasons, both tools | 6 of 6 | 6 of 6 |
+| §2.8, two readings: answers and exits; roll-ups | 4 of 4 | 4 of 4 |
+| `gone`: answers and exits; a roll-up over no member, no reason in either | 2 of 2 | 2 of 2 |
+| `again`: answers and exits; the period over the first life, exit 0 | 2 of 2 | 2 of 2 |
+| `waits`, `missed`, `stray`: answers and exits | 3 of 3 | 3 of 3 |
+
+So every check passed, 182 of 182 in each run (76 of the runtime's
+sections, 106 of the tools'), with no known failure left: `KNOWN` is
+empty, round 80's four F-278 and F-279 checks passing. Every miss was
+reported within the 10 ms bound: zk2py's reader 0.10–0.25 ms after its
+due, the reference's 0.68–4.17 ms. The two tools' windows started 65–104
+ms apart, zk2py's second every time.
+
+**The windows beside §6** (round 81, both tools, both owners, both runs),
+each a rule of 0.5 no scenario makes:
+- **`waits`:** `cmd` waited for three times in a 4 s window, its owner
+  closing before each miss was due and a new owner starting 1 s and 2 s
+  in, each up 0.2 s. Each stretch is at least its close's offset plus the
+  read 100 ms after the withdrawal, so the three summed to 761–866 ms or
+  more; both tools held the longest, 302–311 ms, and answered
+  `window_too_short`, exit 2.
+- **`missed`:** `cmd` missed at 0.5 s with its owner present, its owner
+  closing 1 s in. §2.5's pause is the owner's absence "before the miss is
+  due", so none here: both tools held it to the window's end, 3,000–3,002
+  ms, and answered `no`, `missed`, exit 1.
+- **`stray`:** `cmd` paused at its owner's absence 0.15 s in, then heard
+  from 1 s every 100 ms on a raw session's puts while its owner is absent.
+  Heard, it is held from that arrival: both tools held it 1,918–1,999 ms
+  (zenctl's less by its earlier start), answered its deadline `yes`,
+  `met`, its period `owner_not_present` and its lifespan `foreign_stamp`,
+  exit 2.
+
+**Where the two tools differ:** in no token. Their held times and spans
+differ by the windows' starts and by each tool's read after a withdrawal,
+about 100 ms in both (in step 6 zk2py ended `axis/x` 102–109 ms after
+the remove, zenctl 103–110 ms): step 5's `cmd` 160–185 ms against 254
+ms, step 6's `axis/x` 1,003–1,021 ms against 1,104–1,123 ms, `gone`
+253–259 ms against 317–340 ms. No answer moves with them.
+
+**The runner, not the text.** In the first run of §4 one check failed
+once beside the reference's C, py→rs, while another session's Rust tests
+shared cores 0–1: step 2's due counted from "the instant C first saw its
+owner present", placed on the runner's clock by its `subscribed` line,
+came 1.7 ms past the first `state` poll that answered present, its 2 ms
+margin included. Re-runs found a second, the runner's own race: the poll stopped
+once C held the owner's zid, which C learns from the descriptor put before
+any token, so in one run it never saw C present. The runner now polls
+until both, and places the box's clock with a 5 ms margin (`PLACE_MS`;
+one re-run came 0.1 ms past the 2 ms once more, rs→rs). The alternatives the check tells
+apart are 300 ms away. Both full runs above came after the fix.
+
+`arbitration.v1`, checks passed in each run (setups and controls
+included):
+
+| Section | py→py | rs→py | py→rs | rs→rs |
+|---|---|---|---|---|
+| §1 the dead-man at start, each higher priority taking over | 9 of 9 | 9 of 9 | 9 of 9 | 9 of 9 |
+| §2 a commander silent past its deadline | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §3 a commander killed | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 |
+| §4 a clean stop that publishes after its withdrawal | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+| §5 a re-mint with no drop | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §6 all silent: the dead-man | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| §7 the watch session's own transport moves | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+| §8 an invalid declaration, refused at start | 11 of 11 | 11 of 11 | 11 of 11 | 11 of 11 |
+| §9 a wildcard binding's order | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| §11 a governed commander's standby, with both tools beside step 2 | 14 of 14 | 14 of 14 | 14 of 14 | 14 of 14 |
+
+§10, each tool beside each actuator, its commanders the pairing's, the six
+Expected each with the reference test's exit (0, 1, 1, 1, 2, 2):
+
+| Section | py actuator, zk2py's tool | py actuator, `zenctl arbitration` | rs actuator, zk2py's tool | rs actuator, `zenctl arbitration` |
+|---|---|---|---|---|
+| §10 a tool's questions | 12 of 12 | 12 of 12 | 12 of 12 | 12 of 12 |
+
+Each cell counts the two pairings that hold that actuator, six steps each.
+So 329 of 329 in each run, as round 80. The two tools agreed token by
+token at each of §10's six steps in all four pairings, 24 of 24 a run, and
+beside §11's step 2, governed (teleop selected) and in the control (safety
+selected). F-268's control (`7c`) passed. Core 0.56's open on
+zenoh-python again: of 10 round trips asked at the open event and 10 asked
+100 ms after, every one stood and none before the reopen's telling, in
+each run. Every deadline switch came within the bound: `at_ms − last_ms`
+300.02–302.44 ms with zk2py's actuators and 300.40–301.86 ms with the reference's,
+against 306, so the 50 ms allowance was never used.
+
+**Not run.**
+- A real constrained face: §2.8 ran on the runner's bus, each tool told it
+  reads across one.
+- A stall or a queue's refusal, for §2.7's loss without an owner: no
+  scenario makes one.
+- The doctor's `timing-declaration` and `check conform`'s `timing-period`
+  and `timing-deadline`: zk2py has no doctor or conformance suite for
+  them.
+
+### The evidence
+
+0.5 adds no MUST or SHOULD. Each rule, against what shows it:
+
+| `timing.v1` rule | Evidence | Runs |
+|---|---|---|
+| §2.2 read the keys as the fixture does | `declarations.json` | yes |
+| §2.2 judge nothing under an invalid declaration: no tracker | `declarations.json`, `deadlines.json`, `conclusions.json` | yes |
+| §2.2, §2.3, §2.5 a linter SHOULD warn (four) | none: no core code | zk2py's `lint` (readings); the reference CLI warns of none |
+| §2.4 the owner SHOULD publish at its period | §6, `periods.json` | yes, both owners |
+| §2.4 no runtime publishes on the owner's behalf | §1 Expected 2 | yes, four pairings |
+| §2.5 judge the deadline as the fixture does | `deadlines.json`, §1–§3 | yes, four pairings |
+| §2.5 never against a stamp, a wall clock or a payload's time | §4, §5 | yes, four pairings |
+| §2.5 the detection bound | `deadlines.json`'s `by_ms`, §1, §3 | yes, no lateness past the bound |
+| §2.5 `beyond_bound` once | `deadlines.json` | the fixture only |
+| §2.5 a miss is never "down" | §1 Expected 4, §6 step 2 | yes, four pairings and both tools |
+| §2.6 the owner stamps and states `meta.zid` | §4, §5 | yes, both owners |
+| §2.6 never the HLC's delta for ε | `lifespans.json`, §4 step 4 | yes, four pairings |
+| §2.6 discard an expired sample, and no other | `deadlines.json`, §4 | yes, four pairings |
+| §2.6 never a payload's time | §5 | yes, four pairings |
+| §2.7 a tool's window, its start, its known members | `periods.json`, `conclusions.json`, §6 | yes, both tools beside both owners |
+| §2.7 the held time, the longest stretch, never the sum (0.5) | `deadlines.json` #46–#51, `conclusions.json` #50, §6 step 5 | yes, both tools; and `gone`, `waits`, `missed`, `stray` |
+| §2.7 a member's first life (0.5) | `periods.json` #21, `deadlines.json` #48, §6 step 6 | yes, both tools; and `again` |
+| §2.8 across a face | `lifespans.json`, `conclusions.json` | yes, both tools, not a scenario |
+| §5 conclude, and roll up by the finding (0.4) | `conclusions.json` #28–#42, §6 | yes, both tools beside both owners |
+| §5 a roll-up's reason (0.5) | `conclusions.json` #43–#49, §6 | yes, both tools beside both owners, every resource's and run's reason |
+
+`arbitration.v1`'s table is round 80's, every row run again with the same
+result.
+
+### Not findings
+
+- **A missed member and its owner's absence.** §2.7's "a known member never
+  heard is held only while it is waited for" could be read to pause a
+  member missed before its owner left. §2.5's pause is the owner's absence
+  "before the miss is due", and `deadlines.json`'s description holds the
+  member "heard, missed or waited for", as the CHANGELOG's "A missed member
+  counts held while it stays missed" says. Both tools held `missed`'s
+  `cmd` to the window's end, and §5 reads the misses first, so no answer
+  could move.
+- **A paused member heard again.** v1.md names only "its presence again"
+  as starting a new stretch, but a stretch "begins at … the instant the
+  tool held the member (its first arrival …)", and the description's
+  "heard, missed or waited for" holds a member heard while its owner is
+  absent. Both tools held `stray`'s `cmd` from that arrival. The
+  CHANGELOG's "A heard member counts held from the instant it was first
+  held … to the window's end … whatever presence says after it" would, by
+  its letter, count `stray`'s from its first wait, 3,000 ms; it describes
+  the common case, and v1.md's longest stretch bounds it. Both read `met`.
+- **A known epoch member that ends unheard.** `deadlines.json`'s "its first
+  ended stops it for good" names the report, which §2.5 makes only for a
+  member heard or missed. A known member of an epoch template, waited for
+  and never heard, whose token goes, ends with no report, and the
+  description would hold its next wait as a new stretch. No case has one,
+  and no tool can hold one: a tool knows only a template with no
+  parameter (§2.7), and `epoch` names a parameter (core §2.3). A
+  consumer's held time is read by no answer.
+- **Which members `held_ms` names.** "each member the tracker held in the
+  window" is any member held at any instant of it, as §2.7's "each member
+  it held in a window, at any instant of it" reads (F-267). No case has a
+  member held in the window and not held at its end; zk2py's `readings`
+  holds one, its time kept.
+- **The CHANGELOG's case list.** "#46 to #50" lists four cases; #48 is
+  F-280's, named in its own bullet. The fixture holds six, #51 the two
+  waits'.
+
+**After review-bot on PR #941.** Nothing blocking; its three
+should-fixes are made, and its nit.
+- **One member set.** The `Window` holds `readings` and `spans` from its
+  start, fills both in `end` over the members it answers, and asserts the
+  three key sets equal; `zk2py.timing_tool` indexes them, so a member
+  missing from either fails rather than printing `span_ms` null.
+- **`Tracker.end` is single-use:** a second call judges nothing and adds no
+  report, and the window's end and held times stay as the first left
+  them. A `readings` case pins it.
+- **The roll-up's two forms are explicit.** `rollup` takes `(key, Answer)`
+  pairs alone, read in byte order of the keys for its reason, and
+  `rollup_answer` answer tokens alone, for `conclusions.json`'s
+  `rollup.answers`, where no reason is read; each raises `TypeError` on the
+  other's form or a mix. Every caller that reads a reason passes pairs.
+  A `readings` case pins both refusals.
+- **The nit:** each live check's held-time range says what it must tell
+  apart (for instance §6 step 6's 800–1,400 ms: the first life against
+  both lives summed, about 4 s, and a span to the window's end, about
+  5 s), beside `PLACE_MS`'s.
+
+After them, `just py-conformance` passes 3474 of 3474 (`readings` 520),
+and §6's six steps and the six windows beside it, both tools beside both
+owners, 106 of 106.
+
+### Counts at timing.v1 0.5 and core 0.56
+
+280 entries.
+- **Open: none.** `timing.v1` 0.5's final cold read found nothing more:
+  every MUST against its evidence, the two tools agreeing token by token at
+  all six of §6's steps and beside it, and every runtime section passing
+  in all four pairings.
+- **`arbitration.v1` 0.3: none open,** its regression run as round 80's.
+- **Resolved:** every entry. `timing.v1` 0.5 resolved F-278 to F-280.

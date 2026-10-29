@@ -1,4 +1,4 @@
-"""``timing.v1`` on a bus (profile text 0.3, core 0.55; #609, rounds 76, 78 and 79).
+"""``timing.v1`` on a bus (profile text 0.5, core 0.55; #609, rounds 76 and 78 to 81).
 
 - :class:`Reader` is a consumer of a timed resource (§2.1, §2.5, §2.6) for
   one provider address: a :class:`zk2py.timing.Tracker` per resource with a
@@ -19,7 +19,9 @@
   handed on and no arrival; every other sample is handed on (§2.6).
 - :class:`Window` is a tool's window over it (§2.7): presence followed and
   the descriptors held first, then the subscriptions (the window's start),
-  the trackers evaluated at its end, and §5's three questions per member.
+  the trackers evaluated at its end, and §5's three questions per member,
+  each member's held time its tracker's longest stretch and its span ended
+  at its first end (text 0.5, F-278, F-280).
   It holds no binding, so only a member of a template without parameters
   is known to it (text 0.3); a loss it cannot attribute, a stall of its
   receive path, is every member's (text 0.3); across a constrained face it
@@ -520,12 +522,20 @@ class Reader:
                         self._apply(res, res.tracker.tick(now))
 
     def tick(self, at_ns: int | None = None) -> None:
-        """Judge every member at an instant (a tool's window end)."""
+        """Judge every member at an instant."""
         now = time.monotonic_ns() if at_ns is None else at_ns
         with self.lock:
             for res in self.resources.values():
                 if res.tracker is not None:
                     self._apply(res, res.tracker.tick(now))
+
+    def end_window(self, at_ns: int) -> None:
+        """A tool's window ends (§2.7): every tracker judged there, as at a
+        tick, and its stretches closed (text 0.5, F-278, F-280)."""
+        with self.lock:
+            for res in self.resources.values():
+                if res.tracker is not None:
+                    self._apply(res, res.tracker.end(at_ns))
 
     # -- reading it -----------------------------------------------------------------------
 
@@ -587,13 +597,18 @@ class Window:
                              owner_zids=owner_zids)
         self.start_ns = self.reader.start_ns
         self.end_ns: int | None = None
+        #: each member's reading and its period span (§2.7; None with no
+        #: period declared), both filled by :meth:`end` over one member set,
+        #: the keys of what it returns (review-bot on PR #941)
+        self.readings: dict[str, tm.Reading] = {}
+        self.spans: dict[str, int | None] = {}
 
     def end(self) -> dict[str, dict[str, tm.Answer]]:
         """The window's end: every tracker evaluated there, then each
         member's reading and §5's three answers."""
         rd = self.reader
         self.end_ns = end = time.monotonic_ns()
-        rd.tick(end)
+        rd.end_window(end)
         gap_ms, closed = self.stall.reading()
         # §2.7 (text 0.3): a stall of the receive path names no member, so it
         # is "lost for every member it holds"; zk2py's subscriptions hand
@@ -601,7 +616,7 @@ class Window:
         # refusal is known of one member alone
         unattributed = closed or gap_ms > self.stall.bound_ms
         out: dict[str, dict[str, tm.Answer]] = {}
-        self.readings: dict[str, tm.Reading] = {}
+        self.readings, self.spans = {}, {}
         start = self.start_ns
         assert start is not None
         with rd.lock:
@@ -611,10 +626,14 @@ class Window:
             for res in rd.resources.values():
                 members = set(res.first_held) | set(res.known)
                 if res.tracker is not None:
-                    members |= set(res.tracker.members)
+                    # each member the tracker held at any instant of the window
+                    members |= set(res.tracker.held_in_window())
                 for m in sorted(members):
                     lost = tm.lost_for(m, (), unattributed)
                     out[m] = tm.conclude(res.decl, self._reading(res, m, start, end, lost, present_throughout))
+        # one member set: each member answered has its reading and its span
+        # (None only where no period is declared), never one without the other
+        assert set(out) == set(self.readings) == set(self.spans), (sorted(out), sorted(self.spans))
         return out
 
     @staticmethod
@@ -629,24 +648,29 @@ class Window:
         rd = self.reader
         mine = [r for rid, r in rd.reports if rid == res.rid and r.member == m and start <= r.at_ns <= end]
         arr = [a.mono_ns for a in rd.arrivals if a.key == m and a.handed]
-        ends = [r.at_ns for r in mine if r.event == "ended"]
-        # §2.7: "to the window's end, or to the member's end when it ended in
-        # the window": the first end at or after the instant it first held
-        # the member, whether or not it was heard again after it (round 80,
-        # F-280: the text reads no second life; to 0.3, zk2py dropped an end
-        # followed by an arrival, and so counted the member's absence against
-        # its period). An earlier end ends nothing (review-bot on PR #939).
-        held, ended_at = tm.window_held(start, end, res.first_held.get(m), ends)
+        if res.tracker is not None:
+            # §2.7 (text 0.5): the tracker's account, its longest unbroken
+            # stretch, never the sum: a known member never heard held only
+            # while waited for (F-278), and a member over its first life,
+            # its first end stopping its stretches and its span (F-280)
+            held, ended_at = res.tracker.held_ns(m), res.tracker.first_end(m)
+            assert isinstance(held, int)
+        else:
+            # no tracker, no deadline judged and no end reported: the held
+            # time no answer reads, from the member's first holding
+            held, ended_at = tm.window_held(start, end, res.first_held.get(m), [])
         missed = [r for r in mine if r.event == "missed"]
         acct = tm.DeadlineAccount(held, sum(1 for r in missed if r.owner == tm.PRESENT),
                                   sum(1 for r in missed if r.owner != tm.PRESENT), ended_at is not None)
         known = m in res.known
         # conclude() reads the kind, the declaration, the key and the face
         # before the period's verdict, so with no period this is never read
-        per = (tm.period(res.decl.period_ms, start, end, known, ended_at, arr).verdict
-               if res.decl.period_ms is not None else tm.NOT_HEARD)
-        lifespans = tuple(a.verdict for a in rd.arrivals if a.key == m)
-        reading = tm.Reading(acct, per, lifespans, self.across_face, lost, present)
+        p = (tm.period(res.decl.period_ms, start, end, known, ended_at, arr)
+             if res.decl.period_ms is not None else None)
+        self.spans[m] = None if p is None else p.span_ns
+        # each sample's lifespan, in either life, within the window (§2.7)
+        lifespans = tuple(a.verdict for a in rd.arrivals if a.key == m and start <= a.mono_ns <= end)
+        reading = tm.Reading(acct, tm.NOT_HEARD if p is None else p.verdict, lifespans, self.across_face, lost, present)
         self.readings[m] = reading
         return reading
 

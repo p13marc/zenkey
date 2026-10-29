@@ -1,8 +1,9 @@
 """``timing.v1``: a stream's cadence, its deadline and its lifespan (profile
-text 0.3, draft, written against core 0.55; ``spec/profiles/timing/v1.md``).
+text 0.5, draft, written against core 0.55; ``spec/profiles/timing/v1.md``).
 
 Read cold from the text, its fixtures and its scenarios alone (#609, round
-76; text 0.2 in round 78, text 0.3 in round 79). The session-free half:
+76; text 0.2 in round 78, 0.3 in round 79, 0.4 in round 80, 0.5 in round
+81). The session-free half:
 - :func:`declaration` reads a resolved resource's three keys (§2.2, §2.3),
   as ``conformance/declarations.json`` does, and :func:`requirement` a
   ``[requires.<role>]``'s (§2.3: ignored at 1.0);
@@ -11,8 +12,12 @@ Read cold from the text, its fixtures and its scenarios alone (#609, round
   or forgotten) and ``beyond_bound`` (once, text 0.2's MUST), its due and
   its detection bound, an epoch template's known member waited for from
   its first member token seen (text 0.2, F-261), as
-  ``conformance/deadlines.json`` drives it; :func:`tracker_for` builds one
-  only for a declaration that judges a deadline (text 0.2, F-259);
+  ``conformance/deadlines.json`` drives it, and, when a tool's window ends
+  (``end``), how long it held each member: its longest unbroken stretch,
+  never the sum, a known member never heard held only while waited for,
+  and a member ended held over its first life (text 0.5, F-278, F-280);
+  :func:`tracker_for` builds one only for a declaration that judges a
+  deadline (text 0.2, F-259);
 - :class:`LifespanReading` judges each sample at its arrival (§2.6), on
   the deployment's ε only, against the owner's own stamp, with a clock
   falsified for the rest of the reading once a stamp of it is more than ε
@@ -25,7 +30,9 @@ Read cold from the text, its fixtures and its scenarios alone (#609, round
   face only on its deployment's word (§2.8, text 0.3);
 - :func:`conclude` is §5's three questions of one member over one window,
   as ``conformance/conclusions.json`` does, and :func:`rollup` the answer
-  over a resource or a run, by each question's finding (F-264);
+  over a resource or a run, by each question's finding (F-264), with its
+  reason the first member's giving it, in byte order of the keys, and none
+  over no member (text 0.5, F-279);
 - :func:`lint` is the profile's contract linter: the SHOULDs of §2.2, §2.3
   and §2.5, which have no core code.
 
@@ -273,12 +280,24 @@ class Tracker:
     - **``beyond_bound`` once** (F-260), at a member's first arrival past
       the bound, and not again while it stays past it.
 
+    Text 0.5, a tool's window (``end``, F-278, F-280): from ``start`` to
+    ``end`` the tracker keeps how long it held each member, its **longest
+    unbroken stretch**, never the sum of its stretches. A stretch runs while
+    the member is held heard, missed or waited for: a known member never
+    heard only while waited for, so its owner's absence is a pause and its
+    presence again a new stretch; and the member's first ``ended`` stops it
+    for good, so a member heard again after it is held over its first life.
+    :meth:`held_ns` reads it, :meth:`first_end` the first end.
+
     Read beyond the fixture:
     - **At the start, an unconfirmed owner** counts as present: "while its
       owner is unconfirmed, the wait goes on as it was".
     - **A member not held** whose token is seen, then shown gone, forgets
       the sighting: its tokens are gone, so a later read ends nothing until
       one is seen again.
+    - **A member held in the window and no longer held at its end** (one
+      not known that ended and was not heard again) keeps its held time:
+      ``held_ms`` names each member held at any instant of the window.
     """
 
     def __init__(self, deadline_ms: int, bound: int | None = None, known: Iterable[str] = (),
@@ -299,6 +318,17 @@ class Tracker:
         #: the members reported ``beyond_bound`` and not held since (F-260)
         self.beyond: set[str] = set()
         self.reports: list[Report] = []
+        # -- a tool's window (text 0.5): from start to end ---------------
+        #: the window's end, once ``end`` closed it
+        self.window_end: int | None = None
+        #: each member held at any instant of the window, in the order first held
+        self._in_window: dict[str, None] = {}
+        #: the instant each member's current stretch began
+        self._stretch: dict[str, int] = {}
+        #: each member's longest stretch so far
+        self._longest: dict[str, int] = {}
+        #: each member's first end in the window, which stops its stretches for good
+        self._first_end: dict[str, int] = {}
 
     # -- what it holds --------------------------------------------------------------
 
@@ -344,9 +374,75 @@ class Tracker:
                 self.seen.pop(name, None)
         return out
 
-    def _done(self, out: list[Report]) -> list[Report]:
+    def _done(self, out: list[Report], t: int | None = None) -> list[Report]:
         self.reports += out
+        if t is not None:
+            self._hold(t, out)
         return out
+
+    # -- a tool's window: how long each member was held (text 0.5) -------------
+
+    def _holding(self, name: str) -> bool:
+        """§2.7 (text 0.5): the member held heard, missed or waited for; a
+        known member never heard only while waited for."""
+        m = self.members.get(name)
+        return m is not None and (m.last is not None or m.missed or m.wait is not None)
+
+    def _close(self, name: str, t: int) -> None:
+        since = self._stretch.pop(name, None)
+        if since is not None:
+            self._longest[name] = max(self._longest.get(name, 0), t - since)
+
+    def _hold(self, t: int, out: list[Report]) -> None:
+        """After an event at ``t``: each member's first ``ended`` closes its
+        stretch for good (F-280); then each member held opens a stretch, and
+        each not held closes its own (F-278's pause)."""
+        if self.started_at is None or self.window_end is not None:
+            return
+        for r in out:
+            if r.event == "ended" and r.member not in self._first_end:
+                self._first_end[r.member] = t
+                self._close(r.member, t)
+        for name in self.held():
+            self._in_window.setdefault(name, None)
+            self._longest.setdefault(name, 0)
+        for name in list(self._stretch):
+            if not self._holding(name):
+                self._close(name, t)
+        for name in self.held():
+            if name not in self._stretch and name not in self._first_end and self._holding(name):
+                self._stretch[name] = t
+
+    def end(self, t: int) -> list[Report]:
+        """A tool's window ends (§2.7): judged at as at a tick, then every
+        stretch closed there. Single use: once the window is closed, a
+        second call judges nothing and adds no report (review-bot on PR
+        #941)."""
+        if self.window_end is not None:
+            return []
+        out = self._judge(t)
+        self._done(out, t)
+        for name in list(self._stretch):
+            self._close(name, t)
+        self.window_end = t
+        return out
+
+    def held_ns(self, member: str | None = None) -> dict[str, int] | int:
+        """How long the tracker held each member in the window (text 0.5):
+        its longest unbroken stretch, read once :meth:`end` closed the
+        window (before it, a stretch still open is not counted); by member
+        in member order, or one member's (0 if never held so)."""
+        if member is not None:
+            return self._longest.get(member, 0)
+        return {k: self._longest.get(k, 0) for k in sorted(self._in_window, key=lambda s: s.encode())}
+
+    def first_end(self, member: str) -> int | None:
+        """The member's first end in the window, if it ended in it."""
+        return self._first_end.get(member)
+
+    def held_in_window(self) -> list[str]:
+        """Each member held at any instant of the window, in member order."""
+        return sorted(self._in_window, key=lambda s: s.encode())
 
     # -- events ---------------------------------------------------------------------
 
@@ -365,13 +461,13 @@ class Tracker:
             for m in self.members.values():
                 if m.known and m.last is None and not m.gone and not m.missed:
                     m.wait = max(t, self.present_since)
-        return self._done(out)
+        return self._done(out, t)
 
     def arrival(self, t: int, member: str, expired: bool = False) -> list[Report]:
         """A sample of ``member``; an expired one is no arrival (§2.6)."""
         out = self._judge(t)
         if self.started_at is None or expired:
-            return self._done(out)
+            return self._done(out, t)
         m = self.members.get(member)
         if m is not None:
             if m.missed:
@@ -383,7 +479,7 @@ class Tracker:
         elif member not in self.beyond:
             self.beyond.add(member)
             out.append(Report(t, "beyond_bound", member))
-        return self._done(out)
+        return self._done(out, t)
 
     def owner(self, t: int, state: str) -> list[Report]:
         """The owner's token as the reader observes it: present, unconfirmed
@@ -405,19 +501,19 @@ class Tracker:
             # …, so its owner's absence stops nothing"
             for m in self.members.values():
                 m.wait = None
-        return self._done(out)
+        return self._done(out, t)
 
     def member_seen(self, t: int, member: str) -> list[Report]:
         """A member token of ``member`` seen: heard declared or withdrawn, or
         shown by a read (§2.5, F-261). Epoch templates only."""
         out = self._judge(t)
         if not self.epoch or member in self.seen:
-            return self._done(out)
+            return self._done(out, t)
         self.seen[member] = t
         m = self.members.get(member)
         if m is not None and m.known and m.last is None and not m.missed and self.started_at is not None:
             m.wait, m.gone = t, False
-        return self._done(out)
+        return self._done(out, t)
 
     def member_gone(self, t: int, member: str) -> list[Report]:
         """A complete read shows no member token of ``member`` (§2.5); on an
@@ -426,22 +522,22 @@ class Tracker:
         out = self._judge(t)
         if self.epoch:
             if member not in self.seen:
-                return self._done(out)
+                return self._done(out, t)
             del self.seen[member]
         m = self.members.get(member)
         if m is None:
-            return self._done(out)
+            return self._done(out, t)
         if m.last is not None or m.missed:
             out.append(Report(t, "ended", member, reason="gone"))
         if m.known:
             m.last, m.wait, m.missed, m.gone = None, None, False, True
         else:
             del self.members[member]
-        return self._done(out)
+        return self._done(out, t)
 
     def tick(self, t: int) -> list[Report]:
         """An instant the reader judges at."""
-        return self._done(self._judge(t))
+        return self._done(self._judge(t), t)
 
     def event(self, e: dict[str, Any]) -> list[Report]:
         """One of deadlines.json's events."""
@@ -459,6 +555,9 @@ class Tracker:
             return self.member_gone(t, e["member"])
         if what == "tick":
             return self.tick(t)
+        if what == "end":
+            # text 0.5 (F-278, F-280): a tool's window closes
+            return self.end(t)
         raise ValueError(f"{what!r}: not an event")
 
 
@@ -627,17 +726,21 @@ def period(period_ms: int, from_ns: int, to_ns: int, known: bool, ended_ns: int 
 
 @dataclass(frozen=True)
 class Answer:
+    """One of §5's answers and its reason; a roll-up over no member has none
+    (``None``, text 0.5, F-279)."""
+
     answer: str
-    reason: str
+    reason: str | None
     detail: str = ""
 
-    def pair(self) -> dict[str, str]:
+    def pair(self) -> dict[str, str | None]:
         return {"answer": self.answer, "reason": self.reason}
 
 
 @dataclass(frozen=True)
 class DeadlineAccount:
-    """The tracker's account of one member over a window (§2.7)."""
+    """The tracker's account of one member over a window (§2.7): its held
+    time the longest stretch, never the sum (text 0.5)."""
 
     held_ns: int
     missed_present: int = 0
@@ -667,15 +770,14 @@ class Reading:
 
 def window_held(start_ns: int, end_ns: int, first_held_ns: int | None,
                 ends_ns: Iterable[int]) -> tuple[int, int | None]:
-    """§2.7, a tool's account of one member over its window: ``(held_ns,
-    ended_ns)``. It holds the member "from the later of the window's start
-    and the instant it first held it … to the window's end, or to the
-    member's end when it ended in the window". The end that counts is the
-    first at or after the instant it first held the member in the window,
-    whether or not it was heard again after it (round 80, F-280, open: the
-    text reads one life); an earlier end ends nothing, so it can give no
-    held time of 0, and no ``ended``, of a member held after it (review-bot
-    on PR #939). A member never held was held for 0 ns."""
+    """§2.7, a tool's account of one member over its window where it holds
+    no tracker (a resource that judges no deadline, whose answers never
+    read the held time): ``(held_ns, ended_ns)``, from the later of the
+    window's start and the instant it first held the member to the first
+    end at or after that instant, else to the window's end. An earlier end
+    ends nothing (review-bot on PR #939). A member never held was held for
+    0 ns. Where a tracker is held, :meth:`Tracker.held_ns` is the account:
+    the longest stretch, never the sum (text 0.5)."""
     held_from = start_ns if first_held_ns is None else max(start_ns, first_held_ns)
     after = sorted(t for t in ends_ns if held_from <= t <= end_ns)
     ended = after[0] if after else None
@@ -763,7 +865,34 @@ def _lifespan(decl: Declaration, r: Reading) -> Answer:
 SET_ASIDE = (NOT_ASKED, "not_this_profiles")
 
 
-def rollup(question: str, answers: Iterable[Answer]) -> Answer:
+def _rolled(question: str, every: list[Answer]) -> Answer:
+    """§5's roll-up over the members' answers in the order given, its
+    reason the first member's giving the answer in that order."""
+    finding = FINDING[question]
+    other = YES if finding == NO else NO
+
+    def first(answer: str) -> str | None:
+        return next((a.reason for a in every if a.answer == answer), None)
+
+    asked = [a for a in every if a.answer not in SET_ASIDE]
+    hit = [a for a in asked if a.answer == finding]
+    if hit:
+        return Answer(finding, first(finding), f"{len(hit)} member(s) the finding")
+    if asked and all(a.answer == other for a in asked):
+        return Answer(other, first(other), f"{len(asked)} member(s)")
+    if every and not asked:
+        if all(a.answer == "not_this_profiles" for a in every):
+            return Answer("not_this_profiles", first("not_this_profiles"), f"{len(every)} member(s), none a stream")
+        # every member set aside and not every one not this profile's: one
+        # at least is not asked (SET_ASIDE holds the two)
+        assert any(a.answer == NOT_ASKED for a in every), "a set-aside answer neither not_asked nor not_this_profiles"
+        return Answer(NOT_ASKED, first(NOT_ASKED), f"{len(every)} member(s), every one set aside (F-277)")
+    if not every:
+        return Answer(UNOBSERVABLE, None, "no member at all: no reason (text 0.5, F-279)")
+    return Answer(UNOBSERVABLE, first(UNOBSERVABLE), "no finding, and not every member clean")
+
+
+def rollup(question: str, members: Iterable[tuple[str, Answer]]) -> Answer:
     """§5 "Over a resource, or a run", read by each question's finding
     (F-264), a member not asked, or not this profile's, set aside (text
     0.4):
@@ -773,28 +902,35 @@ def rollup(question: str, answers: Iterable[Answer]) -> Answer:
       and at least one is that pole;
     - when every member is set aside, and there is at least one, not this
       profile's when every one is, else not asked (F-277): nobody put the
-      question of any of them; the reason is the first such member's;
+      question of any of them;
     - unobservable otherwise: a member unobservable and none the finding,
-      or no member at all (``no_member``)."""
-    finding = FINDING[question]
-    other = YES if finding == NO else NO
-    every = list(answers)
-    asked = [a for a in every if a.answer not in SET_ASIDE]
-    hit = [a for a in asked if a.answer == finding]
-    if hit:
-        return Answer(finding, hit[0].reason, f"{len(hit)} member(s) the finding")
-    if asked and all(a.answer == other for a in asked):
-        return Answer(other, asked[0].reason, f"{len(asked)} member(s)")
-    if every and not asked:
-        if all(a.answer == "not_this_profiles" for a in every):
-            return Answer("not_this_profiles", every[0].reason, f"{len(every)} member(s), none a stream")
-        first = next((a for a in every if a.answer == NOT_ASKED), None)
-        # every member set aside and not every one not this profile's: one
-        # at least is not asked (SET_ASIDE holds the two)
-        assert first is not None, "a set-aside answer that is neither not_asked nor not_this_profiles"
-        return Answer(NOT_ASKED, first.reason, f"{len(every)} member(s), every one set aside (F-277)")
-    unobs = [a for a in asked if a.answer == UNOBSERVABLE]
-    return Answer(UNOBSERVABLE, unobs[0].reason if unobs else "no_member", "no finding, and not every member clean")
+      or no member at all.
+
+    Its reason (text 0.5, F-279) is "the reason of the first member giving
+    its answer, in byte order of the members' keys", and "Over no member
+    there is none" (``None``). ``members`` are ``(key, Answer)`` pairs, the
+    answer and its reason under the member's key, read in byte order of the
+    keys whatever order they come in; anything else raises ``TypeError``
+    (review-bot on PR #941). A roll-up read without a reason is
+    :func:`rollup_answer`'s."""
+    pairs = list(members)
+    for x in pairs:
+        if not (isinstance(x, tuple) and len(x) == 2 and isinstance(x[0], str) and isinstance(x[1], Answer)):
+            raise TypeError(f"rollup takes (key, Answer) pairs, got {x!r}: a bare answer is rollup_answer's")
+    return _rolled(question, [a for _, a in sorted(pairs, key=lambda kv: kv[0].encode())])
+
+
+def rollup_answer(question: str, answers: Iterable[str]) -> str:
+    """§5's roll-up of bare answers, the answer alone, where no reason is
+    read (``conclusions.json``'s ``rollup.answers``, #28 to #42, which state
+    none). Each answer is a token string; a pair or an :class:`Answer`
+    raises ``TypeError`` (review-bot on PR #941): a roll-up whose reason is
+    read takes pairs, :func:`rollup`."""
+    tokens = list(answers)
+    for x in tokens:
+        if not isinstance(x, str):
+            raise TypeError(f"rollup_answer takes answer tokens, got {x!r}: a reason is read through rollup's pairs")
+    return _rolled(question, [Answer(x, None) for x in tokens]).answer
 
 
 def rollup_literal(answers: Iterable[Answer]) -> Answer:
@@ -851,4 +987,4 @@ def lint(canonical: dict[str, Any]) -> list[Warning]:
 __all__ = ["PROFILE", "KEYS", "Declaration", "declaration", "requirement", "declaration_of", "merge", "value_ms",
            "Tracker", "tracker_for", "Report", "detection_bound_ns", "LifespanReading", "Stamp", "Verdict", "judge_lifespans",
            "zid_value", "period", "Period", "conclude", "Reading", "DeadlineAccount", "Answer", "rollup",
-           "rollup_literal", "lint", "ms_to_ns", "ns_to_ms"]
+           "rollup_answer", "rollup_literal", "lint", "ms_to_ns", "ns_to_ms"]

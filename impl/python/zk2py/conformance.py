@@ -1199,6 +1199,12 @@ def _timing_deadlines(path: Path) -> list[Result]:
             due = t.next_due()
             got = {"transitions": [r.expect() for r in t.reports], "held": t.held(),
                    "next_due_ms": None if due is None else tm.ns_to_ms(due)}
+            if t.window_end is not None:
+                # text 0.5 (F-278, F-280): a case that ends a tool's window
+                # states each member's longest unbroken stretch
+                got["held_ms"] = {k: tm.ns_to_ms(v) for k, v in t.held_ns().items()}
+        if "held_ms" in c["expect"] and "held_ms" not in got:
+            got["held_ms"] = None
         if "tracker" in c["expect"]:
             got["tracker"] = t is not None
         out.append(_check(f"deadlines #{i}: {c['note']}", got, c["expect"]))
@@ -1243,9 +1249,15 @@ def _timing_conclusions(path: Path) -> list[Result]:
     out = []
     for i, c in enumerate(_load_json(path)["cases"]):
         if "rollup" in c:
-            # text 0.2, F-264: one question over a resource or a run
+            # text 0.2, F-264: one question over a resource or a run; since
+            # text 0.5 (F-279) each member's key and reason, and the roll-up's
+            # reason, the first member's giving its answer in byte order
             r = c["rollup"]
-            got: dict[str, Any] = {"answer": tm.rollup(r["question"], [tm.Answer(a, "") for a in r["answers"]]).answer}
+            if "members" in r:
+                a = tm.rollup(r["question"], [(m["key"], tm.Answer(m["answer"], m["reason"])) for m in r["members"]])
+                got: dict[str, Any] = {"answer": a.answer, "reason": a.reason}
+            else:
+                got = {"answer": tm.rollup_answer(r["question"], r["answers"])}
         else:
             got = {q: a.pair() for q, a in tm.conclude(tm.declaration_of(c), tm.Reading.of(c["reading"])).items()}
         out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
@@ -3681,21 +3693,27 @@ def _timing_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [(w.what, w.where) for w in tm.lint(canon)],
                 [("ignored_kind", "state/s"), ("invalid_value", "stream/a"), ("below_period", "stream/b"),
                  ("ignored_requirement", "requires.src")]))
-    # F-264: §5's roll-up over a resource, by each question's finding.
+    # F-264: §5's roll-up over a resource, by each question's finding. A
+    # roll-up whose reason is read takes (key, Answer) pairs (review-bot on
+    # PR #941): keyed here a, b, c… in the order listed, so byte order is it.
     expired, live = tm.Answer(tm.YES, "expired"), tm.Answer(tm.NO, "live")
     unobs = tm.Answer(tm.UNOBSERVABLE, "no_bound")
+
+    def keyed(answers: list[Any]) -> list[tuple[str, Any]]:
+        return [(chr(ord("a") + i), a) for i, a in enumerate(answers)]
+
     out.append((f"{label} §5 (F-264): the lifespan over a resource with an expired member beside a live one is the "
-                f"finding, yes", tm.rollup("lifespan", [live, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+                f"finding, yes", tm.rollup("lifespan", keyed([live, expired])).pair(), {"answer": "yes", "reason": "expired"}))
     out.append((f"{label} §5 (F-264): the sentence as written answers no there, hiding the finding",
                 tm.rollup_literal([live, expired]).pair(), {"answer": "no", "reason": "live"}))
     out.append((f"{label} §5 (F-264): an expired member beside an unobservable one is the finding",
-                tm.rollup("lifespan", [unobs, expired]).pair(), {"answer": "yes", "reason": "expired"}))
+                tm.rollup("lifespan", keyed([unobs, expired])).pair(), {"answer": "yes", "reason": "expired"}))
     out.append((f"{label} §5: the deadline over a resource, one member missed, is no",
-                tm.rollup("deadline", [tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")]).pair(),
+                tm.rollup("deadline", keyed([tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")])).pair(),
                 {"answer": "no", "reason": "missed"}))
     out.append((f"{label} §5: a member not asked, or not this profile's, set aside: every other yes is yes",
-                tm.rollup("period", [tm.Answer(tm.NOT_ASKED, "not_heard"), tm.Answer(tm.YES, "kept"),
-                                     tm.Answer("not_this_profiles", "kind")]).pair(),
+                tm.rollup("period", keyed([tm.Answer(tm.NOT_ASKED, "not_heard"), tm.Answer(tm.YES, "kept"),
+                                           tm.Answer("not_this_profiles", "kind")])).pair(),
                 {"answer": "yes", "reason": "kept"}))
     # F-262: a missed member never heard stays missed when its owner is
     # present again: one missed, then met at the arrival.
@@ -3793,48 +3811,120 @@ def _timing_tool_readings() -> list[tuple[str, Any, Any]]:
                 tm.owners_held(False, ["1f", "1f", "2a"], ["99"]), ["1f", "2a"]))
     # F-277 (round 79), resolved by text 0.4: §5's roll-up whose every
     # member is set aside is not this profile's when every one is, else not
-    # asked, the first not-asked member's reason; no member at all stays
-    # unobservable. conclusions.json #34 and #40 to #42 give the answers
-    # alone; the reasons are zk2py's, as the reference tool prints them
-    # (round 79: `not_asked`, `no_lifespan`).
+    # asked; no member at all stays unobservable. Since text 0.5 (F-279) the
+    # reason is the first member's giving the answer, and over no member
+    # there is none (conclusions.json #43 to #49 hold the rule itself).
     na, nt = tm.Answer(tm.NOT_ASKED, "no_lifespan"), tm.Answer("not_this_profiles", "kind")
-    out.append(("timing.v1 0.4 §5 (F-277): a roll-up whose every member is set aside: not asked with the first "
-                "not-asked member's reason, not this profile's when every one is, unobservable with none, and a "
-                "set-aside member beside one pole changing nothing",
-                [tm.rollup("lifespan", a).pair() for a in ([na, na], [nt, na], [nt, nt], [], [nt, tm.Answer(tm.NO, "live")],
-                                                           [na, tm.Answer(tm.UNOBSERVABLE, "no_bound")])],
+    out.append(("timing.v1 0.5 §5 (F-277, F-279): a roll-up whose every member is set aside: not asked with the "
+                "first not-asked member's reason, not this profile's when every one is, unobservable with no reason "
+                "over no member, and a set-aside member beside one pole changing nothing",
+                [tm.rollup("lifespan", [(f"m{i}", x) for i, x in enumerate(a)]).pair()
+                 for a in ([na, na], [nt, na], [nt, nt], [], [nt, tm.Answer(tm.NO, "live")],
+                           [na, tm.Answer(tm.UNOBSERVABLE, "no_bound")])],
                 [{"answer": "not_asked", "reason": "no_lifespan"}, {"answer": "not_asked", "reason": "no_lifespan"},
-                 {"answer": "not_this_profiles", "reason": "kind"}, {"answer": "unobservable", "reason": "no_member"},
+                 {"answer": "not_this_profiles", "reason": "kind"}, {"answer": "unobservable", "reason": None},
                  {"answer": "no", "reason": "live"}, {"answer": "unobservable", "reason": "no_bound"}]))
-    # F-278 (round 80, open): a known member never heard, its owner present
-    # at the window's start and absent before its miss was due, waited for
-    # 0.33 s of a 3 s window and never missed. §2.7 holds it "to the
-    # window's end", so §5 reads it met; the reference holds it only while
-    # it waited, window_too_short.
+    # Text 0.5's held time beyond deadlines.json's cases (round 81). F-278's
+    # and F-280's readings went: deadlines.json #46 to #51, periods.json #21
+    # and conclusions.json #50 hold them.
+    label5 = "timing.v1 0.5 §2.7"
     dl = tm.declaration("stream", {"timing.deadline_ms": 500})
-    out.append(("timing.v1 0.4 §2.7, §5 (F-278, open): a known member never heard whose wait its owner's absence "
-                "stopped, held to the window's end as the text writes it: met; held only while waited for, as the "
-                "reference reads it: window_too_short",
-                [tm.conclude(dl, tm.Reading(tm.DeadlineAccount(held), tm.NOT_HEARD, (), False, False, False))
-                 ["deadline"].pair() for held in (3000 * tm.MS, 330 * tm.MS)],
-                [{"answer": "yes", "reason": "met"}, {"answer": "unobservable", "reason": "window_too_short"}]))
-    # F-280 (round 80, open): a member ended 1.1 s into a 5 s window and
-    # heard again from 2 s, every 100 ms. "To the member's end when it ended
-    # in the window" is its first end: kept over its first life (both
-    # tools); zk2py's 0.3 reading, the end dropped once heard again, counted
-    # the second's absence: not kept.
-    arr = [70 * tm.MS + i * 100 * tm.MS for i in range(10)] + [2000 * tm.MS + i * 100 * tm.MS for i in range(31)]
-    out.append(("timing.v1 0.4 §2.7 (F-280, open): a member ended in the window and heard again, its period over "
-                "the span to its first end: kept; to the window's end, its absence counted: not kept",
-                [tm.period(100, 0, 5000 * tm.MS, False, e, arr).verdict for e in (1100 * tm.MS, None)],
-                [tm.KEPT, tm.NOT_KEPT]))
-    # review-bot on PR #939: the end that counts is the first at or after
-    # the instant the member was first held in the window. An earlier one
-    # (100 ms, the member first held at 200 ms) ends nothing: held to the
-    # window's end, never 0 and never ended; one after (1.5 s) ends it there.
+
+    def run(t: tm.Tracker, events: list[dict[str, Any]]) -> tm.Tracker:
+        for e in events:
+            t.event(e)
+        return t
+
+    def held(t: tm.Tracker) -> dict[str, Any]:
+        return {k: tm.ns_to_ms(v) for k, v in t.held_ns().items()}  # type: ignore[union-attr]
+
+    def deadline_of(t: tm.Tracker, m: str) -> dict[str, Any]:
+        reps = [r for r in t.reports if r.member == m]
+        acct = tm.DeadlineAccount(t.held_ns(m), sum(1 for r in reps if r.event == "missed" and r.owner == tm.PRESENT),
+                                  sum(1 for r in reps if r.event == "missed" and r.owner != tm.PRESENT),
+                                  t.first_end(m) is not None)
+        return tm.conclude(dl, tm.Reading(acct, tm.NOT_HEARD, (), False, False, False))["deadline"].pair()
+
+    # A known member never heard, missed while its owner was present, then
+    # its owner gone: a missed member is held while it stays missed (the
+    # CHANGELOG's "deliberately not changed"; deadlines.json's "heard, missed
+    # or waited for"), so the owner's absence after the miss is no pause.
+    t = run(tm.Tracker(500, 1, ["cmd"]), [
+        {"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 0, "event": "start"},
+        {"at_ms": 501, "event": "tick"}, {"at_ms": 1000, "event": "owner", "state": "unconfirmed"},
+        {"at_ms": 1100, "event": "owner", "state": "absent"}, {"at_ms": 3000, "event": "end"}])
+    out.append((f"{label5}: a known member never heard, missed with its owner present, its owner then absent: held "
+                f"to the window's end while it stays missed, and its deadline no (missed)",
+                (held(t), deadline_of(t, "cmd")), ({"cmd": 3000}, {"answer": "no", "reason": "missed"})))
+    # A known member waited for, its owner absent at 300 (a pause), then
+    # heard from 1000 every 100 ms with its owner still absent (a sample a
+    # publisher went on putting after its tokens went): heard, it is held
+    # from that arrival whatever presence says, a new stretch of 2,000 ms,
+    # and no miss: met. Read with presence alone restarting a stretch, as
+    # v1.md's "its presence again starts a new one" alone would, it would be
+    # held 300 ms: window_too_short.
+    t = run(tm.Tracker(500, 1, ["cmd"]), [
+        {"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 0, "event": "start"},
+        {"at_ms": 300, "event": "owner", "state": "absent"},
+        *({"at_ms": 1000 + 100 * i, "event": "arrival", "member": "cmd"} for i in range(20)),
+        {"at_ms": 3000, "event": "end"}])
+    out.append((f"{label5}: a known member paused by its owner's absence, then heard while its owner is absent: a new "
+                f"stretch from that arrival, 2,000 ms, never the 300 ms before the pause; met",
+                (held(t), deadline_of(t, "cmd")), ({"cmd": 2000}, {"answer": "yes", "reason": "met"})))
+    # A member not known, heard 100 and 200, ended at 300 (its token gone
+    # by a complete read), not heard again: no longer held at the window's
+    # end, and held in it, 200 ms, ended.
+    t = run(tm.Tracker(500, 4, [], epoch=True), [
+        {"at_ms": 0, "event": "start"}, {"at_ms": 0, "event": "member_seen", "member": "axis/x"},
+        {"at_ms": 100, "event": "arrival", "member": "axis/x"}, {"at_ms": 200, "event": "arrival", "member": "axis/x"},
+        {"at_ms": 300, "event": "member_gone", "member": "axis/x"}, {"at_ms": 1000, "event": "end"}])
+    out.append((f"{label5}: a member ended in the window and not heard again: held 200 ms though no longer held at its "
+                f"end, its first end at 300; its deadline not asked (ended)",
+                (t.held(), held(t), tm.ns_to_ms(t.first_end("axis/x") or 0), deadline_of(t, "axis/x")),
+                ([], {"axis/x": 200}, 300, {"answer": "not_asked", "reason": "ended"})))
+    # A roll-up's reason over members given out of byte order, through the
+    # pairs zk2py's tool hands it: the run's first member in byte order.
+    out.append(("timing.v1 0.5 §5 (F-279): a run's roll-up over two resources' members, handed in row order, reads "
+                "its reason from the first in byte order",
+                tm.rollup("deadline", [("zk2/lab/pace/pace.v1/stream/cmd", tm.Answer(tm.UNOBSERVABLE, "window_too_short")),
+                                       ("zk2/lab/pace/pace.v1/stream/axis/x",
+                                        tm.Answer(tm.UNOBSERVABLE, "owner_not_present"))]).pair(),
+                {"answer": "unobservable", "reason": "owner_not_present"}))
+    # review-bot on PR #941: the roll-up's two forms are explicit, and a
+    # tool's window closes once. rollup takes (key, Answer) pairs alone,
+    # rollup_answer answer tokens alone; each refuses the other's, and a
+    # mix. A second end judges nothing and adds no report.
+    def refused(f: Any, arg: Any) -> bool:
+        try:
+            f("deadline", arg)
+        except TypeError:
+            return True
+        return False
+
+    met, missed = tm.Answer(tm.YES, "met"), tm.Answer(tm.NO, "missed")
+    out.append(("timing.v1 0.5 §5 (F-279): rollup refuses bare answers and a mix of pairs and answers; rollup_answer "
+                "refuses pairs and Answers; each reads its own form",
+                ([refused(tm.rollup, a) for a in ([met], [("k", met), missed], [("k", "yes")])],
+                 [refused(tm.rollup_answer, a) for a in ([("k", met)], [met], ["yes", met])],
+                 tm.rollup("deadline", [("b", met), ("a", missed)]).pair(), tm.rollup_answer("deadline", ["yes", "no"])),
+                ([True, True, True], [True, True, True], {"answer": "no", "reason": "missed"}, "no")))
+    t = run(tm.Tracker(500, 1, ["cmd"]), [
+        {"at_ms": 0, "event": "owner", "state": "present"}, {"at_ms": 0, "event": "start"},
+        {"at_ms": 1000, "event": "end"}])
+    n = len(t.reports)
+    again = t.end(2 * 1000 * tm.MS)
+    out.append((f"{label5}: a tool's window closes once: a second end, after a miss would be due, judges nothing, "
+                f"adds no report, and leaves the window's end and held time as the first end left them",
+                (n, again, len(t.reports), tm.ns_to_ms(t.window_end or 0), held(t)),
+                (1, [], 1, 1000, {"cmd": 1000})))
+    # review-bot on PR #939: a tool's held time where it holds no tracker (a
+    # resource with no deadline, which no answer reads): the end that counts
+    # is the first at or after the instant the member was first held. An
+    # earlier one (100 ms, the member first held at 200 ms) ends nothing;
+    # one after (1.5 s) ends it there.
     ms = tm.MS
-    out.append(("timing.v1 0.4 §2.7 (F-280, open): a member's end before the instant it was first held in the window "
-                "ends nothing; the first end at or after it does; a member never held was held 0",
+    out.append(("timing.v1 0.4 §2.7: with no tracker, a member's end before the instant it was first held in the "
+                "window ends nothing; the first end at or after it does; a member never held was held 0",
                 [tm.window_held(0, 3000 * ms, 200 * ms, e) for e in ([100 * ms], [100 * ms, 1500 * ms, 2500 * ms], [])]
                 + [tm.window_held(0, 3000 * ms, None, [])],
                 [(2800 * ms, None), (1300 * ms, 1500 * ms), (2800 * ms, None), (0, None)]))
