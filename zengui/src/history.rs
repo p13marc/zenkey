@@ -53,7 +53,7 @@ pub struct HistoryEntry {
     /// or a replayed row, whose stamp is the file's text and never
     /// resurrected as a live one.
     pub stamp: Option<zenoh::time::Timestamp>,
-    /// A `Delete` is a tombstone: authoritative retirement (RFC 04 §1.2),
+    /// A `Delete` is a tombstone: authoritative retirement (core §4.2),
     /// never an empty value.
     pub is_delete: bool,
     /// True payload size.
@@ -199,7 +199,7 @@ pub struct HistoryRing {
     max_entries: usize,
     max_bytes: usize,
     bytes: usize,
-    /// Entries dropped to stay within the bounds (RFC 09 §5.1 O6).
+    /// Entries dropped to stay within the bounds (tooling guide O6).
     evicted: u64,
     next_seq: u64,
     /// See [`HistoryRing::generation`].
@@ -257,7 +257,7 @@ impl HistoryRing {
     /// Re-bound the ring in place (#188) — the Settings overlay's live apply,
     /// same contract as [`crate::echo::EchoRing::resize`]: raising never
     /// discards the eviction count that reported the old bound's cost, and a
-    /// shrink's trim is counted like any other eviction (RFC 09 §5.1 O6).
+    /// shrink's trim is counted like any other eviction (tooling guide O6).
     pub fn resize(&mut self, max_entries: usize) {
         self.max_entries = max_entries.max(1);
         self.max_bytes = self.max_entries.saturating_mul(BYTES_PER_ENTRY);
@@ -475,7 +475,7 @@ mod tests {
     }
 
     /// A tombstone is retirement, not an empty value — the distinction the
-    /// whole state plane rests on (RFC 04 §1.2).
+    /// whole state plane rests on (core §4.2).
     #[test]
     fn a_delete_is_recorded_as_a_tombstone_not_an_empty_put() {
         let mut ring = HistoryRing::new(8);

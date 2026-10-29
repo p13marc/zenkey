@@ -6,8 +6,8 @@
 //! for:
 //!
 //! * **`loss`** was already encoded correctly. `RateReport.sn_gaps` is an
-//!   `Option`, and its doc says `None` = `--loss` was not asked — RFC 09 §5.1
-//!   O4 in one field. The table shows the clause iff the field is there.
+//!   `Option`, and its doc says `None` = `--loss` was not asked — observer §1
+//!   in one field. The table shows the clause iff the field is there.
 //! * **`latency`** was a bug, and its own issue (#238): the report carried a
 //!   full latency distribution whether or not anyone asked, while the caveat
 //!   naming *which clock* it came from printed only under `--latency`. Fixed
@@ -164,9 +164,9 @@ impl Render for RateView<'_> {
         }
         // The caveat is part of the measurement (#119) and names *which*
         // clock (#213). Worded by the engine so the GUI cannot describe the
-        // same number differently (RFC 09 §5.1 O7).
+        // same number differently (observer §8.3).
         if let Some(l) = self.report.rows.iter().find_map(|r| r.latency.as_ref()) {
-            notes.push(Note::caveat(format!("latency = {}", l.caveat())).cite("RFC 09 §5.1 O7"));
+            notes.push(Note::caveat(format!("latency = {}", l.caveat())).cite("observer §8.3"));
         }
         if let Some(gaps) = self.report.sn_gaps.get() {
             notes.push(Note::coverage(format!(

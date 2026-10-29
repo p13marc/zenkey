@@ -10,7 +10,7 @@
 //! under `"qos"`, where [`parse_row`] resolves a profile *name*, so every
 //! row of `echo --format ndjson | pub --from ndjson` was counted
 //! malformed; zengui wrote a payload byte *count* under `"bytes"`, which has
-//! meant base64 of the wire payload since RFC 09 §5.2. Both carried a doc
+//! meant base64 of the wire payload since v1's capture format. Both carried a doc
 //! comment asserting conformance. One struct is the repair — a dialect with
 //! one writer cannot drift from itself.
 //!
@@ -22,7 +22,7 @@
 //! we count).
 //!
 //! A row MAY carry its payload lossless as `"bytes"` (base64 of the exact
-//! wire bytes — the `.zrec` dialect, RFC 09 §5.2), which wins over
+//! wire bytes — the `.zrec` dialect, tooling guide §5), which wins over
 //! `"value"`: a `value` is a decoded *rendering* and does not round-trip a
 //! binary payload. Same for `"attachment_b64"` over `"attachment"`.
 //!
@@ -73,7 +73,7 @@ impl SampleRow {
     }
 
     /// The lossless payload, base64 — what a capture owes and a live
-    /// rendering does not (RFC 09 §5.2).
+    /// rendering does not (tooling guide §5).
     pub fn with_payload_bytes(mut self, payload: &[u8]) -> SampleRow {
         self.bytes = Some(b64(payload));
         self
@@ -100,7 +100,7 @@ pub struct IngestRow {
     /// The row's wire QoS axes, when it carries them (#612, FJ8a); a row
     /// without them publishes with its writer's default.
     pub qos_axes: Option<crate::bus::write::WireQos>,
-    /// A tombstone row (RFC 04 §1.2): publish a delete, not the payload.
+    /// A tombstone row (core §4.2): publish a delete, not the payload.
     pub delete: bool,
     /// The row's attachment, when it carries one (#117), same value rules
     /// as the payload.
@@ -153,7 +153,7 @@ pub fn parse_row(line: &str) -> Result<IngestRow, String> {
     }
     let delete = obj.get("delete").and_then(|d| d.as_bool()).unwrap_or(false);
     // The lossless bytes win over the rendering (`.zrec` rows carry both
-    // clocks and neither payload shape lies — RFC 09 §5.2).
+    // clocks and neither payload shape lies — tooling guide §5).
     let payload = match (b64_bytes(obj, "bytes")?, obj.get("value")) {
         (Some(raw), _) => raw,
         (None, Some(serde_json::Value::Null) | None) if delete => Vec::new(),
@@ -192,7 +192,7 @@ pub fn parse_row(line: &str) -> Result<IngestRow, String> {
 /// One line of an explorer ndjson **stream**, as the input side reads it.
 ///
 /// A stream interleaves its samples with tagged non-sample rows — `{"row":
-/// "dropped",…}` where the bus outran the observer (RFC 09 §5.1 O6),
+/// "dropped",…}` where the bus outran the observer (tooling guide O6),
 /// `{"row":"seed",…}` at the seed boundary — and a consumer that wants the
 /// samples must tell those apart from a row it cannot parse: metadata is
 /// *skipped and counted as skipped*, a malformed row is an error naming the
@@ -271,7 +271,7 @@ mod tests {
 
     /// The `.zrec` dialect: `bytes` is the exact wire payload and wins over
     /// the `value` rendering; `attachment_b64` likewise. Bad base64 is a
-    /// counted error, not a skip (RFC 09 §5.2).
+    /// counted error, not a skip (tooling guide §5).
     #[test]
     fn lossless_bytes_win_over_the_rendering() {
         let row = parse_row(
@@ -312,7 +312,7 @@ mod tests {
         }
     }
 
-    /// The round trip the README advertises and RFC 09 §5.2 rests on, over
+    /// The round trip the README advertises and tooling guide §5 rests on, over
     /// a row this crate wrote rather than one a test hand-typed — and the
     /// axes the sample rode with ride the row both ways (#235, FJ8a).
     #[test]
@@ -348,7 +348,7 @@ mod tests {
         );
 
         // The capture dialect: the lossless bytes, which win over any
-        // rendering (RFC 09 §5.2).
+        // rendering (tooling guide §5).
         let captured = SampleRow {
             key: v.key.clone(),
             t: Some(1_250),
@@ -377,7 +377,7 @@ mod tests {
 
     /// A writer that does not hold a fact omits it. Asserted as a whole
     /// document, because `json["absent"]` is `Null` and a field-by-field
-    /// check cannot tell absent from null-when-unknown (RFC 09 §5.1 O4) —
+    /// check cannot tell absent from null-when-unknown (observer §1) —
     /// the same reason `report_contract.rs` compares whole documents.
     #[test]
     fn an_unheld_fact_is_absent_from_the_row_rather_than_null() {

@@ -1,4 +1,4 @@
-//! Two snapshots compared (RFC 13 §4.4; #219; zk2's since #612, FJ8b): by
+//! Two snapshots compared (tooling guide §5; #219; zk2's since #612, FJ8b): by
 //! zk2 key, facet by facet, bounded, with both spans carried through
 //! untouched.
 //!

@@ -20,7 +20,7 @@ calls v1's `zenkey_build` from its build script, and declares an
 | | The v1 line | The zk2 line |
 |---|---|---|
 | Branch | `v1` | `main` |
-| Rules | `rfcs/`, frozen at v1.50: errata only | [`spec/core.md`](../../spec/core.md), its version in its header, and the profiles of [the index](../../spec/profiles/README.md#index) |
+| Rules | [`rfcs/`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs), frozen at v1.50: errata only | [`spec/core.md`](../../spec/core.md), its version in its header, and the profiles of [the index](../../spec/profiles/README.md#index) |
 | Libraries | `zenkey` and `zenkey-build` 0.11.x, `zenkey-fleet` 0.18.x, on crates.io | `zenkey`, `zenkey-build` and `zenkey-fleet` 0.20.0, and the new `zenkey-model`: all `publish = false`, waiting on the maintainer's call (#585, #929) |
 | Tools | zenctl, zengui and zenwatch, released as 0.14.x | the same three, ported. No release carries them yet: the last tag, 0.14.0, predates the port. |
 | Also | v1's sources and the `fixture-tests` corpus | a second implementation of the spec, [`impl/python/`](../../impl/python/README.md) |

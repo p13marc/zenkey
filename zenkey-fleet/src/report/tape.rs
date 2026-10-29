@@ -1,4 +1,4 @@
-//! The tape plane (RFC 09 §5.2): the `.zrec` header, the row dialect a
+//! The tape plane (tooling guide §5): the `.zrec` header, the row dialect a
 //! capture is made of, and what a capture or a replay reports afterwards.
 //!
 //! [`ZrecHeader`] — with the two version-2 blocks it may carry,
@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The first line of a `.zrec` file: what was asked, under which base, and
-/// when (RFC 09 §5.1 O4 — a capture names its question). The `base` is the
+/// when (observer §1 — a capture names its question). The `base` is the
 /// operator's *stated* deployment base at capture time — in zk2, the
 /// deployment's session namespace (the tooling guide's §5); recorded keys
 /// are full wire keys and are never re-derived from it (O3).
@@ -42,7 +42,7 @@ pub struct ZrecHeader {
     /// state it; empty when every one is named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excluded: Option<Vec<String>>,
-    /// Version 2 (RFC 13 §4.1, v1.34; #218): the state preamble this
+    /// Version 2 (tooling guide §5; #218): the state preamble this
     /// capture carries — the bounded fetch that produced the `preamble`
     /// rows and what it could not fetch. Absent on a version-1 file and on
     /// a capture that asked for none.
@@ -55,7 +55,7 @@ pub struct ZrecHeader {
     pub pre_roll: Option<PreRollInfo>,
 }
 
-/// What a version-2 preamble is a snapshot *of* (RFC 13 §4.3's pre-roll
+/// What a version-2 preamble is a snapshot *of* (tooling guide §5's pre-roll
 /// bullet): the values at the moment the ring began are not recoverable,
 /// so the honest substitute has to be named rather than implied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,13 +71,13 @@ pub enum PreambleSemantics {
     Full,
 }
 
-/// The state preamble's account of itself (RFC 13 §4.1, version 2).
+/// The state preamble's account of itself (tooling guide §5, version 2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreambleInfo {
     /// Preamble rows written — counted apart from observed rows (O6).
     pub count: u64,
     /// How long the fan-in GET took: a preamble is collected *over* a span,
-    /// never at an instant (RFC 13 §4.4's obligation, inherited).
+    /// never at an instant (tooling guide §5's obligation, inherited).
     pub collected_over_s: f64,
     /// The selectors actually fetched — the state-class projection of the
     /// watched set, so a watch that reaches no `state` key fetched nothing.
@@ -94,7 +94,7 @@ pub struct PreambleInfo {
     pub failed: Vec<String>,
 }
 
-/// The retained window's account of itself at trigger time (RFC 13 §4.3's
+/// The retained window's account of itself at trigger time (tooling guide §5's
 /// pre-roll bullet): what `--pre` asked for and what the ring could give.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreRollInfo {
@@ -183,7 +183,7 @@ pub struct ReplayReport {
     pub first_errors: Vec<String>,
     /// Version-2 preamble rows **not** published — the default: re-stamping
     /// state-at-capture-start republishes a snapshot over the live fleet
-    /// (RFC 13 §4.2), so the replayer skips them unless told `--seed-state`
+    /// (tooling guide §5), so the replayer skips them unless told `--seed-state`
     /// and says how many.
     #[serde(skip_serializing_if = "is_zero")]
     pub preamble_skipped: u64,
@@ -199,12 +199,12 @@ pub struct ReplayReport {
 
 /// One sample, as the explorers write it (#235).
 ///
-/// The write side of this module's dialect: `.zrec` rows (RFC 09 §5.2),
+/// The write side of this module's dialect: `.zrec` rows (tooling guide §5),
 /// `zenctl echo --format ndjson`, and zengui's echo export are all
 /// this struct, so [`parse_row`](crate::tape::ingest::parse_row) reads back what any of them wrote. Every
 /// optional field is `skip_serializing_if`: a writer that does not hold a
 /// fact omits it rather than nulling it, because a `null` here would claim
-/// a question was asked and answered negatively (RFC 09 §5.1 O4). That is
+/// a question was asked and answered negatively (observer §1). That is
 /// also what keeps the three writers' rows a *subset* relationship rather
 /// than three shapes — a `.zrec` row carries no `origin`, an echo row
 /// carries no pacing offset, and neither is lying about the other.
@@ -219,7 +219,7 @@ pub struct SampleRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<super::KeyIdentity>,
     /// Microseconds since the capture epoch: the **observer's arrival
-    /// clock**, and the only thing replay paces by (RFC 09 §5.2). A live
+    /// clock**, and the only thing replay paces by (tooling guide §5). A live
     /// stream has no epoch to be relative to, so it omits this.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub t: Option<u64>,
@@ -236,7 +236,7 @@ pub struct SampleRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
     /// The sample's HLC, when one rode it. Whose clock it is depends on who
-    /// stamped it (RFC 09 §5.1 O7); this field says only that it exists.
+    /// stamped it (observer §8.3); this field says only that it exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
     /// The wire's actual QoS axes as one token,
@@ -250,7 +250,7 @@ pub struct SampleRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qos_axes: Option<String>,
     /// A tombstone: authoritative retirement, never an empty put
-    /// (RFC 04 §1.2). Always written — every sample is one or the other,
+    /// (core §4.2). Always written — every sample is one or the other,
     /// and that is a fact rather than an unanswered question.
     pub delete: bool,
     /// Base64 of the exact wire payload — lossless and round-trippable,
@@ -259,20 +259,21 @@ pub struct SampleRow {
     pub bytes: Option<String>,
     /// The payload as a *rendering*: a schema decode when one was asked
     /// for and succeeded, else the structural degradation. It does not
-    /// round-trip a binary payload, and RFC 09 §5.2 says so.
+    /// round-trip a binary payload, and tooling guide §5 says so.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
     /// True payload size, whatever the rendering above shows.
     ///
     /// Deliberately not spelled `bytes`: that key has meant the base64
-    /// payload since RFC 09 §5.2, and a byte count under it makes the row
+    /// payload since v1's capture format, and a byte count under it makes the row
     /// unreadable rather than merely lossy (#235).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload_bytes: Option<usize>,
     /// The publishing entity, `zid:eid#sn`, when `SourceInfo` rode the
     /// sample. Usually absent: zenoh 1.9 and 1.10 deliver none to a
     /// subscriber — 1.10 even dropped setting it through the advanced API
-    /// (eclipse-zenoh/zenoh#2563) — RFC 09 §5.1 O7's practical note.
+    /// (eclipse-zenoh/zenoh#2563), so a stamp's owner is usually
+    /// unattributable (observer §8.3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// The attachment as a rendering (#117), on the same terms as
@@ -296,7 +297,7 @@ pub struct SampleRow {
     /// Why a decode that was asked for did not happen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decode_error: Option<String>,
-    /// A version-2 preamble row (RFC 13 §4.1, #218): state fetched at
+    /// A version-2 preamble row (tooling guide §5, #218): state fetched at
     /// trigger time and written ahead of the first observed row, at
     /// `t: 0`. Only ever written as `true`; an observed row omits it
     /// rather than saying `false`, on the same terms as every other
@@ -311,7 +312,7 @@ pub struct SampleRow {
 /// **The engine's word, not a frontend's.** This is the spelling
 /// [`SampleRow::qos_axes`] carries, which
 /// [`parse_row`](crate::tape::ingest::parse_row) reads back for
-/// `pub --from ndjson` and `.zrec` replay (RFC 09 §5.2) — so it is a
+/// `pub --from ndjson` and `.zrec` replay (tooling guide §5) — so it is a
 /// round-trip contract, not a rendering choice. Both frontends used to spell
 /// it independently, fifteen literals each, agreeing by a comment that said
 /// they agreed (#353). The precedent is `LatencyReport::caveat`, worded here
@@ -435,7 +436,7 @@ mod qos_axes_tests {
     }
 
     /// The token is a round-trip contract, not a rendering: `.zrec` replay
-    /// and `pub --from ndjson` read it back (RFC 09 §5.2). Pinned here rather
+    /// and `pub --from ndjson` read it back (tooling guide §5). Pinned here rather
     /// than in either frontend, because it is neither frontend's (#353).
     #[test]
     fn the_axes_token_is_stable() {

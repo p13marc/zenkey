@@ -11,7 +11,7 @@ that reads presence fills the cache keyed by it, which made `cache clear`'s
 pinned `existed:false` a race against trycmd's file scheduling.
 
 An empty config says so, and says what to type next — an empty set is not a
-verdict (RFC 05 §3.1), and here it is not even a mystery:
+verdict (observer §2), and here it is not even a mystery:
 
 Every case here names `--format` explicitly, for the reason the key algebra
 does: the default is `auto`, `auto` resolves against the stream, and a corpus

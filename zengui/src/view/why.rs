@@ -2,7 +2,7 @@
 //! silent, the non-verdict itemised. zk2's ladder since #614 (FL8b): the
 //! engine's [`zenkey_fleet::run_why`], the one `zenctl why` prints (#702).
 //!
-//! "Silence is never a verdict" (RFC 05 §3.1) is correct and it is also
+//! "Silence is never a verdict" (observer §2) is correct and it is also
 //! where the user is abandoned; the ladder turns the refusal into rungs —
 //! namespace, key, presence, descriptor, contract, answer, last-known — each
 //! asking whether the silence is caused *there*, so a rung's finding is the

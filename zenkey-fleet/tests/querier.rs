@@ -1,5 +1,5 @@
 //! The declared-query chokepoint (#37), proven against real zenoh — the
-//! RFC 05 §2.1 checklist must hold on the *declared* path exactly as
+//! fan-in checklist (core §5.1) must hold on the *declared* path exactly as
 //! `fleet_get` pins it on the one-shot path: target `All` (a `complete`
 //! queryable must not collapse the fleet), consolidation `None`, and
 //! attribution by each reply's own key.
@@ -141,7 +141,7 @@ async fn parameters_ride_per_get_not_in_the_declared_key() {
 /// exercises the same drain. Under a bound of three, three answers come back
 /// and `GetOpts::elided` names the rest: the memory is bounded, the count is
 /// exact, and the rendering has what it needs to say "a sample, not all of
-/// them" (RFC 13 §3 O6).
+/// them" (tooling guide O6).
 ///
 /// Unbounded, this loop kept every reply and its refcounted payload, and
 /// nothing anywhere said how many that was.

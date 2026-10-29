@@ -176,7 +176,7 @@ fn from_zrec(
                 }),
                 // A version-2 preamble row is state at capture start, not an
                 // arrival: it sits on neither axis, and is counted rather
-                // than placed (RFC 13 §4.1). A trigger record is a marker
+                // than placed (tooling guide §5). A trigger record is a marker
                 // the timeline has no lane for.
                 Ingested::Preamble { .. } => preamble += 1,
                 Ingested::Trigger { .. } => {}
@@ -191,7 +191,7 @@ fn from_zrec(
     if preamble > 0 {
         eprintln!(
             "{}: {preamble} preamble row(s) not placed — state at capture start is not \
-             an arrival (RFC 13 §4.1)",
+             an arrival (tooling guide §5)",
             path.display()
         );
     }

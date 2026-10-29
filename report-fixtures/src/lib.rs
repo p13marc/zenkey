@@ -1948,7 +1948,7 @@ pub fn storage_plan() -> StoragePlan {
                 warnings: vec![warn(
                     WarningKind::Overlap,
                     "overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both",
-                    "RFC 09 §2",
+                    "tooling guide §8.4",
                 )],
                 derived: None,
             },
@@ -1971,12 +1971,12 @@ pub fn storage_plan() -> StoragePlan {
                     warn(
                         WarningKind::CompleteRefused,
                         "complete = true refused: it is not replicated — emitted as false",
-                        "RFC 09 §2.2",
+                        "tooling guide §8.4",
                     ),
                     warn(
                         WarningKind::Overlap,
                         "overlaps events (acme/zk2/*/*/*/events/**): a GET under both selectors is answered by both",
-                        "RFC 09 §2",
+                        "tooling guide §8.4",
                     ),
                 ],
                 derived: None,
@@ -1995,7 +1995,7 @@ pub fn storage_plan() -> StoragePlan {
                 warnings: vec![warn(
                     WarningKind::RetentionIsTheDatabases,
                     "retention is the database's policy, not zenoh config",
-                    "RFC 09 §2.3",
+                    "tooling guide §8.4",
                 )],
                 derived: None,
             },
@@ -2005,7 +2005,7 @@ pub fn storage_plan() -> StoragePlan {
             volume: None,
             key_expr: Some("acme/plant/**".into()),
             reason: "names volume \"rocks\", which [volumes] does not declare".into(),
-            cite: "RFC 09 §2".into(),
+            cite: "tooling guide §8.4".into(),
         }],
         enrollment: zenkey_fleet::report::Asked::NotAsked,
     }
@@ -2300,7 +2300,7 @@ pub fn storage_plan_enrolled() -> StoragePlan {
             warnings: vec![PlanWarning {
                 kind: WarningKind::ImplicitVolume,
                 text: "no deployment file names an [events] volume: volatile".into(),
-                cite: "RFC 09 §2.1".into(),
+                cite: "tooling guide §8.4".into(),
             }],
         }],
         storages: vec![PlannedStorage {
@@ -2913,7 +2913,7 @@ pub fn timeline_report_hlc() -> TimelineReport {
     }
 }
 
-// ─── snapshots (RFC 13 §4.4, #219; zk2's since #612, FJ8b) ────────────────
+// ─── snapshots (tooling guide §5, #219; zk2's since #612, FJ8b) ───────────
 
 fn zsnap_header(
     base: &str,

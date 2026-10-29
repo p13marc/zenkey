@@ -35,7 +35,7 @@
 //!     gated `config:doctor`: unavailable (cause `config`) in the
 //!     descriptor when no `doctor` block is configured;
 //!   - `state/counters` — [`ZenwatchCounters`], what the daemon's bounds
-//!     cost (RFC 13 §3 O6), put on change at most once per tick. These are
+//!     cost (tooling guide O6), put on change at most once per tick. These are
 //!     not health.v1 checks: a count is not a level, and health.v1 carries
 //!     no application field (its Appendix A).
 //!
@@ -130,7 +130,7 @@ pub struct ZenwatchDoctor {
     pub fixed: usize,
     /// The `DoctorReport`, exactly as `zenctl doctor --format json` prints
     /// it: each check's verdict in the judgement shape, what was not asked
-    /// absent (RFC 13 §1). After a failed run, the last report that
+    /// absent (observer §1). After a failed run, the last report that
     /// succeeded, retained; `null` when none has yet. Carried as the value
     /// it serialized to; its schema is the fleet's (`report::doctor`).
     #[serde(default)]
@@ -146,7 +146,7 @@ pub struct ZenwatchDoctor {
 }
 
 /// `state/counters`: what the daemon did, and what its bounds cost, since
-/// it started (RFC 13 §3 O6: every bound reports its cost).
+/// it started (tooling guide O6: every bound reports its cost).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ZenwatchCounters {
     /// RFC 3339: when this run started; every count is since then.
@@ -401,7 +401,8 @@ fn observer_check(name: &'static str, o: Observer, what: &str) -> Check {
             Some(Level::Degraded),
             format!(
                 "{dropped} event(s) of {what} lost since the last complete read: every \
-                 identity its rules watch is unobservable until a complete re-read (RFC 13 §3 O6)"
+                 identity its rules watch is unobservable until a complete re-read \
+                 (tooling guide O6)"
             ),
         ),
         Observer::CutOff => (

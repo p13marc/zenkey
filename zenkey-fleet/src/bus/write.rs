@@ -30,7 +30,7 @@ impl std::fmt::Debug for Publication {
 /// ndjson` publish with exactly, or [`WireQos::DEFAULT`]. A zk2 owner's QoS
 /// is per resource (spec §2.4); a tool writing a foreign key has no
 /// contract to read it from, so it publishes what it recorded or what it is
-/// told. v1's five profile names (RFC 04 §3) left with the v1 dependency
+/// told. v1's five QoS profile names left with the v1 dependency
 /// (#612, FJ9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WireQos {
@@ -109,7 +109,7 @@ impl Publication {
     /// Publish one payload, with an optional attachment riding beside it
     /// (#117 — attachments are outside the registry's vocabulary and are
     /// never schema-encoded). Sets the wire `Encoding` when one was declared
-    /// (RFC 04 v1.5's recommendation: publishers say what they carry).
+    /// (publishers say what they carry: core §7.2).
     pub async fn send(&self, payload: Vec<u8>, attachment: Option<Vec<u8>>) -> Result<()> {
         self.send_stamped(payload, attachment, None).await
     }
@@ -117,7 +117,7 @@ impl Publication {
     /// [`send`](Self::send), with an explicit HLC timestamp when the caller
     /// mints one (`session.new_timestamp()`). `None` leaves stamping to the
     /// deployment's config — the default put behaviour. The generator uses
-    /// this to stamp state samples for LWW (RFC 04 §4) and, for its
+    /// this to stamp state samples (core §4.2 S1) and, for its
     /// `unstamped` fault (#163), to deliberately omit the stamp.
     pub async fn send_stamped(
         &self,
@@ -142,7 +142,7 @@ impl Publication {
             .map_err(|e| Error::bus("put", self.publisher.key_expr().as_str(), e))
     }
 
-    /// Publish a tombstone — an authoritative retirement (RFC 04 §1.2),
+    /// Publish a tombstone — an authoritative retirement (core §4.2),
     /// never a payload marker. The only delete path: it rides the declared
     /// publisher, and `Session::delete` stays unexposed for the same reason
     /// there is no bare-put helper. Gate dynamic keys through
@@ -163,10 +163,10 @@ impl Publication {
     }
 
     /// Whether any subscriber currently matches **this publication** — a
-    /// routing fact about the publisher *this process declared* (RFC 12 §9's
-    /// allowed half). It says nothing about other publishers on the key, and
+    /// routing fact about the publisher *this process declared* (the half
+    /// zenoh reports, tooling guide §8.3). It says nothing about other publishers on the key, and
     /// `false` is not a fleet verdict ("no subscriber matched *our*
-    /// publication", never "nobody listens here" — RFC 05 §3.1 applied to a
+    /// publication", never "nobody listens here" — observer §2 applied to a
     /// badge).
     pub async fn matching_status(&self) -> Result<bool> {
         self.publisher
@@ -194,17 +194,18 @@ impl Publication {
 pub enum WriteAct {
     /// A put: a sample on a declared publisher.
     Put,
-    /// A tombstone (RFC 04 §1.2).
+    /// A tombstone (core §4.2).
     Retire,
 }
 
 /// Refuse a write addressed to a wildcard — the one refusal every write
 /// path shares, and the one no `force` overrides (#504).
 ///
-/// A tombstone was the first act to carry it (RFC 04 §1.2, v1.12); a put
+/// A tombstone was the first act to carry it (v1's retire gate; the
+/// tooling guide's §4); a put
 /// is the same blast radius with a payload attached: it is delivered to
 /// every subscriber whose subscription intersects it, across every
-/// producer's keys, and RFC 07 §3 makes a publisher's key concrete by rule.
+/// producer's keys, and every zk2 consumer discards it (core §3.2 R6).
 /// `zenctl pub 'prod/v1/**' x` used to exit 0 with "published". `$` counts:
 /// the only place it may stand in a key expression is `$*`.
 pub fn check_concrete(key: &str, act: WriteAct) -> Result<()> {
@@ -214,11 +215,11 @@ pub fn check_concrete(key: &str, act: WriteAct) -> Result<()> {
     let why = match act {
         WriteAct::Retire => {
             "a tombstone is addressed to one concrete key; a wildcard delete is not \
-             an operator act, it is a blast radius (RFC 04 §1.2, v1.12)"
+             an operator act, it is a blast radius (tooling guide §4)"
         }
         WriteAct::Put => {
-            "a put is addressed to one concrete key (RFC 07 §3: a publisher always \
-             names its own); a wildcard put reaches every subscriber it intersects, \
+            "a put is addressed to one concrete key (core §3.2 R6: a consumer \
+             discards any other); a wildcard put reaches every subscriber it intersects, \
              across every producer's keys — not an operator act, a blast radius"
         }
     };
@@ -236,7 +237,7 @@ pub fn check_concrete(key: &str, act: WriteAct) -> Result<()> {
 /// What a delete means is its owner's to say: a zk2 service's own key is
 /// refused before this is asked (P3, spec §6), and a key no contract
 /// describes has no class a tool could read a licence from — v1 read one
-/// off the key's class and its registry (RFC 04 §1.2), and that reading
+/// off the key's class and its registry, and that reading
 /// left with the v1 grammar (#612, FJ9).
 pub fn check_retire(key: &str, force: bool) -> Result<()> {
     check_concrete(key, WriteAct::Retire)?;
@@ -255,7 +256,7 @@ pub fn check_retire(key: &str, force: bool) -> Result<()> {
 /// [`Publication`] or a [`crate::RepeatingQuery`]). These are the only two
 /// places a matching claim can be made from — a foreign publisher's consumers
 /// are not observable without publishing on their key, and that half stays
-/// deferred (RFC 12 §9; #38/#80 adoption note).
+/// deferred (tooling guide §8.3; #38/#80).
 pub struct MatchingEvents {
     listener: zenoh::matching::MatchingListener<
         zenoh::handlers::FifoChannelHandler<zenoh::matching::MatchingStatus>,
@@ -319,7 +320,7 @@ mod tests {
         let put = check_concrete("prod/zk2/**", WriteAct::Put)
             .unwrap_err()
             .to_string();
-        assert!(put.contains("RFC 07 §3"), "{put}");
+        assert!(put.contains("core §3.2 R6"), "{put}");
         assert!(put.contains("every subscriber"), "{put}");
         assert!(check_concrete("plant/line-1/temp", WriteAct::Put).is_ok());
     }

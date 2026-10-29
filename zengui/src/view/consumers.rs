@@ -3,10 +3,10 @@
 //! ([`zenkey_fleet::Catalog::graph`]), kept to the roles whose provider is
 //! the subject's address, and its interface when the subject names one.
 //!
-//! Its one law is D13's (and RFC 12 §9's before it): this is not matching
+//! Its one law is D13's (v1's before it; the tooling guide's §8.3): this is not matching
 //! status. A row is a role a descriptor binds to a provider present now,
 //! never proof that anything reads, and a subject no presence read stands
-//! behind renders **"not asked"**, never an empty set (RFC 13 §3 O4). The
+//! behind renders **"not asked"**, never an empty set (observer §1). The
 //! vocabulary here never says "listening", "matching" or "unmatched". v1's
 //! admin-space join (declared subscribers and queriers by key expression)
 //! went with v1: zk2's graph is read from descriptors and tokens only, never
@@ -139,7 +139,7 @@ pub fn section(state: &ConsumersState, slot: SlotId, sp: Spacing) -> Column<'_, 
                 kit::EmptyKind::NotAsked,
                 "Presence not read",
                 "R3 edges come from descriptors, and no presence read stands behind the \
-                 lens — the bindings are not asked, never none (RFC 13 §3 O4)",
+                 lens — the bindings are not asked, never none (observer §1)",
             ));
         }
         ConsumersAnswer::Replaying => {

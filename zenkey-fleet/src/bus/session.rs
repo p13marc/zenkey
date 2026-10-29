@@ -40,8 +40,9 @@ pub const TOOL_INTERESTS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Open a session for a read-only explorer.
 ///
-/// RFC 09 §5: debug tools run *without* the session namespace and spell full
-/// keys — "which is also the honest view of what is on the wire". So we never
+/// Debug tools run *without* the session namespace and spell full keys,
+/// which is also the honest view of what is on the wire (core §1.6; the
+/// tooling guide's §8.1). So we never
 /// set `namespace`, and every key this tool prints is the real one.
 ///
 /// **The session is a zenoh client** unless `listen` is non-empty (#501). An
@@ -83,7 +84,7 @@ pub async fn open(connect: &[String], listen: &[String], scouting: bool) -> Resu
 ///
 /// One refusal: a file that sets a session `namespace` is rejected with the
 /// pointer — an explorer that stripped keys would be lying about the wire
-/// (RFC 09 §5), and silently unsetting the user's config would be worse.
+/// (tooling guide §8.1), and silently unsetting the user's config would be worse.
 pub async fn open_with_config(
     file: Option<&Path>,
     connect: &[String],
@@ -142,7 +143,7 @@ pub async fn open_reporting(
 /// nothing to time it out. `zenoh::open` is then raced against `deadline`:
 /// an endpoint that never settles is a **transport** failure, which is the
 /// verdict [`OpenFailure`] exists to distinguish and the one a connect flow
-/// that simply never returned could never reach (RFC 13 §3: a tool that
+/// that simply never returned could never reach (observer §1: a tool that
 /// cannot obtain an observation says so; it does not wait forever in
 /// silence).
 pub async fn open_reporting_within(
@@ -161,7 +162,7 @@ pub async fn open_reporting_within(
 /// Open a session **in** a deployment's namespace (#612, FJ4), for zk2's
 /// resolved verbs.
 ///
-/// The FJ decision of 2026-10-08 ends RFC 09 §5's "explorers are never
+/// The FJ decision of 2026-10-08 ends v1's "explorers are never
 /// namespaced" for zk2: a resolved verb — `service`, `iface`, `graph`,
 /// `schema show`, a live `compat` — reads base-relative `zk2/…` keys
 /// through a session whose `namespace` is the deployment's, exactly as the
@@ -303,7 +304,7 @@ async fn open_config(config: zenoh::Config, deadline: Duration) -> Result<Sessio
             op: "failed to open",
             target: "the Zenoh session".into(),
             source: "nothing to connect to: no connect endpoint and multicast \
-                     scouting off. An explorer session is a client (RFC 09 §5), \
+                     scouting off. An explorer session is a client (tooling guide §8.1), \
                      and a client with no router to dial reaches nothing — name \
                      an endpoint (--connect, a context, or connect.endpoints in \
                      the zenoh config), or opt in to scouting"
@@ -446,7 +447,7 @@ impl Stated {
                     "zenoh read this file, but the explorer could not read which \
                      keys it states ({detail}) — and it needs to: mode and \
                      multicast follow the file only where the file names them \
-                     (RFC 09 §5)"
+                     (tooling guide §8.1)"
                 ),
             )
         };
@@ -511,7 +512,7 @@ fn set(config: &mut zenoh::Config, key: &str, value: &str) -> Result<()> {
 /// say: its namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Posture {
-    /// An un-namespaced explorer (RFC 09 §5): a namespace would strip keys
+    /// An un-namespaced explorer (tooling guide §8.1): a namespace would strip keys
     /// on ingress and lie about the wire.
     Explorer,
     /// A zk2 resolved verb (FJ4): it does run in a namespace, but the
@@ -554,7 +555,7 @@ fn build_config_as(
                     Posture::Explorer => format!(
                         "sets a session namespace ({ns}) — an explorer runs \
                          un-namespaced so it sees the wire as it really is \
-                         (RFC 09 §5); remove the namespace from the file, or \
+                         (tooling guide §8.1); remove the namespace from the file, or \
                          use --base to name the deployment"
                     ),
                     Posture::Namespaced | Posture::Owner => format!(
@@ -604,8 +605,8 @@ fn build_config_as(
         // flag > env > context > file, and nothing above the file was given.
         None if stated.states("scouting/multicast/enabled") => {}
         // Not asked and not stated — no file, or a file that never mentions
-        // it: the explorer default, off (RFC 09 §0.1's contamination
-        // warning). zenoh's own default is on, and a file that merely did not
+        // it: the explorer default, off (tooling guide §8.1: multicast
+        // joins any mesh it can reach). zenoh's own default is on, and a file that merely did not
         // say so used to inherit it (#502).
         None => set(&mut config, "scouting/multicast/enabled", "false")?,
     }
@@ -932,7 +933,7 @@ mod tests {
         assert_eq!(OPEN_TIMEOUT, Duration::from_secs(10));
     }
 
-    /// #122: a file that sets a namespace is refused with the RFC pointer —
+    /// #122: a file that sets a namespace is refused with the guide's pointer —
     /// an explorer that stripped keys would lie about the wire.
     #[test]
     fn a_namespaced_file_is_refused_loudly() {
@@ -940,7 +941,7 @@ mod tests {
         let err = build_config(Some(&path), &[], &[], None)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("RFC 09 §5"), "{err}");
+        assert!(err.contains("tooling guide §8.1"), "{err}");
         assert!(err.contains("--base"), "{err}");
         std::fs::remove_file(path).ok();
     }

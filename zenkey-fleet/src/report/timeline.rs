@@ -25,7 +25,7 @@ pub enum OrderLabel {
     Hlc,
 }
 
-/// What ordering on the HLC axis can claim (RFC 09 §5.1 O7).
+/// What ordering on the HLC axis can claim (observer §8.3).
 ///
 /// zenoh updates a node's HLC on receive only when the node *has* one
 /// (`treat_timestamp!` in `net/routing/dispatcher/pubsub.rs`), and
@@ -219,7 +219,7 @@ pub enum TimelineSource {
     Zrec { path: String },
 }
 
-/// Put or delete — a tombstone is a fact of its own (RFC 04 §1.2).
+/// Put or delete — a tombstone is a fact of its own (core §4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RowKind {

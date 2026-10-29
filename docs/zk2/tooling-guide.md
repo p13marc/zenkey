@@ -13,7 +13,9 @@ What stays here is guidance: how the reference tools (`zenkey-fleet`,
 zenctl, zengui, zenwatch) spell those rules, the observer obligations
 that no fixture or scenario checks yet, recording and replay, what did
 not carry over from v1's observer conformance (RFC 13, frozen on the `v1`
-branch at v1.50), and how the reference tools test themselves (§7). An
+branch at v1.50), how the reference tools test themselves (§7), and the
+practices they keep from v1's operations cookbook, which zk2 states no rule
+for (§8). An
 obligation leaves this guide for `observer.md` once a fixture or a
 scenario can check it. This is #612's tooling guide.
 
@@ -25,6 +27,7 @@ Contents:
 5. [Recording and replay](#5-recording-and-replay)
 6. [What does not carry over from v1](#6-what-does-not-carry-over-from-v1)
 7. [Testing a tool against this guide](#7-testing-a-tool-against-this-guide)
+8. [What the reference keeps from v1's operations cookbook](#8-what-the-reference-keeps-from-v1s-operations-cookbook)
 
 ---
 
@@ -217,6 +220,53 @@ congestion control, reliability and express as received, which a replay
 honours. Versions 1 and 2 still read; their rows' v1 QoS profile names do
 not (#612, FJ9), so such a row replays on the axes the operator gives.
 
+What version 2 added (#218), and version 3 keeps:
+- **A state preamble.** Rows marked `"preamble": true`, at `t` 0, before
+  the first observed row: state fetched when a triggered capture began.
+  The header's `preamble` names the fetch: its row count, the span it was
+  collected over, its selectors, what it is a snapshot *of* (only the keys
+  the retained window cannot show, or the full state), and what it could
+  not fetch. A reader counts preamble rows apart from observed rows (O6).
+- **A trigger record**, `{"trigger": {…}}` with no key, placed where the
+  capture's rule fired (`record --on`). The header's `pre_roll` names what
+  the retained window was asked for and what it held, with its two
+  eviction kinds apart (O6). The pre-roll covers only what was watched
+  (observer §8.2).
+- **An unknown version is refused,** never guessed at. A reader reads
+  every version up to its own, and refuses the next.
+
+**The replay etiquette**, which zenctl enforces:
+- **A dry run first.** `replay --dry-run` lists every put a replay would
+  make, and opens no session.
+- **The header's base is a contract.** A replay onto another base than
+  the capture's is refused without `--force-base`. So is one from the
+  empty base onto the empty base, which cannot tell two deployments apart
+  (#506). `--namespace` moves the keys on purpose (below).
+- **Re-stamped state wins over live state.** A replayed put is new when it
+  is made, so it overwrites what the owners hold. That is why a preamble
+  is never replayed unless the operator passes `--seed-state`, and the
+  replay says how many rows it skipped.
+- **Two replays.** A re-publishing replay (zenctl's) makes puts. A pane
+  replay (zengui's scrubber) feeds the tool's own views from the file and
+  touches no session.
+- **Two clocks.** A `.zrec` carries the observer's arrival offsets (`t`)
+  and the samples' stamps. A time axis says which one it plots
+  (observer §8.3); zengui's scrubber plots `t`.
+
+**A snapshot** (`.zsnap`, version 2 since #612's FJ8b) is the owners'
+current state kept on disk: one S4 GET per selector (core §4.2), and a row
+per key with its identity, its payload's conformance, whose clock stamped
+it, and who holds it.
+- **It is collected over a span, never at an instant.** The header states
+  the span (`collection_span_s`), and so does every rendering.
+- **Its holder is evidence,** read from presence: an instance held the
+  address's token, a complete read showed none, or no presence read was
+  made, and the holder is unattributed (O4).
+- **A diff** states both spans, aligns two snapshots by zk2 key, each
+  file's namespace stripped, and keeps a row's value, conformance and
+  holder apart.
+- A snapshot is read, never published.
+
 **A replayer stands in for the recorded owners** (r4 §4.1, spike S13). It
 republishes under the original addresses in a namespace of its own, a
 `replay` deployment, through a session in that namespace
@@ -287,3 +337,95 @@ Honesty tests that pin copy are the tests people delete.
 `observer.md`'s rules are checked the other way, by the spec's fixtures
 and scenarios, which every implementation runs; these two corpora are how
 the reference tools hold to them and to this guide.
+
+## 8. What the reference keeps from v1's operations cookbook
+
+v1's operations cookbook (RFC 09, on the `v1` branch) held practices that
+zk2's texts state no rule for, and the reference tools still follow them as
+their own. They are guidance: another tool may differ, and says so.
+
+### 8.1 The session posture
+
+A tool that observes a deployment it does not belong to opens its session
+in this posture, unless its user states otherwise (`zenkey_fleet`'s
+`open_reporting`, which zenctl, zengui and zenwatch share):
+- **A client.** An observer is not a routing node: a peer listens on every
+  interface, gossips its locator, and is offered links that churn every
+  time the tool exits. It is a peer only when the user gives a listen
+  endpoint, or when the user's zenoh config states `mode`.
+- **Multicast scouting off,** with or without a config file, and gossip
+  left on. The two are independent switches: multicast joins any mesh it
+  can reach, a colleague's or production's, and gossip carries
+  reachability through a router to the peers behind it. Turning both off
+  to isolate a test cuts spokes off from each other, silently. A key the
+  user's file states is the user's choice; a key zenoh defaulted while
+  loading the file is not, since zenoh's defaults are `peer` and multicast
+  on. **Isolated verification** is multicast off, gossip on and explicit
+  endpoints (zengui's contexts offer it in one click).
+- **Endpoint errors refuse.** An endpoint that does not parse is refused by
+  name before a session is attempted. A client whose endpoints do not
+  answer fails to open, and the tool reports no verdict, never an empty
+  bus (observer §2).
+- **The wire in no namespace.** A namespace strips its prefix on ingress
+  (core §1.6), so raw views, wire selectors and the admin space (`@/…`)
+  are read through a session in none, and a config file that sets a
+  namespace for that session is refused. Resolved reads open a second
+  session in the deployment's namespace, as its services do (#612, FJ4).
+
+### 8.2 `$*` in a selector
+
+The reference refuses `$*` in a selector its user types: zenctl's raw
+verbs, zengui's scopes and zenwatch's rules. `$*` matches inside a chunk,
+which strains zenoh's matching, and a key that seems to need it holds a
+chunk that should be two. The one `$*` the reference asks itself is
+`redundancy.v1` §2.15's standby probe of a template-less operation.
+
+### 8.3 Matching status
+
+zenoh reports matching status, "a subscriber matches this publisher" or
+"a queryable serves this querier", only on publishers and queriers, and
+only for the ones a process declared itself. The reference shows it for
+its own publications and repeating queries, worded as a routing fact
+about that entity ("no subscriber currently matches this publisher"),
+never as a fleet verdict ("nobody listens on this key"): another
+process's publisher may have subscribers this one cannot see (observer
+§2). Whether someone else's publisher has subscribers cannot be read from
+outside without publishing on its key, and the reference does not try.
+
+### 8.4 Router storages
+
+`zenctl storage gen` writes a router's `storage_manager` block, and its
+`--check` compares the plan with a router's config file or its admin
+space. zk2 runs no
+storage on an owner's state (core §4.2 S4) and derives the union storages
+of events from the contracts (core §2.6). The rest is zenoh's storage
+manager, which the plan holds to:
+- **A key expression and its `strip_prefix`.** A storage's `key_expr` is a
+  valid zenoh key expression, and its `strip_prefix` is a literal string
+  prefix of it: the plan derives the leftmost run of chunks with no
+  wildcard.
+- **A volume's capability pair.** A backend advertises *persistence*
+  (volatile or durable) and *history* (latest or all). `memory` is
+  volatile and latest, `fs` and `rocksdb` durable and latest, `influxdb`
+  durable and all. `redb` offers both histories, and the choice is the
+  volume's, so a deployment declares one volume per mode from the same
+  plugin. A plugin outside this table declares its history, or the plan
+  refuses it.
+- **Replication** aligns one value per key, so it runs only on a
+  latest-mode volume: the storage manager refuses to start a replicated
+  storage on an all-mode one, and the plan refuses it first. Every replica
+  uses the same `key_expr`, `strip_prefix` and parameters, with
+  `propagation_delay` below half the `interval`: divergent parameters
+  cause digest storms, not errors.
+- **`complete: true`** is right only on a replicated latest-mode storage,
+  where it lets a router answer a GET from the nearest replica. The plan
+  emits it false elsewhere, and says why.
+- **`garbage_collection` is a tombstone lifetime, not a retention.** It
+  prunes metadata, tombstones included, older than its `lifespan` (zenoh's
+  default 24 h), and never drops a value (core Appendix B). Retention is
+  the backend's: an InfluxDB retention policy, or `redb`'s own block,
+  which an all-mode `redb` storage needs to start and a latest-mode one
+  refuses.
+- **Overlaps.** Two storages whose selectors intersect both answer a GET
+  under both, with duplicate and possibly divergent replies. Accept it, or
+  carve one selector out of the other.

@@ -1,5 +1,5 @@
-//! Matching badges on self-declared entities (#38, RFC 12 §9's allowed
-//! half): a [`Publication`] knows when a subscriber matches it, a
+//! Matching badges on self-declared entities (#38, tooling guide §8.3): a
+//! [`Publication`] knows when a subscriber matches it, a
 //! [`RepeatingQuery`] knows when a queryable serves it — and neither claim
 //! reaches beyond the entity this process declared.
 //!

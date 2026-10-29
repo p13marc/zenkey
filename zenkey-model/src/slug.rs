@@ -1,8 +1,8 @@
 //! Canonical, injective slugging of foreign values into key chunks.
 //!
-//! Ported unchanged from v1 (`zenkey/src/slug.rs` on the `v1` branch, RFC 03
-//! §2 as amended by the v1.31 erratum). zk2 slugs template parameter values
-//! with exactly these rules (r3 §3.1), so a value spelled under v1 keeps its
+//! Ported unchanged from v1 (`zenkey/src/slug.rs` on the `v1` branch, as
+//! amended by v1's v1.31 erratum). zk2 slugs template parameter values
+//! with exactly these rules (core §1.4; r3 §3.1), so a value spelled under v1 keeps its
 //! chunk under zk2.
 //!
 //! Rules:
@@ -16,14 +16,14 @@
 //!   closing underscore), except that `.` and `-` stay literal unless they
 //!   are the value's last byte. Plain `-` substitution is forbidden — it is
 //!   not injective. [`chunk_unslug`] is the decoder, shipped beside the
-//!   encoder as the RFC requires.
+//!   encoder as core §1.4 requires.
 
 use crate::chunk::is_plain_chunk as is_valid_plain_chunk;
 
 /// Lowercase a ULID-shaped identifier for key encoding — or refuse.
 ///
-/// RFC 03 §2: identifiers whose canonical text form is uppercase MUST be
-/// **lowercased at key-build time** where the domain is case-insensitive —
+/// Identifiers whose canonical text form is uppercase are **lowercased at
+/// key-build time** (core §1.4: a ULID in lowercase) where the domain is case-insensitive —
 /// in particular ULIDs, whose Crockford base32 decodes case-insensitively
 /// (payloads MAY keep the canonical uppercase display form). Lowercasing a
 /// ULID therefore names the *same* identifier in its one key spelling;
@@ -36,11 +36,11 @@ use crate::chunk::is_plain_chunk as is_valid_plain_chunk;
 /// instead of lowercasing a value from a domain that might be
 /// case-sensitive (the v1.4 exemption).
 ///
-/// This is also the `events` id path (RFC 04 §1.3): every event key ends in
-/// a unique, time-sortable id — ULID recommended, key-encoded lowercase —
+/// This is also the `events` id path (core §2.6): every event key ends in
+/// a unique, time-sortable id, a ULID key-encoded lowercase (core §1.2),
 /// and this function *is* that encoding. Route an event id through it and
-/// the trailing chunk of `events/<producer>/…/<ulid>` is the RFC's one
-/// spelling; a refusal (`None`) means the id was never a ULID, which a
+/// the trailing chunk of an event key is its one spelling; a refusal
+/// (`None`) means the id was never a ULID, which a
 /// producer should treat as its own bug, not a value to escape.
 pub fn ulid_slug(id: &str) -> Option<String> {
     fn crockford(b: u8) -> bool {
@@ -50,12 +50,12 @@ pub fn ulid_slug(id: &str) -> Option<String> {
     (id.len() == 26 && id.bytes().all(crockford)).then(|| id.to_ascii_lowercase())
 }
 
-/// The reserved prefix (RFC 03 §2, v1.31): refused on passthrough,
+/// The reserved prefix (core §1.4): refused on passthrough,
 /// mandatory on escape.
 const RESERVED_PREFIX: &str = "x-";
 
 /// Slug an arbitrary value (unit name, filename, device name) into a single
-/// legal chunk, losslessly (RFC 03 §2, as amended by the v1.31 erratum).
+/// legal chunk, losslessly (core §1.4; v1's rule as amended by its v1.31 erratum).
 ///
 /// The value passes through literally iff it is already a legal plain chunk
 /// **and** does not start with the reserved prefix `x-`. Otherwise the chunk
@@ -89,7 +89,7 @@ pub fn chunk_slug(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 8);
     out.push_str(RESERVED_PREFIX);
     if bytes.is_empty() {
-        // `x-` alone would end in `-`; the RFC spells the empty value `x-_x`,
+        // `x-` alone would end in `-`; core §1.4 spells the empty value `x-_x`,
         // an escape with no digits that is legal only as the entire body.
         out.push_str("_x");
         return out;
@@ -107,7 +107,7 @@ pub fn chunk_slug(value: &str) -> String {
     out
 }
 
-/// Decode a chunk produced by [`chunk_slug`] back to the value (RFC 03 §2).
+/// Decode a chunk produced by [`chunk_slug`] back to the value (core §1.4).
 ///
 /// This is the left inverse on the image of `chunk_slug` and refuses
 /// everything else: `chunk_unslug(&chunk_slug(v)) == Some(v)` for every
@@ -168,7 +168,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// The corpus every slug property is checked over: the RFC's motivating
+    /// The corpus every slug property is checked over: v1's motivating
     /// counterexamples, boundary bytes, both v1.31 collision pairs, and the
     /// shapes that sit on the edge of the reserved prefix.
     const CORPUS: &[&str] = &[
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(chunk_slug("a_x"), "a_x");
     }
 
-    /// RFC 03 §2 (v1.31): a charset-legal value that starts with `x-` is
+    /// Core §1.4 (v1's v1.31): a charset-legal value that starts with `x-` is
     /// escaped, not passed through — the prefix is reserved on both sides of
     /// the boundary.
     #[test]
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(chunk_slug("x_1"), "x_1");
     }
 
-    /// The pinned table (RFC 03 §2 v1.31). **This is the table adopters
+    /// The pinned table (core §1.4; v1's v1.31). **This is the table adopters
     /// copy**: every row is a spelling the fleet may already carry in a
     /// key, so a row here changing is a re-keying, and it must fail this
     /// build before it re-keys a fleet.
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn escape_is_injective() {
-        // The RFC's motivating counterexample: these MUST NOT share a chunk.
+        // v1's motivating counterexample: these MUST NOT share a chunk.
         assert_ne!(chunk_slug("foo@1.service"), chunk_slug("foo-1.service"));
 
         let slugs: Vec<String> = CORPUS.iter().map(|v| chunk_slug(v)).collect();
@@ -271,7 +271,7 @@ mod tests {
         }
     }
 
-    /// RFC 03 §2: a conforming slugger ships the decoder beside the encoder
+    /// Core §1.4: a conforming slugger ships the decoder beside the encoder
     /// with a round-trip test over both classes.
     #[test]
     fn unslug_round_trips_the_corpus() {
@@ -306,7 +306,7 @@ mod tests {
         }
     }
 
-    /// RFC 03 §2: a ULID is key-encoded in lowercase — both cases of one
+    /// Core §1.4: a ULID is key-encoded in lowercase — both cases of one
     /// ULID name one chunk, and non-ULID shapes are refused rather than
     /// guessed at.
     #[test]
@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(ulid_slug(""), None);
     }
 
-    /// The v1.31 erratum, by its own two witnesses (RFC 03 §2): the pairs
+    /// v1's v1.31 erratum, by its own two witnesses (core §1.4): the pairs
     /// the v1.4 scheme collapsed stay distinct, and each side decodes back
     /// to itself.
     #[test]

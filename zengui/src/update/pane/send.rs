@@ -274,13 +274,13 @@ pub(crate) fn update(
                     let key = form.key.clone();
                     form.log(
                         true,
-                        format!("retired {key} — a tombstone (RFC 04 §1.2), not an empty value"),
+                        format!("retired {key} — a tombstone (core §4.2), not an empty value"),
                     );
                     if matching == Some(false) {
                         form.log(
                             true,
                             "matching: no subscriber matched the tombstone — a routing \
-                             fact, not a fleet verdict (RFC 05 §3.1)",
+                             fact, not a fleet verdict (observer §2)",
                         );
                     }
                 }

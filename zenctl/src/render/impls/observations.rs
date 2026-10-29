@@ -56,7 +56,7 @@ impl Render for ScoutReport {
                  not a claim that nothing is running",
                     self.timeout_s
                 ))
-                .cite("RFC 09 §5.1 O5"),
+                .cite("observer §8.2"),
             ];
         }
         vec![
@@ -69,7 +69,7 @@ impl Render for ScoutReport {
                 "scouting reaches the local multicast domain and the configured \
                  gossip — a node outside both is not absent, it is out of range",
             )
-            .cite("RFC 09 §5.1 O5"),
+            .cite("observer §8.2"),
         ]
     }
 
@@ -137,7 +137,7 @@ impl Render for RouterList {
                  disabled",
                     self.asked
                 ))
-                .cite("RFC 09 §5.1 O5"),
+                .cite("observer §8.2"),
             ];
         }
         vec![Note::summary(format!(

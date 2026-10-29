@@ -1,4 +1,4 @@
-//! A snapshot's rows from values in hand (RFC 13 §4.4; #219; zk2's since
+//! A snapshot's rows from values in hand (tooling guide §5; #219; zk2's since
 //! #612, FJ8b): the per-key fold across selectors, and the projections that
 //! turn one kept reply into the row's facets — identity, conformance,
 //! stamper, holder — through the raw observers' [`Lens`].
@@ -101,7 +101,7 @@ pub fn stamper_of(lens: &Lens<'_>, address: Option<&str>, id: &str) -> StamperWi
     }
 }
 
-/// Who holds a value — evidence, not inference (RFC 13 §4.4).
+/// Who holds a value — evidence, not inference (tooling guide §5).
 ///
 /// The order of the tests is the order of the questions: does the key name
 /// an address; was presence read at all; did that address hold an

@@ -15,7 +15,7 @@ use crate::view::tokens::{face, font, radius, space, stroke};
 pub enum Edge {
     /// An ordinary sample: a quiet edge in the line colour.
     Put,
-    /// A tombstone (RFC 04 §1.2): the retired colour — never danger's,
+    /// A tombstone (core §4.2): the retired colour — never danger's,
     /// because retirement is a fact, not a negative verdict. The row says
     /// "DELETE" in words too.
     Retired,

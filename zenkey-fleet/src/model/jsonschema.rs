@@ -30,7 +30,7 @@ pub const COMBINATORS: [&str; 3] = ["oneOf", "anyOf", "allOf"];
 ///
 /// `None` means **could not follow**, which every caller must render as
 /// "unjudgeable" rather than "absent" — a `$ref` that does not resolve says
-/// nothing about what is underneath it (RFC 13 §3 O4).
+/// nothing about what is underneath it (observer §1).
 pub fn resolve_ref<'d>(root: &'d Value, pointer: &str) -> Option<&'d Value> {
     let rest = pointer.strip_prefix('#')?;
     if rest.is_empty() {

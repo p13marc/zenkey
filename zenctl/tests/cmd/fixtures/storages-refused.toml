@@ -1,5 +1,5 @@
 # Three storages, each refused for a different reason: replication on an
-# all-mode volume (RFC 09 §2.2), a volume nobody declared, and a selector
+# all-mode volume (tooling guide §8.4), a volume nobody declared, and a selector
 # that is not a key expression.
 base = "fleet-a"
 

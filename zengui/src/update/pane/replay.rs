@@ -65,7 +65,7 @@ pub(crate) fn update(
             // only by the file, and it used to freeze the window for its
             // whole length. Until `Loaded` lands, the loading claim below
             // is what the replay tab shows: a load in flight is not an
-            // empty capture and not a hung window (RFC 09 §5.1 O4).
+            // empty capture and not a hung window (observer §1).
             work.replay.replay_open = None;
             work.replay.replay_note = None;
             work.replay.replay_loading = Some(path.clone());

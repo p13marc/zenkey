@@ -15,7 +15,7 @@ use zenctl::render::{
 struct Doc {
     asked: Vec<String>,
     /// The field that must be **absent** when nothing asked for it, never
-    /// `null` (RFC 09 §5.1 O4).
+    /// `null` (observer §1).
     #[serde(skip_serializing_if = "Option::is_none")]
     not_probed: Option<String>,
     #[serde(skip)]
@@ -139,7 +139,7 @@ fn an_unasked_field_is_absent_from_the_envelope_rather_than_null() {
 fn a_coverage_note_rides_the_document_and_a_next_step_does_not() {
     let mut d = doc();
     d.notes = vec![
-        Note::coverage("only the two tiers named above were probed").cite("RFC 09 §5.1 O5"),
+        Note::coverage("only the two tiers named above were probed").cite("observer §8.2"),
         Note::next_step("call one with: zenctl service call …"),
         Note::summary("2 item(s)."),
     ];
@@ -148,7 +148,7 @@ fn a_coverage_note_rides_the_document_and_a_next_step_does_not() {
         .as_array()
         .expect("notes ride the envelope");
     assert_eq!(notes.len(), 1, "only the honesty note: {notes:?}");
-    assert_eq!(notes[0]["cite"], "RFC 09 §5.1 O5");
+    assert_eq!(notes[0]["cite"], "observer §8.2");
 
     // All three still reach a person, and nothing about the data reaches
     // stdout: stdout carries what a script consumes, stderr what is true
@@ -189,7 +189,7 @@ fn a_row_less_family_emits_exactly_one_line() {
     assert!(lines[0].get("rows").is_none(), "and no empty rows array");
 }
 
-/// A declared bound cost cannot ship silently (RFC 13, v1.24): the emit path
+/// A declared bound cost cannot ship silently (tooling guide O6): the emit path
 /// itself writes one `Note::bound` per **non-zero** cost, as `"{n} {what}"`
 /// with the O6 citation, into stderr and the machine documents alike — and a
 /// zero cost writes nothing, so impls declare unconditionally.
@@ -213,7 +213,7 @@ fn a_non_zero_bound_cost_is_auto_appended_and_a_zero_one_is_not() {
         notes[0]["text"],
         "912 key(s) retired at the table bound — totals cover the retained set"
     );
-    assert_eq!(notes[0]["cite"], "RFC 09 §5.1 O6");
+    assert_eq!(notes[0]["cite"], "tooling guide O6");
     assert!(err.contains("912 key(s) retired"), "{err}");
     assert!(
         !err.contains("dropped while behind"),
@@ -229,7 +229,7 @@ fn a_non_zero_bound_cost_is_auto_appended_and_a_zero_one_is_not() {
 #[test]
 fn a_note_renders_its_citation_the_same_way_everywhere() {
     let cited = Note::silence("no replies");
-    assert_eq!(cited.to_line(), "no replies (RFC 05 §3.1)");
+    assert_eq!(cited.to_line(), "no replies (observer §2)");
 
     let bare = Note::summary("4 producer(s).");
     assert_eq!(

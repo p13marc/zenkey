@@ -1,5 +1,5 @@
 {
-  // An explorer must run un-namespaced (RFC 09 §5): a session namespace would
+  // An explorer must run un-namespaced (tooling guide §8.1): a session namespace would
   // hide exactly the foreign traffic zenctl exists to show. Refused by name.
   mode: "client",
   namespace: "zensight",

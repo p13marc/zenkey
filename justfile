@@ -177,17 +177,15 @@ ci:
     # One seam for liveliness subscribers (#830): each one marks its session,
     # and the runtime refuses a presence read beside it.
     ./scripts/check-liveliness-seam.sh
-    # RFC chapter headers agree with rfcs/CHANGELOG.md's Amends ledger
-    # (v1.25 S6), and the version stated in 00-index.md, CLAUDE.md and
-    # README.md is the newest entry's. CI runs it on both lanes: ci.yml for
-    # code pushes, docs.yml for doc-only ones (#420).
-    ./scripts/check-rfc-status.sh
     # The zk2 spec's version and inventory, stated once (#922): core.md's
     # header names spec/CHANGELOG.md's newest amendment, observer.md's its
     # changelog's newest text (#925), README.md and spec/README.md state
-    # neither version, and the profiles index lists every profile text. On
-    # both lanes too.
+    # neither version, and the profiles index lists every profile text. CI
+    # runs it on both lanes: ci.yml for code pushes, docs.yml for doc-only
+    # ones (#420).
     ./scripts/check-spec-status.sh
+    # No source or report fixture cites v1's RFC set (#925).
+    ./scripts/check-v1-citations.sh
     # The type scale by role (#191), the interactive seam (#193), the
     # spacing grid (#192) and the colour gate (#534) — all run as CI's
     # type-scale job.

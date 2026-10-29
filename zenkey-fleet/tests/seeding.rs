@@ -1,5 +1,5 @@
 //! A late joiner's seed — core §4.2 (0.26) — proven against real zenoh
-//! (#614, FL4; issue #42 before it, which proved v1's RFC 04 §3.2). The
+//! (#614, FL4; issue #42 before it, which proved v1's seed). The
 //! subscription first, then the legs: S4's state GET (target `All`,
 //! consolidation `Latest`) and the `@adv` history; replies and live
 //! samples merged per key by the owner's stamp.

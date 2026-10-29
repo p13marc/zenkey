@@ -16,7 +16,7 @@ observation — the one place the word still earns its keep.
 $ zenctl get --help
 Query a raw selector, or read a zk2 state resource (`get state`).
 
-Two forms, never confused. `get <SELECTOR>` is RAW: any key expression, on a session in no namespace, so the selector is the wire key as it is (`prod/zk2/…`, `v1/…`, `@/*/router` for a router's admin document). A selector reaching a node's declaration records (`@/**`, `@/*/router/subscriber/**`, `@/*/peer/queryable/**`, …) can freeze a zenoh 1.10.1 node: it answers them under its routing tables' read lock, and another client's declaration in between deadlocks it (#890). The fleet discipline (RFC 05 §2.1): target All, consolidation None, every reply attributed by its own key; error envelopes render as errors, and each reply is resolved through the deployment in --namespace as `echo` resolves a sample: a zk2 key decoded as its declared type, a foreign one rendered structurally. `get state <ADDRESS> <IFACE> <STATE>` is RESOLVED: one zk2 state resource of one owner, read through its contract in the deployment's namespace — see `zenctl get state --help`. Exit codes, both forms: 0 values only, 1 an error reply, 2 silence.
+Two forms, never confused. `get <SELECTOR>` is RAW: any key expression, on a session in no namespace, so the selector is the wire key as it is (`prod/zk2/…`, `v1/…`, `@/*/router` for a router's admin document). A selector reaching a node's declaration records (`@/**`, `@/*/router/subscriber/**`, `@/*/peer/queryable/**`, …) can freeze a zenoh 1.10.1 node: it answers them under its routing tables' read lock, and another client's declaration in between deadlocks it (#890). The fleet discipline (core §5.1): target All, consolidation None, every reply attributed by its own key; error envelopes render as errors, and each reply is resolved through the deployment in --namespace as `echo` resolves a sample: a zk2 key decoded as its declared type, a foreign one rendered structurally. `get state <ADDRESS> <IFACE> <STATE>` is RESOLVED: one zk2 state resource of one owner, read through its contract in the deployment's namespace — see `zenctl get state --help`. Exit codes, both forms: 0 values only, 1 an error reply, 2 silence.
 
 Usage: zenctl get [OPTIONS] <SELECTOR>
        zenctl get <COMMAND>
@@ -768,7 +768,7 @@ Options:
           [default: 1]
 
       --preamble <PREAMBLE>
-          What the state preamble is a snapshot of (RFC 13 §4.3): the current state of only the keys the ring cannot show, the full current state under the watched selectors, or none at all
+          What the state preamble is a snapshot of (tooling guide §5): the current state of only the keys the ring cannot show, the full current state under the watched selectors, or none at all
 
           Possible values:
           - absent-from-window: Only the state keys absent from the retained window, fetched at trigger time: what the ring cannot tell you
@@ -842,7 +842,7 @@ Options:
 $ zenctl replay --help
 Replay a .zrec capture onto the bus (this publishes).
 
-Replay is PUBLISHING: real puts through declared publishers, at the capture's own pacing (scaled by --speed), re-stamped with this session's HLC: re-stamped old data WINS last-writer-wins against a live fleet, which is why the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the capture header's base is a contract (`--force-base` to override). `--namespace` moves every key into a deployment namespace of its own, through a session in it: a replayer standing in for the owners it recorded (spike S13). A zk2 service's own key replayed where that service runs is refused unless --i-know (P3).
+Replay is PUBLISHING: real puts through declared publishers, at the capture's own pacing (scaled by --speed), re-stamped with this session's HLC: re-stamped old data WINS last-writer-wins against a live fleet, which is why the etiquette is enforced (tooling guide §5) — dry-run first, and the capture header's base is a contract (`--force-base` to override). `--namespace` moves every key into a deployment namespace of its own, through a session in it: a replayer standing in for the owners it recorded (spike S13). A zk2 service's own key replayed where that service runs is refused unless --i-know (P3).
 
 Usage: zenctl replay [OPTIONS] <FILE>
 
@@ -869,7 +869,7 @@ Options:
           Publish into this deployment namespace, through a session opened in it: every key is moved from the capture's base into NS, so a replayer stands in for the owners it recorded in a namespace of its own (spike S13). Typed only, never read from the environment or a context. A zk2 service's own key replayed into the namespace it was recorded in — NS equal to the capture's base, or no --namespace at all — is refused unless --i-know (P3)
 
       --seed-state
-          Publish a version-2 capture's preamble rows too — state at capture start, re-stamped now (RFC 13 §4.1). Off by default: re-stamped state wins last-writer-wins, so the preamble republishes a whole snapshot over the live fleet with no pacing between the rows (§4.2); the rows are skipped and counted instead
+          Publish a version-2 capture's preamble rows too — state at capture start, re-stamped now (tooling guide §5). Off by default: re-stamped state wins last-writer-wins, so the preamble republishes a whole snapshot over the live fleet with no pacing between the rows; the rows are skipped and counted instead
 
       --qos <AXES>
           QoS axes for rows that recorded none (a version-1 or 2 capture): `priority/congestion/reliability[+express]`. A version-3 row publishes with the axes it rode with
@@ -930,7 +930,7 @@ Options:
 $ zenctl timeline --help
 One merged ordering of a window's samples, a lane per zk2 resource.
 
-The fleet timeline (#216): a lane per zk2 address and resource (a key outside the namespace, or not zk2, in a foreign lane, never dropped), the clock stated per report and the stamper per lane — each stamp the owner's own (its id the session zid the owner's descriptor states as `meta.zid`), another clock's, or unattributable (O7) — and DELIBERATELY NO EDGES. A line between two lanes would claim a causality no observer on this bus can establish. What it can say: on the arrival axis, when each sample was seen here; on the HLC axis (`--order hlc`), the happened-before of ONE stamping node, or a comparison of skewed wall clocks when several stamped (RFC 09 §5.1 O7). Unstamped samples get their own lane on arrival and cannot be placed on the HLC axis at all; drops and coalescing render as breaks where they fell (O6). The per-publisher sequence-number lane is reported UNAVAILABLE on this zenoh, not empty. `--from <FILE>` reads a .zrec through the same projection, so live and replay render identically.
+The fleet timeline (#216): a lane per zk2 address and resource (a key outside the namespace, or not zk2, in a foreign lane, never dropped), the clock stated per report and the stamper per lane — each stamp the owner's own (its id the session zid the owner's descriptor states as `meta.zid`), another clock's, or unattributable (O7) — and DELIBERATELY NO EDGES. A line between two lanes would claim a causality no observer on this bus can establish. What it can say: on the arrival axis, when each sample was seen here; on the HLC axis (`--order hlc`), the happened-before of ONE stamping node, or a comparison of skewed wall clocks when several stamped (observer §8.3). Unstamped samples get their own lane on arrival and cannot be placed on the HLC axis at all; drops and coalescing render as breaks where they fell (O6). The per-publisher sequence-number lane is reported UNAVAILABLE on this zenoh, not empty. `--from <FILE>` reads a .zrec through the same projection, so live and replay render identically.
 
 Usage: zenctl timeline [OPTIONS] [SELECTOR]...
 
@@ -1019,7 +1019,7 @@ Options:
 $ zenctl snapshot --help
 Take a deployment's state to a .zsnap file, or compare two with `diff`.
 
-The snapshot of RFC 13 §4.4, re-cut for zk2: the owners' current state, one GET per selector — target All, consolidation Latest, the owner alone answering (spec §4.2 S4), a reply on a wildcard key discarded (R6) — each row carrying what the observer could establish: the exact payload; its zk2 address and resource, or the rung its key stopped at (O2); the payload against its declared type (valid, invalid, undecodable, not checked); whose clock stamped it — the owner's (its descriptor's `meta.zid`), another's, or unattributable (O7); and who HOLDS it — `live` (its address held an instance token, and whether the owner's session answered), `no_instance` (a value answered and presence shows no instance), or `unattributed`. A snapshot is collected OVER a span, never at an instant, and every rendering says so. Exit 0 wrote the file, 2 nobody answered (silence is not a snapshot).
+v1's snapshot, re-cut for zk2 (tooling guide §5): the owners' current state, one GET per selector — target All, consolidation Latest, the owner alone answering (spec §4.2 S4), a reply on a wildcard key discarded (R6) — each row carrying what the observer could establish: the exact payload; its zk2 address and resource, or the rung its key stopped at (O2); the payload against its declared type (valid, invalid, undecodable, not checked); whose clock stamped it — the owner's (its descriptor's `meta.zid`), another's, or unattributable (O7); and who HOLDS it — `live` (its address held an instance token, and whether the owner's session answered), `no_instance` (a value answered and presence shows no instance), or `unattributed`. A snapshot is collected OVER a span, never at an instant, and every rendering says so. Exit 0 wrote the file, 2 nobody answered (silence is not a snapshot).
 
 Usage: zenctl snapshot [OPTIONS] --out <FILE> [SELECTOR]...
        zenctl snapshot <COMMAND>
@@ -1436,7 +1436,7 @@ Options:
 $ zenctl watchdog --help
 Watch conditions on the bus and print each state change as ndjson.
 
-Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per invocation, no shared state; not a daemon. Each --rule is one condition from a CLOSED vocabulary (no expressions, no templating); every genuine state change prints one line {"row":"transition","rule":…,"from":…,"to":…,"at":…,"evidence":…} and an unchanged tick prints nothing. Three states, not two (RFC 09 §5.1 O4/O6): ok / firing / unobservable — a drop under a completeness claim is "could not tell", never "ok", which is what keeps a 3am page honest. The first evaluation states each rule's baseline once, from null. Selectors are wire keys; a payload, a QoS and an address are judged against the deployment in `--namespace` (zk2's since #612, FJ8b).
+Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per invocation, no shared state; not a daemon. Each --rule is one condition from a CLOSED vocabulary (no expressions, no templating); every genuine state change prints one line {"row":"transition","rule":…,"from":…,"to":…,"at":…,"evidence":…} and an unchanged tick prints nothing. Three states, not two (observer §1; tooling guide O6): ok / firing / unobservable — a drop under a completeness claim is "could not tell", never "ok", which is what keeps a 3am page honest. The first evaluation states each rule's baseline once, from null. Selectors are wire keys; a payload, a QoS and an address are judged against the deployment in `--namespace` (zk2's since #612, FJ8b).
 
 Usage: zenctl watchdog [OPTIONS] --rule <RULE>
 

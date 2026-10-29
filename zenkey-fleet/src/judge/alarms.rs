@@ -7,7 +7,7 @@
 //! ([`crate::model::alarms`]): `firing`, `stale_firing` and `rederives` per
 //! key, `owner_set` per owner and `any_firing` over the scope.
 //!
-//! **§5's four questions as judgements** (RFC 13 §1.2, through
+//! **§5's four questions as judgements** (the tooling guide's exit codes, §1, through
 //! [`crate::report::judgement_exit_code`]): each is named so that its
 //! finding is the yes —
 //! - "is this alarm firing?" ([`firing`]): yes is `Established`;

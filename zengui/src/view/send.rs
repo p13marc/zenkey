@@ -21,8 +21,8 @@
 //! **Publishing can be sustained.** A repeat interval drives a real stream,
 //! and the publication's #38 matching badge says whether anyone is consuming
 //! it — a routing fact about *this* publisher, never a fleet verdict
-//! (RFC 05 §3.1). Every send is logged, the log is bounded, and when the
-//! bound bites the pane reports what it dropped (RFC 09 §5.1 O6). A tombstone
+//! (observer §2). Every send is logged, the log is bounded, and when the
+//! bound bites the pane reports what it dropped (tooling guide O6). A tombstone
 //! is an operator act on a key no contract describes, behind `--i-know`
 //! (`zenkey_fleet::check_retire`).
 //!
@@ -786,7 +786,7 @@ pub enum SendMsg {
     Send,
     /// Undeclare the armed publication.
     Stop,
-    /// Retire the key with a tombstone (RFC 04 §1.2, #115).
+    /// Retire the key with a tombstone (core §4.2, #115).
     Retire,
     /// The `--i-know` confirmation a tombstone needs.
     RetireIKnowToggled(bool),
@@ -1081,7 +1081,7 @@ fn matching_sentence(matching: Option<bool>) -> String {
     match matching {
         Some(true) => "matching: a subscriber currently matches this publication".into(),
         Some(false) => "matching: no subscriber currently matches this publication — a \
-                        routing fact about this publisher, not a fleet verdict (RFC 05 §3.1)"
+                        routing fact about this publisher, not a fleet verdict (observer §2)"
             .into(),
         None => "matching: not asked".into(),
     }
@@ -1156,7 +1156,7 @@ fn call_body<'a>(
             "No operation in hand",
             "Call mode plans against a contract revision held — loaded with --contracts or \
              retrieved from the bus — and none in hand declares an operation yet. \"Not \
-             asked\" is not \"nothing serves\" (RFC 09 §5.1 O4).",
+             asked\" is not \"nothing serves\" (observer §1).",
         ));
     }
 

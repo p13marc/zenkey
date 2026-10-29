@@ -721,7 +721,7 @@ pub fn search_flatten(
         // Computed, not asserted. `search_flatten` used to hardcode `true`,
         // and `filtered` feeds an empty-state sentence and a coverage line —
         // an honesty field set by assumption is the thing this crate does not
-        // do (RFC 09 §5.1 O4).
+        // do (observer §1).
         filtered: !query.is_empty(),
         numbers: Numbers::Frozen(stats),
         paths: PathKind::Wire,
@@ -1456,7 +1456,7 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         return kit::empty(
             kit::EmptyKind::Silent,
             "Nothing observed yet",
-            "An empty tree is not a verdict about the bus (RFC 05 §3.1) — \
+            "An empty tree is not a verdict about the bus (observer §2) — \
              it may simply mean nothing has published on the current scope.",
         );
     }

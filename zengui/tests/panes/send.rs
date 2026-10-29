@@ -156,7 +156,7 @@ fn the_publish_mode_bounds_its_log_and_never_invents_a_matcher() {
         assert!(
             ui.find(
                 "matching: no subscriber currently matches this publication — a routing \
-                 fact about this publisher, not a fleet verdict (RFC 05 §3.1)"
+                 fact about this publisher, not a fleet verdict (observer §2)"
             )
             .is_ok(),
             "a false matching badge must disclaim, exactly as the CLI does"

@@ -14,7 +14,7 @@
 //!   while later payloads still parse. If the schema declares it optional,
 //!   validation reads `Valid` without it *by construction*. Vanished requires
 //!   SEEN then absent: a path never observed is not a vanished path
-//!   (RFC 09 §5.1 O4 — "not asked" never renders as "no").
+//!   (observer §1 — "not asked" never renders as "no").
 //! - **`field-stuck`** — a numeric path unchanged across a span long relative
 //!   to a declared freshness, while the key kept publishing. In zk2 a
 //!   freshness is the `freshness.v1` profile's (#613), so the judge
@@ -54,7 +54,7 @@ use crate::report::{DoctorSeverity, FieldCheck, FieldFinding, FieldReport, Field
 /// Default bound on the per-path table, across every key the window sees. A
 /// high-cardinality document can blow a path table the way a `{var}` family
 /// blows a key table (#221), so the cap and its cost are reported like every
-/// other bound (RFC 09 §5.1 O6).
+/// other bound (tooling guide O6).
 pub const DEFAULT_MAX_PATHS: usize = 512;
 
 /// How many distinct values a path may show and still count as small-domain.
@@ -133,7 +133,7 @@ pub struct KeyFields {
     pub undocumented: u64,
     /// Samples whose payload was past [`crate::OBSERVE_LIMIT`] and therefore never
     /// read. **Not** `undocumented`: "we did not look" is not "there was
-    /// nothing to see" (RFC 09 §5.1 O4).
+    /// nothing to see" (observer §1).
     pub unread: u64,
     /// Per dotted path, the stats.
     pub paths: BTreeMap<String, PathStats>,
@@ -300,7 +300,7 @@ impl FieldObservation {
         self.max_paths
     }
 
-    /// Path observations refused to stay within the bound (RFC 09 §5.1 O6).
+    /// Path observations refused to stay within the bound (tooling guide O6).
     pub fn dropped_paths(&self) -> u64 {
         self.dropped.total() as u64
     }

@@ -1,4 +1,4 @@
-//! `.zsnap` — a snapshot kept on disk (RFC 13 §4.4, v1.34; #219): the
+//! `.zsnap` — a snapshot kept on disk (tooling guide §5; #219): the
 //! writer, the reader, and the collection itself — zk2's since #612
 //! (FJ8b): the owners' current state, one S4 GET per selector, each row
 //! resolved through the raw observers' lens. Version 2; a version-1 file
@@ -10,7 +10,7 @@
 //! than guessing, with the same wording [`crate::ZrecReader`] uses.
 //!
 //! What deliberately does not exist here: a *replay* of a snapshot. A
-//! snapshot is read, never published (RFC 13 §4.4); seeding a fleet from a
+//! snapshot is read, never published (tooling guide §5); seeding a fleet from a
 //! file is `--seed-state` over a version-2 `.zrec` preamble.
 
 use std::io::{BufRead, Write};
@@ -76,7 +76,7 @@ pub struct ZsnapReader<R: BufRead> {
 impl<R: BufRead> ZsnapReader<R> {
     /// Parse the header line. A file without one is not a `.zsnap`; a
     /// version this reader does not speak is refused, never guessed at
-    /// (RFC 13 §4.1's rule, which §4.4 inherits).
+    /// (tooling guide §5: an unknown version is refused).
     pub fn new(source: R) -> Result<Self> {
         let mut lines = source.lines();
         let first = lines
@@ -235,7 +235,7 @@ async fn state_get(
     Ok(out)
 }
 
-/// Collect a snapshot of the owners' current state (RFC 13 §4.4; spec §4.2
+/// Collect a snapshot of the owners' current state (tooling guide §5; spec §4.2
 /// S4).
 ///
 /// One state GET per selector — target `All`, consolidation `Latest`, R6's

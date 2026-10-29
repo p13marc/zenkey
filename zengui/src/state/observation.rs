@@ -108,7 +108,7 @@ sub_state! {
         /// The monitor's retained window, as of the last live tick (#217):
         /// the budget the status strip states, and the ring's own costs —
         /// counted apart from `keys_evicted`, `keys_unwatched` and the
-        /// broadcast's lag (RFC 09 §5.1 O6). `None` until a monitor exists,
+        /// broadcast's lag (tooling guide O6). `None` until a monitor exists,
         /// which is not "empty" (O4) — and left stale during replay, when
         /// the strip does not show it.
         pub(crate) retention: Option<zenkey_fleet::RetentionStats>,

@@ -112,7 +112,7 @@ pub fn history(
     replies_task(raw, lens, key, selector, opts, ReadKind::History, None)
 }
 
-/// A foreign key's raw GET (RFC 05 §2.1): target `All`, consolidation
+/// A foreign key's raw GET (core §5.1): target `All`, consolidation
 /// `None`, every reply attributed by its own key — labelled raw, because no
 /// contract says who answers it.
 pub fn raw_get(
@@ -152,7 +152,7 @@ pub fn events(
 }
 
 /// The GET behind [`history`], [`raw_get`] and [`events`]: every reply
-/// through `fleet_get`, the chokepoint of RFC 05 §2.1, then sorted newest
+/// through `fleet_get`, the chokepoint of core §5.1, then sorted newest
 /// first and each stamp attributed (O7).
 fn replies_task(
     raw: zenoh::Session,

@@ -20,11 +20,11 @@ pub enum ExpectVerdict {
 }
 
 impl ExpectVerdict {
-    /// The [`Judgement`](crate::report::Judgement) mapping (RFC 13,
-    /// v1.24). The judged claim is the finding — "the expectation was
+    /// The [`Judgement`](crate::report::Judgement) mapping (observer §1).
+    /// The judged claim is the finding — "the expectation was
     /// violated" — so `Met` is the established-**clean** pole:
     ///
-    /// | verdict | judgement | exit (RFC 13 = this family's own contract) |
+    /// | verdict | judgement | exit (tooling guide §1) |
     /// |---|---|---|
     /// | `NotMet` | `Established` (finding) | 1 |
     /// | `Met` | `NotEstablished` (clean) | 0 |
@@ -37,7 +37,7 @@ impl ExpectVerdict {
                 reason: "the expectation held within the window".into(),
             },
             ExpectVerdict::Impaired => Judgement::Unobservable {
-                reason: "the observation cannot carry the claim (RFC 09 §5.1 O6)".into(),
+                reason: "the observation cannot carry the claim (tooling guide O6)".into(),
             },
         }
     }

@@ -252,7 +252,7 @@ pub(crate) fn shape_held(
 pub(crate) struct KeyCounts {
     /// Distinct keys currently tracked.
     pub(crate) keys: usize,
-    /// Keys retired to stay within the table's bound (RFC 09 §5.1 O6).
+    /// Keys retired to stay within the table's bound (tooling guide O6).
     pub(crate) evicted: u64,
     /// Keys retired because their watch was released.
     pub(crate) unwatched: u64,

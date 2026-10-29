@@ -11,7 +11,7 @@
 //! key, holds it for the stated window, and provably releases it
 //! (`services::value::field`).
 //!
-//! Every bound reports its cost (RFC 09 §5.1 O6): the path table states its
+//! Every bound reports its cost (tooling guide O6): the path table states its
 //! cap and names what it refused; the observer states its drops; the window
 //! states itself. Sparklines ride where `spark.rs` fits — numeric paths the
 //! subject's own recorded history can plot — and each states that its window

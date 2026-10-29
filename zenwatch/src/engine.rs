@@ -25,7 +25,7 @@
 //! the engine's `CondState` into the sink payload unchanged. A presence,
 //! token or alarm rule whose observer lost events, or whose read ran to its
 //! timeout, says `unobservable` once, on its `observer` identity — never
-//! `ok` (RFC 13 §3 O6).
+//! `ok` (tooling guide O6).
 //!
 //! **Transitions, not states.** A token re-declared is not a notification;
 //! an address that was already down going down is not one either. What
@@ -1112,7 +1112,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     let tick = Duration::from_secs_f64(cfg.tick_s);
     eprintln!(
         "zenwatch: {} rule(s), {} sink(s), tick {}s, {}{}{}{}{}{} — three states, \
-         ok/firing/unobservable, one notification per sink per genuine change (RFC 13 §3)",
+         ok/firing/unobservable, one notification per sink per genuine change (observer §1)",
         rules.len(),
         sinks.len(),
         cfg.tick_s,

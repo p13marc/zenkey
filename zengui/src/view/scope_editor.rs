@@ -13,8 +13,8 @@
 //! makes the scope [`ScopePreset::Custom`].
 //!
 //! Every row is validated as typed with [`crate::scope::validate_selector`]
-//! (empty and `$*` are refused — RFC 03 §2 forbids `$*` in selectors, not
-//! merely in published keys), and every row carries its
+//! (empty and `$*` are refused — the reference refuses `$*` in selectors,
+//! not merely in published keys, tooling guide §8.2), and every row carries its
 //! [`crate::scope::blind_spot`]: the verbatim rule is the one users get wrong, so
 //! the editor states it inline rather than trusting a tooltip.
 

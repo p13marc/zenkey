@@ -96,8 +96,8 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
 }
 
 /// The selectors a capture watches, the raw observers' one scope
-/// ([`zk2::wire_scope`], #924): the ones typed (through the raw seam, RFC
-/// 03 §2's `$*` refusal), or the deployment's zk2 data, and with
+/// ([`zk2::wire_scope`], #924): the ones typed (through the raw seam, its
+/// `$*` refusal: tooling guide §8.2), or the deployment's zk2 data, and with
 /// `--explicit` its explicit kinds by name. A typed zk2 selector outside
 /// the namespace gets a one-line hint: selectors are wire keys, and
 /// `replay --namespace` moves only what sits under the capture's namespace.

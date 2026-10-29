@@ -86,7 +86,7 @@ fn the_history_pane_says_why_it_is_empty() {
     assert!(
         ui.find(
             "The watch is active and nothing has arrived on this key since it \
-             was selected. That is not a statement about the bus (RFC 05 §3.1)."
+             was selected. That is not a statement about the bus (observer §2)."
         )
         .is_ok(),
         "silence stays a non-verdict"
@@ -134,7 +134,7 @@ fn the_history_pane_diffs_consecutive_payloads() {
     );
 }
 
-/// A tombstone is authoritative retirement (RFC 04 §1.2), and the put that
+/// A tombstone is authoritative retirement (core §4.2), and the put that
 /// follows one starts a new value rather than "changing" the deleted one.
 #[test]
 fn the_history_pane_marks_a_tombstone_as_retirement() {
@@ -166,7 +166,7 @@ fn the_history_pane_marks_a_tombstone_as_retirement() {
             "a delete must be visibly distinct from an empty put"
         );
         assert!(
-            ui.find("retired — an authoritative delete (RFC 04 §1.2), not an empty value")
+            ui.find("retired — an authoritative delete (core §4.2), not an empty value")
                 .is_ok()
         );
     }
@@ -221,7 +221,7 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
     );
 }
 
-/// The bound is on screen, not implied by a short list (RFC 09 §5.1 O6).
+/// The bound is on screen, not implied by a short list (tooling guide O6).
 #[test]
 fn the_history_pane_counts_what_it_evicted() {
     use zengui::view::history::{HistoryData, section};

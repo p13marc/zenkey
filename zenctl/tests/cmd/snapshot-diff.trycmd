@@ -1,4 +1,4 @@
-`snapshot diff` is the offline half of the `.zsnap` verb (#219, RFC 13 §4.4):
+`snapshot diff` is the offline half of the `.zsnap` verb (#219, tooling guide §5):
 two files in, no session, and the one contract the section makes
 non-negotiable — **both spans stated**, in the envelope and in the caveat —
 visible on every exit code. The fixtures are the shared report fixtures
@@ -17,12 +17,12 @@ facets that moved: `eth0`'s value *and* its conformance (it was fixed), and
 ```console
 $ zenctl snapshot diff tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/b.zsnap
 ? 1
-{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":4,"asked":1,"base":"acme","collected_at":"2026-10-09T00:05:00Z","collection_span_s":0.8,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":1}
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":4,"asked":1,"base":"acme","collected_at":"2026-10-09T00:05:00Z","collection_span_s":0.8,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"notes":[{"cite":"tooling guide §5","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":1}
 {"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1","row":"added"}
 {"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9","row":"removed"}
 {"conformance":[{"state":"invalid","violations":["/is_up: expected boolean"]},{"state":"valid"}],"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":true,"old":"yes","op":"changed","path":"is_up"}],"truncated":0}}
 {"holder":[{"address":"host-b/tc","kind":"no_instance"},{"address":"host-b/tc","answered_by":"owner","kind":"live"}],"key":"zk2/host-b/tc/tc.netif.v1/state/namespaces","row":"changed","timestamp":["7f3b2a1c00000001/cd34","7f3b2a1c00000001/cd34"]}
-a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant (tooling guide §5)
 
 ```
 
@@ -32,8 +32,8 @@ instant.
 
 ```console
 $ zenctl snapshot diff tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/a.zsnap
-{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 1.25s at 2026-10-09T00:00:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":4}
-a: span 1.25s at 2026-10-09T00:00:00Z, b: span 1.25s at 2026-10-09T00:00:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"notes":[{"cite":"tooling guide §5","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 1.25s at 2026-10-09T00:00:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":4}
+a: span 1.25s at 2026-10-09T00:00:00Z, b: span 1.25s at 2026-10-09T00:00:00Z — each side was collected over its span, not at an instant (tooling guide §5)
 
 ```
 
@@ -44,8 +44,8 @@ change, and the caveat says so.
 
 ```console
 $ zenctl snapshot diff tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/staging.zsnap
-{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":5,"asked":1,"base":"staging","collected_at":"2026-10-09T01:00:00Z","collection_span_s":0.9,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["staging/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.90s at 2026-10-09T01:00:00Z — each side was collected over its span, not at an instant"},{"cite":"spec §1.6","text":"keys compared relative to each file's namespace (a: /"acme/", b: /"staging/"); two deployments' clocks are not compared, so a stamp that moved alone is not a change here"}],"report":"snapshot-diff","unchanged":4}
-a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.90s at 2026-10-09T01:00:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":5,"asked":1,"base":"staging","collected_at":"2026-10-09T01:00:00Z","collection_span_s":0.9,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["staging/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"notes":[{"cite":"tooling guide §5","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.90s at 2026-10-09T01:00:00Z — each side was collected over its span, not at an instant"},{"cite":"spec §1.6","text":"keys compared relative to each file's namespace (a: /"acme/", b: /"staging/"); two deployments' clocks are not compared, so a stamp that moved alone is not a change here"}],"report":"snapshot-diff","unchanged":4}
+a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.90s at 2026-10-09T01:00:00Z — each side was collected over its span, not at an instant (tooling guide §5)
 keys compared relative to each file's namespace (a: "acme", b: "staging"); two deployments' clocks are not compared, so a stamp that moved alone is not a change here (spec §1.6)
 
 ```

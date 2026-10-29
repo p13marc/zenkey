@@ -1,4 +1,4 @@
-//! The bound every long-lived table in this crate shares (RFC 09 §5.1 O6).
+//! The bound every long-lived table in this crate shares (tooling guide O6).
 //!
 //! An explorer that runs for hours accumulates: per-key statistics, key
 //! projections, watch state. Every one of those tables needs the same three
@@ -46,7 +46,7 @@ const EVICT_FRACTION: usize = 16;
 /// adds that to its own counters. "Evicted under the bound", "retired because
 /// nothing watches it any more" and "never projected in the first place" are
 /// different facts, and one counter over several of them is exactly what
-/// RFC 09 §5.1 O6 forbids.
+/// tooling guide O6 forbids.
 ///
 /// Recency is the caller's too: `StatsTable` orders by the injected
 /// `last_seen: Instant`, and [`admit`](Self::admit) takes it as a projection

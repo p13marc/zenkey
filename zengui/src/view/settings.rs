@@ -118,7 +118,7 @@ pub struct SettingsData<'a> {
 
 /// The #188 invariant, stated where the bounds are set.
 pub const BOUND_INVARIANT: &str = "raising a bound never clears the counter that reported the \
-     old bound's cost (RFC 09 §5.1 O6)";
+     old bound's cost (tooling guide O6)";
 
 pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     // The acceptance, structural: every `Settings` field is either a control

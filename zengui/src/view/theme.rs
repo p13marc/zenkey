@@ -64,7 +64,7 @@ pub struct Tokens {
     pub success: Color,
     pub warning: Color,
     pub danger: Color,
-    /// A tombstone (RFC 04 §1.2): retirement is a fact, not a negative
+    /// A tombstone (core §4.2): retirement is a fact, not a negative
     /// verdict, so it does not borrow danger's hue.
     pub retired: Color,
     /// Payload syntax: keys and strings. Literals take the text colour and
@@ -341,7 +341,7 @@ impl ThemeColors<'_> {
         }
     }
 
-    /// A tombstone's colour (RFC 04 §1.2).
+    /// A tombstone's colour (core §4.2).
     pub fn retired(&self) -> Color {
         self.tokens().retired
     }
@@ -470,7 +470,7 @@ impl ThemeColors<'_> {
         self.tone(kind.tone())
     }
 
-    /// The judgement scale (#614, FL9): RFC 13's four poles, mirroring the
+    /// The judgement scale (#614, FL9): observer §1's four poles, mirroring the
     /// CLI's ✗/✓/~/· marks.
     pub fn judgement(&self, kind: JudgementTone) -> Color {
         self.tone(kind.tone())
@@ -487,7 +487,7 @@ impl ThemeColors<'_> {
 ///
 /// Five slots, not four: `Neutral` is "we have not asked" (or "the question
 /// does not apply"), structurally its own slot — so an unanswered question can
-/// never borrow the swatch of "asked, and the answer was no". RFC 05 §3.1
+/// never borrow the swatch of "asked, and the answer was no". Observer §2
 /// forbids exactly that false verdict, and the whole five-state
 /// identity ladder ([`crate::keyfacts::Rung`]) exists to prevent it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -521,7 +521,7 @@ pub enum SyntaxRole {
     Punct,
 }
 
-/// How a judgement should read (#614, FL9; RFC 13 §1.2): the four poles of
+/// How a judgement should read (#614, FL9; observer §1): the four poles of
 /// zk2's `Judgement`, a doctor check's verdict and the admin pane's S4 row
 /// alike. Each is **named for a condition firing** (tooling guide §1), so
 /// `Established` is the finding and `NotEstablished` the clean answer —
@@ -748,7 +748,7 @@ impl BudgetTone {
 /// How a payload-conformance verdict should read (#164) — the same
 /// discipline as [`IdentityTone`]: never a boolean, and `NotChecked` is
 /// [`Tone::Neutral`] because "not checked" must never wear an answer's
-/// swatch (RFC 09 §5.1 O4).
+/// swatch (observer §1).
 ///
 /// Four poles since #614 (FL6a), zk2's `Conformance`: the bytes that do not
 /// decode as their declared type are their own pole, apart from a value that

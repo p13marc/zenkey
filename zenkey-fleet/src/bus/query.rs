@@ -1,4 +1,4 @@
-//! The fan-in query discipline (RFC 05 §2.1) — moved verbatim from
+//! The fan-in query discipline (core §5.1) — moved verbatim from
 //! zenctl's `bus.rs`; this stays the single chokepoint for fleet GETs.
 //!
 //! Two disciplines, one `session.get`: the fan-in's (target `All`,
@@ -19,7 +19,7 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 /// a GUI hold an answer in widget state without paying for it.
 #[derive(Debug, Clone)]
 pub enum Answer {
-    /// A value reply — RFC 05 §3: "a reply always indicates success".
+    /// A value reply: success (core §5.1 O3).
     /// Carried as zenoh's refcounted buffer: cloning is a refcount bump,
     /// and consumers decode via `reader()`/`to_bytes()` (a `Cow` — it
     /// copies only when the payload arrived fragmented). Report §14's
@@ -27,7 +27,7 @@ pub enum Answer {
     /// reply is retired.
     Value(zenoh::bytes::ZBytes),
     /// An error reply (`reply_err`), carrying the `{error, message}` envelope
-    /// when it parses. RFC 05 §3: "an error always indicates failure".
+    /// when it parses: failure (core §5.1 O3, §5.2).
     Error { name: String, message: String },
 }
 
@@ -35,7 +35,7 @@ pub enum Answer {
 #[derive(Debug, Clone)]
 pub struct FleetAnswer {
     /// The reply's **own** key expression: the attribution, and the concrete
-    /// key a follow-up must be addressed to (RFC 05 §2.1). A key that names
+    /// key a follow-up must be addressed to (core §5.1, "Attribution"). A key that names
     /// no service a reader knows is still a fact about who answered (O1).
     ///
     /// Empty for an error reply, which zenoh gives no sample and therefore no
@@ -46,8 +46,8 @@ pub struct FleetAnswer {
     ///
     /// A caller that speaks a specific wire (`@blob`'s postcard replies, say)
     /// needs to tell "answered in a dialect we do not speak" from "did not
-    /// answer": the first is an observation, the second is silence, and RFC 09
-    /// §5.1 O4 forbids rendering them alike.
+    /// answer": the first is an observation, the second is silence, and observer
+    /// §1 forbids rendering them alike.
     pub encoding: Option<String>,
     /// The reply's attachment, when it carried one (refcounted, like the
     /// payload). `None` on an error reply is the only truth available:
@@ -56,7 +56,7 @@ pub struct FleetAnswer {
     pub attachment: Option<zenoh::bytes::ZBytes>,
     /// The reply sample's HLC, when it carried one (#215). A reply is a
     /// sample and is stamped like one — by the first timestamping node it
-    /// passed, not necessarily the responder (RFC 09 §5.1 O7). `None` on an
+    /// passed, not necessarily the responder (observer §8.3). `None` on an
     /// error reply, which is not a sample, and on a reply nothing stamped.
     pub timestamp: Option<zenoh::time::Timestamp>,
     /// Whether the reply sample was a put or a delete (#765). A delete is a
@@ -74,12 +74,13 @@ impl FleetAnswer {
     }
 }
 
-/// What one GET may vary — everything RFC 05 §2.1 does **not** fix.
+/// What one GET may vary — everything the fan-in discipline does **not** fix.
 ///
-/// The §2.1 triple is not a knob and deliberately has no field here: it is
+/// The triple (target `All`, consolidation `None`, attribution by the
+/// reply's key; core §5.1) is not a knob and deliberately has no field here: it is
 /// applied by `disciplined_get` to every GET this crate issues. What a
 /// caller does choose is the timeout, the request body, an attachment riding
-/// beside it (#126), the query's priority (RFC 04 §3, RFC 07 §2.6) and
+/// beside it (#126), the query's priority (core §2.4) and
 /// whether replies from *outside* the selector are accepted.
 ///
 /// A spec struct rather than named sibling functions: `fleet_get_at`
@@ -148,11 +149,11 @@ impl GetOpts {
         self
     }
 
-    /// State the query's priority (RFC 04 §3, RFC 07 §2.6).
+    /// State the query's priority (core §2.4).
     ///
     /// Replies inherit the *query's* QoS — a server-side setter is a no-op —
-    /// so a bulk plane's priority can only be decided here. RFC 07 §2.6 makes
-    /// that a caller obligation rather than a suggestion: `@blob` GETs MUST
+    /// so a bulk plane's priority can only be decided here. v1 made that a
+    /// caller obligation rather than a suggestion: `@blob` GETs MUST
     /// ride at [`Priority::DataLow`], or one operator fetching a debug bundle
     /// starves the telemetry and alerts sharing the link.
     pub fn priority(mut self, priority: Priority) -> Self {
@@ -180,7 +181,7 @@ impl GetOpts {
 
     /// Keep at most `max` replies (#339). Zero is clamped to one: a GET that
     /// kept nothing would report silence, and silence is never a verdict
-    /// (RFC 05 §3.1).
+    /// (observer §2).
     pub fn max_replies(mut self, max: usize) -> Self {
         self.max_replies = max.max(1);
         self
@@ -192,7 +193,7 @@ impl GetOpts {
     }
 
     /// **What the bound cost**: replies that arrived and were not kept,
-    /// across every GET run under these options (RFC 13 §3 O6 — a bound that
+    /// across every GET run under these options (tooling guide O6 — a bound that
     /// hides data must say so).
     ///
     /// It rides here, on the object that *states* the bound, rather than in
@@ -231,7 +232,7 @@ impl GetOpts {
     }
 }
 
-/// The fan-in GET of this crate (RFC 05 §2.1) — no other module issues
+/// The fan-in GET of this crate (core §5.1) — no other module issues
 /// a `session.get`: this and [`state_get`] share the one call, which is what
 /// makes the discipline checkable by grep rather than by review.
 ///
@@ -266,7 +267,7 @@ pub(crate) async fn disciplined_get(
 /// `Latest` keeps, per key, the reply with the greatest timestamp, ranks an
 /// unstamped one lowest, and delivers at the GET's completion (§4.1). That
 /// is the whole reason it is not [`disciplined_get`]: a fan-out under
-/// RFC 05 §2.1 wants every reply, a state read wants each key's newest.
+/// the fan-in discipline wants every reply, a state read wants each key's newest.
 /// One selector over several owners is still "addressed to the owner's
 /// keys" (0.26): each key it matches has one owner (P3), so `Latest`
 /// consolidates each key over that owner's answers; a foreign key is
@@ -309,13 +310,13 @@ async fn issue(
 
 /// GET a selector and collect **every** reply, attributed by its own key.
 ///
-/// The RFC 05 §2.1 fan-in, end to end: `disciplined_get` sets target `All`
+/// The fan-in (core §5.1), end to end: `disciplined_get` sets target `All`
 /// and consolidation `None`, and `answer_of` attributes each reply by the
 /// reply's *own* key — which is what makes a wildcard fan-out legible. The
 /// session is the caller's: a raw `get` passes one in no namespace, and the
 /// selector is the wire key.
 ///
-/// Silence is deliberately *not* interpreted here (RFC 05 §3.1: "no reply" is
+/// Silence is deliberately *not* interpreted here (observer §2: "no reply" is
 /// not one condition). Callers that need a verdict join this against a
 /// presence read. Bounded at [`GetOpts::reply_bound`], and what the bound cost is on
 /// [`GetOpts::elided`] (#339).
@@ -330,7 +331,7 @@ pub async fn fleet_get(session: &Session, key: &str, opts: &GetOpts) -> Result<V
 
 /// Drain a reply channel into attributed answers — the shared back half of
 /// [`fleet_get`] and [`RepeatingQuery`]: one implementation of reply-key
-/// attribution and the RFC 05 §3 error envelope, however the query was issued.
+/// attribution and the error envelope (core §5.2), however the query was issued.
 ///
 /// Returns what it kept and **how many it did not** (#339). Past `max` the
 /// replies are still drained — the channel is being emptied either way — they
@@ -356,7 +357,7 @@ async fn collect_answers(
 
 /// One reply, attributed — the per-reply half of [`collect_answers`], shared
 /// with the timed drain in [`RepeatingQuery::fetch_timed`] so attribution and
-/// the RFC 05 §3 error envelope have exactly one implementation.
+/// the error envelope (core §5.2) have exactly one implementation.
 fn answer_of(reply: zenoh::query::Reply) -> FleetAnswer {
     match reply.result() {
         Ok(sample) => FleetAnswer {
@@ -369,7 +370,8 @@ fn answer_of(reply: zenoh::query::Reply) -> FleetAnswer {
         },
         Err(err) => {
             // The error envelope is `{ "error": "<name>", "message": "…" }`
-            // (RFC 05 §3), with reserved names like `error/not-found`. If it
+            // (v1's shape; zk2's is core §5.2's), with reserved names like
+            // `error/not-found`. If it
             // does not parse we still surface the bytes — an unreadable
             // refusal is still a refusal.
             let bytes = err.payload().to_bytes();
@@ -403,7 +405,7 @@ fn answer_of(reply: zenoh::query::Reply) -> FleetAnswer {
     }
 }
 
-/// A **declared** querier carrying the same RFC 05 §2.1 discipline as
+/// A **declared** querier carrying the same fan-in discipline as
 /// [`fleet_get`] (target `All`, consolidation `None`, attribution by reply
 /// key), for fetches that re-ask the **same key expression** — watch loops
 /// and periodic sweeps. Declaring once lets
@@ -519,8 +521,8 @@ impl RepeatingQuery {
         self.max_replies
     }
 
-    /// Replies this querier's bound refused, across every fetch (RFC 13 §3
-    /// O6). See [`GetOpts::elided`] for why the count lives with the bound.
+    /// Replies this querier's bound refused, across every fetch (tooling
+    /// guide O6). See [`GetOpts::elided`] for why the count lives with the bound.
     pub fn elided(&self) -> u64 {
         self.elided.load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -550,7 +552,7 @@ impl RepeatingQuery {
     /// the slowest answer, so attributing it to every origin would report a
     /// fast responder's latency as the fleet's worst. Timing each reply where
     /// it is drained is the only place the distinction is available — and it
-    /// keeps the RFC 05 §2.1 chokepoint intact rather than forking a second
+    /// keeps the fan-in chokepoint intact rather than forking a second
     /// GET path to measure with.
     pub async fn fetch_timed(&self) -> Result<Vec<(FleetAnswer, Duration)>> {
         let started = std::time::Instant::now();
@@ -584,8 +586,8 @@ impl RepeatingQuery {
 
     /// Whether any queryable currently matches **this querier** — "someone
     /// serves what *we* ask", a routing fact about the querier this process
-    /// declared (RFC 12 §9's allowed half). `false` is not a fleet verdict:
-    /// it never means "nobody serves this key" (RFC 05 §3.1).
+    /// declared (the half zenoh reports, tooling guide §8.3). `false` is not a fleet verdict:
+    /// it never means "nobody serves this key" (observer §2).
     pub async fn matching_status(&self) -> Result<bool> {
         self.querier
             .matching_status()

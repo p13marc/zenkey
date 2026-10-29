@@ -255,7 +255,7 @@ pub fn undeclare(publication: Publication) -> Task<Message> {
     )
 }
 
-/// Retire a key: a tombstone (RFC 04 §1.2) on the axes the form picked. The
+/// Retire a key: a tombstone (core §4.2) on the axes the form picked. The
 /// engine has already judged whether this key may be retired
 /// (`check_retire`, behind `--i-know`); this is the write.
 pub fn retire(session: zenoh::Session, key: String, qos: WireQos) -> Task<Message> {

@@ -1,4 +1,4 @@
-//! The storage planner (RFC 09 §2, #393; zk2's since #704): a deployment
+//! The storage planner (tooling guide §8.4, #393; zk2's since #704): a deployment
 //! file, an enrollment and the contracts in, the router's `storage_manager`
 //! block out — with every derived number shown, every caveat cited, and
 //! every refusal named.
@@ -21,7 +21,8 @@
 //! delete it holds, so it cannot be an archive's store (§4.4).
 //!
 //! For every storage a literal `strip_prefix` is derived from the selector
-//! and a volume's capability pair comes from the §2.1 table. The two things
+//! and a volume's capability pair comes from the tooling guide's table
+//! (§8.4). The two things
 //! a human types wrong here — a `strip_prefix` that is not a literal prefix
 //! of its selector, and a history mode the backend does not offer — produce
 //! a router that starts happily and stores nothing, or refuses to start at
@@ -54,7 +55,7 @@ use crate::report::{
     StorageInfo, StoragePlan, Taker, TakerRelation, WarningKind,
 };
 
-/// Zenoh's own default `garbage_collection.lifespan`, seconds (RFC 09 §2.3:
+/// Zenoh's own default `garbage_collection.lifespan`, seconds (tooling guide §8.4:
 /// "default 24 h").
 pub const DEFAULT_LIFESPAN_S: i64 = 86_400;
 /// Zenoh's own default `garbage_collection.period`, seconds.
@@ -67,7 +68,7 @@ pub const DEFAULT_GC_PERIOD_S: u64 = 30;
 /// declaration records (#890).
 pub const CHECK_ASKED: &str = "@/*/router/status/plugins/storage_manager/storages/**";
 
-/// RFC 09 §2.1's capability table: persistence, and the history mode when
+/// The capability table (tooling guide §8.4): persistence, and the history mode when
 /// the plugin fixes it. `None` history = per volume (`redb`); `None` overall
 /// = a plugin this tool does not know.
 fn capability(plugin: &str) -> Option<(Persistence, Option<HistoryMode>)> {
@@ -80,7 +81,7 @@ fn capability(plugin: &str) -> Option<(Persistence, Option<HistoryMode>)> {
     }
 }
 
-/// RFC 09 §2.2's example replication block — what `replication = true`
+/// The example replication block (tooling guide §8.4) — what `replication = true`
 /// means.
 fn default_replication() -> BTreeMap<String, serde_json::Value> {
     [
@@ -225,7 +226,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
 
     let mut refusals = Vec::new();
 
-    // ── Volumes: the capability pair, per volume (RFC 09 §2.1 v1.28). ──
+    // ── Volumes: the capability pair, per volume (tooling guide §8.4). ──
     let mut volumes = Vec::new();
     let mut refused_volumes: Vec<String> = Vec::new();
     for (id, spec) in &deployment.volumes {
@@ -244,7 +245,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
                             fixed.as_str(),
                             h.as_str()
                         ),
-                        cite: "RFC 09 §2.1".into(),
+                        cite: "tooling guide §8.4".into(),
                     });
                     refused_volumes.push(id.clone());
                     continue;
@@ -264,7 +265,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
                              per mode from the same plugin)",
                             spec.plugin
                         ),
-                        cite: "RFC 09 §2.1".into(),
+                        cite: "tooling guide §8.4".into(),
                     });
                     refused_volumes.push(id.clone());
                     continue;
@@ -274,7 +275,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
                 Some(h) => {
                     warnings.push(warn(
                         WarningKind::UnknownPlugin,
-                        "RFC 09 §2.1",
+                        "tooling guide §8.4",
                         format!(
                             "plugin {:?} is not in the capability table; its history = \
                              {:?} is taken as declared, not verified",
@@ -294,7 +295,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
                              mode cannot be inferred: declare history = \"latest\" or \"all\"",
                             spec.plugin
                         ),
-                        cite: "RFC 09 §2.1".into(),
+                        cite: "tooling guide §8.4".into(),
                     });
                     refused_volumes.push(id.clone());
                     continue;
@@ -357,7 +358,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
                     params: BTreeMap::new(),
                     warnings: vec![warn(
                         WarningKind::ImplicitVolume,
-                        "RFC 09 §2.1",
+                        "tooling guide §8.4",
                         "no deployment file names an [events] volume, so the union storages \
                          derived from the enrollment use zenoh's memory backend: volatile, \
                          every stored occurrence is lost on a router restart — name one with \
@@ -402,7 +403,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             refusals.push(refuse_storage(
                 &name,
                 Some(key_expr.clone()),
-                "RFC 03 §2",
+                "tooling guide §8.4",
                 format!("{key_expr:?} is not a valid key expression"),
             ));
             continue;
@@ -427,14 +428,19 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             continue;
         }
 
-        // The volume, and its mode — the fact every §2.2 decision reads.
+        // The volume, and its mode — the fact every replication decision reads.
         let Some(volume) = volumes.iter().find(|v| v.id == volume_id) else {
             let reason = if refused_volumes.contains(&volume_id) {
                 format!("its volume {volume_id:?} was refused (see above)")
             } else {
                 format!("names volume {volume_id:?}, which [volumes] does not declare")
             };
-            refusals.push(refuse_storage(&name, Some(key_expr), "RFC 09 §2", reason));
+            refusals.push(refuse_storage(
+                &name,
+                Some(key_expr),
+                "tooling guide §8.4",
+                reason,
+            ));
             continue;
         };
         let history = volume.history;
@@ -449,7 +455,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             refusals.push(refuse_storage(
                 &name,
                 Some(key_expr),
-                "RFC 09 §2.2",
+                "tooling guide §8.4",
                 format!(
                     "declares replication on volume {:?}, whose history mode is all — \
                      the storage manager refuses to start such a storage, so this plan \
@@ -472,7 +478,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
         {
             warnings.push(warn(
                 WarningKind::ReplicationParams,
-                "RFC 09 §2.2",
+                "tooling guide §8.4",
                 format!(
                     "propagation_delay {delay} ms is not below interval/2 = {} ms — \
                      divergent or inconsistent replication parameters cause digest \
@@ -482,7 +488,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             ));
         }
 
-        // `complete: true` — right in exactly one place (RFC 09 §2.2).
+        // `complete: true` — right in exactly one place (tooling guide §8.4).
         let mut complete = asked_complete;
         if complete && !(replication.is_some() && history == HistoryMode::Latest) {
             complete = false;
@@ -493,7 +499,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             };
             warnings.push(warn(
                 WarningKind::CompleteRefused,
-                "RFC 09 §2.2",
+                "tooling guide §8.4",
                 format!(
                     "complete = true refused: {why} — complete is right only on a \
                      replicated latest-mode storage, where it lets the router answer a GET \
@@ -502,11 +508,11 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             ));
         }
 
-        // The volume's row of the §2.1 table, and its caveats.
+        // The volume's row of the capability table, and its caveats.
         match volume.plugin.as_str() {
             "influxdb" => warnings.push(warn(
                 WarningKind::RetentionIsTheDatabases,
-                "RFC 09 §2.3",
+                "tooling guide §8.4",
                 "retention is the database's policy (an InfluxDB retention policy), not \
                  zenoh config: garbage_collection prunes metadata and never drops a value, \
                  so this storage's data grows until the database prunes it — size the \
@@ -515,14 +521,14 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             "redb" => match (history, &retention) {
                 (HistoryMode::All, None) => warnings.push(warn(
                     WarningKind::RetentionRequired,
-                    "RFC 09 §2.1",
+                    "tooling guide §8.4",
                     "an all-mode redb storage that declares no retention policy refuses to \
                      start — add a retention block bounding age, bytes or per-key samples \
                      (a loud config error is recoverable in seconds; a full disk is not)",
                 )),
                 (HistoryMode::Latest, Some(_)) => warnings.push(warn(
                     WarningKind::RetentionPointless,
-                    "RFC 09 §2.1",
+                    "tooling guide §8.4",
                     "a retention block on a latest-mode volume is refused at startup: there \
                      is no history to prune, and it would report passes while reclaiming \
                      nothing",
@@ -572,7 +578,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
         });
     }
 
-    // ── Overlaps (RFC 09 §2). ──
+    // ── Overlaps (tooling guide §8.4). ──
     let mut overlaps: Vec<(usize, usize)> = Vec::new();
     for i in 0..storages.len() {
         for j in (i + 1)..storages.len() {
@@ -596,7 +602,7 @@ pub fn plan(fallback_base: &str, inputs: StorageInputs<'_>) -> crate::Result<Sto
             );
             storages[this]
                 .warnings
-                .push(warn(WarningKind::Overlap, "RFC 09 §2", text));
+                .push(warn(WarningKind::Overlap, "tooling guide §8.4", text));
         }
     }
 
@@ -807,14 +813,14 @@ fn json5_object<'a>(
 /// they concern, and the refusals where the refused storage would have been.
 ///
 /// Merge it under the router config's `plugins`; each non-memory volume needs
-/// its backend plugin installed and version-matched to the router (RFC 09
-/// §2).
+/// its backend plugin installed and version-matched to the router (tooling
+/// guide §8.4).
 pub fn to_json5(plan: &StoragePlan) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "// zenohd storage_manager block — generated by `zenctl storage gen` (RFC 09 §2)."
+        "// zenohd storage_manager block — generated by `zenctl storage gen` (tooling guide §8.4)."
     );
     let _ = writeln!(out, "// namespace {:?}.", plan.base);
     let _ = writeln!(
@@ -869,7 +875,7 @@ pub fn to_json5(plan: &StoragePlan) -> String {
         };
         let _ = writeln!(
             out,
-            "      {}: {},  // {pair} (RFC 09 §2.1)",
+            "      {}: {},  // {pair} (tooling guide §8.4)",
             json5_key(&v.id),
             json5_object(head, &v.params)
         );
@@ -919,26 +925,26 @@ pub fn to_json5(plan: &StoragePlan) -> String {
         if let Some(rep) = &s.replication {
             let _ = writeln!(
                 out,
-                "        replication: {},  // identical on every replica (RFC 09 §2.2)",
+                "        replication: {},  // identical on every replica (tooling guide §8.4)",
                 json5_object([], rep)
             );
         }
         if s.complete {
             let _ = writeln!(
                 out,
-                "        complete: true,  // replicated latest-mode storage (RFC 09 §2.2)"
+                "        complete: true,  // replicated latest-mode storage (tooling guide §8.4)"
             );
         }
         if let Some(ret) = &s.retention {
             let _ = writeln!(
                 out,
-                "        retention: {},  // the backend's own policy (RFC 09 §2.1)",
+                "        retention: {},  // the backend's own policy (tooling guide §8.4)",
                 json5_value(ret)
             );
         }
         let _ = writeln!(
             out,
-            "        garbage_collection: {{ period: {}, lifespan: {} }},  // {} (RFC 09 §2.3)",
+            "        garbage_collection: {{ period: {}, lifespan: {} }},  // {} (tooling guide §8.4)",
             s.garbage_collection.period_s,
             s.garbage_collection.lifespan_s,
             s.garbage_collection.derivation
@@ -1195,7 +1201,9 @@ pub fn explain(plan: &StoragePlan, key: &str) -> StorageExplain {
             base: plan.base.clone(),
             takers,
             refused_takers,
-            none_reason: Some(format!("{key:?} is not a valid key expression (RFC 03 §2)")),
+            none_reason: Some(format!(
+                "{key:?} is not a valid key expression (tooling guide §8.4)"
+            )),
         };
     };
     for s in &plan.storages {
@@ -1373,7 +1381,8 @@ mod tests {
         assert!(
             ts.warnings
                 .iter()
-                .any(|w| w.kind == WarningKind::RetentionIsTheDatabases && w.cite == "RFC 09 §2.3")
+                .any(|w| w.kind == WarningKind::RetentionIsTheDatabases
+                    && w.cite == "tooling guide §8.4")
         );
     }
 
@@ -1399,7 +1408,7 @@ mod tests {
         );
     }
 
-    /// RFC 09 §2.2: replication on an all-mode volume is a startup refusal,
+    /// Tooling guide §8.4: replication on an all-mode volume is a startup refusal,
     /// so the plan refuses first — and names the storage.
     #[test]
     fn replication_on_an_all_mode_volume_is_refused() {
@@ -1412,7 +1421,7 @@ mod tests {
             .iter()
             .find(|r| r.storage.as_deref() == Some("timeseries"))
             .expect("refused");
-        assert_eq!(r.cite, "RFC 09 §2.2");
+        assert_eq!(r.cite, "tooling guide §8.4");
         assert_eq!(r.key_expr.as_deref(), Some("fleet-a/zk2/*/*/*/stream/**"));
     }
 
@@ -1434,7 +1443,7 @@ mod tests {
                 s.warnings
                     .iter()
                     .any(|w| w.kind == WarningKind::CompleteRefused
-                        && w.cite == "RFC 09 §2.2"
+                        && w.cite == "tooling guide §8.4"
                         && w.text.contains(why)),
                 "{name}: {:?}",
                 s.warnings
@@ -1469,7 +1478,7 @@ mod tests {
     }
 
     /// redb's per-volume mode: retention is mandatory in all mode and refused
-    /// in latest mode (RFC 09 §2.1).
+    /// in latest mode (tooling guide §8.4).
     #[test]
     fn redb_retention_is_judged_by_the_volumes_mode() {
         let mut d = reference();
@@ -1534,7 +1543,7 @@ mod tests {
         );
     }
 
-    /// The JSON5 is RFC 09 §2's shape, with the numbers filled in and the
+    /// The JSON5 is tooling guide §8.4's shape, with the numbers filled in and the
     /// caveats beside the storage they concern.
     #[test]
     fn the_json5_carries_the_block_and_its_comments() {
@@ -1542,7 +1551,7 @@ mod tests {
         let doc = to_json5(&plan);
         assert!(doc.contains("// namespace \"fleet-a\"."));
         assert!(doc.contains("plugins: {\n  storage_manager: {\n    volumes: {"));
-        assert!(doc.contains("      fs: {},  // durable · latest (RFC 09 §2.1)"));
+        assert!(doc.contains("      fs: {},  // durable · latest (tooling guide §8.4)"));
         assert!(doc.contains("        key_expr: \"fleet-a/zk2/*/*/*/events/**\","));
         assert!(doc.contains("        strip_prefix: \"fleet-a/zk2\","));
         assert!(doc.contains(

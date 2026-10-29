@@ -35,7 +35,7 @@ pub struct ServedQuery {
     /// Surfaced, not swallowed (deep-review D7): the ask itself is still a
     /// fact worth logging either way, but a responder whose answers never
     /// leave the process must say so, or its log reads as service
-    /// (RFC 05 §3.1 — silence needs attribution, on the answering side
+    /// (observer §2 — silence needs attribution, on the answering side
     /// too).
     pub reply_error: Option<String>,
 }
@@ -44,7 +44,7 @@ pub struct ServedQuery {
 pub struct MockResponder {
     queryable: zenoh::query::Queryable<FifoChannelHandler<zenoh::query::Query>>,
     /// The declared expression — the responder's own key when concrete
-    /// (RFC 05 §2.1: replies ride the responder's key, G-05b).
+    /// (core §5.1 O3: replies ride the responder's key, G-05b).
     keyexpr: String,
     /// Whether `keyexpr` is concrete (no wildcards) — decided once at
     /// declaration.
@@ -97,9 +97,9 @@ impl MockResponder {
     /// deadline or a count timeout joins the `select!` that today holds only
     /// `ctrl_c` — could be dropped between the two, and the query was then
     /// taken off the channel, never answered, and never logged. Invisible on
-    /// both sides: the asker sees silence it cannot attribute (RFC 05 §3.1),
+    /// both sides: the asker sees silence it cannot attribute (observer §2),
     /// and the responder's log — half the point of this type — never records
-    /// the ask at all (RFC 13 §3 O6).
+    /// the ask at all (tooling guide O6).
     ///
     /// Hand what this returns to [`answer`](Self::answer): a query in the
     /// caller's hand can still be answered after a cancelled poll, and one
@@ -121,7 +121,7 @@ impl MockResponder {
     /// Answer one query and return its view.
     ///
     /// The reply is addressed to the responder's **own declared key** when
-    /// that key is concrete (RFC 05 §2.1: attribution and consolidation both
+    /// that key is concrete (core §5.1: attribution and consolidation both
     /// read the reply key, so echoing a wildcard selector back — the G-05b
     /// violation this used to commit — collapses a mocked fleet to one
     /// surviving reply). A responder declared on a wildcard has no own

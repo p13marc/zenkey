@@ -453,7 +453,7 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
 22. **"System = host" holds only per application.** v1 salts the host id per application. RFC 06
     §1 makes the salt an application constant, so one machine mints three different `h-<12hex>`
     ids for the three adopters, and `zk2/<host>/**` would show one application's services.
-    - *Evidence:* `rfcs/06-identity.md:49-58`; zenoh-modem `modem-contract/src/lib.rs:50-53`
+    - *Evidence:* [`rfcs/06-identity.md:49-58`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs/06-identity.md#L49-L58) (`v1` branch); zenoh-modem `modem-contract/src/lib.rs:50-53`
       (`zenoh-modem-host-id-v1`); ZenSight's `zensight-host-id-v1`; tcgui's `tcgui-host-id-v1`;
       r3.2 l.95-98 ("per-host views … carry over position for position").
     - *Correction:* `hostid.v1` fixes one zk2-wide salt, so the system chunk agrees across

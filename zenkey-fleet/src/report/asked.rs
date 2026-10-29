@@ -3,7 +3,7 @@
 //! [`Asked`] carries one distinction and nothing else: was the question put?
 //! It is here rather than in a domain file because every domain needs it and
 //! none of them owns it — a `topic` field and a `doctor` field must spell
-//! "not asked" the same way or the RFC 09 §5.1 O4 split is only local.
+//! "not asked" the same way or the observer §1 split is only local.
 //!
 //! [`u64_is_zero`] keeps company with it for the same reason: it is the
 //! `skip_serializing_if` predicate behind "absent at zero", the append rule
@@ -12,8 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// "Was the question even put?" — the RFC 09 §5.1 O4 split (#246 / P1),
-/// made nominal (RFC 13, v1.24).
+/// "Was the question even put?" — the observer §1 split (#246 / P1),
+/// made nominal.
 ///
 /// A generation of report fields spelled "not asked" as `Option::None`,
 /// which conflated it with every *other* absence the moment a field also had
@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Asked<T> {
     /// The question was not put. Serializes as absence — not zero, not null,
-    /// not `[]` (RFC 09 §5.1 O4).
+    /// not `[]` (observer §1).
     #[default]
     NotAsked,
     /// The question was put, and this is what came back — an empty answer
@@ -114,7 +114,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Asked<T> {
     /// never reaches here — a field of this type carries `#[serde(default)]`
     /// beside its `skip_serializing_if`, and the default is `NotAsked` — so
     /// a file written by this crate reads back to the value that wrote it
-    /// (`.zsnap`'s `roster`, RFC 13 §4.4).
+    /// (v1's `.zsnap` `roster` was the first such field).
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         T::deserialize(d).map(Asked::Asked)
     }

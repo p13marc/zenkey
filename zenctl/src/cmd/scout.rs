@@ -129,7 +129,7 @@ mod tests {
     }
 
     /// Silence is a statement about the multicast domain, never a bare empty
-    /// table — and now never a bare `[]` either (RFC 05 §3.1's posture applied
+    /// table — and now never a bare `[]` either (observer §2's posture applied
     /// below the session layer; #236).
     #[test]
     fn the_empty_result_states_the_boundary() {

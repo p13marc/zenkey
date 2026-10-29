@@ -1,9 +1,9 @@
 `pub` on a wildcard is refused, and nothing overrides it (#504).
 
-A put is addressed to one concrete key: RFC 07 §3 makes a publisher's key
-its own, by rule. A wildcard put is something else — zenoh delivers it to
-every subscriber whose subscription intersects it, across every producer's
-keys — and `retire` had refused the same blast radius since v1.12 while
+A put is addressed to one concrete key: a zk2 consumer discards a put on a
+wildcard key, by rule (core §3.2 R6). A wildcard put is something else —
+zenoh delivers it to every subscriber whose subscription intersects it,
+across every producer's keys — and `retire` had refused the same blast radius since v1.12 while
 `pub` printed `published prod/v1/** (7 bytes) [1/1]` and exited 0. The
 refusal is now one engine function (`zenkey_fleet::check_concrete`) that the
 tombstone gate, every put row and the declared publisher itself all ask, so
@@ -15,7 +15,7 @@ read, before a session opens — and exits **2** (`zenctl/src/exit.rs`).
 ```console
 $ zenctl pub 'plant/**' '{"x":1}'
 ? 2
-Error: plant/**: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
+Error: plant/**: is a wildcard — a put is addressed to one concrete key (core §3.2 R6: a consumer discards any other); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
 
 ```
 
@@ -25,7 +25,7 @@ stand in a key expression.
 ```console
 $ zenctl pub 'plant/line-1/te$*' '{}'
 ? 2
-Error: plant/line-1/te$*: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
+Error: plant/line-1/te$*: is a wildcard — a put is addressed to one concrete key (core §3.2 R6: a consumer discards any other); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
 
 ```
 

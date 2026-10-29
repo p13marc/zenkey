@@ -66,9 +66,9 @@ use crate::exit::unaskable;
 
 /// The raw-selector seam: every selector (or key) a user types, rather than
 /// composes through positions, passes here before anything reaches the
-/// session. RFC 03 §2 forbids `$*` in selectors, not merely in published
-/// keys (RFC 02 P6: it is markedly slower and strains the infrastructure —
-/// if a chunk needs `$*`, the key is wrong and wants splitting). zengui's
+/// session. The reference refuses `$*` in selectors, not merely in published
+/// keys (tooling guide §8.2: it strains zenoh's matching — if a chunk needs
+/// `$*`, the key is wrong and wants splitting). zengui's
 /// scope seam refuses it with this wording; the CLI must not be the frontend
 /// that lets it through.
 ///
@@ -79,7 +79,7 @@ use crate::exit::unaskable;
 pub fn raw_selector(sel: &str) -> Result<&str> {
     if sel.contains("$*") {
         return Err(unaskable!(
-            "`$*` must not be used in selectors (RFC 03 §2): {sel:?}"
+            "`$*` must not be used in selectors (tooling guide §8.2): {sel:?}"
         ));
     }
     Ok(sel)

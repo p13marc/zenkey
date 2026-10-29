@@ -18,7 +18,7 @@
 //! valid, invalid, undecodable, and not checked (with the rung that stopped
 //! it). A key with no entry has not been checked by *this cache*, which
 //! renders as [`UNCHECKED_LABEL`] — "not yet checked" — and is never a
-//! verdict of any pole (RFC 09 §5.1 O4).
+//! verdict of any pole (observer §1).
 //!
 //! Entries go stale against what they were judged under. A namespace move
 //! and a contracts reload clear the cache: those verdicts describe another
@@ -31,7 +31,7 @@
 //! ## The bound
 //!
 //! Bounded like every other table here, and the bound reports its cost
-//! (RFC 09 §5.1 O6): past [`CAPACITY`] keys, new entries are refused and
+//! (tooling guide O6): past [`CAPACITY`] keys, new entries are refused and
 //! counted — the [`crate::echo`] path-table shape, not a silent LRU that
 //! would make "checked" flicker.
 
@@ -86,7 +86,7 @@ pub struct VerdictCache {
     /// Bumped when what a check resolves through moved (the lens
     /// generation): every entry judged before is due.
     generation: u64,
-    /// Entries refused to stay within the bound (RFC 09 §5.1 O6).
+    /// Entries refused to stay within the bound (tooling guide O6).
     refused: u64,
     /// Verdicts recorded since the cache was last cleared.
     checked: u64,
@@ -215,7 +215,7 @@ pub fn tone(v: &Conformance) -> VerdictTone {
 
 /// The badge word for a verdict — compact, but each pole (and each
 /// not-checked *rung*) distinct: "no provider of this address in presence"
-/// must not share a spelling with "not a zk2 data key" (RFC 09 §5.1 O4;
+/// must not share a spelling with "not a zk2 data key" (observer §1;
 /// #246). The rung is the engine's own words (`Unresolved::words`), so this
 /// window and `zenctl echo` say the same thing.
 pub fn label(v: &Conformance) -> String {
@@ -267,7 +267,7 @@ mod tests {
     }
 
     /// The cache is bounded, refuses past the bound, and counts what it
-    /// refused (RFC 09 §5.1 O6) — while an existing key always refreshes.
+    /// refused (tooling guide O6) — while an existing key always refreshes.
     #[test]
     fn the_cache_is_bounded_and_counts_refusals() {
         let mut c = VerdictCache::new(2);

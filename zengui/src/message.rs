@@ -107,7 +107,7 @@ pub enum BusMsg {
     ),
     /// The namespace listing landed (#614, FL6a): which namespaces hold
     /// zk2 instance tokens, read on the session in no namespace. An empty
-    /// list is *not* a verdict (RFC 05 §3.1), and a read that ran to its
+    /// list is *not* a verdict (observer §2), and a read that ran to its
     /// timeout says so.
     NamespacesListed(Result<Arc<zenkey_fleet::NamespaceListing>, crate::services::ServiceError>),
     /// The contracts `--contracts` (or the Settings overlay) names, loaded
@@ -691,7 +691,7 @@ pub enum RightPane {
     /// admin sweep.
     Mesh,
     /// One service's configuration, read and changed through `config.v1`
-    /// (#768, CD). v1's Config tool (#481) spoke RFC 05 §5.1 and left with
+    /// (#768, CD). v1's Config tool (#481) spoke v1's configuration procedures and left with
     /// FL11 (#614); this one is zk2's, on the profile #613 brought.
     Config,
     // `Connect` is deliberately absent since #185: contexts and endpoints
@@ -757,7 +757,7 @@ pub struct BusTick {
     /// Distinct keys the monitor is *currently* tracking. Not cumulative:
     /// the table is bounded, and the counters below say what that costs.
     pub keys: usize,
-    /// Keys retired to stay within the table's bound (RFC 09 §5.1 O6).
+    /// Keys retired to stay within the table's bound (tooling guide O6).
     pub keys_evicted: u64,
     /// Keys retired because their watch was released — "stopped looking, by
     /// request", the third O6 category.

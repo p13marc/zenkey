@@ -7,7 +7,7 @@
 //! ([`crate::model::telemetry`]): `declaration_of` per resource, `check` per
 //! sample, `pair` per pair.
 //!
-//! **§5's five questions as judgements** (RFC 13 §1.2, through
+//! **§5's five questions as judgements** (the tooling guide's exit codes, §1, through
 //! [`crate::report::judgement_exit_code`]), each named so that its finding
 //! is the yes:
 //! - "is this resource's declaration invalid?" ([`declaration_invalid`]):

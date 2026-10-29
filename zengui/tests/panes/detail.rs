@@ -272,7 +272,7 @@ fn the_value_names_the_zk2_read_that_produced_it() {
         ..data(FOREIGN)
     }));
     assert!(
-        ui.find("raw GET: no reply — a non-verdict, not proof of absence (RFC 05 §3.1)")
+        ui.find("raw GET: no reply — a non-verdict, not proof of absence (observer §2)")
             .is_ok()
     );
     assert!(
@@ -395,7 +395,7 @@ fn a_tombstoned_raw_reply_reads_as_deleted() {
     assert!(ui.find("via raw GET").is_ok());
     assert!(ui.find("DELETE (tombstone)").is_ok());
     assert!(
-        ui.find("a tombstone — retirement, not an empty value (RFC 04 §1.2)")
+        ui.find("a tombstone — retirement, not an empty value (core §4.2)")
             .is_ok()
     );
     assert!(ui.find("0 B").is_err(), "never an empty value's size");
@@ -860,7 +860,7 @@ fn the_inspector_places_a_declared_type_in_its_revision() {
 /// conformance of a real check through the lens — valid, invalid with each
 /// violation a sentence, undecodable with its decode error, and not checked
 /// with the rung that stopped it — never a boolean, and never one pole in
-/// another's words. The two silences keep theirs (#246; RFC 09 §5.1 O4):
+/// another's words. The two silences keep theirs (#246; observer §1):
 /// "no provider of this address in presence" (asked, nobody serves it) is
 /// not "not a zk2 data key" (nothing to ask).
 #[test]

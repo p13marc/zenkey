@@ -23,7 +23,7 @@
 //! - a **stream** declaring `history` keeps it in its owner's
 //!   advanced-publisher cache (§2.5), which is read and labelled so;
 //! - an **event** is replayed on request, bounded by its retention (§2.6);
-//! - a **foreign** key is read raw (RFC 05 §2.1's fan-in), and says so;
+//! - a **foreign** key is read raw (core §5.1's fan-in), and says so;
 //! - nothing is read under `@op` — a GET there is a call (§5) — or for a
 //!   zk2 key the lens stopped short of, whose owner GET needs the revision.
 //!
@@ -111,7 +111,7 @@ pub enum ReadKind {
     /// An event member's occurrences, replayed on request within the
     /// event's retention (§2.6).
     Events,
-    /// A foreign key's raw GET (RFC 05 §2.1: target `All`, consolidation
+    /// A foreign key's raw GET (core §5.1: target `All`, consolidation
     /// `None`, every reply attributed by its own key).
     Raw,
     /// A replay's recorded row at the playhead: nothing was asked of the

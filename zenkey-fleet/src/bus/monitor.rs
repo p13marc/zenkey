@@ -38,7 +38,7 @@ pub struct SampleSource {
     pub sn: u32,
 }
 
-/// Who stamped a sample's HLC (issue #213, RFC 09 §5.1 **O7**).
+/// Who stamped a sample's HLC (issue #213, observer §8.3).
 ///
 /// zenoh stamps at the **first node with timestamping enabled**, not
 /// necessarily at the publisher: `timestamping.enabled` is mode-dependent and
@@ -256,8 +256,8 @@ pub struct MonitorSpec {
     /// watches the wire keys.
     ///
     /// **A list, because a zk2 presence selector names `@zk`.** `*` and
-    /// `**` never cross a verbatim chunk (spec §1.3; RFC 03 §4 D2, carried
-    /// into zk2), so an ambient `zk2/**` sees no token at all, and each
+    /// `**` never cross a verbatim chunk (core §1.3), so an ambient
+    /// `zk2/**` sees no token at all, and each
     /// token form is its own entry: `zk2/<system>/<service>/@zk/instance/*`,
     /// `…/@zk/alive/**` and `…/@zk/member/**`.
     /// [`MonitorSpec::with_presence`] adds the three for a scope. A watch of
@@ -294,7 +294,7 @@ pub struct MonitorSpec {
     /// How many distinct keys to keep statistics for. Least-recently-seen keys
     /// are dropped past this, and the drops are counted
     /// ([`MonitorCore::keys_evicted`]) — a long-running observer is bounded,
-    /// and says so (RFC 09 §5.1).
+    /// and says so (tooling guide O6).
     pub max_keys: usize,
 }
 
@@ -530,7 +530,7 @@ impl MonitorCore {
     }
 
     /// Keys retired from the table because their watch was released
-    /// (RFC 09 §5.1 O6 — see [`crate::model::stats::StatsTable::unwatched`]).
+    /// (tooling guide O6 — see [`crate::model::stats::StatsTable::unwatched`]).
     pub fn keys_unwatched(&self) -> u64 {
         self.with_stats(|s| s.unwatched())
     }
@@ -543,7 +543,7 @@ impl MonitorCore {
     /// Distinct keys dropped from the statistics table to stay within its
     /// bound. Non-zero means the key set on display is partial — report it
     /// rather than letting a shrinking tree read as a quieting bus
-    /// (RFC 09 §5.1).
+    /// (tooling guide O6).
     pub fn keys_evicted(&self) -> u64 {
         self.with_stats(|s| s.evicted())
     }
@@ -555,7 +555,7 @@ impl MonitorCore {
     ///
     /// Covers only **watched** keys by construction: the ring sits on the
     /// ingest path, and nothing unwatched is ever ingested. A consumer that
-    /// presents this window MUST say so (RFC 09 §5.1 O5 — a retained window
+    /// presents this window MUST say so (observer §8.2 — a retained window
     /// over three watches is not a retained window over the bus).
     ///
     /// **What this read costs the network thread** (#331): the retain mutex
@@ -583,7 +583,7 @@ impl MonitorCore {
     /// holds, and what each bound cost — `evicted` (byte budget) apart from
     /// `expired` (age), both apart from [`MonitorCore::dropped`],
     /// [`MonitorCore::keys_evicted`] and [`MonitorCore::keys_unwatched`]
-    /// (RFC 09 §5.1 O6; v1.18 R1 forbids folding the kinds).
+    /// (tooling guide O6; v1.18 R1 forbids folding the kinds).
     pub fn retention(&self) -> RetentionStats {
         self.retain
             .lock()
@@ -608,7 +608,7 @@ impl MonitorCore {
 
 /// A receiver that surfaces lag as data: when this consumer falls behind the
 /// bounded channel, the next `recv` yields the count of samples it missed —
-/// dropped samples are never invisible (RFC 05 §3.1's honesty, applied to a
+/// dropped samples are never invisible (observer §2's honesty, applied to a
 /// UI).
 pub struct EventStream {
     rx: broadcast::Receiver<FleetEvent>,
@@ -1036,7 +1036,7 @@ impl Monitor {
     /// teardown is acknowledged, not racing a drop), then retires statistics
     /// for keys no remaining watch covers. Retired keys are **counted**
     /// ([`crate::model::stats::StatsTable::unwatched`]): a shrinking key set must
-    /// never read as a quieting bus (RFC 09 §5.1 O6).
+    /// never read as a quieting bus (tooling guide O6).
     pub async fn unwatch(&self, id: WatchId) -> Result<()> {
         let mut entry = {
             let mut watches = self.watches.lock().await;
@@ -1159,7 +1159,7 @@ impl Monitor {
     ///
     /// Statistics are **not** retired the way `unwatch` retires them: that
     /// counter answers "the key set shrank because you stopped looking"
-    /// (RFC 09 §5.1 O6) for a monitor that goes on running. This one is the
+    /// (tooling guide O6) for a monitor that goes on running. This one is the
     /// end of the observation; the core goes with it unless a caller kept an
     /// `Arc`, and a re-scope's next monitor starts from a fresh one.
     pub async fn shutdown(mut self) -> Result<()> {
@@ -1530,7 +1530,7 @@ mod tests {
         let _ = (under_lock, flatten);
     }
 
-    /// RFC 09 §5.1 **O6** / v1.18 **R1**: the eviction populations stay
+    /// The tooling guide's **O6** (v1's v1.18 **R1**): the eviction populations stay
     /// separate numbers (#217). Broadcast lag ("could not keep up"),
     /// stats-table eviction ("chose to forget under the key bound") and
     /// retention eviction ("chose to forget under the window's byte budget")

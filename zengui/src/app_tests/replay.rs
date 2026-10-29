@@ -12,7 +12,7 @@ use super::*;
 /// attachment preview).
 ///
 /// What is out, and why: arrival `Instant`s. A `.zrec` reader and the
-/// ring are two observers, and RFC 09 §5.2's two-clocks rule is exactly
+/// ring are two observers, and tooling guide §5's two-clocks rule is exactly
 /// that they share offsets (`t`, which *is* compared, through every rate
 /// and every fold) but not absolute clocks — the panes render those only
 /// as ages against the frame's own "now", which no two runs share either.

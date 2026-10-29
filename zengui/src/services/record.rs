@@ -116,7 +116,7 @@ async fn capture(
 /// bounded only by the file, so on the render thread it froze the window for
 /// as long as a capture took to read, with no upper limit and no sign that
 /// anything was happening. Lands on [`ReplayMsg::Loaded`] — whose handler
-/// clears the loading state the `Open` handler raised (RFC 09 §5.1 O4:
+/// clears the loading state the `Open` handler raised (observer §1:
 /// "loading" is not "empty", and the Activity replay tab says which).
 pub fn load(path: String) -> Task<Message> {
     Task::perform(

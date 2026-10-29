@@ -186,7 +186,7 @@ fn the_topology_caption_carries_the_overlay_facts() {
     assert!(
         ui.find(
             "no admin space answered @/*/* — adminspace.enabled defaults off; this is a \
-         reading about reachability, never an empty mesh (RFC 05 §3.1)"
+         reading about reachability, never an empty mesh (observer §2)"
         )
         .is_ok(),
         "zero answers is reachability, not topology"
@@ -213,7 +213,7 @@ fn the_admin_pane_never_reports_a_sweep_it_did_not_run() {
     assert!(
         ui.find(
             "nothing has been asked — this is \"not asked\", not \"no routers\" \
-             (RFC 09 §5.1 O4)"
+             (observer §1)"
         )
         .is_ok()
     );

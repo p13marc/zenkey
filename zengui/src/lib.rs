@@ -14,7 +14,7 @@
 //! (#614, FL7: zk2's identity rungs, where v1's facts ladder stood).
 //!
 //! **Two sessions** since #614 (FL6a), as zenctl and zenwatch run: the data
-//! pump watches on a session in **no** namespace (RFC 09 §5) — zengui spells
+//! pump watches on a session in **no** namespace (tooling guide §8.1) — zengui spells
 //! full wire keys, which is what lets it see traffic a namespaced application
 //! is blind to — and presence, descriptors and contracts are read on a
 //! session **in** the deployment's namespace, the way the deployment's own

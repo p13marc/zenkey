@@ -1598,7 +1598,7 @@ of the core, and listed as an open question.
 **Repository** (at `c7ef1b4`, 0.14.0):
 
 - `rfcs/00`–`13` and `rfcs/CHANGELOG.md`: v1.0 2026-07-12 → v1.50
-  2026-10-05.
+  2026-10-05 (on the `v1` branch since #925: [`rfcs/`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs)).
 - `docs/redesign-2026-07.md`: the previous redesign; its round-2 owner
   directives still apply: latest zenoh, strong typing, performance as a
   requirement, lib crates only on crates.io.

@@ -19,7 +19,7 @@
 //! 3. **Backpressure terminates in visible counters.** Slow UI → bounded
 //!    broadcast lags → `Dropped(n)` → `lagged`; the batch cap → `coalesced`;
 //!    released watches → `keys_unwatched`. Nothing disappears silently
-//!    (RFC 09 §5.1 O6).
+//!    (tooling guide O6).
 
 use std::sync::Arc;
 

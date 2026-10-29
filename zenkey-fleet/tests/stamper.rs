@@ -1,4 +1,4 @@
-//! The stamper is not always the publisher (issue #213, RFC 09 §5.1 **O7**).
+//! The stamper is not always the publisher (issue #213, observer §8.3).
 //!
 //! The unit tests in `stats.rs` prove the three populations stay apart once
 //! they are classified. This pins the *classification* against a real bus, and
@@ -82,7 +82,7 @@ async fn a_stamp_we_cannot_attribute_is_unknown_and_still_names_its_stamper() {
         StampProvenance::Unattributable { stamper } => {
             // The independent check: the stamper *was* the publisher. Our
             // verdict says "cannot tell", which is conservative — never a
-            // guess in either direction (RFC 09 §5.1 O4 applied to a clock).
+            // guess in either direction (observer §1 applied to a clock).
             assert_eq!(
                 stamper,
                 zenoh::time::TimestampId::from(publisher_zid),

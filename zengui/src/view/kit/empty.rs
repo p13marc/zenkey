@@ -13,9 +13,9 @@ use crate::view::tokens::{face, font, radius, space};
 /// dressed as an alert, and a quiet bus can never look like a filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyKind {
-    /// Nothing was asked (RFC 09 §5.1 O4): no sweep, no probe, no registry.
+    /// Nothing was asked (observer §1): no sweep, no probe, no registry.
     NotAsked,
-    /// Asked, and nothing answered or arrived — a non-verdict (RFC 05 §3.1).
+    /// Asked, and nothing answered or arrived — a non-verdict (observer §2).
     Silent,
     /// Asked, and the answer was an empty list: a fact.
     Empty,
@@ -52,7 +52,7 @@ impl EmptyKind {
 /// A placeholder for a surface with nothing to show (#539).
 ///
 /// Takes an explanation, not just a noun: "no keys" invites the user to
-/// conclude the bus is quiet, which may be false (RFC 05 §3.1). Every call
+/// conclude the bus is quiet, which may be false (observer §2). Every call
 /// site says *why* it is empty and what would change it — and since #539 its
 /// kind, which fixes the icon in the well above the words.
 pub fn empty<'a, M: 'a>(

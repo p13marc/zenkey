@@ -36,7 +36,7 @@ use crate::view::tokens::Spacing;
 ///
 /// A large mesh declares thousands, and an uncapped list is the same bug as a
 /// tree that draws every key — so the bound is disclosed rather than silent
-/// (RFC 09 §5.1 O6).
+/// (tooling guide O6).
 const MAX_ENTITIES: usize = 200;
 
 #[derive(Debug, Clone)]
@@ -104,7 +104,7 @@ pub fn pane<'a>(
              --admin-declared (#890)",
         ),
         kit::muted(
-            "read through the un-namespaced session every explorer runs (RFC 09 §5): a \
+            "read through the un-namespaced session every explorer runs (tooling guide §8.1): a \
              namespaced session's @ selector is rewritten and matches nothing",
         ),
     ]
@@ -120,7 +120,7 @@ pub fn pane<'a>(
             kit::EmptyKind::NotAsked,
             "admin space not swept yet",
             "nothing has been asked — this is \"not asked\", not \"no routers\" \
-             (RFC 09 §5.1 O4)",
+             (observer §1)",
         ));
         return scrollable(col.padding(sp.sm)).height(Length::Fill).into();
     };
@@ -169,7 +169,7 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> El
             "no routers answered @/*/router — a peer-only mesh, or the admin space is \
              disabled.",
         ));
-        col = col.push(kit::muted("silence is not a verdict (RFC 05 §3.1)"));
+        col = col.push(kit::muted("silence is not a verdict (observer §2)"));
         return col.into();
     }
     for r in rows {
@@ -329,7 +329,7 @@ pub const DECLARED_OFF: &str = "declared entities: not asked — off by default,
      asking can freeze a zenoh 1.10 router: it answers them while holding its routing \
      tables' read lock, and another client's declaration in between deadlocks it (#890). \
      --admin-declared, or the Settings overlay, asks. This is \"not asked\", never \
-     \"nothing declared\" (RFC 09 §5.1 O4).";
+     \"nothing declared\" (observer §1).";
 
 /// The sentence a declared-entities read that is asked and holds no answer
 /// renders: nothing landed yet, or nothing answered, a router under a
@@ -339,7 +339,7 @@ pub const DECLARED_UNANSWERED: &str = "declared entities: n/a — not read yet, 
      answered. zenoh's adminspace.enabled defaults to false, a peer mesh has none, and a \
      router under the deny block zenctl acl gen writes refuses these records to every \
      principal (core §11.1, 0.50, #894), so this is \"not available\", never \"nothing \
-     declared\" (RFC 09 §5.1 O4).";
+     declared\" (observer §1).";
 
 /// Declared entities — [`Declared`] separates "the admin space answered and
 /// declared nothing" from "no answer (yet)", which is #70's explicit

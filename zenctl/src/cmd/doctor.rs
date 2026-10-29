@@ -93,7 +93,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
     let report = zenkey_fleet::run_doctor(&bus, &store, &spec).await;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
 
-    // The exit is the report's own judgement (RFC 13 §1.2), projected by the
+    // The exit is the report's own judgement (tooling guide §1), projected by the
     // one seam: a finding at or above the floor is the 1; below it, a check
     // left unobservable or an empty scope is the 2 — it could be hiding the
     // finding — and every check asked established clean is the 0.

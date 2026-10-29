@@ -290,7 +290,7 @@ pub struct CompatReport {
 }
 
 impl CompatReport {
-    /// The verdict on the RFC 13 core. The judged claim is the finding, so
+    /// The verdict on the judgement core (observer §1). The judged claim is the finding, so
     /// a review or breaking change is `Established` and a compatible one
     /// `NotEstablished`: exit 1 and exit 0, through the one projection.
     pub fn to_judgement(&self) -> Judgement {

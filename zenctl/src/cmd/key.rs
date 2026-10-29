@@ -36,8 +36,8 @@ impl RelationVerdict {
 }
 
 /// Whether a "no" is explained by zenoh's verbatim-chunk semantics, which
-/// the convention leans on (RFC 03 §4): D2 — `**` never crosses an
-/// `@`-chunk; D4 — `*` never matches a verbatim chunk.
+/// the convention leans on (core §1.3): `**` never crosses an `@`-chunk,
+/// and `*` never matches a verbatim chunk.
 fn convention_note(a: &str, b: &str) -> Option<String> {
     let has_at = |s: &str| s.split('/').any(|c| c.starts_with('@'));
     let one_has_at = has_at(a) || has_at(b);
@@ -51,14 +51,14 @@ fn convention_note(a: &str, b: &str) -> Option<String> {
     if wild.contains("**") {
         Some(
             "note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; \
-             RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. \
+             core §1.3) — this 'no' is the convention's doing, not a typo. \
              Name the `@`-chunk explicitly to reach past it."
                 .into(),
         )
     } else {
         Some(
             "note: `*` never matches a verbatim `@`-chunk (zenoh verbatim \
-             semantics; RFC 03 §4 D4) — a verbatim chunk (`@stream`, `@op`, \
+             semantics; core §1.3) — a verbatim chunk (`@stream`, `@op`, \
              `@zk`, …) must be named explicitly."
                 .into(),
         )
@@ -219,32 +219,34 @@ mod tests {
     }
 
     /// The two footguns the convention leans on, cited when they bite:
-    /// D2 — `**` never crosses an `@`-chunk (which is why the default
-    /// `<ns>/zk2/**` scope cannot see `@stream`); D4 — `*` never matches a
+    /// Core §1.3: `**` never crosses an `@`-chunk (which is why the default
+    /// `<ns>/zk2/**` scope cannot see `@stream`), and `*` never matches a
     /// verbatim chunk.
     #[test]
-    fn a_convention_shaped_no_cites_the_rfc() {
-        // D2: the default scope really cannot see an explicit-only stream.
+    fn a_convention_shaped_no_cites_the_core() {
+        // `**` (core §1.3, v1's D2): the default scope really cannot see an explicit-only stream.
         let RelationVerdict::No { note } = judge(
             crate::render::KeyOp::Includes,
             "prod/zk2/**",
             "prod/zk2/host-a/cam/video.v1/@stream/frames",
         ) else {
-            panic!("** must not cross @stream (D2)");
+            panic!("** must not cross @stream (core §1.3)");
         };
         let note = note.expect("the convention explains this no");
-        assert!(note.contains("D2"), "{note}");
+        assert!(note.contains("core §1.3"), "{note}");
+        assert!(note.contains("`**` never crosses"), "{note}");
 
-        // D4: a wildcard kind position does not match a verbatim one.
+        // `*` (core §1.3, v1's D4): a wildcard kind position does not match a verbatim one.
         let RelationVerdict::No { note } = judge(
             crate::render::KeyOp::Intersects,
             "prod/zk2/host-a/tc/tc.netif.v1/*/x",
             "prod/zk2/host-a/tc/tc.netif.v1/@op/x",
         ) else {
-            panic!("* must not match @op (D4)");
+            panic!("* must not match @op (core §1.3)");
         };
         let note = note.expect("the convention explains this no");
-        assert!(note.contains("D4"), "{note}");
+        assert!(note.contains("core §1.3"), "{note}");
+        assert!(note.contains("`*` never matches"), "{note}");
 
         // A plain algebra no gets no citation — the note is a diagnosis,
         // not a banner.

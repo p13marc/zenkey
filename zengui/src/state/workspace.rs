@@ -440,7 +440,7 @@ sub_state! {
         pub(crate) replay_open: Option<String>,
         /// A `.zrec` parse in flight (#255): the path being loaded. The
         /// replay tab renders it as an explicit loading state — a load is
-        /// not an empty capture and not a hung window (RFC 09 §5.1 O4).
+        /// not an empty capture and not a hung window (observer §1).
         pub(crate) replay_loading: Option<String>,
         /// Why the last open failed, shown beside the path box.
         pub(crate) replay_note: Option<crate::services::ServiceError>,

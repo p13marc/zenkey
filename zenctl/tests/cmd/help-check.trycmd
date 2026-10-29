@@ -17,7 +17,7 @@ bus would pass a silence assertion for free.
 $ zenctl check --help
 Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict.
 
-All on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the question could not be asked or proven). Everything under here reserves its 2 — which is what makes `check expect --absent` legitimate at all, and what stops a dead bus reading as a pass. CI recipes should run isolated per RFC 09 §0: multicast scouting off, gossip on, explicit endpoints — a test that scouts is not isolated, and the contamination flows both ways.
+All on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the question could not be asked or proven). Everything under here reserves its 2 — which is what makes `check expect --absent` legitimate at all, and what stops a dead bus reading as a pass. CI recipes should run isolated (tooling guide §8.1): multicast scouting off, gossip on, explicit endpoints — a test that scouts is not isolated, and the contamination flows both ways.
 
 Usage: zenctl check <COMMAND>
 
@@ -318,8 +318,8 @@ Options:
 
 It used to share its word with v1's `blob probe`, one word carrying two rules
 that contradict each other. `check probe` is defined by **refusing** to fan
-out — "a probe MUST build its keys the way the product builds them" (RFC 09
-§6) — and reads one address the way a consumer does. `blob probe` *was* a
-fan-out, asking every origin who holds an object (RFC 07 §2.5), so it took a
-different word, `blob locate`, which left `main` with the blob profile (#612,
+out — "a probe MUST build its keys the way the product builds them" (v1's
+cutover acceptance) — and reads one address the way a consumer does.
+`blob probe` *was* a fan-out, asking every origin who holds an object, so
+it took a different word, `blob locate`, which left `main` with the blob profile (#612,
 FJ9). `probe` means exactly one thing.

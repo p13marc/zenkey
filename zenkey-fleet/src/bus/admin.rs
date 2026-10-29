@@ -1,7 +1,7 @@
 //! Zenoh admin-space access (issue #14): browse `@/**` — the middleware's
 //! own introspection — from the same un-namespaced session the convention
 //! tooling already holds (a namespaced session's admin selector would be
-//! rewritten and match nothing, RFC 09 §5).
+//! rewritten and match nothing: core §1.6, and the tooling guide's §8.1).
 //!
 //! Admin key layouts vary between zenoh versions (report §3.1's caveat), so
 //! this module stays a thin, honest transport: keys + JSON values, no
@@ -67,7 +67,7 @@ pub async fn admin_get(
 }
 
 /// [`admin_get`] under the caller's own options — the reply bound and, after
-/// the call, what it cost ([`GetOpts::elided`], RFC 13 §3 O6).
+/// the call, what it cost ([`GetOpts::elided`], tooling guide O6).
 pub async fn admin_get_within(
     session: &Session,
     selector: &str,
@@ -533,7 +533,7 @@ pub fn declared_from_admin_entry(key: &str, value: &serde_json::Value) -> Option
 /// `Ok(None)` when **nothing answered at all**: zenoh's `adminspace.enabled`
 /// defaults to *false* (routers ship with it on; a pure peer mesh has none),
 /// so an empty sweep means "not available", never "nothing declared" —
-/// callers MUST render the difference (RFC 09 §5.1 O4). A *publisher* is
+/// callers MUST render the difference (observer §1). A *publisher* is
 /// visible only if it was declared (P7's rule for the data planes); a bare
 /// `session.put()` never appears here.
 pub async fn declared_entities(
@@ -544,7 +544,7 @@ pub async fn declared_entities(
 }
 
 /// The admin selectors [`declared_entities`] sweeps, in sweep order — the
-/// coverage claim a report built on the sweep states (RFC 13 §3 O5). Each
+/// coverage claim a report built on the sweep states (observer §8.2). Each
 /// reaches the routing tables' read lock ([`reaches_tables_lock`], #890).
 pub fn declared_entity_selectors() -> Vec<String> {
     EntityKind::ALL
@@ -554,7 +554,7 @@ pub fn declared_entity_selectors() -> Vec<String> {
 }
 
 /// [`declared_entities`] under the caller's own options — the reply bound
-/// and, after the call, what it cost ([`GetOpts::elided`], RFC 13 §3 O6).
+/// and, after the call, what it cost ([`GetOpts::elided`], tooling guide O6).
 pub async fn declared_entities_within(
     session: &Session,
     opts: &GetOpts,

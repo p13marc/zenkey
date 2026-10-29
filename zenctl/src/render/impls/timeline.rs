@@ -120,7 +120,7 @@ impl Render for TimelineReport {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
-        // The axis claim is part of the measurement (RFC 09 §5.1 O7): which
+        // The axis claim is part of the measurement (observer §8.3): which
         // clock, and what an order on it can mean.
         notes.push(
             Note::caveat(match &self.axis {
@@ -147,7 +147,7 @@ impl Render for TimelineReport {
                     ),
                 },
             })
-            .cite("RFC 09 §5.1 O7"),
+            .cite("observer §8.3"),
         );
         if self.unstamped_excluded > 0 {
             notes.push(Note::coverage(format!(
@@ -170,7 +170,7 @@ impl Render for TimelineReport {
                 Note::coverage(format!(
                     "the per-publisher sequence-number lane is unavailable: {reason}"
                 ))
-                .cite("RFC 09 §5.1 O4"),
+                .cite("observer §1"),
             );
         }
         let excluded = zenkey_fleet::zrec_excluded(&self.scopes);

@@ -815,7 +815,7 @@ mod tests {
         assert_eq!(
             prefs.selectors,
             ["demo/**"],
-            "the `$*` row (RFC 03 §2) and the empty row are dropped"
+            "the `$*` row (tooling guide §8.2) and the empty row are dropped"
         );
     }
 

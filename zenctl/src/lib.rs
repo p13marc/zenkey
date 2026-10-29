@@ -22,7 +22,7 @@
 //!   through one lens (FJ8b): the namespace, its presence read, the
 //!   contract each descriptor names.
 //!
-//! v1 left at FJ9: the registry (`--registry`, RFC 08 §6 introspection, the
+//! v1 left at FJ9: the registry (`--registry`, its introspection, the
 //! slice cache), the v1 judges and the profile-backed nouns. The `v1`
 //! branch keeps them, and releases 0.14.x.
 //!

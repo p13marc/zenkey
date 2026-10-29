@@ -1,4 +1,4 @@
-//! The storage plan (RFC 09 §2, #393): what a deployment file asks for, what
+//! The storage plan (tooling guide §8.4, #393): what a deployment file asks for, what
 //! a router's storage manager makes of it, and how a live router compares.
 //!
 //! Three documents cross the wire here. [`Deployment`] comes *in* — the small
@@ -24,7 +24,7 @@ use super::judgement::Judgement;
 /// Deliberately small: a namespace, the volumes, and one entry per storage
 /// naming its **selector** — the `strip_prefix` is derived, because typing it
 /// is where a router that starts happily and stores nothing comes from
-/// (RFC 09 §2). Backend parameters pass through verbatim; this type validates
+/// (tooling guide §8.4). Backend parameters pass through verbatim; this type validates
 /// the storage manager's part and not the backend's.
 ///
 /// v1's class table (`class = "state"` and its siblings, each a v1 key
@@ -37,7 +37,7 @@ use super::judgement::Judgement;
 ///
 /// [volumes.fs]
 /// plugin = "fs"                     # memory | fs | rocksdb | influxdb | redb | <other>
-/// # history = "latest"              # the plugin fixes it, except redb (per volume, RFC 09 §2.1)
+/// # history = "latest"              # the plugin fixes it, except redb (per volume, guide §8.4)
 /// dir = "/var/lib/zenoh/fs"         # every other key passes through to the volume block
 ///
 /// [volumes.influxdb]
@@ -47,7 +47,7 @@ use super::judgement::Judgement;
 /// [storages.events]
 /// selector = "zk2/*/*/*/events/**"  # relative to the namespace
 /// volume = "fs"
-/// replication = true                # or a table of RFC 09 §2.2 parameters
+/// replication = true                # or a table of tooling guide §8.4 parameters
 /// params = { dir = "events" }       # merged into `volume: { id: …, … }`
 ///
 /// [storages.timeseries]
@@ -81,7 +81,7 @@ pub struct Deployment {
 /// ```toml
 /// [events]
 /// volume = "fs"                     # declared under [volumes]
-/// replication = true                # as a storage's (RFC 09 §2.2)
+/// replication = true                # as a storage's (tooling guide §8.4)
 /// params = { dir = "events" }       # merged into each storage's volume block
 /// # gc_period_s = 30
 /// ```
@@ -109,7 +109,7 @@ pub struct VolumeSpec {
     /// The backend plugin: `memory`, `fs`, `rocksdb`, `influxdb`, `redb`, or
     /// an out-of-tree name this tool does not know the capability of.
     pub plugin: String,
-    /// The history mode (RFC 09 §2.1). Fixed by the plugin for the four
+    /// The history mode (tooling guide §8.4). Fixed by the plugin for the four
     /// known rows; **per volume**, and required, for `redb` and for any
     /// plugin this tool does not know.
     pub history: Option<HistoryMode>,
@@ -118,7 +118,7 @@ pub struct VolumeSpec {
     pub params: BTreeMap<String, serde_json::Value>,
 }
 
-/// The history half of a volume's capability pair (RFC 09 §2.1, v1.28):
+/// The history half of a volume's capability pair (tooling guide §8.4):
 /// whether the backend keeps one value per key or every sample.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -136,7 +136,7 @@ impl HistoryMode {
     }
 }
 
-/// The persistence half of the capability pair (RFC 09 §2.1).
+/// The persistence half of the capability pair (tooling guide §8.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Persistence {
@@ -168,19 +168,19 @@ pub struct StorageSpec {
     /// block (`dir`, `db`…), verbatim.
     #[serde(default)]
     pub params: BTreeMap<String, serde_json::Value>,
-    /// `true` for RFC 09 §2.2's example parameters, or a table of your own.
+    /// `true` for tooling guide §8.4's example parameters, or a table of your own.
     #[serde(default)]
     pub replication: Replication,
     /// Ask for `complete: true`. Honoured only on a replicated latest-mode
-    /// storage (RFC 09 §2.2); refused, and said so, elsewhere.
+    /// storage (tooling guide §8.4); refused, and said so, elsewhere.
     #[serde(default)]
     pub complete: bool,
-    /// A backend retention block (`redb`, RFC 09 §2.1), verbatim.
+    /// A backend retention block (`redb`, tooling guide §8.4), verbatim.
     pub retention: Option<serde_json::Value>,
     /// `garbage_collection.period`, seconds. Default 30, Zenoh's own.
     pub gc_period_s: Option<u64>,
     /// An explicit `garbage_collection.lifespan`, seconds. Default zenoh's
-    /// own 24 h (RFC 09 §2.3).
+    /// own 24 h (tooling guide §8.4).
     pub gc_lifespan_s: Option<i64>,
 }
 
@@ -292,7 +292,7 @@ pub struct PlannedStorage {
     /// Derived: the literal leftmost run of `key_expr`.
     pub strip_prefix: String,
     pub volume: String,
-    /// The volume's history mode — the fact every §2.2 decision reads.
+    /// The volume's history mode — the fact every replication decision reads.
     pub history: HistoryMode,
     /// The replication block, when replicated.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -313,7 +313,7 @@ pub struct PlannedStorage {
 }
 
 /// `garbage_collection: { period, lifespan }` with the computation shown
-/// (RFC 09 §2.3).
+/// (tooling guide §8.4).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GarbageCollection {
     pub period_s: u64,
@@ -337,21 +337,21 @@ pub struct PlanWarning {
 #[serde(rename_all = "snake_case")]
 pub enum WarningKind {
     /// Two storages' selectors intersect: a GET under both is answered twice
-    /// (RFC 09 §2).
+    /// (tooling guide §8.4).
     Overlap,
-    /// `complete = true` asked for where RFC 09 §2.2 does not allow it; the
+    /// `complete = true` asked for where tooling guide §8.4 does not allow it; the
     /// plan emits `false`.
     CompleteRefused,
     /// Retention lives in the database; `garbage_collection` is not it
-    /// (RFC 09 §2.3).
+    /// (tooling guide §8.4).
     RetentionIsTheDatabases,
     /// An all-mode `redb` storage without a retention block refuses to start
-    /// (RFC 09 §2.1).
+    /// (tooling guide §8.4).
     RetentionRequired,
     /// A retention block on a latest-mode volume is refused at startup
-    /// (RFC 09 §2.1).
+    /// (tooling guide §8.4).
     RetentionPointless,
-    /// Replication parameters that break RFC 09 §2.2's rule.
+    /// Replication parameters that break tooling guide §8.4's rule.
     ReplicationParams,
     /// A plugin this tool does not know; the declared capability is taken on
     /// trust.
@@ -390,7 +390,7 @@ pub struct StorageCheck {
     pub base: String,
     /// What was compared: the admin space, or a config file.
     pub source: CheckSource,
-    /// The admin selector put to the bus (RFC 13 §3 O5), or the config
+    /// The admin selector put to the bus (observer §8.2), or the config
     /// file read.
     pub asked: String,
     pub planned: usize,
@@ -438,7 +438,7 @@ pub enum CheckKind {
     StripPrefixDiffers,
     VolumeDiffers,
     /// The running `garbage_collection.lifespan` is below the plan's — a
-    /// slow replica may resurrect a retired key (RFC 09 §2.3).
+    /// slow replica may resurrect a retired key (tooling guide §8.4).
     LifespanBelowMinimum,
     /// A storage whose key expression intersects an owner's `state/**` or
     /// `@state/**`: it would answer GETs on an owner's state, which spec
@@ -567,7 +567,7 @@ mod tests {
                 warnings: vec![PlanWarning {
                     kind: WarningKind::CompleteRefused,
                     text: "t".into(),
-                    cite: "RFC 09 §2.2".into(),
+                    cite: "tooling guide §8.4".into(),
                 }],
                 derived: None,
             }],
@@ -576,7 +576,7 @@ mod tests {
                 volume: None,
                 key_expr: Some("fleet-a/plant/**".into()),
                 reason: "r".into(),
-                cite: "RFC 09 §2".into(),
+                cite: "tooling guide §8.4".into(),
             }],
             enrollment: Asked::NotAsked,
         };

@@ -54,9 +54,9 @@ pub const DECLARE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// Await one declaration under [`DECLARE_TIMEOUT`], naming what stalled.
 ///
 /// A stall is an [`Error::Bus`] like any other declare failure: the caller's
-/// input was fine, the fabric did not complete the operation. RFC 13 §3 — a
-/// tool that cannot obtain an observation says so rather than waiting forever
-/// in silence.
+/// input was fine, the fabric did not complete the operation. A
+/// tool that cannot obtain an observation says so (observer §1,
+/// Unobservable) rather than waiting forever in silence.
 pub(crate) async fn declared<T, E>(
     op: &'static str,
     target: impl std::fmt::Display,

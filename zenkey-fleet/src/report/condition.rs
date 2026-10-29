@@ -5,7 +5,7 @@
 //! tick, which is what makes an hours-long run readable — and
 //! [`WatchdogSummary`] carries what the run could *not* see, because a
 //! watchdog that dropped samples has not been quiet, it has been blind
-//! (RFC 09 §5.1 O6).
+//! (tooling guide O6).
 //!
 //! `CondWindow` — the raw observation a [`CondState`] is judged from — is
 //! deliberately *not* here: it carries no `Serialize`, so it is
@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use super::judgement::Judgement;
 
 /// One condition's evaluation state — the watchdog's serde-stable **wire
-/// projection** of the [`Judgement`] core (RFC 13, v1.24; RFC 09 §5.1
-/// pre-v1.24). Three states, not two: `unobservable` is "I could not tell",
+/// projection** of the [`Judgement`] core (observer §1). Three states, not
+/// two: `unobservable` is "I could not tell",
 /// which is neither "fine" nor "fire".
 ///
 /// The mapping (see [`From<Judgement>`](#impl-From<Judgement>-for-CondState)),
@@ -43,7 +43,7 @@ pub enum CondState {
     Unobservable,
 }
 
-/// The documented wire projection (RFC 13, v1.24): `Established` → `firing`,
+/// The documented wire projection (observer §1): `Established` → `firing`,
 /// `NotEstablished` → `ok` (the polarity note on [`CondState`]), both
 /// unestablished poles → `unobservable`.
 impl From<&Judgement> for CondState {
@@ -64,9 +64,9 @@ impl From<Judgement> for CondState {
 
 /// One genuine state change — the only thing the watchdog ever emits.
 ///
-/// `Deserialize` too, since v1.34: a version-2 `.zrec` interleaves the
+/// `Deserialize` too: a version-2 `.zrec` interleaves the
 /// transition that fired a trigger capture as a `{"trigger": …}` record
-/// (RFC 13 §4.1), and a reader hands it back as this same shape.
+/// (tooling guide §5), and a reader hands it back as this same shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transition {
     /// The rule, in its canonical spelling ([`Condition`](crate::judge::condition::Condition)'s `Display`).
@@ -95,7 +95,7 @@ pub struct WatchdogSummary {
 }
 
 impl WatchdogSummary {
-    /// How the run ended, as one RFC 13 §1.2 [`Judgement`] (#511): any rule
+    /// How the run ended, as one [`Judgement`] (#511; observer §1): any rule
     /// firing is `Established` — the finding; otherwise any rule
     /// unobservable is `Unobservable`, since a rule nobody could judge has
     /// not said the fleet is fine; otherwise every rule ended `ok`, which is

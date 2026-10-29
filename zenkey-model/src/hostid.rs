@@ -109,7 +109,7 @@ mod tests {
 
     const MID: &str = "b642b4217b34b1e8d3bd915fc65c4452";
 
-    /// v1's RFC 06 §1 vector, which the construction keeps (Appendix A).
+    /// v1's test vector, which the construction keeps (hostid.v1 Appendix A).
     #[test]
     fn rfc06_vector() {
         assert_eq!(

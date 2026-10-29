@@ -16,7 +16,7 @@
 //! its keys, and a split-brain on every exclusive resource it serves (§6).
 //!
 //! **The synthetic marker.** v1's generator put `{"synthetic": true, …}` in
-//! every sample's attachment (RFC 09 §5.3). A zk2 attachment is the
+//! every sample's attachment. A zk2 attachment is the
 //! contract's: a type, fingerprinted (§2.3), so a marker there would be a
 //! payload the contract does not declare, and has no zk2 meaning. The
 //! marker moves to the descriptor's `meta` ([`marker`]), which §3.3 keeps

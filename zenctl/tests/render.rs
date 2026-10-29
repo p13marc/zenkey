@@ -1046,7 +1046,7 @@ fn a_field_report_states_its_bound_and_what_it_did_not_ask() {
 "#]]
     );
     let stderr = notes(&fx::field_report());
-    // Deliberately reworded by the bounds() migration (RFC 13, v1.24):
+    // Deliberately reworded by the bounds() migration (tooling guide O6):
     // the cost is now an auto-appended bound note — count first, wording
     // from the declared BoundCost; `max_paths` and the refused examples
     // ride the document.
@@ -1289,7 +1289,7 @@ fn a_capture_names_the_explicit_kinds_it_opted_into() {
     );
 }
 
-/// A snapshot states its span in every format (RFC 13 §4.4, #219): the
+/// A snapshot states its span in every format (tooling guide §5, #219): the
 /// table's second line, and a caveat note the machine formats carry. Its
 /// holders are zk2's (#612, FJ8b): live owners, addresses no instance held,
 /// and the payloads that failed their type, each counted apart.
@@ -1318,7 +1318,7 @@ collected over 1.25s from 2026-10-09T00:00:00Z (1 asked, 5 answered)
     assert_data_eq!(
         ndjson(&fx::snapshot_report()),
         str![[r#"
-{"header":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"live":3,"no_instance":1,"nonconforming":1,"notes":[{"cite":"RFC 13 §4.4","text":"collected over 1.25s, not at an instant — a fan-in GET has no single moment"},{"cite":"tooling guide O5","text":"@state keys are excluded, not empty: no selector names `@state`, and `*`/`**` never match a verbatim chunk"},{"cite":"spec §4.2 S4","text":"1 value(s) answered for an address with no instance visible to this reader: an owner gone, or a store answering on its keys, which S4 forbids"},{"cite":"RFC 09 §5.1 O6","text":"1 answer(s) for one key lost to a newer one from another selector"}],"out":"deployment.zsnap","report":"snapshot","unattributed":0}
+{"header":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"live":3,"no_instance":1,"nonconforming":1,"notes":[{"cite":"tooling guide §5","text":"collected over 1.25s, not at an instant — a fan-in GET has no single moment"},{"cite":"tooling guide O5","text":"@state keys are excluded, not empty: no selector names `@state`, and `*`/`**` never match a verbatim chunk"},{"cite":"spec §4.2 S4","text":"1 value(s) answered for an address with no instance visible to this reader: an owner gone, or a store answering on its keys, which S4 forbids"},{"cite":"tooling guide O6","text":"1 answer(s) for one key lost to a newer one from another selector"}],"out":"deployment.zsnap","report":"snapshot","unattributed":0}
 
 "#]]
     );
@@ -1349,7 +1349,7 @@ DIFFERENT
     assert_data_eq!(
         ndjson(&fx::snapshot_diff()),
         str![[r#"
-{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":4,"asked":1,"base":"acme","collected_at":"2026-10-09T00:05:00Z","collection_span_s":0.8,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":1}
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":4,"asked":1,"base":"acme","collected_at":"2026-10-09T00:05:00Z","collection_span_s":0.8,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"notes":[{"cite":"tooling guide §5","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":1}
 {"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1","row":"added"}
 {"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9","row":"removed"}
 {"conformance":[{"state":"invalid","violations":["/is_up: expected boolean"]},{"state":"valid"}],"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":true,"old":"yes","op":"changed","path":"is_up"}],"truncated":0}}
@@ -1890,13 +1890,13 @@ fn a_key_relation_carries_its_convention_note_once() {
         a: "v1/**".into(),
         b: "v1/h-3fa9/@rpc/sysinfo/introspect".into(),
         answer: false,
-        note: Some("`**` never crosses an `@`-chunk (RFC 03 §4 D2)".into()),
+        note: Some("`**` never crosses an `@`-chunk (core §1.3)".into()),
     };
     assert_data_eq!(
         table(&no),
         str![[r#"
 no — v1/** does not include all of v1/h-3fa9/@rpc/sysinfo/introspect
-`**` never crosses an `@`-chunk (RFC 03 §4 D2)
+`**` never crosses an `@`-chunk (core §1.3)
 
 "#]]
     );
@@ -2402,7 +2402,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
     );
 }
 
-/// The other half of the mechanical floor (RFC 13, v1.24): every family
+/// The other half of the mechanical floor (observer §8.2): every family
 /// whose verb subscribes or GETs states its observed scope — what was asked,
 /// and over what window — as data (`Render::scope`), not only as prose in a
 /// note. The checklist below is the list of observing families; adding an
@@ -2437,7 +2437,7 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.asked, ["acme/zk2/**"]);
     assert_eq!(s.window_s, Some(10.0));
 
-    // A snapshot's window is its collection span — the RFC 13 §4.4 fact
+    // A snapshot's window is its collection span — the tooling guide §5 fact
     // every rendering states (#219).
     let s = scoped(&fx::snapshot_report());
     assert_eq!(s.asked, ["acme/zk2/*/*/*/state/**"]);
@@ -2616,7 +2616,7 @@ fn a_context_list_keeps_an_empty_base_distinct_from_an_absent_one() {
     );
     assert!(
         lines[3].get("base").is_none(),
-        "an unset base is absent, never null (RFC 09 §5.1 O4)"
+        "an unset base is absent, never null (observer §1)"
     );
 }
 
@@ -2697,7 +2697,7 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
     assert_eq!(doc["existed"], false);
     assert!(
         doc.get("services").is_none(),
-        "clear counts nothing — absent, not zero (RFC 09 §5.1 O4)"
+        "clear counts nothing — absent, not zero (observer §1)"
     );
 }
 
@@ -2721,16 +2721,16 @@ storages:
   events      acme/zk2/*/*/*/events/**       fs (latest)     replicated, complete
     strip acme/zk2
     gc lifespan 86400 s (period 30 s): zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from
-    ! overlap: overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both (RFC 09 §2)
+    ! overlap: overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both (tooling guide §8.4)
   links       acme/zk2/*/*/*/events/link/**  fs (latest)
     strip acme/zk2
     gc lifespan 3600 s (period 30 s): declared gc_lifespan_s 3600
-    ! complete_refused: complete = true refused: it is not replicated — emitted as false (RFC 09 §2.2)
-    ! overlap: overlaps events (acme/zk2/*/*/*/events/**): a GET under both selectors is answered by both (RFC 09 §2)
+    ! complete_refused: complete = true refused: it is not replicated — emitted as false (tooling guide §8.4)
+    ! overlap: overlaps events (acme/zk2/*/*/*/events/**): a GET under both selectors is answered by both (tooling guide §8.4)
   timeseries  acme/zk2/*/*/*/stream/**       influxdb (all)
     strip acme/zk2
     gc lifespan 86400 s (period 30 s): zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from
-    ! retention_is_the_databases: retention is the database's policy, not zenoh config (RFC 09 §2.3)
+    ! retention_is_the_databases: retention is the database's policy, not zenoh config (tooling guide §8.4)
 
 "#]]
     );
@@ -2793,7 +2793,7 @@ storage check for namespace "acme" against the admin space: 3 planned, 0 observe
 
 "#]]
     );
-    assert!(notes(&fx::storage_check_unobservable()).contains("RFC 05 §3.1"));
+    assert!(notes(&fx::storage_check_unobservable()).contains("observer §2"));
 }
 
 /// #704: a plan derived from an enrollment names where each union storage
@@ -2811,7 +2811,7 @@ storage plan for namespace "acme"
 
 volumes:
   memory  memory  volatile · latest
-    ! implicit_volume: no deployment file names an [events] volume: volatile (RFC 09 §2.1)
+    ! implicit_volume: no deployment file names an [events] volume: volatile (tooling guide §8.4)
 
 storages:
   events-tc.netem.v1-applied  acme/zk2/*/*/tc.netem.v1/events/applied/*  memory (latest)

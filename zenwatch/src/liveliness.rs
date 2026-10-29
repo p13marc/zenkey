@@ -877,7 +877,7 @@ impl ForeignRule {
             }
             TokenBasis::Lost { dropped } => format!(
                 "the observer lost {dropped} liveliness event(s) on {sel}: a token's going or \
-                 return inside that span was not seen — unobservable, not ok (RFC 13 §3 O6); \
+                 return inside that span was not seen — unobservable, not ok (tooling guide O6); \
                  re-reading"
             ),
             TokenBasis::Incomplete {

@@ -19,7 +19,7 @@ $ zenctl key includes --format ndjson 'prod/zk2/**' 'prod/zk2/host-a/tc/tc.netif
 ```
 
 A "no" the convention explains rather than merely reports: `**` never crosses an
-`@`-chunk (RFC 03 §4 D2). That is the rule that puts zk2's verbatim chunks —
+`@`-chunk (core §1.3). That is the rule that puts zk2's verbatim chunks —
 `@stream`, `@state`, `@op`, `@zk`, `@adv` — out of reach of a firehose scope,
 and the reason a raw observer names one to see it. The note rides in both
 formats, because a script deserves the reason too.
@@ -28,11 +28,11 @@ formats, because a script deserves the reason too.
 $ zenctl key includes --format table 'prod/zk2/**' 'prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics'
 ? 1
 no — prod/zk2/** does not include all of prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics
-note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.
+note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; core §1.3) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.
 
 $ zenctl key includes --format ndjson 'prod/zk2/**' 'prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics'
 ? 1
-{"a":"prod/zk2/**","answer":false,"b":"prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics","note":"note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.","op":"includes","report":"key-relation"}
+{"a":"prod/zk2/**","answer":false,"b":"prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics","note":"note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; core §1.3) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.","op":"includes","report":"key-relation"}
 
 ```
 

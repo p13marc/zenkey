@@ -36,7 +36,7 @@
 //! coverage statement is the `seed_complete` line, which arrives when it
 //! becomes true. And `echo --format ndjson` is an *input* format:
 //! `zenkey_fleet::parse_row` reads it back for `pub --from
-//! ndjson` and `.zrec` (RFC 09 §5.2), and it counts a line it cannot parse as
+//! ndjson` and `.zrec` (tooling guide §5), and it counts a line it cannot parse as
 //! *malformed*. Extra fields on a row are ignored; a prepended envelope line
 //! would break the round trip (#235).
 //!
@@ -113,11 +113,11 @@ impl Format {
 /// the thing people delete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteKind {
-    /// RFC 09 §5.1 O4/O5 — what was asked, and what was not.
+    /// Observer §1, §8.2 — what was asked, and what was not.
     Coverage,
-    /// RFC 05 §3.1 — a zero result that is not a verdict.
+    /// Observer §2 — a zero result that is not a verdict.
     Silence,
-    /// RFC 09 §5.1 O6 — what the bounded observer dropped or retired.
+    /// Tooling guide O6 — what the bounded observer dropped or retired.
     Bound,
     /// How to read a number: which clock, which population (O7).
     Caveat,
@@ -150,7 +150,7 @@ impl NoteKind {
 pub struct Note {
     pub kind: NoteKind,
     pub text: String,
-    /// The clause it discharges — `"RFC 09 §5.1 O4"`, `"RFC 05 §3.1"`.
+    /// The clause it discharges — `"observer §1"`, `"observer §2"`.
     pub cite: Option<&'static str>,
 }
 
@@ -172,10 +172,10 @@ impl Note {
         Note::new(NoteKind::Coverage, text)
     }
     pub fn silence(text: impl Into<String>) -> Note {
-        Note::new(NoteKind::Silence, text).cite("RFC 05 §3.1")
+        Note::new(NoteKind::Silence, text).cite("observer §2")
     }
     pub fn bound(text: impl Into<String>) -> Note {
-        Note::new(NoteKind::Bound, text).cite("RFC 09 §5.1 O6")
+        Note::new(NoteKind::Bound, text).cite("tooling guide O6")
     }
     pub fn caveat(text: impl Into<String>) -> Note {
         Note::new(NoteKind::Caveat, text)
@@ -215,8 +215,8 @@ impl Note {
     }
 }
 
-/// What a bounded observer paid, O6's closed vocabulary (RFC 09 §5.1 O6;
-/// the judgement shape it feeds is RFC 13, v1.24).
+/// What a bounded observer paid, O6's closed vocabulary (tooling guide O6;
+/// the judgement shape it feeds is observer §1).
 ///
 /// Five kinds and no sixth: a new way for a bound to cost something is a new
 /// variant, argued for the way a new doctor check id is — not a free-text
@@ -259,7 +259,7 @@ impl BoundCost {
 }
 
 /// What one observing report actually watched ([`Render::scope`]) — the
-/// RFC 09 §5.1 O5 coverage claim as data rather than as prose scattered
+/// observer §8.2 coverage claim as data rather than as prose scattered
 /// through notes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObservedScope {
@@ -390,7 +390,7 @@ pub trait Render: Serialize {
         Vec::new()
     }
 
-    /// What this report's bounded observation cost (RFC 09 §5.1 O6).
+    /// What this report's bounded observation cost (tooling guide O6).
     ///
     /// Declared as data, not prose: the emit path appends one
     /// [`Note::bound`] per **non-zero** cost, in every format — so a report
@@ -400,7 +400,7 @@ pub trait Render: Serialize {
         Vec::new()
     }
 
-    /// What this report actually watched (RFC 09 §5.1 O5) — `Some` for every
+    /// What this report actually watched (observer §8.2) — `Some` for every
     /// family whose verb subscribes or GETs and whose report carries the
     /// facts; the render floor test keeps the checklist. `None` for a purely
     /// local computation.

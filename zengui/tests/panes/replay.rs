@@ -5,7 +5,7 @@ use super::*;
 /// The REPLAY banner (issue #74) is unmistakable and carries the capture's
 /// own account of itself: the file, its selectors and base, when it was
 /// captured, the drop ledger (O6 applied to a file), the transport — and
-/// the scrubber's axis names its clock (RFC 09 §5.2's two-clock rule).
+/// the scrubber's axis names its clock (tooling guide §5's two-clock rule).
 #[test]
 fn the_replay_banner_says_everything() {
     use zengui::replay::ReplayState;

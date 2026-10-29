@@ -1,5 +1,5 @@
 //! "Up to N examples, and the count of what they stand for" — one collector
-//! (RFC 09 §5.1 O6).
+//! (tooling guide O6).
 //!
 //! Every judge in this crate names a handful of offenders and then says how
 //! many more there were: the doctor's per-check findings, `field`'s per-path

@@ -5,7 +5,7 @@
 //! One fleet, two explorers, one config.
 //!
 //! **Why it is a crate of its own and not part of `zenkey-fleet`.** Nothing
-//! here touches the bus: no `Session`, no key, no RFC 05 fan-in. It is
+//! here touches the bus: no `Session`, no key, no fan-in GET. It is
 //! explorer *configuration* — `~/.config`, environment fallbacks, a cache
 //! directory — and living in the engine forced `dirs` and `toml` onto every
 //! library consumer of `zenkey-fleet` so that two binaries could read a TOML
