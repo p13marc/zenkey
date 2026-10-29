@@ -31,8 +31,9 @@ they land:
 - **Writing a contract:** the authoring format,
   [`examples/zk2/README.md`](examples/zk2/README.md).
 - **What the code generator gives you:** [`docs/zk2/codegen.md`](docs/zk2/codegen.md).
-- **What the tools owe the person reading them:**
-  [`docs/zk2/tooling-guide.md`](docs/zk2/tooling-guide.md).
+- **What the tools owe the person reading them:** the rules in
+  [`spec/observer.md`](spec/observer.md), and how the reference tools
+  meet them in [`docs/zk2/tooling-guide.md`](docs/zk2/tooling-guide.md).
 - **Coming from v1:** [`docs/zk2/migration.md`](docs/zk2/migration.md).
 - **The rules, for implementers:** [`spec/README.md`](spec/README.md): the
   core, the [profiles](spec/profiles/README.md#index), the schemas, the
@@ -50,7 +51,7 @@ names are v1's ([below](#v1)).
 
 | Part | What it is |
 |------|-----------|
-| [`spec/`](spec/README.md) | The **zk2 specification**, for implementers: the normative core ([`core.md`](spec/core.md): its version is in its header, and every amendment in [`spec/CHANGELOG.md`](spec/CHANGELOG.md)), the profiles, each a specification of its own built on the core (listed in [the profiles index](spec/profiles/README.md#index)), the contract and descriptor schemas, conformance fixtures and network scenarios. It is written so that any language can implement it from `spec/` alone. |
+| [`spec/`](spec/README.md) | The **zk2 specification**, for implementers: the normative core ([`core.md`](spec/core.md): its version is in its header, and every amendment in [`spec/CHANGELOG.md`](spec/CHANGELOG.md)), the observer rules a tool and any reader follow ([`observer.md`](spec/observer.md), versioned the same way in its header and [`spec/observer-CHANGELOG.md`](spec/observer-CHANGELOG.md)), the profiles, each a specification of its own built on the core (listed in [the profiles index](spec/profiles/README.md#index)), the contract and descriptor schemas, conformance fixtures and network scenarios. It is written so that any language can implement it from `spec/` alone. |
 | [`zenkey-model/`](zenkey-model/) | The **session-free half of zk2**: the `zk2/` key grammar and its kind selectors, resource templates (most-literal-first) and slugs, the contract authoring format (draft 2) with stable-coded lints, the canonical form, fingerprints, bundles and the append-only `.history`, the compatibility classifier, a late joiner's merge, and the session-free half of each profile. It depends on no zenoh crate but `zenoh-keyexpr`. Its `zk2` binary is the contract CI (`zk2 contract lint\|fingerprint\|bundle\|compat\|check-history`). It loads every contract in [`examples/zk2/`](examples/zk2/), generates `spec/`'s schemas and runs `spec/`'s fixtures. |
 | [`zenkey/`](zenkey/) | The **zk2 runtime**: `ServiceBuilder` brings a service up in the spec's order (resources, then the descriptor and bundles, then the tokens), typed writers apply the contract's QoS and stamp state, consumers read through a role's bindings, and operations come with their clients and their fan-out rules; presence, contract retrieval, a minimal archive, and the runtime half of each profile that has one. What needs no session is `zenkey-model`'s, re-exported as `zenkey::model`; without its default `zenoh` feature the crate builds with no zenoh, so a contract crate's traits do too. `examples/owner.rs` is a service to interoperate with, driven from stdin. |
 | [`zenkey-build/`](zenkey-build/) | **zk2's codegen**: from an application's build script it lints the contracts, gates each against its `.history` (a breaking revision fails the build), embeds the bundles, and generates one module per interface, with its types, a `Server` and a `Consumer`, and `Handlers`, `Client` and `Api` for its operations ([design](docs/zk2/codegen.md)). |

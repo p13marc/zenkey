@@ -183,9 +183,10 @@ ci:
     # code pushes, docs.yml for doc-only ones (#420).
     ./scripts/check-rfc-status.sh
     # The zk2 spec's version and inventory, stated once (#922): core.md's
-    # header names spec/CHANGELOG.md's newest amendment, README.md and
-    # spec/README.md state no core version, and the profiles index lists
-    # every profile text. On both lanes too.
+    # header names spec/CHANGELOG.md's newest amendment, observer.md's its
+    # changelog's newest text (#925), README.md and spec/README.md state
+    # neither version, and the profiles index lists every profile text. On
+    # both lanes too.
     ./scripts/check-spec-status.sh
     # The type scale by role (#191), the interactive seam (#193), the
     # spacing grid (#192) and the colour gate (#534) — all run as CI's

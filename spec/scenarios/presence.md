@@ -186,7 +186,7 @@ whose router-to-client direction the test can stall.
 2. The instance read holds the owner's instance token, and no error reply.
    The alive read is answered: a final reply, no token and no error reply,
    the same as a selector no token matches. A tool cannot tell it from
-   absence (core §8.1, "A refused read").
+   absence (core §8.1, "A refused read"; observer §3.4).
 3. The first read holds the owner's instance token, and ends with no error
    reply. The second ends with the error reply `Timeout` and no token, and
    the tool reports it as possibly incomplete, never as absence.
@@ -223,7 +223,7 @@ through a link the test can cut and heal, and retries its connection.
    reply. A check made before the read passed it, since a transport was
    held. The reader finds no transport when the read ends, and reports the
    read possibly incomplete, cut off during it, never the owner absent
-   (core §8.1, "A read cut off while it runs").
+   (core §8.1, "A read cut off while it runs"; observer §3.5).
 
 *Measured (0.37) on zenoh 1.10.1, with the reference runtime: as above.
 alarms.v1 0.4 first measured the cut-off read, and its reader made none.
@@ -236,7 +236,7 @@ cut, no token and no error reply, and read possibly incomplete, cut off
 during it, in 20 of 20 runs, with the check after it reading the session's
 links. Reading `Session::info().transports()` instead, it came back
 complete and empty in 4 of 10: the closing transport was still listed
-(core §8.1, "What the check reads"). The fleet's reader, `PresenceFeed`,
+(core §8.1, "What the check reads"; observer §3.5). The fleet's reader, `PresenceFeed`,
 read such a re-read as a seed possibly incomplete, cut off while it ran,
 and kept its owner up, in 10 of 10 runs (`zenkey-fleet/tests/presence_scenarios.rs`'s
 `s7_a_read_cut_off_while_it_runs`).*

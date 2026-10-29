@@ -28,7 +28,8 @@ jobs:
       # (00-index.md, CLAUDE.md, README.md) name the newest entry.
       - run: ./scripts/check-rfc-status.sh
       # The zk2 spec's version and inventory, stated once (#922): core.md's
-      # header names spec/CHANGELOG.md's newest amendment, README.md and
-      # spec/README.md state no core version, and spec/profiles/README.md's
+      # header names spec/CHANGELOG.md's newest amendment, observer.md's
+      # header spec/observer-CHANGELOG.md's newest text (#925), README.md and
+      # spec/README.md state neither version, and spec/profiles/README.md's
       # index lists every profile text there is.
       - run: ./scripts/check-spec-status.sh

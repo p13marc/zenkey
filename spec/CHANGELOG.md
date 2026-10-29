@@ -3,6 +3,136 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.58 — 2026-10-29: the reader's discipline moved to `observer.md`, no rule changed (#925)
+
+The rules a tool follows lived in three places under three statuses
+(#925, epic #921 Track B): much of this document was the reader's
+discipline, tied to zenoh 1.10.1, so an owner publishing one stream had
+to page through it, and each zenoh measurement moved the version every
+owner depends on. This amendment moves that discipline to
+[`observer.md`](observer.md), a normative text of its own with its own
+version, text 0.1 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)),
+written against this version. **Moved, no rule changed.** Each moved
+block's text is word for word what 0.57 held, its `[F:]` and `[Sc:]`
+citations with it; only its references are rewritten for its new home
+(a core section is written `core §n` there). Where only a sentence or a
+table cell moved (R3's and R7's tool clauses, §7.1's "Generic tools"
+column, §3.3's two `meta` sentences, §7.4's SHOULD), it stands there as a
+bullet of its own, its words kept and the subject it lost named. Each old home holds a
+one-line pointer, `Moved to observer.md §n (core 0.58); no rule
+changed.`, under the block's name, and every section number stays, so a
+citation of `core §8.1` or `core §2.7` still leads to the rule.
+
+**Moved** (old home → new home):
+- §8.1, "Reading presence", the whole block (370 of the section's 440
+  lines) → observer §3: the handlers and "The subscribers bind too" →
+  §3.1; "A fault read from presence shapes holds in two reads" → §3.2; a
+  GET ended at its timeout, and "A read that runs to its session's
+  interests timeout is not complete" → §3.3; "A refused read is complete,
+  and empty" → §3.4; "A read through a session cut off is not complete",
+  with "What the check reads", "A read cut off while it runs" and "A
+  profile's premise" → §3.5; "Absence is established only by a complete
+  read", with "Acting on a withdrawal" → §3.6; "The read that establishes
+  absence goes on a session with no liveliness subscriber", the watch
+  session, its round trip, a namespace's wire keys and a move of its
+  transport → §3.7; "A read on a token's own session answers that token
+  itself" → §3.8; "What a complete read covers" → §3.9.
+- §8.3, "What a tool can count" → observer §3.10.
+- §4.2, "R6 and a tool's seed" and "What a seed cannot know" → observer
+  §4.1; a tool's S4 check against the admin space, "What the check reads"
+  and "Who answered" → §4.2; "What a tool does not ask" → §4.3; "A tool's
+  S1 check" → §4.4.
+- §3.3, `meta`: the tool's sentences, a tool attributing a stamp by
+  `meta.zid` and "A tool MUST compare two zids by value" → observer §4.4.
+- §4.4, "What a tool can see" → observer §4.5.
+- §2.4, "What a tool can conclude rests on it" → observer §5.1.
+- §2.7, "What a tool reads" → observer §5.2, and "What a tool concludes",
+  its table and its `[F: budget/]` `[Sc: budget.md]` → §5.3.
+- §6, split-brain's diagnosis ("A holder is an incumbent, whatever its
+  mark", "Replicated serving", "Longer than the grace period", the grace
+  period a tool setting) → observer §6.1, and "Reading the mark" → §6.2.
+- §3.2, R3's **Tool** half (the graph read from descriptors), R7's tool
+  half (a tool saying unobservable, never down) and "A tool has no system
+  of its own" → observer §7.1.
+- §5.1, "Every call is answered (O3)": a tool judging O3 from outside,
+  "Where a tool learns its grants" and "Told so" → observer §7.2.
+- §7.1's "Generic tools" column (protobuf and JSON Schema decoded, raw by
+  its media type) and the reserved kinds' plugin; §7.2, "Decode order" and
+  "Honest rendering" with "A type is named one way" → observer §7.3.
+- §7.4, "A tool SHOULD check the limit at start" → observer §7.4.
+
+**Split where a block bound both** (the owner's or the deployment's half
+stays here, the reader's moved):
+- **§3.2's R3 and R7** keep their rows, the owner's and the consumer's
+  rules, and their evidence; the tool's clause is a pointer in the cell.
+- **§3.3's `meta`** keeps an owner's SHOULD to state `meta.zid`, and "How
+  a zid compares" keeps the zid's spelling and an owner's SHOULD to write
+  it as zenoh does.
+- **§4.2's admin space** keeps "The admin space is off by default" and a
+  deployment enabling it, read-only, for the tools' principals (0.10);
+  observer §4.2 cites it.
+- **§5.1's "Every call is answered (O3)"** keeps the owner's half: a
+  handler that ends without replying is answered `internal`.
+- **§6's split-brain** keeps what it is (two holders for longer than a
+  grace period, a finding but where replicated serving explains it), that
+  the runtime does not fence but under `redundancy.v1`, and an owner's
+  SHOULD to keep a re-mint's overlap below one second, with
+  `[Sc: operations.md §8]`.
+- **§7.1's table** keeps each kind's use; the reserved kinds keep their
+  declaration as `raw`, with `[Sc: types.md §2]`.
+
+**Also changed, no rule:** the header's opening says what `observer.md`
+holds. O5's and §11.3's reference for a refused read is observer §3.4;
+§11.1's and §11.3's for "Who answered" observer §4.2, and §11.1's for a
+node frozen by its declaration records observer §4.3. Appendix C says that
+the moved rules' evidence is indexed in `observer.md` too. Beside the
+text: `scenarios/presence.md` §6 and §7 and `scenarios/budget.md`, which
+cite a moved rule by its name, and `profiles/alarms/v1.md` §2.15's
+citation of "the path could not drop one silently" add `observer §n`
+beside it; `scenarios/README.md`, `conformance/README.md`,
+`spec/README.md` and the profiles' template (`profiles/README.md`, §5's
+three states) name `observer.md`, and `scripts/check-spec-status.sh`
+holds its header to its changelog as it holds this document's.
+
+**Deliberately not changed.**
+- **No rule, no fixture, no scenario.** The fixtures and scenarios pass
+  unchanged; the moved rules bind exactly whom they bound (observer §0: a
+  tool, and any participant where it reads).
+- **What stays binds owners, consumers, callers and deployments:** the
+  grammar, resources and QoS, the bound, a member, the owner's budget and
+  an event's rate (§2.7), bindings and the descriptor, state and S1–S7, a
+  late joiner's order and merge (§4.2, `[F: seed/merge.json]`, a consumer's
+  as much as a tool's), "Observing S1" and §3.2's "Observing it" (how a
+  tester checks an owner's rule), archives, operations and O1–O7 (O5 whole:
+  it binds a caller and a tool alike), ownership and serving, types,
+  presence *tokens*, re-minting and the caller's timeouts (§8.1), the
+  start-up order, the presence budget, contract retrieval (a caller's as
+  much as a tool's), constrained faces, contracts and their CI's checks
+  (§9: static rules every implementation runs), profiles' extension points,
+  access-control grants (§11), and Appendices A–E.
+- **§5.2's envelope decoding stays.** "Reading one" and "Decoding" name a
+  tool, but they are the envelope's format and its decoder, which a caller
+  runs too, pinned by `errors/cases.json`.
+- **§11's admin read stays.** The Tool grant, the admin read's three
+  selectors and a generator's MUST NOT are grants a deployment compiles.
+  The reader's side of the admin read, what a tool asks and must not ask,
+  was §4.2's, and moved.
+- **Sentences that say how a reader reads a value the core defines stay
+  with the definition:** §2.2's no-ceiling value "a tool reads as no
+  bound", §3.3's standby entry "a tool reads them so, never as exposure",
+  a role's `optional`, and §1.7's "a tool that serves several interface
+  majors subscribes once per major".
+- **Every profile text's "Written against"** stays as it is, and no
+  profile text's version moves: a profile citing `core §8.1` or `core
+  §2.7` for a reader's rule is led on by the pointer, and the one that
+  cites a moved rule by its exact sentence gains `observer §n` beside it,
+  a reference and no rule.
+- **The tooling guide's judgement shape and O-rules** are promoted by
+  `observer.md` text 0.1, not by this amendment; that is a change of
+  their status, recorded in `observer-CHANGELOG.md`.
+- **`rfcs/` and the Rust sources' `RFC nn` citations** are #925's second
+  part.
+
 ## 0.57 — 2026-10-29: `cardinality = "unbounded"`, and "at scale" on the sections a small deployment can skip (#937)
 
 zk2 is built to hold thousands of devices per presence domain, and the
