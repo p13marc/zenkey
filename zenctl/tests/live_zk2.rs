@@ -9260,3 +9260,403 @@ async fn timing_s6_a_tools_window() {
     exits(&run, 2);
     session.close().await.expect("the owner's session ends");
 }
+
+// ─── arbitration.v1 (#909, BC): scenarios.md §10, a tool's questions ─────
+//
+// The scenarios' parties as the owner example's `--commander` and
+// `--arbitrate` bring them up, through the runtime: three commanders of
+// `steer.v1` (`lab/safety`, `lab/teleop`, `lab/autopilot`), each on a
+// session of its own, putting `<service> <n>` every period from 500 ms
+// after its tokens while it is not held; and `A_l`, `lab/rudder-l` on
+// `rudder.v1`, its role `cmd` arbitrated by `Consumer::arbitrate`, its
+// withdrawals heard on a watch session of its own. T is `zenctl
+// arbitration`, holding `rudder.v1` and `steer.v1` offline.
+
+/// The scenarios' contracts, as the runtime's tests keep them.
+fn arbitration_contract(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts")
+        .join(format!("{name}.toml"))
+}
+
+fn arbitration_load(path: &Path) -> Contract {
+    let l = load_path(path);
+    l.contract
+        .unwrap_or_else(|| panic!("{}: {}", path.display(), l.report))
+}
+
+/// A copy of a scenarios' contract with `from` replaced by `to`, under
+/// the bus's home.
+fn arbitration_copy(bus: &Bus, name: &str, from: &str, to: &str, file: &str) -> PathBuf {
+    let text = std::fs::read_to_string(arbitration_contract(name)).expect("the contract");
+    assert!(text.contains(from), "{name} holds {from:?}");
+    let path = bus.home.join(file);
+    std::fs::write(&path, text.replace(from, to)).expect("the copy");
+    path
+}
+
+/// One commander, as the owner example's `--commander` is.
+struct Commander {
+    svc: Option<Service>,
+    on: Arc<std::sync::atomic::AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+    _session: zenoh::Session,
+}
+
+impl Commander {
+    async fn start(endpoint: &str, service: &str) -> Commander {
+        let session = client(endpoint, None).await;
+        let steer = arbitration_load(&arbitration_contract("steer.v1"));
+        let iface = steer.iface.clone();
+        let mut b = ServiceBuilder::new(
+            &session,
+            ServiceConfig::new(format!("lab/{service}").parse().expect("an address")),
+        );
+        b.implement(Implementation::new(steer)).expect("steer.v1");
+        b.expose(&iface, "stream/cmd").expect("cmd");
+        let svc = b.start().await.expect("a commander starts");
+        let w = svc
+            .writer(&iface, "stream/cmd", &Bindings::new())
+            .await
+            .expect("cmd's writer");
+        let on = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (o, name) = (Arc::clone(&on), service.to_owned());
+        let task = tokio::spawn(async move {
+            // F-269: the first put 500 ms after the tokens.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let mut tick = tokio::time::interval(Duration::from_millis(50));
+            let mut n = 0u64;
+            loop {
+                tick.tick().await;
+                if o.load(Ordering::Relaxed) {
+                    let _ = w.put(format!("{name} {n}")).await;
+                    n += 1;
+                }
+            }
+        });
+        Commander {
+            svc: Some(svc),
+            on,
+            task,
+            _session: session,
+        }
+    }
+
+    /// `commander hold` / `commander resume`: the tokens kept.
+    fn hold(&self, held: bool) {
+        self.on.store(!held, Ordering::Relaxed);
+    }
+}
+
+impl Drop for Commander {
+    fn drop(&mut self) {
+        self.task.abort();
+        drop(self.svc.take());
+    }
+}
+
+/// `A_l`, as the owner example's `--arbitrate <binding>` is: `rudder.v1`,
+/// its role `cmd` bound in order and arbitrated over `steer.v1`.
+struct Actuator {
+    svc: Service,
+    _arb: zenkey::arbitration::Arbitration,
+    _sessions: [zenoh::Session; 2],
+}
+
+impl Actuator {
+    async fn start(endpoint: &str, binding: &[&str]) -> Actuator {
+        let session = client(endpoint, None).await;
+        let watch = client(endpoint, None).await;
+        let steer = Arc::new(arbitration_load(&arbitration_contract("steer.v1")));
+        let rudder = arbitration_load(&arbitration_contract("rudder.v1"));
+        let iface = rudder.iface.clone();
+        let cfg =
+            ServiceConfig::new("lab/rudder-l".parse().expect("an address")).bind("cmd", binding);
+        let mut b = ServiceBuilder::new(&session, cfg);
+        b.implement(Implementation::new(rudder)).expect("rudder.v1");
+        b.arbitrate("cmd", Arc::clone(&steer))
+            .expect("arbitrated, valid");
+        b.expose(&iface, "state/angle").expect("angle");
+        let svc = b.start().await.expect("an actuator starts");
+        let arb = svc
+            .consumer("cmd", steer)
+            .expect("cmd's consumer")
+            .with_watch(watch.clone())
+            .arbitrate(|_| {})
+            .await
+            .expect("it arbitrates");
+        Actuator {
+            svc,
+            _arb: arb,
+            _sessions: [session, watch],
+        }
+    }
+
+    async fn stop(self) {
+        self.svc.close().await.expect("a clean close");
+    }
+}
+
+/// T: `zenctl arbitration <extra…> --format json`, with the contracts it
+/// holds offline.
+async fn arbitration_of(bus: &Bus, extra: &[&str], contracts: &[&Path]) -> Run {
+    let mut args: Vec<String> = vec!["arbitration".into()];
+    args.extend(extra.iter().map(|s| (*s).to_owned()));
+    for c in contracts {
+        args.extend(["--contracts".into(), c.display().to_string()]);
+    }
+    args.extend(["--timeout", "2", "--format", "json"].map(str::to_owned));
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    bus.zenctl(&argv).await
+}
+
+/// The one role row of a run, and its three answers as `(answer, reason)`.
+fn arbitration_answers(run: &Run) -> (Value, [(String, String); 3]) {
+    let doc = run.json();
+    let rows = rows_of(&doc, "role");
+    assert_eq!(rows.len(), 1, "one role read: {run}");
+    let r = rows[0].clone();
+    let s = |v: &Value| v.as_str().unwrap_or("").to_owned();
+    let answers =
+        ["declaration", "selection", "binding"].map(|q| (s(&r[q]["answer"]), s(&r[q]["reason"])));
+    (r, answers)
+}
+
+/// Until T reads `lab/rudder-l`'s descriptor binding `cmd` to `binding`,
+/// with no view: a consumer is up when presence says so.
+async fn until_bound(bus: &Bus, binding: &[&str], rudder: &Path, steer: &Path) {
+    let want: Vec<Value> = binding.iter().map(|b| json!(b)).collect();
+    let args = [
+        "arbitration",
+        "lab/rudder-l",
+        "--for",
+        "0",
+        "--contracts",
+        &rudder.display().to_string(),
+        "--contracts",
+        &steer.display().to_string(),
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ]
+    .map(|s| s.to_owned());
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let run = bus
+        .until(&argv, |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                rows_of(&d, "role")
+                    .first()
+                    .is_some_and(|row| row["bindings"] == Value::Array(want.clone()))
+            })
+        })
+        .await;
+    let doc = run.json();
+    assert_eq!(
+        rows_of(&doc, "role")[0]["bindings"],
+        Value::Array(want),
+        "the descriptor's binding, in order: {run}"
+    );
+}
+
+/// arbitration.v1 `scenarios.md` §10 (§2.14, §5): T reads `A_l`'s
+/// descriptor and listens on a subscription and a watch of its own, each
+/// selection its own view.
+/// 1. The three commanders run, `A_l` bound as in §1: the declaration yes
+///    (`valid`), the selection yes (`selected`, `lab/safety`), the binding
+///    no (`exact`). Exit 0.
+/// 2. All three hold: the selection no (`dead_man`). Exit 1.
+/// 3. `A_l` bound as in §9, `C_t` and `C_a` running: the selection yes,
+///    `lab/autopilot`; the binding yes (`wildcard`, entry 1). Exit 1.
+/// 4. A copy of `rudder.v1` saying `freshest`, offline, no consumer
+///    running: the declaration no (`invalid`, `policy_unsupported`); the
+///    selection and the binding not asked (`no_descriptor`). Exit 1.
+/// 5. `steer.v1` and a copy with `timing.deadline_ms = 200`, `A_l` of step
+///    1: the declaration and the selection unobservable
+///    (`revisions_disagree`). Exit 2.
+/// 6. 100 ms of listening to `A_l` of step 1, all three holding: the
+///    selection unobservable (`listening`). Exit 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn arbitration_s10_a_tools_questions() {
+    let bus = Bus::bare(None).await;
+    let (rudder, steer) = (
+        arbitration_contract("rudder.v1"),
+        arbitration_contract("steer.v1"),
+    );
+    let held: [&Path; 2] = [&rudder, &steer];
+    let c = [
+        Commander::start(&bus.endpoint, "safety").await,
+        Commander::start(&bus.endpoint, "teleop").await,
+        Commander::start(&bus.endpoint, "autopilot").await,
+    ];
+    const S1: [&str; 3] = ["lab/safety", "lab/teleop", "lab/autopilot"];
+    let a = Actuator::start(&bus.endpoint, &S1).await;
+    wait_for(
+        &bus,
+        &["lab/safety", "lab/teleop", "lab/autopilot", "lab/rudder-l"],
+    )
+    .await;
+    until_bound(&bus, &S1, &rudder, &steer).await;
+    // Every commander past its lead.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    // 1. The three run, bound as in §1.
+    let run = arbitration_of(&bus, &["lab/rudder-l", "--for", "2"], &held).await;
+    let (row, answers) = arbitration_answers(&run);
+    assert_eq!(
+        answers,
+        answered([("yes", "valid"), ("yes", "selected"), ("no", "exact")]),
+        "{run}"
+    );
+    assert_eq!(row["selection"]["provider"], "lab/safety", "{run}");
+    assert_eq!(row["selection"]["whose"], "the tool's own view", "{run}");
+    assert_eq!(row["declaration"]["deadline_ms"], 300, "{run}");
+    assert_eq!(row["view"]["watching"], true, "{run}");
+    exits(&run, 0);
+
+    // 2. All three hold.
+    for x in &c {
+        x.hold(true);
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let run = arbitration_of(&bus, &["lab/rudder-l", "--for", "2"], &held).await;
+    let (_, answers) = arbitration_answers(&run);
+    assert_eq!(
+        answers[1],
+        ("no".to_owned(), "dead_man".to_owned()),
+        "{run}"
+    );
+    exits(&run, 1);
+
+    // 3. A_l bound as in §9, C_t and C_a running.
+    a.stop().await;
+    const S9: [&str; 2] = ["lab/safety", "lab/*"];
+    let a = Actuator::start(&bus.endpoint, &S9).await;
+    c[1].hold(false);
+    c[2].hold(false);
+    until_bound(&bus, &S9, &rudder, &steer).await;
+    let run = arbitration_of(&bus, &["lab/rudder-l", "--for", "2"], &held).await;
+    let (row, answers) = arbitration_answers(&run);
+    assert_eq!(
+        answers,
+        answered([("yes", "valid"), ("yes", "selected"), ("yes", "wildcard")]),
+        "{run}"
+    );
+    assert_eq!(row["selection"]["provider"], "lab/autopilot", "{run}");
+    assert_eq!(row["binding"]["wildcards"], json!([1]), "{run}");
+    assert_eq!(
+        row["binding"]["wildcard_entries"],
+        json!(["lab/*"]),
+        "{run}"
+    );
+    exits(&run, 1);
+
+    // 4. A copy saying freshest, offline, no consumer running.
+    a.stop().await;
+    let freshest = arbitration_copy(
+        &bus,
+        "rudder.v1",
+        "\"arbitration.policy\" = \"priority\"",
+        "\"arbitration.policy\" = \"freshest\"",
+        "rudder-freshest.v1.toml",
+    );
+    let offline: [&Path; 2] = [&freshest, &steer];
+    let run = bus
+        .until(
+            &[
+                "arbitration",
+                "--role",
+                "cmd",
+                "--for",
+                "0",
+                "--contracts",
+                &freshest.display().to_string(),
+                "--timeout",
+                "2",
+                "--format",
+                "json",
+            ],
+            |r| {
+                serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                    rows_of(&d, "role")
+                        .iter()
+                        .all(|row| row["consumer"].is_null())
+                })
+            },
+        )
+        .await;
+    assert!(
+        rows_of(&run.json(), "role")
+            .iter()
+            .all(|row| row["consumer"].is_null()),
+        "no consumer running: {run}"
+    );
+    let run = arbitration_of(&bus, &["--role", "cmd", "--for", "2"], &offline).await;
+    let (row, answers) = arbitration_answers(&run);
+    assert_eq!(
+        answers,
+        answered([
+            ("no", "invalid"),
+            ("not_asked", "no_descriptor"),
+            ("not_asked", "no_descriptor")
+        ]),
+        "{run}"
+    );
+    assert_eq!(
+        row["declaration"]["reasons"],
+        json!(["policy_unsupported"]),
+        "{run}"
+    );
+    assert_eq!(row["bindings"], Value::Null, "{run}");
+    exits(&run, 1);
+
+    // 5. Two revisions of steer.v1, A_l of step 1.
+    let a = Actuator::start(&bus.endpoint, &S1).await;
+    c[0].hold(false);
+    until_bound(&bus, &S1, &rudder, &steer).await;
+    let steer_200 = arbitration_copy(
+        &bus,
+        "steer.v1",
+        "\"timing.deadline_ms\" = 300",
+        "\"timing.deadline_ms\" = 200",
+        "steer-200.v1.toml",
+    );
+    let two: [&Path; 3] = [&rudder, &steer, &steer_200];
+    let run = arbitration_of(&bus, &["lab/rudder-l", "--for", "2"], &two).await;
+    let (row, answers) = arbitration_answers(&run);
+    assert_eq!(
+        answers,
+        answered([
+            ("unobservable", "revisions_disagree"),
+            ("unobservable", "revisions_disagree"),
+            ("no", "exact")
+        ]),
+        "{run}"
+    );
+    assert_eq!(
+        row["revisions"].as_array().map(Vec::len),
+        Some(2),
+        "both revisions read: {run}"
+    );
+    exits(&run, 2);
+
+    // 6. 100 ms of listening, all three holding.
+    for x in &c {
+        x.hold(true);
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let run = arbitration_of(&bus, &["lab/rudder-l", "--for", "0.1"], &held).await;
+    let (row, answers) = arbitration_answers(&run);
+    assert_eq!(
+        answers[1],
+        ("unobservable".to_owned(), "listening".to_owned()),
+        "{run}"
+    );
+    let listened = row["view"]["listened_ms"].as_f64().unwrap_or(f64::MAX);
+    assert!(
+        listened < 300.0,
+        "less than one deadline: {listened} ms\n{run}"
+    );
+    exits(&run, 2);
+    a.stop().await;
+}
