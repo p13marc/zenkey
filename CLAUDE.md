@@ -233,6 +233,43 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   disagree is `invalid`, its reasons named: what replaced v1's
   `kind-mismatch`, in `watch`, `echo`, `check expect`, `check schema`,
   `payload-type` and the watchdog's `invalid-payload`.
+  `timing.v1` (#908, MC) runs through all four layers too. The fleet runs
+  its own engine over `zenkey_model::timing` rather than the runtime's
+  (`Consumer::with_watch` takes a namespaced watch session and keeps no
+  window): `bus::timing`'s `run_timing` reads presence and descriptors,
+  follows the owners' instance, interface and member tokens on the
+  `WatchSession` (no namespace, wire keys) beside each timed stream's
+  members in **one** bounded queue (a refusal a counted loss), each
+  arrival's `Instant` and `SystemTime` read **in the subscriber's
+  callback**, and starts the window once a presence read after the
+  barrier and the descriptor of every instance it shows stand (text 0.2,
+  F-263; tried once more when they did not, `TimingOpening` saying what
+  it stood on); a withdrawal leaving none owes a read 100 ms later on the
+  namespaced session (absent only by a complete one), an instance heard
+  declared or a stamp of an unknown id asks descriptors, a loss, a stall
+  (`bus::stall`) or a watch transport move holds every owner unconfirmed
+  and reads presence again, and a one-shot timer sits at the trackers'
+  earliest due; the queue is drained before a tick or a read's answer.
+  `model::timing`'s `TimingBook` is session-free: a `Tracker` and a
+  `LifespanReader` per provider address and resource (`TimedResource`,
+  bound and `epoch` from the contract, a template without parameters the
+  one known member: a tool holds no binding, text 0.3), the owner per
+  (address, interface) present, unconfirmed, absent or unseen (a
+  tokenless interface's owner its instance token, by the descriptor),
+  member tokens seen and gone (F-261), each member's span held, misses
+  with the owner's state, end, arrivals (for `period_window`, bounded)
+  and lifespans, in one order whose instants never go back; across a face
+  every owner unseen and the `meta.zid`s the deployment's word
+  (`--owner-zid`, text 0.3). `judge::timing` maps `deadline_met`,
+  `period_kept` and `lifespan_expired` onto `report::timing`'s tokens and
+  rolls each question up per resource and per run by `roll_up` (F-264);
+  `TimingReport::judgement` is 1 on any question's finding, 0 every
+  question asked on its other pole, 2 otherwise. The doctor's
+  `timing-declaration` (warning, from the contracts: an invalid value, a
+  deadline below the period, timing keys on a state, an event, an
+  operation or a requirement), and `check conform`'s `timing-period` and
+  `timing-deadline` run the same reader over the suite's window
+  (`ConformObservation::timing`, none when both are skipped).
 - `zenkey-explorer-config/` — the **shared explorer config crate**
   (Apache-2.0, **not published**): named connection contexts, the path
   policy (`~/.config/zenkey-explorer/config.toml`, legacy zenctl read
@@ -324,6 +361,21 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   load plus `t`. `World::metered` (`lab/meter` on
   `zenkey/tests/contracts/meter.v1.toml`, `site-a/rf0` on modem.v3) feeds
   seven scenes, and the spray runs `lab/meter` (`--meter`).
+  **Timing (#908, MC)**: a key resolving to a `timing.v1` stream shows
+  PERIOD, DEADLINE and LIFESPAN beside TYPE, each the contract's (an
+  invalid declaration said so), and a Timing section, `zengui::timing`'s
+  read over the slot's history ring, **the window's own view**: arrivals
+  are the ring's `received`, stamped at the data pump's callback
+  (`SampleView::of`), the member judged from its first retained arrival
+  by the model's `Tracker`, the owner's state the presence link's as it
+  landed (`OwnerTrack`, recorded per slot by `track_owner`), a lag of the
+  pump while the slot recorded a loss, judged at the latest tick's
+  instant (`timing_now`, so a scene renders the same twice); §5's
+  deadline and period by the model's judges, each miss with its owner's
+  state, the lifespan said not judged (no ε), and a replay read
+  unobservable. `World::timed` (`robot1/teleop` on the walkthrough's
+  `twist_cmd.v1`) feeds `inspector-timing-missed`, and `robot1/nav`'s
+  position `inspector-timing-period`.
   **The Workbench**: nodes per address from presence (health read once per
   selection, a "clocks synced" toggle), and `redundancy.v1` read beside
   health once per selection (#841, RC: `nodes::RedundancyState`,
@@ -449,8 +501,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirty-one
-  checks since #841's RC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: thirty-two
+  checks since #908's MC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
@@ -610,6 +662,19 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `gen` and `serve` of a governed contract are candidates on a reader and
   a watch session of their own (`cmd/serve.rs`'s `elect`), with the
   address guard unchanged. §12 runs as `live_zk2.rs`'s `redundancy_s12_…`.
+  #908's MC added `timing [SELECTOR] [--for SECS] [--clock-bound MS]
+  [--across-face] [--owner-zid ZID]… [--settle] [--lease]
+  [--wait-before-close] [--contracts]`, a root judgement beside
+  `telemetry` over `run_timing`: §5's three questions per member in the
+  fixtures' tokens, rolled up per resource and per run; exit 1 a deadline
+  missed with the owner present and nothing lost, a period not kept
+  likewise, or a sample expired; 0 every question asked on its other
+  pole; 2 otherwise (no `--clock-bound` leaves every lifespan `no_bound`).
+  The doctor gains `timing-declaration` (32 checks), and `check conform`
+  `timing-period` and `timing-deadline` (31 cases). timing scenarios §6
+  runs as `live_zk2.rs`'s `timing_s6_a_tools_window`, on the owner
+  example's timing drive compiled in (`timing every <member> <ms>` its
+  step 3, `timing declare <axis>` a member token alone).
   `--skip` sends nothing: no call for `operation`, no fan-out probe for
   `fanout-refused`, no standby probe for `redundancy-standby` (#841, RD).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
@@ -672,7 +737,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `serve`, `gen`, `scout`); `compat` compares two contract revisions
   offline, exit-coded like a judgement; a **judgement** is exit-coded
   (`check expect|probe|schema|face`, `doctor`, `health`, `alarms`,
-  `telemetry`, `desired`, `redundancy`, `watchdog`).
+  `telemetry`, `timing`, `desired`, `redundancy`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
@@ -775,7 +840,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   clean stop; and it caches no discovery: it is not the noun
   `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
   doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
-  (`deep`, thirty-one checks since #841's RC, `redundancy-vacancy` among
+  (`deep`, thirty-two checks since #908's MC, `timing-declaration` among
   them; top-level `clocks_synced` for the `health-*` checks, which a
   `doctor` rule reads too) every few **hours** beside the drain, as a rule
   of its own (`RuleKind::ScheduledDoctor`, id `doctor`). The first run is a
@@ -1238,8 +1303,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   an id not held. An expired sample is discarded, counted
   (`Subscription::expired`) and no arrival.
   `Consumer::subscribe_timed` hands `TimingEvent` (missed, met, ended,
-  beyond_bound, expired) to a second callback, in order, from a task of
-  its own; `subscribe` drops them, so its callers are unchanged. Without
+  beyond_bound, expired, an expired one with its arrival's `wall`, text
+  0.3, F-276) to a second callback, in order, from a task of its own;
+  `subscribe` drops them, so its callers are unchanged. Without
   a watch session the owner stays unseen: no never-heard wait, a member
   ended only forgotten. A writer of a stream declaring a lifespan stamps
   each put from the service's `Minter` clock, its id the session's zid
