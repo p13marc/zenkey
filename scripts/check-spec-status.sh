@@ -94,6 +94,20 @@ fi
 # gives each match's byte offset, turned into a line number below.
 two_part='v?0\.[0-9]+([^.0-9x]|\.[^0-9x])'
 pattern="(\<([Cc]ore|[Ss]pec)[^0-9]{0,30}|\<[Vv]ersion[^0-9A-Za-z]{0,6})${two_part}"
+obs_pattern="\<[Oo]bserver[^0-9]{0,30}${two_part}"
+# Where each observer hit ends, `<doc>:<byte>`: a core hit ending at the same
+# number is the observer's version, which 2b reports, and only that one is
+# set aside, never a core hit that merely passes the word (review-bot on PR
+# #947). A match's end is its byte offset plus its length in bytes.
+obs_ends=" "
+for doc in README.md spec/README.md; do
+    while IFS= read -r hit; do
+        [ -z "$hit" ] && continue
+        offset=${hit%%:*}
+        text=${hit#*:}
+        obs_ends+="$doc:$(( offset + $(printf '%s' "$text" | LC_ALL=C wc -c) )) "
+    done < <(grep -zobE "$obs_pattern" "$doc" | tr '\0\n' '\n ' || true)
+done
 stated=0
 for doc in README.md spec/README.md; do
     # grep's own status, apart from tr's: 1 is no match, above 1 an error
@@ -110,8 +124,10 @@ for doc in README.md spec/README.md; do
         offset=${hit%%:*}
         text=${hit#*:}
         # `spec/observer.md) text 0.1` names the observer's version, which
-        # 2b reports: the word `observer` between `spec` and the number.
-        case "$text" in *[Oo]bserver*) continue ;; esac
+        # 2b reports: set aside only when an observer hit ends at this
+        # number too.
+        end=$(( offset + $(printf '%s' "$text" | LC_ALL=C wc -c) ))
+        case "$obs_ends" in *" $doc:$end "*) continue ;; esac
         line=$(( $(head -c "$offset" "$doc" | wc -l) + 1 ))
         echo "spec-status: $doc:$line states a core version: '$text'" >&2
         stated=1
@@ -123,7 +139,6 @@ if [ "$stated" -ne 0 ]; then
 fi
 
 # --- 2b. the front doors state no observer version (#925) ------------------
-obs_pattern="\<[Oo]bserver[^0-9]{0,30}${two_part}"
 obs_stated=0
 for doc in README.md spec/README.md; do
     rc=0
