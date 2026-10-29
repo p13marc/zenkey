@@ -3,7 +3,8 @@ zk2py.timing_tool -c ENDPOINT [--for SECS] [--clock-bound MS]
 [--contracts PATH]... [--across-face [--owner-zid ZID]...] SELECTOR``.
 
 Written from ``spec/profiles/timing/v1.md`` (text 0.3, its roll-up text
-0.4's) §2.7 and §5, as a tool's implementer reads them. ``SELECTOR`` names one owner's members,
+0.4's, its held time and a roll-up's reason text 0.5's) §2.7 and §5, as a
+tool's implementer reads them. ``SELECTOR`` names one owner's members,
 ``zk2/<system>/<service>/**`` or narrower; for each timed stream it reaches
 (a ``stream`` or ``@stream`` resource with a ``timing.*`` annotation):
 
@@ -20,7 +21,11 @@ Written from ``spec/profiles/timing/v1.md`` (text 0.3, its roll-up text
 3. §5's three questions of each member it held, and each read over its
    resource and over the run by its finding (F-264), a question whose
    every member is set aside not asked, or not this profile's (text 0.4,
-   F-277).
+   F-277), its reason and ``first`` the first member's giving its answer in
+   byte order of the keys, none over no member (text 0.5, F-279). A
+   member's ``held_ms`` is its longest unbroken stretch, never the sum: a
+   known member never heard held only while waited for (F-278), a member
+   that ended held, and its ``span_ms`` read, over its first life (F-280).
 
 Across a constrained face (``--across-face``) no presence and no descriptor
 cross: the contracts are ``--contracts``, the deployment's word, and each
@@ -66,6 +71,21 @@ def timed_rids(canonical: dict[str, Any], selector: str, address: str) -> list[s
     return out
 
 
+def _rolled(question: str, members: list[tuple[str, tm.Answer]]) -> dict[str, Any]:
+    """§5's roll-up of one question over a resource's or the run's members
+    (text 0.4), its reason and ``first`` the first member's giving its
+    answer in byte order of the keys, and over no member neither (text 0.5,
+    F-279: "Over no member there is none")."""
+    a = tm.rollup(question, members)
+    out: dict[str, Any] = {"answer": a.answer}
+    if a.reason is not None:
+        out["reason"] = a.reason
+        out["first"] = next(k for k, x in sorted(members, key=lambda kv: kv[0].encode())
+                            if x.answer == a.answer)
+    out["members"] = len(members)
+    return out
+
+
 def _address(selector: str) -> str:
     parts = selector.split("/")
     if len(parts) < 3 or parts[0] != "zk2" or "*" in parts[1] or "*" in parts[2]:
@@ -105,7 +125,7 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
         while time.monotonic_ns() < end:
             time.sleep(min(0.05, max(0.0, (end - time.monotonic_ns()) / 1e9)))
     rows: list[dict[str, Any]] = []
-    members: dict[str, list[tm.Answer]] = {"deadline": [], "period": [], "lifespan": []}
+    members: dict[str, list[tuple[str, tm.Answer]]] = {"deadline": [], "period": [], "lifespan": []}
     for (canon, rids), w in zip(plans, windows):
         got = w.end()
         rd = w.reader
@@ -113,30 +133,32 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
         for rid in rids:
             res = rd.resources[rid]
             mine = {m: a for m, a in got.items() if m in set(res.first_held) | set(res.known)
-                    | (set(res.tracker.members) if res.tracker is not None else set())}
+                    | (set(res.tracker.held_in_window()) if res.tracker is not None else set())}
             rows.append({"row": "resource", "address": address, "iface": canon["interface"], "resource": rid,
                          "declaration": res.decl.expect(), "members": len(mine),
-                         "questions": {q: tm.rollup(q, [a[q] for a in mine.values()]).pair()
+                         "questions": {q: _rolled(q, [(m, a[q]) for m, a in mine.items()])
                                        for q in ("deadline", "period", "lifespan")}})
             start, end = w.start_ns or 0, w.end_ns or 0
             for m, a in sorted(mine.items()):
                 r = w.readings.get(m)
-                arrivals = sum(1 for x in rd.arrivals if x.key == m and x.handed)
+                arrivals = sum(1 for x in rd.arrivals if x.key == m and x.handed and start <= x.mono_ns <= end)
                 reps = [x for rid_, x in rd.reports if rid_ == rid and x.member == m and start <= x.at_ns <= end]
                 misses = [{"at_ms": tm.ns_to_ms(x.at_ns - start), "due_ms": tm.ns_to_ms((x.due_ns or 0) - start),
                            "owner": x.owner} for x in reps if x.event == "missed"]
+                # the member's first end (text 0.5, F-280: read over its first life)
                 ended = next(({"at_ms": tm.ns_to_ms(x.at_ns - start), "reason": x.reason}
-                              for x in reversed(reps) if x.event == "ended"), None)
+                              for x in reps if x.event == "ended"), None)
                 rows.append({"row": "member", "key": m, "address": address, "iface": canon["interface"],
                              "resource": rid, "known": m in res.known, "arrivals": arrivals,
                              "held_ms": None if r is None else tm.ns_to_ms(r.deadline.held_ns),
+                             "span_ms": None if w.spans.get(m) is None else tm.ns_to_ms(w.spans[m]),
                              "missed_present": None if r is None else r.deadline.missed_present,
                              "missed_not_present": None if r is None else r.deadline.missed_not_present,
                              "misses": misses, "ended": ended,
                              **{q: a[q].pair() for q in ("deadline", "period", "lifespan")}})
                 for q in members:
-                    members[q].append(a[q])
-    runq = {q: tm.rollup(q, members[q]).pair() for q in members}
+                    members[q].append((m, a[q]))
+    runq = {q: _rolled(q, members[q]) for q in members}
     # §5 over the run, read by each question's finding (F-264). A question
     # whose every member is set aside rolls up not asked, or not this
     # profile's (text 0.4, F-277): nobody put it, so it is set aside here
