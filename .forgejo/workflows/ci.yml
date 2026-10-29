@@ -60,8 +60,9 @@ jobs:
       # also touches an RFC runs it in the same status set.
       - run: ./scripts/check-rfc-status.sh
       # The zk2 spec's version and inventory, stated once (#922): core.md's
-      # header names the CHANGELOG's newest amendment, README.md and
-      # spec/README.md state no core version, and the profiles index lists
+      # header names the CHANGELOG's newest amendment, observer.md's its
+      # changelog's newest text (#925), README.md and spec/README.md state
+      # neither version, and the profiles index lists
       # every spec/profiles/<name>/v<N>.md. Run here and on the Docs lane,
       # as check-rfc-status.sh is.
       - run: ./scripts/check-spec-status.sh
