@@ -409,15 +409,26 @@ fn rust_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The profiles a service's source follows through [`ENTRY_POINTS`]: each
-/// `.rs` file under `dir` read down to its `#[cfg(test)]`, a line starting
-/// `//` skipped. How many files there were.
+/// `.rs` file under `dir` read down to its test module (a `#[cfg(test)]`
+/// whose next line opens a `mod`, so a `#[cfg(test)]` helper before it
+/// cuts nothing), a line starting `//` skipped and string literals blanked.
+/// How many files there were.
+///
+/// **Its limit, by design** (review-bot on PR #945): a marker is a method
+/// name, so a method of that name on another type would count. The markers
+/// are the runtime's entry points, and a service has no reason to call an
+/// unrelated `.health()`; the check is a guard against a column going
+/// stale, not a proof of use.
 fn entry_points_in(dir: &Path) -> (BTreeSet<String>, usize) {
     let mut out = BTreeSet::new();
     let files = rust_files(dir);
     for p in &files {
         let text = std::fs::read_to_string(p).unwrap();
-        let code = text.split("#[cfg(test)]").next().unwrap();
-        for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
+        for line in code_before_tests(&text)
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+        {
+            let line = without_strings(line);
             for (marker, profile) in ENTRY_POINTS {
                 if line.contains(marker) {
                     out.insert((*profile).to_string());
@@ -426,6 +437,46 @@ fn entry_points_in(dir: &Path) -> (BTreeSet<String>, usize) {
         }
     }
     (out, files.len())
+}
+
+/// `text` up to its test module: the first `#[cfg(test)]` line whose next
+/// non-empty line opens a `mod`.
+fn code_before_tests(text: &str) -> &str {
+    let mut at = 0;
+    let mut lines = text.split_inclusive('\n').peekable();
+    while let Some(line) = lines.next() {
+        if line.trim() == "#[cfg(test)]"
+            && lines
+                .clone()
+                .find(|l| !l.trim().is_empty())
+                .is_some_and(|l| {
+                    l.trim_start().starts_with("mod ") || l.trim_start().starts_with("pub mod ")
+                })
+        {
+            return &text[..at];
+        }
+        at += line.len();
+    }
+    text
+}
+
+/// `line` with each string literal's contents blanked, so a marker quoted
+/// in a message counts for nothing.
+fn without_strings(line: &str) -> String {
+    let (mut out, mut quoted, mut escaped) = (String::new(), false, false);
+    for c in line.chars() {
+        match (quoted, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (_, _, '"') => {
+                quoted = !quoted;
+                out.push(c);
+            }
+            (true, false, _) => {}
+            (false, _, _) => out.push(c),
+        }
+    }
+    out
 }
 
 /// A table row's cells, trimmed; a `\|` stays in its cell.
@@ -643,7 +694,23 @@ fn the_index_says_who_uses_each_profile() {
             ));
         }
         let rel = text.strip_prefix(profiles()).unwrap().display().to_string();
-        let first_token = |s: &str| s.split_whitespace().next().unwrap_or("").to_string();
+        // A header cell's version: its first `N.M` token, whatever follows
+        // it (`0.5 ([CHANGELOG.md](…))`, `core 0.56 (…)`), else the cell
+        // whole, which then fails the comparison by name (review-bot on PR
+        // #945).
+        let first_token = |s: &str| {
+            s.split_whitespace()
+                .find(|w| {
+                    w.split_once('.').is_some_and(|(a, b)| {
+                        !a.is_empty()
+                            && !b.is_empty()
+                            && a.bytes().all(|c| c.is_ascii_digit())
+                            && b.bytes().all(|c| c.is_ascii_digit())
+                    })
+                })
+                .unwrap_or(s)
+                .to_string()
+        };
         let header = [
             ("Text", first_token(&header_field(text, "Text version"))),
             ("Status", header_field(text, "Status")),
