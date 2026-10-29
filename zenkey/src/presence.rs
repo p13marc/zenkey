@@ -67,7 +67,10 @@
 //! trip on a task of its own that every waiter shares (#882), since the
 //! one after a move waits for the population (0.44, F-239). No round
 //! trip is asked through a session cut off, and none that was cut off
-//! while it ran stands (0.42, F-228).
+//! while it ran stands (0.42, F-228); and none at once at an open: zenoh
+//! 1.10.1 tells an open before the session's router face declares the
+//! subscribers' interests again, so the round trip after an open is asked
+//! [`OPEN_MARGIN`] after it (0.56, #914).
 //!
 //! **A GET that runs to the session's interests timeout** (#851, core §8.1,
 //! 0.41) is possibly incomplete. zenoh 1.10.1's client and peer runtimes end
@@ -530,12 +533,39 @@ pub async fn settle_at(session: &zenoh::Session, key: &str, timeout: Duration) -
 /// (`docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`),
 /// which is why none is asked again while one is in flight.
 ///
+/// **Not at once at an open** (core §8.1, 0.56; #914). zenoh 1.10.1 tells
+/// the session's transport events listener that a transport opened before
+/// the session's router face on it declares the subscribers' interests
+/// again (`net/runtime/mod.rs`, `new_unicast`, then `hat/client/mod.rs`),
+/// so a round trip asked at once at the open can find no face, and stand
+/// at once, complete and empty, before the reopen tells a token. So a round
+/// trip asked within [`OPEN_MARGIN`] of the session's latest transport
+/// event, when that event is an open, waits out the rest of the margin on
+/// its task, shared like the round trip itself, before it asks; a move
+/// during the margin ends it unasked, and it does not stand: the next
+/// waiter asks the new state's. A close needs no margin: no round trip through a
+/// session cut off is asked (0.42, F-228).
+///
 /// Cloning shares it; the round trip in flight is ended with the last
 /// clone.
 #[derive(Clone)]
 pub struct Barrier {
     inner: std::sync::Arc<BarrierInner>,
 }
+
+/// How long after an open of a watch session's transport its [`Barrier`]
+/// asks the round trip (core §8.1, 0.56: "A reader SHOULD ask the round
+/// trip after an open a margin after its event (the reference: 100 ms)";
+/// #914). zenoh 1.10.1 tells the open to the session's transport events
+/// listener before its router face declares the subscribers' interests
+/// again, and a round trip asked in between can stand with nothing told.
+/// Measured by the reference on zenoh 1.10.1
+/// (`tests/presence.rs`, `a_round_trip_asked_at_the_open_event_can_precede_the_reopen`):
+/// a round trip asked at the open event stood before the reopen's telling
+/// at 6 of 60 reopens, in 0.24 ms where one that reached the router took
+/// 41–45 ms; one asked 100 ms after the event followed the telling at 60
+/// of 60.
+pub const OPEN_MARGIN: Duration = Duration::from_millis(100);
 
 struct BarrierInner {
     session: zenoh::Session,
@@ -546,6 +576,11 @@ struct BarrierInner {
     timeout: Duration,
     /// Bumped by every transport event of the session.
     moved: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The latest open of the session's transport: the `moved` count it
+    /// brought and its instant (core §8.1, 0.56; #914). Its lock is held
+    /// across the event's bump of `moved` and this store, so a round trip
+    /// that reads the count an open brought finds that open here.
+    opened: std::sync::Arc<Mutex<Option<(u64, std::time::Instant)>>>,
     /// One more than the `moved` count of the latest round trip that stood;
     /// 0 for none. Raised by `fetch_max` alone, so it never goes back: a
     /// round trip that stood at an older count can never undo a newer one's.
@@ -614,13 +649,25 @@ impl Barrier {
     pub async fn at(session: &zenoh::Session, key: &str, timeout: Duration) -> Result<Barrier> {
         use std::sync::atomic::{AtomicU64, Ordering};
         let moved = std::sync::Arc::new(AtomicU64::new(0));
+        let opened = std::sync::Arc::new(Mutex::new(None));
         let moves = std::sync::Arc::new(tokio::sync::Notify::new());
-        let (m, n) = (std::sync::Arc::clone(&moved), std::sync::Arc::clone(&moves));
+        let (m, o, n) = (
+            std::sync::Arc::clone(&moved),
+            std::sync::Arc::clone(&opened),
+            std::sync::Arc::clone(&moves),
+        );
         let events = session
             .info()
             .transport_events_listener()
-            .callback(move |_| {
-                m.fetch_add(1, Ordering::SeqCst);
+            .callback(move |ev| {
+                // The open's instant, stored under the lock its bump of
+                // `moved` is made under (#914).
+                let mut open = o.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let count = m.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+                if ev.kind() == zenoh::sample::SampleKind::Put {
+                    *open = Some((count, std::time::Instant::now()));
+                }
+                drop(open);
                 n.notify_waiters();
             })
             .await
@@ -631,6 +678,7 @@ impl Barrier {
                 key: key.to_owned(),
                 timeout,
                 moved,
+                opened,
                 stood: std::sync::Arc::new(AtomicU64::new(0)),
                 trip: Mutex::new(None),
                 moves,
@@ -679,6 +727,11 @@ impl Barrier {
     /// still is (it ran to its timeout or to the interests timeout, or its
     /// session was cut off) returns `false` at once, never asked again
     /// within the same call: the caller decides when to ask again.
+    ///
+    /// **Within [`OPEN_MARGIN`] of an open** the round trip waits out the
+    /// rest of the margin before it asks (core §8.1, 0.56; #914), and the
+    /// margin counts against `wait`: a waiter whose wait ends first returns
+    /// `false`, and the round trip runs on for the next to take up.
     pub async fn establish_within(&self, wait: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
@@ -701,8 +754,9 @@ impl Barrier {
         }
     }
 
-    /// Whether a round trip is in flight (#882): asked, with no answer yet
-    /// and its task not ended.
+    /// Whether a round trip is in flight (#882): asked, or waiting out
+    /// [`OPEN_MARGIN`] before it asks (#914), with no answer yet and its
+    /// task not ended.
     #[must_use]
     pub fn in_flight(&self) -> bool {
         self.inner
@@ -718,6 +772,10 @@ impl Barrier {
     /// it is now; else a new one, on a task of its own, the old one ended.
     /// A task that has ended, with or without sending, is never taken up:
     /// one that ended in a panic would otherwise be waited on for good.
+    ///
+    /// A new one asked within [`OPEN_MARGIN`] of an open that is the
+    /// session's latest transport event waits out the rest of it first, on
+    /// its task (#914); one whose transport moves meanwhile ends unasked.
     fn trip(&self) -> (u64, tokio::sync::watch::Receiver<Option<bool>>) {
         use std::sync::atomic::Ordering;
         let mut slot = self
@@ -744,7 +802,32 @@ impl Barrier {
         // As long as the session's runtime waits for its routers: zenoh ends
         // the GET there anyway, and a waiter waits as long as it chooses.
         let bound = interests_timeout(&session).max(self.inner.timeout);
+        // The open that brought the count, if the latest event is one: read
+        // after the count, under the lock the event bumps it under, so an
+        // open counted is an open found (#914).
+        let ask_at = self
+            .inner
+            .opened
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .and_then(|(count, at)| (count == now).then_some(at + OPEN_MARGIN));
         let task = tokio::spawn(async move {
+            // Not at once at the open (core §8.1, 0.56): its router face may
+            // not have declared the subscribers' interests again yet, and a
+            // round trip asked in between can stand with nothing told.
+            if let Some(at) = ask_at {
+                let rest = at.saturating_duration_since(std::time::Instant::now());
+                if !rest.is_zero() {
+                    tokio::time::sleep(rest).await;
+                }
+                if moved.load(Ordering::SeqCst) != now {
+                    // It could not stand: the next waiter asks the new
+                    // state's, and no GET the router answers in full is
+                    // asked for nothing.
+                    let _ = tx.send(Some(false));
+                    return;
+                }
+            }
             let came = settle_at(&session, &key, bound).await.unwrap_or(false);
             // Checked, then stored, in two steps: a move between them leaves
             // `stood` at this count while `moved` is past it, which
