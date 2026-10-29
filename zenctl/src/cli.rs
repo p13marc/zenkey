@@ -172,8 +172,8 @@ pub(crate) struct ExplicitArgs {
     /// the default `<ns>/zk2/**`. The three are the deployment's whole data
     /// plane apart from its operations and control keys (O5). Opt-in, never
     /// the default: an explicit kind is kept off every wildcard because it
-    /// is high rate or large (core §1.3). Not with a SELECTOR (exit 2):
-    /// beside a narrower one it would add every service's explicit traffic,
+    /// is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it
+    /// would add every service's explicit traffic to the scope you typed,
     /// so name the kind under your own prefix instead
     /// (`<ns>/zk2/<system>/*/*/@stream/**`).
     #[arg(long)]
@@ -2691,8 +2691,8 @@ pub(crate) struct SnapshotArgs {
     /// `@state` included (#924). `@stream` is not added: a stream answers
     /// no GET (spec §1.3). Opt-in, never the default: an explicit kind is
     /// kept off every wildcard because it is large (core §1.3). Not with a
-    /// SELECTOR (exit 2): beside a narrower one it would add every
-    /// service's `@state`, so name it under your own prefix instead
+    /// SELECTOR (exit 2): it would add every service's `@state` to the
+    /// scope you typed, so name it under your own prefix instead
     /// (`<ns>/zk2/<system>/*/*/@state/**`).
     #[arg(long)]
     pub(crate) explicit: bool,

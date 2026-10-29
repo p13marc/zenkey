@@ -1248,6 +1248,47 @@ would replay 4800 put(s) and 20 tombstone(s) from acme/v1/** (captured 2026-08-2
     assert!(notes(&fx::replay_report()).contains("partial view of a partial view"));
 }
 
+/// #924: a capture names the verbatim chunks its selectors name beside
+/// those none names, in every medium, so `--explicit`'s `@stream` and
+/// `@state` read as captured; the default scope's capture still says all
+/// five are excluded, and names none. A timeline window says the same.
+#[test]
+fn a_capture_names_the_explicit_kinds_it_opted_into() {
+    let three: Vec<String> = [
+        "acme/zk2/**",
+        "acme/zk2/*/*/*/@stream/**",
+        "acme/zk2/*/*/*/@state/**",
+    ]
+    .map(String::from)
+    .to_vec();
+    let mut report = fx::record_report();
+    report.header = zenkey_fleet::ZrecHeader::capture(three.clone(), "acme");
+    let named = "@stream, @state named by a watched selector, so captured; @op, @zk, @adv \
+                 excluded: no watched selector names them";
+    let n = notes(&report);
+    assert!(n.contains(named), "{n}");
+    assert!(ndjson(&report).contains(named), "the machine form too");
+
+    report.header = zenkey_fleet::ZrecHeader::capture(vec!["acme/zk2/**".into()], "acme");
+    let n = notes(&report);
+    assert!(
+        n.contains("@stream, @state, @op, @zk, @adv excluded: no watched selector"),
+        "{n}"
+    );
+    assert!(!n.contains("named by"), "{n}");
+
+    let mut window = fx::timeline_report_arrival();
+    window.scopes = three;
+    let n = notes(&window);
+    assert!(
+        n.contains(
+            "@stream, @state named by a selector, so watched; @op, @zk, @adv excluded from \
+             this window, not empty"
+        ),
+        "{n}"
+    );
+}
+
 /// A snapshot states its span in every format (RFC 13 §4.4, #219): the
 /// table's second line, and a caveat note the machine formats carry. Its
 /// holders are zk2's (#612, FJ8b): live owners, addresses no instance held,

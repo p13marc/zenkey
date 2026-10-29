@@ -210,7 +210,7 @@ zenctl's raw observers opt in with `--explicit`: `record` (with `--on`
 too), `echo` and `timeline` add both selectors beside the default, and
 `snapshot` adds `@state` alone, since a stream answers no GET. Beside a
 selector the operator typed, the flag is refused (exit 2): it would add
-every service's explicit traffic to a narrower scope. zengui's
+every service's explicit traffic to the scope typed. zengui's
 `explicit` preset names the same two selectors.
 
 **O6. A bounded observer reports what it dropped.** It counts three things
@@ -275,9 +275,9 @@ zenctl's `.zrec` is version 3 (#612, FJ8a). Its header adds `excluded`: the
 verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`) that no selector
 of the capture names, so the file cannot contain them whatever the bus
 carried (O5). A capture taken with `--explicit` lists all three of O5's
-selectors, and its `excluded` names only `@op`, `@zk` and `@adv` (#924). Each row adds `qos_axes`, the sample's
-priority, congestion control, reliability and express as received, which a
-replay honours. Versions 1 and 2 still read; their rows' v1 QoS profile names
+selectors, and its `excluded` names only `@op`, `@zk` and `@adv` (#924).
+Each row adds `qos_axes`, the sample's priority, congestion control,
+reliability and express as received, which a replay honours. Versions 1 and 2 still read; their rows' v1 QoS profile names
 do not (#612, FJ9), so such a row replays on the axes the operator gives.
 
 **A replayer stands in for the recorded owners** (r4 §4.1, spike S13). It
