@@ -662,7 +662,7 @@ def section6(report: Report) -> None:
         # Step 2: cmd stopped 1 s, 2 s into the window.
         w, got = run_window(every(0.1, (2.0, 3.0)))
         rd = w.readings.get(CMD)
-        runs = {q: tm.rollup(q, [v[q] for v in got.values()]) for q in ("deadline", "period", "lifespan")}
+        runs = {q: tm.rollup(q, [(k, v[q]) for k, v in got.items()]) for q in ("deadline", "period", "lifespan")}
         finding = any(a.answer == tm.FINDING[q] for q, a in runs.items())
         misses = [r for r in w.reader.reports_of(CMD, "missed")]
         report.check(sec, "Expected 2: cmd deadline no (missed, the owner present when T reported it), period no "
@@ -726,6 +726,98 @@ def section6(report: Report) -> None:
                                  f"{after[0][2].count if after else None} tokens; axis/x ended "
                                  f"{[_ms(r.at_ns - last_x) for r in ended]} after its last arrival")
         bus.owners.remove(o)
+        # Step 5 (text 0.5, F-278): a new owner publishes nothing and closes
+        # cleanly 0.15 s into the window, before cmd's miss is due at 0.5 s.
+        o5 = bus.owner()
+        time.sleep(0.3)
+
+        def close_early(start: int) -> None:
+            def go() -> None:
+                _sleep_until(start + 150 * MS)
+                o5.close()
+            threading.Thread(target=go, daemon=True).start()
+
+        w, got = run_window(close_early)
+        bus.owners.remove(o5)
+        rd = w.reader
+        held5 = w.readings[CMD].deadline.held_ns if CMD in w.readings else None
+        runs = {q: tm.rollup(q, [(k, v[q]) for k, v in got.items()]) for q in ("deadline", "period", "lifespan")}
+        report.check(sec, "Expected 5: the owner closed 0.15 s in, read absent before cmd's miss is due: no miss; cmd "
+                          "held only while waited for, less than its deadline: deadline unobservable "
+                          "(window_too_short), period unobservable (owner_not_present), lifespan unobservable "
+                          "(no_sample); no axis member held; the run has no verdict",
+                     not rd.reports_of(CMD, "missed") and held5 is not None and 0 < held5 < 500 * MS
+                     and pairs(got, CMD) == {"deadline": ("unobservable", "window_too_short"),
+                                             "period": ("unobservable", "owner_not_present"),
+                                             "lifespan": ("unobservable", "no_sample")}
+                     and set(got) == {CMD} and all(a.answer == tm.UNOBSERVABLE for a in runs.values()),
+                     show(got) + f"; cmd held {_ms(held5)}; run "
+                                 f"{ {q: (a.answer, a.reason) for q, a in runs.items()} }")
+        # Step 6 (text 0.5, F-280): a new owner publishes cmd and axis/x; 1 s
+        # in it withdraws x's member token, 2 s in declares it again and
+        # publishes axis/x every 100 ms to the window's end.
+        o6 = bus.owner()
+        o6.hold_member("pace.v1", "x")
+        x_on = threading.Event()
+        x_on.set()
+        stop6 = threading.Event()
+
+        def pump6() -> None:
+            sx, sc = [0], [0]
+            nxt = time.monotonic_ns()
+            while not stop6.is_set():
+                _sleep_until(nxt)
+                try:
+                    o6.publish(CMD, str(sc[0]).encode())
+                    sc[0] += 1
+                    if x_on.is_set():
+                        o6.publish(kx, str(sx[0]).encode())
+                        sx[0] += 1
+                except Exception:  # noqa: BLE001 - closed while putting
+                    return
+                nxt += 100 * MS
+
+        th6 = threading.Thread(target=pump6, daemon=True)
+        th6.start()
+        time.sleep(0.3)
+
+        def again(start: int) -> None:
+            def go() -> None:
+                _sleep_until(start + 1 * NS)
+                x_on.clear()
+                time.sleep(0.005)
+                o6.release_member("pace.v1", "x")
+                _sleep_until(start + 2 * NS)
+                o6.hold_member("pace.v1", "x")
+                x_on.set()
+            threading.Thread(target=go, daemon=True).start()
+
+        w, got = run_window(again)
+        stop6.set()
+        rd = w.reader
+        ended = rd.reports_of(kx, "ended")
+        r6 = w.readings.get(kx)
+        held6, span6 = (r6.deadline.held_ns if r6 else None), w.spans.get(kx)
+        x_arr = [a.mono_ns for a in rd.arrivals_of(kx) if w.start_ns <= a.mono_ns <= (w.end_ns or 0)]
+        first_life = [t for t in x_arr if ended and t <= ended[0].at_ns]
+        runs = {q: tm.rollup(q, [(k, v[q]) for k, v in got.items()]) for q in ("deadline", "period", "lifespan")}
+        clean = all(a.answer == (tm.NO if tm.FINDING[q] == tm.YES else tm.YES) for q, a in runs.items()
+                    if a.answer not in tm.SET_ASIDE)
+        report.check(sec, "Expected 6: axis/x ended (gone) at the read after its withdrawal, before a miss is due, "
+                          "heard again from 2 s and read over its first life: held and span about a second each, "
+                          "deadline not asked (ended), period yes (kept); cmd met, kept, live; the run clean",
+                     len(ended) >= 1 and ended[0].reason == "gone" and not rd.reports_of(kx, "missed")
+                     and held6 is not None and span6 is not None and 800 * MS <= held6 <= 1400 * MS
+                     and 800 * MS <= span6 <= 1400 * MS
+                     and len(x_arr) > len(first_life) + 20
+                     and pairs(got, kx) == {"deadline": ("not_asked", "ended"), "period": ("yes", "kept"),
+                                            "lifespan": ("not_asked", "no_lifespan")}
+                     and pairs(got, CMD) == {"deadline": ("yes", "met"), "period": ("yes", "kept"),
+                                             "lifespan": ("no", "live")} and clean,
+                     show(got) + f"; axis/x ended {[_ms(r.at_ns - w.start_ns) for r in ended]} in, held {_ms(held6)}, "
+                                 f"span {_ms(span6)}, {len(first_life)} of {len(x_arr)} arrivals in its first life")
+        o6.close()
+        bus.owners.remove(o6)
     finally:
         stop_axis.set()
         bus.close()
