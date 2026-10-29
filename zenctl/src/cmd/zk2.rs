@@ -420,14 +420,21 @@ pub fn wire_scope_through(
     mut seam: impl FnMut(&str) -> Result<String>,
 ) -> Result<Vec<String>> {
     if explicit && !typed.is_empty() {
+        // Every explicit kind this verb reads, each under the user's own
+        // prefix (review-bot on PR #944).
+        let suggest = reads
+            .explicit_kinds()
+            .iter()
+            .map(|k| format!("`<ns>/zk2/<system>/*/*/{}/**`", k.as_str()))
+            .collect::<Vec<_>>()
+            .join(" or ");
         return Err(unaskable!(
             "--explicit widens the default scope ({}) and is not taken beside a \
              selector ({}): it would add every service's explicit traffic to the scope \
              you typed. Drop the selector for the deployment's whole data plane, or name \
-             the kind under your own prefix (`<ns>/zk2/<system>/*/*/{}/**`)",
+             the kind under your own prefix ({suggest})",
             default_selector(namespace),
             typed.join(" + "),
-            reads.explicit_kinds()[0].as_str()
         ));
     }
     if !typed.is_empty() {

@@ -277,8 +277,9 @@ of the capture names, so the file cannot contain them whatever the bus
 carried (O5). A capture taken with `--explicit` lists all three of O5's
 selectors, and its `excluded` names only `@op`, `@zk` and `@adv` (#924).
 Each row adds `qos_axes`, the sample's priority, congestion control,
-reliability and express as received, which a replay honours. Versions 1 and 2 still read; their rows' v1 QoS profile names
-do not (#612, FJ9), so such a row replays on the axes the operator gives.
+reliability and express as received, which a replay honours. Versions 1
+and 2 still read; their rows' v1 QoS profile names do not (#612, FJ9), so
+such a row replays on the axes the operator gives.
 
 **A replayer stands in for the recorded owners** (r4 §4.1, spike S13). It
 republishes under the original addresses in a namespace of its own, a
