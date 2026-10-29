@@ -9,9 +9,9 @@ name: Docs
 on:
   push:
     branches: [main, v1]
-    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh']
+    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh', 'scripts/check-spec-status.sh']
   pull_request:
-    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh']
+    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh', 'scripts/check-spec-status.sh']
   workflow_dispatch:
 
 concurrency:
@@ -27,3 +27,8 @@ jobs:
       # (v1.25 S6), and the three places that state the set's version
       # (00-index.md, CLAUDE.md, README.md) name the newest entry.
       - run: ./scripts/check-rfc-status.sh
+      # The zk2 spec's version and inventory, stated once (#922): core.md's
+      # header names spec/CHANGELOG.md's newest amendment, README.md and
+      # spec/README.md state no core version, and spec/profiles/README.md's
+      # index lists every profile text there is.
+      - run: ./scripts/check-spec-status.sh
