@@ -1582,6 +1582,24 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     tools); no zengui or zenwatch release from `main` without the
     maintainer.
 
+- **Decided 2026-10-29 (#938, epic #921 Track C): profiles by use.**
+  - `spec/profiles/README.md`'s index has a **Used by** column: the
+    adopter mappings (`examples/zk2/zensight/`, `zenoh-modem/`, `tcgui/`)
+    and the shipped services (zenwatch) that use each profile, as a
+    descriptor would list it (core §3.3). `zenkey-model/tests/profiles.rs`
+    (`the_index_says_who_uses_each_profile`) computes it and fails when a
+    row is stale, when the status disagrees with it, or when a row's text
+    version, status or core version is not its text's header's;
+  - `experimental` is a status beside `draft` and `accepted`: a profile no
+    adopter's mapping and no shipped service uses, listed in the index's
+    second table. `timing.v1` and `arbitration.v1` are experimental (the
+    walkthrough alone uses them); their texts, runtimes and tools are
+    unchanged. A profile leaves experimental when an adopter's mapping or a
+    shipped service uses it, and a status moves without a text version;
+  - no new tier before an adopter asks: #613's remaining profiles start
+    only when an adopter's mapping needs one, `media.v1` first in line
+    (`zs.parallax.v1` lists it in `uses`).
+
 ## Commands
 
 Zero warnings is a CI gate. (The fixture-tests codegen round-trip runs on the
