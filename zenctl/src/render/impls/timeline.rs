@@ -175,10 +175,16 @@ impl Render for TimelineReport {
         }
         let excluded = zenkey_fleet::zrec_excluded(&self.scopes);
         if !excluded.is_empty() {
+            let named = crate::cmd::zk2::named_verbatim(&excluded);
             notes.push(
                 Note::coverage(format!(
-                    "{} excluded from this window, not empty: no selector names them, \
+                    "{}{} excluded from this window, not empty: no selector names them, \
                      and `*`/`**` never match a verbatim chunk",
+                    if named.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{} named by a selector, so watched; ", named.join(", "))
+                    },
                     excluded.join(", ")
                 ))
                 .cite("tooling guide O5"),

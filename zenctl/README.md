@@ -338,27 +338,32 @@ given id, `--v1-salt` for the v1 origins of the migration table).
 subscription, decoded through the contract) · `zenctl echo` (every wire key,
 raw; a zk2 key resolved through presence and its contract and decoded as its
 declared type, and where the ladder stops, the rung named — not in this
-namespace, not zk2, no provider, no contract, undecodable as its type) ·
+namespace, not zk2, no provider, no contract, undecodable as its type;
+`--explicit` adds the explicit `@stream` and `@state` by name, which no
+wildcard reaches) ·
 `zenctl rate` (rates grouped by zk2 address and resource, `--per-key`,
 `--bytes` for bandwidth) · `zenctl field --for 60` (per-field statistics over
 decoded payloads: the vanished field, the field the declared type never
 declares) · `zenctl timeline --for 10` (one merged ordering, a lane per zk2
 resource, each stamp the owner's clock, another's or unattributable; `--from`
-a capture).
+a capture; `--explicit` as `echo`'s).
 
 **Capture — keep what happened.**
 `zenctl record -o bus.zrec --for 30` (a `.zrec` version 3 capture of the
 deployment's zk2 data, `<ns>/zk2/**`, rows keeping their wire keys, payloads
 and QoS axes, drops recorded where they fell, the header naming what the
-selectors exclude) · `zenctl record -o incident.zrec --on 'silent-for
+selectors exclude; `--explicit` adds `<ns>/zk2/*/*/*/@stream/**` and
+`<ns>/zk2/*/*/*/@state/**`, so the three selectors are the deployment's
+whole data plane but its operations and control keys, opted into and never
+the default) · `zenctl record -o incident.zrec --on 'silent-for
 prod/zk2/** 30' --pre 30` (armed: written only when a rule fires, with the
 thirty seconds before it and the owners' state as a preamble) · `zenctl
 replay bus.zrec --dry-run` (replay is
 publishing: preview first; `--namespace replay` stands in for the recorded
 owners in a namespace of its own) · `zenctl snapshot -o state.zsnap` (the
 owners' current state, S4's GET, each row's holder, stamper and conformance,
-collected over a span) and `zenctl snapshot diff a.zsnap b.zsnap` (by zk2
-key, so two namespaces compare as they are).
+collected over a span; `--explicit` asks `@state` too) and `zenctl snapshot
+diff a.zsnap b.zsnap` (by zk2 key, so two namespaces compare as they are).
 
 **Act — write to the bus.**
 `zenctl call <address> <iface> <operation> [request]` (a zk2 operation,
@@ -607,6 +612,7 @@ zenctl key intersects 'zk2/**' 'zk2/host-a/cam/video.v1/@stream/frames'  # keyex
 zenctl hostid --v1-salt tcgui-host-id-v1   # the system @hostid.v1/<service> gets here, and the v1 origin it replaces
 zenctl echo --format ndjson > f         # …and back: zenctl pub --from ndjson < f (one row shape, both directions)
 zenctl record --namespace acme -o bus.zrec --for 10  # capture: same row shape + header + pacing + in-file drop ledger
+zenctl record --namespace acme -o all.zrec --for 10 --explicit  # …and the explicit @stream/@state by name (opt-in: they are large)
 zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is publishing, and re-stamped old data wins LWW (RFC 09 §5.2)
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold

@@ -161,6 +161,25 @@ pub(crate) struct OutputArgs {
     pub(crate) color: crate::render::ColorChoice,
 }
 
+/// `--explicit`, the explicit kinds opted into (#924): one struct, flattened
+/// into every raw observer whose default scope is `<ns>/zk2/**`, so its
+/// words cannot drift between them (`snapshot`, which reads state alone,
+/// has its own).
+#[derive(Args, Clone, Copy)]
+pub(crate) struct ExplicitArgs {
+    /// Also watch the deployment's explicit kinds, each named on its own:
+    /// `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, beside
+    /// the default `<ns>/zk2/**`. The three are the deployment's whole data
+    /// plane apart from its operations and control keys (O5). Opt-in, never
+    /// the default: an explicit kind is kept off every wildcard because it
+    /// is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it
+    /// would add every service's explicit traffic to the scope you typed,
+    /// so name the kind under your own prefix instead
+    /// (`<ns>/zk2/<system>/*/*/@stream/**`).
+    #[arg(long)]
+    pub(crate) explicit: bool,
+}
+
 #[derive(Parser)]
 #[command(
     name = "zenctl",
@@ -246,9 +265,11 @@ pub(crate) struct EchoArgs {
     /// selector is the key as the wire carries it (`prod/zk2/**`). Default:
     /// the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no
     /// verbatim chunk (`@stream`, `@state`, `@op`, `@zk`, `@adv`): name one
-    /// to see it (`prod/zk2/*/*/*/@stream/**`).
+    /// to see it (`prod/zk2/*/*/*/@stream/**`), or pass --explicit.
     #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
     pub(crate) selector: Option<String>,
+    #[command(flatten)]
+    pub(crate) explicit: ExplicitArgs,
     /// kcat-style format string: %k wire key, %K the key relative to the
     /// namespace, %A address, %i interface, %r resource (`<kind>/<template>`,
     /// when a contract resolved it), %t declared type, %v value, %e
@@ -686,7 +707,8 @@ pub(crate) enum Command {
     /// carries the namespace you stated (`--namespace`, alias `--base`) and
     /// the exact selectors, and names the verbatim chunks none of them reach
     /// (`@stream`, `@state`, `@op`, `@zk`, `@adv`: O5) — a `zk2/**` capture
-    /// excludes them, it does not find them empty. A bus that outruns the
+    /// excludes them, it does not find them empty, and `--explicit` opts
+    /// into `@stream` and `@state` by name. A bus that outruns the
     /// disk surfaces as drop records in the file, where the gaps happened
     /// (O6). Replay with `zenctl replay --namespace`; the file is ndjson, so
     /// `jq` reads it too.
@@ -2534,9 +2556,11 @@ pub(crate) struct RecordArgs {
     /// namespace, so a selector is the key as the wire carries it
     /// (`prod/zk2/**`). Default: the deployment's zk2 data, `<ns>/zk2/**`,
     /// whose `**` reaches no verbatim chunk (`@stream`, `@state`, …): name
-    /// one to capture it (`prod/zk2/*/*/*/@stream/**`).
+    /// one to capture it (`prod/zk2/*/*/*/@stream/**`), or pass --explicit.
     #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
     pub(crate) selectors: Vec<String>,
+    #[command(flatten)]
+    pub(crate) explicit: ExplicitArgs,
     /// Output file. An existing file is refused (exit 2) unless
     /// --overwrite: a capture is the one artifact this verb exists to keep.
     #[arg(long, short = 'o', value_name = "FILE")]
@@ -2624,9 +2648,11 @@ pub(crate) struct TimelineArgs {
     /// selector is the key as the wire carries it. Default: the deployment's
     /// zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk
     /// (`@stream`, `@state`, …) — excluded, not empty, and the report says
-    /// so (O5). Not with --from.
+    /// so (O5); --explicit names them. Not with --from.
     #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
     pub(crate) selectors: Vec<String>,
+    #[command(flatten)]
+    pub(crate) explicit: ExplicitArgs,
     /// The passive window, seconds. Not with --from: a capture's span is in
     /// its rows.
     #[arg(long = "for", value_name = "SECS", required_unless_present = "from")]
@@ -2639,7 +2665,7 @@ pub(crate) struct TimelineArgs {
     /// projection, so the same window rendered live and from its file is
     /// identical. Keys are read under the capture's stated namespace, and
     /// resolved through `--contracts` alone: a file names no owner.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["selectors", "for_secs"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["selectors", "for_secs", "explicit"])]
     pub(crate) from: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
@@ -2657,9 +2683,19 @@ pub(crate) struct SnapshotArgs {
     /// its state keys (only `state` and `@state` answer a GET, spec §1.3),
     /// one GET each. Default: the deployment's zk2 data, `<ns>/zk2/**`,
     /// which reaches every `state` key and no `@state` one (O5): name
-    /// `@state` to snapshot it.
+    /// `@state` to snapshot it, or pass --explicit.
     #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
     pub(crate) selectors: Vec<String>,
+    /// Also take the deployment's explicit state, `<ns>/zk2/*/*/*/@state/**`,
+    /// beside the default `<ns>/zk2/**`, so every state key is asked,
+    /// `@state` included (#924). `@stream` is not added: a stream answers
+    /// no GET (spec §1.3). Opt-in, never the default: an explicit kind is
+    /// kept off every wildcard because it is large (core §1.3). Not with a
+    /// SELECTOR (exit 2): it would add every service's `@state` to the
+    /// scope you typed, so name it under your own prefix instead
+    /// (`<ns>/zk2/<system>/*/*/@state/**`).
+    #[arg(long)]
+    pub(crate) explicit: bool,
     /// Output file. Refused (exit 2) when nobody answered: a file of
     /// silence would read as an empty deployment. An existing file is
     /// refused too (exit 2), before any session, unless --overwrite.

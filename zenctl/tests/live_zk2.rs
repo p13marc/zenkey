@@ -3659,6 +3659,306 @@ async fn a_base_relative_zk2_selector_is_hinted_on_stderr() {
     );
 }
 
+// ── #924: `--explicit`, the explicit kinds opted into ──────────────────────
+
+/// `map.v1`: an explicit state, a population kept off every ambient
+/// selector (core §1.3). The walkthrough declares none, so the case
+/// carries its own.
+fn map_contract() -> Contract {
+    contract_text(
+        "map.v1",
+        "[interface]\nname = \"map\"\nmajor = 1\n\
+         [resources.grid]\nkind = \"state\"\nexplicit = true\n\
+         type = { raw = \"application/octet-stream\" }\n",
+    )
+}
+
+/// The explicit kinds' owners, in the bus's namespace: the walkthrough's
+/// `camera.v1` at `robot1/camera`, a frame on its `@stream image` with its
+/// `FrameMeta` every 50 ms and its ambient `state info` beside it, and
+/// `map.v1` at `robot1/map`, its `@state grid` put as often.
+async fn explicit_owners(bus: &mut Bus) {
+    let addr = |s: &str| s.parse().expect("an address");
+    let none = Bindings::new();
+    let cam = iface("camera.v1");
+    let mut b = ServiceBuilder::new(&bus.owners, ServiceConfig::new(addr("robot1/camera")));
+    b.implement(Implementation::new(contract("walkthrough/camera.v1")))
+        .expect("implement camera.v1");
+    let frames = b
+        .declare_writer(&cam, "@stream/image", &none)
+        .await
+        .expect("a frame writer");
+    let info = b
+        .declare_state_writer(&cam, "state/info", &none)
+        .await
+        .expect("an info writer");
+    b.serve_state(&cam).expect("serve state");
+    bus.services.push(b.start().await.expect("the camera"));
+
+    let map = iface("map.v1");
+    let mut b = ServiceBuilder::new(&bus.owners, ServiceConfig::new(addr("robot1/map")));
+    b.implement(Implementation::new(map_contract()))
+        .expect("implement map.v1");
+    let grid = b
+        .declare_state_writer(&map, "@state/grid", &none)
+        .await
+        .expect("a grid writer");
+    b.serve_state(&map).expect("serve state");
+    bus.services.push(b.start().await.expect("the map"));
+
+    bus.keep(Task(tokio::spawn(async move {
+        loop {
+            // A JPEG's first bytes, and an empty `FrameMeta`, which is a
+            // valid message, as an empty `camera.v1.Info` is.
+            let _ = frames
+                .put_with(vec![0xff, 0xd8, 0xff], Some(Vec::<u8>::new()))
+                .await;
+            let _ = info.put(Vec::<u8>::new()).await;
+            let _ = grid.put(vec![7u8; 16]).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })));
+}
+
+/// The rows of a `.zrec` file, its header skipped.
+fn zrec_rows(path: &str) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .skip(1)
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether a row's key is the one given.
+fn has_key(rows: &[Value], key: &str) -> bool {
+    rows.iter().any(|r| r["key"] == key)
+}
+
+/// The coverage notes of a `--format json` document, joined.
+fn notes_text(doc: &Value) -> String {
+    doc["notes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|n| n["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// #924, the issue's "done when": core §1.3's guard keeps the explicit
+/// kinds off every wildcard, so `zenctl record` with no selector captures
+/// the deployment's ambient data and neither the camera's `@stream` frames
+/// nor the map's `@state`, and its header says it excluded them, not found
+/// them empty; `record --explicit` captures both, the three selectors in
+/// the header under the namespace and neither kind among the excluded;
+/// `echo --explicit` shows the frames that `echo` alone never does; and
+/// `snapshot --explicit` asks `@state` beside `state`. Beside a typed
+/// selector `--explicit` is refused, exit 2, before any session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn explicit_captures_the_camera_frames_a_zk2_capture_excludes() {
+    let mut bus = Bus::bare(Some("site")).await;
+    explicit_owners(&mut bus).await;
+    wait_for_ns(&bus, "site", &["robot1/camera", "robot1/map"]).await;
+
+    let frames = "site/zk2/robot1/camera/camera.v1/@stream/image";
+    let grid = "site/zk2/robot1/map/map.v1/@state/grid";
+    let info = "site/zk2/robot1/camera/camera.v1/state/info";
+    let file = |name: &str| bus.home.join(name).to_str().expect("UTF-8").to_owned();
+
+    // `record` alone: the ambient data, neither explicit kind, said so.
+    let plain = file("plain.zrec");
+    let record = |out: &str, explicit: bool| {
+        let mut args = vec![
+            "record".to_owned(),
+            "-o".to_owned(),
+            out.to_owned(),
+            "--overwrite".to_owned(),
+            "--for".to_owned(),
+            "2".to_owned(),
+            "--namespace".to_owned(),
+            "site".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+        ];
+        if explicit {
+            args.push("--explicit".to_owned());
+        }
+        args
+    };
+    let args = record(&plain, false);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let run = bus
+        .until(&args, |r| r.code == 0 && has_key(&zrec_rows(&plain), info))
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["header"]["base"], "site", "{run}");
+    assert_eq!(doc["header"]["selectors"], json!(["site/zk2/**"]));
+    assert_eq!(
+        doc["header"]["excluded"],
+        json!(["@stream", "@state", "@op", "@zk", "@adv"])
+    );
+    let rows = zrec_rows(&plain);
+    assert!(
+        !has_key(&rows, frames) && !has_key(&rows, grid),
+        "a zk2/** capture holds no explicit kind: {rows:?}"
+    );
+    let notes = notes_text(&doc);
+    assert!(
+        notes.contains("@stream, @state, @op, @zk, @adv excluded"),
+        "{notes}"
+    );
+    assert!(
+        run.stderr
+            .contains("@stream, @state, @op, @zk, @adv excluded: no selector names them"),
+        "{run}"
+    );
+
+    // `record --explicit`: both kinds by name, beside the ambient data.
+    let explicit = file("explicit.zrec");
+    let args = record(&explicit, true);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let run = bus
+        .until(&args, |r| {
+            let rows = zrec_rows(&explicit);
+            r.code == 0 && has_key(&rows, frames) && has_key(&rows, grid)
+        })
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        doc["header"]["selectors"],
+        json!([
+            "site/zk2/**",
+            "site/zk2/*/*/*/@stream/**",
+            "site/zk2/*/*/*/@state/**"
+        ]),
+        "{run}"
+    );
+    assert_eq!(doc["header"]["excluded"], json!(["@op", "@zk", "@adv"]));
+    let notes = notes_text(&doc);
+    assert!(
+        notes.contains(
+            "@stream, @state named by a watched selector, so captured; @op, @zk, @adv excluded"
+        ),
+        "{notes}"
+    );
+    assert!(
+        run.stderr.contains(
+            "@stream, @state named by a selector; @op, @zk, @adv excluded: no selector names them"
+        ),
+        "{run}"
+    );
+    let rows = zrec_rows(&explicit);
+    let frame = rows
+        .iter()
+        .find(|r| r["key"] == frames)
+        .expect("a frame row");
+    assert_eq!(frame["bytes"], "/9j/", "the frame, lossless: {frame}");
+    assert_eq!(frame["qos_axes"], "data_low/drop/best_effort", "{frame}");
+    assert!(has_key(&rows, info), "the ambient data beside it");
+
+    // `echo` alone never shows a frame; `echo --explicit` does, resolved.
+    let run = bus
+        .zenctl(&[
+            "echo",
+            "--namespace",
+            "site",
+            "--count",
+            "20",
+            "--format",
+            "ndjson",
+        ])
+        .await;
+    exits(&run, 0);
+    assert!(
+        !ndjson_lines(&run).iter().any(|l| l["key"] == frames),
+        "{run}"
+    );
+    let run = bus
+        .until(
+            &[
+                "echo",
+                "--explicit",
+                "--namespace",
+                "site",
+                "--count",
+                "40",
+                "--format",
+                "ndjson",
+            ],
+            |r| r.code == 0 && r.stdout.lines().any(|l| l.contains(frames)),
+        )
+        .await;
+    exits(&run, 0);
+    let lines = ndjson_lines(&run);
+    let frame = lines
+        .iter()
+        .find(|l| l["key"] == frames)
+        .expect("a frame line");
+    assert_eq!(frame["identity"]["address"], "robot1/camera", "{frame}");
+    assert_eq!(frame["identity"]["resource"], "@stream/image", "{frame}");
+    assert!(
+        lines.iter().any(|l| l["key"] == grid),
+        "the explicit state too: {run}"
+    );
+
+    // `snapshot --explicit` asks `@state` beside `state`, `@stream` never.
+    let snap = file("explicit.zsnap");
+    let run = bus
+        .until(
+            &[
+                "snapshot",
+                "-o",
+                &snap,
+                "--overwrite",
+                "--explicit",
+                "--namespace",
+                "site",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0 && r.json()["live"] == 2,
+        )
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        doc["header"]["selectors"],
+        json!(["site/zk2/*/*/*/state/**", "site/zk2/*/*/*/@state/**"]),
+        "{run}"
+    );
+    assert!(
+        !notes_text(&doc).contains("@state keys are excluded"),
+        "{run}"
+    );
+
+    // Beside a typed selector, refused before any session: exit 2.
+    let refused = file("refused.zrec");
+    let run = bus
+        .zenctl(&[
+            "record",
+            "site/zk2/robot1/**",
+            "--explicit",
+            "-o",
+            &refused,
+            "--for",
+            "1",
+            "--namespace",
+            "site",
+        ])
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("--explicit widens the default scope"),
+        "{run}"
+    );
+    assert!(!Path::new(&refused).exists(), "nothing written: {run}");
+}
+
 // ── FK1: why, check conform, storage gen, admin graph (#702–#705) ──────────
 
 /// The rows of a `--format json` document tagged `instance`, by address.

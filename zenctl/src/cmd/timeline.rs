@@ -44,6 +44,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
     let contracts = zk2::load_contracts(&cli.contracts)?;
     let crate::cli::TimelineArgs {
         selectors,
+        explicit: crate::cli::ExplicitArgs { explicit },
         for_secs,
         order,
         from,
@@ -60,7 +61,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
             // Clap has already required `--for` without `--from`; the
             // positivity check is the one every window shares (#307).
             let secs = for_secs.expect("clap requires --for without --from");
-            live(&selectors, secs, &dep, &contracts).await?
+            live(&selectors, explicit, secs, &dep, &contracts).await?
         }
     };
     let report = timeline(&window, order);
@@ -68,23 +69,19 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
     Ok(())
 }
 
-/// Watch the selectors for the window and collect what arrived, in order.
+/// Watch the selectors for the window and collect what arrived, in order:
+/// the raw observers' one scope ([`zk2::wire_scope`]), the explicit kinds
+/// by name under `--explicit` (#924).
 async fn live(
     selectors: &[String],
+    explicit: bool,
     for_secs: f64,
     dep: &Deployment,
     contracts: &zenkey_fleet::ContractSet,
 ) -> Result<Window> {
     let duration = super::positive_secs("--for", for_secs)?;
     let namespace = dep.namespace();
-    let selectors: Vec<String> = if selectors.is_empty() {
-        vec![zk2::default_selector(namespace)]
-    } else {
-        selectors
-            .iter()
-            .map(|s| zk2::wire_selector(Some(s), namespace))
-            .collect::<Result<_>>()?
-    };
+    let selectors = zk2::wire_scope(selectors, explicit, namespace, zk2::Reads::Samples)?;
 
     // The lens first: the presence read names each owner's zid and the
     // revisions its descriptors name, before the window opens.
@@ -106,18 +103,10 @@ async fn live(
     // The window starts once every watch is declared — the first instant
     // the observer could have seen all of what it was asked to.
     let epoch = Instant::now();
-    let excluded = zenkey_fleet::zrec_excluded(&selectors);
     eprintln!(
         "timeline over {} selector(s) for {for_secs}s…{}",
         selectors.len(),
-        if excluded.is_empty() {
-            String::new()
-        } else {
-            format!(
-                " ({} excluded: no selector names them, and `*`/`**` never match one)",
-                excluded.join(", ")
-            )
-        }
+        zk2::scope_note(&selectors)
     );
 
     let mut rows = Vec::new();

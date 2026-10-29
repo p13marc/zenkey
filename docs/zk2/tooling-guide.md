@@ -191,6 +191,28 @@ wildcard scope either names the verbatim kinds it watches beside it, or
 states that they are excluded. The exact selectors ride the report (a
 `scopes` field), and a recording's header carries them too.
 
+**Everything is three selectors.** This is the reference's rule (#924);
+#925 moves it into the observer rules. Positions 1–5 of a zk2 key have
+fixed arity (core §1.3), so these three reach every data key of every
+service of a deployment, present or future, with no presence read:
+- `<ns>/zk2/**`, the ambient kinds;
+- `<ns>/zk2/*/*/*/@stream/**`, the explicit streams;
+- `<ns>/zk2/*/*/*/@state/**`, the explicit state.
+
+Together they are the deployment's whole data plane apart from its
+operations (`@op`) and its control keys (`@zk`). An `@adv` subtree is
+advanced publication's own (core §2.5), not data. A tool that offers
+"everything" spells all three, and still names `@op`, `@zk` and `@adv`
+as excluded. The explicit two are an opt-in, never a default: the guard
+exists so that nobody pulls a camera's frames by accident.
+
+zenctl's raw observers opt in with `--explicit`: `record` (with `--on`
+too), `echo` and `timeline` add both selectors beside the default, and
+`snapshot` adds `@state` alone, since a stream answers no GET. Beside a
+selector the operator typed, the flag is refused (exit 2): it would add
+every service's explicit traffic to the scope typed. zengui's
+`explicit` preset names the same two selectors.
+
 **O6. A bounded observer reports what it dropped.** It counts three things
 and never folds them into one number:
 - *lagged:* samples missed while the tool was behind;
@@ -252,10 +274,12 @@ v1's `.zrec` format minimum (RFC 13 §4.1, on the `v1` branch) carries over:
 zenctl's `.zrec` is version 3 (#612, FJ8a). Its header adds `excluded`: the
 verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`) that no selector
 of the capture names, so the file cannot contain them whatever the bus
-carried (O5). Each row adds `qos_axes`, the sample's
-priority, congestion control, reliability and express as received, which a
-replay honours. Versions 1 and 2 still read; their rows' v1 QoS profile names
-do not (#612, FJ9), so such a row replays on the axes the operator gives.
+carried (O5). A capture taken with `--explicit` lists all three of O5's
+selectors, and its `excluded` names only `@op`, `@zk` and `@adv` (#924).
+Each row adds `qos_axes`, the sample's priority, congestion control,
+reliability and express as received, which a replay honours. Versions 1
+and 2 still read; their rows' v1 QoS profile names do not (#612, FJ9), so
+such a row replays on the axes the operator gives.
 
 **A replayer stands in for the recorded owners** (r4 §4.1, spike S13). It
 republishes under the original addresses in a namespace of its own, a

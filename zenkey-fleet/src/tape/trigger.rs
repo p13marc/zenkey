@@ -143,6 +143,33 @@ pub enum TriggerEvent<'a> {
 /// drop where the loss happened rather than growing without bound.
 const FIRE_BUFFER: usize = 4096;
 
+/// The preamble's GETs for the watched selectors, and the selectors it
+/// could not project: [`state_projection`] of each, once. An explicit
+/// stream selector (`…/@stream/**`, `zenctl --explicit`, #924) has no
+/// state to fetch and is neither (review-bot on PR #944): only a selector
+/// that could have named state and does not project is a failure.
+#[must_use]
+pub fn preamble_plan(namespace: &str, watched: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut selectors = Vec::new();
+    let mut failed = Vec::new();
+    for sel in watched {
+        match state_projection(namespace, sel) {
+            Some(p) if !selectors.contains(&p) => selectors.push(p),
+            Some(_) => {}
+            None if names_explicit_stream(namespace, sel) => {}
+            None => failed.push(sel.clone()),
+        }
+    }
+    (selectors, failed)
+}
+
+/// Whether `selector` names the explicit `@stream` kind at core §1.1's kind
+/// position, `zk2/<system>/<service>/<iface>/@stream/…`.
+fn names_explicit_stream(namespace: &str, selector: &str) -> bool {
+    crate::model::namespace::strip(namespace, selector)
+        .is_some_and(|rel| rel.split('/').nth(4) == Some("@stream") && rel.starts_with("zk2/"))
+}
+
 /// The state projection of a wire selector under `namespace` (#612, FJ8a):
 /// the selector narrowed to zk2's state keys (spec §1.1, §1.3), or `None`
 /// when it reaches none.
@@ -565,15 +592,7 @@ where
     let preamble = async {
         let semantics = spec.preamble?;
         let started = Instant::now();
-        let mut selectors = Vec::new();
-        let mut failed = Vec::new();
-        for sel in &watched {
-            match state_projection(namespace, sel) {
-                Some(p) if !selectors.contains(&p) => selectors.push(p),
-                Some(_) => {}
-                None => failed.push(sel.clone()),
-            }
-        }
+        let (selectors, mut failed) = preamble_plan(namespace, &watched);
         // The owners' answer (S4), never a storage's: one GET per projected
         // selector, together.
         let gets = futures_util::future::join_all(selectors.iter().map(|selector| async move {
@@ -743,6 +762,37 @@ mod tests {
         // is a duplicate, and an equal-but-distinct expression that includes
         // the first is kept (it includes; it is not included).
         assert_eq!(watch_cover(&s(&["v1/x/**", "v1/x/**"])), s(&["v1/x/**"]));
+    }
+
+    /// #924: under `--explicit` the preamble asks the explicit state and
+    /// the ambient one, and an explicit stream selector, which has no state
+    /// to fetch, is no failure; a selector that names no state still is.
+    #[test]
+    fn the_preamble_plan_leaves_an_explicit_stream_out_of_its_failures() {
+        let watched: Vec<String> = [
+            "prod/zk2/**",
+            "prod/zk2/*/*/*/@stream/**",
+            "prod/zk2/*/*/*/@state/**",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        let (gets, failed) = preamble_plan("prod", &watched);
+        assert_eq!(
+            gets,
+            ["prod/zk2/*/*/*/state/**", "prod/zk2/*/*/*/@state/**"],
+            "the ambient state and the explicit state, each asked"
+        );
+        assert!(
+            failed.is_empty(),
+            "a stream has no state to fetch: {failed:?}"
+        );
+        let (_, failed) = preamble_plan("prod", &["prod/zk2/lab/*/x.v1/@op/**".to_owned()]);
+        assert_eq!(
+            failed,
+            ["prod/zk2/lab/*/x.v1/@op/**"],
+            "a selector that names no state fails"
+        );
     }
 
     /// zk2's projection (FJ8a): a `**` before the kind widens to plain

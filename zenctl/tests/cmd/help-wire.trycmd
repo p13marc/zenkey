@@ -372,9 +372,12 @@ Usage: zenctl echo [OPTIONS] [SELECTOR]
 
 Arguments:
   [SELECTOR]
-          Full wire selector to watch — this session is in no namespace, so a selector is the key as the wire carries it (`prod/zk2/**`). Default: the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (`@stream`, `@state`, `@op`, `@zk`, `@adv`): name one to see it (`prod/zk2/*/*/*/@stream/**`)
+          Full wire selector to watch — this session is in no namespace, so a selector is the key as the wire carries it (`prod/zk2/**`). Default: the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (`@stream`, `@state`, `@op`, `@zk`, `@adv`): name one to see it (`prod/zk2/*/*/*/@stream/**`), or pass --explicit
 
 Options:
+      --explicit
+          Also watch the deployment's explicit kinds, each named on its own: `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`. The three are the deployment's whole data plane apart from its operations and control keys (O5). Opt-in, never the default: an explicit kind is kept off every wildcard because it is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's explicit traffic to the scope you typed, so name the kind under your own prefix instead (`<ns>/zk2/<system>/*/*/@stream/**`)
+
       --fmt <FMT>
           kcat-style format string: %k wire key, %K the key relative to the namespace, %A address, %i interface, %r resource (`<kind>/<template>`, when a contract resolved it), %t declared type, %v value, %e encoding, %l payload bytes, %n counter, %T timestamp, %a attachment (empty when none arrived), %q QoS axes (priority/congestion/reliability, +express — the wire's actual axes, #120), %S source zid:eid#sn (empty when the publisher attaches no SourceInfo), %{a.b.c} a decoded payload field by dot-path, %% literal percent
 
@@ -722,15 +725,18 @@ Options:
 $ zenctl record --help
 Capture wire selectors' traffic to a .zrec file.
 
-A capture (`.zrec` version 3, the tooling guide's §5), taken through the Monitor on a session in no namespace, so rows keep their full wire keys and their payloads lossless (base64 `bytes`), with the QoS axes they rode with and the stamp they carried, informatively. The header carries the namespace you stated (`--namespace`, alias `--base`) and the exact selectors, and names the verbatim chunks none of them reach (`@stream`, `@state`, `@op`, `@zk`, `@adv`: O5) — a `zk2/**` capture excludes them, it does not find them empty. A bus that outruns the disk surfaces as drop records in the file, where the gaps happened (O6). Replay with `zenctl replay --namespace`; the file is ndjson, so `jq` reads it too.
+A capture (`.zrec` version 3, the tooling guide's §5), taken through the Monitor on a session in no namespace, so rows keep their full wire keys and their payloads lossless (base64 `bytes`), with the QoS axes they rode with and the stamp they carried, informatively. The header carries the namespace you stated (`--namespace`, alias `--base`) and the exact selectors, and names the verbatim chunks none of them reach (`@stream`, `@state`, `@op`, `@zk`, `@adv`: O5) — a `zk2/**` capture excludes them, it does not find them empty, and `--explicit` opts into `@stream` and `@state` by name. A bus that outruns the disk surfaces as drop records in the file, where the gaps happened (O6). Replay with `zenctl replay --namespace`; the file is ndjson, so `jq` reads it too.
 
 Usage: zenctl record [OPTIONS] --out <FILE> [SELECTOR]...
 
 Arguments:
   [SELECTOR]...
-          Full wire selectors to capture, repeatable — this session is in no namespace, so a selector is the key as the wire carries it (`prod/zk2/**`). Default: the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (`@stream`, `@state`, …): name one to capture it (`prod/zk2/*/*/*/@stream/**`)
+          Full wire selectors to capture, repeatable — this session is in no namespace, so a selector is the key as the wire carries it (`prod/zk2/**`). Default: the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (`@stream`, `@state`, …): name one to capture it (`prod/zk2/*/*/*/@stream/**`), or pass --explicit
 
 Options:
+      --explicit
+          Also watch the deployment's explicit kinds, each named on its own: `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`. The three are the deployment's whole data plane apart from its operations and control keys (O5). Opt-in, never the default: an explicit kind is kept off every wildcard because it is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's explicit traffic to the scope you typed, so name the kind under your own prefix instead (`<ns>/zk2/<system>/*/*/@stream/**`)
+
   -o, --out <FILE>
           Output file. An existing file is refused (exit 2) unless --overwrite: a capture is the one artifact this verb exists to keep
 
@@ -930,9 +936,12 @@ Usage: zenctl timeline [OPTIONS] [SELECTOR]...
 
 Arguments:
   [SELECTOR]...
-          Full wire selectors to watch — this session is in no namespace, so a selector is the key as the wire carries it. Default: the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (`@stream`, `@state`, …) — excluded, not empty, and the report says so (O5). Not with --from
+          Full wire selectors to watch — this session is in no namespace, so a selector is the key as the wire carries it. Default: the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (`@stream`, `@state`, …) — excluded, not empty, and the report says so (O5); --explicit names them. Not with --from
 
 Options:
+      --explicit
+          Also watch the deployment's explicit kinds, each named on its own: `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`. The three are the deployment's whole data plane apart from its operations and control keys (O5). Opt-in, never the default: an explicit kind is kept off every wildcard because it is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's explicit traffic to the scope you typed, so name the kind under your own prefix instead (`<ns>/zk2/<system>/*/*/@stream/**`)
+
       --for <SECS>
           The passive window, seconds. Not with --from: a capture's span is in its rows
 
@@ -1021,9 +1030,12 @@ Commands:
 
 Arguments:
   [SELECTOR]...
-          Full wire selectors, repeatable — this session is in no namespace, so a selector is the key as the wire carries it. Each is narrowed to its state keys (only `state` and `@state` answer a GET, spec §1.3), one GET each. Default: the deployment's zk2 data, `<ns>/zk2/**`, which reaches every `state` key and no `@state` one (O5): name `@state` to snapshot it
+          Full wire selectors, repeatable — this session is in no namespace, so a selector is the key as the wire carries it. Each is narrowed to its state keys (only `state` and `@state` answer a GET, spec §1.3), one GET each. Default: the deployment's zk2 data, `<ns>/zk2/**`, which reaches every `state` key and no `@state` one (O5): name `@state` to snapshot it, or pass --explicit
 
 Options:
+      --explicit
+          Also take the deployment's explicit state, `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`, so every state key is asked, `@state` included (#924). `@stream` is not added: a stream answers no GET (spec §1.3). Opt-in, never the default: an explicit kind is kept off every wildcard because it is large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's `@state` to the scope you typed, so name it under your own prefix instead (`<ns>/zk2/<system>/*/*/@state/**`)
+
   -o, --out <FILE>
           Output file. Refused (exit 2) when nobody answered: a file of silence would read as an empty deployment. An existing file is refused too (exit 2), before any session, unless --overwrite
 
