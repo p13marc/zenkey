@@ -95,8 +95,8 @@ pub fn redundancy(
 pub const ARBITRATION_DEADLINES: u32 = 2;
 
 /// One address's `arbitration.v1` (#909, BC), at the selection's settle
-/// beside `redundancy.v1`, never polled: read as `zenctl arbitration
-/// <address>` reads it, through the engine's `run_arbitration` on the
+/// beside `redundancy.v1`, never polled: read as
+/// `zenctl arbitration <address>` reads it, through the engine's `run_arbitration` on the
 /// session **in** the namespace — presence, the descriptor, the declaring
 /// contract and every revision of the required interface in the window's
 /// store — and the tool's own view over [`ARBITRATION_DEADLINES`] of each
