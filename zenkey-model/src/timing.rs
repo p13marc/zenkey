@@ -12,7 +12,9 @@
 //!   events: start │ arrival(member, expired) │ owner(present, unconfirmed, absent) │ member_gone │ tick
 //! LifespanReader::judge(stamp)          ─▶ live │ expired │ unobservable │ not asked │ not this profile's, + reason  §2.6
 //! period_window(period, window, …)      ─▶ kept │ not_kept │ too_short │ not_heard                                 §2.7
+//! Holding::observe(tracker, reports, at) ─▶ each member's held time: while heard, missed or waited for, to its first end §2.7
 //! deadline_met / period_kept / lifespan_expired ─▶ yes │ no │ unobservable │ not_asked │ not_this_profiles        §5
+//! roll_up / roll_up_first               ─▶ a resource's or a run's answer, and its first member's reason          §5
 //! ```
 //!
 //! There is no I/O and no clock here. A reader takes each arrival's instant
@@ -1296,6 +1298,147 @@ impl DeadlineAccount {
     }
 }
 
+/// How long a tool held one member in its window, so far (§2.7): see
+/// [`Holding`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HeldSpan {
+    /// The time counted while the count stood stopped.
+    counted: Duration,
+    /// The instant the running count started, while it runs.
+    from: Option<Mono>,
+    /// Its first end in the window: the count stops there for good
+    /// (F-280).
+    ended: Option<Mono>,
+}
+
+impl HeldSpan {
+    /// The time held up to `at`, a running count included.
+    #[must_use]
+    pub fn held_to(&self, at: Mono) -> Duration {
+        self.counted + self.from.map_or(Duration::ZERO, |f| at.saturating_since(f))
+    }
+
+    /// Its first end in the window, when it ended.
+    #[must_use]
+    pub fn ended(&self) -> Option<Mono> {
+        self.ended
+    }
+
+    /// Whether the count runs.
+    #[must_use]
+    pub fn counting(&self) -> bool {
+        self.from.is_some()
+    }
+
+    fn run(&mut self, at: Mono) {
+        if self.from.is_none() && self.ended.is_none() {
+            self.from = Some(at);
+        }
+    }
+
+    fn stop(&mut self, at: Mono) {
+        if let Some(f) = self.from.take() {
+            self.counted += at.saturating_since(f);
+        }
+    }
+}
+
+/// How long a tool held each member of one tracker in its window (§2.7;
+/// text 0.5, F-278, F-280): the account [`DeadlineAccount::held`] reads.
+///
+/// Handed the tracker after each event it observed in the window, with the
+/// reports it made, a member counts from the instant the tracker holds it
+/// heard, missed or waited for, and stops at the instant it holds it
+/// otherwise, or not at all:
+/// - **a known member never heard counts only while it is waited for**
+///   (§2.5): its owner's absence stops the count, and its presence again
+///   starts it (F-278), so a window whose owner left before the miss was
+///   due holds it for less than the deadline, and §5 answers
+///   `window_too_short`, never `met`;
+/// - **its first `ended` stops it for good** (F-280): a member heard again
+///   after it ended is read over its first life, its held time and its span
+///   ending at that first end.
+///
+/// The window runs from the tracker's start (§2.7: the window's start is
+/// its subscription's start) to [`Holding::close`]: before its start a
+/// tracker waits for nothing and takes no arrival, so nothing counts.
+#[derive(Debug, Clone, Default)]
+pub struct Holding {
+    spans: BTreeMap<String, HeldSpan>,
+    closed: bool,
+}
+
+impl Holding {
+    /// No member held yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// After `tracker` observed an event at `at` and made `reports`: each
+    /// member's count moved to where the tracker leaves it. Nothing after
+    /// [`Holding::close`].
+    pub fn observe(&mut self, tracker: &Tracker, reports: &[Report], at: Mono) {
+        if self.closed {
+            return;
+        }
+        for r in reports {
+            if let Report::Ended { member, .. } = r {
+                let s = self.spans.entry(member.clone()).or_default();
+                s.stop(at);
+                s.ended.get_or_insert(at);
+            }
+        }
+        for name in tracker.held() {
+            let counts = matches!(
+                tracker.state(name),
+                Some(
+                    MemberState::Heard { .. }
+                        | MemberState::Missed { .. }
+                        | MemberState::Waiting { .. }
+                )
+            );
+            if !counts && !self.spans.contains_key(name) {
+                // Held and not counted: listed, at nothing.
+                self.spans.insert(name.to_owned(), HeldSpan::default());
+                continue;
+            }
+            let s = self.spans.entry(name.to_owned()).or_default();
+            if counts {
+                s.run(at);
+            } else {
+                s.stop(at);
+            }
+        }
+        for (name, s) in &mut self.spans {
+            if s.counting() && tracker.state(name).is_none() {
+                s.stop(at);
+            }
+        }
+    }
+
+    /// The window's end at `at`: every count stops there, and nothing moves
+    /// after.
+    pub fn close(&mut self, at: Mono) {
+        for s in self.spans.values_mut() {
+            s.stop(at);
+        }
+        self.closed = true;
+    }
+
+    /// Every member the tracker held in the window, in member order (byte
+    /// order of the keys), with its span.
+    pub fn spans(&self) -> impl Iterator<Item = (&str, &HeldSpan)> {
+        self.spans.iter().map(|(k, s)| (k.as_str(), s))
+    }
+
+    /// `member`'s span, when the tracker held it in the window.
+    #[must_use]
+    pub fn span(&self, member: &str) -> Option<&HeldSpan> {
+        self.spans.get(member)
+    }
+}
+
 /// The premises every question reads first: the kind, then the declaration.
 fn premise(kind: Kind, d: &Declaration) -> Result<Declared, Judged> {
     if kind != Kind::Stream {
@@ -1493,6 +1636,26 @@ pub fn roll_up(question: Question, answers: impl IntoIterator<Item = Answer>) ->
     }
 }
 
+/// §5's roll-up with its reason (text 0.5, F-279): [`roll_up`]'s answer
+/// over `members`, each its key, its answer and its reason, and the first
+/// member giving that answer in byte order of the keys, with its reason,
+/// whatever order they come in; `None` over no member. Over one member or
+/// more the answer is always some member's: `unobservable` is the roll-up's
+/// only when a member's is, or when there is none.
+pub fn roll_up_first<K: AsRef<str>, R>(
+    question: Question,
+    members: impl IntoIterator<Item = (K, Answer, R)>,
+) -> (Answer, Option<(K, R)>) {
+    let members: Vec<(K, Answer, R)> = members.into_iter().collect();
+    let answer = roll_up(question, members.iter().map(|(_, a, _)| *a));
+    let first = members
+        .into_iter()
+        .filter(|(_, a, _)| *a == answer)
+        .min_by(|(x, _, _), (y, _, _)| x.as_ref().as_bytes().cmp(y.as_ref().as_bytes()))
+        .map(|(k, _, r)| (k, r));
+    (answer, first)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1625,5 +1788,121 @@ mod tests {
             Answer::Unobservable,
             "an unobservable member is never set aside"
         );
+    }
+
+    /// Text 0.5, F-279: the first member giving the answer, in byte order
+    /// of the keys, whatever order they come in; over no member, none.
+    #[test]
+    fn a_roll_ups_reason_is_its_first_members_in_byte_order() {
+        let d = Question::Deadline;
+        let (a, first) = roll_up_first(
+            d,
+            [
+                ("axis/a", Answer::Unobservable, Reason::OwnerNotPresent),
+                ("axis/B", Answer::Unobservable, Reason::WindowTooShort),
+            ],
+        );
+        assert_eq!(
+            (a, first),
+            (
+                Answer::Unobservable,
+                Some(("axis/B", Reason::WindowTooShort))
+            ),
+            "B (0x42) before a (0x61): bytes, never a locale"
+        );
+        let (a, first) = roll_up_first(
+            d,
+            [
+                ("axis/a", Answer::Unobservable, Reason::Lost),
+                ("cmd", Answer::No, Reason::Missed),
+            ],
+        );
+        assert_eq!(
+            (a, first),
+            (Answer::No, Some(("cmd", Reason::Missed))),
+            "the first member giving the answer, not the first member"
+        );
+        let (a, first) = roll_up_first(
+            Question::Lifespan,
+            [
+                ("a", Answer::NotThisProfiles, Reason::Kind),
+                ("b", Answer::NotAsked, Reason::NoLifespan),
+            ],
+        );
+        assert_eq!(
+            (a, first),
+            (Answer::NotAsked, Some(("b", Reason::NoLifespan)))
+        );
+        let (a, first) = roll_up_first(d, std::iter::empty::<(&str, Answer, Reason)>());
+        assert_eq!((a, first), (Answer::Unobservable, None));
+    }
+
+    fn holding_of(t: &mut Tracker, h: &mut Holding, at: u64, e: Event<'_>) -> Vec<Report> {
+        let r = t.observe(ms(at), e);
+        h.observe(t, &r, ms(at));
+        r
+    }
+
+    /// Text 0.5, F-278: a known member never heard is held only while it
+    /// is waited for; its owner's absence stops the count, its presence
+    /// again starts it.
+    #[test]
+    fn a_known_member_is_held_only_while_it_is_waited_for() {
+        let mut t = Tracker::new(Duration::from_millis(500), Some(1), ["cmd"]);
+        let mut h = Holding::new();
+        holding_of(&mut t, &mut h, 0, Event::Owner(OwnerState::Present));
+        holding_of(&mut t, &mut h, 0, Event::Start);
+        holding_of(&mut t, &mut h, 150, Event::Owner(OwnerState::Unconfirmed));
+        holding_of(&mut t, &mut h, 330, Event::Owner(OwnerState::Absent));
+        let r = holding_of(&mut t, &mut h, 3000, Event::Tick);
+        assert!(r.is_empty(), "no miss: the wait stopped before its due");
+        h.close(ms(3000));
+        assert_eq!(
+            h.span("cmd").map(|s| s.held_to(ms(3000))),
+            Some(Duration::from_millis(330)),
+            "the unconfirmed while waits on (§2.5), the absence stops it"
+        );
+        // Present again: the count starts again.
+        let mut t = Tracker::new(Duration::from_millis(500), Some(1), ["cmd"]);
+        let mut h = Holding::new();
+        holding_of(&mut t, &mut h, 0, Event::Owner(OwnerState::Present));
+        holding_of(&mut t, &mut h, 0, Event::Start);
+        holding_of(&mut t, &mut h, 330, Event::Owner(OwnerState::Absent));
+        holding_of(&mut t, &mut h, 1000, Event::Owner(OwnerState::Present));
+        let r = holding_of(&mut t, &mut h, 1501, Event::Tick);
+        assert_eq!(r.len(), 1, "{r:?}");
+        h.close(ms(2000));
+        assert_eq!(
+            h.span("cmd").map(|s| s.held_to(ms(2000))),
+            Some(Duration::from_millis(1330))
+        );
+    }
+
+    /// Text 0.5, F-280: a member that ends and is heard again is held over
+    /// its first life alone.
+    #[test]
+    fn a_member_heard_again_is_held_over_its_first_life() {
+        let mut t =
+            Tracker::new(Duration::from_millis(500), Some(4), Vec::<String>::new()).with_epoch();
+        let mut h = Holding::new();
+        holding_of(&mut t, &mut h, 0, Event::Owner(OwnerState::Present));
+        holding_of(&mut t, &mut h, 0, Event::Start);
+        holding_of(&mut t, &mut h, 0, Event::MemberSeen("axis/x"));
+        let arrival = Event::Arrival {
+            member: "axis/x",
+            expired: false,
+        };
+        for at in [100, 500, 900] {
+            holding_of(&mut t, &mut h, at, arrival);
+        }
+        let r = holding_of(&mut t, &mut h, 1100, Event::MemberGone("axis/x"));
+        assert_eq!(r.len(), 1, "ended, and no miss: {r:?}");
+        holding_of(&mut t, &mut h, 2000, Event::MemberSeen("axis/x"));
+        holding_of(&mut t, &mut h, 2000, arrival);
+        holding_of(&mut t, &mut h, 4000, arrival);
+        h.close(ms(5000));
+        let s = h.span("axis/x").copied().expect("held");
+        assert_eq!(s.ended(), Some(ms(1100)));
+        assert_eq!(s.held_to(ms(5000)), Duration::from_millis(1000));
     }
 }

@@ -2429,7 +2429,341 @@
         "axis/x"
       ],
       "note": "F-275: a known member of an epoch template waits on from its member token when its owner is absent: absence stops only a wait that began at the owner's presence, so the miss is due at 100 and reported with the owner absent"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 500,
+      "epoch": false,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 150,
+          "event": "owner",
+          "state": "unconfirmed"
+        },
+        {
+          "at_ms": 330,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 3000,
+          "event": "end"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "held_ms": {
+          "cmd": 330
+        },
+        "next_due_ms": null,
+        "transitions": []
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "F-278: a tool's window over a known member never heard, its owner closing 150 ms in and read absent at 330, before the miss is due at 500: held only while waited for, the unconfirmed while included (§2.5), 330 ms, so §5 reads window_too_short, never met (scenarios.md §6 step 5)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 500,
+      "epoch": false,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 200,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 1000,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 1501,
+          "event": "tick"
+        },
+        {
+          "at_ms": 2000,
+          "event": "end"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "held_ms": {
+          "cmd": 1200
+        },
+        "next_due_ms": null,
+        "transitions": [
+          {
+            "at_ms": 1501,
+            "by_ms": 1510,
+            "due_ms": 1500,
+            "event": "missed",
+            "member": "cmd",
+            "owner": "present"
+          }
+        ]
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "F-278: its owner's absence stops the count, and its presence again starts it: 200 ms, then from 1000 to the window's end, missed at 1501 and held while missed: 1,200 ms"
+    },
+    {
+      "bound": 4,
+      "deadline_ms": 500,
+      "epoch": true,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 0,
+          "event": "member_seen",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 50,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 300,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 550,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 800,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 1050,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 1100,
+          "event": "member_gone",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 1600,
+          "event": "tick"
+        },
+        {
+          "at_ms": 2000,
+          "event": "member_seen",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 2050,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 2300,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 2801,
+          "event": "tick"
+        },
+        {
+          "at_ms": 3000,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 3250,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 3500,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 3750,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 4000,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 4250,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 4500,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 4750,
+          "event": "arrival",
+          "member": "axis/x"
+        },
+        {
+          "at_ms": 5000,
+          "event": "end"
+        }
+      ],
+      "expect": {
+        "held": [
+          "axis/x"
+        ],
+        "held_ms": {
+          "axis/x": 1050
+        },
+        "next_due_ms": 5250,
+        "transitions": [
+          {
+            "at_ms": 1100,
+            "event": "ended",
+            "member": "axis/x",
+            "reason": "gone"
+          },
+          {
+            "at_ms": 2801,
+            "by_ms": 2810,
+            "due_ms": 2800,
+            "event": "missed",
+            "member": "axis/x",
+            "owner": "present"
+          },
+          {
+            "at_ms": 3000,
+            "event": "met",
+            "member": "axis/x"
+          }
+        ]
+      },
+      "known": [],
+      "note": "F-280: a member that ends in a tool's window and is heard again is read over its first life: held from its first arrival at 50 to its first end at 1100, 1,050 ms; its second life's miss is reported all the same, and §5 reads the misses before ended (scenarios.md §6 step 6)"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 500,
+      "epoch": false,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "owner",
+          "state": "present"
+        },
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 100,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 400,
+          "event": "arrival",
+          "member": "cmd"
+        },
+        {
+          "at_ms": 450,
+          "event": "owner",
+          "state": "unconfirmed"
+        },
+        {
+          "at_ms": 600,
+          "event": "owner",
+          "state": "absent"
+        },
+        {
+          "at_ms": 800,
+          "event": "end"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "held_ms": {
+          "cmd": 800
+        },
+        "next_due_ms": 900,
+        "transitions": []
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "F-278's control: a known member heard is held whatever presence says after it, from its wait at the window's start to the window's end: only a member never heard counts only while waited for"
+    },
+    {
+      "bound": 1,
+      "deadline_ms": 500,
+      "epoch": false,
+      "events": [
+        {
+          "at_ms": 0,
+          "event": "start"
+        },
+        {
+          "at_ms": 1000,
+          "event": "end"
+        }
+      ],
+      "expect": {
+        "held": [
+          "cmd"
+        ],
+        "held_ms": {
+          "cmd": 0
+        },
+        "next_due_ms": null,
+        "transitions": []
+      },
+      "known": [
+        "cmd"
+      ],
+      "note": "a known member whose owner was never seen in a tool's window: held, waited for by nothing, counted at nothing, which §5 reads not_heard"
     }
   ],
-  "description": "timing.v1 §2.5: one reader's deadline tracker for one provider and resource -> the reports it makes. deadline_ms is the resource's deadline; or, in its place, resource is {kind, annotations}, read as declarations.json reads one: there is a tracker only for a stream whose declaration is valid and declares a deadline not below its period (§2.2, §2.5; text 0.2, F-259), and with none there is no report, no member held and no due, expect.tracker saying whether there is one. bound is the resource's bound (core §2.7), null for none; known lists the members the reader can name without hearing them; epoch is true for a template that declares epoch (core §2.3, §8.1; text 0.2, F-261). events are in order, each at_ms an instant of the reader's monotonic clock in milliseconds, exact to the nanosecond: start (the subscription declared), arrival of member (expired true: an expired sample, which is no arrival, §2.6), owner with state present, unconfirmed or absent (the owner's token as the reader observes it, v1.md §0; unseen before any), member_seen (a member token of member seen: heard declared or withdrawn, or shown by a read), member_gone (a complete read shows no member token of member), and tick (an instant the reader judges at). At every event's instant the reader first judges every member it holds, in member order (byte order of the names): a member heard is missed when the instant is more than deadline_ms after its last arrival (due = last arrival + deadline), a known member never heard and waited for when it is more than deadline_ms after the instant its wait began (due = that instant + deadline); then a member that is not known, missed, and whose last arrival is 3,600,000 ms or more before the instant is forgotten. Then it applies the event. start: without epoch, each known member is waited for from the later of the start and the instant the owner became present, if the owner is present; with epoch, from the later of the start and the instant a member token of it was first seen, if one was, and never from the owner. arrival (ignored before start, and when expired): a held member becomes heard at that instant, reporting met if it was missed; a member not held is held, heard, when fewer than bound members are held, else reported beyond_bound, once at its first such arrival and not again while it stays past the bound (text 0.2, F-260), and not held; a first arrival reports nothing. owner present: from unseen or absent, the owner became present at that instant, and, without epoch, every known member never heard, not missed and not ended is waited for from it (if started; text 0.2, F-262); from unconfirmed, nothing changes. owner unconfirmed: nothing changes but the state. owner absent: without epoch, every waited-for member is no longer waited for; a missed one stays missed; with epoch, nothing changes but the state, since a known member's wait began at its member token, never at its owner's presence (text 0.3, F-275). member_seen, with epoch only: the first since the member last ended records its instant, and a known member neither heard nor missed is waited for from it (if started). member_gone: with epoch, nothing unless a token of the member was seen since it last ended (a read that shows none before any was seen ends nothing); then a held member ends, reported ended (reason gone) when it was heard or missed; a known member stays held, waited for by nothing, until its next arrival or a token of it seen again; another is no longer held. A forgotten member is reported ended (reason forgotten) and no longer held. Known members are always held, count toward the bound, and are never forgotten. expect.transitions are the reports in order: missed (member, due_ms, by_ms = due + max(deadline/50, 1 ms), and owner, the owner's state at the report: present, unconfirmed, absent, or unseen when no state was given), met, ended (reason), beyond_bound; each at_ms the instant it is reported. expect.held is the members held after the last event, in member order; expect.next_due_ms the earliest due among held members heard or waited for, null when none."
+  "description": "timing.v1 §2.5: one reader's deadline tracker for one provider and resource -> the reports it makes. deadline_ms is the resource's deadline; or, in its place, resource is {kind, annotations}, read as declarations.json reads one: there is a tracker only for a stream whose declaration is valid and declares a deadline not below its period (§2.2, §2.5; text 0.2, F-259), and with none there is no report, no member held and no due, expect.tracker saying whether there is one. bound is the resource's bound (core §2.7), null for none; known lists the members the reader can name without hearing them; epoch is true for a template that declares epoch (core §2.3, §8.1; text 0.2, F-261). events are in order, each at_ms an instant of the reader's monotonic clock in milliseconds, exact to the nanosecond: start (the subscription declared), arrival of member (expired true: an expired sample, which is no arrival, §2.6), owner with state present, unconfirmed or absent (the owner's token as the reader observes it, v1.md §0; unseen before any), member_seen (a member token of member seen: heard declared or withdrawn, or shown by a read), member_gone (a complete read shows no member token of member), and tick (an instant the reader judges at). At every event's instant the reader first judges every member it holds, in member order (byte order of the names): a member heard is missed when the instant is more than deadline_ms after its last arrival (due = last arrival + deadline), a known member never heard and waited for when it is more than deadline_ms after the instant its wait began (due = that instant + deadline); then a member that is not known, missed, and whose last arrival is 3,600,000 ms or more before the instant is forgotten. Then it applies the event. start: without epoch, each known member is waited for from the later of the start and the instant the owner became present, if the owner is present; with epoch, from the later of the start and the instant a member token of it was first seen, if one was, and never from the owner. arrival (ignored before start, and when expired): a held member becomes heard at that instant, reporting met if it was missed; a member not held is held, heard, when fewer than bound members are held, else reported beyond_bound, once at its first such arrival and not again while it stays past the bound (text 0.2, F-260), and not held; a first arrival reports nothing. owner present: from unseen or absent, the owner became present at that instant, and, without epoch, every known member never heard, not missed and not ended is waited for from it (if started; text 0.2, F-262); from unconfirmed, nothing changes. owner unconfirmed: nothing changes but the state. owner absent: without epoch, every waited-for member is no longer waited for; a missed one stays missed; with epoch, nothing changes but the state, since a known member's wait began at its member token, never at its owner's presence (text 0.3, F-275). member_seen, with epoch only: the first since the member last ended records its instant, and a known member neither heard nor missed is waited for from it (if started). member_gone: with epoch, nothing unless a token of the member was seen since it last ended (a read that shows none before any was seen ends nothing); then a held member ends, reported ended (reason gone) when it was heard or missed; a known member stays held, waited for by nothing, until its next arrival or a token of it seen again; another is no longer held. A forgotten member is reported ended (reason forgotten) and no longer held. Known members are always held, count toward the bound, and are never forgotten. expect.transitions are the reports in order: missed (member, due_ms, by_ms = due + max(deadline/50, 1 ms), and owner, the owner's state at the report: present, unconfirmed, absent, or unseen when no state was given), met, ended (reason), beyond_bound; each at_ms the instant it is reported. expect.held is the members held after the last event, in member order; expect.next_due_ms the earliest due among held members heard or waited for, null when none. A case that ends a tool's window gives end as its last event (§2.7; text 0.5, F-278, F-280): the reader judges at it as at a tick, and the window, from start to end, closes. expect.held_ms then gives each member the tracker held in the window, in member order, with how long it held it: a member counts while the tracker holds it heard, missed or waited for, from the instant it is so to the instant it is not or the window's end; a known member never heard counts only while waited for, so its owner's absence stops the count and its presence again starts it (F-278); and its first ended stops the count for good, so a member heard again after it ended is held over its first life (F-280). A known member held and never so counts 0. A case without end states no held_ms."
 }

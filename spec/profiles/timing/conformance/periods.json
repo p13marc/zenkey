@@ -1809,7 +1809,65 @@
         "from_ms": 0,
         "to_ms": 5000
       }
+    },
+    {
+      "arrivals_ms": [
+        50,
+        150,
+        250,
+        350,
+        450,
+        550,
+        650,
+        750,
+        850,
+        950,
+        1050,
+        2050,
+        2150,
+        2250,
+        2350,
+        2450,
+        2550,
+        2650,
+        2750,
+        2850,
+        2950,
+        3050,
+        3150,
+        3250,
+        3350,
+        3450,
+        3550,
+        3650,
+        3750,
+        3850,
+        3950,
+        4050,
+        4150,
+        4250,
+        4350,
+        4450,
+        4550,
+        4650,
+        4750,
+        4850,
+        4950
+      ],
+      "ended_ms": 1100,
+      "expect": {
+        "arrivals": 11,
+        "span_ms": 1050,
+        "verdict": "kept"
+      },
+      "known": false,
+      "note": "F-280: a member that ended in the window and is heard again is read over its first life: its span ends at its first end, 11 arrivals in 1,050 ms, kept; its second life's 30 arrivals are not counted, and to the window's end it would read (41 + 2) x 100 = 4,300 < 4,950, not kept (scenarios.md §6 step 6)",
+      "period_ms": 100,
+      "window": {
+        "from_ms": 0,
+        "to_ms": 5000
+      }
     }
   ],
-  "description": "timing.v1 §2.7: one member's arrivals over a tool's window -> whether the period was kept. period_ms is the declared period; window.from_ms and window.to_ms the window's start and end on the tool's monotonic clock, in milliseconds; known whether the member is known (v1.md §0; to a tool, which holds no binding, only a member of a template without parameters, §2.7, text 0.3); ended_ms the instant the member ended within the window, or null; arrivals_ms the member's arrivals, ascending, exact to the nanosecond. The span starts at from_ms for a known member, else at the member's first arrival within the window (from_ms <= t <= to_ms), and ends at ended_ms when not null, else at to_ms. Its arrivals are those within the span, both ends included. expect.verdict is not_heard for a member not known with no arrival within the window (arrivals 0, span_ms null); too_short when the span is below 3 x period_ms; kept when (arrivals + 2) x period_ms is at least the span; not_kept otherwise. expect.arrivals is the count, expect.span_ms the span's length."
+  "description": "timing.v1 §2.7: one member's arrivals over a tool's window -> whether the period was kept. period_ms is the declared period; window.from_ms and window.to_ms the window's start and end on the tool's monotonic clock, in milliseconds; known whether the member is known (v1.md §0; to a tool, which holds no binding, only a member of a template without parameters, §2.7, text 0.3); ended_ms the instant the member first ended within the window, or null (a member heard again after it ended is read over its first life: arrivals after ended_ms are its second life's, and not counted; text 0.5, F-280); arrivals_ms the member's arrivals, ascending, exact to the nanosecond. The span starts at from_ms for a known member, else at the member's first arrival within the window (from_ms <= t <= to_ms), and ends at ended_ms when not null, else at to_ms. Its arrivals are those within the span, both ends included. expect.verdict is not_heard for a member not known with no arrival within the window (arrivals 0, span_ms null); too_short when the span is below 3 x period_ms; kept when (arrivals + 2) x period_ms is at least the span; not_kept otherwise. expect.arrivals is the count, expect.span_ms the span's length."
 }
