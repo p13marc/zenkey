@@ -1153,7 +1153,7 @@ mod tests {
         assert!(line.contains("routers: not asked"), "{line}");
         assert!(line.contains("health: not asked"), "{line}");
         assert!(
-            line.contains("checks: 1 established, 0 unobservable, 31 not asked"),
+            line.contains("checks: 1 established, 0 unobservable, 32 not asked"),
             "{line}"
         );
         assert!(line.contains("namespace \"prod\""), "{line}");

@@ -845,7 +845,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Thirty-one checks, each a question whose finding is the yes:
+    /// Thirty-three checks, each a question whose finding is the yes:
     /// split-brain (§6; of an interface redundancy.v1 governs, its first
     /// question's split, whatever the holders' marks), binding-unsatisfied
     /// (§3.2), contract-drift (§9.8), contract-unavailable (§8.4),
@@ -884,7 +884,12 @@ pub(crate) enum Command {
     /// complete presence reads); and timing.v1's timing-declaration (a
     /// warning, from the contracts: an invalid timing value, a deadline
     /// below its period, or timing keys on a resource that is not a stream
-    /// or on a requirement). A standby is never token-missing, and
+    /// or on a requirement); and arbitration.v1's arbitration-declaration (a
+    /// running consumer's role carrying arbitration.policy, read from its
+    /// descriptor and contracts over every revision of the required
+    /// interface in hand: an error when its declaration is invalid, a
+    /// warning when its binding has a wildcard or a shadowed entry). A
+    /// standby is never token-missing, and
     /// hostid-duplicate does not count a recognised one. The deployment is
     /// read through a session in its namespace; the routers' admin space and
     /// the presence domain through one in no namespace. A check whose input
@@ -1175,6 +1180,61 @@ pub(crate) enum Command {
     /// answer and its `role`: `incumbent`, `standby`, `twin`,
     /// `not_a_candidate`, `unknown`).
     Redundancy(RedundancyArgs),
+    /// Read arbitration.v1: which provider does each arbitrated role follow?
+    ///
+    /// arbitration.v1's tool (spec/profiles/arbitration/v1.md §2.14, §5),
+    /// through a session in the deployment's namespace: presence and each
+    /// descriptor of the consumers in scope (the address given, or every
+    /// one), the revisions they name, and the bound providers' descriptors
+    /// and revisions. Each role a descriptor's requires lists that carries
+    /// arbitration.policy (or whose declaring contract is not in hand; or the
+    /// one --role names) is read from the contract declared_by names at the
+    /// revision the descriptor lists, over every revision of the required
+    /// interface in hand (offline or retrieved), its binding in order and its
+    /// parameter bindings (self.system and self.service the consumer's own).
+    /// With --role and no consumer's descriptor listing it, each contract in
+    /// --contracts declaring the role is read with no descriptor: the
+    /// selection and the binding are not asked (no_descriptor, text 0.2,
+    /// F-272). The tool then listens --for seconds with a view of its own:
+    /// the providers' interface tokens followed on a watch session of its
+    /// own, each entry's stream subscribed to, every arrival read in its
+    /// subscriber's callback, decided by the profile's arbiter on this
+    /// host's monotonic clock. That view is the tool's, never the consumer's:
+    /// its samples ride another path, with another latency and loss. Per
+    /// role, §5's three questions in the fixtures' tokens (yes, no,
+    /// unobservable, not_asked, not_this_profiles) with their reasons: is
+    /// the declaration valid (no, invalid, with its reasons in §2.2's order:
+    /// the consumer refuses to start); which provider does the tool's view
+    /// select (no, dead_man after listening one deadline; unbound is
+    /// informative; unobservable, listening, before one deadline with
+    /// nothing eligible, and lost when the tool lost samples within the
+    /// last deadline); and does the binding leave a priority to an order
+    /// nobody chose (yes, a warning: a wildcard entry, or a shadowed one,
+    /// each named). Exit 1 on any question's finding (a declaration invalid,
+    /// the view in the dead-man, a wildcard or shadowed entry); 0 when every
+    /// question asked answers its other pole; 2 no verdict: an answer
+    /// unobservable, nothing arbitrated in scope, or a run that could not
+    /// start.
+    ///
+    /// --format json is one document: `report` ("arbitration"), `namespace`,
+    /// `target` and `role` when asked, `listen_s`, `asked`, `judgement`,
+    /// `rows` and `notes`, and `skipped` and `unobservable` when there is
+    /// something to say. A `role` row: `consumer` and `instance` (absent with
+    /// no descriptor), `role`, `iface` (the required interface),
+    /// `declared_by`, `declaring`, `bindings` (null with no descriptor),
+    /// `params`, `revisions` (the required interface's read over), and
+    /// `declaration` (`answer`, `reason`, `says`, `reasons`, and a valid
+    /// one's `policy`, `resource`, `deadline_ms`, `period_ms`), `selection`
+    /// (`answer`, `reason`, `says`, `provider`, and `whose`: always "the
+    /// tool's own view"), `binding` (`answer`, `reason`, `says`, `wildcards`
+    /// and `shadowed` as 0-based positions, `wildcard_entries`,
+    /// `shadowed_entries`), each with `finding` when it is one; `view` when
+    /// it listened (`whose`, `listened_ms`, `lost`, `active`, `watching`,
+    /// `governed`, `switches`, each `from`, `to`, `cause`, `at_ms`, `last_ms`
+    /// from the view's start, `providers` in rank order, each `address`,
+    /// `delivered`, `not_active`, `deleted`, `expired`, `not_incumbent`,
+    /// `withdrawn`, `discards`, `reads`, `round_trips`); and `notes`.
+    Arbitration(ArbitrationArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -3377,6 +3437,42 @@ pub(crate) struct RedundancyArgs {
     /// unobservable, across_face (redundancy.v1 §2.13).
     #[arg(long, requires_all = ["address", "iface"])]
     pub(crate) across_face: bool,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl arbitration`'s flags (#909, BC) — one struct the dispatcher
+/// hands over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct ArbitrationArgs {
+    /// One consumer, `<system>/<service>`. Omitted, every consumer in the
+    /// namespace whose descriptor requires a role carrying
+    /// arbitration.policy.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: Option<zenkey_model::grammar::Addr>,
+    /// Only this role: asked even when it carries no policy, which answers
+    /// not this profile's. With no consumer's descriptor listing it, read
+    /// from each contract in --contracts that declares it.
+    #[arg(long, value_name = "ROLE")]
+    pub(crate) role: Option<String>,
+    /// How long the tool's own view listens, seconds: at least one
+    /// deadline, or a view in the dead-man answers nothing (listening). 0
+    /// listens not at all: the selection is not asked (not_listened).
+    #[arg(long = "for", value_name = "SECS", default_value_t = 2.0)]
+    pub(crate) for_secs: f64,
+    /// The deployment's link lease, seconds: with --wait-before-close, the
+    /// longest this reader may stall before it counts a loss (spec §2.7,
+    /// 0.27), which leaves its view's answer unobservable (lost).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
+    pub(crate) lease: f64,
+    /// The routers' wait_before_close, seconds (spec §2.7, 0.27).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
+    pub(crate) wait_before_close: f64,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

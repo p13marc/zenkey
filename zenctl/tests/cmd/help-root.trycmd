@@ -64,6 +64,7 @@ Commands:
   timing       Read timing.v1 streams: deadline met, period kept, a sample expired
   desired      Read desired.v1 targets: has each converged on its author's document?
   redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
+  arbitration  Read arbitration.v1: which provider does each arbitrated role follow?
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion
@@ -138,6 +139,7 @@ Commands:
   timing       Read timing.v1 streams: deadline met, period kept, a sample expired
   desired      Read desired.v1 targets: has each converged on its author's document?
   redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
+  arbitration  Read arbitration.v1: which provider does each arbitrated role follow?
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion

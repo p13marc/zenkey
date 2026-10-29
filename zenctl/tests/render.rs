@@ -87,53 +87,54 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     assert_data_eq!(
         table(&report),
         str![[r#"
-✗  split-brain (§6)                           finding — 1 subject(s)
+✗  split-brain (§6)                                finding — 1 subject(s)
     ✗ error: host-a/tc tc.netif.v1 — 2 instances hold its interface token in two presence reads 2.0s apart (3fa9c2d41b7e0012, 3fa9c2d41b7e0013), and at least two expose an exclusive resource
-⚠  binding-unsatisfied (§3.2 R5)              finding — 1 subject(s)
+⚠  binding-unsatisfied (§3.2 R5)                   finding — 1 subject(s)
     ⚠ warning: ws-01/tcgui-frontend scenario — its bindings (*/tc) select no provider of tc.scenario.v1 visible to this reader
-?  contract-drift (§9.8)                      unobservable — 1 subject(s) unjudged
+?  contract-drift (§9.8)                           unobservable — 1 subject(s) unjudged
     ? unjudged tc.netem.v1 eeeeeeeeeeeeeeee 5d1c0a9b2e3f4a6b: not classified: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee is unavailable
-✗  contract-unavailable (§8.4)                finding — 1 subject(s)
+✗  contract-unavailable (§8.4)                     finding — 1 subject(s)
     ✗ error: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee — named by host-b/tc@3fa9c2d41b7e0014; no holder served a bundle that verified (no reply)
-✓  descriptor-invalid (§3.3)                  clean — 3 descriptor(s) pass the descriptor check against the contracts they name
-✓  token-missing (§8.1)                       clean — 3 instance(s): every token agrees with its descriptor
-✓  presence-over-budget (§8.3)                clean — 9 token(s) visible to this reader in the presence domain; within the budget 10000
-✓  storage-on-state (§4.2 S4)                 clean — 1 storage(s) on 2 router(s), none answering on an owner's state keys
-✓  archive-unaligned (§4.4)                   clean — no archive.v1 provider visible to this reader: nothing to align
-—  state-stamp-foreign (§4.2 S1–S2)           not asked
-·  shm-memlock-low (§7.4)                     finding — 1 subject(s)
+✓  descriptor-invalid (§3.3)                       clean — 3 descriptor(s) pass the descriptor check against the contracts they name
+✓  token-missing (§8.1)                            clean — 3 instance(s): every token agrees with its descriptor
+✓  presence-over-budget (§8.3)                     clean — 9 token(s) visible to this reader in the presence domain; within the budget 10000
+✓  storage-on-state (§4.2 S4)                      clean — 1 storage(s) on 2 router(s), none answering on an owner's state keys
+✓  archive-unaligned (§4.4)                        clean — no archive.v1 provider visible to this reader: nothing to align
+—  state-stamp-foreign (§4.2 S1–S2)                not asked
+·  shm-memlock-low (§7.4)                          finding — 1 subject(s)
     · info: this host — RLIMIT_MEMLOCK is 64 KiB, below the 8 MiB floor
-✓  admin-unreachable (§4.2)                   clean — 2 router(s) answered `@/*/router`
-✓  router-version-skew (App. B)               clean — 2 router(s), all at 1.10.1
-✗  health-failed (health.v1 §2.1)             finding — 1 subject(s)
+✓  admin-unreachable (§4.2)                        clean — 2 router(s) answered `@/*/router`
+✓  router-version-skew (App. B)                    clean — 2 router(s), all at 1.10.1
+✗  health-failed (health.v1 §2.1)                  finding — 1 subject(s)
     ✗ error: host-b/tc — its status is FAILED, fresh: present, and unable to do its primary job, as its owner says (health.v1 §2.1) — its reason: "netns gone"
-✓  health-degraded (health.v1 §2.1)           clean — 1 service(s) implementing health.v1, none at DEGRADED: each fresh status, and the checks it vouches for, read better
-?  health-stale (health.v1 §2.4)              unobservable — 1 subject(s) unjudged
+✓  health-degraded (health.v1 §2.1)                clean — 1 service(s) implementing health.v1, none at DEGRADED: each fresh status, and the checks it vouches for, read better
+?  health-stale (health.v1 §2.4)                   unobservable — 1 subject(s) unjudged
     ? unjudged host-a/tc: its status's freshness could not be read: this reader's clock is not trusted to the HLC delta against the stamping clock (clock_untrusted)
-✓  health-inconsistent (health.v1 §2.2)       clean — 1 service(s) implementing health.v1, each fresh status no better than its current checks
-⚠  hostid-duplicate (hostid.v1 §2.12)         finding — 1 subject(s)
+✓  health-inconsistent (health.v1 §2.2)            clean — 1 service(s) implementing health.v1, each fresh status no better than its current checks
+⚠  hostid-duplicate (hostid.v1 §2.12)              finding — 1 subject(s)
     ⚠ warning: h-bbd1aa1db10b/sysinfo — in both presence reads 2.0s apart, instances of h-bbd1aa1db10b/sysinfo on a system their descriptors declare minted state 2 session zids: the cause is undecided
-—  population-over-bound (§2.7)               not asked
-✗  config-projection (config.v1 §2.19)        finding — 1 subject(s)
+—  population-over-bound (§2.7)                    not asked
+✗  config-projection (config.v1 §2.19)             finding — 1 subject(s)
     ✗ error: lab/rf0 — in both of two readings 2.0s apart, its status is not its view's projection: an owner keeps the status equal to the view's projection (config.v1 §2.19)
-✓  config-overdue (config.v1 §2.11)           clean — 1 service(s) implementing config.v1, none listing a change pending past its deadline by its own clock; 3 present service(s) do not list config.v1, and are not asked
-?  config-unpersisted (config.v1 §5)          unobservable — 1 subject(s) unjudged
+✓  config-overdue (config.v1 §2.11)                clean — 1 service(s) implementing config.v1, none listing a change pending past its deadline by its own clock; 3 present service(s) do not list config.v1, and are not asked
+?  config-unpersisted (config.v1 §5)               unobservable — 1 subject(s) unjudged
     ? unjudged lab/rf0: no fresh view: the status carries no class, no writable and no startup value — the view this reader's clock is not trusted to the HLC delta against the stamping clock (unobservable) — the doctor measures no clock: pass --clocks-synced on the deployment's word that this host's clock and the owners' agree (freshness.v1 §2.6)
-—  config-desired (config.v1 §2.18)           not asked
-✗  alarm-key (alarms.v1 §2.2)                 finding — 1 subject(s)
+—  config-desired (config.v1 §2.18)                not asked
+✗  alarm-key (alarms.v1 §2.2)                      finding — 1 subject(s)
     ✗ error: zk2/lab/liar/alarms.v1/state/alarms/0000000000000001 — the key is not its document's: the document derives a659f813308ad1da — a phantom of another derivation, of a renamed rule, or an owner that hashed a host-scoped label (alarms.v1 §2.2, §2.9)
-?  alarm-stale (alarms.v1 §2.7)               unobservable — 1 subject(s) unjudged
+?  alarm-stale (alarms.v1 §2.7)                    unobservable — 1 subject(s) unjudged
     ? unjudged zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da: this reader's clock is not trusted to the HLC delta against the stamping clock (clock_untrusted); a reply is aged only on the operator's word that the clocks agree (--clocks-synced, freshness.v1 §2.6)
-⚠  telemetry-declaration (telemetry.v1 §2.2)  finding — 1 subject(s)
+⚠  telemetry-declaration (telemetry.v1 §2.2)       finding — 1 subject(s)
     ⚠ warning: meter.v1 sha256:5d1c stream/level — implemented by lab/meter; its declaration is invalid: the type cannot carry the declared kind (not_a_carrier) — no reader reads its members' kind, conformance or continuity (telemetry.v1 §2.2)
-—  telemetry-sample (telemetry.v1 §2.6)       not asked
-⚠  desired-refused (desired.v1 §2.7)          finding — 1 subject(s)
+—  telemetry-sample (telemetry.v1 §2.6)            not asked
+⚠  desired-refused (desired.v1 §2.7)               finding — 1 subject(s)
     ⚠ warning: lab/worker task — its last act, on 200/a1, was refused: code reach at "/endpoint" (desired.v1 §2.7)
-?  desired-behind (desired.v1 §2.17)          unobservable — 1 subject(s) unjudged
+?  desired-behind (desired.v1 §2.17)               unobservable — 1 subject(s) unjudged
     ? unjudged lab/w3 task: its report's observed 100/a1 is earlier than its author lab/author's current version, its put 300/a1, the same id: not yet — how long it has been so cannot be told from one reading without a trusted clock: pass --clocks-synced
-✓  desired-last-known (desired.v1 §2.9)       clean — 2 desired.v1 role(s), none running a document read from an archive
-✓  redundancy-vacancy (redundancy.v1 §2.15)   clean — 1 interface(s) redundancy.v1 governs, none without an incumbent in both reads 2.0s apart
-✓  timing-declaration (timing.v1 §2.2)        clean — 2 timed resource(s) in 1 revision(s) named by descriptors, each declaration one a reader judges
+✓  desired-last-known (desired.v1 §2.9)            clean — 2 desired.v1 role(s), none running a document read from an archive
+✓  redundancy-vacancy (redundancy.v1 §2.15)        clean — 1 interface(s) redundancy.v1 governs, none without an incumbent in both reads 2.0s apart
+✓  timing-declaration (timing.v1 §2.2)             clean — 2 timed resource(s) in 1 revision(s) named by descriptors, each declaration one a reader judges
+✓  arbitration-declaration (arbitration.v1 §2.14)  clean — 1 arbitrated role(s) of running consumers, each declaration valid and each binding of exact entries, none shadowed
 
 "#]]
     );
@@ -480,6 +481,57 @@ timing under every timed stream in namespace "acme" — 2 timed resource(s), 2 m
     let said = notes(&report);
     assert!(said.contains("a miss is never \"down\""), "{said}");
     assert!(said.contains("ε = 100 ms"), "{said}");
+}
+
+/// `zenctl arbitration` (#909, BC): one row per consumer's role, §5's three
+/// answers in the fixtures' tokens in every medium — the declaration with
+/// its reasons, the selection always labelled the tool's own view, the
+/// binding naming its wildcard and shadowed entries, the view's switches
+/// and counts — and the run's judgement, a finding (the wildcard's
+/// warning, the offline copy's invalid declaration), leading the envelope.
+#[test]
+fn an_arbitration_reading_spells_every_answer_apart_in_every_medium() {
+    let report = fx::arbitration_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+arbitration of every consumer in namespace "acme" — 2 role(s) read, each view listening up to 2.0s
+!  lab/rudder-l cmd → steer.v1             declaration yes (valid); selection yes (selected, lab/autopilot, the tool's own view); binding yes (wildcard lab/*)
+    arbitrated, priority over stream/cmd, deadline 300 ms, period 50 ms
+    bound, in order: [lab/safety, lab/*]
+    the tool's own view over 2000 ms: follows lab/autopilot, its watch's round trips 1
+    switch at 0.0 ms: none → none, start
+    switch at 12.5 ms: none → lab/teleop, sample
+    switch at 31.0 ms: lab/teleop → lab/autopilot, sample
+    lab/safety: delivered 0, not_active 0, deleted 0, expired 0, not_incumbent 0
+    lab/autopilot: delivered 40, not_active 0, deleted 0, expired 0, not_incumbent 0
+    lab/teleop: delivered 1, not_active 39, deleted 0, expired 0, not_incumbent 0
+✗  rudder.v1 cmd (no consumer) → steer.v1  declaration no (invalid); selection not_asked (no_descriptor); binding not_asked (no_descriptor)
+    invalid: freshest and lease are reserved; arbitration.v1 1.0 defines priority only (policy_unsupported)
+    no consumer's descriptor: no binding read
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "arbitration");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert!(envelope.get("roles").is_none(), "roles are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.roles.len());
+    assert_eq!(rows[0]["selection"]["whose"], "the tool's own view");
+    assert_eq!(rows[0]["selection"]["provider"], "lab/autopilot");
+    assert_eq!(rows[0]["binding"]["wildcard_entries"][0], "lab/*");
+    assert_eq!(rows[0]["view"]["switches"][2]["cause"], "sample");
+    assert_eq!(rows[1]["bindings"], serde_json::Value::Null);
+    assert_eq!(rows[1]["declaration"]["reasons"][0], "policy_unsupported");
+    assert_eq!(rows[1]["selection"]["reason"], "no_descriptor");
+    let said = notes(&report);
+    assert!(said.contains("the tool's own view"), "{said}");
+    assert!(said.contains("a priority nobody chose"), "{said}");
 }
 
 /// `zenctl telemetry` (#819, TC): one row per metric resource and per
@@ -2224,6 +2276,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "admin-graph",
         "admin-routers",
         "alarms",
+        "arbitration",
         "bench",
         "cache",
         "cache-action",

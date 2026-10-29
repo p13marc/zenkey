@@ -1,0 +1,106 @@
+`arbitration` (#909, BC) reads `arbitration.v1` as the profile's tool does:
+each consumer's arbitrated role, from its descriptor and the contract its
+`declared_by` names, over every revision of the required interface in hand,
+and the tool's own view of it over a short listen, its watch on a watch
+session of its own. §5's three answers per role, in the fixtures' tokens: is
+the declaration valid, which provider does the tool's view select (always
+labelled the tool's own, never the consumer's), and does the binding leave a
+priority to an order nobody chose. A judgement verb: exit 1 on any question's
+finding (a declaration invalid, the view in the dead-man, a wildcard or a
+shadowed entry, the last a warning); 0 when every question asked answers its
+other pole (`unbound` informative); 2 otherwise. The help names the JSON
+document's fields.
+
+```console
+$ zenctl arbitration --help
+Read arbitration.v1: which provider does each arbitrated role follow?
+
+arbitration.v1's tool (spec/profiles/arbitration/v1.md §2.14, §5), through a session in the deployment's namespace: presence and each descriptor of the consumers in scope (the address given, or every one), the revisions they name, and the bound providers' descriptors and revisions. Each role a descriptor's requires lists that carries arbitration.policy (or whose declaring contract is not in hand; or the one --role names) is read from the contract declared_by names at the revision the descriptor lists, over every revision of the required interface in hand (offline or retrieved), its binding in order and its parameter bindings (self.system and self.service the consumer's own). With --role and no consumer's descriptor listing it, each contract in --contracts declaring the role is read with no descriptor: the selection and the binding are not asked (no_descriptor, text 0.2, F-272). The tool then listens --for seconds with a view of its own: the providers' interface tokens followed on a watch session of its own, each entry's stream subscribed to, every arrival read in its subscriber's callback, decided by the profile's arbiter on this host's monotonic clock. That view is the tool's, never the consumer's: its samples ride another path, with another latency and loss. Per role, §5's three questions in the fixtures' tokens (yes, no, unobservable, not_asked, not_this_profiles) with their reasons: is the declaration valid (no, invalid, with its reasons in §2.2's order: the consumer refuses to start); which provider does the tool's view select (no, dead_man after listening one deadline; unbound is informative; unobservable, listening, before one deadline with nothing eligible, and lost when the tool lost samples within the last deadline); and does the binding leave a priority to an order nobody chose (yes, a warning: a wildcard entry, or a shadowed one, each named). Exit 1 on any question's finding (a declaration invalid, the view in the dead-man, a wildcard or shadowed entry); 0 when every question asked answers its other pole; 2 no verdict: an answer unobservable, nothing arbitrated in scope, or a run that could not start.
+
+--format json is one document: `report` ("arbitration"), `namespace`, `target` and `role` when asked, `listen_s`, `asked`, `judgement`, `rows` and `notes`, and `skipped` and `unobservable` when there is something to say. A `role` row: `consumer` and `instance` (absent with no descriptor), `role`, `iface` (the required interface), `declared_by`, `declaring`, `bindings` (null with no descriptor), `params`, `revisions` (the required interface's read over), and `declaration` (`answer`, `reason`, `says`, `reasons`, and a valid one's `policy`, `resource`, `deadline_ms`, `period_ms`), `selection` (`answer`, `reason`, `says`, `provider`, and `whose`: always "the tool's own view"), `binding` (`answer`, `reason`, `says`, `wildcards` and `shadowed` as 0-based positions, `wildcard_entries`, `shadowed_entries`), each with `finding` when it is one; `view` when it listened (`whose`, `listened_ms`, `lost`, `active`, `watching`, `governed`, `switches`, each `from`, `to`, `cause`, `at_ms`, `last_ms` from the view's start, `providers` in rank order, each `address`, `delivered`, `not_active`, `deleted`, `expired`, `not_incumbent`, `withdrawn`, `discards`, `reads`, `round_trips`); and `notes`.
+
+Usage: zenctl arbitration [OPTIONS] [SYSTEM/SERVICE]
+
+Arguments:
+  [SYSTEM/SERVICE]
+          One consumer, `<system>/<service>`. Omitted, every consumer in the namespace whose descriptor requires a role carrying arbitration.policy
+
+Options:
+      --role <ROLE>
+          Only this role: asked even when it carries no policy, which answers not this profile's. With no consumer's descriptor listing it, read from each contract in --contracts that declares it
+
+      --for <SECS>
+          How long the tool's own view listens, seconds: at least one deadline, or a view in the dead-man answers nothing (listening). 0 listens not at all: the selection is not asked (not_listened)
+          
+          [default: 2]
+
+      --lease <SECS>
+          The deployment's link lease, seconds: with --wait-before-close, the longest this reader may stall before it counts a loss (spec §2.7, 0.27), which leaves its view's answer unobservable (lost)
+          
+          [default: 10]
+
+      --wait-before-close <SECS>
+          The routers' wait_before_close, seconds (spec §2.7, 0.27)
+          
+          [default: 5]
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```

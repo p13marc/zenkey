@@ -193,7 +193,7 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `timing`, `desired`, `redundancy`, `watchdog`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `timing`, `desired`, `redundancy`, `arbitration`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -243,6 +243,10 @@ zenctl desired lab/worker --role task --namespace prod --clocks-synced   # one t
 # Who serves, redundancy.v1: exit 1 on a split, a twin or a lasting vacancy.
 zenctl redundancy --namespace prod                     # every governed interface, two reads 2 s apart
 zenctl redundancy fleet/catalog --iface zs.catalog.v1 --namespace prod --contracts contracts/   # one, its contract offline
+
+# One commander at a time, arbitration.v1: exit 1 on an invalid declaration, the tool's view in the dead-man, or a wildcard or shadowed entry.
+zenctl arbitration --namespace prod --for 2            # every consumer's arbitrated role, each view the tool's own
+zenctl arbitration --role cmd --contracts contracts/ --for 0   # a role read offline with no consumer: the declaration alone
 
 # One expectation over a zk2 resource, for CI or a cron job.
 zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 60 --at-least 1
@@ -430,6 +434,12 @@ interface: is it served by exactly one incumbent, is there a vacancy, how
 many stand by, and of each instance, a standby or a twin — exit 1 on a
 split, a twin or a lasting vacancy, 0 one incumbent each and every instance
 accounted for, 2 otherwise) ·
+`zenctl arbitration [SYSTEM/SERVICE]` (each consumer's `arbitration.v1`
+role: is its declaration valid over every revision of the required
+interface in hand, which provider does the tool's own view select, does
+its binding leave a priority to an order nobody chose — exit 1 on an
+invalid declaration, the view in the dead-man or a wildcard or shadowed
+entry, 0 every question asked on its other pole, 2 otherwise) ·
 `zenctl watchdog --rule …` (conditions, as transitions).
 
 **Router configuration — generated, then checked.**
@@ -469,7 +479,8 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > `check conform`'s `desired-*` cases. #841's RC added `redundancy`, the
 > `redundancy-vacancy` check and `check conform`'s `redundancy-*` cases.
 > #908's MC added `timing`, the `timing-declaration` check and `check
-> conform`'s `timing-*` cases.
+> conform`'s `timing-*` cases. #909's BC added `arbitration` and the
+> `arbitration-declaration` check.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -739,7 +750,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks thirty-two questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks thirty-three questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -780,6 +791,7 @@ none.
 | `desired-last-known` | does a desired.v1 target run a document it read from an archive, its author not answering for it? (info) | desired.v1 §2.9 |
 | `redundancy-vacancy` | does an interface redundancy.v1 governs have candidates and no incumbent, in both of two complete presence reads? (warning; one read's vacancy is a takeover due) | redundancy.v1 §2.15 |
 | `timing-declaration` | does a contract an owner implements declare timing.v1 values a reader cannot judge: an invalid one, a deadline below its period, or timing keys on a resource that is not a stream or on a requirement? (warning) | timing.v1 §2.2 |
+| `arbitration-declaration` | does a running consumer hold a role carrying `arbitration.policy` whose declaration is invalid over every revision of the required interface in hand (error: its consumer cannot start on it), or whose binding has a wildcard or a shadowed entry, a priority nobody chose (warning)? | arbitration.v1 §2.14 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -848,6 +860,16 @@ mean nothing; a key in `[defaults]` reaches every kind) are each a contract
 linter's warning. Whether a member met its deadline, kept its period or
 arrived expired is a window's: `zenctl timing` and `check conform`'s
 `timing-*` cases.
+
+`arbitration-declaration` (#909) reads no view: every role a running
+consumer's descriptor requires that carries `arbitration.policy`, from the
+contract its `declared_by` names at the revision the descriptor lists, over
+every revision of the required interface in hand (the providers'
+descriptors name theirs). An invalid declaration is an error, since its
+consumer refuses to start on it; a wildcard or a shadowed entry in its
+binding a warning, a priority nobody chose. A role whose declaring contract
+is not in hand, or whose revisions disagree, is unjudged. Which provider a
+role follows is a view's: `zenctl arbitration`.
 
 The `desired-*` checks (#840) make one `desired.v1` reading of every target
 over the second presence read and the revisions it retrieved: each target's
@@ -1182,6 +1204,55 @@ cross, and the deployment's word names the address, never who serves it.
 The doctor's `split-brain` and `redundancy-vacancy` ask the same questions;
 `check conform`'s `redundancy-declaration` and `redundancy-standby` check
 one service's declaration and probe its standbys.
+
+## `arbitration` — which provider does each arbitrated role follow?
+
+`arbitration` (#909) reads `arbitration.v1` (`spec/profiles/arbitration/v1.md`)
+as its §2.14 tool does: every consumer in the namespace whose descriptor
+requires a role carrying `arbitration.policy`, or one consumer, or one role
+(`--role`). Each role is read from its descriptor's `requires` entry (the
+role, `declared_by`, the bindings in their order, the parameter bindings, a
+`self.system` or `self.service` the consumer's own) and the contract
+`declared_by` names at the revision the descriptor lists, over every
+revision of the required interface the tool holds, offline or retrieved
+from the bound providers' descriptors: the declaration they all give, or
+`revisions_disagree`. Then the tool **listens** (`--for`, 2 s) with a view
+of its own: one liveliness subscriber per entry on a watch session of its
+own and its round trip, one subscriber per entry on the namespaced session,
+every arrival read in its callback, decided by the profile's arbiter on this
+host's monotonic clock; a withdrawal read again 100 ms later, a move of the
+watch session's transport kept until the round trip asked 100 ms after it
+stands, and a governed interface's incumbents read at the start. Per role,
+§5's three questions in the profile's tokens:
+
+| question | answered | the finding |
+|---|---|---|
+| is the role's declaration valid? | `yes` (`valid`, its policy and deadline); `no` (`invalid`, its reasons in §2.2's order); `unobservable`: `no_contract`, `revisions_disagree`, `no_provider_contract`; `not_this_profiles` (`not_arbitrated`) | `no` (exit 1) |
+| which provider does the tool's view select? | `yes` (`selected`, the provider); `no` (`dead_man` after one deadline, or `unbound`, informative); `unobservable`: `invalid`, `listening`, `lost`; `not_asked`: `no_descriptor`, `not_listened` | `no`, `dead_man` (exit 1) |
+| does the binding leave a priority to an order nobody chose? | `yes` (`wildcard`, `shadowed`, naming the entries); `no` (`exact`); `not_asked` (`no_descriptor`) | `yes`, a warning (exit 1) |
+
+The selection is **always the tool's own view**, labelled so in every
+medium: its samples ride another path than the consumer's, with another
+latency and loss, and a consumer's switches are its own to tell. With
+`--role` and no consumer's descriptor listing it, each contract in
+`--contracts` declaring the role is read with no descriptor (F-272): the
+declaration answered, the selection and the binding `not_asked`,
+`no_descriptor`.
+
+```console
+$ zenctl arbitration lab/rudder-l --namespace acme -c tcp/127.0.0.1:7447
+arbitration of lab/rudder-l in namespace "acme" — 1 role(s) read, each view listening up to 2.0s
+·  lab/rudder-l cmd → steer.v1  declaration yes (valid); selection yes (selected, lab/safety, the tool's own view); binding no (exact)
+    arbitrated, priority over stream/cmd, deadline 300 ms, period 50 ms
+    bound, in order: [lab/safety, lab/teleop, lab/autopilot]
+    the tool's own view over 2000 ms: follows lab/safety, its watch's round trips 1
+    …
+```
+
+Exit 1 on any question's finding; 0 when every question asked answered its
+other pole; 2 no verdict (an answer unobservable, nothing arbitrated in
+scope, or a run that could not start). The doctor's
+`arbitration-declaration` asks the first and third questions with no view.
 
 ## `acl gen` — access control from the contracts
 

@@ -162,6 +162,7 @@ pub async fn run() -> Result<()> {
         Command::Timing(a) => cmd::timing::run(a).await,
         Command::Desired(a) => cmd::desired::run(a).await,
         Command::Redundancy(a) => cmd::redundancy::run(a).await,
+        Command::Arbitration(a) => cmd::arbitration::run(a).await,
         Command::Watchdog(a) => cmd::watchdog::run(a).await,
 
         // ── Meta ─────────────────────────────────────────────────────────
