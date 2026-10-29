@@ -16,6 +16,7 @@ use zenkey_fleet::{
     BundleStore, Catalog, ContractSet, ContractState, PresenceScope, ResolvedTarget, Revision,
 };
 use zenkey_model::canonical::Fingerprint;
+use zenkey_model::grammar::{AMBIENT, KindToken, kind_selector};
 use zenkey_model::template::Bindings;
 
 use crate::bus::Deployment;
@@ -349,7 +350,124 @@ pub fn lens_unread_note(reason: &str) -> crate::render::Note {
 /// The default wire selector of a raw observer: the deployment's zk2 data,
 /// `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (O5).
 pub fn default_selector(namespace: &str) -> String {
-    zenkey_fleet::with_namespace(namespace, "zk2/**")
+    zenkey_fleet::with_namespace(namespace, AMBIENT)
+}
+
+/// What a raw observer reads off its scope (#924): samples, through a
+/// subscription, which a key of every kind delivers; or state, through a
+/// GET, which only `state` and `@state` answer (core §1.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reads {
+    Samples,
+    State,
+}
+
+impl Reads {
+    /// The explicit kinds `--explicit` adds for a verb that reads this way.
+    fn explicit_kinds(self) -> &'static [KindToken] {
+        match self {
+            Reads::Samples => &[KindToken::ExplicitStream, KindToken::ExplicitState],
+            Reads::State => &[KindToken::ExplicitState],
+        }
+    }
+}
+
+/// The wire selectors `--explicit` adds (#924): each explicit kind named on
+/// its own, `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, the
+/// latter alone for a verb that reads state. Positions 1–5 have fixed arity
+/// (core §1.3), so one exact selector per kind reaches every explicit
+/// resource of every service, present or future, with no presence read;
+/// and spelling one lends nothing to the other. Built as zengui's
+/// `explicit` preset builds them: `zenkey_model::grammar`'s kind selector
+/// with the namespace in front, never `format!`.
+pub fn explicit_selectors(namespace: &str, reads: Reads) -> Vec<String> {
+    reads
+        .explicit_kinds()
+        .iter()
+        .map(|k| zenkey_fleet::with_namespace(namespace, kind_selector(None, None, None, *k)))
+        .collect()
+}
+
+/// A raw observer's wire scope (#924), the one helper every verb with a
+/// `<ns>/zk2/**` default takes it from: the selectors typed, each through
+/// the raw seam ([`wire_selector`]), or the default; with `--explicit`, the
+/// default and then [`explicit_selectors`]. The three selectors together
+/// are the deployment's whole data plane apart from its operations and
+/// control keys (the tooling guide's O5).
+///
+/// `--explicit` beside a typed selector is refused, exit 2: it widens the
+/// *default*, and beside `prod/zk2/host-a/**` it would add every service's
+/// explicit traffic, the very pull §1.3's guard exists to prevent. Who
+/// types a selector names the explicit kind under it themselves.
+pub fn wire_scope(
+    typed: &[String],
+    explicit: bool,
+    namespace: &str,
+    reads: Reads,
+) -> Result<Vec<String>> {
+    wire_scope_through(typed, explicit, namespace, reads, |s| {
+        wire_selector(Some(s), namespace)
+    })
+}
+
+/// [`wire_scope`] with the verb's own seam for a typed selector: `record`'s
+/// hint also says what `replay --namespace` moves.
+pub fn wire_scope_through(
+    typed: &[String],
+    explicit: bool,
+    namespace: &str,
+    reads: Reads,
+    mut seam: impl FnMut(&str) -> Result<String>,
+) -> Result<Vec<String>> {
+    if explicit && !typed.is_empty() {
+        return Err(unaskable!(
+            "--explicit widens the default scope ({}) and is not taken beside a \
+             selector: beside {} it would add every service's explicit traffic to what \
+             you narrowed. Drop the selector for the deployment's whole data plane, or \
+             name the kind under your own prefix (`<ns>/zk2/<system>/*/*/{}/**`)",
+            default_selector(namespace),
+            typed.join(" + "),
+            reads.explicit_kinds()[0].as_str()
+        ));
+    }
+    if !typed.is_empty() {
+        return typed.iter().map(|s| seam(s)).collect();
+    }
+    let mut scope = vec![default_selector(namespace)];
+    if explicit {
+        scope.extend(explicit_selectors(namespace, reads));
+    }
+    Ok(scope)
+}
+
+/// zk2's verbatim chunks a capture or a window names, in
+/// [`zenkey_fleet::VERBATIM`]'s order: those its `excluded` list leaves
+/// out, since that list is exact (#924).
+pub fn named_verbatim(excluded: &[String]) -> Vec<&'static str> {
+    zenkey_fleet::VERBATIM
+        .into_iter()
+        .filter(|v| !excluded.iter().any(|e| e == v))
+        .collect()
+}
+
+/// What a raw observer's selectors reach among the verbatim chunks, said
+/// on stderr before it starts (O5; #924): those a selector names, then
+/// those none names. Empty when every one is named.
+pub fn scope_note(selectors: &[String]) -> String {
+    let excluded = zenkey_fleet::zrec_excluded(selectors);
+    if excluded.is_empty() {
+        return String::new();
+    }
+    let named = named_verbatim(&excluded);
+    format!(
+        " — {}{} excluded: no selector names them, and `*`/`**` never match one",
+        if named.is_empty() {
+            String::new()
+        } else {
+            format!("{} named by a selector; ", named.join(", "))
+        },
+        excluded.join(", ")
+    )
 }
 
 /// A typed wire selector through the raw seam, with the hint for a
@@ -424,5 +542,119 @@ mod tests {
         assert!(crate::cli::revision_arg("tc.netif.v1@").is_err());
         assert!(crate::cli::revision_arg("tcnetif").is_err());
         assert!(crate::cli::revision_arg(&format!("a.v1@{}", "0".repeat(65))).is_err());
+    }
+
+    fn intersects(a: &str, b: &str) -> bool {
+        let (a, b) = (
+            zenoh::key_expr::KeyExpr::new(a).expect("a key expression"),
+            zenoh::key_expr::KeyExpr::new(b).expect("a key expression"),
+        );
+        a.intersects(&b)
+    }
+
+    /// #924: with no selector the scope is the deployment's zk2 data, and
+    /// `--explicit` adds each explicit kind by name after it, under the
+    /// namespace as the default is; the three reach every data key of the
+    /// deployment and no `@op` or `@zk` key, and spelling one explicit kind
+    /// lends nothing to the other. A verb that reads state adds `@state`
+    /// alone.
+    #[test]
+    fn explicit_adds_each_explicit_kind_by_name_beside_the_default() {
+        let samples = Reads::Samples;
+        assert_eq!(
+            wire_scope(&[], false, "prod", samples).unwrap(),
+            ["prod/zk2/**"]
+        );
+        let all = wire_scope(&[], true, "prod", samples).unwrap();
+        assert_eq!(
+            all,
+            [
+                "prod/zk2/**",
+                "prod/zk2/*/*/*/@stream/**",
+                "prod/zk2/*/*/*/@state/**"
+            ]
+        );
+        assert_eq!(
+            wire_scope(&[], true, "", samples).unwrap(),
+            ["zk2/**", "zk2/*/*/*/@stream/**", "zk2/*/*/*/@state/**"]
+        );
+        assert_eq!(
+            wire_scope(&[], true, "acme/fleet-a", Reads::State).unwrap(),
+            ["acme/fleet-a/zk2/**", "acme/fleet-a/zk2/*/*/*/@state/**"]
+        );
+
+        let frames = "prod/zk2/robot1/camera/camera.v1/@stream/image";
+        let tiles = "prod/zk2/robot1/map/map.v1/@state/tiles/a";
+        assert!(!intersects(&all[0], frames) && !intersects(&all[0], tiles));
+        assert!(intersects(&all[1], frames) && !intersects(&all[1], tiles));
+        assert!(intersects(&all[2], tiles) && !intersects(&all[2], frames));
+        for hidden in [
+            "prod/zk2/robot1/nav/nav.v2/@op/reset",
+            "prod/zk2/robot1/nav/@zk/instance/0123456789abcdef",
+            "prod/zk2/@zk/contract/abc",
+            "other/zk2/robot1/camera/camera.v1/@stream/image",
+        ] {
+            assert!(
+                !all.iter().any(|s| intersects(s, hidden)),
+                "{hidden} is not the data plane"
+            );
+        }
+        // Positions 1–5 have fixed arity (core §1.3): what §1.3's guard
+        // reads, `blind_spots`, finds each selector blind to the others'.
+        assert_eq!(
+            zenkey_model::grammar::blind_spots(&all[1]).unwrap(),
+            ["@state", "@op", "@zk"]
+        );
+    }
+
+    /// #924: `--explicit` widens the default, so beside a typed selector
+    /// it is refused, exit 2, saying why; a typed selector alone passes
+    /// through the raw seam as before.
+    #[test]
+    fn explicit_beside_a_typed_selector_is_refused() {
+        let typed = ["prod/zk2/host-a/**".to_owned()];
+        let refused =
+            wire_scope(&typed, true, "prod", Reads::Samples).expect_err("refused beside it");
+        assert_eq!(crate::exit::code_for(&refused), crate::exit::NO_VERDICT);
+        let words = refused.to_string();
+        assert!(words.contains("prod/zk2/host-a/**"), "{words}");
+        assert!(words.contains("/*/*/@stream/**"), "{words}");
+        let refused = wire_scope(&typed, true, "prod", Reads::State).expect_err("refused");
+        assert!(refused.to_string().contains("/*/*/@state/**"), "{refused}");
+        assert_eq!(
+            wire_scope(&typed, false, "prod", Reads::Samples).unwrap(),
+            typed
+        );
+        assert!(wire_scope(&["zk2/$*/x".into()], false, "", Reads::Samples).is_err());
+    }
+
+    /// The line a raw observer says before it starts (O5): the verbatim
+    /// chunks a selector names, then those none names; nothing when every
+    /// one is named.
+    #[test]
+    fn the_scope_note_names_what_is_watched_and_what_is_excluded() {
+        assert_eq!(
+            scope_note(&["prod/zk2/**".to_owned()]),
+            " — @stream, @state, @op, @zk, @adv excluded: no selector names them, and \
+             `*`/`**` never match one"
+        );
+        assert_eq!(
+            scope_note(&wire_scope(&[], true, "prod", Reads::Samples).unwrap()),
+            " — @stream, @state named by a selector; @op, @zk, @adv excluded: no selector \
+             names them, and `*`/`**` never match one"
+        );
+        let every = [
+            "zk2/*/*/*/@stream/**",
+            "zk2/*/*/*/@state/**",
+            "zk2/*/*/*/@op/**",
+            "zk2/*/*/@zk/**",
+            "zk2/*/*/*/stream/**/@adv/**",
+        ]
+        .map(String::from);
+        assert_eq!(scope_note(&every), "");
+        assert_eq!(
+            named_verbatim(&["@op".into(), "@zk".into(), "@adv".into()]),
+            ["@stream", "@state"]
+        );
     }
 }

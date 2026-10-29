@@ -126,13 +126,23 @@ impl Render for RecordReport {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         // Version 3 (#612, FJ8a): what the selectors cannot reach, said —
-        // an excluded verbatim chunk is not an empty one.
+        // an excluded verbatim chunk is not an empty one — and what they
+        // name, `--explicit`'s `@stream` and `@state` among them (#924).
         if let Some(ex) = self.header.excluded.as_deref().filter(|e| !e.is_empty()) {
+            let named = crate::cmd::zk2::named_verbatim(ex);
             notes.push(
                 Note::coverage(format!(
-                    "{} excluded: no watched selector names them, and `*`/`**` never match a \
+                    "{}{} excluded: no watched selector names them, and `*`/`**` never match a \
                      verbatim chunk — the capture holds none of their traffic, which is not \
                      the same as there being none",
+                    if named.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "{} named by a watched selector, so captured; ",
+                            named.join(", ")
+                        )
+                    },
                     ex.join(", ")
                 ))
                 .cite("tooling guide O5"),

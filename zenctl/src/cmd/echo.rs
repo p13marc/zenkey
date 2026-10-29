@@ -15,6 +15,10 @@
 //! provider or a revision nudges a re-read in the background, so a service
 //! that starts after `echo` resolves too, and the drain never waits on one.
 //!
+//! The scope is the raw observers' one ([`zk2::wire_scope`]): a typed
+//! selector, or the deployment's zk2 data, and with `--explicit` its
+//! explicit kinds by name (#924), each watched on the same monitor.
+//!
 //! The row dialect is the one `pub --from ndjson` and `.zrec` read back
 //! (#235, FJ8a's `qos_axes`), with the key's `identity` beside it; the
 //! tagged `dropped` lines are stream metadata, skipped by the reader.
@@ -37,6 +41,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     let contracts = zk2::load_contracts(&cli.contracts)?;
     let EchoArgs {
         selector,
+        explicit: crate::cli::ExplicitArgs { explicit },
         fmt,
         raw,
         hex: hex_payload,
@@ -47,7 +52,12 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         ns: _,
     } = cli;
     let namespace = dep.namespace().to_owned();
-    let selector = zk2::wire_selector(selector.as_deref(), &namespace)?;
+    let selectors = zk2::wire_scope(
+        selector.as_slice(),
+        explicit,
+        &namespace,
+        zk2::Reads::Samples,
+    )?;
 
     // The data plane in no namespace: every key as the wire carries it.
     let session = dep.link().session().await?;
@@ -74,13 +84,16 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     let monitor =
         zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
-    monitor.watch(&selector).await?;
+    for s in &selectors {
+        monitor.watch(s).await?;
+    }
 
     let ndjson = crate::render::Mode::of(dep.format()).machine();
     if !ndjson {
         eprintln!(
-            "echoing {selector}{} (ctrl-c to stop)",
-            excluded_note(&selector)
+            "echoing {}{} (ctrl-c to stop)",
+            selectors.join(" + "),
+            zk2::scope_note(&selectors)
         );
     }
     let mut seen = 0usize;
@@ -157,19 +170,6 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// What a `**` selector cannot carry, said up front (O5).
-fn excluded_note(selector: &str) -> String {
-    let excluded = zenkey_fleet::zrec_excluded(&[selector.to_owned()]);
-    if excluded.is_empty() {
-        String::new()
-    } else {
-        format!(
-            " — {} excluded: no selector names them, and `*`/`**` never match one",
-            excluded.join(", ")
-        )
-    }
 }
 
 /// One sample through the lens.

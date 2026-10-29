@@ -13,6 +13,10 @@
 //! because a file of zero rows would read as an empty deployment the next
 //! time somebody diffed against it.
 //!
+//! Its scope is the raw observers' one ([`zk2::wire_scope`]), read as
+//! state: `--explicit` adds `<ns>/zk2/*/*/*/@state/**` alone (#924), since
+//! a stream answers no GET.
+//!
 //! The diff opens no session. Its exit is the RFC 13 §1.2 projection over
 //! the diff's own judgement — a difference *is* the finding (1), identity
 //! is clean (0) — and a file that could not be read is the reserved 2,
@@ -41,6 +45,7 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     let contracts = zk2::load_contracts(&cli.contracts)?;
     let SnapshotArgs {
         selectors,
+        explicit,
         out,
         max_replies,
         no_presence,
@@ -61,14 +66,7 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     // before the session, because nothing the fleet answers changes it.
     let mode = super::output_mode(&out, overwrite)?;
     let namespace = dep.namespace().to_owned();
-    let asked: Vec<String> = if selectors.is_empty() {
-        vec![zk2::default_selector(&namespace)]
-    } else {
-        selectors
-            .iter()
-            .map(|s| zk2::wire_selector(Some(s), &namespace))
-            .collect::<Result<_>>()?
-    };
+    let asked = zk2::wire_scope(&selectors, explicit, &namespace, zk2::Reads::State)?;
     // Only state answers a GET (spec §1.3): each selector narrowed to its
     // state keys, and one that reaches none named, never silently dropped.
     let mut gets = Vec::new();

@@ -10,7 +10,10 @@
 //! namespace the operator stated (`--namespace`, alias `--base`: zk2's base
 //! is the namespace), the exact selectors, and the verbatim chunks none of
 //! them reach (O5). With no selector it captures the deployment's zk2 data,
-//! `<ns>/zk2/**`, and says what that excludes.
+//! `<ns>/zk2/**`, and says what that excludes; `--explicit` adds the
+//! explicit kinds by name, `<ns>/zk2/*/*/*/@stream/**` and
+//! `<ns>/zk2/*/*/*/@state/**` (#924), and the header's `selectors` and
+//! `excluded` say so.
 //!
 //! `--on <RULE> --pre <SECS>` (#218) is the triggered form: nothing is
 //! written until a rule fires, and then the file carries the state
@@ -35,11 +38,13 @@ use zenkey_fleet::{
 
 use crate::bus::Deployment;
 use crate::cli::PreambleMode;
+use crate::cmd::zk2;
 
 pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let crate::cli::RecordArgs {
         selectors,
+        explicit: crate::cli::ExplicitArgs { explicit },
         out,
         for_secs,
         count,
@@ -56,7 +61,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     // Before anything else that could take time: an existing capture is
     // refused unless --overwrite (#514), and no session opens to find out.
     let mode = super::output_mode(&out, overwrite)?;
-    let selectors = selectors_of(&selectors, dep.namespace())?;
+    let selectors = selectors_of(&selectors, explicit, dep.namespace())?;
     if on.is_empty() {
         return run_inner(&selectors, &out, mode, for_secs, count, &dep).await;
     }
@@ -90,24 +95,20 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     run_triggered(&selectors, &out, mode, triggered, &dep).await
 }
 
-/// The selectors a capture watches: the ones typed (through the raw seam,
-/// RFC 03 §2's `$*` refusal), or the deployment's zk2 data. A typed zk2
-/// selector outside the namespace gets a one-line hint: selectors are wire
-/// keys, and `replay --namespace` moves only what sits under the
-/// capture's namespace.
-fn selectors_of(typed: &[String], namespace: &str) -> Result<Vec<String>> {
-    if typed.is_empty() {
-        return Ok(vec![zenkey_fleet::with_namespace(namespace, "zk2/**")]);
-    }
-    let mut out = Vec::new();
-    for s in typed {
+/// The selectors a capture watches, the raw observers' one scope
+/// ([`zk2::wire_scope`], #924): the ones typed (through the raw seam, RFC
+/// 03 §2's `$*` refusal), or the deployment's zk2 data, and with
+/// `--explicit` its explicit kinds by name. A typed zk2 selector outside
+/// the namespace gets a one-line hint: selectors are wire keys, and
+/// `replay --namespace` moves only what sits under the capture's namespace.
+fn selectors_of(typed: &[String], explicit: bool, namespace: &str) -> Result<Vec<String>> {
+    zk2::wire_scope_through(typed, explicit, namespace, zk2::Reads::Samples, |s| {
         let s = super::raw_selector(s)?;
         if let Some(hint) = off_namespace_hint(s, namespace) {
             eprintln!("{hint}");
         }
-        out.push(s.to_owned());
-    }
-    Ok(out)
+        Ok(s.to_owned())
+    })
 }
 
 /// The hint for a base-relative zk2 selector typed under a non-empty
@@ -126,17 +127,6 @@ fn off_namespace_hint(sel: &str, namespace: &str) -> Option<String> {
             zenkey_fleet::with_namespace(namespace, sel)
         )
     })
-}
-
-/// What a capture of `selectors` cannot contain, said before it starts (O5).
-fn excluded_line(header: &ZrecHeader) -> String {
-    match header.excluded.as_deref() {
-        Some([]) | None => String::new(),
-        Some(ex) => format!(
-            " — {} excluded: no selector names them, and `*`/`**` never match one",
-            ex.join(", ")
-        ),
-    }
 }
 
 async fn run_inner(
@@ -179,7 +169,7 @@ async fn run_inner(
             (Some(d), n) => format!(" for {d}s or {n} sample(s)"),
             _ => String::new(),
         },
-        excluded_line(&header)
+        zk2::scope_note(&header.selectors)
     );
 
     let bounds = RecordBounds {
@@ -298,7 +288,7 @@ async fn run_triggered(
             Some(d) => format!("; giving up after {:.1}s", d.as_secs_f64()),
             None => String::new(),
         },
-        excluded_line(&ZrecHeader::capture(selectors.to_vec(), dep.namespace()))
+        zk2::scope_note(selectors)
     );
 
     let armed = std::time::Instant::now();
@@ -399,8 +389,8 @@ mod tests {
     /// selector under a namespace is hinted, a wire key is not.
     #[test]
     fn the_default_is_the_namespaces_zk2_data_and_a_relative_selector_is_hinted() {
-        assert_eq!(selectors_of(&[], "prod").unwrap(), ["prod/zk2/**"]);
-        assert_eq!(selectors_of(&[], "").unwrap(), ["zk2/**"]);
+        assert_eq!(selectors_of(&[], false, "prod").unwrap(), ["prod/zk2/**"]);
+        assert_eq!(selectors_of(&[], false, "").unwrap(), ["zk2/**"]);
         let hint = off_namespace_hint("zk2/**", "prod").expect("hinted");
         assert!(hint.contains(r#"did you mean "prod/zk2/**"?"#), "{hint}");
         for (sel, ns) in [
@@ -411,6 +401,38 @@ mod tests {
         ] {
             assert_eq!(off_namespace_hint(sel, ns), None, "{sel} under {ns:?}");
         }
-        assert!(selectors_of(&["zk2/$*/x".into()], "").is_err());
+        assert!(selectors_of(&["zk2/$*/x".into()], false, "").is_err());
+    }
+
+    /// #924: `--explicit` captures the explicit kinds by name beside the
+    /// default, under the namespace, and is refused beside a typed
+    /// selector; the header then excludes neither, and the line before the
+    /// capture names both.
+    #[test]
+    fn explicit_names_both_explicit_kinds_and_the_header_says_so() {
+        let all = selectors_of(&[], true, "prod").unwrap();
+        assert_eq!(
+            all,
+            [
+                "prod/zk2/**",
+                "prod/zk2/*/*/*/@stream/**",
+                "prod/zk2/*/*/*/@state/**"
+            ]
+        );
+        let header = ZrecHeader::capture(all.clone(), "prod");
+        assert_eq!(header.selectors, all);
+        assert_eq!(
+            header.excluded.as_deref(),
+            Some(&["@op".to_owned(), "@zk".to_owned(), "@adv".to_owned()][..])
+        );
+        assert_eq!(
+            zk2::scope_note(&all),
+            " — @stream, @state named by a selector; @op, @zk, @adv excluded: no selector \
+             names them, and `*`/`**` never match one"
+        );
+        let refused = selectors_of(&["prod/zk2/host-a/**".into()], true, "prod")
+            .expect_err("--explicit beside a selector");
+        assert_eq!(crate::exit::code_for(&refused), crate::exit::NO_VERDICT);
+        assert!(refused.to_string().contains("--explicit"), "{refused}");
     }
 }
