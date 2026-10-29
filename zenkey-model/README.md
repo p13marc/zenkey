@@ -23,4 +23,5 @@ this crate.
 cargo run -p zenkey-model --example zk2-check -- examples/zk2/walkthrough/nav.v2.toml
 ```
 
-MIT. Not on crates.io until the zk2 core spec is accepted (#606).
+MIT. Not on crates.io: publishing the zk2 crates waits on the maintainer's
+call (#585, #929).
