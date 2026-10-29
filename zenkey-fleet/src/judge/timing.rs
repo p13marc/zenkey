@@ -9,7 +9,8 @@
 //! `lifespan_expired` over each sample's `LifespanReader` judgement, each
 //! under the window's premises (across a face, lost, the owner present
 //! throughout); and `roll_up` over a resource's members and the run's, read
-//! by each question's finding (text 0.2, F-264). Nothing is re-derived
+//! by each question's finding (text 0.2, F-264), every member set aside not
+//! asked (text 0.4, F-277). Nothing is re-derived
 //! here: this module maps the model's answers onto the report's tokens.
 //!
 //! **The run's verdict** ([`TimingReport::judgement`]): a finding of any
@@ -59,32 +60,25 @@ pub fn answer(q: Question, j: Judged) -> TimingAnswer {
     }
 }
 
-/// One question over `members` (each its key and its answer), by
-/// `roll_up` (F-264). With no member asked it, `not_asked`.
+/// One question over `members` (each its key and its answer), by the
+/// model's `roll_up` alone (F-264; text 0.4, F-277: every member set
+/// aside is not asked, or not this profile's when every one is; no member
+/// at all is unobservable).
 pub fn roll<'a>(
     q: Question,
     members: impl IntoIterator<Item = (&'a str, &'a TimingAnswer)> + Clone,
 ) -> TimingRollUp {
     let mut counts = std::collections::BTreeMap::new();
-    let mut asked = false;
     for (_, a) in members.clone() {
         *counts.entry(a.answer.as_str().to_owned()).or_insert(0) += 1;
-        asked |= !matches!(
-            a.answer,
-            TimingAnswerToken::NotAsked | TimingAnswerToken::NotThisProfiles
-        );
     }
-    let answer = if asked {
-        token(roll_up(
-            q,
-            members
-                .clone()
-                .into_iter()
-                .map(|(_, a)| model_answer(a.answer)),
-        ))
-    } else {
-        TimingAnswerToken::NotAsked
-    };
+    let answer = token(roll_up(
+        q,
+        members
+            .clone()
+            .into_iter()
+            .map(|(_, a)| model_answer(a.answer)),
+    ));
     let first = members
         .into_iter()
         .find(|(_, a)| a.answer == answer)
@@ -94,7 +88,7 @@ pub fn roll<'a>(
         first: first.as_ref().map(|(k, _)| k.clone()),
         reason: first.map(|(_, r)| r),
         members: counts,
-        finding: asked && model_answer(answer) == q.finding(),
+        finding: model_answer(answer) == q.finding(),
     }
 }
 
@@ -357,6 +351,10 @@ pub fn reason_says(token: &str) -> &'static str {
 mod tests {
     use super::*;
 
+    fn unobs_early() -> TimingAnswer {
+        a(TimingAnswerToken::Unobservable, "window_too_short")
+    }
+
     fn a(t: TimingAnswerToken, reason: &str) -> TimingAnswer {
         TimingAnswer {
             answer: t,
@@ -386,7 +384,29 @@ mod tests {
         let r = roll(Question::Lifespan, [("x", &live), ("z", &not_asked)]);
         assert_eq!((r.answer, r.finding), (TimingAnswerToken::No, false));
         let r = roll(Question::Lifespan, [("z", &not_asked)]);
-        assert_eq!(r.answer, TimingAnswerToken::NotAsked);
+        assert_eq!(r.answer, TimingAnswerToken::NotAsked, "F-277");
+        let other = a(TimingAnswerToken::NotThisProfiles, "kind");
+        let r = roll(Question::Period, [("s", &other)]);
+        assert_eq!(
+            (r.answer, r.finding),
+            (TimingAnswerToken::NotThisProfiles, false),
+            "every member not this profile's"
+        );
+        let r = roll(
+            Question::Deadline,
+            [("z", &not_asked), ("u", &unobs_early())],
+        );
+        assert_eq!(
+            (r.answer, r.finding),
+            (TimingAnswerToken::Unobservable, false),
+            "an unobservable member is never set aside"
+        );
+        let r = roll(Question::Lifespan, std::iter::empty());
+        assert_eq!(
+            (r.answer, r.finding),
+            (TimingAnswerToken::Unobservable, false),
+            "no member at all"
+        );
         let unobs = a(TimingAnswerToken::Unobservable, "no_bound");
         let r = roll(Question::Lifespan, [("x", &live), ("u", &unobs)]);
         assert_eq!(

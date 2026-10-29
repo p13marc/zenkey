@@ -4,6 +4,37 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-29: round 79's answer (#908, MD)
+
+The second implementation read 0.3 cold and ran its own tool beside the
+reference's (zk2py round 79). The two agreed on every member's answer, and
+read one roll-up apart: F-277, accepted on #908.
+
+**Changed: a rule (round 79).**
+- **A roll-up whose every member is set aside** (§5; F-277). 0.3 read it
+  unobservable, "unobservable otherwise", the members not asked or not
+  this profile's set aside, and `conclusions.json` #33 and #34 read it so.
+  Over a resource or a run whose every member is not asked, nobody put the
+  question, which §5's opening calls not asked, never a window that could
+  not answer it: a run of streams declaring no lifespan answered the
+  lifespan's question unobservable, and so had no verdict. Now, when every
+  member is set aside and there is at least one, the roll-up is not this
+  profile's when every one is, else not asked. `conclusions.json` #34
+  (one member not this profile's, one not asked) moves from unobservable
+  to `not_asked`, and #40 to #42 are new: `[not_asked]` and `[not_asked,
+  not_asked]` → `not_asked`, `[not_this_profiles]` → `not_this_profiles`. The reference's
+  `zenkey_model::timing::roll_up` takes the rule; the fleet's tool had
+  answered not asked already, by a rule of its own the model did not
+  give, and now reads the model's alone. Changes a run's verdict where
+  every member is set aside.
+
+**Deliberately not changed.**
+- **No member at all** (#33) stays unobservable: nothing was held to ask,
+  and a run whose scope holds none has no verdict.
+- **The other pole** still needs one member on it: a member set aside
+  beside it changes nothing.
+- **The core version.** Nothing here needs core 0.56.
+
 ## 0.3 — 2026-10-28: round 78's answers, and the tools (#908, MC)
 
 The second implementation ran 0.2 against the reference runtime (zk2py
