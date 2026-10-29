@@ -15,7 +15,10 @@ version, text 0.1 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)),
 written against this version. **Moved, no rule changed.** Each moved
 block's text is word for word what 0.57 held, its `[F:]` and `[Sc:]`
 citations with it; only its references are rewritten for its new home
-(a core section is written `core §n` there). Each old home holds a
+(a core section is written `core §n` there). Where only a sentence or a
+table cell moved (R3's and R7's tool clauses, §7.1's "Generic tools"
+column, §3.3's two `meta` sentences, §7.4's SHOULD), it stands there as a
+bullet of its own, its words kept and the subject it lost named. Each old home holds a
 one-line pointer, `Moved to observer.md §n (core 0.58); no rule
 changed.`, under the block's name, and every section number stays, so a
 citation of `core §8.1` or `core §2.7` still leads to the rule.

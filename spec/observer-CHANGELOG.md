@@ -33,7 +33,12 @@ references are rewritten for this text (§0: a bare § is this text's, a
 core section is `core §n`, and a version in parentheses is the core
 amendment that made the rule). Two blocks a core block shared with an
 owner or a deployment restate the core's half and cite it: §4.2's
-admin space off by default, and §6.1's opening sentence.
+admin space off by default, and §6.1's opening sentence. Where only a
+sentence or a table cell moved, it is a bullet of its own here, its words
+kept and the subject it lost named: §4.4's two `meta` sentences, §7.1's
+R3 and R7 clauses, §7.3's "What a generic tool decodes" (core §7.1's
+"Generic tools" column and its plugin), and §7.4's SHOULD, which names
+the limit core §7.4 sets.
 
 **Promoted from [`docs/zk2/tooling-guide.md`](../docs/zk2/tooling-guide.md),
 each with its evidence:**
