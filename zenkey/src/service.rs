@@ -345,6 +345,16 @@ impl ServiceBuilder {
     /// only), and one carrying no `arbitration.policy`. A role carrying one
     /// that is not given here is still checked at start, by §2.2's checks 1
     /// to 5, which need no revision.
+    ///
+    /// **Checked here, at once** (text 0.3, F-274): the declaration is read
+    /// over `required` and the role's parameter bindings as configured, and
+    /// an invalid one is refused here with the error
+    /// [`ServiceBuilder::start`] would give, `not started: <address>: role
+    /// …: arbitration.v1 invalid: <reason>…` (`Error::NotExposed`). So a
+    /// caller that puts a state's value before its tokens (core §8.2,
+    /// "State values") calls this first, and puts nothing of an instance
+    /// that never starts (§2.2: "nothing of the instance is declared or
+    /// put"). [`ServiceBuilder::start`] reads it again.
     pub fn arbitrate(
         &mut self,
         role: &str,
@@ -382,6 +392,8 @@ impl ServiceBuilder {
                  (arbitration.v1 §2.2)"
             )));
         }
+        let addr = self.address()?;
+        check_role(r, &self.impls, &self.config, Some(&required), addr)?;
         self.arbitrated.insert(role.to_owned(), required);
         Ok(self)
     }
@@ -1150,30 +1162,47 @@ fn check_arbitration(
     held: &BTreeMap<String, Arc<zenkey_model::contract::Contract>>,
     addr: &Addr,
 ) -> Result<()> {
-    use zenkey_model::arbitration::{self, Declaration};
     for r in roles {
-        let Some(by) = r.declared_by.as_ref() else {
-            continue;
-        };
-        let Ok(s) = find(impls, by) else { continue };
-        let Some(req) = s.imp.contract().requires.get(&r.role) else {
-            continue;
-        };
-        let role = arbitration::Role::of(s.imp.contract(), req);
-        let rev = held.get(&r.role).map(|c| arbitration::Revision::of(c));
-        let params = config
-            .bindings
-            .get(&r.role)
-            .map(|b| b.params.clone())
-            .unwrap_or_default();
-        if let Declaration::Invalid(why) = arbitration::declaration(&role, rev.as_ref(), &params) {
-            return Err(Error::NotExposed(format!(
-                "{addr}: role {:?} ({}): arbitration.v1 {}",
-                r.role,
-                r.interface,
-                crate::arbitration::invalid_words(&why)
-            )));
-        }
+        check_role(r, impls, config, held.get(&r.role).map(Arc::as_ref), addr)?;
+    }
+    Ok(())
+}
+
+/// [`check_arbitration`] of one role, over `held`, the revision of its
+/// required interface given (`None`: checks 1 to 5 alone). A role no
+/// contract declares, or one its declaring contract does not require, is
+/// not this profile's here.
+fn check_role(
+    r: &Role,
+    impls: &[ImplState],
+    config: &ServiceConfig,
+    held: Option<&zenkey_model::contract::Contract>,
+    addr: &Addr,
+) -> Result<()> {
+    use zenkey_model::arbitration::{self, Declaration};
+    let Some(by) = r.declared_by.as_ref() else {
+        return Ok(());
+    };
+    let Ok(s) = find(impls, by) else {
+        return Ok(());
+    };
+    let Some(req) = s.imp.contract().requires.get(&r.role) else {
+        return Ok(());
+    };
+    let role = arbitration::Role::of(s.imp.contract(), req);
+    let rev = held.map(arbitration::Revision::of);
+    let params = config
+        .bindings
+        .get(&r.role)
+        .map(|b| b.params.clone())
+        .unwrap_or_default();
+    if let Declaration::Invalid(why) = arbitration::declaration(&role, rev.as_ref(), &params) {
+        return Err(Error::NotExposed(format!(
+            "{addr}: role {:?} ({}): arbitration.v1 {}",
+            r.role,
+            r.interface,
+            crate::arbitration::invalid_words(&why)
+        )));
     }
     Ok(())
 }

@@ -254,13 +254,18 @@ impl Commander {
                     if !on.load(Ordering::Relaxed) {
                         continue;
                     }
-                    let payload = format!("{name} {n}");
                     let put = if raw.load(Ordering::Relaxed) {
                         // Round the writer: a standby's raw samples
-                        // (scenarios §11), stamped by the session's HLC.
-                        session.put(&key, payload).await.map_err(|e| e.to_string())
+                        // (scenarios §11 step 1), `standby <n>`, stamped by
+                        // the session's HLC (text 0.3, F-276).
+                        session
+                            .put(&key, format!("standby {n}"))
+                            .await
+                            .map_err(|e| e.to_string())
                     } else {
-                        w.put(payload).await.map_err(|e| e.to_string())
+                        w.put(format!("{name} {n}"))
+                            .await
+                            .map_err(|e| e.to_string())
                     };
                     match put {
                         Ok(()) => {

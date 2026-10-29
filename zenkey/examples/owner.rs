@@ -494,11 +494,14 @@
 //! <entry>,…` makes the owner an actuator: `rudder.v1` implemented, its
 //! role `cmd` bound to the entries in order and arbitrated over the
 //! `steer.v1` it holds (a `steer.v1` file given, else the embedded one),
-//! refused at start, exit 1, when the declaration is invalid; it prints
+//! refused, exit 1, when the declaration is invalid, before anything of it
+//! is declared or put (`ServiceBuilder::arbitrate` reads it at once, text
+//! 0.3, F-274); it prints
 //! each switch, one JSON line, as `scenarios.md`'s conventions write it,
 //! and puts every command it delivers on `angle`. `--commander` makes it a
 //! commander: `steer.v1`'s `cmd` put at its period, `<service> <n>`, from
-//! `--commander-lead-ms` after its tokens (F-269). `arbitrate …` and
+//! `--commander-lead-ms` after its tokens (F-269), or raw round its writer,
+//! `standby <n>` (scenarios §11, F-276). `arbitrate …` and
 //! `commander …` lines are answered by one JSON line each; `--help` lists
 //! them.
 
@@ -1034,11 +1037,13 @@ arbitration.v1 (spec/profiles/arbitration/v1.md)
   refused at start when the declaration is invalid (arbitration.v1 §2.2):
   stderr says `not started: <system>/<service>: role \"cmd\" (steer.v1):
   arbitration.v1 invalid: <reason>[, <reason>...] (...)`, exit 1, nothing
-  declared. Its sessions: the service's, which holds the subscription and
+  declared or put. Its sessions: the service's, which holds the subscription and
   makes every read again; and a watch session of its own, a client of
   --watch-connect's endpoint or --connect's, where it hears withdrawals.
   It puts every command it delivers on angle, its payload unchanged (at its
-  start angle holds ok, the owner's raw state value).
+  start angle holds ok, the owner's raw state value, put once the declaration
+  is read valid and before its tokens: a refused actuator puts nothing, text
+  0.3, F-274).
 
   --arbitrate <entry>,...         implement rudder.v1, cmd bound to these
                                   <system>/<service> entries (either chunk *), in order
@@ -1082,8 +1087,8 @@ arbitration.v1 (spec/profiles/arbitration/v1.md)
 
   commander hold|resume           stop or start putting, the tokens kept
   commander raw on|off            on: every put raw through the session, round the
-                                  writer, stamped by the session's HLC: a standby's
-                                  samples (scenarios.md §11)
+                                  writer, stamped by the session's HLC, each sample
+                                  `standby <n>`: a standby's samples (scenarios.md §11)
   commander sent                  {\"commander\": \"sent\", \"sent\": <n>, \"refused\": <n>}
   commander new-epoch             a re-mint, make-before-break (core §8.1)
   commander zid                   the session's zid
@@ -2116,6 +2121,7 @@ impl Ctx<'_> {
         let mut servers = Vec::new();
         let mut members = Members::default();
         let none = Bindings::new();
+        let mut arbitrated = false;
         for imp in self.imps.iter().cloned() {
             let iface = imp.iface().clone();
             let resources = imp.contract().resources.clone();
@@ -2142,7 +2148,22 @@ impl Ctx<'_> {
             members
                 .contracts
                 .insert(iface.clone(), imp.contract().clone());
+            let arbitrates = imp
+                .contract()
+                .requires
+                .get(arbitrate::ROLE)
+                .is_some_and(|r| r.interface == arbitrate::steer_iface());
             b.implement(imp)?;
+            // arbitration.v1 §2.2 (#909): the role's declaration read over
+            // the revision held as soon as its contract is implemented,
+            // before any of the instance's writers is declared or put (text
+            // 0.3, F-274): an invalid one stops the owner here, `not
+            // started: … invalid`, nothing declared or put; start() reads it
+            // again.
+            if arbitrates && let Some(steer) = &self.arb_steer {
+                b.arbitrate(arbitrate::ROLE, Arc::clone(steer))?;
+                arbitrated = true;
+            }
             for r in resources {
                 let name = zenkey::implementation::resource_name(&r);
                 let raw = |t: &TypeId| matches!(t, TypeId::Raw { .. });
@@ -2212,6 +2233,11 @@ impl Ctx<'_> {
                     }
                 }
             }
+        }
+        // --arbitrate with no contract requiring steer.v1 as `cmd`: the
+        // runtime's refusal, as before anything is put.
+        if !arbitrated && let Some(steer) = &self.arb_steer {
+            b.arbitrate(arbitrate::ROLE, Arc::clone(steer))?;
         }
         // Core §3.3: a template's bound lowered in the descriptor, which the
         // runtime then keeps (§2.7). alarms.v1's goes in its startup, set
@@ -2376,11 +2402,6 @@ impl Ctx<'_> {
             }
             None => None,
         };
-        // arbitration.v1 §2.2 (#909): the role's declaration read at start
-        // over the revision held.
-        if let Some(steer) = &self.arb_steer {
-            b.arbitrate(arbitrate::ROLE, Arc::clone(steer))?;
-        }
         let svc = b.start().await?;
         if let Some((r, _)) = &red
             && opts.hold_heal
