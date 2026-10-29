@@ -415,7 +415,9 @@ def _lifespan_step(bus: Bus, epsilon: int | None, offset: Callable[[float], int]
     c = bus.reader([RID_CMD], epsilon, on_value=lambda k, p: handed.append(p))
     c.handed = handed  # type: ignore[attr-defined]
     time.sleep(0.3)
-    o = bus.owner()
+    # text 0.3 (F-273): "The owner's session has no HLC, so the runner's
+    # offset moves its stamps alone"
+    o = bus.owner(hlc=False)
     _held_by(c, o)
     t0 = time.monotonic_ns()
     clock = stamped_clock(o.session, lambda: offset((time.monotonic_ns() - t0) / NS))

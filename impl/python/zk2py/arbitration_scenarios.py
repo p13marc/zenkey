@@ -1,8 +1,8 @@
 """The ``arbitration.v1`` scenarios (``spec/profiles/arbitration/scenarios.md``,
-text 0.2) on an in-process zenoh-python router, in every pairing of zk2py's
+text 0.3) on an in-process zenoh-python router, in every pairing of zk2py's
 parties and the reference's: ``python -m zk2py.arbitration_scenarios
 [--pair COMMANDERS:ACTUATORS]... [--only 1 … 11|7c]``, each side ``py`` or
-``rs`` (round 78; zk2py alone in round 77).
+``rs`` (rounds 78 and 79; zk2py alone in round 77).
 
 - **The bus** is the text's: R1, a router on a free loopback port; every
   party a client of it. §7's watch links go through a TCP relay the test
@@ -27,6 +27,13 @@ parties and the reference's: ``python -m zk2py.arbitration_scenarios
   ``start`` line's arrival, the pipe's error well under a millisecond.
 - **S** subscribes to ``zk2/lab/**`` and follows ``zk2/lab/*/@zk/**`` on a
   watch session, recording each delivery's arrival, key and payload.
+- **§10** runs both tools at once over each step's consumer, each a
+  process given the same arguments: zk2py's (``python -m
+  zk2py.arbitration_tool``) and the reference's (``zenctl arbitration``, a
+  black box); each one's answers and exit checked against Expected and the
+  reference test's exits, then the two compared token by token. §11 runs
+  both beside its step 2, holding minor 1 (governed) and, the control,
+  minor 0 beside minor 1 (text 0.3, §2.14).
 - **Margins** are the text's: a switch's ``at_ms − last_ms`` against the
   detection bound with 50 ms of scheduling beyond it, the largest lateness
   recorded; an instant the test takes itself, 200 ms.
@@ -53,6 +60,8 @@ STEER, RUDDER = DIR / "steer.v1.toml", DIR / "rudder.v1.toml"
 GOVERNED = DIR / "steer-governed.v1.toml"
 BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/targets/zenkey-tier/blackbox"))
 OWNER = BLACKBOX / "owner"
+#: §10's tools: zk2py's, and the reference's when its black box is here
+TOOLS = ("zk2py", "zenctl") if os.access(BLACKBOX / "zenctl", os.X_OK) else ("zk2py",)
 NS, MS = 1_000_000_000, 1_000_000
 DEADLINE_MS, BOUND_MS, MARGIN_MS = 300, 306, 50
 EXACT = ["lab/safety", "lab/teleop", "lab/autopilot"]
@@ -952,9 +961,10 @@ def section8(report: Report, oi: str = "py", ci: str = "py") -> None:
                          code == 1 and not appeared and silent
                          and f"invalid: {reason}" in err and "not started:" in err,
                          f"exit {code}; stderr {err!r}; {len(appeared)} tokens; stdout {a.lines()}")
+            # F-274, resolved by the reference (text 0.3): its refused actuator
+            # no longer puts angle's ok before the check
             report.check(sec, f"step {name}: nothing of A_l is put (§2.2: \"nothing of the instance is declared or "
-                              f"put\")", not put, f"{len(put)} puts: {puts}",
-                         known="F-274" if a.impl == "rs" else None)
+                              f"put\")", not put, f"{len(put)} puts: {puts}")
         for c in cs.values():
             c.stop()
     finally:
@@ -1015,95 +1025,158 @@ def section9(report: Report, oi: str = "py", ci: str = "py") -> None:
 
 # -- §10 --------------------------------------------------------------------------------------------
 
-def section10(report: Report, oi: str = "py", ci: str = "py") -> None:
-    from . import arbitration as ab
-    from . import live
-    from .arbitration_live import ToolView
-    from .contract import load_contract
+class ToolProc:
+    """One tool's reading as a process: zk2py's (``python -m
+    zk2py.arbitration_tool``) or the reference's (``zenctl arbitration
+    --format json``, a black box), the same arguments to each: the
+    consumer, ``--for``, ``--contracts`` holding what T holds offline, and
+    ``--role`` where a step names one."""
 
+    def __init__(self, tool: str, endpoint: str, consumer: str | None, contracts: list[Path],
+                 listen_s: float, role: str | None = None) -> None:
+        args = ([consumer] if consumer else []) + ["--for", str(listen_s), "-c", endpoint]
+        for c in contracts:
+            args += ["--contracts", str(c)]
+        if role is not None:
+            args += ["--role", role]
+        if tool == "zenctl":
+            argv, env = [str(BLACKBOX / "zenctl"), "arbitration", "--format", "json", *args], None
+        else:
+            argv = [sys.executable, "-m", "zk2py.arbitration_tool", *args]
+            env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
+        self.tool = tool
+        self.p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+
+    def result(self, timeout_s: float = 60.0) -> tuple[int | None, dict[str, Any] | None, str]:
+        try:
+            out, err = self.p.communicate(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            self.p.kill()
+            out, err = self.p.communicate()
+        try:
+            return self.p.returncode, json.loads(out), err
+        except ValueError:
+            return self.p.returncode, None, err
+
+
+def tool_tokens(doc: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """A tool's answers as tokens, one entry per role row: each question's
+    answer, reason, provider, reasons, wildcards and shadowed, as
+    ``conclusions.json`` writes them, and whose view a selection is."""
+    out = []
+    for r in (doc or {}).get("rows") or []:
+        row = {"role": r.get("role")}
+        for q in ("declaration", "selection", "binding"):
+            a = r.get(q) or {}
+            row[q] = {k: a[k] for k in ("answer", "reason", "provider", "reasons", "wildcards", "shadowed", "whose")
+                      if k in a}
+        out.append(row)
+    return out
+
+
+def section10(report: Report, oi: str = "py", ci: str = "py") -> None:
+    """§10 with both tools, zk2py's and the reference's, each a process, run
+    at once over the same consumer and commanders: each one's answers
+    checked against Expected and the reference test's exits (0, 1, 1, 1, 2,
+    2), then the two compared token by token."""
     sec = "§10 a tool's questions" + f" [{oi}→{ci}]"
     bus = Bus(oi, ci)
     try:
-        t_s, t_w = live.open_client(bus.endpoint), live.open_client(bus.endpoint)
-        rudder, steer = bus.rudder, bus.steer
-        rudder_role = ab.role_of(rudder.canonical, "cmd")
-
-        def read(a: Actuator, revisions: list[Any], listen_s: float | None) -> dict[str, ab.Answer]:
-            """T: the consumer's descriptor (its role, bindings and parameter
-            bindings), the contracts it holds offline, and its own view."""
-            d = live.get_descriptor(bus.s, a.instance_key or "")
-            doc = json.loads(d[0].payload)
-            req = next(r for r in doc["requires"] if r["role"] == "cmd")
-            params = ab.resolve_params(dict(req.get("params") or {}), doc["service"])
-            declared = ab.tool_declaration(rudder_role if req.get("declared_by") == "rudder.v1" else None,
-                                           [ab.provider_of(r.canonical) for r in revisions], params)
-            view = None
-            if listen_s is not None and isinstance(declared, ab.Declaration) and declared.valid:
-                tv = ToolView(t_s, t_w, req["interface"], declared, list(req["bindings"]), params)
-                time.sleep(listen_s)
-                view = tv.view()
-                tv.close()
-            return ab.conclude(declared, list(req["bindings"]), view)
-
-        def show(got: dict[str, ab.Answer]) -> str:
-            return "; ".join(f"{q} {json.dumps(a.expect())}" for q, a in got.items())
-
         cs = {s: bus.commander(s) for s in ("autopilot", "teleop", "safety")}
         a = bus.actuator("rudder-l")
         time.sleep(1.0)
-        got = read(a, [steer], 2.0)
-        report.check(sec, "Expected 1: the declaration yes (valid); the selection yes (selected, lab/safety), the "
-                          "tool's own view; the binding no (exact)",
-                     got["declaration"].expect() == {"answer": "yes", "reason": "valid"}
-                     and got["selection"].expect() == {"answer": "yes", "reason": "selected", "provider": "lab/safety"}
-                     and got["binding"].expect() == {"answer": "no", "reason": "exact", "wildcards": [], "shadowed": []},
-                     show(got))
+
+        def read(step: str, consumer: str | None, contracts: list[Path], listen_s: float, role: str | None = None
+                 ) -> dict[str, tuple[int | None, list[dict[str, Any]], str]]:
+            procs = {t: ToolProc(t, bus.endpoint, consumer, contracts, listen_s, role) for t in TOOLS}
+            got = {}
+            for t, p in procs.items():
+                code, doc, err = p.result()
+                got[t] = (code, tool_tokens(doc), err)
+            if "zenctl" not in got:
+                report.note(sec, f"step {step}: the reference tool's black box is missing: zk2py's tool alone")
+                return got
+            (ca, ta, _), (cb, tb, eb) = got["zk2py"], got["zenctl"]
+            report.check(sec, f"step {step}: the two tools' answers agree, token by token, and their exits",
+                         ta == tb and ca == cb and bool(ta),
+                         f"exits zk2py {ca}, zenctl {cb}; zk2py {json.dumps(ta)}; zenctl {json.dumps(tb)}"
+                         + ("" if tb else f"; zenctl stderr {eb[-300:]!r}"))
+            return got
+
+        def first(got: tuple[int | None, list[dict[str, Any]], str]) -> dict[str, Any]:
+            return got[1][0] if got[1] else {"declaration": {}, "selection": {}, "binding": {}}
+
+        own = "the tool's own view"
+        exact = [RUDDER, STEER]
+        got1 = read("1", "lab/rudder-l", exact, 2.0)
+        for t, g in got1.items():
+            r = first(g)
+            report.check(f"§10 [{ci}→{t}]", "Expected 1: the declaration yes (valid); the selection yes (selected, "
+                                            "lab/safety), the tool's own view; the binding no (exact); exit 0",
+                         r["declaration"] == {"answer": "yes", "reason": "valid"}
+                         and r["selection"] == {"answer": "yes", "reason": "selected", "provider": "lab/safety",
+                                                "whose": own}
+                         and r["binding"] == {"answer": "no", "reason": "exact", "wildcards": [], "shadowed": []}
+                         and g[0] == 0, f"exit {g[0]}; {json.dumps(r)}")
         for c in cs.values():
             c.hold()
         time.sleep(0.5)
-        got = read(a, [steer], 2.0)
-        report.check(sec, "Expected 2: all three holding, the selection no (dead_man)",
-                     got["selection"].expect() == {"answer": "no", "reason": "dead_man"}, show(got))
-        got6 = read(a, [steer], 0.1)
-        steer200 = load_contract(bus.copy(STEER, "d200", '"timing.deadline_ms" = 300', '"timing.deadline_ms" = 200'))
-        got5 = read(a, [steer, steer200], 2.0)
+        got2 = read("2", "lab/rudder-l", exact, 2.0)
+        for t, g in got2.items():
+            r = first(g)
+            report.check(f"§10 [{ci}→{t}]", "Expected 2: all three holding, the selection no (dead_man); exit 1",
+                         r["selection"] == {"answer": "no", "reason": "dead_man", "whose": own} and g[0] == 1,
+                         f"exit {g[0]}; {json.dumps(r['selection'])}")
+        got6 = read("6", "lab/rudder-l", exact, 0.1)
+        steer200 = bus.copy(STEER, "d200", '"timing.deadline_ms" = 300', '"timing.deadline_ms" = 200')
+        got5 = read("5", "lab/rudder-l", [RUDDER, STEER, steer200], 2.0)
         a.stop()
         cs["safety"].stop()
         for c in (cs["teleop"], cs["autopilot"]):
             c.resume()
         a9 = bus.actuator("rudder-l", ["lab/safety", "lab/*"])
         time.sleep(1.0)
-        got = read(a9, [steer], 2.0)
-        report.check(sec, "Expected 3: bound as §9, C_t and C_a running: the selection yes (selected, "
-                          "lab/autopilot); the binding yes (wildcard), naming entry 1",
-                     got["selection"].expect() == {"answer": "yes", "reason": "selected", "provider": "lab/autopilot"}
-                     and got["binding"].expect() == {"answer": "yes", "reason": "wildcard", "wildcards": [1],
-                                                     "shadowed": []}, show(got))
+        got3 = read("3", "lab/rudder-l", exact, 2.0)
+        for t, g in got3.items():
+            r = first(g)
+            report.check(f"§10 [{ci}→{t}]", "Expected 3: bound as §9, C_t and C_a running: the selection yes "
+                                            "(selected, lab/autopilot); the binding yes (wildcard), naming entry 1; "
+                                            "exit 1",
+                         r["selection"] == {"answer": "yes", "reason": "selected", "provider": "lab/autopilot",
+                                            "whose": own}
+                         and r["binding"] == {"answer": "yes", "reason": "wildcard", "wildcards": [1], "shadowed": []}
+                         and g[0] == 1, f"exit {g[0]}; {json.dumps(r)}")
         a9.stop()
-        fresh = load_contract(bus.copy(RUDDER, "freshest10", '"arbitration.policy" = "priority"',
-                                       '"arbitration.policy" = "freshest"'))
+        time.sleep(0.5)
+        fresh = bus.copy(RUDDER, "freshest10", '"arbitration.policy" = "priority"', '"arbitration.policy" = "freshest"')
         # text 0.2 (F-272): with no consumer, no descriptor, so no binding
-        got = ab.conclude(ab.tool_declaration(ab.role_of(fresh.canonical, "cmd"), [ab.provider_of(steer.canonical)]),
-                          None, None)
-        report.check(sec, "Expected 4: a copy of rudder.v1 saying freshest, offline, no consumer: the declaration "
-                          "no (invalid, policy_unsupported); the selection and the binding not asked (no_descriptor)",
-                     got["declaration"].expect() == {"answer": "no", "reason": "invalid",
-                                                     "reasons": ["policy_unsupported"]}
-                     and got["selection"].expect() == {"answer": "not_asked", "reason": "no_descriptor"}
-                     and got["binding"].expect() == {"answer": "not_asked", "reason": "no_descriptor",
-                                                     "wildcards": [], "shadowed": []}, show(got))
-        report.check(sec, "Expected 5: steer.v1 and a copy with a 200 ms deadline held: the declaration and the "
-                          "selection unobservable (revisions_disagree)",
-                     got5["declaration"].expect() == {"answer": "unobservable", "reason": "revisions_disagree"}
-                     and got5["selection"].expect() == {"answer": "unobservable", "reason": "revisions_disagree"},
-                     show(got5))
-        report.check(sec, "Expected 6: listened 100 ms only, all three holding: the selection unobservable "
-                          "(listening)",
-                     got6["selection"].expect() == {"answer": "unobservable", "reason": "listening"}, show(got6))
+        got4 = read("4", None, [fresh, STEER], 2.0, role="cmd")
+        for t, g in got4.items():
+            r = first(g)
+            report.check(f"§10 [{ci}→{t}]", "Expected 4: a copy of rudder.v1 saying freshest, offline, no consumer: "
+                                            "the declaration no (invalid, policy_unsupported); the selection and the "
+                                            "binding not asked (no_descriptor); exit 1",
+                         r["declaration"] == {"answer": "no", "reason": "invalid", "reasons": ["policy_unsupported"]}
+                         and r["selection"] == {"answer": "not_asked", "reason": "no_descriptor", "whose": own}
+                         and r["binding"] == {"answer": "not_asked", "reason": "no_descriptor", "wildcards": [],
+                                              "shadowed": []}
+                         and g[0] == 1, f"exit {g[0]}; {json.dumps(r)}")
+        for t, g in got5.items():
+            r = first(g)
+            report.check(f"§10 [{ci}→{t}]", "Expected 5: steer.v1 and a copy with a 200 ms deadline held: the "
+                                            "declaration and the selection unobservable (revisions_disagree); exit 2",
+                         r["declaration"] == {"answer": "unobservable", "reason": "revisions_disagree"}
+                         and r["selection"] == {"answer": "unobservable", "reason": "revisions_disagree",
+                                                "whose": own}
+                         and g[0] == 2, f"exit {g[0]}; {json.dumps(r)}")
+        for t, g in got6.items():
+            r = first(g)
+            report.check(f"§10 [{ci}→{t}]", "Expected 6: listened 100 ms only, all three holding: the selection "
+                                            "unobservable (listening); exit 2",
+                         r["selection"] == {"answer": "unobservable", "reason": "listening", "whose": own} and g[0] == 2,
+                         f"exit {g[0]}; {json.dumps(r['selection'])}")
         for c in (cs["teleop"], cs["autopilot"]):
             c.stop()
-        live.close(t_s)
-        live.close(t_w)
     finally:
         bus.close()
 
@@ -1230,10 +1303,15 @@ def section11(report: Report, oi: str = "py", ci: str = "py") -> None:
             by1 = {body for t, k, body, i in bus.stamped if "/lab/safety/" in k and _zid_eq(i, z1)}
             raw = [(t, body) for t, k, body, i in bus.stamped if "/lab/safety/" in k and _zid_eq(i, z2)
                    and t1 <= t <= t1_end]
+        # text 0.3 (F-276): X's raw puts carry "standby <n>", the reference's
+        # commander raw on's too, so Expected 1 reads by the payload as well
+        report.check(sec, "step 1: X's raw puts carry the payload standby <n> (scenarios §11 step 1)",
+                     bool(raw) and all(body.startswith("standby ") for _, body in raw),
+                     f"{len(raw)} raw puts, first {[b for _, b in raw[:2]]}")
         for a in acts:
             sws = a.switches()
             ang = [x for _, x in bus.angle(a, t1, t1_end)]
-            foreign = [x for x in ang if x not in by1]
+            foreign = [x for x in ang if x not in by1 or x.startswith("standby ")]
             ni = c1[a.service]["not_incumbent"] - c0[a.service]["not_incumbent"]
             report.check(sec, f"Expected 1 ({a.service}): follows lab/safety within 1 s of its start, its incumbent "
                               f"learned by its read at start and C_s1's meta.zid; through step 1 no line, no standby "
@@ -1250,7 +1328,19 @@ def section11(report: Report, oi: str = "py", ci: str = "py") -> None:
                          f"{len(foreign)} not C_s1's; not_incumbent +{ni}, X put {len(raw)} raw (S saw them)")
         n1 = {a.service: len(a.switches()) for a in acts}
         cs1.hold()
-        time.sleep(2.0)
+        # Beside the section (text 0.3, §2.14): both tools read A_l over
+        # steer.v1 minor 1, every revision they hold governed, so their views
+        # learn C_s1 as safety's incumbent and count X's samples
+        # not_incumbent: safety ineligible, teleop selected. The control:
+        # both tools holding minor 0 offline beside minor 1 retrieved from
+        # C_s1's descriptor, so not every revision held governs, X's samples
+        # are arrivals, and safety stays selected.
+        time.sleep(0.4)
+        procs = {t: ToolProc(t, bus.endpoint, "lab/rudder-l", [RUDDER, GOVERNED], 1.0) for t in TOOLS}
+        ctl = {t: ToolProc(t, bus.endpoint, "lab/rudder-l", [RUDDER, STEER], 1.0) for t in TOOLS}
+        views = {t: p.result() for t, p in procs.items()}
+        ctls = {t: p.result() for t, p in ctl.items()}
+        time.sleep(max(0.0, 2.0 - 0.4 - 1.5))
         for a in acts:
             new = a.switches()[n1[a.service]:]
             report.check(sec, f"Expected 2 ({a.service}): C_s1 holds: to teleop, cause deadline, at_ms − last_ms "
@@ -1258,6 +1348,34 @@ def section11(report: Report, oi: str = "py", ci: str = "py") -> None:
                          [sw(x) for x in new] == [("lab/safety", "lab/teleop", "deadline")]
                          and all(_deadline_ok(x, report) for x in new),
                          f"{[(sw(x), round(gap(x), 3)) for x in new]}")
+        for t, (code, doc, err) in views.items():
+            row = ((doc or {}).get("rows") or [{}])[0]
+            v = row.get("view") or {}
+            ni = next((x.get("not_incumbent", 0) for x in v.get("providers") or [] if x.get("address") == "lab/safety"),
+                      0)
+            report.check(sec, f"beside step 2 ({t}): the tool's own view, every revision held governed, selects "
+                              f"lab/teleop while C_s1 holds; X's samples not_incumbent there (§2.14, text 0.3)",
+                         (row.get("selection") or {}).get("provider") == "lab/teleop" and ni >= 10
+                         and v.get("governed") is True,
+                         f"exit {code}; selection {row.get('selection')}; governed {v.get('governed')}; safety's "
+                         f"not_incumbent {ni}; switches {[(x.get('from'), x.get('to'), x.get('cause')) for x in v.get('switches') or []]}"
+                         + ("" if doc else f"; stderr {err[-300:]!r}"))
+        tt = [tool_tokens(d) for _, d, _ in views.values()]
+        if len(tt) == 2:
+            report.check(sec, "beside step 2: the two tools' answers agree, token by token",
+                         tt[0] == tt[1] and bool(tt[0]), f"zk2py {json.dumps(tt[0])}; zenctl {json.dumps(tt[1])}")
+        for t, (code, doc, err) in ctls.items():
+            row = ((doc or {}).get("rows") or [{}])[0]
+            v = row.get("view") or {}
+            report.check(sec, f"beside step 2, the control ({t}): minor 0 held beside minor 1, not every revision "
+                              f"governs: X's samples are arrivals, and the view selects lab/safety",
+                         (row.get("selection") or {}).get("provider") == "lab/safety" and not v.get("governed"),
+                         f"exit {code}; selection {row.get('selection')}; governed {v.get('governed', 'absent')}; revisions "
+                         f"{row.get('revisions')}" + ("" if doc else f"; stderr {err[-300:]!r}"))
+        tt = [tool_tokens(d) for _, d, _ in ctls.values()]
+        if len(tt) == 2:
+            report.check(sec, "beside step 2, the control: the two tools' answers agree, token by token",
+                         tt[0] == tt[1] and bool(tt[0]), f"zk2py {json.dumps(tt[0])}; zenctl {json.dumps(tt[1])}")
         n2 = {a.service: len(a.switches()) for a in acts}
         t3 = time.monotonic_ns()
         cs1.resume()

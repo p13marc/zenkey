@@ -1,7 +1,7 @@
 """``timing.v1``'s scenarios (``spec/profiles/timing/scenarios.md``, text
-0.2) in every pairing of zk2py's runtime and the Rust reference's: ``python
+0.3) in every pairing of zk2py's runtime and the Rust reference's: ``python
 -m zk2py.timing_interop [--pair OWNER:READER]... [--only 1 … 6]...``, each of
-OWNER and READER ``py`` or ``rs`` (#609, round 78).
+OWNER and READER ``py`` or ``rs`` (#609, rounds 78 and 79).
 
 - **The bus** is the text's: R1, an in-process zenoh-python router with
   timestamping on and its HLC's delta the default; §5 step 2's R2 has
@@ -13,7 +13,9 @@ OWNER and READER ``py`` or ``rs`` (#609, round 78).
   session's zid (own), or put unstamped with the wall clock less 10 s as
   its payload (none). The reference's is :class:`RsPace`, the black box
   ``owner --connect <R1> --timing [--no-hlc] lab/pace``, driven by its
-  ``timing …`` commands.
+  ``timing …`` commands: ``timing declare`` for §3 step 5 and ``timing
+  every`` for §6 step 3 (text 0.3, F-276). §4's owner has no HLC, both
+  implementations' (text 0.3, F-273).
 - **The readers.** zk2py's is :class:`zk2py.timing_live.Reader`, the
   reference's the black box ``consume --timing``, one process per resource.
   Both are C: no HLC on their sessions, the owner's presence followed on a
@@ -25,8 +27,13 @@ OWNER and READER ``py`` or ``rs`` (#609, round 78).
   instant the reader first saw its owner present, the runner polls the
   black box's ``state`` every 10 ms, and checks the due falls between the
   owner's start and the first poll that answered ``present``.
-- **§6** is a tool's: zk2py's :class:`zk2py.timing_live.Window`, beside
-  each owner. The reference tool is #908's MC.
+- **§6** is a tool's, run with both tools at once beside each owner (text
+  0.3): zk2py's (``python -m zk2py.timing_tool``) and the reference's
+  (``zenctl timing``, a black box), each a process, their windows' starts
+  their ``timing: listening`` lines; each tool's answers checked against
+  Expected, then the two compared token by token. A check an open finding
+  is known to fail prints XFAIL naming it (F-277), is counted as failed,
+  and leaves the exit 0.
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -62,12 +69,16 @@ PERIOD_S = 0.1
 
 class Report:
     def __init__(self) -> None:
-        self.rows: list[tuple[str, str, bool, str]] = []
+        self.rows: list[tuple[str, str, bool, str, str | None]] = []
         self.late: list[tuple[str, float]] = []
 
-    def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
-        self.rows.append((section, name, ok, detail))
-        print(f"{'PASS' if ok else 'FAIL'} [{section}] {name}" + (f": {detail}" if detail else ""), flush=True)
+    def check(self, section: str, name: str, ok: bool, detail: str = "", known: str | None = None) -> bool:
+        """``known`` names an open finding the check is known to fail by:
+        printed XFAIL, counted as failed, and the exit left 0."""
+        self.rows.append((section, name, ok, detail, known))
+        tag = "PASS" if ok else ("XFAIL" if known else "FAIL")
+        print(f"{tag} [{section}] {name}" + (f" (known: {known})" if known and not ok else "")
+              + (f": {detail}" if detail else ""), flush=True)
         return ok
 
     def note(self, section: str, text: str) -> None:
@@ -197,6 +208,8 @@ class PyPace:
         self.lock = threading.Lock()
         self.on: dict[str, bool] = {"cmd": False}
         self.count: dict[str, int] = {"cmd": 0}
+        #: each member's interval, its period unless ``every`` set another
+        self.interval: dict[str, float] = {}
         self.closed = False
         self.threads: dict[str, threading.Thread] = {}
         self._go("cmd")
@@ -235,10 +248,18 @@ class PyPace:
                     self.o.publish(self._key(member), _payload_10s_old())
             except Exception:  # noqa: BLE001 - closed while putting
                 return
-            nxt += int(PERIOD_S * NS)
+            with self.lock:
+                nxt += int(self.interval.get(member, PERIOD_S) * NS)
 
     def resume(self, member: str) -> None:
         with self.lock:
+            self.on[member] = True
+
+    def every(self, member: str, ms: int) -> None:
+        """``timing every <member> <ms>`` (scenarios conventions, text 0.3):
+        the member published at another interval than its period, on."""
+        with self.lock:
+            self.interval[member] = ms / 1000
             self.on[member] = True
 
     def pause(self, member: str) -> None:
@@ -373,11 +394,14 @@ class RsPace:
         self._ask(f"timing pause {member}", "pause")
 
     def add(self, axis: str, publish: bool = True) -> int:
-        if not publish:
-            raise NotImplementedError("the reference's timing add publishes at once")
+        """``timing add``, or with ``publish`` False ``timing declare``, which
+        declares the member token alone (text 0.3, F-276)."""
         at = time.monotonic_ns()
-        self._ask(f"timing add {axis}", "add")
+        self._ask(f"timing {'add' if publish else 'declare'} {axis}", "add" if publish else "declare")
         return at
+
+    def every(self, member: str, ms: int) -> None:
+        self._ask(f"timing every {member} {ms}", "every")
 
     def remove(self, axis: str) -> None:
         self._ask(f"timing remove {axis}", "remove")
@@ -738,17 +762,6 @@ def section2(report: Report, oi: str, ci: str) -> None:
 
 # -- §3 ----------------------------------------------------------------------------------------
 
-def _raw_member_token(bus: Bus, axis: str) -> tuple[Any, int]:
-    """A member token at ``lab/pace``'s address declared by a raw session of
-    the runner's: the stand-in, with the reference's owner, for "the owner
-    declares x's member token … and publishes nothing on it", which its
-    ``timing add`` cannot do (it publishes at once)."""
-    s = bus.client()
-    at = time.monotonic_ns()
-    tok = s.liveliness().declare_token(f"zk2/lab/pace/@zk/member/pace.v1/{axis}/00000000000000f1")
-    return tok, at
-
-
 def section3(report: Report, oi: str, ci: str) -> None:
     sec = f"§3 [{oi}→{ci}]"
     bus = Bus()
@@ -804,11 +817,9 @@ def section3(report: Report, oi: str, ci: str) -> None:
         kx = f"{AXIS}/x"
         time.sleep(1.0)
         quiet = not c3.reports()
-        raw = None
-        if isinstance(o, PyPace):
-            sent = o.add("x", publish=False)
-        else:
-            raw, sent = _raw_member_token(bus, "x")
+        # the owner declares x's member token alone: the reference's
+        # ``timing declare x`` since text 0.3 (F-276)
+        sent = o.add("x", publish=False)
         time.sleep(0.7)
         m_lo, m_hi = c3.seen_window(kx, sent)
         missed = c3.reports(kx, "missed")
@@ -817,17 +828,13 @@ def section3(report: Report, oi: str, ci: str) -> None:
             and (m_hi is not None or m_c <= m_lo + 50 * MS)
         report.check(sec, "Expected 5: C3 (axis = x, known) reports nothing in its first second, its owner present; "
                           "then missed for axis/x, due at M + 500 ms (M its first sight of x's member token), "
-                          "within the bound"
-                          + ("" if raw is None else " (x's token declared by a raw session: the reference owner's "
-                                                    "timing add publishes at once)"),
+                          "within the bound",
                      quiet and len(missed) == 1 and window_ok and not c3.arrivals()
                      and missed[0].c - missed[0].due <= (BOUND_MS + RUNNER_MS) * MS,
                      f"first second quiet {quiet}; missed {[(_ms(r.due - c3.to_c(sent)), _ms(r.c - r.due), r.owner) for r in missed]} "
                      f"(due after the declaration, reported after the due); M within "
                      f"[{_ms(None if m_lo is None else m_lo - c3.to_c(sent))}, "
                      f"{_ms(None if m_hi is None else m_hi - c3.to_c(sent))}] of the declaration")
-        if raw is not None:
-            raw.undeclare()
         c3.close()
     finally:
         bus.close()
@@ -845,12 +852,10 @@ def section4(report: Report, oi: str, ci: str) -> None:
             c = bus.reader(ci, RID_CMD, eps)
             c.track_presence(True)
             time.sleep(0.3)
-            # The reference's owner offsets its stamps alone with its HLC
-            # off (its --help: "an HLC would follow them", core §4.1): with
-            # it on, its own stamp 400 ms ahead holds its HLC there, and its
-            # later stamps stand still until its wall clock catches up.
-            # zk2py's stamps from the offset wall clock either way.
-            o = bus.owner(oi, hlc=oi == "py")
+            # text 0.3 (F-273): "The owner's session has no HLC, so the
+            # runner's offset moves its stamps alone"; the reference's owner
+            # runs with --no-hlc, zk2py's with its session's HLC off
+            o = bus.owner(oi, hlc=False)
             spawned = c.to_c(o.spawned)
             # F-266: the owner publishes once C holds its descriptor, where C
             # judges a lifespan; with no ε, once C sees its owner present (the
@@ -891,11 +896,16 @@ def section4(report: Report, oi: str, ci: str) -> None:
                 p_c = None if len(missed) != 1 else missed[0].due - 500 * MS
                 due_ok = p_c is not None and p_hi is not None and p_lo <= p_c <= p_hi \
                     and missed[0].c - missed[0].due <= (BOUND_MS + RUNNER_MS) * MS
+                # text 0.3 (F-276): the reference's C prints an expired
+                # arrival's wall_ns, the wall clock read at the arrival
+                walls = all(a.wall_ns > 0 for a in arr)
                 report.check(sec, "Expected 2 (700 ms behind): every sample expired, none handed on; missed for cmd, "
-                                  "due 500 ms after C first saw its owner present; no met",
+                                  "due 500 ms after C first saw its owner present; no met; each arrival's wall clock "
+                                  "recorded, an expired one's too",
                              len(arr) >= 18 and ours and set(verdicts) == {"expired"} and handed == 0 and due_ok
-                             and not c.reports(CMD, "met"),
-                             detail + f"; P within [{_ms(None if p_hi is None else p_lo - spawned)}, "
+                             and not c.reports(CMD, "met") and walls,
+                             detail + f"; wall clock recorded on every arrival {walls}"
+                                      f"; P within [{_ms(None if p_hi is None else p_lo - spawned)}, "
                                       f"{_ms(None if p_hi is None else p_hi - spawned)}] of the owner's start, the "
                                       f"due's P {_ms(None if p_c is None else p_c - spawned)}")
             elif name == "3":
@@ -968,107 +978,278 @@ def section5(report: Report, oi: str, ci: str) -> None:
             bus.close()
 
 
-# -- §6, zk2py's tool beside each owner ----------------------------------------------------------
+# -- §6, both tools beside each owner -------------------------------------------------------------
+
+class ToolRun:
+    """One tool's window as a process: zk2py's (``python -m
+    zk2py.timing_tool``) or the reference's (``zenctl timing``, a black box),
+    each ``<selector> --for 5 --clock-bound 100``; standard error's ``timing:
+    listening`` line is the window's start, its arrival recorded on the
+    runner's clock; standard output is one JSON document."""
+
+    def __init__(self, tool: str, endpoint: str, window_s: float = 5.0, extra: list[str] | None = None) -> None:
+        sel = "zk2/lab/pace/**"
+        if tool == "zenctl":
+            args = [str(BLACKBOX / "zenctl"), "timing", sel, "--for", str(window_s), "--clock-bound", "100",
+                    "--format", "json", "-c", endpoint, *(extra or [])]
+            env = None
+        else:
+            args = [sys.executable, "-m", "zk2py.timing_tool", sel, "--for", str(window_s), "--clock-bound", "100",
+                    "-c", endpoint, *(extra or [])]
+            env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
+        self.tool = tool
+        self.p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.err: list[tuple[int, str]] = []
+        self.out: list[str] = []
+        self.lock = threading.Lock()
+        self.threads = [threading.Thread(target=self._pump, args=(self.p.stderr, True), daemon=True),
+                        threading.Thread(target=self._pump, args=(self.p.stdout, False), daemon=True)]
+        for th in self.threads:
+            th.start()
+
+    def _pump(self, f: Any, err: bool) -> None:
+        for line in f:
+            with self.lock:
+                if err:
+                    self.err.append((time.monotonic_ns(), line.rstrip("\n")))
+                else:
+                    self.out.append(line)
+
+    def listening(self) -> int | None:
+        with self.lock:
+            return next((t for t, x in self.err if x.startswith("timing: listening")), None)
+
+    def result(self, timeout_s: float = 30.0) -> tuple[int | None, dict[str, Any] | None]:
+        try:
+            code = self.p.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            self.p.kill()
+            code = None
+        for th in self.threads:
+            th.join(2.0)
+        with self.lock:
+            text = "".join(self.out)
+        try:
+            return code, json.loads(text)
+        except ValueError:
+            return code, None
+
+
+def tool_answers(doc: dict[str, Any] | None) -> dict[tuple[str, str], dict[str, Any]]:
+    """A tool's answers as tokens: per member, per resource and over the run,
+    each question's (answer, reason); a member's misses' owner states and its
+    end's reason beside them."""
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    if doc is None:
+        return out
+    for r in doc.get("rows") or []:
+        if r.get("row") == "member":
+            out[("member", r["key"])] = {q: (r[q]["answer"], r[q]["reason"]) for q in ("deadline", "period", "lifespan")
+                                         if q in r}
+            # §2.7 (text 0.3): a tool's known members, beside the answers
+            out[("member", r["key"])]["known"] = bool(r.get("known"))
+        elif r.get("row") == "resource":
+            out[("resource", r["resource"])] = {q: (v["answer"], v["reason"]) for q, v in r["questions"].items()}
+    if doc.get("run"):
+        out[("run", "")] = {q: (v["answer"], v["reason"]) for q, v in doc["run"].items()}
+    return out
+
+
+def _member_row(doc: dict[str, Any] | None, key: str) -> dict[str, Any]:
+    return next((r for r in (doc or {}).get("rows") or [] if r.get("row") == "member" and r.get("key") == key), {})
+
+
+def _misses(row: dict[str, Any]) -> list[str]:
+    """The owner's state at each miss a tool reported of a member."""
+    return [m.get("owner") for m in row.get("misses") or []]
+
+
+def _ended(row: dict[str, Any]) -> str | None:
+    e = row.get("ended")
+    return e.get("reason") if isinstance(e, dict) else None
+
 
 def section6(report: Report, oi: str) -> None:
-    from .timing_live import Window
-
-    sec = f"§6 [{oi}→zk2py's tool]"
+    """§6 with both tools, each a process, their windows run at once over the
+    same owner: each tool's answers checked against Expected, then the two
+    compared token by token (a member's answers, each resource's and the
+    run's, the exit). A step's owner commands are timed from the later of the
+    two windows' starts, and ``cmd`` runs past both windows' ends."""
+    sec = f"§6 [{oi}→both tools]"
     bus = Bus()
     try:
         o = bus.owner(oi)
         kx = f"{AXIS}/x"
         o.add("x")
         time.sleep(0.3)
+        results: list[tuple[str, dict[str, Any]]] = []
 
-        def run(plan: Callable[[int], threading.Thread]) -> tuple[Window, dict[str, dict[str, tm.Answer]]]:
-            w = Window(bus.client(), bus.client(), ADDRESS, bus.contract, [RID_CMD, RID_AXIS], epsilon_ms=100)
-            assert w.start_ns is not None
-            th = plan(w.start_ns)
-            _sleep_until(w.start_ns + 5 * NS)
-            got = w.end()
-            w.close()
-            # the step's own commands end before the next window opens
-            th.join(2.0)
-            return w, got
+        def run(step: str, plan: Callable[[int], None]) -> dict[str, tuple[int | None, dict[str, Any] | None]]:
+            runs = {t: ToolRun(t, bus.endpoint) for t in ("zk2py", "zenctl")}
+            ok = _wait(lambda: all(r.listening() is not None or r.p.poll() is not None for r in runs.values()), 15.0)
+            starts = [r.listening() for r in runs.values()]
+            if not ok or any(t is None for t in starts):
+                for r in runs.values():
+                    r.p.kill()
+                report.check(sec, f"step {step}: both tools' windows start", False,
+                             "; ".join(f"{t}: {r.err[-3:]}" for t, r in runs.items()))
+                return {t: (None, None) for t in runs}
+            later = max(t for t in starts if t is not None)
+            plan(later)
+            got = {t: r.result() for t, r in runs.items()}
+            report.note(sec, f"step {step}: the windows' starts {abs(starts[0] - starts[1]) / MS:.1f} ms apart "
+                             f"(zk2py's {'first' if starts[0] <= starts[1] else 'second'})")
+            return got
 
-        def every(period_s: float, pause: tuple[float, float] | None = None, close_at: float | None = None):
-            def plan(start: int) -> threading.Thread:
-                def go() -> None:
-                    if period_s == PERIOD_S and pause is None:
-                        o.resume("cmd")
-                        if close_at is not None:
-                            _sleep_until(start + int(close_at * NS))
-                            o.close()
-                            return
-                        _sleep_until(start + 5 * NS + 50 * MS)
-                        o.pause("cmd")
-                        return
-                    if pause is not None:
-                        o.resume("cmd")
-                        _sleep_until(start + int(pause[0] * NS))
-                        o.pause("cmd")
-                        _sleep_until(start + int(pause[1] * NS))
-                        o.resume("cmd")
-                        _sleep_until(start + 5 * NS + 50 * MS)
-                        o.pause("cmd")
-                        return
-                    # one sample every period_s: resumed until a sample is seen, then paused
-                    i = 0
-                    while True:
-                        t = start + int(i * period_s * NS)
-                        if t >= start + 5 * NS:
-                            return
-                        _sleep_until(t)
-                        t_on = time.monotonic_ns()
-                        o.resume("cmd")
-                        _wait(lambda: bool(bus.seen_of(CMD, t_on)), 0.2, 0.001)
-                        o.pause("cmd")
-                        i += 1
-                th = threading.Thread(target=go, daemon=True)
-                th.start()
-                return th
-            return plan
+        def steady(later: int) -> None:
+            o.resume("cmd")
+            _sleep_until(later + 5 * NS + 300 * MS)
+            o.pause("cmd")
 
-        def pairs(got: dict[str, dict[str, tm.Answer]], key: str) -> dict[str, tuple[str, str]]:
-            return {q: (a.answer, a.reason) for q, a in got.get(key, {}).items()}
+        def paused(later: int) -> None:
+            o.resume("cmd")
+            _sleep_until(later + 2 * NS)
+            o.pause("cmd")
+            _sleep_until(later + 3 * NS)
+            o.resume("cmd")
+            _sleep_until(later + 5 * NS + 300 * MS)
+            o.pause("cmd")
 
-        def show(got: dict[str, dict[str, tm.Answer]]) -> str:
-            return "; ".join(f"{k.rsplit('/stream/', 1)[1]}: " + ", ".join(f"{q} {a.answer} ({a.reason})"
-                                                                         for q, a in v.items())
-                             for k, v in got.items())
+        def slow(later: int) -> None:
+            # the reference's ``timing every`` sets the interval and leaves the
+            # member paused or not as it was: resumed after it
+            o.every("cmd", 250)
+            o.resume("cmd")
+            _sleep_until(later + 5 * NS + 300 * MS)
+            o.pause("cmd")
+            o.every("cmd", 100)
+            o.pause("cmd")
 
-        w, got = run(every(PERIOD_S))
-        report.check(sec, "Expected 1: cmd met, kept, live; axis/x met, kept, no_lifespan",
-                     pairs(got, CMD) == {"deadline": ("yes", "met"), "period": ("yes", "kept"),
-                                         "lifespan": ("no", "live")}
-                     and pairs(got, kx) == {"deadline": ("yes", "met"), "period": ("yes", "kept"),
-                                            "lifespan": ("not_asked", "no_lifespan")}, show(got))
-        w, got = run(every(PERIOD_S, (2.0, 3.0)))
-        runs = {q: tm.rollup(q, [v[q] for v in got.values()]) for q in ("deadline", "period", "lifespan")}
-        report.check(sec, "Expected 2: cmd missed (the owner present), not_kept, live; the run's verdict the finding",
-                     pairs(got, CMD) == {"deadline": ("no", "missed"), "period": ("no", "not_kept"),
-                                         "lifespan": ("no", "live")}
-                     and all(r.owner == tm.PRESENT for r in w.reader.reports_of(CMD, "missed"))
-                     and any(a.answer == tm.FINDING[q] for q, a in runs.items()),
-                     show(got) + f"; {len(w.reader.arrivals_of(CMD))} cmd arrivals")
-        w, got = run(every(0.25))
-        report.check(sec, "Expected 3: cmd every 250 ms: deadline met, period not_kept",
-                     pairs(got, CMD).get("deadline") == ("yes", "met")
-                     and pairs(got, CMD).get("period") == ("no", "not_kept"),
-                     show(got) + f"; {len(w.reader.arrivals_of(CMD))} cmd arrivals")
-        w, got = run(every(PERIOD_S, close_at=1.0))
-        ended = w.reader.reports_of(kx, "ended")
-        last_x = max((a.mono_ns for a in w.reader.arrivals_of(kx)), default=0)
-        report.check(sec, "Expected 4: the owner closed cleanly 1 s in: cmd owner_not_present twice, lifespan no; "
-                          "axis/x ended (gone) at the read, deadline not asked (ended), period kept",
-                     pairs(got, CMD) == {"deadline": ("unobservable", "owner_not_present"),
-                                         "period": ("unobservable", "owner_not_present"),
-                                         "lifespan": ("no", "live")}
-                     and len(ended) == 1 and ended[0].reason == "gone" and ended[0].at_ns < last_x + 500 * MS
-                     and pairs(got, kx).get("deadline") == ("not_asked", "ended")
-                     and pairs(got, kx).get("period") == ("yes", "kept"),
-                     show(got) + f"; axis/x ended {[_ms(r.at_ns - last_x) for r in ended]} after its last arrival")
+        def closing(later: int) -> None:
+            o.resume("cmd")
+            _sleep_until(later + 1 * NS)
+            o.close()
+
+        def pairs(doc: dict[str, Any] | None, key: str) -> dict[str, tuple[str, str]]:
+            return {q: v for q, v in tool_answers(doc).get(("member", key), {}).items() if q != "known"}
+
+        def known(doc: dict[str, Any] | None, key: str) -> Any:
+            return tool_answers(doc).get(("member", key), {}).get("known")
+
+        steps = [("1", steady), ("2", paused), ("3", slow), ("4", closing)]
+        for step, plan in steps:
+            got = run(step, plan)
+            for tool, (code, doc) in got.items():
+                tsec = f"§6 [{oi}→{tool}]"
+                c, x = pairs(doc, CMD), pairs(doc, kx)
+                if step == "1":
+                    report.check(tsec, "Expected 1: cmd met, kept, live; axis/x met, kept, no_lifespan",
+                                 c == {"deadline": ("yes", "met"), "period": ("yes", "kept"),
+                                       "lifespan": ("no", "live")}
+                                 and x == {"deadline": ("yes", "met"), "period": ("yes", "kept"),
+                                           "lifespan": ("not_asked", "no_lifespan")} and code == 0,
+                                 f"exit {code}; cmd {c}; axis/x {x}")
+                    # §2.7 (text 0.3): "a member is known to it only when its
+                    # template has no parameter"
+                    report.check(tsec, "§2.7: cmd known, axis/x not (a tool holds no binding)",
+                                 known(doc, CMD) is True and known(doc, kx) is False,
+                                 f"cmd {known(doc, CMD)}, axis/x {known(doc, kx)}")
+                elif step == "2":
+                    owners = _misses(_member_row(doc, CMD))
+                    run_ = tool_answers(doc).get(("run", ""), {})
+                    report.check(tsec, "Expected 2: cmd missed (the owner present when T reported it), not_kept, "
+                                       "live; the run's verdict the finding",
+                                 c == {"deadline": ("no", "missed"), "period": ("no", "not_kept"),
+                                       "lifespan": ("no", "live")}
+                                 and bool(owners) and all(w == "present" for w in owners)
+                                 and run_.get("deadline", ("",))[0] == "no" and code == 1,
+                                 f"exit {code}; cmd {c}; misses' owner {owners}; "
+                                 f"{_member_row(doc, CMD).get('arrivals')} cmd arrivals; run {run_}")
+                elif step == "3":
+                    report.check(tsec, "Expected 3: cmd every 250 ms: deadline met, period not_kept",
+                                 c.get("deadline") == ("yes", "met") and c.get("period") == ("no", "not_kept"),
+                                 f"exit {code}; cmd {c}; {_member_row(doc, CMD).get('arrivals')} cmd arrivals")
+                else:
+                    report.check(tsec, "Expected 4: the owner closed cleanly 1 s in: cmd owner_not_present twice, "
+                                       "lifespan no; axis/x ended (gone) at the read, deadline not asked (ended), "
+                                       "period kept",
+                                 c == {"deadline": ("unobservable", "owner_not_present"),
+                                       "period": ("unobservable", "owner_not_present"),
+                                       "lifespan": ("no", "live")}
+                                 and _ended(_member_row(doc, kx)) == "gone"
+                                 and x.get("deadline") == ("not_asked", "ended") and x.get("period") == ("yes", "kept"),
+                                 f"exit {code}; cmd {c}; axis/x {x}, ended {_ended(_member_row(doc, kx))}")
+            # the two tools, token by token
+            (ca, da), (cb, db) = got["zk2py"], got["zenctl"]
+            ta, tb = tool_answers(da), tool_answers(db)
+            diffs = []
+            for k in sorted(set(ta) | set(tb)):
+                for q in ("deadline", "period", "lifespan", "known"):
+                    va, vb = ta.get(k, {}).get(q), tb.get(k, {}).get(q)
+                    if va != vb:
+                        diffs.append((k, q, va, vb))
+            known = [d for d in diffs if d[0][0] in ("resource", "run") and d[3] is not None
+                     and d[3][0] == "not_asked" and d[2] == ("unobservable", "no_member")]
+            other = [d for d in diffs if d not in known]
+            results.append((step, {"diffs": diffs, "exits": (ca, cb)}))
+            report.check(sec, f"step {step}: the two tools' answers agree, token by token, members, resources and "
+                              f"the run",
+                         not other and ca == cb,
+                         f"exits zk2py {ca}, zenctl {cb}; differences {other or 'none'}")
+            if known:
+                report.check(sec, f"step {step}: a roll-up whose every member is not asked: zk2py unobservable "
+                                  f"(§5's sentence, conclusions.json #33), zenctl not_asked",
+                             False, f"{[(k, q, a, b) for k, q, a, b in known]}", known="F-277")
+            if step != "4":
+                time.sleep(0.5)
+    finally:
+        bus.close()
+
+
+def section6_face(report: Report, oi: str) -> None:
+    """Beside §6, not a scenario: both tools told the owner sits across a
+    constrained face (§2.8), on the runner's bus, where the deployment's word
+    is all they read: the contract offline, no presence and no descriptor,
+    and ``meta.zid`` only as ``--owner-zid`` states it (text 0.3). Read with
+    the owner's zid, then with none."""
+    sec = f"§2.8 beside §6 [{oi}→both tools]"
+    bus = Bus()
+    try:
+        o = bus.owner(oi)
+        kx = f"{AXIS}/x"
+        o.add("x")
+        o.resume("cmd")
+        time.sleep(0.3)
+        face = ["--across-face", "--contracts", str(PACE)]
+        for name, extra, life in (("the owner's zid on the deployment's word", ["--owner-zid", o.zid], ("no", "live")),
+                                  ("no zid stated", [], ("unobservable", "unattributed"))):
+            runs = {t: ToolRun(t, bus.endpoint, 2.0, face + extra) for t in ("zk2py", "zenctl")}
+            got = {t: r.result() for t, r in runs.items()}
+            ans = {t: tool_answers(d) for t, (_, d) in got.items()}
+            for t, a in ans.items():
+                c, x = a.get(("member", CMD), {}), a.get(("member", kx), {})
+                report.check(sec, f"{name} ({t}): cmd's deadline and period unobservable (across_face), its "
+                                  f"lifespan {life[0]} ({life[1]}); axis/x across_face, no lifespan",
+                             c.get("deadline") == ("unobservable", "across_face")
+                             and c.get("period") == ("unobservable", "across_face") and c.get("lifespan") == life
+                             and x.get("deadline") == ("unobservable", "across_face")
+                             and x.get("lifespan") == ("not_asked", "no_lifespan"),
+                             f"exit {got[t][0]}; cmd {c}; axis/x {x}"
+                             + ("" if got[t][1] else f"; stderr {runs[t].err[-3:]}"))
+            ta, tb = ans["zk2py"], ans["zenctl"]
+            diffs = [(k, q, ta.get(k, {}).get(q), tb.get(k, {}).get(q)) for k in sorted(set(ta) | set(tb))
+                     for q in ("deadline", "period", "lifespan", "known")
+                     if ta.get(k, {}).get(q) != tb.get(k, {}).get(q)]
+            known = [d for d in diffs if d[0][0] in ("resource", "run") and d[3] is not None
+                     and d[3][0] == "not_asked" and d[2] == ("unobservable", "no_member")]
+            other = [d for d in diffs if d not in known]
+            report.check(sec, f"{name}: the two tools' answers agree, token by token, and their exits",
+                         not other and got["zk2py"][0] == got["zenctl"][0],
+                         f"exits zk2py {got['zk2py'][0]}, zenctl {got['zenctl'][0]}; differences {other or 'none'}")
+            if known:
+                report.check(sec, f"{name}: a roll-up whose every member is not asked", False,
+                             f"{[(k, q, a, b) for k, q, a, b in known]}", known="F-277")
+        o.pause("cmd")
     finally:
         bus.close()
 
@@ -1081,7 +1262,8 @@ PAIRS = ["py:py", "rs:py", "py:rs", "rs:rs"]
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.timing_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--pair", action="append", choices=PAIRS, help="owner:reader, each py or rs")
-    ap.add_argument("--only", action="append", choices=[*SECTIONS, "6"], help="run only these sections")
+    ap.add_argument("--only", action="append", choices=[*SECTIONS, "6", "face"],
+                    help="run only these sections (face: §2.8 beside §6, both tools)")
     args = ap.parse_args(argv)
     report = Report()
     names = {"py": "zk2py", "rs": "rust"}
@@ -1109,10 +1291,17 @@ def main(argv: list[str] | None = None) -> int:
                 traceback.print_exc()
                 report.check(f"§{name} [{names[oi]}→{names[ci]}]", "the section ran to its end", False,
                              f"{type(e).__name__}: {e}")
-    if not args.only or "6" in args.only:
+    six = not args.only or "6" in args.only
+    if six and not os.access(BLACKBOX / "zenctl", os.X_OK):
+        print(f"SKIP §6: it runs both tools, and the reference's is missing: {BLACKBOX / 'zenctl'}", flush=True)
+        six = False
+    face = (not args.only or "face" in args.only) and os.access(BLACKBOX / "zenctl", os.X_OK)
+    for fn, on in ((section6, six), (section6_face, face)):
+        if not on:
+            continue
         for oi in sorted({p.split(':')[0] for p in pairs}):
             try:
-                section6(report, oi)
+                fn(report, oi)
             except Exception as e:  # noqa: BLE001
                 import traceback
 
@@ -1120,12 +1309,15 @@ def main(argv: list[str] | None = None) -> int:
                 report.check(f"§6 [{oi}]", "the section ran to its end", False, f"{type(e).__name__}: {e}")
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
+    known = [r for r in report.rows if not r[2] and r[4]]
     late = max((x for _, x in report.late), default=0.0)
-    print(f"timing interop: {passed} passed, {failed} failed; the largest lateness past the 10 ms bound {late:.3f} ms")
-    for sec, name, ok, detail in report.rows:
+    print(f"timing interop: {passed} passed, {failed} failed"
+          + (f" ({len(known)} of them known: {', '.join(sorted({r[4] for r in known if r[4]}))})" if known else "")
+          + f"; the largest lateness past the 10 ms bound {late:.3f} ms")
+    for sec, name, ok, detail, why in report.rows:
         if not ok:
-            print(f"FAIL [{sec}] {name}: {detail}")
-    return 1 if failed else 0
+            print(f"{'XFAIL' if why else 'FAIL'} [{sec}] {name}" + (f" (known: {why})" if why else "") + f": {detail}")
+    return 1 if failed > len(known) else 0
 
 
 if __name__ == "__main__":
