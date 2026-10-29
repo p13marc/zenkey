@@ -37,6 +37,17 @@ pub(crate) fn update(v: &mut Verdicts, msg: NodesMsg, cx: Ctx) -> Task<Message> 
             }
             Task::none()
         }
+        NodesMsg::ArbitrationRead(addr, ran_against, report) => {
+            // The health reading's guard (#109).
+            if cx.sub.follow.current.address() == Some(&addr) && ran_against == cx.dep.namespace() {
+                v.nodes.arbitration_read(addr, report);
+            }
+            Task::none()
+        }
+        NodesMsg::AskArbitration => match cx.sub.follow.current.address().cloned() {
+            Some(addr) => arbitration(v, cx, addr),
+            None => Task::none(),
+        },
         NodesMsg::AskHealth => ask(v, cx),
         NodesMsg::AskRedundancy => match cx.sub.follow.current.address().cloned() {
             Some(addr) => redundancy(v, cx.dep, addr),
@@ -46,7 +57,14 @@ pub(crate) fn update(v: &mut Verdicts, msg: NodesMsg, cx: Ctx) -> Task<Message> 
             // Still the selection, and the latest one's settle (#862's
             // review); the landing keeps its own guard.
             if cx.sub.follow.current.address() == Some(&addr) && v.nodes.settled(&addr, due) {
-                redundancy(v, cx.dep, addr)
+                // And what its arbitrated roles follow, when it requires
+                // one (#909, BC): the same settle, one reading more.
+                let arbitration = if v.nodes.arbitration_owed(&addr) {
+                    arbitration(v, cx, addr.clone())
+                } else {
+                    Task::none()
+                };
+                Task::batch([redundancy(v, cx.dep, addr), arbitration])
             } else {
                 Task::none()
             }
@@ -96,6 +114,15 @@ pub(crate) fn redundancy_soon(
         return Task::none();
     }
     let due = v.nodes.due_redundancy(addr.clone());
+    // arbitration.v1 (#909, BC): owed at the same settle when a descriptor
+    // of the address requires a role, which only its contract can say is
+    // arbitrated.
+    let consumer = dep.catalog.as_ref().is_some_and(|c| {
+        let want = addr.to_string();
+        c.descriptors()
+            .any(|d| d.service == want && !d.requires.is_empty())
+    });
+    v.nodes.due_arbitration(addr.clone(), consumer);
     // The timer is made inside the task, on iced's tokio executor, never
     // here: `update` runs outside any runtime, and `tokio::time::sleep`
     // made outside one panics (review on PR #867). A test that drives
@@ -127,6 +154,33 @@ pub(crate) fn redundancy(
         addr,
         dep.store.clone(),
         dep.timeout(),
+    )
+}
+
+/// One `arbitration.v1` reading of `addr` (#909, BC) on the session in the
+/// namespace, its view's watch on the presence monitor's watch session,
+/// marked as asked — the settle's call, and "read again"'s.
+pub(crate) fn arbitration(
+    v: &mut Verdicts,
+    cx: Ctx,
+    addr: zenkey_model::grammar::Addr,
+) -> Task<Message> {
+    let Some(session) = cx.dep.session.clone() else {
+        return Task::none();
+    };
+    let watch = cx
+        .obs
+        .presence_monitor
+        .as_ref()
+        .and_then(|m| m.watch_session().cloned());
+    v.nodes.asking_arbitration(addr.clone());
+    services::sweep::arbitration(
+        session,
+        watch,
+        cx.dep.namespace().to_string(),
+        addr,
+        cx.dep.store.clone(),
+        cx.dep.timeout(),
     )
 }
 

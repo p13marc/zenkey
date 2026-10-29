@@ -17,7 +17,12 @@
 //! - **redundancy** — `redundancy.v1`'s reading of the address selected
 //!   (#841, RC), on selection too: two presence reads a grace apart, each
 //!   instance's role on every governed interface the fleet's judge's,
-//!   never derived here: [`RedundancyState`].
+//!   never derived here: [`RedundancyState`];
+//! - **arbitration** — `arbitration.v1`'s reading of the address selected
+//!   (#909, BC), when its descriptor requires a role, at the same settle:
+//!   each arbitrated role's declaration and binding, and the selection of
+//!   the tool's own view over a listen of two deadlines, every answer the
+//!   fleet's judge's: [`ArbitrationState`].
 //!
 //! Plus the zero-cost join v1's roster made: for every address whose state
 //! an active watch covers, the age of its newest state sample, read from
@@ -34,7 +39,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use zenkey_fleet::report::{
-    Asked, DescriptorAnswer, HealthReport, RedundancyReport, RedundancyRow,
+    ArbitrationReport, Asked, DescriptorAnswer, HealthReport, RedundancyReport, RedundancyRow,
 };
 use zenkey_fleet::{Catalog, KeyTreeSnapshot, LivePresence};
 use zenkey_model::grammar::{Addr, GRAMMAR, KindToken};
@@ -208,6 +213,44 @@ impl RedundancyState {
     }
 }
 
+/// `arbitration.v1` for the one address selected (#909, BC): asked at the
+/// selection's settle, beside `redundancy.v1`, when a descriptor of the
+/// address requires a role; never polled.
+#[derive(Debug, Clone, Default)]
+pub enum ArbitrationState {
+    /// Nothing selected, or the address requires no role.
+    #[default]
+    NotAsked,
+    /// Selected, requiring a role: the reading owed once the selection
+    /// settles.
+    Due(Addr),
+    /// The reading is in flight: the descriptor, the contracts, and the
+    /// tool's own view listening two deadlines.
+    Asking(Addr),
+    /// The engine's report, as `zenctl arbitration <address>` prints it.
+    Read(Addr, Arc<ArbitrationReport>),
+}
+
+impl ArbitrationState {
+    /// The address this state is about, if any.
+    pub fn address(&self) -> Option<&Addr> {
+        match self {
+            ArbitrationState::NotAsked => None,
+            ArbitrationState::Due(a)
+            | ArbitrationState::Asking(a)
+            | ArbitrationState::Read(a, _) => Some(a),
+        }
+    }
+
+    /// The reading of `addr`, when it is the one landed.
+    pub fn report(&self, addr: &Addr) -> Option<&ArbitrationReport> {
+        match self {
+            ArbitrationState::Read(a, r) if a == addr => Some(r),
+            _ => None,
+        }
+    }
+}
+
 /// The pane's whole state.
 #[derive(Debug, Default)]
 pub struct NodesState {
@@ -220,6 +263,9 @@ pub struct NodesState {
     /// Counts the selections a reading was owed for: only the latest one's
     /// settle asks (#862's review).
     pub redundancy_due: u64,
+    /// `arbitration.v1` for the address selected (#909, BC), asked at the
+    /// same settle.
+    pub arbitration: ArbitrationState,
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1). Off by default
     /// (D11): without it no reply's age can be judged, and health reads
@@ -384,6 +430,33 @@ impl NodesState {
     /// A `redundancy.v1` reading landed, under the health reading's guard.
     pub fn redundancy_read(&mut self, addr: Addr, report: Arc<RedundancyReport>) {
         self.redundancy = RedundancyState::Read(addr, report);
+    }
+
+    /// `addr` was selected (#909, BC): its `arbitration.v1` reading owed at
+    /// the selection's settle when a descriptor of it requires a role
+    /// (`consumer`), and not asked otherwise.
+    pub fn due_arbitration(&mut self, addr: Addr, consumer: bool) {
+        self.arbitration = if consumer {
+            ArbitrationState::Due(addr)
+        } else {
+            ArbitrationState::NotAsked
+        };
+    }
+
+    /// Whether the settle asks `addr`'s `arbitration.v1` reading.
+    pub fn arbitration_owed(&self, addr: &Addr) -> bool {
+        matches!(&self.arbitration, ArbitrationState::Due(a) if a == addr)
+    }
+
+    /// An `arbitration.v1` reading was asked for `addr` (#909, BC).
+    pub fn asking_arbitration(&mut self, addr: Addr) {
+        self.arbitration = ArbitrationState::Asking(addr);
+    }
+
+    /// An `arbitration.v1` reading landed, under the health reading's
+    /// guard.
+    pub fn arbitration_read(&mut self, addr: Addr, report: Arc<ArbitrationReport>) {
+        self.arbitration = ArbitrationState::Read(addr, report);
     }
 
     /// A namespace switch or reconnect: what was read described another

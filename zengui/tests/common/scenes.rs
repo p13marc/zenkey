@@ -81,6 +81,15 @@ pub const ALL: &[Scene] = &[
         landmark: "standby on zs.catalog.v1 — marked, holding no token",
     },
     Scene {
+        name: "workbench-arbitration",
+        size: DESKTOP,
+        build: workbench_arbitration,
+        // arbitration.v1 (#909, BC): `lab/rudder-l` selected, its role's
+        // three answers off the fleet's judge, the selection the tool's own
+        // view.
+        landmark: "the tool's own view: follows lab/autopilot (selected), over 600 ms",
+    },
+    Scene {
         name: "workbench-admin",
         size: DESKTOP,
         build: workbench_admin,
@@ -791,6 +800,41 @@ fn workbench_nodes(theme: ThemeChoice) -> Zengui {
             nav,
             String::new(),
             World::new().health("robot1/nav"),
+        ))),
+    );
+    app
+}
+
+/// The nodes tool on an arbitrated consumer (#909, BC): presence with
+/// `lab/rudder-l` beside the world, the address selected, and the
+/// `arbitration.v1` reading its selection asks for landed as the engine
+/// judged it — `cmd` valid over `steer.v1`, the tool's own view following
+/// `lab/autopilot` through the wildcard, and the wildcard warned of.
+fn workbench_arbitration(theme: ThemeChoice) -> Zengui {
+    use zengui::view::nodes::NodesMsg;
+    let (mut app, world) = live_world(prefs(theme));
+    send(
+        &mut app,
+        Message::Bus(zengui::message::BusMsg::Presence(
+            0,
+            world.presence_update_with_rudder(),
+        )),
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Nodes)),
+    );
+    let rudder: zenkey_model::grammar::Addr = super::RUDDER.parse().expect("an address");
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Address(rudder.clone()))),
+    );
+    send(
+        &mut app,
+        Message::Pane(PaneMsg::Nodes(NodesMsg::ArbitrationRead(
+            rudder,
+            String::new(),
+            world.rudder_arbitration(),
         ))),
     );
     app

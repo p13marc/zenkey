@@ -2,8 +2,10 @@
 //! fed by presence (free — the presence link's own monitor) and the
 //! watched-only freshness join; health loads on selection, through one
 //! `health.v1` reading, and so does who serves each governed interface,
-//! through one `redundancy.v1` reading (#841, RC) — the pane's only
-//! data-plane costs (the laziness ground rule).
+//! through one `redundancy.v1` reading (#841, RC), and what each arbitrated
+//! role follows, through one `arbitration.v1` reading and the tool's own
+//! view over two deadlines (#909, BC) — the pane's only data-plane costs
+//! (the laziness ground rule).
 //!
 //! v1's roster keyed alive tokens by origin and producer. zk2 has neither:
 //! a service is an **address**, `<system>/<service>`, run as instances that
@@ -24,7 +26,7 @@ use zenkey_fleet::{AddressStatus, LiveAddress, PresenceBasis};
 use zenkey_model::grammar::Addr;
 
 use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
-use crate::nodes::{Described, HealthState, NodesState, RedundancyState};
+use crate::nodes::{ArbitrationState, Described, HealthState, NodesState, RedundancyState};
 use crate::presence_link::PresenceUpdate;
 use crate::view::kit;
 use crate::view::theme::{PresenceTone, Tone};
@@ -45,8 +47,14 @@ pub enum NodesMsg {
     /// Read who serves the selected address again — one more reading.
     AskRedundancy,
     /// The selection settled: the address, and the selection's count
-    /// ([`NodesState::due_redundancy`]). Only the latest asks the reading.
+    /// ([`NodesState::due_redundancy`]). Only the latest asks the reading,
+    /// and its `arbitration.v1` reading when one is owed (#909, BC).
     RedundancySettled(Addr, u64),
+    /// The selected address's `arbitration.v1` reading landed (#909, BC):
+    /// the address, the namespace it ran in, and the engine's report.
+    ArbitrationRead(Addr, String, Arc<zenkey_fleet::report::ArbitrationReport>),
+    /// Read the selected address's arbitrated roles again.
+    AskArbitration,
     /// The "clocks synced" toggle (D11): the operator's word that this
     /// host's clock and the owners' agree. Re-asks the selected address.
     ClocksSynced(bool),
@@ -373,8 +381,11 @@ pub fn detail_section<'a>(
             kit::plural(l.members.len(), "member token")
         )));
     }
-    col.push(redundancy_section(addr, nodes, sp))
-        .push(health_section(addr, nodes, sp))
+    col = col.push(redundancy_section(addr, nodes, sp));
+    if nodes.arbitration.address() == Some(addr) {
+        col = col.push(arbitration_section(addr, nodes, sp));
+    }
+    col.push(health_section(addr, nodes, sp))
 }
 
 /// One instance's role on each governed interface of the address, read
@@ -497,6 +508,130 @@ fn redundancy_section<'a>(addr: &Addr, nodes: &'a NodesState, sp: Spacing) -> Co
         )));
     }
     col
+}
+
+/// `arbitration.v1` for this address (#909, BC): asked at the selection's
+/// settle when its descriptor requires a role, never polled — §5's three
+/// questions of each arbitrated role in the engine's tokens and words, the
+/// selection always **the tool's own view**, never the consumer's.
+fn arbitration_section<'a>(addr: &Addr, nodes: &'a NodesState, sp: Spacing) -> Column<'a, Message> {
+    use zenkey_fleet::report::ArbitrationAnswerToken as T;
+    let mut ask = kit::secondary(kit::caption("read again")).padding([0.0, sp.xs]);
+    if !matches!(
+        nodes.arbitration,
+        ArbitrationState::Asking(_) | ArbitrationState::Due(_)
+    ) {
+        ask = ask.on_press(msg(NodesMsg::AskArbitration));
+    }
+    let mut col = column![
+        row![
+            kit::eyebrow("ARBITRATION (ARBITRATION.V1)"),
+            iced::widget::space::horizontal(),
+            ask
+        ]
+        .spacing(sp.sm)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(sp.xs);
+    let Some(report) = nodes.arbitration.report(addr) else {
+        return col.push(kit::muted(match &nodes.arbitration {
+            ArbitrationState::Due(a) if a == addr => {
+                "what its arbitrated roles follow is read once the selection settles"
+            }
+            ArbitrationState::Asking(a) if a == addr => {
+                "reading arbitration.v1 — the descriptor, the contracts, and the tool's own \
+                 view listening two deadlines"
+            }
+            _ => "its arbitrated roles not asked — read on selection, never polled",
+        }));
+    };
+    if let Some(why) = &report.unobservable {
+        return col.push(kit::muted(format!("unobservable — {why}")));
+    }
+    if report.roles.is_empty() {
+        return col.push(kit::muted(
+            "no role of it carries arbitration.policy: each receives from every bound \
+             provider, merged (core §3.2)",
+        ));
+    }
+    for r in &report.roles {
+        let finding = r.answers().iter().any(|a| a.3);
+        let (tone, word) = if r.declaration.finding || r.selection.finding {
+            (Tone::Negative, "a finding")
+        } else if finding {
+            (Tone::Caution, "a warning")
+        } else if r.answers().iter().any(|a| a.1 == T::Unobservable) {
+            (Tone::Neutral, "not established")
+        } else {
+            (Tone::Positive, "clean")
+        };
+        col = col.push(kit::status_chip(
+            tone,
+            format!("{} → {}: {word}", r.role, r.iface),
+        ));
+        let d = &r.declaration;
+        col = col.push(kit::muted(format!(
+            "declaration: {} ({}) — {}",
+            arbitration_token(d.answer),
+            d.reason,
+            d.says
+        )));
+        let s = &r.selection;
+        let view = r.view.as_ref().map_or_else(String::new, |v| {
+            format!(
+                ", over {:.0} ms{}",
+                v.listened_ms,
+                if v.watching {
+                    ""
+                } else {
+                    ", no watch: the deadline alone"
+                }
+            )
+        });
+        col = col.push(kit::muted(match &s.provider {
+            Some(p) => format!("{}: follows {p} ({}){view}", s.whose, s.reason),
+            None => format!(
+                "{}: {} ({}){view} — {}",
+                s.whose,
+                arbitration_token(s.answer),
+                s.reason,
+                s.says
+            ),
+        }));
+        let b = &r.binding;
+        let mut named = Vec::new();
+        if !b.wildcard_entries.is_empty() {
+            named.push(format!("wildcard {}", b.wildcard_entries.join(", ")));
+        }
+        if !b.shadowed_entries.is_empty() {
+            named.push(format!("shadowed {}", b.shadowed_entries.join(", ")));
+        }
+        col = col.push(kit::muted(format!(
+            "binding: {} ({}) — {}",
+            arbitration_token(b.answer),
+            if named.is_empty() {
+                b.reason.clone()
+            } else {
+                named.join("; ")
+            },
+            r.bindings.as_ref().map_or_else(
+                || "no descriptor read".to_owned(),
+                |e| format!("bound [{}]", e.join(", "))
+            )
+        )));
+    }
+    col
+}
+
+fn arbitration_token(t: zenkey_fleet::report::ArbitrationAnswerToken) -> &'static str {
+    use zenkey_fleet::report::ArbitrationAnswerToken as T;
+    match t {
+        T::Yes => "yes",
+        T::No => "no",
+        T::Unobservable => "unobservable",
+        T::NotAsked => "not asked",
+        T::NotThisProfiles => "not this profile's",
+    }
 }
 
 /// One of §5's questions, in the profile's tokens and the judge's words.
