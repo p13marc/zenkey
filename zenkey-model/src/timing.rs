@@ -1449,10 +1449,13 @@ impl Question {
 }
 
 /// §5's roll-up of one question over a resource or a run, read by its
-/// finding (text 0.2, F-264): the finding when any member's answer is the
-/// finding; the other pole when every member's answer is that pole, and
-/// there is at least one; unobservable otherwise. A member not asked, or
-/// not this profile's, is set aside.
+/// finding (text 0.2, F-264), a member not asked, or not this profile's,
+/// set aside: the finding when any member's answer is the finding; the
+/// other pole when every member's answer is that pole or set aside, and at
+/// least one is that pole; when every member is set aside, and there is at
+/// least one, not this profile's when every one is, else not asked (text
+/// 0.4, F-277); unobservable otherwise, an unobservable member and none the
+/// finding, or no member at all.
 #[must_use]
 pub fn roll_up(question: Question, answers: impl IntoIterator<Item = Answer>) -> Answer {
     let finding = question.finding();
@@ -1462,20 +1465,31 @@ pub fn roll_up(question: Question, answers: impl IntoIterator<Item = Answer>) ->
         Answer::Yes
     };
     let (mut poles, mut unestablished) = (0u64, false);
+    let (mut aside, mut not_asked) = (0u64, false);
     for a in answers {
         if a == finding {
             return finding;
         }
         match a {
-            Answer::NotAsked | Answer::NotThisProfiles => {}
+            Answer::NotAsked => {
+                aside += 1;
+                not_asked = true;
+            }
+            Answer::NotThisProfiles => aside += 1,
             a if a == other => poles += 1,
             _ => unestablished = true,
         }
     }
-    if poles > 0 && !unestablished {
-        other
-    } else {
+    if unestablished {
         Answer::Unobservable
+    } else if poles > 0 {
+        other
+    } else if aside == 0 {
+        Answer::Unobservable
+    } else if not_asked {
+        Answer::NotAsked
+    } else {
+        Answer::NotThisProfiles
     }
 }
 
@@ -1596,5 +1610,20 @@ mod tests {
         let l = Question::Lifespan;
         assert_eq!(roll_up(l, [Answer::No, Answer::Yes]), Answer::Yes, "F-264");
         assert_eq!(roll_up(l, [Answer::No, Answer::No]), Answer::No);
+        // Every member set aside (text 0.4, F-277): nobody put the question.
+        assert_eq!(roll_up(l, [Answer::NotAsked]), Answer::NotAsked);
+        assert_eq!(
+            roll_up(l, [Answer::NotThisProfiles, Answer::NotAsked]),
+            Answer::NotAsked
+        );
+        assert_eq!(
+            roll_up(Question::Period, [Answer::NotThisProfiles]),
+            Answer::NotThisProfiles
+        );
+        assert_eq!(
+            roll_up(d, [Answer::NotAsked, Answer::Unobservable]),
+            Answer::Unobservable,
+            "an unobservable member is never set aside"
+        );
     }
 }

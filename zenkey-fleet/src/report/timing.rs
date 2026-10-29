@@ -347,11 +347,20 @@ impl TimingReport {
                 ),
             };
         }
+        // No member held, or none asked any question (text 0.4, F-277: a
+        // roll-up over members all set aside is not asked; over none at
+        // all, unobservable): nothing was answered.
         let asked: Vec<&(&str, &TimingRollUp)> = q
             .iter()
-            .filter(|(_, r)| r.answer != TimingAnswerToken::NotAsked)
+            .filter(|(_, r)| {
+                !matches!(
+                    r.answer,
+                    TimingAnswerToken::NotAsked | TimingAnswerToken::NotThisProfiles
+                )
+            })
             .collect();
-        if asked.is_empty() {
+        let held = q.iter().any(|(_, r)| !r.members.is_empty());
+        if !held || asked.is_empty() {
             return Judgement::Unobservable {
                 reason: format!(
                     "no question was asked of any member in {:.1}s: no member of the {} timed \

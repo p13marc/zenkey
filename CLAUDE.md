@@ -262,7 +262,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   every owner unseen and the `meta.zid`s the deployment's word
   (`--owner-zid`, text 0.3). `judge::timing` maps `deadline_met`,
   `period_kept` and `lifespan_expired` onto `report::timing`'s tokens and
-  rolls each question up per resource and per run by `roll_up` (F-264);
+  rolls each question up per resource and per run by `roll_up` alone
+  (F-264; text 0.4, F-277: members all set aside, not asked);
   `TimingReport::judgement` is 1 on any question's finding, 0 every
   question asked on its other pole, 2 otherwise. The doctor's
   `timing-declaration` (warning, from the contracts: an invalid value, a
@@ -1105,7 +1106,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   from its first member token seen, its tokens gone ending it only after
   one was seen; `roll_up(Question, …)`, read by each question's finding;
   a tool's window opened once it follows presence and holds the
-  descriptors, §0's `unseen`), and `arbitration.v1`'s (`arbitration`, #909 BA: the
+  descriptors, §0's `unseen`; text 0.3, F-273 to F-276, #908 MC; text
+  0.4, F-277, #908 MD: `roll_up` over members all set aside is not asked,
+  or not this profile's when every one is, and over none unobservable),
+  and `arbitration.v1`'s (`arbitration`, #909 BA: the
   vocabulary, `policy` on a requirement, the interim row published
   unchanged by core 0.54, the first read on a requirement;
   `declaration`/`declaration_of` over a role (its contract's `uses`, or a
