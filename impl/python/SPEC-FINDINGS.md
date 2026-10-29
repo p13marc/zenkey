@@ -16004,10 +16004,57 @@ Wording that would settle it, either way:
   `axis/x` 180–230 ms after its withdrawal, and zk2py 107–112 ms after,
   each well before the 500 ms due. No verdict moves.
 
+**After review-bot on PR #939.** Nothing blocking; its should-fixes and
+nits are made.
+- **An end before the member was first held** ends nothing.
+  `zk2py.timing.window_held` holds a member from the later of the window's
+  start and the instant it first held it, to the first end at or after
+  that instant, else to the window's end. An earlier end can no longer
+  give a held time of 0, nor `ended`, and so neither `window_too_short`
+  nor `not_asked` wrongly. `Window._reading` uses it. A `readings` case
+  pins it: an end at 100 ms of a member first held at 200 ms ends nothing
+  (held 2,800 of 3,000 ms), and one at 1.5 s ends it there.
+- **The tool sections run** (§6, `face`, `gone`, `again`) beside each owner
+  the selected pairs name, and only with both tools present. A crash is
+  reported under the section's own name.
+- **`again`'s margins are wide.** The window is now 8 s, the withdrawal
+  2 s in and the re-add 4 s in, so each life is 2 s or more against the
+  windows' 72–113 ms start skew. The checks of each tool alone are what
+  the text fixes: ended (`gone`), no miss, the deadline `not_asked`
+  (`ended`), the lifespan not asked. The period kept over the first life
+  is F-280's reading, checked once over both tools.
+- **Nits.** The tool documents are read with `.get` throughout, so a
+  malformed one fails a check rather than aborting a section. In
+  `rollup`'s every-member-set-aside branch, `next` has a default and an
+  assert.
+
+After them, `just py-conformance` passes 3455 of 3455 (`readings` 516).
+`timing.v1` §6 with both tools beside both owners, and `gone` and `again`,
+gave 48 passed and the four known F-278 and F-279 checks as XFAIL, exit 0.
+- §6: 5 of 5 per tool and owner, and the two tools' 8 comparisons beside
+  each owner.
+- `gone` as before.
+- `again`: 4 of 4 beside each owner. Each tool ended `axis/x` 2.11 s in
+  (zk2py) and 2.18 s in (zenctl). Both read its period kept, and both
+  exited 0. The held times were 2,007–2,019 ms (zk2py) and 5,933–6,037 ms
+  (zenctl).
+
+**F-278 to F-280 are accepted on #908** (issuecomment-37774) for
+`timing.v1` text 0.5, which the next Rust chunk writes:
+- F-278 as the reference reads it: a known member is held only while it
+  is waited for;
+- F-279: a roll-up's reason is the first member's, in byte order of the
+  keys, and over no member there is none;
+- F-280: a member is read over its first life, and a miss in any life is
+  still a miss.
+
+zk2py has not read 0.5. All three stay open here until the next round
+reads it cold.
+
 **Counts at timing.v1 0.4, arbitration.v1 0.3 and core 0.56:** 280
 entries.
 - **Open: F-278 to F-280,** three, all `timing.v1`'s, a tool's (§2.7,
-  §5).
+  §5), each accepted on #908 for text 0.5, which no round has read yet.
   - **A verdict and a test:** F-278 and F-280.
   - **Wording:** F-279.
 - **`arbitration.v1` 0.3: none open.** Its final cold read found nothing

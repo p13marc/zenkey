@@ -3828,6 +3828,16 @@ def _timing_tool_readings() -> list[tuple[str, Any, Any]]:
                 "the span to its first end: kept; to the window's end, its absence counted: not kept",
                 [tm.period(100, 0, 5000 * tm.MS, False, e, arr).verdict for e in (1100 * tm.MS, None)],
                 [tm.KEPT, tm.NOT_KEPT]))
+    # review-bot on PR #939: the end that counts is the first at or after
+    # the instant the member was first held in the window. An earlier one
+    # (100 ms, the member first held at 200 ms) ends nothing: held to the
+    # window's end, never 0 and never ended; one after (1.5 s) ends it there.
+    ms = tm.MS
+    out.append(("timing.v1 0.4 §2.7 (F-280, open): a member's end before the instant it was first held in the window "
+                "ends nothing; the first end at or after it does; a member never held was held 0",
+                [tm.window_held(0, 3000 * ms, 200 * ms, e) for e in ([100 * ms], [100 * ms, 1500 * ms, 2500 * ms], [])]
+                + [tm.window_held(0, 3000 * ms, None, [])],
+                [(2800 * ms, None), (1300 * ms, 1500 * ms), (2800 * ms, None), (0, None)]))
     return out
 
 

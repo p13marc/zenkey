@@ -43,6 +43,9 @@ OWNER and READER ``py`` or ``rs`` (#609, rounds 78 to 80).
   miss is due, round 80): the two tools' agreement there is F-278's, and a
   roll-up's reason over no member F-279's, in :data:`KNOWN`; ``again``
   (§2.7, a member ended and heard again in one window, round 80, F-280).
+  Each runs beside every owner the selected pairs name, and only with both
+  tools present. F-278 to F-280 are accepted on #908 for text 0.5, which
+  zk2py has not read yet: they stay open here.
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -1084,18 +1087,25 @@ def tool_answers(doc: dict[str, Any] | None) -> dict[tuple[str, str], dict[str, 
     out: dict[tuple[str, str], dict[str, Any]] = {}
     if doc is None:
         return out
+    # .get throughout: a malformed document reads as missing tokens, which a
+    # check then fails, never a KeyError aborting the section (review-bot on
+    # PR #939)
+    def pair(v: Any) -> tuple[Any, Any]:
+        return (v.get("answer"), v.get("reason")) if isinstance(v, dict) else (None, None)
+
     for r in doc.get("rows") or []:
+        if not isinstance(r, dict):
+            continue
         if r.get("row") == "member":
-            out[("member", r["key"])] = {q: (r[q]["answer"], r[q]["reason"]) for q in ("deadline", "period", "lifespan")
-                                         if q in r}
+            k = ("member", r.get("key"))
+            out[k] = {q: pair(r[q]) for q in ("deadline", "period", "lifespan") if q in r}
             # §2.7 (text 0.3): a tool's known members, beside the answers
-            out[("member", r["key"])]["known"] = bool(r.get("known"))
+            out[k]["known"] = bool(r.get("known"))
         elif r.get("row") == "resource":
             # a roll-up over no member carries no reason in zenctl's output
-            out[("resource", r["resource"])] = {q: (v["answer"], v.get("reason"))
-                                                for q, v in r["questions"].items()}
-    if doc.get("run"):
-        out[("run", "")] = {q: (v["answer"], v.get("reason")) for q, v in doc["run"].items()}
+            out[("resource", r.get("resource"))] = {q: pair(v) for q, v in (r.get("questions") or {}).items()}
+    if isinstance(doc.get("run"), dict):
+        out[("run", "")] = {q: pair(v) for q, v in doc["run"].items()}
     return out
 
 
@@ -1109,23 +1119,28 @@ def rollup_mismatches(doc: dict[str, Any] | None) -> list[tuple[str, str, str, s
     out: list[tuple[str, str, str, str]] = []
     if not doc:
         return [("document", "", "none", "")]
-    members = [r for r in doc.get("rows") or [] if r.get("row") == "member"]
+    rows = [r for r in doc.get("rows") or [] if isinstance(r, dict)]
+    members = [r for r in rows if r.get("row") == "member"]
 
-    def rolled(q: str, rows: list[dict[str, Any]]) -> str:
-        return tm.rollup(q, [tm.Answer(r[q]["answer"], r[q].get("reason", "")) for r in rows if q in r]).answer
+    def answer(v: Any) -> Any:
+        return v.get("answer") if isinstance(v, dict) else None
 
-    for res in (r for r in doc.get("rows") or [] if r.get("row") == "resource"):
+    def rolled(q: str, of: list[dict[str, Any]]) -> str:
+        return tm.rollup(q, [tm.Answer(str(answer(r[q])), str(r[q].get("reason") or "") if isinstance(r[q], dict)
+                                       else "") for r in of if q in r]).answer
+
+    for res in (r for r in rows if r.get("row") == "resource"):
         mine = [m for m in members if m.get("resource") == res.get("resource")
                 and m.get("address") == res.get("address") and m.get("iface") == res.get("iface")]
-        for q, v in (res.get("questions") or {}).items():
-            if v["answer"] != (want := rolled(q, mine)):
-                out.append((res["resource"], q, v["answer"], want))
-        if res.get("resource") == RID_AXIS and mine and (res.get("questions") or {}).get("lifespan", {}).get(
-                "answer") != "not_asked":
-            out.append((res["resource"], "lifespan", str(res["questions"].get("lifespan")), "not_asked"))
-    for q, v in (doc.get("run") or {}).items():
-        if v["answer"] != (want := rolled(q, members)):
-            out.append(("run", q, v["answer"], want))
+        qs = res.get("questions") if isinstance(res.get("questions"), dict) else {}
+        for q, v in qs.items():
+            if answer(v) != (want := rolled(q, mine)):
+                out.append((str(res.get("resource")), q, str(answer(v)), want))
+        if res.get("resource") == RID_AXIS and mine and answer(qs.get("lifespan")) != "not_asked":
+            out.append((str(res.get("resource")), "lifespan", str(qs.get("lifespan")), "not_asked"))
+    for q, v in (doc.get("run") if isinstance(doc.get("run"), dict) else {}).items():
+        if answer(v) != (want := rolled(q, members)):
+            out.append(("run", q, str(answer(v)), want))
     return out
 
 
@@ -1381,25 +1396,33 @@ def section6_gone(report: Report, oi: str) -> None:
 
 def section6_again(report: Report, oi: str) -> None:
     """Beside §6, not a scenario (round 80, F-280): ``axis/x`` ends in the
-    window and is heard again. Its member token is withdrawn 1 s into a 5 s
+    window and is heard again. Its member token is withdrawn 2 s into an 8 s
     window (``timing remove x``), so a tool ends it (gone) at its read, and
-    added again 2 s in (``timing add x``), so it is heard again, "judged
-    from that arrival, as a member first heard" (§2.5). §2.7's period span
-    runs "to the member's end when it ended in the window", and the text
-    reads no second life: both tools read the first end, its period kept
-    over its first life and its second life judged by neither; its deadline
-    not asked (``ended``). zk2py's round-80 first reading, an end followed
-    by an arrival dropped, counted the second's absence against the period:
-    no, not_kept, exit 1, beside zenctl's exit 0."""
+    added again 4 s in (``timing add x``), so it is heard again, "judged
+    from that arrival, as a member first heard" (§2.5). The margins are wide
+    against the two windows' starts (72–113 ms apart) and a loaded runner:
+    each life is 2 s or more, the end's read some 0.1–0.25 s after the
+    withdrawal and 1.75 s or more before the re-add (review-bot on PR #939).
+
+    §2.7's period span runs "to the member's end when it ended in the
+    window", and the text reads no second life (F-280, open; accepted on
+    #908 for text 0.5 as its first life). The checks of each tool alone
+    are what the text fixes: ended (gone), no miss, its deadline not asked
+    (``ended``), its lifespan not asked. The period, kept over its first
+    life, is the two tools' reading of F-280, checked once over both. zk2py's
+    round-80 first reading, an end followed by an arrival dropped, counted
+    the second's absence against the period: no, not_kept, exit 1, beside
+    zenctl's exit 0."""
     sec = f"§2.7 again beside §6 [{oi}→both tools]"
     bus = Bus()
+    window_s, remove_s, add_s = 8.0, 2.0, 4.0
     try:
         o = bus.owner(oi)
         kx = f"{AXIS}/x"
         o.add("x")
         o.resume("cmd")
         time.sleep(0.3)
-        runs = {t: ToolRun(t, bus.endpoint, 5.0) for t in ("zk2py", "zenctl")}
+        runs = {t: ToolRun(t, bus.endpoint, window_s) for t in ("zk2py", "zenctl")}
         ok = _wait(lambda: all(r.listening() is not None or r.p.poll() is not None for r in runs.values()), 15.0)
         starts = [r.listening() for r in runs.values()]
         if not ok or any(t is None for t in starts):
@@ -1409,23 +1432,27 @@ def section6_again(report: Report, oi: str) -> None:
                          "; ".join(f"{t}: {r.err[-3:]}" for t, r in runs.items()))
             return
         later = max(t for t in starts if t is not None)
-        _sleep_until(later + 1 * NS)
+        _sleep_until(later + int(remove_s * NS))
         o.remove("x")
-        _sleep_until(later + 2 * NS)
+        _sleep_until(later + int(add_s * NS))
         o.add("x")
-        _sleep_until(later + 5 * NS + 300 * MS)
+        _sleep_until(later + int(window_s * NS) + 300 * MS)
         o.pause("cmd")
         got = {t: r.result() for t, r in runs.items()}
         ans = {t: tool_answers(d) for t, (_, d) in got.items()}
         for t, a in ans.items():
             x, row = a.get(("member", kx), {}), _member_row(got[t][1], kx)
-            report.check(sec, f"{t}: axis/x ended (gone) about 1.1 s in and heard again: no miss, its deadline not "
-                              f"asked (ended), its period kept over its first life; the run clean, exit 0",
-                         _ended(row) == "gone" and not row.get("misses")
-                         and x.get("deadline") == ("not_asked", "ended") and x.get("period") == ("yes", "kept")
-                         and got[t][0] == 0,
+            report.check(sec, f"{t}: axis/x ended (gone) after its withdrawal {remove_s:g} s in, and heard again "
+                              f"from {add_s:g} s: no miss, its deadline not asked (ended), its lifespan not asked",
+                         _ended(row) == "gone" and not row.get("misses") and x.get("deadline") == ("not_asked", "ended")
+                         and x.get("lifespan") == ("not_asked", "no_lifespan"),
                          f"exit {got[t][0]}; axis/x {x}; ended {row.get('ended')}; held_ms {row.get('held_ms')}; "
                          f"{row.get('arrivals')} arrivals")
+        periods = {t: a.get(("member", kx), {}).get("period") for t, a in ans.items()}
+        report.check(sec, "F-280's reading, both tools: axis/x's period over its first life, kept, and the run clean, "
+                          "exit 0",
+                     all(v == ("yes", "kept") for v in periods.values()) and all(c == 0 for c, _ in got.values()),
+                     "; ".join(f"{t} {periods[t]}, exit {got[t][0]}" for t in got))
         ta, tb = ans["zk2py"], ans["zenctl"]
         diffs = [(k, q, ta.get(k, {}).get(q), tb.get(k, {}).get(q)) for k in sorted(set(ta) | set(tb))
                  for q in ("deadline", "period", "lifespan", "known")
@@ -1478,24 +1505,32 @@ def main(argv: list[str] | None = None) -> int:
                 traceback.print_exc()
                 report.check(f"§{name} [{names[oi]}→{names[ci]}]", "the section ran to its end", False,
                              f"{type(e).__name__}: {e}")
-    six = not args.only or "6" in args.only
-    if six and not os.access(BLACKBOX / "zenctl", os.X_OK):
-        print(f"SKIP §6: it runs both tools, and the reference's is missing: {BLACKBOX / 'zenctl'}", flush=True)
-        six = False
-    face = (not args.only or "face" in args.only) and os.access(BLACKBOX / "zenctl", os.X_OK)
-    gone = (not args.only or "gone" in args.only) and os.access(BLACKBOX / "zenctl", os.X_OK)
-    again = (not args.only or "again" in args.only) and os.access(BLACKBOX / "zenctl", os.X_OK)
-    for fn, on in ((section6, six), (section6_face, face), (section6_gone, gone), (section6_again, again)):
-        if not on:
-            continue
-        for oi in sorted({p.split(':')[0] for p in pairs}):
+    # The tool sections (§6, and beside it face, gone and again) each run
+    # both tools beside one owner, and read no reader: they run beside each
+    # owner the selected pairs name, and only when both tools are here
+    # (review-bot on PR #939). An owner the pairs do not name is never run
+    # for them, and with `--only` naming none of them none runs.
+    tools = [("6", section6, "§6"), ("face", section6_face, "§2.8 beside §6"),
+             ("gone", section6_gone, "§2.7 beside §6"), ("again", section6_again, "§2.7 again beside §6")]
+    wanted = [t for t in tools if not args.only or t[0] in args.only]
+    owners = sorted({p.split(":")[0] for p in pairs})
+    if wanted and not os.access(BLACKBOX / "zenctl", os.X_OK):
+        print(f"SKIP {', '.join(t[2] for t in wanted)}: each runs both tools, and the reference's is missing: "
+              f"{BLACKBOX / 'zenctl'}", flush=True)
+        wanted = []
+    if wanted and not owners:
+        print(f"SKIP {', '.join(t[2] for t in wanted)}: no pairing selected names an owner to run them beside",
+              flush=True)
+    for _, fn, label in wanted:
+        for oi in owners:
             try:
                 fn(report, oi)
             except Exception as e:  # noqa: BLE001
                 import traceback
 
                 traceback.print_exc()
-                report.check(f"§6 [{oi}]", "the section ran to its end", False, f"{type(e).__name__}: {e}")
+                report.check(f"{label} [{oi}→both tools]", "the section ran to its end", False,
+                             f"{type(e).__name__}: {e}")
     from .checks import summarise
 
     return summarise("timing interop", report.rows,
