@@ -3,6 +3,91 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.57 — 2026-10-29: `cardinality = "unbounded"`, and "at scale" on the sections a small deployment can skip (#937)
+
+zk2 is built to hold thousands of devices per presence domain, and the
+machinery for that sits in a newcomer's path (#921, Track C). A template
+with parameters must declare `cardinality` (E013), and one with no ceiling
+had to write 4294967295 "by convention" (§2.2). Member tokens, the
+tokenless set, the presence budget, §2.7's budget and the standby mark sat
+beside the basic rules with nothing saying which a small deployment can
+skip. This amendment names the no-ceiling value, and opens each of those
+sections with one line saying who needs it and from what size. Two
+contract fixtures are added; no expectation changed.
+
+**Changed: `cardinality = "unbounded"` (§2.2, §9.1, §9.5).**
+- **§2.2:** a template's `cardinality` is a positive integer or
+  `"unbounded"`. The no-ceiling value is written `"unbounded"` (the
+  canonical form's 4294967295), where 0.6 to 0.56 wrote the number "by
+  convention" and said the authoring format needed no second spelling. A
+  contract MAY still write the number: the two spellings have one
+  canonical form, so one fingerprint, and an implementation MUST read them
+  alike. Any other string is E000.
+  `[F: contracts/ok-cardinality-unbounded, ok-cardinality-no-ceiling, e000-cardinality-string]`:
+  `ok-cardinality-unbounded` is `ok-cardinality-no-ceiling` with
+  `"unbounded"` for the number, no code, the same fingerprint and the same
+  canonical bytes; `e000-cardinality-string` writes `"Unbounded"`, E000.
+- **§9.1, "Values":** a new bullet. `cardinality` is an integer or the
+  string `"unbounded"`, which is 4294967295 from resolution on; any other
+  string is a value of the wrong type, so E000.
+- **§9.5:** the resource's `cardinality` row says that `"unbounded"` is
+  written 4294967295.
+- **The authoring format is draft 2** (`examples/zk2/README.md`): draft 1
+  plus this spelling, and nothing else. §7.1's sentence on the reserved
+  kinds names draft 2, which has no spelling for them either.
+- **The reference** (`zenkey-model`): `authoring::Cardinality` reads either
+  spelling, and E013's message ends with what to write: "write a number,
+  the most members one instance will hold, or `"unbounded"`".
+  `contract.schema.json` gives `cardinality` as an integer or the string
+  `"unbounded"`, a one-member `enum`, as the schema's other strings are.
+
+**Stated, no rule changed: "At scale."** Each of these opens with one
+informative line, "**At scale.** A deployment needs this … only once …;
+below that, …", taking its size from the core's own numbers (§1.5's 5,000
+devices per presence domain, §8.3's 10–15k tokens, spike S2's discovery
+times), or, where it gives none, saying what makes the section matter. A
+small deployment's reading path can skip them by name.
+- **§2.7, the population budget:** only once a service's templated
+  resources hold members that come and go in numbers near their
+  `cardinality`, or a tool judges their budget; below that, an owner
+  writes its `cardinality` and keeps each event's `rate`, and the rest is
+  for a tool that judges budgets.
+- **§3.3, `standby`:** only once a service runs in two instances, one
+  standing by for the other under `redundancy.v1`; with one instance per
+  service, no entry is marked, and absent is serving.
+- **§8.1, the tokenless set (U22):** only once a presence domain nears
+  the presence budget, about 10–15k tokens; below that, the set is empty
+  and every interface keeps its token.
+- **§8.1, member tokens:** only once a contract declares `epoch`, as one
+  service serving its devices, containers or streams as members does, the
+  shape §1.5 gives above about 5,000 devices per presence domain; below
+  that, a service per device keeps each one's continuity in its own
+  instance id, and an owner whose contract declares no `epoch` holds no
+  member token.
+- **§8.3, the presence budget:** only once a presence domain nears 10,000
+  liveliness tokens; below that, spike S2 measured discovery under 2 s
+  (under 50 ms at 1,000 tokens).
+
+**Deliberately not changed.**
+- **The canonical form, and every fingerprint.** `"unbounded"` is resolved
+  to 4294967295 before the canonical form is built, so its `cardinality`
+  stays an integer, and its `format` stays `zk2-contract/draft-1`: the
+  canonical form did not change, and moving the tag would move every
+  fingerprint. No bundle, history or descriptor reads anything new.
+- **E013's condition:** a template with parameters and no `cardinality`,
+  or 0. Codes are the conformance surface, and messages are not.
+- **An omitted `cardinality` is not read as unbounded.** An author could
+  then lose the budget by forgetting a line; a named spelling keeps the
+  choice explicit (#937, "considered and not proposed").
+- **The descriptor's `cardinality`** (§3.3) stays an integer: it lowers a
+  bound, and the no-ceiling value there is the number.
+- **A bound above 4294967295** is still a bound like any other
+  (`budget/bounds.json`); `"unbounded"` names 2^32−1 alone.
+- **No text moved.** The "at scale" lines are added in place, and every
+  rule of those sections stands as it was. §1.3's kind table and §1.5's
+  device-as-service bullet are unchanged; keeping these sections out of a
+  newcomer's guide is #933's.
+
 ## 0.56 — 2026-10-28: a close's withdrawals come before its transport event, and an open before its interests (round 77's F-268, #909)
 
 zk2py round 77 read `arbitration.v1` 0.1 and core 0.54 cold, and ran its
