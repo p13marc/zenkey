@@ -4,6 +4,23 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## experimental — 2026-10-29: no adopter yet (#938)
+
+The text's status moves from `draft` to `experimental`, the status of a
+profile that no adopter's mapping and no shipped service uses
+([`../README.md`](../README.md), "The process"). No contract of
+ZenSight's, zenoh-modem's or tcgui's mapping lists `timing.v1` in
+`uses`, and zenwatch does not follow it: only the walkthrough's `nav.v2`
+and `twist_cmd.v1` do. The profile leaves `experimental` when an
+adopter's mapping or a shipped service uses it.
+
+**Changed: the status alone.** The index lists `timing.v1` in its second
+table, "Experimental: no adopter yet", and the header's status reads
+`experimental`.
+
+**Deliberately not changed.** No rule. The text stays 0.5, and its
+fixtures, scenarios, runtime and tools are as they were.
+
 ## 0.5 — 2026-10-29: round 80's answers (#908, ME)
 
 The second implementation made the final cold read of 0.4 against the
