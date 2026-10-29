@@ -2399,3 +2399,171 @@ async fn a_round_trip_asked_at_the_open_event_can_precede_the_reopen() {
 
 /// The reopens of the test above.
 const OPEN_ROUNDS: usize = 10;
+
+/// How many times the move within the margin is tried before the test
+/// fails for want of one that lands in it.
+const MARGIN_ATTEMPTS: usize = 5;
+
+/// #914: the barrier asks the round trip after an open a margin after it
+/// (core §8.1, 0.56: "A reader SHOULD ask the round trip after an open a
+/// margin after its event (the reference: 100 ms)"). The test above's
+/// watch session, its three subscribers without history over three tokens,
+/// and a [`presence::Barrier`] on it. [`OPEN_ROUNDS`] reopens; at each the
+/// reader asks the barrier at once at the open, as a reader that follows
+/// [`presence::Barrier::moved_since`] does, and its round trip stands only
+/// after the reopen has told every token, asked no sooner than
+/// [`presence::OPEN_MARGIN`] after the open. Then a move within the margin:
+/// the round trip waiting it out ends unasked, and does not stand.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_barrier_round_trip_after_an_open_follows_the_reopen() {
+    use std::time::{Duration, Instant};
+    let (_r1, ep) = router(None).await;
+    let holder = client(&ep).await;
+    let mut _tokens = Vec::new();
+    for i in 1..=3 {
+        _tokens.push(
+            holder
+                .liveliness()
+                .declare_token(format!(
+                    "zk2/lab/s{i}/@zk/alive/steer.v1/000000000000000{i}/0123456789abcdef"
+                ))
+                .await
+                .unwrap(),
+        );
+    }
+    let link = common::link_to(&ep).await;
+    let watch = common::retrying_client(link.endpoint()).await;
+    let told: Arc<Mutex<Vec<Instant>>> = Arc::default();
+    let mut _subs = Vec::new();
+    for i in 1..=3 {
+        let t = Arc::clone(&told);
+        _subs.push(
+            presence::declare_subscriber(&watch, format!("zk2/lab/s{i}/@zk/alive/**"))
+                .history(false)
+                .callback(move |s: Sample| {
+                    if s.kind() == SampleKind::Put {
+                        t.lock().unwrap().push(Instant::now());
+                    }
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    // Each open's instant, on a listener of the test's own.
+    let (tx, rx) = flume::unbounded::<Instant>();
+    let _listener = watch
+        .info()
+        .transport_events_listener()
+        .callback(move |ev| {
+            if ev.kind() == SampleKind::Put {
+                let _ = tx.send(Instant::now());
+            }
+        })
+        .await
+        .unwrap();
+    let barrier = presence::Barrier::at(&watch, "zk2/lab/s1/@zk/settle", T)
+        .await
+        .unwrap();
+    assert!(barrier.establish().await, "the round trip at the start");
+    let moved = |seen: u64| {
+        let b = barrier.clone();
+        async move {
+            tokio::time::timeout(common::SETTLE, b.moved_since(seen))
+                .await
+                .expect("the transport moved");
+        }
+    };
+    let mut rows = Vec::new();
+    for round in 0..OPEN_ROUNDS {
+        let seen = barrier.moves();
+        link.cut();
+        moved(seen).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let from = told.lock().unwrap().len();
+        let seen = barrier.moves();
+        link.heal();
+        // At once at the open, as the barrier's own waiter hears it.
+        moved(seen).await;
+        let stood = barrier.establish().await;
+        let replied = Instant::now();
+        let opened = rx.recv_async().await.unwrap();
+        let before = told.lock().unwrap()[from..]
+            .iter()
+            .filter(|at| **at <= replied)
+            .count();
+        let after_ms =
+            (replied.saturating_duration_since(opened).as_secs_f64() * 1e4).round() / 10.0;
+        rows.push((before, after_ms));
+        assert!(
+            stood,
+            "round {round}: the round trip after the reopen stands"
+        );
+        assert_eq!(
+            before, 3,
+            "round {round}: the reopen's telling before the barrier's reply"
+        );
+        // The open's instant, read on two listeners: a few ms between them
+        // at most.
+        assert!(
+            replied + Duration::from_millis(5) >= opened + presence::OPEN_MARGIN,
+            "round {round}: asked {after_ms:.3} ms after the open"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    eprintln!(
+        "#914: the barrier's round trip after an open stood after the reopen's telling at \
+         {} of {OPEN_ROUNDS} reopens; (tokens told by its reply, ms after the open) {rows:?}",
+        rows.iter().filter(|(n, _)| *n == 3).count()
+    );
+
+    // A move within the margin: the round trip waiting it out ends unasked.
+    // Under load the close's event can come after the margin, when the
+    // round trip asks (through a session with no link, which asks nothing),
+    // so it is tried until a close lands within it, and a run where none
+    // does fails rather than passing untested (review-bot on PR #932).
+    let seen = barrier.moves();
+    link.cut();
+    moved(seen).await;
+    let mut tested = None;
+    for attempt in 0..MARGIN_ATTEMPTS {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let asked = presence::liveliness_gets(&watch).settles;
+        let seen = barrier.moves();
+        link.heal();
+        moved(seen).await;
+        let opened = Instant::now();
+        assert!(
+            !barrier.establish_within(Duration::ZERO).await,
+            "attempt {attempt}: not asked within the margin"
+        );
+        assert!(
+            barrier.in_flight(),
+            "attempt {attempt}: waiting out the margin"
+        );
+        let seen = barrier.moves();
+        link.cut();
+        moved(seen).await;
+        let closed = opened.elapsed();
+        eventually("the round trip ends", || async { !barrier.in_flight() }).await;
+        assert!(
+            !barrier.established(),
+            "attempt {attempt}: a move within the margin: no barrier"
+        );
+        let trips = presence::liveliness_gets(&watch).settles - asked;
+        eprintln!(
+            "#914: attempt {attempt}: a close {closed:?} after the open; {trips} round trip(s) asked"
+        );
+        if closed + Duration::from_millis(10) < presence::OPEN_MARGIN {
+            assert_eq!(
+                trips, 0,
+                "attempt {attempt}: a move within the margin ends it unasked"
+            );
+            tested = Some(attempt);
+            break;
+        }
+    }
+    assert!(
+        tested.is_some(),
+        "no close landed within the margin in {MARGIN_ATTEMPTS} attempts: the property went untested"
+    );
+}

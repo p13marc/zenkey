@@ -34,7 +34,7 @@
 //! | §2.5 `not_incumbent` | a governed required interface (`redundancy.v1` §2.2): a sample whose stamp's id is not the incumbent's `meta.zid` (`redundancy.v1` §2.10), the incumbent the lowest instance holding the interface's token, as the watch and the reads show it, and its descriptor |
 //! | §2.7 withdrawals on a watch session, never polled | a liveliness subscriber per entry on [`crate::consumer::Consumer::with_watch`]'s session, its round trip made after declaring it; without one, the deadline alone, said so ([`Arbitration::watching`]) |
 //! | §2.7 read again | 0.1 s after the first withdrawal of a burst ([`crate::timing::REREAD`]), one read per address, on the consumer's session, which holds no liveliness subscriber ([`Arbitration::reads`]) |
-//! | §2.8 a move | `Moved` at the watch session's transport event, or at a withdrawal heard while it holds no link, whichever comes first (text 0.2, F-268; core §8.1, 0.56); `Stood` when the round trip asked after it stands ([`crate::presence::Barrier`]), asked again until one does |
+//! | §2.8 a move | `Moved` at the watch session's transport event, or at a withdrawal heard while it holds no link, whichever comes first (text 0.2, F-268; core §8.1, 0.56); `Stood` when the round trip asked after it stands ([`crate::presence::Barrier`], which asks the one after an open [`crate::presence::OPEN_MARGIN`] after it, core §8.1, 0.56, #914), asked again until one does |
 //! | §2.9 decided at every event; the timer | a one-shot timer at [`Arbiter::due`], re-armed at every step; every event's instant on this host's monotonic clock, never earlier than the last |
 //! | §2.9 only the active provider's arrivals delivered | [`ArbitrationEvent::Delivered`], from the subscriber's lock, in decision order |
 //! | §2.10, §2.11 every switch told, the dead-man at start | [`ArbitrationEvent::Switched`]; the first is `start`'s, to none |
@@ -834,15 +834,6 @@ struct Follower {
 
 type Trip = std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>;
 
-/// How long after a move of the watch session the round trip that ends it
-/// is asked (text 0.2; core §8.1, 0.56): zenoh 1.10.1 tells a transport's
-/// open to its listener before its router re-declares the session's
-/// subscribers' interests on it, and a round trip asked in between finds no
-/// face, and stands at once, complete and empty, before the reopen's
-/// telling (measured: 6 of 60 asked at the event; 0 of 60 asked 100 ms
-/// after, `tests/presence.rs`).
-const AFTER_OPEN: Duration = Duration::from_millis(100);
-
 impl Follower {
     async fn run(
         mut self,
@@ -900,11 +891,12 @@ impl Follower {
                     moves_seen = barrier.as_ref().map_or(moves_seen, crate::presence::Barrier::moves);
                     self.awaiting_event = None;
                     lock(&self.core).presence(Instant::now(), Event::Moved, None);
-                    // Not at the event's instant: zenoh 1.10.1 tells an
-                    // open before its router declares the subscribers'
+                    // Asked now: the barrier asks the round trip after an
+                    // open `OPEN_MARGIN` after it, since zenoh 1.10.1 tells
+                    // an open before its router declares the subscribers'
                     // interests again, and a round trip asked in between
-                    // stands with nothing told (core §8.1, 0.56).
-                    trip = Some(self.ask_trip(AFTER_OPEN));
+                    // stands with nothing told (core §8.1, 0.56; #914).
+                    trip = Some(self.ask_trip(Duration::ZERO));
                 }
                 stood = tripped => {
                     trip = None;
@@ -986,11 +978,15 @@ impl Follower {
         }
     }
 
-    /// The round trip after a move, `after` from now.
+    /// The round trip after a move, `after` from now: through the
+    /// barrier, which waits out [`crate::presence::OPEN_MARGIN`] after an
+    /// open before it asks (#914).
     fn ask_trip(&self, after: Duration) -> Trip {
         let b = self.barrier.clone();
         Box::pin(async move {
-            tokio::time::sleep(after).await;
+            if !after.is_zero() {
+                tokio::time::sleep(after).await;
+            }
             match b {
                 Some(b) => b.establish().await,
                 None => false,
