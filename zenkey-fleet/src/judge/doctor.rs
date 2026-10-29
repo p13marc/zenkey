@@ -969,7 +969,8 @@ fn arbitration_declaration(p: &Presence<'_>) -> CheckReport {
                 DoctorSeverity::Error,
                 subject.clone(),
                 format!(
-                    "its declaration is invalid over the {} revision(s) of {} in hand: {} — a                      consumer's runtime refuses to start on it (arbitration.v1 §2.2)",
+                    "its declaration is invalid over the {} revision(s) of {} in hand: {} — a \
+                     consumer's runtime refuses to start on it (arbitration.v1 §2.2)",
                     read.revisions.len(),
                     s.required,
                     why.iter()
@@ -1007,7 +1008,8 @@ fn arbitration_declaration(p: &Presence<'_>) -> CheckReport {
             let mut what = Vec::new();
             if !wild.is_empty() {
                 what.push(format!(
-                    "the wildcard {} ranks its addresses by system then service, byte by byte:                      a priority nobody chose",
+                    "the wildcard {} ranks its addresses by system then service, byte by byte: \
+                     a priority nobody chose",
                     named(&wild)
                 ));
             }
@@ -1034,7 +1036,8 @@ fn arbitration_declaration(p: &Presence<'_>) -> CheckReport {
         findings,
         undecided,
         format!(
-            "{judged} arbitrated role(s) of running consumers, each declaration valid and each              binding of exact entries, none shadowed"
+            "{judged} arbitrated role(s) of running consumers, each declaration valid and each \
+             binding of exact entries, none shadowed"
         ),
     )
 }
