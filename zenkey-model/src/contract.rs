@@ -663,6 +663,11 @@ fn pick<T: Clone>(
         .cloned()
 }
 
+/// What E013 says to write (core §2.2, 0.57; #937): both spellings, so a
+/// newcomer who meets the error needs no further reading.
+const E013_SPELLINGS: &str =
+    "write a number, the most members one instance will hold, or \"unbounded\"";
+
 #[allow(clippy::too_many_lines)]
 fn resolve_resource(raw: &str, spec: &ResourceSpec, cx: &mut Ctx<'_>) -> Option<Resource> {
     let at = at_res(raw);
@@ -717,16 +722,19 @@ fn resolve_resource(raw: &str, spec: &ResourceSpec, cx: &mut Ctx<'_>) -> Option<
             ));
         }
     }
-    match (template.has_params(), spec.cardinality) {
+    // `"unbounded"` is 4294967295 from here on (§2.2, 0.57): the contract
+    // carries one integer whichever spelling wrote it.
+    let cardinality = spec.cardinality.map(a::Cardinality::value);
+    match (template.has_params(), cardinality) {
         (true, None) => cx.report.push(Diagnostic::error(
             "E013",
             at.clone(),
-            "a templated resource declares its `cardinality`",
+            format!("a templated resource declares its `cardinality`; {E013_SPELLINGS}"),
         )),
         (true, Some(0)) => cx.report.push(Diagnostic::error(
             "E013",
             at.clone(),
-            "`cardinality` is at least 1",
+            format!("`cardinality` is at least 1; {E013_SPELLINGS}"),
         )),
         (false, Some(_)) => cx.report.push(Diagnostic::error(
             "E014",
@@ -820,7 +828,7 @@ fn resolve_resource(raw: &str, spec: &ResourceSpec, cx: &mut Ctx<'_>) -> Option<
         token,
         doc: spec.doc.clone(),
         params: spec.params.clone(),
-        cardinality: spec.cardinality,
+        cardinality,
         epoch: spec.epoch.clone(),
         optional: spec.optional,
         gate,
@@ -1366,6 +1374,62 @@ mod tests {
         );
         assert_eq!(codes("[interface]\nname = \"t\"\nmajor = 1\n"), ["W104"]);
         assert_eq!(codes("[interface]\nname = \"t\"\n"), ["E000"]);
+    }
+
+    /// `cardinality = "unbounded"` (core §2.2, 0.57; #937): the contract
+    /// carries 4294967295, so both spellings have one fingerprint; any other
+    /// string, a negative number or a float is not the format's shape; and
+    /// E013 says what to write.
+    #[test]
+    fn cardinality_unbounded_is_the_no_ceiling_value() {
+        let src = |card: &str| {
+            format!(
+                "{HEAD}[resources.\"a/{{x}}\"]\nkind = \"stream\"\nparams = {{ x = \"string\" }}\n\
+                 {card}type = {{ raw = \"text/plain\" }}\n"
+            )
+        };
+        let load = |card: &str| load_str(&src(card), Path::new("."), None);
+        let named = load("cardinality = \"unbounded\"\n")
+            .contract
+            .expect("valid");
+        let number = load("cardinality = 4294967295\n").contract.expect("valid");
+        let r = named.resource(KindToken::Stream, "a/{x}").unwrap();
+        assert_eq!(r.cardinality, Some(crate::budget::NO_CEILING));
+        assert_eq!(
+            crate::canonical::canonical_bytes(&named),
+            crate::canonical::canonical_bytes(&number)
+        );
+        assert_eq!(
+            crate::canonical::Fingerprint::of(&named),
+            crate::canonical::Fingerprint::of(&number)
+        );
+        for bad in [
+            "cardinality = \"Unbounded\"\n",
+            "cardinality = \"many\"\n",
+            "cardinality = \"4\"\n",
+            "cardinality = -1\n",
+            "cardinality = 4.0\n",
+        ] {
+            assert_eq!(codes(&src(bad)), ["E000"], "{bad}");
+        }
+        let at_least_one = load("cardinality = 0\n");
+        for l in [load(""), at_least_one] {
+            let d = &l.report.0;
+            assert_eq!(d.len(), 1, "{}", l.report);
+            assert_eq!(d[0].code, "E013");
+            assert!(
+                d[0].message.ends_with(
+                    "write a number, the most members one instance will hold, or \"unbounded\""
+                ),
+                "{}",
+                d[0].message
+            );
+        }
+        let untemplated = format!(
+            "{HEAD}[resources.\"a\"]\nkind = \"stream\"\ncardinality = \"unbounded\"\n\
+             type = {{ raw = \"text/plain\" }}\n"
+        );
+        assert_eq!(codes(&untemplated), ["E014"]);
     }
 
     /// W103 is judged on resolved types: an unresolved one (E023) says

@@ -46,6 +46,22 @@
     "interface"
   ],
   "$defs": {
+    "Cardinality": {
+      "description": "A templated resource's `cardinality`: a number, the most members one instance will hold, or `\"unbounded\"`, which is 4294967295 (core §2.2).",
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "enum": [
+            "unbounded"
+          ]
+        }
+      ]
+    },
     "Congestion": {
       "type": "string",
       "enum": [
@@ -631,13 +647,15 @@
           "default": null
         },
         "cardinality": {
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cardinality"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
+          "default": null
         },
         "congestion": {
           "anyOf": [

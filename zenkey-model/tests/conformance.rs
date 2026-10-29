@@ -204,6 +204,12 @@ fn contracts() {
         fps.get("ok-defaults-spelled")
     );
     assert!(fps.contains_key("ok-defaults-defaulted"));
+    // `"unbounded"` and the number it names fingerprint alike (§2.2, 0.57).
+    assert_eq!(
+        fps.get("ok-cardinality-unbounded"),
+        fps.get("ok-cardinality-no-ceiling")
+    );
+    assert!(fps.contains_key("ok-cardinality-unbounded"));
     if bless() {
         want["cases"] = Value::Object(got);
         write_json(&expect_path, &want);
