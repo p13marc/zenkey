@@ -103,5 +103,6 @@ mod nodes;
 mod replay;
 mod sections;
 mod send;
+mod timing;
 mod traffic;
 mod tree_pane;

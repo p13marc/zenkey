@@ -27,7 +27,9 @@
 //! view's projection in both readings, both documents fresh, the view
 //! well-formed, each refusal the text makes checkable without changing
 //! anything, and a dry run; a service whose descriptor does not list
-//! `config.v1` is not asked them.
+//! `config.v1` is not asked them. The `timing-*` cases are `timing.v1`'s
+//! (#908): a period not kept and a deadline missed, each with the owner
+//! present throughout and nothing lost, over the profile's own reader.
 
 use std::fmt;
 
@@ -196,11 +198,24 @@ pub enum CaseId {
     /// queryable answers a call over its wildcard and a state queryable
     /// holding nothing answers nothing.
     RedundancyStandby,
+    /// Every member of a timed stream the service exposes, with a declared
+    /// period, kept it over the window (`timing.v1` §2.7, §5; #908): not
+    /// kept, the owner present throughout and nothing lost (this run's
+    /// queue and its own receive path, `bus::stall`), is the violation,
+    /// read by the profile's roll-up over the resource's members (F-264).
+    /// Each arrival is read in the subscriber's callback.
+    TimingPeriod,
+    /// Every member of a timed stream the service exposes, with a declared
+    /// deadline, met it over the window (`timing.v1` §2.5, §5; #908): a
+    /// miss reported while the owner was present, nothing lost, is the
+    /// violation; a miss only while it was not present is unobservable,
+    /// and a miss is never "down".
+    TimingDeadline,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 29] = [
+    pub const ALL: [CaseId; 31] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -230,6 +245,8 @@ impl CaseId {
         CaseId::DesiredAuthor,
         CaseId::RedundancyDeclaration,
         CaseId::RedundancyStandby,
+        CaseId::TimingPeriod,
+        CaseId::TimingDeadline,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -264,6 +281,8 @@ impl CaseId {
             CaseId::DesiredAuthor => "desired-author",
             CaseId::RedundancyDeclaration => "redundancy-declaration",
             CaseId::RedundancyStandby => "redundancy-standby",
+            CaseId::TimingPeriod => "timing-period",
+            CaseId::TimingDeadline => "timing-deadline",
         }
     }
 
@@ -305,6 +324,8 @@ impl CaseId {
             CaseId::DesiredAuthor => "desired.v1 §2.2",
             CaseId::RedundancyDeclaration => "redundancy.v1 §2.2",
             CaseId::RedundancyStandby => "redundancy.v1 §2.4",
+            CaseId::TimingPeriod => "timing.v1 §2.7",
+            CaseId::TimingDeadline => "timing.v1 §2.5",
         }
     }
 }
@@ -512,6 +533,8 @@ mod tests {
                 "desired-author",
                 "redundancy-declaration",
                 "redundancy-standby",
+                "timing-period",
+                "timing-deadline",
             ]
         );
         for c in CaseId::ALL {

@@ -800,6 +800,119 @@ fn telemetry_declaration(p: &Presence<'_>) -> CheckReport {
     )
 }
 
+/// `timing.v1` §2.2, §2.3, §2.5 (#908, MC): every resource and every
+/// requirement of every revision the descriptors name, its timing
+/// declaration read from the contract (`zenkey_model::timing::declaration_of`
+/// and `requirement_declaration`). The warnings a contract linter gives,
+/// each something no reader judges: an invalid value (no question of its
+/// members is answered), a deadline below its period (no deadline), and
+/// timing keys on a state, an event, an operation or a requirement, where
+/// they mean nothing (`[defaults]` included, which `[defaults.stream]`
+/// would have scoped). A revision not in hand is unjudged.
+fn timing_declaration(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::TimingDeclaration;
+    use zenkey_model::timing::{Declaration, declaration_of, requirement_declaration};
+    let mut named: BTreeMap<(IfaceId, Fingerprint), BTreeSet<String>> = BTreeMap::new();
+    for (a, _, d) in p.served() {
+        for e in &d.interfaces {
+            if let (Ok(iface), Ok(fp)) =
+                (IfaceId::from_str(&e.iface), Fingerprint::parse(&e.contract))
+            {
+                named.entry((iface, fp)).or_default().insert(a.to_string());
+            }
+        }
+    }
+    let mut findings = Vec::new();
+    let mut undecided = p.undescribed("the revisions it implements are unknown");
+    let mut timed = 0usize;
+    for ((iface, fp), by) in &named {
+        let rev = match p.revision(iface, fp) {
+            Ok(r) => r,
+            Err(why) => {
+                undecided.push(unjudged(format!("{iface} {fp}"), why));
+                continue;
+            }
+        };
+        let by = by.iter().cloned().collect::<Vec<_>>().join(", ");
+        let c = rev.contract();
+        let mut warn = |subject: String, why: String| {
+            findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                format!("{iface} {fp} {subject}"),
+                format!("implemented by {by}; {why}"),
+            ));
+        };
+        for r in &c.resources {
+            let name = zenkey::implementation::resource_name(r);
+            match declaration_of(r) {
+                Declaration::NotThisProfiles => {}
+                Declaration::Ignored => warn(
+                    name,
+                    format!(
+                        "timing keys on a {} resource mean nothing (timing.v1 §2.3): only a \
+                         stream has a period, a deadline or a lifespan; a key in [defaults] \
+                         reaches every kind, where [defaults.stream] would not",
+                        r.kind.as_str()
+                    ),
+                ),
+                Declaration::Invalid(why) => {
+                    timed += 1;
+                    warn(
+                        name,
+                        format!(
+                            "its timing declaration is invalid: {} — no reader judges its \
+                             period, deadline or lifespan (timing.v1 §2.2)",
+                            why.iter()
+                                .map(|w| format!("{} ({})", w.says(), w.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        ),
+                    );
+                }
+                Declaration::Declared(d) => {
+                    timed += 1;
+                    if let (true, Some(period), Some(deadline)) =
+                        (d.below_period(), d.period, d.deadline)
+                    {
+                        warn(
+                            name,
+                            format!(
+                                "its deadline, {} ms, is below its period, {} ms, so it is no \
+                                 deadline: an owner keeping its period would be missed between \
+                                 every two samples, and no reader judges one (timing.v1 §2.5)",
+                                deadline.as_millis(),
+                                period.as_millis()
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        for (role, req) in &c.requires {
+            if requirement_declaration(&req.annotations) == Declaration::Ignored {
+                warn(
+                    format!("requires.{role}"),
+                    "timing keys on a requirement mean nothing at this version (timing.v1 \
+                     §2.3): a descriptor's requirement entry carries no annotations, and a \
+                     tightened deadline belongs to a binding, which has no field for it"
+                        .to_owned(),
+                );
+            }
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{timed} timed resource(s) in {} revision(s) named by descriptors, each declaration \
+             one a reader judges",
+            named.len()
+        ),
+    )
+}
+
 /// `telemetry.v1` §2.6 (#819, TC), with `--deep`: every value reply of the
 /// owners' state GETs (the ones `state-stamp-foreign` makes) that is a
 /// sample of a state metric member, read by `zenkey_model::telemetry::check`.
@@ -1204,6 +1317,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::DesiredBehind => desired_behind(p, spec),
                 CheckId::DesiredLastKnown => desired_last_known(p, spec),
                 CheckId::RedundancyVacancy => redundancy_vacancy(p),
+                CheckId::TimingDeclaration => timing_declaration(p),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -6182,6 +6296,81 @@ mod tests {
             unseen(&check(
                 &obs(only_good, &[], &[&good]),
                 CheckId::TelemetryDeclaration
+            ))
+            .contains("unavailable")
+        );
+    }
+
+    /// `pace.v1`, the timing scenarios' contract, as the runtime's tests keep
+    /// it.
+    fn pace() -> Contract {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/pace.v1.toml");
+        let text = std::fs::read_to_string(&path).expect("pace.v1");
+        let l = zenkey_model::contract::load_str(&text, path.parent().unwrap(), None);
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    }
+
+    /// `timing-declaration` (#908, MC): an invalid value, a deadline below
+    /// its period, and timing keys on a state or a requirement are each a
+    /// warning, read from the contract a descriptor names; `pace.v1`'s two
+    /// timed streams are clean, and a revision not in hand unjudged.
+    #[test]
+    fn a_timing_declaration_no_reader_judges_is_a_warning() {
+        let bad = load(
+            "[interface]\nname = \"odd\"\nmajor = 1\nuses = [\"timing.v1\"]\n\
+             [resources.fast]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+             annotations = { \"timing.period_ms\" = 0 }\n\
+             [resources.slow]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+             annotations = { \"timing.period_ms\" = 100, \"timing.deadline_ms\" = 50 }\n\
+             [resources.level]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+             annotations = { \"timing.period_ms\" = 100 }\n\
+             [requires.cmd]\ninterface = \"pace.v1\"\n\
+             annotations = { \"timing.deadline_ms\" = 100 }\n",
+        );
+        let good = pace();
+        let after = observed(
+            &[inst("lab/odd", A)],
+            vec![(
+                ("lab/odd", A),
+                descriptor("lab/odd", A, &[entry(&bad), entry(&good)], &[]),
+            )],
+        );
+        let r = check(&obs(after, &[&bad, &good], &[]), CheckId::TimingDeclaration);
+        assert_eq!(r.verdict, Judgement::Established, "{r:#?}");
+        let by: BTreeMap<String, &DoctorFinding> = r
+            .findings
+            .iter()
+            .map(|f| (f.subject.rsplit(' ').next().unwrap().to_owned(), f))
+            .collect();
+        assert_eq!(
+            by.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["requires.cmd", "state/level", "stream/fast", "stream/slow"],
+            "pace.v1's two are clean: {r:#?}"
+        );
+        assert!(by.values().all(|f| f.severity == DoctorSeverity::Warning));
+        assert!(by["stream/fast"].evidence.contains("period_value"));
+        assert!(by["stream/slow"].evidence.contains("below its period"));
+        assert!(by["state/level"].evidence.contains("mean nothing"));
+        assert!(by["requires.cmd"].evidence.contains("requirement"));
+        let only_good = observed(
+            &[inst("lab/pace", A)],
+            vec![(
+                ("lab/pace", A),
+                descriptor("lab/pace", A, &[entry(&good)], &[]),
+            )],
+        );
+        assert!(
+            clean(&check(
+                &obs(only_good.clone(), &[&good], &[]),
+                CheckId::TimingDeclaration
+            ))
+            .contains("2 timed resource(s)")
+        );
+        assert!(
+            unseen(&check(
+                &obs(only_good, &[], &[&good]),
+                CheckId::TimingDeclaration
             ))
             .contains("unavailable")
         );

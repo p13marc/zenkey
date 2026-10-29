@@ -881,7 +881,10 @@ pub(crate) enum Command {
     /// desired-last-known (info: a target running a document read from an
     /// archive); and redundancy.v1's redundancy-vacancy (a warning: a
     /// governed interface with candidates and no incumbent in both of two
-    /// complete presence reads). A standby is never token-missing, and
+    /// complete presence reads); and timing.v1's timing-declaration (a
+    /// warning, from the contracts: an invalid timing value, a deadline
+    /// below its period, or timing keys on a resource that is not a stream
+    /// or on a requirement). A standby is never token-missing, and
     /// hostid-duplicate does not count a recognised one. The deployment is
     /// read through a session in its namespace; the routers' admin space and
     /// the presence domain through one in no namespace. A check whose input
@@ -1014,6 +1017,64 @@ pub(crate) enum Command {
     /// not asked, never null; ndjson carries the same, the envelope first,
     /// then a line per row.
     Telemetry(TelemetryArgs),
+    /// Read timing.v1 streams: deadline met, period kept, a sample expired
+    ///
+    /// timing.v1's tool (spec/profiles/timing/v1.md §2.7, §5), through a session
+    /// in the deployment's namespace: presence and each descriptor, the
+    /// revisions they name, and every timed stream those declare (a stream
+    /// with a timing.* annotation) — those the selector reaches when one is
+    /// given. The owners' instance, interface and member tokens are followed
+    /// on a watch session of their own, each member's samples subscribed to,
+    /// both into one queue, each arrival read in the subscriber's callback on
+    /// this host's monotonic clock and its wall clock. The window starts once
+    /// a presence read made after the watch session's round trip, and the
+    /// descriptor of every instance it shows, both stand (text 0.2, F-263),
+    /// when stderr says "listening"; that is every member's subscription start.
+    /// Per member it held: did it meet its deadline (a miss reported while its
+    /// owner was present, nothing lost, is the finding; one only while its
+    /// owner was unconfirmed, absent or unseen is unobservable, and a miss is
+    /// never "down"), did the owner keep its period ((arrivals + 2) × period
+    /// at least the span, over a span of three periods or more; not kept with
+    /// the owner present throughout and nothing lost is the finding), and did
+    /// a sample arrive expired (its age, this host's wall clock at its arrival
+    /// less the owner's stamp, less ε above the lifespan; only on a stated
+    /// --clock-bound, never the HLC's delta, and only on a stamp whose id is a
+    /// descriptor's meta.zid). Each in the fixtures' tokens (yes, no,
+    /// unobservable, not_asked, not_this_profiles) with its reason, and each
+    /// read over a resource and the run by its finding (text 0.2, F-264).
+    /// Across a constrained face the deadline and the period are unobservable
+    /// (§2.8) and the lifespan is judged on the meta.zids --owner-zid states.
+    /// Exit 1 on a finding (a deadline missed with the owner present and
+    /// nothing lost, a period not kept likewise, a sample expired); 0 when
+    /// every question asked is answered on its other pole over the run; 2 no
+    /// verdict: no timed resource in scope, no member held, a question
+    /// unobservable (a lifespan with no --clock-bound, `no_bound`, among them),
+    /// or a run that could not start.
+    ///
+    /// --format json is one document: `report` ("timing"), `namespace`,
+    /// `selector`, `across_face`, `clock_bound_ms`, `opening` (`presence`:
+    /// `complete`, `incomplete`, `cut_off`, `unsettled`, `failed` or
+    /// `across_face`; `selector`, `instances`, `descriptors` answered,
+    /// `unanswered`, and `stood`: whether the window's start is §2.7's),
+    /// `window_s`, `asked`, `run` (the three questions over every member:
+    /// `deadline`, `period`, `lifespan`, each `answer`, `first` member giving
+    /// it with its `reason`, `members` counted by answer, `finding`),
+    /// `judgement`, `rows` and `notes`; and `lost`, `refused`, `unresolved`,
+    /// `skipped` and `unobservable` when there is something to say. A
+    /// `resource` row: `address`, `iface`, `fingerprint`, `resource`,
+    /// `selector`, `declaration` (`declared` or `invalid`, its `reasons`,
+    /// `period_ms`, `deadline_ms`, `lifespan_ms`, `below_period`, `says`),
+    /// `bound`, `owner` (`present_throughout`, `at_end`, `zids`, `tokenless`),
+    /// `members`, `beyond_bound` and `questions`, as `run`'s. A `member` row:
+    /// `key`, `address`, `iface`, `resource`, `known`, `held_ms`, `arrivals`,
+    /// `span_ms`, `missed`, `missed_present`, `misses` (each `at_ms`, `due_ms`,
+    /// `by_ms` from the window's start, and the `owner`'s state), `met`,
+    /// `ended` (`at_ms`, `reason`: `gone` or `forgotten`), `deletes`,
+    /// `lifespans` (`judged`, `live`, `expired`, `unobservable`, `reasons`),
+    /// and `deadline`, `period` and `lifespan`, each `answer`, `reason`,
+    /// `says` and `finding`. A field absent is a question not asked, never
+    /// null; ndjson carries the same, the envelope first, then a line per row.
+    Timing(TimingArgs),
     /// Read desired.v1 targets: has each converged on its author's document?
     ///
     /// desired.v1's tool (spec/profiles/desired/v1.md §2.17, §5), through a
@@ -1322,6 +1383,15 @@ pub(crate) enum CheckCmd {
     ///                    call before any handler runs, and a state one
     ///                    holding nothing answers nothing (redundancy.v1
     ///                    §2.4)
+    ///   timing-period    each exposed timed stream with a period kept it
+    ///                    over the window, read by timing.v1's tool reader:
+    ///                    not kept with the owner present throughout and
+    ///                    nothing lost is the violation (timing.v1 §2.7, §5)
+    ///   timing-deadline  each exposed timed stream with a deadline met it
+    ///                    over the window: a miss while the owner was
+    ///                    present, nothing lost, is the violation; one only
+    ///                    while it was not present is unobservable
+    ///                    (timing.v1 §2.5, §5)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
@@ -3400,6 +3470,63 @@ pub(crate) struct TelemetryArgs {
     /// they did. With a state metric resource in scope, S4's GET of it is
     /// the proof and this is not used. Set it to the link's round trip; 0
     /// opens at once. Default 0.25, five times what a loopback face needed.
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_fleet::TELEMETRY_DEFAULT_SETTLE.as_secs_f64())]
+    pub(crate) settle: f64,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl timing`'s flags (#908, MC) — one struct the dispatcher hands
+/// over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct TimingArgs {
+    /// The members asked of: a key expression, base-relative (`zk2/…`) —
+    /// one member (`zk2/lab/pace/pace.v1/stream/cmd`), one owner's
+    /// (`zk2/lab/pace/**`), a system's (`zk2/lab/**`). Omitted, every timed
+    /// stream the descriptors in the namespace declare.
+    #[arg(value_name = "SELECTOR")]
+    pub(crate) selector: Option<String>,
+    /// The window, seconds, from its start (stderr's "listening"). A
+    /// member's period needs a span of three periods, and its deadline a
+    /// member held for longer than the deadline.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
+    pub(crate) for_secs: f64,
+    /// ε, the deployment's stated bound on how far an owner's stamps and
+    /// this host's wall clock disagree, whole milliseconds (timing.v1 §2.6).
+    /// Without it every sample's lifespan is unobservable (`no_bound`):
+    /// never the HLC's delta, nor any number of this tool's own.
+    #[arg(long, value_name = "MS")]
+    pub(crate) clock_bound: Option<u64>,
+    /// The deployment's link lease, seconds: with --wait-before-close, the
+    /// longest this reader may stall before it counts a loss (spec §2.7,
+    /// 0.27), which leaves no miss and no period not kept the owner's.
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
+    pub(crate) lease: f64,
+    /// The routers' wait_before_close, seconds (spec §2.7, 0.27).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
+    pub(crate) wait_before_close: f64,
+    /// The one owner the selector names sits across a constrained face
+    /// (spec §8.5), where presence and descriptors do not cross: the
+    /// deployment's word that it implements the contracts --contracts
+    /// holds. The deadline and the period are unobservable (timing.v1
+    /// §2.8): no owner is seen present, and the face's rate is not the
+    /// owner's.
+    #[arg(long)]
+    pub(crate) across_face: bool,
+    /// Across a face, an owner instance's session zid as its descriptor
+    /// would state it as `meta.zid`: the deployment's word, since no
+    /// descriptor crosses (timing.v1 §2.8, text 0.3). Repeatable. Without
+    /// one, every sample's lifespan across the face is unobservable
+    /// (`unattributed`).
+    #[arg(long, value_name = "ZID", requires = "across_face")]
+    pub(crate) owner_zid: Vec<String>,
+    /// Across a face, seconds to wait after the subscriptions before the
+    /// window starts: a margin for them to cross, never proof.
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_fleet::TELEMETRY_DEFAULT_SETTLE.as_secs_f64())]
     pub(crate) settle: f64,

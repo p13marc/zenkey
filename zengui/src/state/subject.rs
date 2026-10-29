@@ -88,6 +88,21 @@ sub_state! {
         /// each ring entry decoded once. `None` when the key resolves to no
         /// metric resource, or nothing records it.
         pub(crate) metric: Option<crate::metric::MetricFold>,
+        /// The slot key's owner, as the presence link said it at each
+        /// landing since the slot started recording (#908, MC): what a
+        /// `timing.v1` miss reads its owner's state from. Reset with the
+        /// key.
+        pub(crate) timing_owner: crate::timing::OwnerTrack,
+        /// The key the owner track and the loss below are of.
+        pub(crate) timing_key: Option<String>,
+        /// Whether the pump's broadcast lagged on a tick while the slot
+        /// recorded (#908, MC): a loss, after which no miss is the owner's.
+        pub(crate) timing_lost: bool,
+        /// The latest bus tick's instant (#908, MC): the newest arrival it
+        /// carried, or the moment it landed when it carried none — what the
+        /// window's own view is judged at, so a scene renders the same
+        /// twice. `None` before a tick, and for a replay.
+        pub(crate) timing_now: Option<std::time::Instant>,
         /// The bounded field observation on the slot key (#223): run on
         /// demand, dropped with the subject — its report is evidence about
         /// one key's window.
@@ -121,6 +136,10 @@ impl SubjectSlot {
             series_leaf: None,
             series: None,
             metric: None,
+            timing_owner: crate::timing::OwnerTrack::default(),
+            timing_key: None,
+            timing_lost: false,
+            timing_now: None,
             fields: view::fields::FieldsState::default(),
             why: view::why::WhyState::default(),
             consumers: view::consumers::ConsumersState::default(),
@@ -223,7 +242,69 @@ impl SubjectSlot {
             rate: self.rate_series.series().clone(),
             unit,
             metric,
+            timing: self.timing_read(resolved),
         })
+    }
+
+    /// The slot key's `timing.v1` reading over its history ring, the
+    /// window's own view (#908, MC; [`crate::timing`]), judged at the
+    /// latest tick's instant. A replay's ring is no live member's arrivals.
+    fn timing_read(
+        &self,
+        resolved: Option<&zenkey_fleet::Resolved>,
+    ) -> Option<std::sync::Arc<crate::timing::TimingRead>> {
+        let rec = self.history.as_ref()?;
+        let resolved = resolved?;
+        let owner = match &self.timing_key {
+            Some(k) if *k == rec.key => self.timing_owner.clone(),
+            _ => crate::timing::OwnerTrack::default(),
+        };
+        crate::timing::read(
+            resolved,
+            &rec.ring,
+            &owner,
+            self.timing_lost,
+            self.timing_now.is_none(),
+            self.timing_now.unwrap_or_else(std::time::Instant::now),
+        )
+        .map(std::sync::Arc::new)
+    }
+
+    /// One presence landing, or a tick's look at the projection in hand
+    /// (#908, MC): the slot key's owner as it shows it, recorded when it
+    /// changed. A new key starts a new track, its first state recorded at
+    /// the instant its recording began, since no landing came between.
+    pub(crate) fn track_owner(
+        &mut self,
+        presence: Option<&zenkey_fleet::LivePresence>,
+        identities: &crate::keyfacts::IdentityCache,
+        landed: Option<std::time::Instant>,
+    ) {
+        let Some(rec) = self.history.as_ref() else {
+            return;
+        };
+        if self.timing_key.as_deref() != Some(rec.key.as_str()) {
+            self.timing_key = Some(rec.key.clone());
+            self.timing_owner = crate::timing::OwnerTrack::default();
+            self.timing_lost = false;
+        }
+        let Some(r) = identities.get(&rec.key).and_then(|r| r.resolved.as_ref()) else {
+            return;
+        };
+        let state = crate::timing::owner_of(presence, &r.address, &r.iface);
+        let at = match landed {
+            Some(at) => at,
+            // No landing came since the last one, so its state held from
+            // before the recording began through every entry recorded.
+            None if self.timing_owner.now() == zenkey_model::timing::OwnerState::Unseen => rec
+                .ring
+                .iter()
+                .map(|e| e.received)
+                .min()
+                .map_or(rec.since, |first| first.min(rec.since)),
+            None => return,
+        };
+        self.timing_owner.record(at, state);
     }
 }
 
@@ -329,6 +410,10 @@ impl SubjectState {
             // Folded again below, over the pin's own ring: a clone is
             // another generation, never the follow slot's fold (#819, TD).
             metric: None,
+            timing_owner: follow.timing_owner.clone(),
+            timing_key: follow.timing_key.clone(),
+            timing_lost: follow.timing_lost,
+            timing_now: follow.timing_now,
             fields,
             why: view::why::WhyState::default(),
             consumers: view::consumers::ConsumersState::default(),

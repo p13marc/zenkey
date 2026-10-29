@@ -193,7 +193,7 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `desired`, `redundancy`, `watchdog`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `timing`, `desired`, `redundancy`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -231,6 +231,10 @@ zenctl alarms 'zk2/lab/**' --namespace prod --clocks-synced --for 905   # an own
 # Metrics, telemetry.v1: exit 1 on a sample that does not conform or a counter that went backwards within an epoch.
 zenctl telemetry --namespace prod --for 30
 zenctl telemetry 'zk2/rf/modem/**' --namespace prod --across-face --contracts contracts/   # across a constrained face: only in-band epochs establish one
+
+# Cadence, timing.v1: exit 1 on a deadline missed with its owner present, a period not kept, or a sample expired.
+zenctl timing --namespace prod --for 30 --clock-bound 50   # every timed stream; lifespans on the deployment's ε
+zenctl timing 'zk2/robot/**' --namespace prod --for 10      # no --clock-bound: every lifespan unobservable, exit 2 where one is declared
 
 # Desired state, desired.v1: exit 1 on a refused or failed act, or a target behind its author's version for the whole window.
 zenctl desired --namespace prod --for 30               # every target's roles, read again while an answer may move
@@ -411,6 +415,11 @@ members a scope reaches: each resource's declaration, each member's kind and
 unit, its samples' conformance, each pair's continuity with how its epoch
 was had, and a counter's rate — exit 1 on a sample that does not conform or
 a decrease within an established epoch, 2 when nothing could be answered) ·
+`zenctl timing [SELECTOR]` (the `timing.v1` streams a scope reaches, over a
+window: did each member meet its deadline, did its owner keep its period,
+did a sample arrive expired — exit 1 on a miss with the owner present and
+nothing lost, a period not kept likewise, or a sample expired, 2 when a
+question could not be answered) ·
 `zenctl desired [SYSTEM/SERVICE]` (each `desired.v1` target's roles against
 their authors' documents: has it converged on its author's current version,
 is its last act refused or failed, is what it acted on last-known, is a
@@ -459,6 +468,8 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > `telemetry-*` checks. #840's DD added `desired`, the `desired-*` checks and
 > `check conform`'s `desired-*` cases. #841's RC added `redundancy`, the
 > `redundancy-vacancy` check and `check conform`'s `redundancy-*` cases.
+> #908's MC added `timing`, the `timing-declaration` check and `check
+> conform`'s `timing-*` cases.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -728,7 +739,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks thirty questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks thirty-two questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -768,6 +779,7 @@ none.
 | `desired-behind` | is a desired.v1 target not yet converged on a version its author stamped longer ago than `--desired-behind` (60 s)? (warning; `--clocks-synced` only: one reading never finds a target behind) | desired.v1 §2.17 |
 | `desired-last-known` | does a desired.v1 target run a document it read from an archive, its author not answering for it? (info) | desired.v1 §2.9 |
 | `redundancy-vacancy` | does an interface redundancy.v1 governs have candidates and no incumbent, in both of two complete presence reads? (warning; one read's vacancy is a takeover due) | redundancy.v1 §2.15 |
+| `timing-declaration` | does a contract an owner implements declare timing.v1 values a reader cannot judge: an invalid one, a deadline below its period, or timing keys on a resource that is not a stream or on a requirement? (warning) | timing.v1 §2.2 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -827,6 +839,15 @@ core code). `telemetry-sample` reads the value replies of the GETs
 metric member alone: a stream has no sample to GET. `zenctl telemetry` and
 `check conform`'s `telemetry-*` cases read streams over a window, and the
 continuity no single sample shows.
+
+`timing-declaration` (#908) reads no window either: every resource and every
+requirement of the revisions the descriptors name, from the contracts alone.
+An invalid value, a deadline below its period (no deadline at all), and
+timing keys on a state, an event, an operation or a requirement (where they
+mean nothing; a key in `[defaults]` reaches every kind) are each a contract
+linter's warning. Whether a member met its deadline, kept its period or
+arrived expired is a window's: `zenctl timing` and `check conform`'s
+`timing-*` cases.
 
 The `desired-*` checks (#840) make one `desired.v1` reading of every target
 over the second presence read and the revisions it retrieved: each target's
@@ -1026,6 +1047,66 @@ non-conforming metric sample is `invalid` wherever a payload is checked —
 `invalid-payload` watchdog rule — its reasons named (`telemetry.v1 §2.6
 tag_disagrees: …`). `rate` stays message throughput: a counter's rate is a
 pair's, and a pair is this verb's.
+
+## `timing` — did each stream meet its deadline, keep its period, arrive in time?
+
+`timing` (#908) reads `timing.v1` (`spec/profiles/timing/v1.md`) as its
+§2.7 tool does: every timed stream the descriptors in the namespace declare
+(a stream with a `timing.*` annotation), or those a base-relative selector
+reaches, over one window. The owners' instance, interface and member tokens
+are followed on a watch session of their own and every member's samples
+subscribed to, both into one queue, and each arrival is read in its
+subscriber's callback, on this host's monotonic clock with its wall clock
+beside it. The window starts once a presence read made after the watch
+session's round trip, and the descriptor of every instance it shows, both
+stand (text 0.2, F-263), when stderr says `timing: listening …`; that
+instant is every member's subscription start, and `--for` counts from it. A
+withdrawal heard leaves its owner unconfirmed and is read again 100 ms
+later: absent only on a complete read. Per member it held, §5's three
+questions, in the profile's tokens (`yes`, `no`, `unobservable`,
+`not_asked`, `not_this_profiles`), each with its reason:
+
+| question | answered | the finding |
+|---|---|---|
+| did this member meet its deadline? | `yes` (`met`): no miss, held longer than the deadline; `no` (`missed`): a miss while its owner was present, nothing lost; `unobservable`: a miss only while its owner was unconfirmed, absent or unseen (`owner_not_present`), a loss beside a miss (`lost`), the deadline below the period, across a face, a window too short; `not_asked`: no deadline, ended, not heard | `no` (exit 1) |
+| did the owner keep its period? | `yes` (`kept`): (arrivals + 2) × period at least the span; `no` (`not_kept`), the owner present throughout and nothing lost; otherwise `unobservable` (`owner_not_present`, `lost`, a span under three periods, across a face) | `no` (exit 1) |
+| did a sample arrive expired? | `yes` (`expired`): its age, this host's wall clock at its arrival less the owner's stamp, less ε, above the lifespan; `no` (`live`); `unobservable`: no `--clock-bound` (`no_bound`), an unstamped sample, one no descriptor's `meta.zid` attributes, a clock seen ahead by more than ε | `yes` (exit 1) |
+
+Each is read over a resource and over the run by its finding (text 0.2,
+F-264): the finding when any member's answer is the finding, the other pole
+when every member asked answers it, unobservable otherwise. A miss is
+never "down": whether an owner is gone is presence's word, and the report
+gives both. ε is the deployment's word (`--clock-bound MS`), never the
+HLC's delta: without it every lifespan is unobservable, and a run over a
+resource that declares one exits 2. Across a constrained face
+(`--across-face`, with `--contracts` and one owner named) no presence
+crosses, so the deadline and the period are unobservable, and a lifespan is
+attributed only to the `meta.zid`s `--owner-zid` states, since no
+descriptor crosses either (text 0.3).
+
+Exit 1 on a finding; 0 when every question asked was answered on its other
+pole over the run; **2** otherwise: no timed resource in scope, no member
+held, a question unobservable, or a run that could not start. `--format
+json` is one document whose every field `zenctl timing --help` names: the
+envelope's `opening` (what the window's start stood on), `run` (the three
+questions rolled up, each with the first member that gave its answer) and
+`judgement`, then a `resource` row per timed resource and a `member` row per
+member, its misses listed with the owner's state at each.
+
+```
+$ zenctl timing --namespace acme --for 5 --clock-bound 100 -c tcp/127.0.0.1:7447
+timing under every timed stream in namespace "acme" — 2 timed resource(s), 2 member(s) held over 5.0s: deadline no (missed, zk2/lab/pace/pace.v1/stream/cmd), period no (not_kept, zk2/lab/pace/pace.v1/stream/cmd), lifespan no (live, zk2/lab/pace/pace.v1/stream/cmd)
+✓  lab/pace pace.v1 stream/cmd          period 100 ms, deadline 500 ms, seen within 510 ms, lifespan 300 ms; the owner present throughout; 1 member(s) held
+✓  lab/pace pace.v1 stream/axis/{axis}  period 100 ms, deadline 500 ms, seen within 510 ms; the owner present throughout; 1 member(s) held
+·  zk2/lab/pace/pace.v1/stream/axis/x  deadline yes (met), period yes (kept), lifespan not_asked (no_lifespan)
+✗  zk2/lab/pace/pace.v1/stream/cmd     deadline no (missed), period no (not_kept), lifespan no (live)
+    missed at 2401.3 ms, due 2400.1 ms (by 2410.1 ms), its owner present
+```
+
+The same reading is `check conform`'s `timing-period` and `timing-deadline`,
+over its window, for the interface under test. `rate` stays message
+throughput: a period is the contract's promise, and only this verb holds a
+member to it.
 
 ## `desired` — has each target converged on its author's document?
 

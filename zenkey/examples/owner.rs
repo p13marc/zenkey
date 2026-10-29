@@ -477,7 +477,8 @@
 //! `zenkey/tests/contracts/pace.v1.toml`, embedded), unless a contract file
 //! given is `pace.v1`, and drives it from standard input: each member
 //! published at its period while it is on, `cmd` paused at the start and
-//! each axis on once added (`timing add <axis>`, its member token first),
+//! each axis on once added (`timing add <axis>`, its member token first;
+//! `timing declare <axis>` declares the token alone, scenarios §3 step 5),
 //! every sample its sequence number as text, stamped by the runtime's
 //! writer from the service's clock. `timing offset <ms>` shifts that clock
 //! (§4's skewed owner), and `timing stamp none` puts raw through the
@@ -984,8 +985,15 @@ timing.v1 (spec/profiles/timing/v1.md)
 
   timing pause|resume <member>    stop or start publishing <member>: cmd, or
                                   axis/<axis>
+  timing every <member> <ms>      publish <member> every <ms> rather than at its
+                                  period (scenarios.md §6 step 3: slower than
+                                  its period, within its deadline)
+  timing declare <axis>           declare axis/<axis>'s member token alone (core
+                                  §8.1), publishing nothing on it (scenarios.md §3
+                                  step 5)
   timing add <axis>               declare axis/<axis>'s member token (core §8.1),
-                                  then publish it at the period
+                                  unless `timing declare` holds it, then publish
+                                  it at the period
   timing remove <axis>            stop axis/<axis>, then withdraw its member token
   timing offset <ms>              the stamping clock's offset (negative: behind)
   timing stamp own|none           none: every member put raw through the session,
@@ -998,7 +1006,10 @@ timing.v1 (spec/profiles/timing/v1.md)
 
   Answers, one JSON line each:
     {\"timing\": \"pause\"|\"resume\", \"member\": <member>, \"key\": <key>, \"on\": <bool>}
-    {\"timing\": \"add\", \"member\": <member>, \"key\": <key>, \"epoch\": <id>}
+    {\"timing\": \"every\", \"member\": <member>, \"key\": <key>, \"ms\": <ms>}
+    {\"timing\": \"declare\", \"member\": <member>, \"epoch\": <id>}
+    {\"timing\": \"add\", \"member\": <member>, \"key\": <key>, \"epoch\": <id>|null}
+      (epoch null: the token `timing declare` declared, kept)
     {\"timing\": \"remove\", \"member\": <member>}
     {\"timing\": \"offset\", \"ms\": <ms>}
     {\"timing\": \"stamp\", \"mode\": \"own\"|\"none\"}

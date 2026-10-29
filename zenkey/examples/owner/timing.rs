@@ -1,7 +1,7 @@
 //! `timing.v1`'s owner drive (#908, MB): `pace.v1`, the scenarios'
 //! contract (`spec/profiles/timing/scenarios.md`), published at its
-//! period, each member paused, resumed, added or removed from standard
-//! input; its stamps offset, or left unset, for §4 and §5.
+//! period, each member paused, resumed, declared, added or removed from
+//! standard input; its stamps offset, or left unset, for §4 and §5.
 //!
 //! Every member starts paused: `cmd` is published once `timing resume
 //! cmd` says so, an axis once added. Each sample's payload is its sequence
@@ -38,11 +38,13 @@ pub fn iface() -> IfaceId {
     "pace.v1".parse().expect("an interface")
 }
 
-/// One member published at the period.
+/// One member published at the period, or every `every_ms` once `timing
+/// every` sets it.
 struct Member {
     writer: Arc<Writer>,
     key: String,
     on: Arc<AtomicBool>,
+    every_ms: Arc<AtomicU64>,
     published: Arc<AtomicU64>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -88,21 +90,28 @@ impl Drive {
         let writer = Arc::new(writer);
         let on = Arc::new(AtomicBool::new(name != "cmd"));
         let published = Arc::new(AtomicU64::new(0));
+        let every_ms = Arc::new(AtomicU64::new(
+            u64::try_from(self.period.as_millis()).unwrap_or(u64::MAX),
+        ));
         let task = {
-            let (w, on, n, raw, session, period, key) = (
+            let (w, on, n, raw, session, every, key) = (
                 Arc::clone(&writer),
                 Arc::clone(&on),
                 Arc::clone(&published),
                 Arc::clone(&self.raw),
                 self.session.clone(),
-                self.period,
+                Arc::clone(&every_ms),
                 key.clone(),
             );
             tokio::spawn(async move {
-                let mut tick = tokio::time::interval(period);
+                // Each tick a whole interval after the last, never drifting
+                // with the puts; the interval read anew at each (`timing
+                // every`).
+                let mut next = tokio::time::Instant::now();
                 let mut seq = 0u64;
                 loop {
-                    tick.tick().await;
+                    next += Duration::from_millis(every.load(Ordering::Relaxed).max(1));
+                    tokio::time::sleep_until(next).await;
                     if !on.load(Ordering::Relaxed) {
                         continue;
                     }
@@ -136,6 +145,7 @@ impl Drive {
                 writer,
                 key,
                 on,
+                every_ms,
                 published,
                 task,
             },
@@ -159,6 +169,38 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             serde_json::json!({"timing": verb, "member": member, "key": m.key, "on": on})
                 .to_string()
         }
+        ["timing", "every", member, ms] => {
+            // Scenarios §6 step 3 (text 0.3, MC-found): a member published
+            // slower or faster than its period, which the period does not
+            // forbid (§2.4).
+            let members = d.members.lock().expect("not poisoned");
+            let Some(m) = members.get(*member) else {
+                return refused(format!("no member {member:?}: cmd, or an axis added"));
+            };
+            match ms.parse::<u64>() {
+                Ok(n) if n > 0 => {
+                    m.every_ms.store(n, Ordering::Relaxed);
+                    serde_json::json!({"timing": "every", "member": member, "key": m.key, "ms": n})
+                        .to_string()
+                }
+                _ => refused(format!("{ms:?}: a whole number of milliseconds above 0")),
+            }
+        }
+        ["timing", "declare", axis] => {
+            // Scenarios §3 step 5 (text 0.3, F-276): the member's token
+            // alone, nothing published on it until `timing add`.
+            let name = format!("axis/{axis}");
+            if svc.holds_member(&iface(), axis) {
+                return refused(format!("{name}'s member token is held already"));
+            }
+            match svc.declare_member(&iface(), axis).await {
+                Ok(epoch) => {
+                    serde_json::json!({"timing": "declare", "member": name, "epoch": epoch.to_string()})
+                        .to_string()
+                }
+                Err(e) => refused(e.to_string()),
+            }
+        }
         ["timing", "add", axis] => {
             let name = format!("axis/{axis}");
             if d.members.lock().expect("not poisoned").contains_key(&name) {
@@ -166,10 +208,15 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             }
             let values: Bindings = [("axis".to_owned(), vec![(*axis).to_owned()])].into();
             // Core §8.1: a member exists from its owner's first declaration
-            // of it, its token before its first sample.
-            let epoch = match svc.declare_member(&iface(), axis).await {
-                Ok(e) => e,
-                Err(e) => return refused(e.to_string()),
+            // of it, its token before its first sample; one `timing
+            // declare` declared is kept, never declared twice.
+            let epoch = if svc.holds_member(&iface(), axis) {
+                None
+            } else {
+                match svc.declare_member(&iface(), axis).await {
+                    Ok(e) => Some(e),
+                    Err(e) => return refused(e.to_string()),
+                }
             };
             let w = match svc.writer(&iface(), AXIS, &values).await {
                 Ok(w) => w,
@@ -177,16 +224,18 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             };
             let key = w.key_expr().as_str().to_owned();
             d.add(&name, w);
-            serde_json::json!({"timing": "add", "member": name, "key": key, "epoch": epoch.to_string()})
+            serde_json::json!({"timing": "add", "member": name, "key": key, "epoch": epoch.map(|e| e.to_string())})
                 .to_string()
         }
         ["timing", "remove", axis] => {
             let name = format!("axis/{axis}");
-            let Some(m) = d.members.lock().expect("not poisoned").remove(&name) else {
+            let published = d.members.lock().expect("not poisoned").remove(&name);
+            let declared = svc.holds_member(&iface(), axis);
+            if published.is_none() && !declared {
                 return refused(format!("no member {name:?}"));
-            };
-            drop(m);
-            if let Err(e) = svc.remove_member(&iface(), axis).await {
+            }
+            drop(published);
+            if declared && let Err(e) = svc.remove_member(&iface(), axis).await {
                 return refused(e.to_string());
             }
             serde_json::json!({"timing": "remove", "member": name}).to_string()
@@ -226,8 +275,8 @@ pub async fn command(line: &str, svc: &mut Service, d: &Drive) -> String {
             serde_json::json!({"timing": "writers", "stamped": members}).to_string()
         }
         _ => refused(
-            "timing pause|resume <member>, add|remove <axis>, offset <ms>, stamp own|none, \
-             published, zid or writers"
+            "timing pause|resume <member>, every <member> <ms>, declare|add|remove <axis>, \
+             offset <ms>, stamp own|none, published, zid or writers"
                 .to_owned(),
         ),
     }

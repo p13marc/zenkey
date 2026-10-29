@@ -9037,3 +9037,226 @@ async fn redundancy_s12_a_probe_guarded_by_a_revision_held_offline() {
     b.close().await;
     a.close().await;
 }
+
+// ─── timing.v1 (#908, MC): scenarios.md §6, a tool's window ──────────────
+//
+// The scenarios' owner (`lab/pace` on `pace.v1`), brought up through the
+// runtime as the owner example's `--timing` brings it up, and driven by the
+// same standard-input commands (`zenkey/examples/owner/timing.rs`, compiled
+// in): `timing resume cmd`, `timing add x`, `timing pause cmd`, `timing
+// every cmd 250`. T is `zenctl timing`, under ε = 100 ms.
+
+#[allow(dead_code)]
+#[path = "../../zenkey/examples/owner/timing.rs"]
+mod timing_drive;
+
+/// `lab/pace` on a session of its own, every resource exposed, `cmd`
+/// resumed and `axis/x` added: both at the period.
+async fn pace_owner(endpoint: &str) -> (zenoh::Session, Service, timing_drive::Drive) {
+    let session = client(endpoint, None).await;
+    let c = timing_drive::contract().expect("pace.v1, embedded");
+    let names: Vec<String> = c
+        .resources
+        .iter()
+        .map(zenkey::implementation::resource_name)
+        .collect();
+    let iface = c.iface.clone();
+    let mut b = ServiceBuilder::new(
+        &session,
+        ServiceConfig::new("lab/pace".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(c)).expect("pace.v1");
+    for n in names {
+        b.expose(&iface, &n).expect("exposed");
+    }
+    let mut svc = b.start().await.expect("start");
+    let drive = timing_drive::Drive::start(&svc, &session)
+        .await
+        .expect("the drive");
+    for line in ["timing resume cmd", "timing add x"] {
+        let said = timing_drive::command(line, &mut svc, &drive).await;
+        assert!(!said.starts_with("refused"), "{line}: {said}");
+    }
+    (session, svc, drive)
+}
+
+/// T over `lab/pace` for 5 s under ε = 100 ms: its run, and the moment it
+/// says it listens.
+fn timing_of_pace(
+    bus: &Bus,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::task::JoinHandle<Run>,
+) {
+    bus.spawn_on_line(
+        &[
+            "timing",
+            "zk2/lab/pace/**",
+            "--for",
+            "5",
+            "--clock-bound",
+            "100",
+            "--timeout",
+            "2",
+            "--format",
+            "json",
+        ],
+        "timing: listening",
+    )
+}
+
+/// One member's three answers, as `(answer, reason)` each.
+fn timing_answers(doc: &Value, key: &str) -> [(String, String); 3] {
+    let m = rows_of(doc, "member")
+        .into_iter()
+        .find(|r| r["key"] == key)
+        .unwrap_or_else(|| panic!("{key} has a member row: {doc}"));
+    let s = |v: &Value| v.as_str().unwrap_or("").to_owned();
+    ["deadline", "period", "lifespan"].map(|q| (s(&m[q]["answer"]), s(&m[q]["reason"])))
+}
+
+fn answered(pairs: [(&str, &str); 3]) -> [(String, String); 3] {
+    pairs.map(|(a, r)| (a.to_owned(), r.to_owned()))
+}
+
+const PACE_CMD: &str = "zk2/lab/pace/pace.v1/stream/cmd";
+const PACE_X: &str = "zk2/lab/pace/pace.v1/stream/axis/x";
+
+/// timing.v1 `scenarios.md` §6 (§2.7, §5): T reads `lab/pace` over a 5 s
+/// window, its start once it follows presence and holds the descriptor
+/// (F-263), each member it held answered at any instant of it (F-267). The
+/// owner publishes `axis/x` every 100 ms throughout.
+/// 1. `cmd` every 100 ms: deadline yes (`met`), period yes (`kept`),
+///    lifespan no (`live`); `axis/x` deadline yes, period yes, lifespan not
+///    asked. Exit 0.
+/// 2. `cmd` stopped 2 s into the window for 1 s, its tokens kept: deadline
+///    no (`missed`, the owner present when T reported it, within the
+///    bound), period no (`not_kept`), lifespan no. Exit 1.
+/// 3. `cmd` every 250 ms: deadline yes, period no (`not_kept`). Exit 1.
+/// 4. The owner closes 1 s into the window: T reads it absent after the
+///    withdrawals; `cmd` deadline and period unobservable
+///    (`owner_not_present`), lifespan no; `axis/x` ended at that read
+///    (`gone`): deadline not asked (`ended`), period yes (`kept`) over its
+///    span. Exit 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn timing_s6_a_tools_window() {
+    let bus = Bus::bare(None).await;
+    let (session, mut svc, drive) = pace_owner(&bus.endpoint).await;
+    wait_for(&bus, &["lab/pace"]).await;
+
+    // 1. At the period throughout.
+    let (listening, t) = timing_of_pace(&bus);
+    listening.await.expect("T says it listens");
+    let run = t.await.expect("the timing run");
+    let doc = run.json();
+    assert_eq!(doc["opening"]["stood"], true, "F-263: {run}");
+    assert_eq!(
+        timing_answers(&doc, PACE_CMD),
+        answered([("yes", "met"), ("yes", "kept"), ("no", "live")]),
+        "{run}"
+    );
+    assert_eq!(
+        timing_answers(&doc, PACE_X),
+        answered([
+            ("yes", "met"),
+            ("yes", "kept"),
+            ("not_asked", "no_lifespan")
+        ]),
+        "{run}"
+    );
+    exits(&run, 0);
+
+    // 2. A second's pause, 2 s into the window, the tokens kept.
+    let (listening, t) = timing_of_pace(&bus);
+    listening.await.expect("T says it listens");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    timing_drive::command("timing pause cmd", &mut svc, &drive).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    timing_drive::command("timing resume cmd", &mut svc, &drive).await;
+    let run = t.await.expect("the timing run");
+    let doc = run.json();
+    assert_eq!(
+        timing_answers(&doc, PACE_CMD),
+        answered([("no", "missed"), ("no", "not_kept"), ("no", "live")]),
+        "{run}"
+    );
+    let cmd = rows_of(&doc, "member")
+        .into_iter()
+        .find(|r| r["key"] == PACE_CMD)
+        .expect("cmd");
+    assert_eq!(cmd["missed"], 1, "missed once: {run}");
+    let miss = &cmd["misses"][0];
+    assert_eq!(miss["owner"], "present", "a miss is never down: {run}");
+    let late = miss["at_ms"].as_f64().unwrap() - miss["due_ms"].as_f64().unwrap();
+    assert!(
+        (0.0..=60.0).contains(&late),
+        "within the 10 ms bound and the runner's 50 ms: {late} ms\n{run}"
+    );
+    let arrivals = cmd["arrivals"].as_u64().unwrap();
+    assert!(
+        (36..=42).contains(&arrivals),
+        "about 40 arrivals in the 5 s span: {arrivals}\n{run}"
+    );
+    assert_eq!(doc["run"]["deadline"]["answer"], "no", "{run}");
+    exits(&run, 1);
+
+    // 3. Every 250 ms: slower than the period, within the deadline.
+    timing_drive::command("timing every cmd 250", &mut svc, &drive).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (listening, t) = timing_of_pace(&bus);
+    listening.await.expect("T says it listens");
+    let run = t.await.expect("the timing run");
+    let doc = run.json();
+    assert_eq!(
+        timing_answers(&doc, PACE_CMD),
+        answered([("yes", "met"), ("no", "not_kept"), ("no", "live")]),
+        "{run}"
+    );
+    exits(&run, 1);
+    timing_drive::command("timing every cmd 100", &mut svc, &drive).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // 4. The owner closes cleanly 1 s into the window.
+    let (listening, t) = timing_of_pace(&bus);
+    listening.await.expect("T says it listens");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    drop(drive);
+    svc.close().await.expect("a clean close");
+    let run = t.await.expect("the timing run");
+    let doc = run.json();
+    assert_eq!(
+        timing_answers(&doc, PACE_CMD),
+        answered([
+            ("unobservable", "owner_not_present"),
+            ("unobservable", "owner_not_present"),
+            ("no", "live")
+        ]),
+        "{run}"
+    );
+    assert_eq!(
+        timing_answers(&doc, PACE_X),
+        answered([
+            ("not_asked", "ended"),
+            ("yes", "kept"),
+            ("not_asked", "no_lifespan")
+        ]),
+        "{run}"
+    );
+    let x = rows_of(&doc, "member")
+        .into_iter()
+        .find(|r| r["key"] == PACE_X)
+        .expect("axis/x");
+    assert_eq!(x["ended"]["reason"], "gone", "{run}");
+    let ended = x["ended"]["at_ms"].as_f64().unwrap();
+    assert!(
+        (1000.0..1500.0).contains(&ended),
+        "at the read after the withdrawals, long before a miss is due: {ended} ms\n{run}"
+    );
+    let resource = rows_of(&doc, "resource")
+        .into_iter()
+        .find(|r| r["resource"] == "stream/cmd")
+        .expect("cmd's resource");
+    assert_eq!(resource["owner"]["at_end"], "absent", "{run}");
+    exits(&run, 2);
+    session.close().await.expect("the owner's session ends");
+}

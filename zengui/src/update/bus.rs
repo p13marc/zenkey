@@ -161,7 +161,29 @@ pub(crate) fn apply_tick(
     // sampler, the facts behind the unit. Rebuilt once per slot here rather
     // than once per frame (#178, #257).
     let identities = work.replay.identity_cache(&dep.identity);
+    // `timing.v1`'s window, on live ticks only (#908, MC): the tick's
+    // instant (its newest arrival, else the moment it landed), a lag while
+    // the slot recorded, and the owner the presence in hand shows. A
+    // replay's slot is judged at no instant, and reads nothing.
+    let live = work.replay.replay.is_none();
+    let tick_at = tick
+        .samples
+        .iter()
+        .map(|s| s.received)
+        .max()
+        .unwrap_or_else(std::time::Instant::now);
     for slot in sub.all_mut() {
+        if live {
+            slot.track_owner(
+                dep.presence.as_ref().map(|u| &*u.presence),
+                identities,
+                None,
+            );
+            slot.timing_now = Some(slot.timing_now.map_or(tick_at, |t| t.max(tick_at)));
+            slot.timing_lost |= tick.lagged > 0 && slot.history.is_some();
+        } else {
+            slot.timing_now = None;
+        }
         slot.refresh_series(identities);
     }
     // The tree's shape survived, so point it at this tick's numbers
@@ -285,6 +307,14 @@ pub(crate) fn update(
             }
             let catalog = update.catalog.clone();
             let generation = update.generation;
+            // Each slot's owner as this landing shows it (#908, MC): what a
+            // `timing.v1` miss reads its owner's state from.
+            if work.replay.replay.is_none() {
+                let now = std::time::Instant::now();
+                for slot in sub.all_mut() {
+                    slot.track_owner(Some(&update.presence), &dep.identity, Some(now));
+                }
+            }
             dep.presence = Some(update);
             if (generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog))
                 && adopt_lens(dep, work, catalog, generation)

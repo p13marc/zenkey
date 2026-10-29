@@ -13,6 +13,10 @@ mod common;
 #[path = "../examples/owner.rs"]
 mod owner;
 
+#[allow(dead_code)]
+#[path = "../examples/consume.rs"]
+mod consume;
+
 use std::path::Path;
 use std::time::Duration;
 
@@ -2113,6 +2117,26 @@ async fn the_owner_example_drives_timing() {
         .as_nanos();
     assert!(now - ns >= 9_000_000_000, "a payload time 10 s old");
     ask_json(&o, "timing stamp own").await;
+    // `timing every cmd 250` (§6 step 3): slower than its period.
+    let r = ask_json(&o, "timing every cmd 250").await;
+    assert_eq!(r["ms"], 250);
+    let before = ask_json(&o, "timing published").await["members"]["cmd"]
+        .as_u64()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let after = ask_json(&o, "timing published").await["members"]["cmd"]
+        .as_u64()
+        .unwrap();
+    assert!(
+        (3..=5).contains(&(after - before)),
+        "about four in a second at 250 ms: {before} → {after}"
+    );
+    assert!(
+        o.ask("timing every cmd 0")
+            .await
+            .starts_with("refused timing every cmd 0")
+    );
+    ask_json(&o, "timing every cmd 100").await;
     ask_json(&o, "timing pause cmd").await;
     // An axis: its member token, then its samples; removed, the token goes.
     let r = ask_json(&o, "timing add x").await;
@@ -2133,6 +2157,49 @@ async fn the_owner_example_drives_timing() {
         }
     }
     ask_json(&o, "timing remove x").await;
+    let gone = tokio::time::timeout(SETTLE, members.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(gone.kind(), SampleKind::Delete);
+    // `timing declare y` (text 0.3, F-276, scenarios §3 step 5): the member
+    // token alone, nothing published on it; `timing add y` then publishes,
+    // the token kept and never declared again.
+    while data.try_recv().is_ok() {}
+    let r = ask_json(&o, "timing declare y").await;
+    assert_eq!(r["member"], "axis/y");
+    assert!(r["epoch"].is_string(), "{r}");
+    let tok = tokio::time::timeout(SETTLE, members.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(tok.kind(), SampleKind::Put);
+    assert!(tok.key_expr().as_str().contains("/@zk/member/pace.v1/y/"));
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    while let Ok(s) = data.try_recv() {
+        assert!(
+            !s.key_expr().as_str().ends_with("/axis/y"),
+            "a declared member publishes nothing"
+        );
+    }
+    assert!(
+        o.ask("timing declare y")
+            .await
+            .starts_with("refused timing declare y")
+    );
+    let r = ask_json(&o, "timing add y").await;
+    assert_eq!(r["epoch"], serde_json::Value::Null, "the token kept: {r}");
+    loop {
+        let s = tokio::time::timeout(SETTLE, data.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        if s.key_expr().as_str().ends_with("/axis/y") {
+            break;
+        }
+    }
+    assert!(members.try_recv().is_err(), "no second token of y");
+    ask_json(&o, "timing remove y").await;
     let gone = tokio::time::timeout(SETTLE, members.recv_async())
         .await
         .unwrap()
@@ -2163,6 +2230,8 @@ fn the_help_documents_the_timing_surface() {
         "--timing",
         "--no-hlc",
         "timing pause|resume <member>",
+        "timing every <member> <ms>",
+        "timing declare <axis>",
         "timing add <axis>",
         "timing remove <axis>",
         "timing offset <ms>",
@@ -2173,6 +2242,46 @@ fn the_help_documents_the_timing_surface() {
     ] {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
+}
+
+/// `consume --timing`'s expired arrival (text 0.3, F-276): its `wall_ns`
+/// is the wall clock the engine read at the arrival, its age's, as its
+/// `--help` promises, never null.
+#[test]
+fn an_expired_arrival_prints_its_wall_clock() {
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use zenkey::model::freshness::StampAge;
+    use zenkey::timing::TimingEvent;
+    let origin = Instant::now();
+    let wall = SystemTime::now();
+    let stamped = wall - Duration::from_millis(700);
+    let stamp = zenoh::time::Timestamp::new(
+        zenoh::time::NTP64::from(stamped.duration_since(UNIX_EPOCH).unwrap()),
+        zenoh::time::TimestampId::try_from([7u8; 16]).unwrap(),
+    );
+    let ev = TimingEvent::Expired {
+        provider: "lab/pace".parse().unwrap(),
+        key: "zk2/lab/pace/pace.v1/stream/cmd".to_owned(),
+        arrival: origin + Duration::from_millis(5),
+        wall,
+        stamp,
+        age: StampAge::between(stamped, wall),
+    };
+    let line = consume::timing::event_line(origin, &ev);
+    let ns = wall
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
+        .to_string();
+    assert_eq!(line["wall_ns"], serde_json::Value::String(ns), "{line}");
+    assert_eq!(line["delivered"], false);
+    assert_eq!(line["lifespan"]["verdict"], "expired");
+    let age = line["stamp"]["age_ms"].as_f64().unwrap();
+    assert!((age - 700.0).abs() < 0.01, "{age}");
+    assert!(
+        consume::HELP.contains("for an expired arrival too"),
+        "--help says when wall_ns is read"
+    );
 }
 
 /// The next switch line of an actuator, as JSON.

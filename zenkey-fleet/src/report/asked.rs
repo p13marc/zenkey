@@ -142,3 +142,8 @@ impl<T: schemars::JsonSchema> schemars::JsonSchema for Asked<T> {
 pub(crate) fn u64_is_zero(n: &u64) -> bool {
     *n == 0
 }
+
+/// [`u64_is_zero`], for a `u32` count.
+pub(crate) fn u32_is_zero(n: &u32) -> bool {
+    *n == 0
+}

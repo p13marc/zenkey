@@ -1,0 +1,114 @@
+`timing` (#908, MC) reads `timing.v1` as the profile's tool does: the timed
+streams a scope reaches, over one window, each member's deadline, its period
+and each sample's lifespan, in the fixtures' tokens, rolled up per resource
+and per run by each question's finding. A judgement verb: exit 1 on a
+deadline missed while the owner was present with nothing lost, a period not
+kept likewise, or a sample expired; 0 when every question asked was answered
+on its other pole; 2 when one went unanswered (a lifespan with no
+--clock-bound among them) or the run could not start. The help names the
+JSON document's fields.
+
+```console
+$ zenctl timing --help
+Read timing.v1 streams: deadline met, period kept, a sample expired
+
+timing.v1's tool (spec/profiles/timing/v1.md §2.7, §5), through a session in the deployment's namespace: presence and each descriptor, the revisions they name, and every timed stream those declare (a stream with a timing.* annotation) — those the selector reaches when one is given. The owners' instance, interface and member tokens are followed on a watch session of their own, each member's samples subscribed to, both into one queue, each arrival read in the subscriber's callback on this host's monotonic clock and its wall clock. The window starts once a presence read made after the watch session's round trip, and the descriptor of every instance it shows, both stand (text 0.2, F-263), when stderr says "listening"; that is every member's subscription start. Per member it held: did it meet its deadline (a miss reported while its owner was present, nothing lost, is the finding; one only while its owner was unconfirmed, absent or unseen is unobservable, and a miss is never "down"), did the owner keep its period ((arrivals + 2) × period at least the span, over a span of three periods or more; not kept with the owner present throughout and nothing lost is the finding), and did a sample arrive expired (its age, this host's wall clock at its arrival less the owner's stamp, less ε above the lifespan; only on a stated --clock-bound, never the HLC's delta, and only on a stamp whose id is a descriptor's meta.zid). Each in the fixtures' tokens (yes, no, unobservable, not_asked, not_this_profiles) with its reason, and each read over a resource and the run by its finding (text 0.2, F-264). Across a constrained face the deadline and the period are unobservable (§2.8) and the lifespan is judged on the meta.zids --owner-zid states. Exit 1 on a finding (a deadline missed with the owner present and nothing lost, a period not kept likewise, a sample expired); 0 when every question asked is answered on its other pole over the run; 2 no verdict: no timed resource in scope, no member held, a question unobservable (a lifespan with no --clock-bound, `no_bound`, among them), or a run that could not start.
+
+--format json is one document: `report` ("timing"), `namespace`, `selector`, `across_face`, `clock_bound_ms`, `opening` (`presence`: `complete`, `incomplete`, `cut_off`, `unsettled`, `failed` or `across_face`; `selector`, `instances`, `descriptors` answered, `unanswered`, and `stood`: whether the window's start is §2.7's), `window_s`, `asked`, `run` (the three questions over every member: `deadline`, `period`, `lifespan`, each `answer`, `first` member giving it with its `reason`, `members` counted by answer, `finding`), `judgement`, `rows` and `notes`; and `lost`, `refused`, `unresolved`, `skipped` and `unobservable` when there is something to say. A `resource` row: `address`, `iface`, `fingerprint`, `resource`, `selector`, `declaration` (`declared` or `invalid`, its `reasons`, `period_ms`, `deadline_ms`, `lifespan_ms`, `below_period`, `says`), `bound`, `owner` (`present_throughout`, `at_end`, `zids`, `tokenless`), `members`, `beyond_bound` and `questions`, as `run`'s. A `member` row: `key`, `address`, `iface`, `resource`, `known`, `held_ms`, `arrivals`, `span_ms`, `missed`, `missed_present`, `misses` (each `at_ms`, `due_ms`, `by_ms` from the window's start, and the `owner`'s state), `met`, `ended` (`at_ms`, `reason`: `gone` or `forgotten`), `deletes`, `lifespans` (`judged`, `live`, `expired`, `unobservable`, `reasons`), and `deadline`, `period` and `lifespan`, each `answer`, `reason`, `says` and `finding`. A field absent is a question not asked, never null; ndjson carries the same, the envelope first, then a line per row.
+
+Usage: zenctl timing [OPTIONS] [SELECTOR]
+
+Arguments:
+  [SELECTOR]
+          The members asked of: a key expression, base-relative (`zk2/…`) — one member (`zk2/lab/pace/pace.v1/stream/cmd`), one owner's (`zk2/lab/pace/**`), a system's (`zk2/lab/**`). Omitted, every timed stream the descriptors in the namespace declare
+
+Options:
+      --for <SECS>
+          The window, seconds, from its start (stderr's "listening"). A member's period needs a span of three periods, and its deadline a member held for longer than the deadline
+          
+          [default: 10]
+
+      --clock-bound <MS>
+          ε, the deployment's stated bound on how far an owner's stamps and this host's wall clock disagree, whole milliseconds (timing.v1 §2.6). Without it every sample's lifespan is unobservable (`no_bound`): never the HLC's delta, nor any number of this tool's own
+
+      --lease <SECS>
+          The deployment's link lease, seconds: with --wait-before-close, the longest this reader may stall before it counts a loss (spec §2.7, 0.27), which leaves no miss and no period not kept the owner's
+          
+          [default: 10]
+
+      --wait-before-close <SECS>
+          The routers' wait_before_close, seconds (spec §2.7, 0.27)
+          
+          [default: 5]
+
+      --across-face
+          The one owner the selector names sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements the contracts --contracts holds. The deadline and the period are unobservable (timing.v1 §2.8): no owner is seen present, and the face's rate is not the owner's
+
+      --owner-zid <ZID>
+          Across a face, an owner instance's session zid as its descriptor would state it as `meta.zid`: the deployment's word, since no descriptor crosses (timing.v1 §2.8, text 0.3). Repeatable. Without one, every sample's lifespan across the face is unobservable (`unattributed`)
+
+      --settle <SECS>
+          Across a face, seconds to wait after the subscriptions before the window starts: a margin for them to cross, never proof
+          
+          [default: 0.25]
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```

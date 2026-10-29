@@ -4,6 +4,99 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-28: round 78's answers, and the tools (#908, MC)
+
+The second implementation ran 0.2 against the reference runtime (zk2py
+round 78) and filed F-273, F-275 and F-276 against `timing.v1`, all
+accepted on #908. The reference's tools (`zenctl timing`, the doctor's
+`timing-declaration`, `check conform`'s `timing-period` and
+`timing-deadline`, and zengui's Inspector, #908's MC) ran §6, `zenctl
+timing` three times in a row. This text answers the findings and says what
+the tools found. It is written
+against core 0.55, as 0.2 was.
+
+**Changed: rules (round 78).**
+- **An owner absent, beside an epoch template's known member** (§2.5;
+  F-275). "If its owner is absent before the miss is due" stops only a
+  wait that began at the owner's presence: an epoch template's known
+  member is waited for from its member token, and waits on until a read
+  shows that token gone. The reference's `Tracker` already read it so,
+  and so did zk2py; 0.2's bullet, under "a member never heard", read as
+  though it stopped both. Changes a verdict in that sequence alone.
+  `deadlines.json` gains its case (start 0, its token seen 0, the owner
+  present 0 and absent 50, a tick at 101: missed, due 100), and its
+  description says what `owner absent` does with `epoch`.
+
+**Changed: the scenarios (round 78).**
+- **§4's owner has no HLC** (F-273): the runner's offset moves its stamps
+  alone, as §2.6's "Without an HLC too" lets an owner stamp. An owner whose
+  HLC is on follows its own first stamp ahead (core §4.1, 0.53), so its
+  clock stands still and its stamps cannot run 400 ms ahead and then
+  agree. No verdict moves: every sample of step 3 reads `clock_disagrees`
+  either way. The reference's §4 test states the owner's HLC off rather
+  than leaving it to a client's default.
+- **The black box's commands** (F-276): the conventions name the owner's
+  standard input for each step, `timing declare <axis>` among them, which
+  declares a member's token and publishes nothing (§3 step 5), where
+  `timing add` publishes at once; and `consume --timing` prints an expired
+  arrival's `wall_ns`, the wall clock it read at the arrival, as its
+  `--help` promised, where 0.2's printed null.
+
+**Changed: what the tools found (MC).**
+- **A loss the tool cannot attribute is every member's** (§2.7). A queue's
+  refusal, or a stall of the tool's receive path, names no member, and
+  0.2's "a delivery of the member" could be read as excusing a member none
+  of whose deliveries is known lost. It is lost for every member the tool
+  holds: any of them may have been the one. `conclusions.json`'s
+  description says what sets `reading.lost`. No verdict of a fixture
+  moves.
+- **A tool's known members** (§2.7). A tool holds no binding, so a member
+  is known to it only when its template has no parameter, and a selector
+  naming a concrete key binds nothing. Scenarios §6's `cmd` is known and
+  `axis/x` is not, as 0.2's expected observations already read them.
+  `periods.json`'s description says so.
+- **The lifespan across a face** (§2.8). 0.2 said it was judged "as
+  anywhere", and a descriptor does not cross a face either: a reader there
+  holds an owner's `meta.zid` only on its deployment's word, as it holds
+  ε, and without one reads every sample `unattributed` (§2.6 step 6), the
+  owner's own included. `lifespans.json` gains two cases: the same samples
+  with no `meta.zid` (unattributed) and with the deployment's (live, then
+  expired). The reference tool takes it as `--owner-zid`.
+- **Scenarios §6's step 3 on the black box**: the owner example gains
+  `timing every <member> <ms>`, a member published at another interval
+  than its period, since none of its commands could publish `cmd` every
+  250 ms; the conventions name it, and §6 names the reference tool and its
+  runs.
+
+**Stated: what the tools do** (the reference, not a rule).
+- **`zenctl timing`** follows presence on a watch session in no namespace,
+  reads presence and descriptors on its namespaced session, and starts its
+  window once a presence read after the round trip and every descriptor it
+  shows stand, trying once more when they did not (F-263); its opening is
+  in the report. Each arrival is read in the subscriber's callback, and
+  samples, token moves, owed reads and its timer are folded in one order
+  whose instants never go back. A withdrawal leaving none owes a read
+  100 ms later; a loss, a stall or a move of its watch session's transport
+  holds every owner unconfirmed until presence is read again. Every
+  verdict is `zenkey_model::timing`'s, rolled up by `roll_up`.
+- **`check conform`'s `timing-period` and `timing-deadline`** run the same
+  reader over the suite's window, one case per exposed timed stream, read
+  over its members by finding; both skipped, it sends nothing.
+- **The doctor's `timing-declaration`** is the linter's warnings of §2.2,
+  §2.3 and §2.5 read from the contracts the descriptors name.
+- **zengui's Inspector** reads a timed stream's declared values beside its
+  type, and its deadline and period over the slot's recorded history, the
+  window's own view: arrivals stamped at the data pump's callback, the
+  owner's state as the presence link landed it, and the lifespan not
+  judged for want of ε.
+
+**Deliberately not changed.**
+- **No verdict of a lifespan or a period,** and no tracker's but F-275's
+  sequence.
+- **The core version.** Nothing here needs core 0.56.
+- **No zenwatch rule.** `silent-for` watches a selector's silence; a
+  deadline rule waits.
+
 ## 0.2 — 2026-10-27: what the runtime showed, and round 76's answers (#908, MB)
 
 The reference runtime (`zenkey::timing`, #908's MB) ran scenarios §1 to

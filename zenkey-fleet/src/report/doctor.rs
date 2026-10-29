@@ -152,11 +152,17 @@ pub enum CheckId {
     /// "is there a vacancy?" (`redundancy.v1` §2.15; #841). The election
     /// did not end, or, under `external`, no instance holds the lock.
     RedundancyVacancy,
+    /// A timed stream whose timing declaration a reader cannot judge: an
+    /// invalid value, a deadline below its period, or timing keys where they
+    /// mean nothing (on a state, an event, an operation or a requirement)
+    /// (`timing.v1` §2.2, §2.3, §2.5; #908), read from the contracts the
+    /// descriptors name. A warning, as a contract linter's.
+    TimingDeclaration,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 31] = [
+    pub const ALL: [CheckId; 32] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -188,6 +194,7 @@ impl CheckId {
         CheckId::DesiredBehind,
         CheckId::DesiredLastKnown,
         CheckId::RedundancyVacancy,
+        CheckId::TimingDeclaration,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -224,6 +231,7 @@ impl CheckId {
             CheckId::DesiredBehind => "desired-behind",
             CheckId::DesiredLastKnown => "desired-last-known",
             CheckId::RedundancyVacancy => "redundancy-vacancy",
+            CheckId::TimingDeclaration => "timing-declaration",
         }
     }
 
@@ -267,6 +275,7 @@ impl CheckId {
             CheckId::DesiredBehind => "desired.v1 §2.17",
             CheckId::DesiredLastKnown => "desired.v1 §2.9",
             CheckId::RedundancyVacancy => "redundancy.v1 §2.15",
+            CheckId::TimingDeclaration => "timing.v1 §2.2",
         }
     }
 
@@ -380,6 +389,11 @@ impl CheckId {
             CheckId::RedundancyVacancy => {
                 "does an interface redundancy.v1 governs have candidates and no incumbent, in both \
                  of two complete presence reads a grace apart?"
+            }
+            CheckId::TimingDeclaration => {
+                "does a contract an owner implements declare timing.v1 values a reader cannot \
+                 judge: an invalid one, a deadline below its period, or timing keys on a resource \
+                 that is not a stream or on a requirement?"
             }
         }
     }
@@ -1079,6 +1093,7 @@ mod check_id_tests {
                 "desired-behind",
                 "desired-last-known",
                 "redundancy-vacancy",
+                "timing-declaration",
             ]
         );
     }

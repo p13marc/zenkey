@@ -16,7 +16,8 @@ use zengui::prefs::{Density, LayoutPreset, Prefs, ThemeChoice};
 use zengui::view::palette::{Overlay, PaletteMsg};
 
 use super::{
-    BYTES, DROPS, ETH0, FRAMES, HEALTH, LATENCY, POSITION, TX_BYTES, USED, World, send, window,
+    BYTES, DROPS, ETH0, FRAMES, HEALTH, LATENCY, POSITION, TWIST_CMD, TX_BYTES, USED, World, send,
+    window,
 };
 
 pub struct Scene {
@@ -228,6 +229,25 @@ pub const ALL: &[Scene] = &[
         // The axis named with both sides (#614, FL12): the one scene whose
         // newest sample rode other axes than its contract declares.
         landmark: "congestion: declared block, observed drop",
+    },
+    // timing.v1 in the Inspector (#908, MC). `robot1/nav`'s position:
+    // period 100 ms and lifespan 500 ms beside TYPE, the contract's; no
+    // deadline, so not asked; published every 250 ms, its period not kept
+    // over the recorded history, the window's own view.
+    Scene {
+        name: "inspector-timing-period",
+        size: DESKTOP,
+        build: timing_period,
+        landmark: "period: no (not_kept)",
+    },
+    // `robot1/teleop`'s command stream, its 100 ms deadline missed between
+    // every two 250 ms ticks with its owner present, by the presence link:
+    // the finding, and a miss never "down".
+    Scene {
+        name: "inspector-timing-missed",
+        size: DESKTOP,
+        build: timing_missed,
+        landmark: "deadline: no (missed)",
     },
     // telemetry.v1 in the Inspector (#819, TD). A Point counter, unit `1`,
     // its epoch in the Point: the plotted leaf is `value.value`, its §2.11
@@ -1183,6 +1203,34 @@ fn inspector_qos_mismatch(theme: ThemeChoice) -> Zengui {
     preset(&mut app, LayoutPreset::Explore);
     world.tick_with_stranger(&mut app, ETH0);
     app
+}
+
+/// A window on `world` (#908, MC), `key` revealed and selected before its
+/// traffic so its history holds `ticks` of it, and the Explore layout.
+fn timed_on(prefs: Prefs, mut world: World, key: &str, ticks: u32) -> (Zengui, World) {
+    let mut app = window(prefs);
+    world.connect(&mut app);
+    world.tick(&mut app);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(key.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(key.into()))),
+    );
+    world.ticks(&mut app, ticks);
+    world.verdicts(&mut app);
+    preset(&mut app, LayoutPreset::Explore);
+    (app, world)
+}
+
+fn timing_period(theme: ThemeChoice) -> Zengui {
+    timed_on(prefs(theme), World::new(), POSITION, 29).0
+}
+
+fn timing_missed(theme: ThemeChoice) -> Zengui {
+    timed_on(prefs(theme), World::timed(), TWIST_CMD, 29).0
 }
 
 /// A window on the metered world (#819, TD): `lab/meter` and `site-a/rf0`

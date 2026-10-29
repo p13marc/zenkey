@@ -61,6 +61,7 @@ Commands:
   health       Read every service's health.v1, or one's: healthy, unhealthy, stale
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
+  timing       Read timing.v1 streams: deadline met, period kept, a sample expired
   desired      Read desired.v1 targets: has each converged on its author's document?
   redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
   watchdog     Watch conditions on the bus and print each state change as ndjson
@@ -134,6 +135,7 @@ Commands:
   health       Read every service's health.v1, or one's: healthy, unhealthy, stale
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
+  timing       Read timing.v1 streams: deadline met, period kept, a sample expired
   desired      Read desired.v1 targets: has each converged on its author's document?
   redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
   watchdog     Watch conditions on the bus and print each state change as ndjson

@@ -101,10 +101,14 @@ pub enum TimingEvent {
         at: Instant,
     },
     /// A sample discarded as expired (§2.6): not delivered, and no arrival.
+    /// `wall` is this host's wall clock at its arrival, read in the
+    /// subscriber's callback with `arrival`: what `age` was taken against
+    /// (text 0.3, F-276).
     Expired {
         provider: Addr,
         key: String,
         arrival: Instant,
+        wall: SystemTime,
         stamp: Timestamp,
         age: StampAge,
     },
@@ -494,6 +498,7 @@ impl Engine {
                     provider: addr.clone(),
                     key: key.to_owned(),
                     arrival,
+                    wall,
                     stamp,
                     age: StampAge::between(stamp.get_time().to_system_time(), wall),
                 });

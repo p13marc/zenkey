@@ -139,6 +139,15 @@ on one resource:
                    call before any handler runs, and a state one
                    holding nothing answers nothing (redundancy.v1
                    §2.4)
+  timing-period    each exposed timed stream with a period kept it
+                   over the window, read by timing.v1's tool reader:
+                   not kept with the owner present throughout and
+                   nothing lost is the violation (timing.v1 §2.7, §5)
+  timing-deadline  each exposed timed stream with a deadline met it
+                   over the window: a miss while the owner was
+                   present, nothing lost, is the violation; one only
+                   while it was not present is unobservable
+                   (timing.v1 §2.5, §5)
 
 "Lost no delivery" is established, never assumed (§2.7, 0.25): this
 run lost nothing, and the resource is reliable with block, which no
@@ -308,7 +317,7 @@ is clap's refusal, which lists them.
 ```console
 $ zenctl check conform host-a/tc tc.netif.v1 --skip budgets
 ? 2
-error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window, config-projection, config-fresh, config-view, config-refusal, config-dry-run, alarm-key, alarm-document, telemetry-declaration, telemetry-sample, telemetry-continuity, desired-report, desired-binding, desired-author, redundancy-declaration, redundancy-standby
+error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window, config-projection, config-fresh, config-view, config-refusal, config-dry-run, alarm-key, alarm-document, telemetry-declaration, telemetry-sample, telemetry-continuity, desired-report, desired-binding, desired-author, redundancy-declaration, redundancy-standby, timing-period, timing-deadline
 
 For more information, try '--help'.
 

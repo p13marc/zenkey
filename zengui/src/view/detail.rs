@@ -430,6 +430,10 @@ pub struct SeriesData {
     /// counter's rate, and every pair's continuity — each the fleet's
     /// reading (`crate::metric`).
     pub metric: Option<std::sync::Arc<MetricRead>>,
+    /// The key's `timing.v1` stream (#908, MC): its declared period,
+    /// deadline and lifespan, and the window's own view of its deadline and
+    /// period over the recorded history (`crate::timing`).
+    pub timing: Option<std::sync::Arc<crate::timing::TimingRead>>,
     /// Retained geometry for the two charts (#178).
     ///
     /// A `canvas::Cache` has to outlive the frame to be worth anything, and
@@ -488,6 +492,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
             col = col.push(identity_section(
                 r,
                 data.series.and_then(|s| s.metric.as_deref()),
+                data.series.and_then(|s| s.timing.as_deref()),
                 sp,
             ));
         }
@@ -529,6 +534,12 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
         && let Some(section) = series_section(series, data.slot, sp)
     {
         col = col.push(section);
+    }
+
+    // — Timing: a `timing.v1` stream's deadline and period over the
+    // recorded history, the window's own view (#908, MC).
+    if let Some(t) = data.series.and_then(|s| s.timing.as_deref()) {
+        col = col.push(timing_section(t, sp));
     }
 
     // The count, and no longer a link: the timeline is the next section down
@@ -1279,6 +1290,7 @@ fn last_known_section<'a>(data: &DetailData<'a>) -> Element<'a, Message> {
 pub(crate) fn identity_section<'a>(
     resolution: &'a Resolution,
     metric: Option<&'a MetricRead>,
+    timing: Option<&'a crate::timing::TimingRead>,
     sp: Spacing,
 ) -> Element<'a, Message> {
     let identity = &resolution.identity;
@@ -1319,6 +1331,32 @@ pub(crate) fn identity_section<'a>(
             grid.push(kit::field("METRIC KIND", kit::mono(m.kind_words())));
             grid.push(kit::field("UNIT", kit::mono(m.unit().words())));
         }
+        // A timed stream's values (#908, MC; timing.v1 §2.2), beside the
+        // type they time, each with where it came from: a value appears
+        // only when it is declared.
+        if let Some(d) = timing.and_then(crate::timing::TimingRead::declared) {
+            // The source is the revision REVISION names beside it.
+            let source = |v: std::time::Duration| format!("{} ms (the contract's)", v.as_millis());
+            if let Some(p) = d.period {
+                grid.push(kit::field("PERIOD", kit::mono(source(p))));
+            }
+            if let Some(dl) = d.deadline {
+                grid.push(kit::field(
+                    "DEADLINE",
+                    kit::mono(if d.below_period() {
+                        format!(
+                            "{} ms, below its period: no deadline (§2.5)",
+                            dl.as_millis()
+                        )
+                    } else {
+                        source(dl)
+                    }),
+                ));
+            }
+            if let Some(l) = d.lifespan {
+                grid.push(kit::field("LIFESPAN", kit::mono(source(l))));
+            }
+        }
         grid.push(kit::field(
             "REVISION",
             kit::mono(short_fingerprint(&r.revision.fingerprint().to_string())),
@@ -1332,6 +1370,16 @@ pub(crate) fn identity_section<'a>(
             "telemetry.v1 declaration invalid (§2.2): {why}"
         )));
     }
+    if let Some(zenkey_model::timing::Declaration::Invalid(why)) = timing.map(|t| &t.declaration) {
+        col = col.push(kit::muted(format!(
+            "timing.v1 declaration invalid (§2.2): {} — no period, deadline or lifespan is \
+             judged",
+            why.iter()
+                .map(|w| w.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
     if !identity.values.is_empty() {
         col = col.push(kit::muted(
             identity
@@ -1340,6 +1388,100 @@ pub(crate) fn identity_section<'a>(
                 .map(|(k, v)| format!("{k} = {}", v.join("/")))
                 .collect::<Vec<_>>()
                 .join(" · "),
+        ));
+    }
+    col.into()
+}
+
+/// One of §5's answers as a judgement badge (#908, MC): the question's
+/// finding wears the finding's mark, its other pole the clean one, and the
+/// unestablished kinds their own; the fixture's token and reason always in
+/// the text.
+fn timing_badge<'a>(
+    q: zenkey_model::timing::Question,
+    what: &'static str,
+    j: &zenkey_model::timing::Judged,
+) -> Element<'a, Message> {
+    use crate::view::theme::JudgementTone as T;
+    use zenkey_model::timing::Answer;
+    let tone = match j.answer {
+        a if a == q.finding() => T::Established,
+        Answer::Yes | Answer::No => T::NotEstablished,
+        Answer::Unobservable => T::Unobservable,
+        Answer::NotAsked | Answer::NotThisProfiles => T::NotAsked,
+    };
+    kit::badge_judgement(
+        tone,
+        format!("{what}: {} ({})", j.answer.as_str(), j.reason.as_str()),
+    )
+}
+
+/// A `timing.v1` stream over the recorded history (#908, MC): the window's
+/// own view of §5's deadline and period questions, each the model's
+/// answer, the misses with the owner's state the presence link gave, and
+/// the lifespan said not judged here (no ε).
+fn timing_section<'a>(t: &'a crate::timing::TimingRead, sp: Spacing) -> Element<'a, Message> {
+    use zenkey_model::timing::Question;
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::section_header("Timing", None));
+    if let Some(why) = t.unobservable {
+        col = col.push(kit::muted(format!("the window's own view: {why}")));
+        return col.into();
+    }
+    col = col.push(kit::muted(format!(
+        "the window's own view (timing.v1 §2.7): {} over the recorded {:.1}s, each taken at \
+         the data pump's callback; the owner {} now, by the presence link",
+        kit::plural(t.arrivals, "arrival"),
+        t.span.as_secs_f64(),
+        t.owner_now.as_str()
+    )));
+    if t.evicted > 0 {
+        col = col.push(kit::muted(format!(
+            "the history ring dropped {} older, so this window starts at the oldest it kept",
+            kit::plural(usize::try_from(t.evicted).unwrap_or(usize::MAX), "entry")
+        )));
+    }
+    if let Some(j) = &t.deadline {
+        col = col.push(timing_badge(Question::Deadline, "deadline", j));
+        col = col.push(kit::muted(j.reason.says()));
+    }
+    for (due, late, owner) in &t.latest_misses {
+        col = col.push(kit::muted(format!(
+            "missed: due at {due:.0} ms, reported {late:.0} ms after, its owner {}",
+            owner.as_str()
+        )));
+    }
+    if t.misses as usize > t.latest_misses.len() {
+        col = col.push(kit::muted(format!(
+            "the latest {} of {} misses",
+            t.latest_misses.len(),
+            t.misses
+        )));
+    }
+    if t.misses > 0 {
+        col = col.push(kit::muted(
+            "a miss is never \"down\": nothing arrived within the deadline, as this window \
+             saw it; whether the owner is gone is presence's word (§2.5)",
+        ));
+    }
+    if let Some(j) = &t.period {
+        col = col.push(timing_badge(Question::Period, "period", j));
+        let span = t
+            .period_reading
+            .map(|p| {
+                format!(
+                    "{} in a {:.0} ms span: ",
+                    kit::plural(p.arrivals as usize, "arrival"),
+                    p.span.unwrap_or_default().as_secs_f64() * 1e3
+                )
+            })
+            .unwrap_or_default();
+        col = col.push(kit::muted(format!("{span}{}", j.reason.says())));
+    }
+    if t.declared().is_some_and(|d| d.lifespan.is_some()) {
+        col = col.push(kit::muted(
+            "lifespan: not judged here — it takes the deployment's stated clock bound, which \
+             zengui is not told (§2.6); zenctl timing --clock-bound judges it",
         ));
     }
     col.into()

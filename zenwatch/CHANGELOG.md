@@ -7,6 +7,12 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the doctor reads `timing.v1` declarations (#908, MC)
+
+| Before | Now | Notes |
+|---|---|---|
+| the scheduled doctor and a `doctor` rule: thirty-one checks | thirty-two: `timing-declaration` (warning: an invalid timing value, a deadline below its period, or timing keys where they mean nothing) | the `zenwatch.v1` schema's check id stays an open string, so its contract is unchanged; no rule of zenwatch's own reads a deadline yet (`silent-for` watches a selector's silence) |
+
 ## Unreleased (`main`, zk2) — the scheduled doctor's storages read reaches no declaration record (#890, WJ)
 
 | Before | Now | Notes |
