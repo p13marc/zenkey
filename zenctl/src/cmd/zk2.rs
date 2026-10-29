@@ -422,9 +422,9 @@ pub fn wire_scope_through(
     if explicit && !typed.is_empty() {
         return Err(unaskable!(
             "--explicit widens the default scope ({}) and is not taken beside a \
-             selector: beside {} it would add every service's explicit traffic to what \
-             you narrowed. Drop the selector for the deployment's whole data plane, or \
-             name the kind under your own prefix (`<ns>/zk2/<system>/*/*/{}/**`)",
+             selector ({}): it would add every service's explicit traffic to the scope \
+             you typed. Drop the selector for the deployment's whole data plane, or name \
+             the kind under your own prefix (`<ns>/zk2/<system>/*/*/{}/**`)",
             default_selector(namespace),
             typed.join(" + "),
             reads.explicit_kinds()[0].as_str()
