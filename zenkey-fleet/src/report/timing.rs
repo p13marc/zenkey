@@ -359,14 +359,26 @@ impl TimingReport {
                 )
             })
             .collect();
+        // The three roll-ups are over one member set (`judge::timing::
+        // questions`), so a member held is held for every question.
         let held = q.iter().any(|(_, r)| !r.members.is_empty());
-        if !held || asked.is_empty() {
+        if !held {
             return Judgement::Unobservable {
                 reason: format!(
                     "no question was asked of any member in {:.1}s: no member of the {} timed \
                      resource(s) in scope was held",
                     self.window_s,
                     self.resources.len()
+                ),
+            };
+        }
+        if asked.is_empty() {
+            return Judgement::Unobservable {
+                reason: format!(
+                    "no question was asked of any member in {:.1}s: every member held was set \
+                     aside, not asked or not this profile's, for every question (timing.v1 §5, \
+                     text 0.4)",
+                    self.window_s
                 ),
             };
         }

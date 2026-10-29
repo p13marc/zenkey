@@ -351,6 +351,10 @@ pub fn reason_says(token: &str) -> &'static str {
 mod tests {
     use super::*;
 
+    fn unobs_early() -> TimingAnswer {
+        a(TimingAnswerToken::Unobservable, "window_too_short")
+    }
+
     fn a(t: TimingAnswerToken, reason: &str) -> TimingAnswer {
         TimingAnswer {
             answer: t,
@@ -381,6 +385,22 @@ mod tests {
         assert_eq!((r.answer, r.finding), (TimingAnswerToken::No, false));
         let r = roll(Question::Lifespan, [("z", &not_asked)]);
         assert_eq!(r.answer, TimingAnswerToken::NotAsked, "F-277");
+        let other = a(TimingAnswerToken::NotThisProfiles, "kind");
+        let r = roll(Question::Period, [("s", &other)]);
+        assert_eq!(
+            (r.answer, r.finding),
+            (TimingAnswerToken::NotThisProfiles, false),
+            "every member not this profile's"
+        );
+        let r = roll(
+            Question::Deadline,
+            [("z", &not_asked), ("u", &unobs_early())],
+        );
+        assert_eq!(
+            (r.answer, r.finding),
+            (TimingAnswerToken::Unobservable, false),
+            "an unobservable member is never set aside"
+        );
         let r = roll(Question::Lifespan, std::iter::empty());
         assert_eq!(
             (r.answer, r.finding),
