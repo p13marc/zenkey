@@ -31,6 +31,15 @@ chlog=spec/CHANGELOG.md
 index=spec/profiles/README.md
 fail=0
 
+# Every input must exist: a renamed or missing file would otherwise read as
+# "nothing stated" and pass (review-bot on PR #943).
+for f in "$core" "$chlog" "$index" README.md spec/README.md; do
+    if [ ! -f "$f" ]; then
+        echo "spec-status: $f is missing; the check reads it." >&2
+        exit 2
+    fi
+done
+
 # --- 1. core.md's header names the newest amendment ------------------------
 # The header: everything above the first `## ` heading.
 header_version=$(awk '/^## / { exit } { print }' "$core" \
@@ -56,7 +65,14 @@ two_part='v?0\.[0-9]+([^.0-9x]|\.[^0-9x])'
 pattern="(\<([Cc]ore|[Ss]pec)[^0-9]{0,30}|\<[Vv]ersion[^0-9A-Za-z]{0,6})${two_part}"
 stated=0
 for doc in README.md spec/README.md; do
-    hits=$(grep -zobE "$pattern" "$doc" | tr '\0\n' '\n ' || true)
+    # grep's own status, apart from tr's: 1 is no match, above 1 an error
+    # (an unreadable file or a bad pattern), never a silent pass.
+    rc=0
+    hits=$(grep -zobE "$pattern" "$doc" | tr '\0\n' '\n '; exit "${PIPESTATUS[0]}") || rc=$?
+    if [ "$rc" -gt 1 ]; then
+        echo "spec-status: grep could not read $doc (exit $rc)." >&2
+        exit 2
+    fi
     [ -z "$hits" ] && continue
     while IFS= read -r hit; do
         [ -z "$hit" ] && continue
