@@ -6,12 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 
-- `rfcs/` — the **normative RFC set** (v1.50; ratified at v1.18, 2026-08-15). Chapters 02–10
-  and 13 (observer conformance, v1.24) are application-neutral; chapter 11 is the
-  ZenSight reference profile. Wire-contract
-  changes go through these RFCs, amendment-style (see `rfcs/CHANGELOG.md` —
-  each amendment records what changed *and* what deliberately
-  did not).
+- v1's **RFC set** (v1.50; ratified at v1.18, 2026-08-15) is **not on
+  `main`** since #925: it is frozen on the `v1` branch's `rfcs/`, with its
+  amendment ledger (`rfcs/CHANGELOG.md`) and `check-rfc-status.sh`. zk2's
+  normative texts are `spec/core.md`, `spec/observer.md` and the profiles
+  under `spec/profiles/`, each with its CHANGELOG; the tooling guide
+  (`docs/zk2/tooling-guide.md`) is guidance, and its §8 holds the v1
+  practices the reference tools keep (session posture, `$*`, matching
+  status, router storages).
 - `zenkey/` — the **runtime crate** (MIT, crates.io): typed key grammar, origin
   minting, `AppProfile`, slugs, QoS profiles, registry slices. Keys are built
   through types, never `format!`. **App-neutral: no bundled registry, no app
@@ -28,7 +30,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   crates.io is the v1 engine, released from the `v1` branch, which no
   member of `main` links since #614 FL11b; the in-tree 0.20.0 is zk2's and
   `publish = false`): the shared core of the zk2 explorers — zenctl,
-  zengui and zenwatch — `fleet_get` (the RFC 05 §2.1 chokepoint,
+  zengui and zenwatch — `fleet_get` (the fan-in chokepoint, core §5.1,
   moved verbatim from zenctl), presence and contract retrieval
   (`bus::presence`, `bus::contracts`), the session-free **lens** a raw
   observer resolves keys through (`model::lens`), contract-resolved
@@ -831,7 +833,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   usage errors, everything else this tool refuses of your input
   (`exit::Unaskable`), silence under fan-out, and any pre-run failure of a
   verdict verb (`exit::asked`). Verdicts exit through
-  `zenkey_fleet::judgement_exit_code` over the RFC 13 §1.2 `Judgement`, never
+  `zenkey_fleet::judgement_exit_code` over observer §1's `Judgement`, never
   a hand-rolled match. `zenctl/CHANGELOG.md` carries the old→new table.
 
 - `zenwatch/` — the **notifier** (Apache-2.0, **not published**; Forgejo
@@ -957,8 +959,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `docs/zk2/README.md`. Issues cite it as `r3 §x`; r3.x and r4 keep r3's
   section numbers. The r-number moves only through a reviewed revision carrying a
   "what changed since rN" table.
-- **The v1 line.** v1 (`rfcs/`, frozen at v1.50) is maintained on the `v1`
-  branch (0.14.x patches, #587).
+- **The v1 line.** v1 (its RFC set frozen at v1.50, in the `v1` branch's
+  `rfcs/`, off `main` since #925) is maintained on the `v1` branch (0.14.x
+  patches, #587).
 - **`main` is the zk2 line, in the strangler layout (#615).** Every tool on
   it is ported, and none links v1's crates since #614 (FL11b). zk2 reuses
   the crate names at 0.20.0. `zenkey-model` is new.
@@ -1683,7 +1686,7 @@ directory, a `.history` root) — a revision held offline is never retrieved,
 and every renderer is source-agnostic. A payload renders as its declared type
 when a contract resolves one, else structurally (JSON / CBOR→JSON diagnostic
 / text / hex), with the rung where resolution stopped named. Bus discipline
-(RFC 05, `zenkey-fleet/src/bus/query.rs`): every fleet GET goes through
+(core §5.1, `zenkey-fleet/src/bus/query.rs`): every fleet GET goes through
 `zenkey_fleet::fleet_get`
 (target `All`, consolidation `None`, attribution by reply key). Silence is
 never a verdict. Scouting is opt-in.
@@ -1692,9 +1695,14 @@ never a verdict. Scouting is opt-in.
 
 - Conventional commits (`feat:`/`fix:`/`docs:`/`chore:`), scope by crate
   (`feat(zenctl): …`, `docs(rfc): …`).
-- RFC text is normative: when code and RFC disagree, either fix the code or amend
-  the RFC explicitly (with a changelog entry in `rfcs/CHANGELOG.md`) — never silently
-  drift. Doc comments cite RFC sections (`RFC 03 §2`) and issues; keep that habit.
+- Spec text is normative: when code and `spec/` disagree, either fix the code or
+  amend the text explicitly (an entry in `spec/CHANGELOG.md`,
+  `spec/observer-CHANGELOG.md` or the profile's CHANGELOG) — never silently
+  drift. Doc comments and report `cite` values cite zk2's texts (`core §1.4`,
+  `observer §8.2`, `alarms.v1 §2.5`, `tooling guide O6`) and issues, never
+  v1's RFC set: `scripts/check-v1-citations.sh` (in `just ci` and ci.yml)
+  fails on `RFC 01`–`RFC 13` in any `.rs`, `.trycmd` or `tests/{cmd,fixtures}`
+  file (#925). An IETF RFC (`RFC 3339`) is fine.
 - Publishing (crates.io, LIB CRATES ONLY): `zenkey` → `zenkey-build` →
   `zenkey-fleet` (in that order; zenkey-build version-locks to zenkey 0.x).
   Binaries (zenctl, zengui, zenwatch) ship via the `release.yml` binary lane.
