@@ -13,13 +13,14 @@ written against.
 
 **Used by** names the adopter mappings in [`examples/zk2/`](../../examples/zk2/)
 that use the profile and, after a semicolon, the shipped services that
-do. A mapping or a service uses a profile where an instance's descriptor
-would list it (core §3.3): a contract it implements lists the profile in
-`uses`, it implements the profile's standard contract, or the profile
-mints its system. The walkthrough (`examples/zk2/walkthrough/`) is the
-design's, not an adopter's, and the tools read every profile, so neither
-counts. `zenkey-model/tests/profiles.rs` computes the column from the
-repository, and fails when a row's is stale.
+do, or reads `none`. A mapping or a service uses a profile where an
+instance's descriptor would list it (core §3.3): a contract it implements
+lists the profile in `uses`, it implements the profile's standard
+contract, or the profile mints its system. The walkthrough
+(`examples/zk2/walkthrough/`) is the design's, not an adopter's, and the
+tools read every profile, so neither counts.
+`zenkey-model/tests/profiles.rs` computes the column from the repository,
+and fails when a row's is stale.
 
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
