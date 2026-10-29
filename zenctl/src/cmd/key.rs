@@ -219,8 +219,8 @@ mod tests {
     }
 
     /// The two footguns the convention leans on, cited when they bite:
-    /// D2 — `**` never crosses an `@`-chunk (which is why the default
-    /// `<ns>/zk2/**` scope cannot see `@stream`); D4 — `*` never matches a
+    /// Core §1.3: `**` never crosses an `@`-chunk (which is why the default
+    /// `<ns>/zk2/**` scope cannot see `@stream`), and `*` never matches a
     /// verbatim chunk.
     #[test]
     fn a_convention_shaped_no_cites_the_core() {
@@ -230,7 +230,7 @@ mod tests {
             "prod/zk2/**",
             "prod/zk2/host-a/cam/video.v1/@stream/frames",
         ) else {
-            panic!("** must not cross @stream (D2)");
+            panic!("** must not cross @stream (core §1.3)");
         };
         let note = note.expect("the convention explains this no");
         assert!(note.contains("core §1.3"), "{note}");
@@ -242,7 +242,7 @@ mod tests {
             "prod/zk2/host-a/tc/tc.netif.v1/*/x",
             "prod/zk2/host-a/tc/tc.netif.v1/@op/x",
         ) else {
-            panic!("* must not match @op (D4)");
+            panic!("* must not match @op (core §1.3)");
         };
         let note = note.expect("the convention explains this no");
         assert!(note.contains("core §1.3"), "{note}");

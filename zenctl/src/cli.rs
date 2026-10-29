@@ -1863,7 +1863,7 @@ pub(crate) enum StorageCmd {
     /// selectors, `complete = true` off a replicated latest-mode storage,
     /// retention that is the database's and not zenoh's or a replay's and
     /// not the storage's (spec §2.6), redb's mandatory retention in all mode.
-    /// Each is the tooling guide's §8.4 but the replay's.
+    /// The tooling guide's §8.4 explains each caveat, and spec §2.6 the replay's.
     ///
     /// Four ways out. The plan report (`--format` as everywhere); `--json5`,
     /// the zenohd block with every derivation and warning as a comment beside
