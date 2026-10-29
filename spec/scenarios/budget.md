@@ -92,7 +92,7 @@ measurement of the process, not of the path, and §2.7 names it as a
 premise a deployment provides.
 
 **A tool's window over a stalled reader** (0.27, core §2.7). The case
-§2.7's "its reader lost none" exists for, read by a tool.
+§2.7's "its reader lost none" (observer §5.2) exists for, read by a tool.
 - *Setup.* An owner of an event of two sources at most, `reliable` with
   `block` and a 2 s retention, publishing both every 200 ms, its instance
   token held throughout. A tool reads its population over a 4 s window,

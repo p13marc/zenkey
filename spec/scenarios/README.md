@@ -20,6 +20,10 @@ the runtime (#610 onward).
 | [`constrained.md`](constrained.md) | §1.6, R7, §8.5, §12 |
 | [`budget.md`](budget.md) | §2.7: what a path drops and a reader sees (0.25), a stalled reader (0.27); an owner keeping its bound and its rate |
 
+Since core 0.58 the reader's rules among them are
+[`../observer.md`](../observer.md)'s: a scenario's core section leads there
+by its pointer, and observer.md's Appendix B indexes the evidence.
+
 Conventions: R1 and R2 are routers, linked R2 → R1 unless a scenario says
 otherwise. "Owner", "consumer" and "caller" are client sessions. Timeouts
 are 1 s unless stated.

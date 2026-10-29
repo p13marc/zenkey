@@ -8,6 +8,7 @@ measurements behind it are [`docs/zk2/spike-report.md`](../docs/zk2/spike-report
 | Path | What it is | Source |
 |---|---|---|
 | [`core.md`](core.md) | **The normative core.** Its header gives its version, the date its first version was accepted, and a link to [`CHANGELOG.md`](CHANGELOG.md), which records every amendment since. Every MUST cites a fixture or a scenario. | written from r4 |
+| [`observer.md`](observer.md) | **The observer rules**, normative beside the core: what a tool, or any participant reading presence, state or the admin space, does with what it reads, when a read is complete, and what it may conclude and tell a person. Its header gives its text version, its status and the core version it is written against, and links [`observer-CHANGELOG.md`](observer-CHANGELOG.md). It holds the reader's discipline the core moved out (#925), and the judgement shape and observer obligations that [`docs/zk2/tooling-guide.md`](../docs/zk2/tooling-guide.md) carried, promoted where they cite evidence. Its evidence is the core's fixtures and scenarios, and the profiles'. | moved from the core, and the tooling guide |
 | [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 2. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
@@ -15,6 +16,7 @@ measurements behind it are [`docs/zk2/spike-report.md`](../docs/zk2/spike-report
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
 | [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. They are listed, each with its text version, status, who uses it and the core version it is written against, in [the index](profiles/README.md#index), those nobody uses yet (`experimental`) in a table of their own, beside the template and the process. | `zenkey-model/tests/profiles.rs` |
 | [`CHANGELOG.md`](CHANGELOG.md) | The amendments to `core.md` since its first accepted version, newest first | |
+| [`observer-CHANGELOG.md`](observer-CHANGELOG.md) | The versions of `observer.md`'s text, newest first | |
 
 **License.** The spec, its fixtures and its scenarios ship under the
 repository's MIT license, like `zenkey-model`.
@@ -22,7 +24,8 @@ repository's MIT license, like `zenkey-model`.
 **Process.**
 - **Since the core was accepted (2026-10-08),** every change goes through
   `CHANGELOG.md`, amendment-style. Each entry records what changed, and what
-  deliberately did not.
+  deliberately did not. `observer.md`'s changes go through
+  `observer-CHANGELOG.md` the same way.
 - **Fixtures land with their rule.** A machine-testable normative rule
   arrives with its fixture or scenario in the same change.
 - **Lessons go to guides, not MUSTs.**
