@@ -54,7 +54,7 @@ const HEX_VIEW_BYTES: usize = 1024;
 ///
 /// 64 KiB is far past what anyone reads in a pane and far short of what
 /// costs a frame; a payload that wants more than this wants a file, not a
-/// scroll (RFC 13 §3 O6 — the bound is stated where it bites).
+/// scroll (tooling guide O6 — the bound is stated where it bites).
 const DOCUMENT_VIEW_CHARS: usize = 64 * 1024;
 
 /// Clamp a rendered document to [`DOCUMENT_VIEW_CHARS`], on a char boundary.
@@ -1060,13 +1060,13 @@ fn replies_value<'a>(r: &'a Replies, data: &DetailData<'a>) -> Element<'a, Messa
             col = col.push(kit::muted(match r.kind {
                 ReadKind::History => {
                     "the owner's @adv cache answered nothing — no advanced publisher is \
-                     present, or its history is empty: silence, not absence (RFC 05 §3.1)"
+                     present, or its history is empty: silence, not absence (observer §2)"
                 }
                 ReadKind::Events => {
                     "no occurrence answered within the retention — a union storage keeps \
-                     events (§2.6), and silence is not absence (RFC 05 §3.1)"
+                     events (§2.6), and silence is not absence (observer §2)"
                 }
-                _ => "raw GET: no reply — a non-verdict, not proof of absence (RFC 05 §3.1)",
+                _ => "raw GET: no reply — a non-verdict, not proof of absence (observer §2)",
             }));
         }
         Some(reply) => {
@@ -1153,7 +1153,7 @@ fn reply_body<'a>(reply: &'a Reply, data: &DetailData<'a>) -> Element<'a, Messag
     if reply.delete {
         return kit::callout(
             crate::view::theme::Tone::Info,
-            kit::caption("a tombstone — retirement, not an empty value (RFC 04 §1.2)"),
+            kit::caption("a tombstone — retirement, not an empty value (core §4.2)"),
         );
     }
     let mut col = Column::new().spacing(sp.xs);

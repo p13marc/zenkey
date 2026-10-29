@@ -32,7 +32,7 @@ fn msg(m: MeshMsg) -> Message {
 
 /// The tool: the drawn mesh over the whole dock — or, before any sweep, the
 /// one action that would draw it. Never swept is "not asked", not an empty
-/// mesh (RFC 09 §5.1 O4).
+/// mesh (observer §1).
 pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
     let mut col = column![].spacing(sp.sm);
     if let Some(e) = &state.error {
@@ -58,7 +58,7 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
             "admin space not swept yet",
             "the mesh is drawn from the admin space, which is queried on demand — \
              nothing has been asked, so this is \"not asked\", not an empty mesh \
-             (RFC 09 §5.1 O4)",
+             (observer §1)",
             run,
         ));
         return container(col).padding(sp.sm).into();
@@ -142,7 +142,7 @@ fn topology<'a>(
         // reachability, never an empty mesh.
         col = col.push(kit::muted(
             "no admin space answered @/*/* — adminspace.enabled defaults off; this is a \
-             reading about reachability, never an empty mesh (RFC 05 §3.1)",
+             reading about reachability, never an empty mesh (observer §2)",
         ));
         return col.into();
     }

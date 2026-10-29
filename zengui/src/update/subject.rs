@@ -59,7 +59,7 @@ pub(crate) fn update(
         SubjectMsg::ValueFetched(key, outcome) => {
             // No base guard needed (#109 audit): the evidence is keyed by
             // the full wire key, which names its own base (an explorer runs
-            // un-namespaced, RFC 09 §5).
+            // un-namespaced, tooling guide §8.1).
             //
             // A live read never lands while the panes show a capture
             // (#614, FL8a): it answers about the bus, and a replay's slots

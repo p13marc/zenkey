@@ -71,12 +71,12 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
             Task::none()
         }
         ContextMsg::Isolate => {
-            // RFC 09 §0.1's isolated-verification recipe, one click:
+            // The isolated-verification recipe (tooling guide §8.1), one click:
             // multicast off, explicit endpoints only.
             form.scouting = false;
             form.status = Some(Ok(
                 "multicast scouting off — an empty result now means \"nothing on these \
-                 endpoints\", never \"nothing on the network\" (RFC 09 §0.1)"
+                 endpoints\", never \"nothing on the network\" (tooling guide §8.1)"
                     .into(),
             ));
             Task::none()

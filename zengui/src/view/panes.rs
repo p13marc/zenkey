@@ -30,7 +30,7 @@ use crate::view::tokens::{Spacing, space};
 ///
 /// The distinction the history pane rests on: with no watch, no sample can
 /// reach the recorder, and "nothing recorded yet" would be a verdict the tool
-/// never obtained (RFC 09 §5.1 O4). A selector that does not parse cannot be
+/// never obtained (observer §1). A selector that does not parse cannot be
 /// claimed as coverage, so it is not counted — the same rule
 /// `StatsTable::retire_unwatched` applies from the other side.
 pub(crate) fn key_is_watched(watched: &[String], key: &str) -> bool {

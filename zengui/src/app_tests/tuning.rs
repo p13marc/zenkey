@@ -37,7 +37,9 @@ fn the_selector_editor_seeds_forks_and_refuses_invalid_drafts() {
     let _ = app.update(Message::Pane(PaneMsg::Scope(ScopeMsg::Apply)));
     let status = app.work.bench.scope_form.status.clone().expect("a verdict");
     assert!(
-        status.expect_err("must refuse").contains("RFC 03 §2"),
+        status
+            .expect_err("must refuse")
+            .contains("tooling guide §8.2"),
         "the refusal carries the validator's own words"
     );
     assert_eq!(

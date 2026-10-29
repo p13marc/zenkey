@@ -154,7 +154,7 @@ async fn the_raw_scope_sees_streams_and_not_explicit_frames_which_a_named_select
         "an ambient zk2 stream rides `**`: {position}"
     );
     // Foreign keys are first-class, and so is another deployment's
-    // traffic — that is the point of a pump in no namespace (RFC 09 §5).
+    // traffic — that is the point of a pump in no namespace (tooling guide §8.1).
     for foreign in ["demo/example/foo", "two/chunks"] {
         assert!(keys.iter().any(|k| k == foreign), "{foreign} is observed");
     }
@@ -177,7 +177,7 @@ async fn the_raw_scope_sees_streams_and_not_explicit_frames_which_a_named_select
     bus.down().await;
 }
 
-/// RFC 09 §5.1 O6, against real traffic: a bounded observer stays bounded
+/// The tooling guide's O6, against real traffic: a bounded observer stays bounded
 /// and says what the bound cost. The spray publishes far more than 3 keys
 /// the raw scope can see, so a bound of 3 must engage.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

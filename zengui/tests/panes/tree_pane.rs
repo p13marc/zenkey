@@ -323,7 +323,7 @@ fn density_changes_the_grid_never_the_claims() {
 }
 
 /// The empty tree must explain itself rather than implying the bus is quiet
-/// (RFC 05 §3.1).
+/// (observer §2).
 #[test]
 fn the_empty_tree_explains_itself() {
     let flat = tree::Flattened::empty();
@@ -334,7 +334,7 @@ fn the_empty_tree_explains_itself() {
     // Selectors match a widget's whole text, so this is the full disclaimer.
     assert!(
         ui.find(
-            "An empty tree is not a verdict about the bus (RFC 05 §3.1) — \
+            "An empty tree is not a verdict about the bus (observer §2) — \
              it may simply mean nothing has published on the current scope."
         )
         .is_ok(),

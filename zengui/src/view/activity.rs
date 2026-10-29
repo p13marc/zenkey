@@ -126,7 +126,7 @@ fn replay_stream<'a>(
             col = col.push(kit::error(format!("could not open: {note}")));
         }
     }
-    // A parse in flight is its own state (#255, RFC 09 §5.1 O4): "loading"
+    // A parse in flight is its own state (#255, observer §1): "loading"
     // is neither "no file open" nor a hung window, and the tab says which.
     if let Some(path) = &r.replay_loading {
         col = col.push(kit::muted(replay::loading_note(path)));
@@ -172,7 +172,7 @@ fn replay_stream<'a>(
         );
     }
     // The loaded snapshot (#219): opened here because a `.zsnap` is the
-    // `.zrec`'s sibling, and shown with its span because RFC 13 §4.4 makes
+    // `.zrec`'s sibling, and shown with its span because tooling guide §5 makes
     // stating the span every rendering's obligation.
     if let Some(path) = &r.snapshot_open {
         col = col.push(replay::snapshot_open_row(path, sp));

@@ -6,7 +6,7 @@
 //! snapshot, the tick's totals, the echo ring's loss counters — and surfaced
 //! only as one status-strip sentence and numbers on individual tree rows.
 //!
-//! Honest the same way the strip is (RFC 09 §5.1): with no session a tile
+//! Honest the same way the strip is (observer §1, tooling guide O6): with no session a tile
 //! says "not asked", never 0; with nothing watched it says so by choice; the
 //! three ways a sample can go missing are three numbers, never summed; and a
 //! share is a share of the *retained* keys whenever the bound has retired any.
@@ -152,7 +152,7 @@ pub fn section<'a>(d: TrafficData<'a>) -> Column<'a, Message> {
             kit::EmptyKind::Silent,
             "No key carried traffic yet",
             "The watches are active and nothing has arrived. That is not a statement \
-             about the bus (RFC 05 §3.1).",
+             about the bus (observer §2).",
         ));
     }
     let mut note = format!(

@@ -6,14 +6,14 @@
 //! 1. **Is anything being recorded at all** — history exists only for a key
 //!    under an active watch, and a pane that renders "nothing yet" for a key
 //!    nobody is watching would be reporting a verdict it never obtained
-//!    (RFC 09 §5.1 O4). The empty state says which of the two it is, and
+//!    (observer §1). The empty state says which of the two it is, and
 //!    offers the watch.
 //! 2. **The timeline** — newest first, each row labelled with *which clock*
 //!    stamped it: the publisher's HLC where one exists, this observer's
 //!    arrival otherwise. They are never silently interchanged.
 //! 3. **The diff** — the selected row against the one before it. A tombstone
 //!    is retirement, and the put after one is a new value, not a change
-//!    (RFC 04 §1.2); a payload with no structural form degrades to a byte
+//!    (core §4.2); a payload with no structural form degrades to a byte
 //!    comparison that says so rather than inventing field names.
 
 use iced::widget::{Column, column, row, text};
@@ -159,7 +159,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
             kit::EmptyKind::Silent,
             "No samples yet",
             "The watch is active and nothing has arrived on this key since it \
-             was selected. That is not a statement about the bus (RFC 05 §3.1).",
+             was selected. That is not a statement about the bus (observer §2).",
         ));
     }
 
@@ -210,7 +210,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
 
     // The snapshot comparison (#219): offered only when the loaded file
     // carries this key; the caption names the snapshot's moment *and span*,
-    // because a snapshot is collected over one (RFC 13 §4.4).
+    // because a snapshot is collected over one (tooling guide §5).
     if let Some((row, header)) = data.snapshot {
         col = col.push(
             kit::secondary(kit::caption(if data.compare_snapshot {
@@ -331,7 +331,7 @@ fn row_view<'a>(
     // asks the question ("what did it look like two samples ago").
     let age = newest.saturating_sub(entry.seq);
     let marker = if focused { "▸" } else { " " };
-    // A tombstone is retirement (RFC 04 §1.2): the retired edge and its own
+    // A tombstone is retirement (core §4.2): the retired edge and its own
     // chip — never the danger hue, which is for an answer that came back no
     // (#538). A put's size is data, in a data chip.
     let (edge, kind): (kit::Edge, Element<'a, Message>) = if entry.is_delete {
@@ -418,7 +418,7 @@ fn pair_view<'a>(
     if entry.is_delete {
         return col
             .push(note(
-                "retired — an authoritative delete (RFC 04 §1.2), not an empty value",
+                "retired — an authoritative delete (core §4.2), not an empty value",
             ))
             .into();
     }
@@ -540,7 +540,7 @@ fn brief(v: &serde_json::Value) -> String {
 
 /// A statement about the timeline that is not a field change — a fact,
 /// commentary's callout (#566). It wore danger's red, and both its uses are
-/// about retirement, which is a fact, never a negative verdict (RFC 04 §1.2).
+/// about retirement, which is a fact, never a negative verdict (core §4.2).
 fn note<'a>(s: &'static str) -> Element<'a, Message> {
     kit::callout(crate::view::theme::Tone::Info, kit::caption(s))
 }

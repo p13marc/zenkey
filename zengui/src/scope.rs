@@ -228,9 +228,10 @@ pub fn validate_selector(sel: &str) -> Result<()> {
     if sel.trim().is_empty() {
         bail!("empty key expression");
     }
-    // RFC 03 §2 forbids `$*` in selectors, not merely in published keys.
+    // The reference refuses `$*` in selectors, not merely in published keys
+    // (tooling guide §8.2).
     if sel.contains("$*") {
-        bail!("`$*` must not be used in selectors (RFC 03 §2): {sel:?}");
+        bail!("`$*` must not be used in selectors (tooling guide §8.2): {sel:?}");
     }
     zenoh::key_expr::KeyExpr::new(sel.to_string())
         .map_err(|e| anyhow::anyhow!("not a valid key expression {sel:?}: {e}"))?;
@@ -450,9 +451,10 @@ mod tests {
         assert!(validate_selector("zk2/*/*/*/state/**").is_ok());
         assert!(validate_selector("").is_err());
         assert!(validate_selector("   ").is_err());
-        // RFC 03 §2 forbids `$*` in selectors, not only in published keys.
+        // The reference refuses `$*` in selectors, not only in published keys
+        // (tooling guide §8.2).
         let err = validate_selector("demo/$*/x").unwrap_err().to_string();
-        assert!(err.contains("RFC 03 §2"), "{err}");
+        assert!(err.contains("tooling guide §8.2"), "{err}");
     }
 
     /// The subtree watch selector widens symbolic chunks and covers the tail.

@@ -14,7 +14,7 @@
 //!
 //! ## Why the scouting help text is this long
 //!
-//! RFC 09 §0.1: multicast scouting and gossip are **independent** switches, and
+//! Multicast scouting and gossip are **independent** switches (tooling guide §8.1), and
 //! "scouting off" in every explorer here means the multicast half only. That
 //! distinction is invisible in a checkbox labelled "scouting", and getting it
 //! wrong is how a throwaway session ends up in a production fleet — or, in the
@@ -76,7 +76,7 @@ pub enum ContextMsg {
     Save,
     /// Save, then switch to it.
     SaveAndSelect,
-    /// The isolated-verification recipe, one click (RFC 09 §0.1): multicast
+    /// The isolated-verification recipe, one click (tooling guide §8.1): multicast
     /// off, explicit endpoints, nothing discovered by accident.
     Isolate,
     /// The switch landed — a session on the new context, or why not (#176).
@@ -290,7 +290,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         "tcp/0.0.0.0:7448 …",
         &form.listen,
         ContextMsg::ListenChanged,
-        Some("listening makes the session a peer others can reach (RFC 09 §5)".into()),
+        Some("listening makes the session a peer others can reach (tooling guide §8.1)".into()),
     ));
     col = col.push(field(
         "ZENOH CONFIG",
@@ -355,7 +355,7 @@ fn field<'a>(
     )
 }
 
-/// RFC 09 §0.1, in the place it matters. Two switches, not one — and the
+/// The tooling guide's §8.1, in the place it matters. Two switches, not one — and the
 /// sentence that keeps somebody from misreading an isolated session as a dead
 /// fleet.
 fn scouting_help<'a>() -> Element<'a, Message> {
@@ -364,7 +364,7 @@ fn scouting_help<'a>() -> Element<'a, Message> {
     };
     Column::with_children(vec![
         kit::body(
-            "RFC 09 §0.1: multicast scouting and gossip are independent. This \
+            "Multicast scouting and gossip are independent (tooling guide §8.1). This \
              toggle is the multicast half only. The session is a client of its \
              endpoints — no listener, no gossip — unless it listens, and a \
              listening peer still learns about others through gossip over an \

@@ -1,7 +1,7 @@
 //! The status strip: what zengui is actually watching, stated rather than
 //! implied.
 //!
-//! This pane exists because of RFC 05 §3.1 and RFC 12 §9. An explorer showing
+//! This pane exists because of observer §2 and the tooling guide's §8.3. An explorer showing
 //! an empty tree looks identical whether the bus is quiet, the scope excludes
 //! the traffic, the session reaches nothing, or no contract resolves a key.
 //! Every one of those is stated here so the user never has to infer it.
@@ -309,7 +309,7 @@ pub fn seed_text(seeded: usize, t: crate::state::observation::SeedTotals) -> Str
 
 /// The key count, and — if the table has evicted — what that count omits.
 ///
-/// A bounded observer must report what its bound cost (RFC 09 §5.1 O6): a key
+/// A bounded observer must report what its bound cost (tooling guide O6): a key
 /// set that stops growing, or shrinks, is otherwise indistinguishable from a
 /// bus that went quiet.
 fn keys_label<'a>(keys: usize, evicted: u64) -> Element<'a, Message> {
@@ -350,7 +350,7 @@ pub fn identity_text(cached: usize, evicted: u64) -> String {
 /// resting state, the span actually held, and — only once the byte bound
 /// has bitten — its own eviction count. A **fourth** number beside
 /// [`keys_text`], `identity_text` and the unwatch line, never folded into any
-/// of them: each bound reports its own cost (RFC 09 §5.1 O6; v1.18 R1).
+/// of them: each bound reports its own cost (tooling guide O6; v1.18 R1).
 pub fn retention_text(r: &zenkey_fleet::RetentionStats) -> String {
     let mut label = format!(
         "retained: {:.0}s held · budget {}",
@@ -739,7 +739,7 @@ mod tests {
         );
     }
 
-    /// RFC 09 §5.1 O6: a bounded observer reports what its bound cost. Without
+    /// The tooling guide's O6: a bounded observer reports what its bound cost. Without
     /// this, a key count that stops growing looks like a bus that went quiet.
     /// #614 (FL6b): the seed summary names zk2's two legs — the `@adv`
     /// history and S4's state GET — and never a storage; every boundary's

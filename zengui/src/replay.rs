@@ -7,7 +7,7 @@
 //! [`zenkey_fleet::MonitorCore`] — the same stats table, the same tree
 //! builder, the same bounded counters as live — and the panes cannot tell
 //! the difference. Nothing here can publish: there is no session in this
-//! module at all, which is the RFC 09 §5.2 pane-replay posture made
+//! module at all, which is the tooling guide §5 pane-replay posture made
 //! structural. The retained window rides the same machinery over an
 //! in-memory ring: [`ReplayState::from_retained`] instead of
 //! [`ReplayState::load`], and everything after the constructor is shared.
@@ -195,7 +195,7 @@ pub enum ReplaySource {
         /// The ring's account of itself at the moment the window was taken:
         /// the budget the banner states, and what each bound cost —
         /// retention eviction stays its own number, apart from stats-table
-        /// eviction and from `Dropped(n)` (RFC 09 §5.1 O6, v1.18 R1).
+        /// eviction and from `Dropped(n)` (tooling guide O6; v1's v1.18 R1).
         taken: RetentionStats,
     },
 }
@@ -216,10 +216,10 @@ pub struct ReplayState {
     pub capture_dropped: u64,
     /// Rows that did not parse — counted, never skipped.
     pub malformed: u64,
-    /// Version-2 preamble rows (RFC 13 §4.1; #218): state at capture
+    /// Version-2 preamble rows (tooling guide §5; #218): state at capture
     /// start, fed to the fold first and counted apart from observed rows.
     /// A pane replay has no session, so seeding its own fold from them is
-    /// exactly right — nothing is republished (§4.3's two replays).
+    /// exactly right — nothing is republished (tooling guide §5's two replays).
     pub preamble_rows: u64,
     /// Version-2 trigger records, at their capture-clock position (the
     /// `t` of the last observed row before each): what fired, so the
@@ -244,7 +244,7 @@ pub struct ReplayState {
     /// fed as `ingest_at`'s wall axis (`wall_epoch + t`). Injecting both
     /// clocks is what keeps a rebuild deterministic through the latency
     /// fold too: reading the live wall clock mid-scrub would subtract a
-    /// different "now" from each rebuild's HLCs (RFC 09 §5.2's two-clocks
+    /// different "now" from each rebuild's HLCs (tooling guide §5's two-clocks
     /// rule, applied to the second clock).
     wall_epoch: std::time::SystemTime,
     /// This replay's id ([`NEXT_REPLAY`]): what its verdict batches carry.

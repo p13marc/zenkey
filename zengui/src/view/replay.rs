@@ -5,7 +5,7 @@
 //! Mode honesty is the whole design: while a `.zrec` feeds the panes, the
 //! banner names the file, its selectors, its base, when it was captured
 //! and what the capture dropped (a replay is a partial view and says so —
-//! RFC 09 §5.1 O6), and the live link is off. A retained window owes a
+//! tooling guide O6), and the live link is off. A retained window owes a
 //! different set of statements (#217): the budget in force, that the
 //! window covers only **watched** keys — a retained window over three
 //! watches presented as "the bus" is an O5 failure with a nicer UI — and
@@ -14,7 +14,7 @@
 //! The scrubber's axis is the **capture clock** (each row's `t`, the
 //! recording observer's arrival offsets) and the label says so, because a
 //! consumer plotting a time axis states which clock it plotted
-//! (RFC 09 §5.2).
+//! (tooling guide §5).
 
 use iced::widget::{row, text};
 use iced::{Element, Length};
@@ -161,7 +161,7 @@ pub fn retained_meta(taken: &RetentionStats, rows: usize, span_secs: f64) -> Str
     )
 }
 
-/// The retention bound's own cost, as its own number (RFC 09 §5.1 O6;
+/// The retention bound's own cost, as its own number (tooling guide O6;
 /// v1.18 R1): shown when the **byte** budget bit, and never folded into
 /// the stats-table eviction count or into `Dropped(n)`. `None` while the
 /// window still holds everything its age claim promises.
@@ -176,7 +176,7 @@ pub fn retained_evicted_note(taken: &RetentionStats) -> Option<String> {
 }
 
 /// What the banner says about a version-2 capture's preamble (#218;
-/// RFC 13 §4.1): the rows that seed the fold, counted apart from observed
+/// tooling guide §5): the rows that seed the fold, counted apart from observed
 /// rows, and — when the file states a pre-roll — that it covers only the
 /// watched selectors and how much of the asked-for window the ring could
 /// give (O5/O6). `None` on a version-1 file, which has neither.
@@ -430,7 +430,7 @@ pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
 
 /// What the replay tab says while a `.zrec` parses (#255). A pinned string,
 /// like [`retained_meta`], because it is an honesty statement: a load in
-/// flight is not an empty capture and not a hung window (RFC 09 §5.1 O4 —
+/// flight is not an empty capture and not a hung window (observer §1 —
 /// "loading" is a state the UI must say, not leave to be inferred from
 /// blankness).
 pub fn loading_note(path: &str) -> String {
@@ -482,7 +482,7 @@ pub fn snapshot_open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
 }
 
 /// What the Replay tab says about a loaded snapshot (#219; `.zsnap` v2
-/// since #614, FL8b): its moment **and its span** — RFC 13 §4.4's one
+/// since #614, FL8b): its moment **and its span** — tooling guide §5's one
 /// non-negotiable — what it holds, and whether a presence read stood behind
 /// its holders and stamps.
 pub fn snapshot_label(s: &zenkey_fleet::Snapshot) -> String {
@@ -548,7 +548,7 @@ mod tests {
         assert!(meta.contains("not the bus"), "{meta}");
     }
 
-    /// Retention eviction is its own number (RFC 09 §5.1 O6; v1.18 R1):
+    /// Retention eviction is its own number (tooling guide O6; v1.18 R1):
     /// silent while the bound has not bitten, and named as *this* bound's
     /// cost when it has — never a shared figure with the stats table or
     /// the broadcast.

@@ -2,12 +2,12 @@
 //!
 //! Bounded by **both** item count and total preview bytes. An item cap alone is
 //! not a memory bound — a foreign publisher putting megabyte payloads on plain
-//! chunks is exactly the traffic the key-agnostic core invites in, and RFC 03
-//! §4 D2 does not protect against it (that rule only keeps `@`-planes out).
+//! chunks is exactly the traffic the key-agnostic core invites in, and core
+//! §1.3's guard does not protect against it (that rule only keeps `@`-planes out).
 //!
 //! Everything dropped is counted. Between `evicted` here and `lagged` from the
-//! monitor's bounded broadcast, no sample ever disappears silently — RFC 05
-//! §3.1's "silence is never a verdict" applied to a scrollback.
+//! monitor's bounded broadcast, no sample ever disappears silently — observer
+//! §2's "silence is never a verdict" applied to a scrollback.
 
 use std::collections::VecDeque;
 
@@ -27,7 +27,7 @@ use zenkey_fleet::SampleView;
 /// runs per sample or per frame, and two different limits would be two
 /// different answers to one question. Past it the size is reported
 /// and the decode is skipped — which is stated, never silently empty
-/// (RFC 13 §3 O6).
+/// (tooling guide O6).
 pub const DECODE_LIMIT: usize = zenkey_fleet::OBSERVE_LIMIT;
 
 /// Maximum characters retained per preview.
@@ -58,11 +58,12 @@ pub struct EchoLine {
     pub preview: String,
     /// True payload size, regardless of how much of it the preview shows.
     pub len: usize,
-    /// The sample's declared encoding, verbatim (RFC 08 §7: sample > registry
-    /// > sniff, so this is the highest-precedence signal).
+    /// The sample's declared encoding, verbatim (observer §7.3: the sample's
+    /// encoding, then the contract's type, then sniffing, so this is the
+    /// highest-precedence signal).
     pub encoding: String,
     /// A `Delete` is a tombstone — authoritative retirement, never a payload
-    /// marker (RFC 04 §1.2). It must be visibly distinct from an empty put.
+    /// marker (core §4.2). It must be visibly distinct from an empty put.
     pub is_delete: bool,
     /// Publisher HLC timestamp, when the publisher's session stamps one.
     pub timestamp: Option<String>,
@@ -195,7 +196,7 @@ impl EchoRing {
     /// old bound's cost: `evicted`, `lagged` and `coalesced` are untouched,
     /// because a raised bound does not un-lose what was already lost.
     /// Shrinking trims immediately, and what it trims is counted like any
-    /// other eviction (RFC 09 §5.1 O6).
+    /// other eviction (tooling guide O6).
     pub fn resize(&mut self, max_lines: usize) {
         self.max_lines = max_lines.max(1);
         self.max_bytes = self.max_lines.saturating_mul(2048);

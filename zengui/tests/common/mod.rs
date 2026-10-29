@@ -168,7 +168,7 @@ pub fn sample_attached(
     v
 }
 
-/// A tombstone (RFC 04 §1.2) — retirement, not an empty put.
+/// A tombstone (core §4.2) — retirement, not an empty put.
 pub fn tombstone(key: &str, at: Instant) -> Arc<SampleView> {
     view(
         key,
@@ -1556,8 +1556,8 @@ impl World {
                 .record(key, stray.payload.len(), None, at, None, None);
             samples.push(stray);
         }
-        // Every 12th tick the health leaf retires and comes back (RFC 04
-        // §1.2): the tree, the echo and the history all have a tombstone to
+        // Every 12th tick the health leaf retires and comes back (core
+        // §4.2): the tree, the echo and the history all have a tombstone to
         // draw.
         if n % 12 == 11 {
             samples.push(tombstone(HEALTH, at));

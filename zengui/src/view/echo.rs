@@ -10,7 +10,7 @@
 //! The honesty rule that shapes all of it: **pausing does not stop the bus.**
 //! A frozen view over a ring that keeps filling is a lie unless the gap is
 //! reported, so [`EchoView::paused_gap`] exists and the strip renders it —
-//! RFC 09 §5.1 O6, applied to a scrollback the user deliberately stopped.
+//! tooling guide O6, applied to a scrollback the user deliberately stopped.
 
 use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
@@ -213,7 +213,7 @@ pub fn visible<'a>(
 /// This doc used to claim the shared fields were "byte-for-byte the CLI's".
 /// They were not: the row spelled a payload byte *count* as `bytes`, which
 /// [`zenkey_fleet::parse_row`] reads as base64 of the wire payload
-/// (RFC 09 §5.2) and rejects as malformed. Sharing the writer is what makes
+/// (tooling guide §5) and rejects as malformed. Sharing the writer is what makes
 /// the claim true rather than restating it.
 ///
 /// `identity` is the key as `lens` resolves it — the deployment's lens live,
@@ -238,7 +238,7 @@ pub fn ndjson_line(line: &EchoLine, lens: &zenkey_fleet::Lens<'_>) -> String {
     row.timestamp = line.timestamp.clone();
     row.delete = line.is_delete;
     // The payload *size*, under the key that means a size. `bytes` is the
-    // base64 wire payload in this dialect and has been since RFC 09 §5.2 —
+    // base64 wire payload in this dialect and has been since tooling guide §5 —
     // writing a count there made the export unreadable by the only reader
     // it has, rather than merely lossy (#235).
     row.payload_bytes = Some(line.len);
@@ -392,7 +392,7 @@ pub fn section<'a>(
             "No matching samples",
             if ring.is_empty() {
                 "Nothing has arrived on the current scope yet. That is not a \
-                 statement about the bus (RFC 05 §3.1)."
+                 statement about the bus (observer §2)."
             } else {
                 "The ring holds samples, but none match the current filter."
             },
@@ -538,7 +538,7 @@ fn loss_strip<'a>(ring: &EchoRing) -> Element<'a, Message> {
 }
 
 /// The verdict cache's own account (#164): what has been checked, and what
-/// the bound cost (RFC 09 §5.1 O6). Always rendered — the rows below carry
+/// the bound cost (tooling guide O6). Always rendered — the rows below carry
 /// per-key badges, so the strip that scopes them must be present.
 fn verdict_strip<'a>(verdicts: &crate::verdict::VerdictCache) -> Element<'a, Message> {
     let mut msg = format!(
@@ -565,7 +565,7 @@ fn line_view<'a>(
     // The #164 badge: the cached verdict for this line's key — of the most
     // recently checked sample, which the strip above says. A key never
     // checked renders the third state in words, not a blank that could read
-    // as "fine" (RFC 09 §5.1 O4).
+    // as "fine" (observer §1).
     let badge = match verdict {
         Some(entry) => kit::badge_verdict(
             crate::verdict::tone(&entry.verdict),
@@ -588,7 +588,7 @@ fn line_view<'a>(
         .spacing(sp.xs)
         .align_y(iced::Alignment::Center);
     // The sample's declared encoding — the highest-precedence signal there
-    // is (RFC 08 §7) — and its true size, as data chips.
+    // is (observer §7.3) — and its true size, as data chips.
     if !line.encoding.is_empty() {
         head = head.push(kit::data_chip(line.encoding.as_str()));
     }
@@ -597,7 +597,7 @@ fn line_view<'a>(
         .push(badge);
 
     // A tombstone is authoritative retirement, not an empty value
-    // (RFC 04 §1.2) — so it must not look like a put with no payload: the
+    // (core §4.2) — so it must not look like a put with no payload: the
     // retired edge, a DELETE chip, and the `<delete>` preview beside it.
     let (edge, second): (kit::Edge, Element<'a, Message>) = if line.is_delete {
         (
@@ -682,7 +682,7 @@ mod tests {
         let mut view = EchoView::new();
         view.set_key_filter("v1/$*/state".into());
         let err = view.key_filter_error.clone().expect("must report");
-        assert!(err.contains("RFC 03 §2"), "{err}");
+        assert!(err.contains("tooling guide §8.2"), "{err}");
         // …and nothing is filtered out while it is invalid.
         assert!(view.admits(&line(0, "demo/anything", "{}"), None));
 
@@ -775,7 +775,7 @@ mod tests {
         assert!(!row.delete);
 
         // A tombstone reads back as a tombstone, not as an empty put
-        // (RFC 04 §1.2).
+        // (core §4.2).
         let mut dead = line(1, "demo/state/health", "");
         dead.is_delete = true;
         let exported = with_lens(|lens| ndjson_line(&dead, lens));
@@ -817,7 +817,7 @@ mod tests {
         assert_eq!(json["identity"]["is"], "not_in_namespace");
         // Absent, not null: v1's `origin` and `subject` left with the v1
         // grammar, and a missing key is absent — `json["origin"]` yields
-        // `Null` for that too, so only the object can tell (RFC 09 §5.1 O4).
+        // `Null` for that too, so only the object can tell (observer §1).
         for gone in ["origin", "subject"] {
             assert!(
                 !json.as_object().unwrap().contains_key(gone),

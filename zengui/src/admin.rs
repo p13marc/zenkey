@@ -12,7 +12,7 @@
 //!
 //! **S4 inverts v1's table** (D14). v1 joined declared state families to the
 //! storages that would seed them and read "covered" as good: the `latest`
-//! storage was RFC 09 §2's late-joiner seed. zk2's owner is authoritative
+//! storage was v1's late-joiner seed. zk2's owner is authoritative
 //! for its state (core §4.2 S4): a late joiner seeds from the owner, and
 //! last-known state is an `archive.v1`'s (§4.4) — so a router storage on an
 //! owner's state keys is the finding, and each storage is judged against

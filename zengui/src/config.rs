@@ -48,7 +48,7 @@ pub struct Cli {
     /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
     ///
     /// The session is a zenoh client of these endpoints — no listener, no
-    /// gossip (RFC 09 §5) — so one nothing answers is a link error, not an
+    /// gossip (tooling guide §8.1) — so one nothing answers is a link error, not an
     /// empty tree, and one that does not parse is refused by name.
     #[arg(long, short = 'c', value_name = "ENDPOINT")]
     pub connect: Vec<String>,
@@ -63,7 +63,7 @@ pub struct Cli {
     /// Off by default — with a --zenoh-config too, unless the file itself
     /// states `scouting.multicast.enabled` — and deliberately so: an explorer
     /// that multicast-scouts joins whatever mesh it can reach, which is how a
-    /// throwaway session ends up in a live fleet. Note RFC 09 §0.1 — this is
+    /// throwaway session ends up in a live fleet. Note tooling guide §8.1 — this is
     /// the *multicast* half only; gossip is a separate switch.
     #[arg(long)]
     pub scouting: bool,
@@ -151,7 +151,7 @@ pub struct Cli {
     ///
     /// Smaller than the echo ring on purpose: history keeps whole payloads so
     /// it can diff them, where echo keeps a one-line preview. Entries dropped
-    /// to respect this bound are counted and displayed (RFC 09 §5.1 O6).
+    /// to respect this bound are counted and displayed (tooling guide O6).
     #[arg(long)]
     pub history_entries: Option<usize>,
 
@@ -160,7 +160,7 @@ pub struct Cli {
     ///
     /// Least-recently-seen keys are retired past this, and the retirements are
     /// counted and displayed — a long-running observer is bounded, and says so
-    /// (RFC 09 §5.1 O6). Raise it on a bus with a very wide key population.
+    /// (tooling guide O6). Raise it on a bus with a very wide key population.
     #[arg(long)]
     pub max_keys: Option<usize>,
 }
@@ -400,7 +400,7 @@ pub fn contracts(typed: Vec<PathBuf>, remembered: &[PathBuf]) -> anyhow::Result<
 ///
 /// The empty namespace is a real, named deployment — the default one — not
 /// an unset field: an explorer that cannot see and name it is blind to the
-/// common case (RFC 09 §5). One function, shared by
+/// common case (core §1.6). One function, shared by
 /// [`Settings::namespace_label`] and [`NamespaceChoice`]'s `Display`, so the
 /// window title and the picker rows cannot drift into two spellings.
 pub fn namespace_label(namespace: &str) -> &str {
@@ -459,7 +459,7 @@ impl Settings {
     ///
     /// With no endpoints and no scouting, zenoh opens a session that reaches
     /// nothing. The window would then show an empty tree, which is
-    /// indistinguishable from a quiet bus — the false verdict of RFC 05 §3.1.
+    /// indistinguishable from a quiet bus — the false verdict of observer §2.
     /// The UI turns this into a banner rather than letting the user infer.
     pub fn is_unreachable(&self) -> bool {
         self.connect.is_empty()
@@ -639,7 +639,7 @@ mod tests {
     fn defaults_match_the_documented_ones() {
         let s = parse(&[]).unwrap();
         assert_eq!(s.timeout(), Duration::from_secs(5));
-        assert_eq!(s.scouting, None, "scouting is opt-in (RFC 09 §0.1)");
+        assert_eq!(s.scouting, None, "scouting is opt-in (tooling guide §8.1)");
         assert_eq!(s.scope, ScopePreset::Everything);
         assert!(!s.eager, "lazy is the default (issue #85)");
         assert!(
@@ -663,7 +663,7 @@ mod tests {
         assert!(parse(&["--history-entries", "0"]).is_err());
     }
 
-    /// The key table is bounded (RFC 09 §5.1 O6); a zero bound is rejected at
+    /// The key table is bounded (tooling guide O6); a zero bound is rejected at
     /// the boundary rather than silently clamped somewhere downstream.
     #[test]
     fn the_key_bound_is_configurable_and_must_be_positive() {

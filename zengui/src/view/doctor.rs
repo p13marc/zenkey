@@ -20,7 +20,7 @@ use crate::view::theme::{JudgementTone, SeverityTone};
 use crate::view::tokens::{Spacing, font};
 
 /// How many undecided subjects the list draws before it stops and says so
-/// (RFC 09 §5.1 O6): a deployment with a hundred silent descriptors would
+/// (tooling guide O6): a deployment with a hundred silent descriptors would
 /// otherwise push every finding below the fold.
 const UNJUDGED_ROWS: usize = 12;
 
@@ -122,7 +122,7 @@ pub fn section<'a>(
         return col.into();
     };
 
-    // The scope is what makes an empty findings list legible (RFC 05 §3.1:
+    // The scope is what makes an empty findings list legible (observer §2:
     // silence needs attribution).
     col = col.push(kit::muted(scope_line(report)));
     // The run as one judgement, under the floor `zenctl doctor` defaults to.

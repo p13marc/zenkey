@@ -153,7 +153,7 @@ pub fn badge_severity<'a, M: 'a>(
     glyph_badge(tone.glyph(), label, tone.tone())
 }
 
-/// A judgement badge (#614, FL9; RFC 13 §1.2) — theme-resolved like
+/// A judgement badge (#614, FL9; observer §1) — theme-resolved like
 /// [`tone_badge`], carrying the CLI's own mark via the tone so the two
 /// explorers read alike: a doctor check's verdict, an S4 storage row. Mark
 /// **and** text, never colour alone.

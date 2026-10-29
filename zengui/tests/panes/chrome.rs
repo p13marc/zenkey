@@ -58,7 +58,7 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
 }
 
 /// The connection pane (#67) explains scouting rather than labelling it, and
-/// carries RFC 09 §0.1's actual semantics: two independent switches, and the
+/// carries tooling guide §8.1's actual semantics: two independent switches, and the
 /// reading of an empty result under an isolated session.
 #[test]
 fn the_connect_pane_states_what_scouting_means() {
@@ -72,13 +72,13 @@ fn the_connect_pane_states_what_scouting_means() {
     let mut ui = simulator::<Message, _, _>(pane(&form, false));
     assert!(
         ui.find(
-            "RFC 09 §0.1: multicast scouting and gossip are independent. This toggle is \
+            "Multicast scouting and gossip are independent (tooling guide §8.1). This toggle is \
              the multicast half only. The session is a client of its endpoints — no \
              listener, no gossip — unless it listens, and a listening peer still \
              learns about others through gossip over an established link."
         )
         .is_ok(),
-        "the two-switch distinction must be on screen, not just in the RFC"
+        "the two-switch distinction must be on screen, not just in the guide"
     );
     assert!(
         ui.find(
@@ -442,7 +442,7 @@ fn the_selector_editor_shows_the_resolved_truth_and_its_blind_spots() {
 }
 
 /// In custom mode the editor validates per keystroke: an invalid row shows
-/// the validator's own words (`$*` names RFC 03 §2), a valid row shows its
+/// the validator's own words (`$*` names tooling guide §8.2), a valid row shows its
 /// blind spot, and the apply row is offered.
 #[test]
 fn the_selector_editor_validates_each_row_as_typed() {
@@ -471,7 +471,7 @@ fn the_selector_editor_validates_each_row_as_typed() {
         .is_ok()
     );
     // …and the invalid row carries the validator's verdict, verbatim —
-    // which is where RFC 03 §2 reaches the screen.
+    // which is where the tooling guide's §8.2 reaches the screen.
     let err = zengui::scope::validate_selector("demo/$*/x").unwrap_err();
     assert!(
         // Its own words, no leading spaces since #559: the row's error is a
