@@ -1,7 +1,7 @@
 # Changelog
 
 Releases of the workspace as a whole. The convention's own amendment ledger
-is [`rfcs/CHANGELOG.md`](rfcs/CHANGELOG.md); `zenctl`'s command-tree cut has
+is [`rfcs/CHANGELOG.md`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs/CHANGELOG.md) on the `v1` branch; `zenctl`'s command-tree cut has
 its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
@@ -183,7 +183,7 @@ or an exit 2, never in a silent write or a green exit.* Six chunks — **DP**
 so every later fix landed with its regression), **DQ** (the session
 posture), **DR** (write guards), **DS** (exit honesty), **DT** (the
 operator surface) — and two RFC amendments, **v1.47** and **v1.48**
-([rfcs/CHANGELOG.md](rfcs/CHANGELOG.md)). Every changed behaviour a script
+([rfcs/CHANGELOG.md](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs/CHANGELOG.md), on the `v1` branch). Every changed behaviour a script
 can see is in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md)'s old → new
 tables. #518 (two RFC 05 §5.1 wire questions the config test double
 found) stays open past this release.

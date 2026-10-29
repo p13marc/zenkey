@@ -18,7 +18,7 @@
 #   cpu/{core}/frequency               -> cpu/cores/{core}/frequency
 # In v1, `cpu/times/usage` matched both cpu/{core}/usage and cpu/times/{component}, and
 # `cpu/times/user` matched {cpu}/times/{component} too. v1 resolved them by most-literal-first
-# precedence (rfcs/08-registry.md:33); draft 0 has no precedence rule, so the overlaps have to go.
+# precedence (https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs/08-registry.md#L33); draft 0 has no precedence rule, so the overlaps have to go.
 # QoS: zk2 stream defaults (best_effort, drop, data). v1's `sampled` profile was data_low; restating
 # it on 136 resources is what interface-level defaults would avoid (Gap G11). No `history`: RFC 11 §1's
 # target posture for telemetry is the baseline tier.

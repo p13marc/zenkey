@@ -316,7 +316,7 @@ Each gap: what it is · the evidence · the proposed correction.
 
 1. **G1. Template overlap has no rule.** Draft 0 makes template *strings*
    unique, but says nothing when two templates match one concrete key.
-   - *Evidence:* v1 has 187 same-class overlapping pairs. sysinfo has 56 (`sysinfo.toml:171/189/204`, `cpu/times/user` matches three templates). snmp has 129 (`snmp.toml:15`, the catch-all against every typed column). netring has 1 (`netring.toml:124` vs `:236`) and container 1. v1 resolves them by most-literal-first precedence (`rfcs/08-registry.md:33`). Here, four sysinfo templates and the netring per-source family were renamed to get a clean check.
+   - *Evidence:* v1 has 187 same-class overlapping pairs. sysinfo has 56 (`sysinfo.toml:171/189/204`, `cpu/times/user` matches three templates). snmp has 129 (`snmp.toml:15`, the catch-all against every typed column). netring has 1 (`netring.toml:124` vs `:236`) and container 1. v1 resolves them by most-literal-first precedence ([`rfcs/08-registry.md:33`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs/08-registry.md#L33), `v1` branch). Here, four sysinfo templates and the netring per-source family were renamed to get a clean check.
    - *Correction:* adopt v1's precedence (literal beats `{x}` beats `{x...}`, position by position) in draft 0 and the model's parser, and lint overlapping templates whose types differ. Or forbid overlap outright; ZenSight can live with either.
 2. **G2. Cardinality is one number per contract, but bounds belong to implementations.**
    - *Evidence:* alarms run 32 (correlator) to 256 (bmc); `evidence/device` runs 64 (snmp) to 4096 (logs, netring). Device services re-base every v1 poller-wide bound (`zs.snmp.v1` keeps v1's).

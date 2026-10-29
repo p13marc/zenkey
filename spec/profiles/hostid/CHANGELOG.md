@@ -4,6 +4,12 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## After 0.7 — 2026-10-29: a link moved, no rule changed (#925)
+
+v1's RFC set left `main` for the `v1` branch, and Appendix B's row for
+RFC 06's vector links its copy there. No rule changed, and the text keeps
+its version.
+
 ## 0.7 — 2026-10-25: the finding's reads hold the interface tokens (#841, RB)
 
 The second implementation read 0.6 cold (zk2py round 56, PR #855), and

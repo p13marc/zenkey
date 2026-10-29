@@ -1,17 +1,18 @@
 # The prose lane (#420). `ci.yml` ignores '**.md' and 'docs/**' on purpose —
-# a prose change must not rebuild the workspace — but the one gate written
-# for RFC amendments reads nothing *but* markdown, so under that filter it
-# ran on every push except the ones it exists for. PR #419 (five files, all
-# under rfcs/) merged with zero CI statuses. This workflow is the inverse
-# trigger: it runs when and only when prose changes, and it runs the gates
-# whose inputs are prose. The expensive jobs stay where they are.
+# a prose change must not rebuild the workspace — but a gate whose inputs
+# are markdown would then run on every push except the ones it exists for:
+# PR #419 (five files, all under v1's rfcs/) merged with zero CI statuses.
+# This workflow is the inverse trigger: it runs when and only when prose
+# changes, and it runs the gates whose inputs are prose. The expensive jobs
+# stay where they are. v1's RFC set and its status gate left main with #925;
+# the `v1` branch keeps both, and this file's copy there.
 name: Docs
 on:
   push:
     branches: [main, v1]
-    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh', 'scripts/check-spec-status.sh']
+    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh']
   pull_request:
-    paths: ['**.md', 'docs/**', 'rfcs/**', 'scripts/check-rfc-status.sh', 'scripts/check-spec-status.sh']
+    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh']
   workflow_dispatch:
 
 concurrency:
@@ -19,14 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  rfc-status:
+  spec-status:
     runs-on: ubuntu-24.04
     steps:
       - uses: https://data.forgejo.org/actions/checkout@v7.0.1
-      # RFC chapter headers agree with rfcs/CHANGELOG.md's Amends ledger
-      # (v1.25 S6), and the three places that state the set's version
-      # (00-index.md, CLAUDE.md, README.md) name the newest entry.
-      - run: ./scripts/check-rfc-status.sh
       # The zk2 spec's version and inventory, stated once (#922): core.md's
       # header names spec/CHANGELOG.md's newest amendment, observer.md's
       # header spec/observer-CHANGELOG.md's newest text (#925), README.md and

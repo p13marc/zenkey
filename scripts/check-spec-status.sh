@@ -32,7 +32,8 @@
 #     zenkey-model/tests/profiles.rs's to check, since they read the
 #     contracts.
 #
-# Same shape as check-rfc-status.sh, which keeps v1's RFC headers.
+# Same shape as v1's check-rfc-status.sh, which keeps v1's RFC headers on
+# the `v1` branch (#925 took both off main).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

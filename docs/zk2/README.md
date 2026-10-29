@@ -3,7 +3,7 @@
 zk2 is the next zenkey: a small, typed, introspectable **interface-contract
 and reflection layer over Zenoh**. It serves control, perception, mission,
 payloads, hardware abstraction, simulation and ground segments, and also
-supervision. v1 (the RFC set in `rfcs/`, frozen at v1.50) is the keyspace of
+supervision. v1 (the RFC set in the `v1` branch's [`rfcs/`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs), frozen at v1.50) is the keyspace of
 a fleet-observability product; zk2 keeps v1's hard-won lessons and drops its
 observability shape.
 

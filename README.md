@@ -152,8 +152,8 @@ as 0.14.x patch releases. crates.io's `zenkey` and `zenkey-build` 0.11.x
 and `zenkey-fleet` 0.18.x are v1's, and existing adopters
 ([ZenSight](https://github.com/p13marc/zensight), whose reference profile
 is the RFCs' chapter 11, and [tcgui](https://github.com/p13marc/tcgui))
-stay on them until they port. Its RFC set is still in [`rfcs/`](rfcs/00-index.md)
-on `main`, with its amendment ledger; #925 takes it off. The v1 adoption
+stay on them until they port. Its frozen RFC set, with its amendment ledger,
+is in the `v1` branch's [`rfcs/`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/rfcs) (#925 took it off `main`). The v1 adoption
 path (`AppProfile`, a `registry/` and v1's `zenkey-build`) is in its
 [crate README](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/v1/zenkey/README.md).
 This repository graduated from the ZenSight monorepo in 2026-07, with its
