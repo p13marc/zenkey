@@ -2409,7 +2409,7 @@ const OPEN_ROUNDS: usize = 10;
 /// [`presence::Barrier::moved_since`] does, and its round trip stands only
 /// after the reopen has told every token, asked no sooner than
 /// [`presence::OPEN_MARGIN`] after the open. Then a move within the margin:
-/// the round trip waiting it out ends unasked, standing not.
+/// the round trip waiting it out ends unasked, and does not stand.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_barrier_round_trip_after_an_open_follows_the_reopen() {
     use std::time::{Duration, Instant};
