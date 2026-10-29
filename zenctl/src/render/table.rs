@@ -12,7 +12,7 @@
 //!
 //! **`—` is not the empty string.** `Cell::Unknown` renders `—` and means the
 //! question was never put to the bus; an empty [`Cell::Text`] means it was
-//! asked and the answer was nothing (RFC 09 §5.1 O4). They are different
+//! asked and the answer was nothing (observer §1). They are different
 //! variants rather than different strings, so the distinction survives a
 //! refactor that a convention would not. There is deliberately no
 //! `From<&str>` and no `From<Option<T>>`: [`Cell::asked`] is the only bridge
@@ -55,7 +55,7 @@ const GAP: &str = "  ";
 
 /// One cell.
 ///
-/// See the module doc: the `Unknown`/`Empty` split is the RFC 09 §5.1 O4
+/// See the module doc: the `Unknown`/`Empty` split is the observer §1
 /// distinction expressed as a type rather than as a spelling convention.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cell {

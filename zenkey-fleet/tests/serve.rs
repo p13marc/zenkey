@@ -53,7 +53,7 @@ async fn a_responder_answers_and_logs_the_ask() {
     assert_eq!(v.to_bytes().as_ref(), br#"{"mock":true}"#);
     assert_eq!(
         answers[0].key, KEY,
-        "replied on the responder's own concrete key (RFC 05 §2.1)"
+        "replied on the responder's own concrete key (core §5.1 O3)"
     );
     assert_eq!(answers[0].encoding.as_deref(), Some("application/json"));
 
@@ -77,7 +77,7 @@ async fn a_responder_answers_and_logs_the_ask() {
 /// responder gets its reply on the responder's own concrete key — before
 /// the fix, the mock echoed `query.key_expr()` and the reply key was the
 /// caller's wildcard selector, which default consolidation would collapse
-/// across a mocked fleet (RFC 05 §2.1).
+/// across a mocked fleet (core §5.1, "Attribution").
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
     let (a, b) = peer_pair().await;
@@ -113,7 +113,7 @@ async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
     assert_eq!(
         answers[0].key, KEY,
         "the reply rides the responder's concrete key, not the echoed \
-         wildcard selector (RFC 05 §2.1, G-05b)"
+         wildcard selector (core §5.1 O3, G-05b)"
     );
     let view = log.await.expect("join");
     assert!(view.selector.contains("v1/*"), "{}", view.selector);
@@ -125,8 +125,8 @@ async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
 /// The old `next()` had an await at each end — `recv_async` took the query,
 /// `reply` sent it — and a caller dropped in between consumed a query that was
 /// then never answered and never logged: silence the asker cannot attribute
-/// (RFC 05 §3.1) and an ask the responder's own log never records
-/// (RFC 13 §3 O6). Today `ctrl_c` is the only thing racing that loop, which is
+/// (observer §2) and an ask the responder's own log never records
+/// (tooling guide O6). Today `ctrl_c` is the only thing racing that loop, which is
 /// benign; the moment a `--for` deadline joins it, this is the shape that
 /// stays honest.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

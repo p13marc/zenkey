@@ -154,7 +154,7 @@ impl Render for RecordReport {
                     "the pre-roll covers only the watched selectors — the retained window is \
                      fed by the watch set, not the bus",
                 )
-                .cite("RFC 09 §5.1 O5"),
+                .cite("observer §8.2"),
             );
         }
         if self.pre_roll.is_none() && self.trigger.is_none() && self.out.is_none() {
@@ -163,7 +163,7 @@ impl Render for RecordReport {
                     "no rule fired within the wait — a rule not firing is not a finding, and \
                      silence is not a verdict",
                 )
-                .cite("RFC 05 §3.1"),
+                .cite("observer §2"),
             );
         }
         notes
@@ -205,7 +205,7 @@ impl Render for ReplayReport {
             }
             t.grid(g);
         }
-        // The version-2 kinds, counted apart (RFC 13 §4.1): what the replay
+        // The version-2 kinds, counted apart (tooling guide §5): what the replay
         // did not publish and why, what it seeded, and what merely fired.
         if self.preamble_skipped > 0 {
             t.line(format!(
@@ -229,7 +229,7 @@ impl Render for ReplayReport {
     }
 
     fn bounds(&self) -> Vec<BoundCost> {
-        // Migrated from a hand-written note (which cited RFC 09 §5.2); the
+        // Migrated from a hand-written note (which cited v1's capture etiquette); the
         // auto-appended bound note carries the standard O6 citation.
         vec![BoundCost::new(
             BoundKind::Missed,
@@ -257,7 +257,7 @@ impl Render for ReplayReport {
                      re-stamped, would overwrite live state; --seed-state to mean it",
                     self.preamble_skipped
                 ))
-                .cite("RFC 13 §4.2"),
+                .cite("tooling guide §5"),
             );
         }
         notes
@@ -366,7 +366,7 @@ impl Render for ExpectReport {
                     "the observation cannot carry the claim — this is not a verdict \
                      either way",
                 )
-                .cite("RFC 09 §5.1 O6"),
+                .cite("tooling guide O6"),
             );
         }
         notes

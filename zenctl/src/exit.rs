@@ -15,7 +15,7 @@
 //!   question that *was* asked is an answer.
 //! * **1 — asked, and the answer is a finding.** The assertion did not hold;
 //!   the retired family still speaks; the payload does not conform; a reply
-//!   was an error envelope (RFC 05 §3); rows were refused or malformed;
+//!   was an error envelope (core §5.2); rows were refused or malformed;
 //!   `--fail-on` tripped; an act failed. **`why` exits 1 when it finds a
 //!   cause** — a cause *is* the finding, and the healthy fleet is the clean
 //!   run.
@@ -29,7 +29,7 @@
 //!   asked ([`NoSession`], #503); a presence read the engine would not make
 //!   — beside a liveliness subscriber (#830), or through a session cut off
 //!   from every other zenoh node (core §8.1, 0.37); silence under a
-//!   fan-out; an observation too impaired to carry the claim (RFC 13 §1, the
+//!   fan-out; an observation too impaired to carry the claim (observer §1, the
 //!   O4/O6 rules); and, on the verdict verbs, *any* failure before the
 //!   question was put.
 //!
@@ -51,8 +51,9 @@
 //!    pre-run failure of theirs — resolution, session, registry, the
 //!    observation itself — lands on the reserved 2 instead.
 //! 3. [`verdict`] — the engine's own projection,
-//!    [`zenkey_fleet::judgement_exit_code`] over the RFC 13 §1.2 [`Judgement`]
-//!    shape. A verb that has a verdict does **not** hand-roll a `match`: it
+//!    [`zenkey_fleet::judgement_exit_code`] over the [`Judgement`]
+//!    shape (observer §1; the tooling guide's exit codes, §1). A verb
+//!    that has a verdict does **not** hand-roll a `match`: it
 //!    maps to `Judgement` engine-side (every vocabulary carries a
 //!    `to_judgement()`) and exits through this function. `why`'s polarity flip
 //!    falls out of that mapping rather than being spelled again here.
@@ -81,9 +82,9 @@ pub const NO_VERDICT: i32 = 2;
 /// Clap already exits 2 for every mis-shaped command line, which fixes the
 /// meaning of 2 for user input whether the rest of the tool agrees or not. The
 /// refusals clap cannot express — a context name that is not in the config
-/// file, a QoS profile outside RFC 04 §3's five, a class outside RFC 04 §1's
-/// three, a `--fault` kind outside `gen`'s vocabulary, a `$*` selector RFC 03
-/// §2 forbids, a window given as zero seconds — are the same kind of mistake
+/// file, a QoS profile outside v1's five, a class outside v1's three, a
+/// `--fault` kind outside `gen`'s vocabulary, a `$*` selector (tooling guide
+/// §8.2), a window given as zero seconds — are the same kind of mistake
 /// and now exit the same way.
 ///
 /// It is an ordinary `std::error::Error`, so it rides an `anyhow` chain
@@ -277,7 +278,7 @@ where
 
 /// Exit on a verdict, through the engine's own projection (seam 3).
 ///
-/// [`zenkey_fleet::judgement_exit_code`] is the RFC 13 §1.2 mapping and the
+/// [`zenkey_fleet::judgement_exit_code`] is the tooling guide's §1 mapping and the
 /// only place 0/1/2 is spelled against the [`Judgement`] shape. A verb hands
 /// it the judgement its report already carries; the surface vocabularies —
 /// `ExpectVerdict`, `CutoverVerdict`, `WhyVerdict`, `CondState` — each do

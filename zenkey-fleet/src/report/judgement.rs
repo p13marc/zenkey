@@ -1,4 +1,4 @@
-//! The judgement core (RFC 13, v1.24) — one shape under every verdict.
+//! The judgement core (observer §1) — one shape under every verdict.
 //!
 //! Every tool verdict in this workspace is a surface naming of one four-pole
 //! shape:
@@ -6,9 +6,10 @@
 //! > `Established(yes) | Established(no) | Unestablished(NotAsked) |
 //! > Unestablished(Unobservable{reason})`
 //!
-//! RFC 13 (v1.24) is the normative chapter for this shape; before v1.24 the
-//! material lived in RFC 09 §5.1 (the O1–O7 observation rules), and the O#
-//! citations across this crate still point there for the individual rules.
+//! `spec/observer.md` §1 is the normative text for this shape. The O#
+//! citations across this crate are the tooling guide's observer
+//! obligations (its §3), v1's numbers kept; O1, O4, O5 and O7 are
+//! observer §8.1, §1, §8.2 and §8.3.
 //! The poles:
 //!
 //! * [`Judgement::Established`] — Established(yes): the question was put and
@@ -46,7 +47,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 /// One question's judgement — the four-pole core every tool verdict maps
-/// onto (RFC 13, v1.24; RFC 09 §5.1 pre-v1.24). See the module doc.
+/// onto (observer §1). See the module doc.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum Judgement {
@@ -58,11 +59,11 @@ pub enum Judgement {
     NotEstablished { reason: String },
     /// Unestablished: the question was not put — the input was not fetched,
     /// was not requested, or does not exist for this subject. Not asked is
-    /// not answered no (RFC 09 §5.1 O4).
+    /// not answered no (observer §1).
     NotAsked,
     /// Unestablished: the question was put and the observation cannot carry
     /// the claim — a drop under a completeness claim, a window shorter than
-    /// the claim's span, or an ask that failed (RFC 09 §5.1 O6).
+    /// the claim's span, or an ask that failed (tooling guide O6).
     Unobservable { reason: String },
 }
 
@@ -89,7 +90,7 @@ impl Judgement {
     }
 }
 
-/// The RFC 13 (v1.24) exit projection: `0` = established-clean, `1` =
+/// The exit projection (tooling guide §1): `0` = established-clean, `1` =
 /// established-finding, `2` = unestablished (not asked, or unobservable).
 ///
 /// The projection reads the core convention (module doc): the judged claim
@@ -133,7 +134,7 @@ mod tests {
         );
     }
 
-    /// The 0/1/2 projection (RFC 13 v1.24): established-clean /
+    /// The 0/1/2 projection (tooling guide §1): established-clean /
     /// established-finding / unestablished — and both unestablished poles
     /// share the exit, because neither is a verdict.
     #[test]

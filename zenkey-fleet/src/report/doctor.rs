@@ -1,7 +1,7 @@
 //! zk2's doctor (#612, FJ6): one verdict per check, in the judgement shape.
 //!
 //! Every check asks one question about the deployment and answers it on the
-//! RFC 13 core ([`Judgement`]), with the polarity the tooling guide asks
+//! judgement core ([`Judgement`], observer §1), with the polarity the tooling guide asks
 //! every vocabulary to document (`docs/zk2/tooling-guide.md` §1): each id
 //! is **named for a condition firing**, so its finding is the *yes* —
 //! `Established` — and a clean check is `NotEstablished`, with the evidence

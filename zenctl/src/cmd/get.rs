@@ -7,7 +7,7 @@
 //! namespace, through the runtime's consumer ([`state`]).
 //!
 //! A plain fan-in GET: target `All`, consolidation `None`, every reply
-//! attributed by its own key (RFC 05 §2.1), error envelopes rendered as
+//! attributed by its own key (core §5.1), error envelopes rendered as
 //! errors — through `zenkey_fleet::fleet_get`, never the JSON-lossy admin
 //! browse. Each reply is resolved through the same lens `echo` reads a
 //! sample through (#612, FJ9): the deployment in `--namespace`, its
@@ -65,7 +65,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     // Clap requires it whenever `state` is not given.
     let selector = selector.ok_or_else(|| crate::exit::unaskable!("a selector is required"))?;
     let namespace = dep.namespace().to_owned();
-    // The raw seam (`$*` never reaches the session, RFC 03 §2), and the
+    // The raw seam (`$*` never reaches the session, tooling guide §8.2), and the
     // one-line hint for a base-relative `zk2/…` typed under a namespace.
     let selector = zk2::wire_selector(Some(&selector), &namespace)?;
     let payload = body.as_ref().map(crate::input::Source::read).transpose()?;
@@ -87,7 +87,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     let session = dep.link().session().await?;
     // Named, because the reply bound's *cost* rides on the options that state
     // it (#339): a GET that read only some of the replies must say so, or the
-    // rendering claims a fan-in it did not have (RFC 13 §3 O6).
+    // rendering claims a fan-in it did not have (tooling guide O6).
     let opts = zenkey_fleet::GetOpts::new(dep.timeout()).payload(payload);
     let answers = zenkey_fleet::fleet_get(&session, &selector, &opts).await?;
     let elided = opts.elided();
@@ -132,7 +132,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         }
         match answers.len() {
             0 => println!(
-                "no replies within {secs}s. Silence is not a verdict (RFC 05 §3.1): \
+                "no replies within {secs}s. Silence is not a verdict (observer §2): \
                  nothing may hold the selector, its holders may be down, a router's \
                  access control may have refused it (core §11.2: at once, complete and \
                  empty), or the timeout too short — `zenctl admin graph` says who is \
@@ -140,7 +140,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
             ),
             len => eprintln!(
                 "{len} repl{} within {secs}s — an observation, not totality \
-                 (RFC 05 §2.1)",
+                 (core §5.1)",
                 if len == 1 { "y" } else { "ies" }
             ),
         }
@@ -152,7 +152,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         }
     }
     // Exit-code discipline shared with `call`: 1 = an error reply, 2 = zero
-    // replies (silence stays a distinct non-verdict — RFC 05 §3.1).
+    // replies (silence stays a distinct non-verdict — observer §2).
     let code = exit_code(&answers);
     if code != 0 {
         std::process::exit(code);

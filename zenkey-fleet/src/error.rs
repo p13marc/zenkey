@@ -9,7 +9,7 @@
 //!
 //! ## The classification is the point
 //!
-//! RFC 13 §1 draws the line this enum is built around: **a question that
+//! Observer §1 draws the line this enum is built around: **a question that
 //! could not be *put* is not the same as a question that was put and
 //! answered badly.** [`Error::Unaskable`] is the first; everything else is a
 //! failure of an attempt that was actually made.
@@ -71,7 +71,7 @@ pub enum Error {
     /// that is not a key expression, a name outside a closed vocabulary, a
     /// window of zero seconds, a hostname where an origin belongs.
     ///
-    /// This is the variant that carries RFC 13 §1's "the question could not
+    /// This is the variant that carries observer §1's "the question could not
     /// be asked", and the only one a caller fixes by changing what it passed.
     #[error("{what}: {detail}")]
     Unaskable {
@@ -193,7 +193,7 @@ impl std::fmt::Display for NotAsked {
 }
 
 impl Error {
-    /// The caller's input was refused and nothing was attempted — RFC 13
+    /// The caller's input was refused and nothing was attempted — observer
     /// §1's "the question could not be asked".
     ///
     /// `zenctl` maps this to its reserved exit 2. It is a method rather than

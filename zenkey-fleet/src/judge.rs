@@ -7,7 +7,7 @@
 //! rule's state, a path a type does not declare.
 //!
 //! Because a verdict is the only thing here worth having, the honesty rules
-//! (RFC 13, v1.24; RFC 09 §5.1 O1–O7 for the individual rules) bite hardest
+//! (observer §1, §2 and §8; the tooling guide's §3 for the rest) bite hardest
 //! in this layer. Three of them shape every module:
 //!
 //! * **Not asked is not answered no** (O4). A check that did not run reports
@@ -15,7 +15,7 @@
 //! * **An observation that cannot carry the claim is neither pass nor fail**
 //!   (O6) — a drop under a completeness claim, a window shorter than the
 //!   claim's span.
-//! * **Silence is never a verdict** (RFC 05 §2.1). A judge that heard
+//! * **Silence is never a verdict** (observer §2). A judge that heard
 //!   nothing says what it asked and what did not answer.
 //!
 //! [`crate::report::Judgement`] is where those three become a type: the

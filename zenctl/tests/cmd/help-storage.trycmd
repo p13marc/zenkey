@@ -6,7 +6,7 @@ families against the storages — left with the v1 registry (#612, FJ9).
 $ zenctl storage --help
 Storages: what the mesh persists, and the router config behind it.
 
-What the routers' admin space says the mesh persists — and the router block that makes it persist (RFC 09 §2).
+What the routers' admin space says the mesh persists — and the router block that makes it persist (tooling guide §8.4).
 
 Usage: zenctl storage <COMMAND>
 
@@ -92,7 +92,7 @@ $ zenctl storage gen --help
 Generate the router's storage config from the deployment
 
 Plan the router's storages, and emit the `plugins.storage_manager`
-block (RFC 09 §2, #393; zk2's since #704), from either or both of:
+block (tooling guide §8.4, #393; zk2's since #704), from either or both of:
 
   --enrollment   the enrollment `acl gen` reads, with --contracts: a
                  UNION STORAGE per event resource of every interface an
@@ -111,19 +111,19 @@ manager accepts a put older than a delete it holds, so it cannot be an
 archive's store (§4.4).
 
 Each storage's `strip_prefix` is derived as its selector's literal
-leftmost run, and a volume's capability pair comes from RFC 09 §2.1's
+leftmost run, and a volume's capability pair comes from tooling guide §8.4's
 table (per volume — one volume per history mode from the same plugin).
 A file's storage takes its lifespan from the file, or zenoh's 24 h
 default, and says which. With no [events] volume, the union storages
 use an implicit memory volume, and the plan says it is volatile.
 
 The plan refuses what the router would refuse — replication on an
-all-mode volume (§2.2), a volume nobody declared, a selector that is
-not a key expression — and warns where a caveat applies: overlapping
-selectors (§2), `complete = true` off a replicated latest-mode storage
-(§2.2), retention that is the database's and not zenoh's (§2.3) or a
-replay's and not the storage's (spec §2.6), redb's mandatory retention
-in all mode (§2.1).
+all-mode volume, a volume nobody declared, a selector that is not a
+key expression — and warns where a caveat applies: overlapping
+selectors, `complete = true` off a replicated latest-mode storage,
+retention that is the database's and not zenoh's or a replay's and
+not the storage's (spec §2.6), redb's mandatory retention in all mode.
+Each is the tooling guide's §8.4 but the replay's.
 
 Four ways out. The plan report (`--format` as everywhere); `--json5`,
 the zenohd block with every derivation and warning as a comment beside
@@ -151,8 +151,8 @@ The deployment file, in full:
   [storages.plant]
   selector = "plant/**"          # relative to the namespace; never on state/**
   volume = "fs"
-  replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
-  complete = true                # honoured only where §2.2 allows it
+  replication = true             # or { interval = 10.0, … } (tooling guide §8.4)
+  complete = true                # honoured only on a replicated latest-mode storage
   params = { dir = "plant" }     # merged into `volume: { id: "fs", … }`
   # retention = { … }            # the backend's own block (redb), verbatim
   # gc_period_s = 30             # garbage_collection.period

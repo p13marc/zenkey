@@ -16,7 +16,7 @@
 //! keys included: that is what lets it spot a key outside the deployment.
 //! [`bus::lens`] and [`model::lens`] are the bridge: a raw observer's key
 //! resolved through the namespace, presence and the contracts in hand. The
-//! RFC 05 §2.1 fan-in discipline of a raw GET lives in exactly one place
+//! fan-in discipline of a raw GET (core §5.1) lives in exactly one place
 //! ([`bus::query::fleet_get`] — target `All`, consolidation `None`,
 //! attribution by the reply's own key), and every liveliness GET goes
 //! through [`bus::presence::liveliness_read`].
@@ -40,7 +40,7 @@
 //! ([`Error::NotAsked`]); so is one through a session cut off from every
 //! other zenoh node ([`bus::presence::cut_off`]).
 //!
-//! **v1 left at FJ9** (#612). The registry slice sets, RFC 08 §6
+//! **v1 left at FJ9** (#612). The registry slice sets, the registry's
 //! introspection, the v1 roster, the schema-aware decode seam, the v1
 //! judges (`why`, `cutover`, `retired`, `conform` and its registry checks)
 //! and the profile-backed features (v1's configuration, blobs, the exporter,
@@ -94,7 +94,7 @@
 //!   arbitrated role: its descriptor, the declaring contract, every
 //!   revision of the required interface in hand, and the tool's own view
 //!   over a short listen, its watch on the watch session, #909). The
-//!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
+//!   fan-in discipline (core §5.1) lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
 //!   [`bus::presence::liveliness_read`] in the same way, on the unbounded
@@ -169,8 +169,8 @@
 //!   question's finding, #908), `arbitration` (`arbitration.v1`'s three
 //!   questions per role, each the model's, the selection the tool's own
 //!   view, #909), and
-//!   [`judge::common`] for the vocabulary they share. The honesty rules (the
-//!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
+//!   [`judge::common`] for the vocabulary they share. The honesty rules
+//!   (`spec/observer.md`, and the tooling guide) bite hardest here, so
 //!   the layer states them once.
 //!
 //! * **[`report`]** — every serde-pinned wire shape in the crate, split by

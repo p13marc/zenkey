@@ -83,7 +83,7 @@ pub struct RateReport {
     pub total_bytes: u64,
     /// Concrete keys retained by the stats table over the window.
     pub keys: usize,
-    /// Keys retired to stay within the table bound (RFC 09 §5.1 O6) — the
+    /// Keys retired to stay within the table bound (tooling guide O6) — the
     /// totals cover the retained set only.
     pub evicted: u64,
     /// The bound the table ran under.
@@ -101,7 +101,7 @@ pub struct RateReport {
 /// HLCs are only as good as the fleet's time discipline. Negative values
 /// are the skew *evidence* and are never clamped — render this as
 /// "observed skewed latency", an observation, not a verdict on the
-/// transport (RFC 09 §5.1 applied to a number).
+/// transport (observer §8.3 applied to a number).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct LatencySummary {
     pub min_us: i64,
@@ -128,7 +128,7 @@ pub struct LatencyReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub foreign: Option<LatencySummary>,
     /// Stamped, but with no `SourceInfo` to compare against: unknown, not
-    /// foreign (RFC 09 §5.1 O4).
+    /// foreign (observer §1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unattributable: Option<LatencySummary>,
     /// The distinct stamping nodes seen on this key, rendered. Empty when
@@ -167,7 +167,7 @@ impl LatencyReport {
     /// The caveat that has to travel with every rendering of these numbers.
     ///
     /// One sentence, in the engine, so the CLI and the GUI cannot drift into
-    /// describing the same measurement differently (RFC 09 §5.1 O7).
+    /// describing the same measurement differently (observer §8.3).
     pub fn caveat(&self) -> String {
         let clock = match (self.self_stamped.is_some(), self.foreign.is_some()) {
             (true, false) => "the publisher's own HLC",
@@ -178,7 +178,7 @@ impl LatencyReport {
         let mut note = format!(
             "arrival wall-clock − {clock}: observed *skewed* latency — it contains \
              clock skew, and negative values are the skew evidence, not an error \
-             (RFC 09 §5.1)"
+             (observer §8.3)"
         );
         if !self.stampers.is_empty() {
             note.push_str(&format!("\nstamped by: {}", self.stampers.join(", ")));

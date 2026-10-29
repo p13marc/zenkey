@@ -70,7 +70,7 @@ fn table_of(f: &Fixture, w: Width) -> String {
 /// The distinction the whole primitive exists for: a question never put to the
 /// bus renders `—`, and a question answered with nothing renders empty. They
 /// are different variants, so no refactor can quietly merge them
-/// (RFC 09 §5.1 O4).
+/// (observer §1).
 #[test]
 fn an_unasked_cell_is_not_an_empty_one() {
     let f = Fixture::of(&[("alpha", None, 1), ("beta", Some(""), 2)]);
@@ -168,5 +168,5 @@ fn an_empty_table_renders_nothing_and_the_note_carries_the_meaning() {
     let (out, err) = to_string(&f, Format::Table, Width::Unbounded).unwrap();
     assert_eq!(out, "", "no header over no rows");
     assert!(err.contains("not a verdict"), "the note explains it: {err}");
-    assert!(err.contains("RFC 05 §3.1"), "and cites: {err}");
+    assert!(err.contains("observer §2"), "and cites: {err}");
 }

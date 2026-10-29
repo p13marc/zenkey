@@ -128,7 +128,7 @@ pub struct KeyRelation {
     pub b: String,
     pub answer: bool,
     /// Why a "no" is the convention's doing rather than a typo — `**` never
-    /// crosses an `@`-chunk (RFC 03 §4 D2), `*` never matches a verbatim
+    /// crosses an `@`-chunk (core §1.3), `*` never matches a verbatim
     /// service origin (D4).
     ///
     /// Absent when the answer needs no explanation, never null (O4): a "yes"
@@ -205,13 +205,13 @@ impl Render for KeyCanon {
 #[derive(Debug, Clone, Serialize)]
 pub struct GetReport {
     /// The selector as asked. A GET's coverage claim is exactly this and no
-    /// wider (RFC 09 §5.1 O5).
+    /// wider (observer §8.2).
     pub selector: String,
     /// Seconds waited — the other half of the claim, and what makes a silent
     /// result legible.
     pub timeout_s: f64,
     /// Replies that arrived and were not read, because the reply bound bit
-    /// (#339, RFC 13 §3 O6). Absent — not `0` — when it did not: an unheld
+    /// (#339, tooling guide O6). Absent — not `0` — when it did not: an unheld
     /// fact is absent from the row rather than null, and a bound that never
     /// bit hid nothing to disclose.
     #[serde(skip_serializing_if = "is_zero")]
@@ -287,7 +287,7 @@ pub struct ContextRow {
     /// Three states, and the reason this is an `Option<String>` rather than a
     /// `String`: a stored **empty** base (`""`, the legal bus-root deployment)
     /// must not read like an unset one. In the table they are `""` and `—`;
-    /// in json they are `""` and absent (RFC 09 §5.1 O4).
+    /// in json they are `""` and absent (observer §1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
     pub connect: Vec<String>,
@@ -448,7 +448,7 @@ pub struct CacheAction {
     pub action: &'static str,
     pub dir: String,
     /// Services the presence read saw, for `refresh`. Absent for `clear`,
-    /// which counts nothing — not zero (RFC 09 §5.1 O4).
+    /// which counts nothing — not zero (observer §1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub services: Option<usize>,
     /// Whether there was anything there. `clear` on an absent directory is

@@ -33,7 +33,7 @@
 //!
 //! ## v1 left at FJ9 (#612)
 //!
-//! v1's registry (`--registry`, RFC 08 §6 introspection, the slice cache),
+//! v1's registry (`--registry`, its introspection, the slice cache),
 //! its composed selectors (`--origin`/`--class`/`--producer`), its judges
 //! (`why`, `check cutover|conform|retired`) and the profile-backed nouns
 //! (`config`, `blob`, `export`) are gone from `main`; the `v1` branch keeps
@@ -46,7 +46,7 @@
 //! `compat` are **resolved** verbs: they read zk2's base-relative keys
 //! through a session opened *in* the deployment's namespace
 //! (`NamespaceArgs`: `--namespace`, with `--base` as its alias and the
-//! context file's `base` as its rung), which ends RFC 09 §5's "explorers are
+//! context file's `base` as its rung), which ends v1's "explorers are
 //! never namespaced" for zk2 (decided 2026-10-08). `namespace list` is the
 //! raw half: it looks across namespaces, so its session (`SessionArgs`)
 //! takes none. They replaced v1's `topic`, `node`, `base`, `interface` and
@@ -543,7 +543,7 @@ pub(crate) enum Command {
     /// Storages: what the mesh persists, and the router config behind it.
     ///
     /// What the routers' admin space says the mesh persists — and the router
-    /// block that makes it persist (RFC 09 §2).
+    /// block that makes it persist (tooling guide §8.4).
     #[command(subcommand)]
     Storage(StorageCmd),
     /// Router access control, generated from an enrollment and the contracts.
@@ -559,7 +559,7 @@ pub(crate) enum Command {
     Admin(AdminCmd),
     /// Key-expression algebra, offline: inclusion, intersection, canon.
     ///
-    /// No session is opened. RFC 03 §4's footguns, diagnosed.
+    /// No session is opened. Verbatim chunks' footguns (core §1.3), diagnosed.
     #[command(subcommand)]
     Key(KeyCmd),
     /// A running service's configuration, through config.v1.
@@ -605,7 +605,7 @@ pub(crate) enum Command {
     /// can freeze a zenoh 1.10.1 node: it answers them under its routing
     /// tables' read lock, and another client's declaration in between
     /// deadlocks it (#890).
-    /// The fleet discipline (RFC 05 §2.1): target All, consolidation None,
+    /// The fleet discipline (core §5.1): target All, consolidation None,
     /// every reply attributed by its own key; error envelopes render as
     /// errors, and each reply is resolved through the deployment in
     /// --namespace as `echo` resolves a sample: a zk2 key decoded as its
@@ -718,7 +718,7 @@ pub(crate) enum Command {
     /// Replay is PUBLISHING: real puts through declared publishers, at the capture's own pacing
     /// (scaled by --speed), re-stamped with this session's HLC: re-stamped
     /// old data WINS last-writer-wins against a live fleet, which is why
-    /// the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the
+    /// the etiquette is enforced (tooling guide §5) — dry-run first, and the
     /// capture header's base is a contract (`--force-base` to override).
     /// `--namespace` moves every key into a deployment namespace of its own,
     /// through a session in it: a replayer standing in for the owners it
@@ -736,7 +736,7 @@ pub(crate) enum Command {
     /// bus can establish. What it can say: on the arrival axis, when each
     /// sample was seen here; on the HLC axis (`--order hlc`), the
     /// happened-before of ONE stamping node, or a comparison of skewed wall
-    /// clocks when several stamped (RFC 09 §5.1 O7). Unstamped samples get
+    /// clocks when several stamped (observer §8.3). Unstamped samples get
     /// their own lane on arrival and cannot be placed on the HLC axis at
     /// all; drops and coalescing render as breaks where they fell (O6). The
     /// per-publisher sequence-number lane is reported UNAVAILABLE on this
@@ -745,7 +745,7 @@ pub(crate) enum Command {
     Timeline(TimelineArgs),
     /// Take a deployment's state to a .zsnap file, or compare two with `diff`.
     ///
-    /// The snapshot of RFC 13 §4.4, re-cut for zk2: the owners' current
+    /// v1's snapshot, re-cut for zk2 (tooling guide §5): the owners' current
     /// state, one GET per selector — target All, consolidation Latest, the
     /// owner alone answering (spec §4.2 S4), a reply on a wildcard key
     /// discarded (R6) — each row carrying what the observer could establish:
@@ -829,7 +829,7 @@ pub(crate) enum Command {
     /// question could not be asked or proven). Everything under here reserves
     /// its 2 — which is what makes `check expect --absent` legitimate at all,
     /// and what stops a dead bus reading as a pass. CI recipes should run
-    /// isolated per RFC 09 §0: multicast scouting off, gossip on, explicit
+    /// isolated (tooling guide §8.1): multicast scouting off, gossip on, explicit
     /// endpoints — a test that scouts is not isolated, and the contamination
     /// flows both ways.
     #[command(subcommand)]
@@ -1264,7 +1264,7 @@ pub(crate) enum Command {
     /// condition from a CLOSED vocabulary (no expressions, no templating);
     /// every genuine state change prints one line
     /// {"row":"transition","rule":…,"from":…,"to":…,"at":…,"evidence":…} and
-    /// an unchanged tick prints nothing. Three states, not two (RFC 09 §5.1 O4/O6):
+    /// an unchanged tick prints nothing. Three states, not two (observer §1; tooling guide O6):
     /// ok / firing / unobservable — a drop under a completeness claim is
     /// "could not tell", never "ok", which is what keeps a 3am page honest.
     /// The first evaluation states each rule's baseline once, from null.
@@ -1581,8 +1581,8 @@ pub(crate) enum KeyCmd {
     /// Can `a` and `b` name a common key? Exit 0 yes / 1 no / 2 invalid.
     ///
     /// When a 'no' is the convention's doing — `**` never crosses an
-    /// `@`-chunk (RFC 03 §4 D2), `*` never matches a verbatim service
-    /// origin (D4) — the output says so, with the citation.
+    /// `@`-chunk, `*` never matches a verbatim one (core §1.3) — the
+    /// output says so, with the citation.
     Intersects(KeyIntersectsArgs),
     /// Canonicalize an expression, or print its parse error verbatim.
     Canon {
@@ -1832,7 +1832,7 @@ pub(crate) enum StorageCmd {
     /// Generate the router's storage config from the deployment
     ///
     /// Plan the router's storages, and emit the `plugins.storage_manager`
-    /// block (RFC 09 §2, #393; zk2's since #704), from either or both of:
+    /// block (tooling guide §8.4, #393; zk2's since #704), from either or both of:
     ///
     ///   --enrollment   the enrollment `acl gen` reads, with --contracts: a
     ///                  UNION STORAGE per event resource of every interface an
@@ -1851,19 +1851,19 @@ pub(crate) enum StorageCmd {
     /// archive's store (§4.4).
     ///
     /// Each storage's `strip_prefix` is derived as its selector's literal
-    /// leftmost run, and a volume's capability pair comes from RFC 09 §2.1's
+    /// leftmost run, and a volume's capability pair comes from tooling guide §8.4's
     /// table (per volume — one volume per history mode from the same plugin).
     /// A file's storage takes its lifespan from the file, or zenoh's 24 h
     /// default, and says which. With no [events] volume, the union storages
     /// use an implicit memory volume, and the plan says it is volatile.
     ///
     /// The plan refuses what the router would refuse — replication on an
-    /// all-mode volume (§2.2), a volume nobody declared, a selector that is
-    /// not a key expression — and warns where a caveat applies: overlapping
-    /// selectors (§2), `complete = true` off a replicated latest-mode storage
-    /// (§2.2), retention that is the database's and not zenoh's (§2.3) or a
-    /// replay's and not the storage's (spec §2.6), redb's mandatory retention
-    /// in all mode (§2.1).
+    /// all-mode volume, a volume nobody declared, a selector that is not a
+    /// key expression — and warns where a caveat applies: overlapping
+    /// selectors, `complete = true` off a replicated latest-mode storage,
+    /// retention that is the database's and not zenoh's or a replay's and
+    /// not the storage's (spec §2.6), redb's mandatory retention in all mode.
+    /// Each is the tooling guide's §8.4 but the replay's.
     ///
     /// Four ways out. The plan report (`--format` as everywhere); `--json5`,
     /// the zenohd block with every derivation and warning as a comment beside
@@ -1891,8 +1891,8 @@ pub(crate) enum StorageCmd {
     ///   [storages.plant]
     ///   selector = "plant/**"          # relative to the namespace; never on state/**
     ///   volume = "fs"
-    ///   replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
-    ///   complete = true                # honoured only where §2.2 allows it
+    ///   replication = true             # or { interval = 10.0, … } (tooling guide §8.4)
+    ///   complete = true                # honoured only on a replicated latest-mode storage
     ///   params = { dir = "plant" }     # merged into `volume: { id: "fs", … }`
     ///   # retention = { … }            # the backend's own block (redb), verbatim
     ///   # gc_period_s = 30             # garbage_collection.period
@@ -2602,7 +2602,7 @@ pub(crate) struct RecordArgs {
     /// Seconds between rule evaluations — the one period flag (#307).
     #[arg(long, value_name = "SECS", default_value_t = 1.0, requires = "on")]
     pub(crate) every: f64,
-    /// What the state preamble is a snapshot of (RFC 13 §4.3): the
+    /// What the state preamble is a snapshot of (tooling guide §5): the
     /// current state of only the keys the ring cannot show, the full
     /// current state under the watched selectors, or none at all.
     #[arg(
@@ -2626,7 +2626,8 @@ pub(crate) struct RecordArgs {
 }
 
 /// `record --preamble`: what a triggered capture's state preamble is a
-/// snapshot of — the RFC 13 §4.3 semantics plus "none" (#218).
+/// snapshot of — the preamble's two semantics (tooling guide §5) plus
+/// "none" (#218).
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum PreambleMode {
     /// Only the state keys absent from the retained window, fetched at
@@ -2780,10 +2781,10 @@ pub(crate) struct ReplayArgs {
     #[arg(long, value_name = "NS")]
     pub(crate) namespace: Option<String>,
     /// Publish a version-2 capture's preamble rows too — state at capture
-    /// start, re-stamped now (RFC 13 §4.1). Off by default: re-stamped
+    /// start, re-stamped now (tooling guide §5). Off by default: re-stamped
     /// state wins last-writer-wins, so the preamble republishes a whole
-    /// snapshot over the live fleet with no pacing between the rows
-    /// (§4.2); the rows are skipped and counted instead.
+    /// snapshot over the live fleet with no pacing between the rows; the
+    /// rows are skipped and counted instead.
     #[arg(long)]
     pub(crate) seed_state: bool,
     /// QoS axes for rows that recorded none (a version-1 or 2 capture):

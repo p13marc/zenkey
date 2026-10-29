@@ -1,4 +1,4 @@
-//! The retire path (#115, RFC 04 §1.2): a tombstone is a `SampleKind::Delete`
+//! The retire path (#115, core §4.2): a tombstone is a `SampleKind::Delete`
 //! riding the declared publisher — never a payload marker, never an ad-hoc
 //! `session.delete`.
 //!
@@ -97,6 +97,6 @@ async fn the_monitor_reports_kind_delete() {
     assert_eq!(
         view.kind,
         SampleKind::Delete,
-        "SampleView carries the kind exactly (RFC 04 §1.2)"
+        "SampleView carries the kind exactly (core §4.2)"
     );
 }

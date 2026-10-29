@@ -1,4 +1,4 @@
-//! The scouting plane (RFC 09 §5): what a UDP scout heard, as a document.
+//! The scouting plane (tooling guide §8.1): what a UDP scout heard, as a document.
 //! Opt-in, and the report says so — an explorer that scouted by default
 //! would be changing the bus it came to observe.
 
@@ -7,7 +7,7 @@ use serde::Serialize;
 /// What a scouting round heard, and what it could have heard (#236).
 ///
 /// A wrapper rather than a bare `Vec<HelloView>` for one reason, and it is
-/// RFC 09 §5.1 **O5**: scouting reaches the local multicast domain and the
+/// Observer §8.2's rule, applied: scouting reaches the local multicast domain and the
 /// configured gossip, and nothing else. An empty list is a **boundary**, not a
 /// claim that nothing is running — and a bare array cannot say so, which is
 /// why `zenctl scout --format json` used to print that sentence as *prose on

@@ -1,4 +1,4 @@
-//! The admin plane (RFC 09 §5.1): routers, storages, declared entities and
+//! The admin plane (observer §4.2, §4.3): routers, storages, declared entities and
 //! the mesh topology — everything read out of Zenoh's own `@/**` adminspace
 //! rather than off the keyspace. v1's state coverage and origin attachments
 //! left with the v1 grammar they joined against (#612, FJ9); zk2's
@@ -47,14 +47,14 @@ pub struct StorageInfo {
     /// The key expression the storage captures, when the layout exposes it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_expr: Option<String>,
-    /// The literal prefix stripped before the volume sees a key (RFC 09 §2 —
+    /// The literal prefix stripped before the volume sees a key (tooling guide §8.4 —
     /// zenoh requires a wildcard-free prefix here). Absent when the layout
     /// does not say, which is not the same as "none configured".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strip_prefix: Option<String>,
     /// The backing volume's id — `memory` is volatile and loses what it
     /// stored on a router restart, `fs`/`rocksdb` are the durable LWW stores
-    /// (RFC 09 §2). A storage is never an owner's state seed in zk2: a late
+    /// (tooling guide §8.4). A storage is never an owner's state seed in zk2: a late
     /// joiner seeds from the owner (core §4.2, S4), and a storage answering
     /// on an owner's state is a finding. Spelled either as a bare string or as `{ id: "fs", … }`
     /// depending on version; both are absorbed here.

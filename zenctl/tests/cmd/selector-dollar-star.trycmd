@@ -1,6 +1,6 @@
-RFC 03 §2 forbids `$*` in selectors, not merely in published keys — the
-sub-chunk wildcard is markedly slower, strains the infrastructure (RFC 02 P6),
-and a key that seems to need it is a key that wants splitting into chunks.
+The reference refuses `$*` in selectors, not merely in published keys — the
+sub-chunk wildcard strains zenoh's matching (tooling guide §8.2), and a key
+that seems to need it is a key that wants splitting into chunks.
 zengui's scope seam has always refused it; these cases pin the CLI's
 `cmd::raw_selector` seam doing the same, with the same wording, on every verb
 that accepts a typed selector.
@@ -19,35 +19,35 @@ exits with for a mis-shaped command line.
 ```console
 $ zenctl echo 'zk2/$*/x'
 ? 2
-Error: `$*` must not be used in selectors (RFC 03 §2): "zk2/$*/x"
+Error: `$*` must not be used in selectors (tooling guide §8.2): "zk2/$*/x"
 
 ```
 
 ```console
 $ zenctl get 'zk2/$*/x'
 ? 2
-Error: `$*` must not be used in selectors (RFC 03 §2): "zk2/$*/x"
+Error: `$*` must not be used in selectors (tooling guide §8.2): "zk2/$*/x"
 
 ```
 
 ```console
 $ zenctl record 'zk2/$*/x' --out /dev/null
 ? 2
-Error: `$*` must not be used in selectors (RFC 03 §2): "zk2/$*/x"
+Error: `$*` must not be used in selectors (tooling guide §8.2): "zk2/$*/x"
 
 ```
 
 ```console
 $ zenctl field 'zk2/$*/x'
 ? 2
-Error: `$*` must not be used in selectors (RFC 03 §2): "zk2/$*/x"
+Error: `$*` must not be used in selectors (tooling guide §8.2): "zk2/$*/x"
 
 ```
 
 ```console
 $ zenctl rate 'zk2/$*/x'
 ? 2
-Error: `$*` must not be used in selectors (RFC 03 §2): "zk2/$*/x"
+Error: `$*` must not be used in selectors (tooling guide §8.2): "zk2/$*/x"
 
 ```
 

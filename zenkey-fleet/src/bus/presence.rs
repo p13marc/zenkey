@@ -222,7 +222,7 @@ impl Scope {
 
     /// `zk2/<system>/<service>/@zk/<rest…>`, `*` for what the scope leaves
     /// open. `@zk` is always named: `*` and `**` never cross a verbatim
-    /// chunk (§1.3; RFC 03 §4 D2, carried into zk2).
+    /// chunk (§1.3).
     fn under_control(&self, rest: &[&str]) -> String {
         let system = self.system.as_ref().map_or("*", Name::as_str);
         let service = self.service.as_ref().map_or("*", Name::as_str);

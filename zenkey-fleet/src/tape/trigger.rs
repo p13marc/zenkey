@@ -1,4 +1,4 @@
-//! Trigger capture (#218; RFC 13 §4.1 version 2, §4.3's pre-roll bullet):
+//! Trigger capture (#218; tooling guide §5, `.zrec` version 2's pre-roll):
 //! leave a recorder armed with a small pre-roll and a condition, and get a
 //! file only when something happens — with **the thirty seconds before it
 //! fired** in it.

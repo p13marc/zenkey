@@ -57,7 +57,7 @@ pub struct KeyStats {
     /// Times the sequence numbering restarted — a backwards or absurd jump
     /// (beyond the private `SN_RESET_WINDOW`), which is a publisher restart, not
     /// loss. Its own number: folding a restart into `sn_gaps` would invent
-    /// millions of "lost" samples nobody sent (RFC 09 §5.1 O6 — the kinds
+    /// millions of "lost" samples nobody sent (tooling guide O6 — the kinds
     /// are never folded).
     pub sn_resets: u64,
     /// Samples that carried **no** HLC timestamp — an observation of their
@@ -145,7 +145,7 @@ fn summarise(values: impl Iterator<Item = i64>) -> Option<LatencySummary> {
 /// therefore keeps at most [`DEFAULT_MAX_KEYS`] entries, evicting the
 /// least-recently-seen first — the keys that stopped publishing are the ones a
 /// live view has least use for — and **counts every eviction**, so a shrinking
-/// key set is never mistaken for a quiet bus (RFC 09 §5.1).
+/// key set is never mistaken for a quiet bus (tooling guide O6).
 ///
 /// The keys are `Arc<str>` rather than `String` so that
 /// [`rows`](Self::rows) — the copy the ingest lock is held for (#330) — is a

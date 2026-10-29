@@ -8,8 +8,8 @@
 //! deliberately small ([`RetentionBudget::default`]: 64 MiB / 2 min) — a
 //! generous default here turns an overnight session into a memory incident.
 //!
-//! **What eviction from this ring is, and is not** (RFC 09 §5.1 **O6**,
-//! sharpened at ratification — v1.18 R1): a bounded observer reports what
+//! **What eviction from this ring is, and is not** (the tooling guide's
+//! **O6**, sharpened at v1's ratification — v1.18 R1): a bounded observer reports what
 //! each bound cost and MUST NOT fold the kinds into one number. The ring's
 //! costs are therefore counted apart from every existing population — from
 //! broadcast lag ([`crate::MonitorCore::dropped`], "could not keep up"),

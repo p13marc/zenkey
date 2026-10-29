@@ -53,7 +53,7 @@ pub struct ValueDiff {
     /// Changes found past `max_changes` and therefore not listed.
     ///
     /// Counted rather than silently cut: a bounded view that reports what it
-    /// dropped is the RFC 09 §5.1 O6 rule, and a diff that quietly stops at
+    /// dropped is the tooling guide O6 rule, and a diff that quietly stops at
     /// twenty entries reads as "and nothing else changed". Always written,
     /// even at zero — a diff's bound is part of what the diff *is*.
     pub truncated: usize,

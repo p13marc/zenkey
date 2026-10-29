@@ -1,5 +1,5 @@
 //! The structural ladder: what bytes honestly say when no schema resolves
-//! (RFC 08 §7 for v1; spec §7.2's "then sniffing" for zk2).
+//! (observer §7.3's decode order, whose last rung is "then sniffing").
 //!
 //! JSON if it parses, then CBOR that accounts for every byte, then UTF-8
 //! text, else a byte count. Schema-free and sync, so it runs on render paths
@@ -87,7 +87,7 @@ pub fn structural(bytes: &[u8]) -> String {
 /// text `"ust a plai"` with eight bytes left over — and an explorer that shows
 /// that has silently corrupted the payload it was asked to display. Any
 /// lowercase-initial ASCII text is a candidate. Requiring total consumption is
-/// what makes the sniff honest (RFC 08 §7 — sniffing is the last resort, so it
+/// what makes the sniff honest (observer §7.3 — sniffing is the last resort, so it
 /// must at least be self-consistent).
 fn cbor_whole(bytes: &[u8]) -> Option<ciborium::Value> {
     let mut cursor = std::io::Cursor::new(bytes);

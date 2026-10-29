@@ -6,7 +6,7 @@
 //! answer from values already in hand belongs in [`crate::model`]; a module
 //! that turns an observation into a verdict belongs in [`crate::judge`].
 //!
-//! The RFC 05 §2.1 fan-in discipline lives here exactly once, in
+//! The fan-in discipline (core §5.1) lives here exactly once, in
 //! [`query::fleet_get`] — target `All`, consolidation `None`, attribution by
 //! the reply's own key. Everything in this layer that asks a raw question
 //! goes through it rather than reaching for `session.get`, which is what

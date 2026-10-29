@@ -1,4 +1,4 @@
-# A v1 enrollment (RFC 09 §3): a CN bound to a role and an origin. zk2's
+# A v1 enrollment (v1's ACL recipes): a CN bound to a role and an origin. zk2's
 # enrollment has neither; the file does not load (acl-gen.trycmd).
 [[principal]]
 cn     = "h-3fa9c2d41b7e"

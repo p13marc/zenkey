@@ -10,7 +10,7 @@
 //!   nothing at all;
 //! * `—` for *not asked* and `""` for *asked, nothing there* become different
 //!   [`Cell`](super::Cell) variants rather than two spellings a refactor can
-//!   merge by accident (RFC 09 §5.1 O4);
+//!   merge by accident (observer §1);
 //! * a heterogeneous row stream gets a discriminator, because a consumer
 //!   should not have to identify a line by guessing at its fields.
 

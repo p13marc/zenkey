@@ -1,7 +1,7 @@
 //! The per-key statistics table (issue #203).
 //!
 //! `stats` feeds every `hz`/`bw` figure, both frontends' key trees, and the
-//! bound accounting that RFC 09 §5.1 **O6** obliges an observer to report. It
+//! bound accounting that the tooling guide's **O6** obliges an observer to report. It
 //! had no test file of its own, which is the part worth naming: **untested
 //! eviction is untested honesty**. A table that retires keys correctly but
 //! forgets to count it looks identical, from the outside, to one that never

@@ -1,4 +1,4 @@
-//! `zenctl snapshot` (#219, RFC 13 §4.4; zk2's since #612, FJ8b): a
+//! `zenctl snapshot` (#219, tooling guide §5; zk2's since #612, FJ8b): a
 //! deployment's current state kept on disk as a `.zsnap`, and two of them
 //! compared by zk2 key.
 //!
@@ -17,7 +17,7 @@
 //! state: `--explicit` adds `<ns>/zk2/*/*/*/@state/**` alone (#924), since
 //! a stream answers no GET.
 //!
-//! The diff opens no session. Its exit is the RFC 13 §1.2 projection over
+//! The diff opens no session. Its exit is the projection (tooling guide §1) over
 //! the diff's own judgement — a difference *is* the finding (1), identity
 //! is clean (0) — and a file that could not be read is the reserved 2,
 //! never a claim that the two agree. It compares by zk2 key: each row's key

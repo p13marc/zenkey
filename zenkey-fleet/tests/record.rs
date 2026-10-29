@@ -1,4 +1,4 @@
-//! `.zrec` capture and replay over a real bus (#39; RFC 09 §5.2): what a
+//! `.zrec` capture and replay over a real bus (#39; tooling guide §5): what a
 //! monitor observed round-trips through a file and back onto a second bus
 //! through declared publishers — key, payload bytes, kind, encoding and
 //! attachment intact — and the capture's drop ledger survives into the

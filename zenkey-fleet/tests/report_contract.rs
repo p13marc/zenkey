@@ -10,7 +10,7 @@
 //! field-by-field.** Two reasons, and both are the point of the file:
 //! comparing fields cannot catch an *added* one, and `json["absent"]` yields
 //! `Value::Null`, so a field-by-field test passes identically for "absent" and
-//! "explicitly null". That distinction is RFC 09 §5.1 **O4** — a question not
+//! "explicitly null". That distinction is observer §1's — a question not
 //! asked must not render as a negative answer — and in these documents it is
 //! carried entirely by `skip_serializing_if`. A test that cannot see it is not
 //! guarding it.
@@ -745,7 +745,7 @@ fn a_timeline_on_the_hlc_axis_is_pinned() {
     );
 }
 
-// ─── snapshots (RFC 13 §4.4, #219; zk2's since #612, FJ8b) ────────────────
+// ─── snapshots (tooling guide §5, #219; zk2's since #612, FJ8b) ───────────
 
 /// The `.zsnap` header, version 2: the span is the fact a capture header
 /// does not carry, the O6 counters are absent at zero, and the presence
@@ -840,7 +840,7 @@ fn a_snapshot_report_is_the_header_plus_holder_counts() {
     assert!(v.get("incomplete").is_none(), "empty is absent");
 }
 
-/// A diff carries both headers whole (both spans, RFC 13 §4.4), lists the
+/// A diff carries both headers whole (both spans, tooling guide §5), lists the
 /// three key sets by zk2 key, and keeps the facets apart.
 #[test]
 fn a_snapshot_diff_keeps_both_spans_and_its_facets_apart() {

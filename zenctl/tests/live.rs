@@ -49,7 +49,7 @@ fn exits(run: &Run, code: i32) {
 /// `get` answers 0 with the stored value, resolved through the lens — a
 /// foreign key in the namespace is `not_zk2`, rendered structurally and
 /// never refused; a key nobody answers is silence, and silence is 2 —
-/// never an empty 0 (RFC 05 §3.1).
+/// never an empty 0 (observer §2).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_is_0_with_a_value_and_2_on_silence() {
     let bus = Bus::up().await;

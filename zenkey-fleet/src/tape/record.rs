@@ -1,4 +1,4 @@
-//! `.zrec` capture and replay (issue #39; RFC 09 §5.2 documents the
+//! `.zrec` capture and replay (issue #39; tooling guide §5 documents the
 //! etiquette, this module is normative for the format).
 //!
 //! A `.zrec` file is newline-delimited JSON in the explorers' one row
@@ -7,7 +7,7 @@
 //! not need but a capture does: a versioned header line naming what was
 //! asked, a lossless `"bytes"` payload (a `"value"` is a rendering), a
 //! pacing offset `"t"` on the observer's arrival clock, and drop records
-//! interleaved **where the gap happened** (RFC 09 §5.1 O6, applied to a
+//! interleaved **where the gap happened** (tooling guide O6, applied to a
 //! file — a capture taken while behind is a partial view and says so at
 //! the position of the loss).
 //!
@@ -31,12 +31,12 @@
 //! Replay is publishing. Every replayed sample rides a declared publisher
 //! ([`crate::bus::write::declare_publication`], P7 — no ad-hoc puts), gets the
 //! *replaying* session's HLC (re-stamped deliberately: a preserved foreign
-//! HLC silently loses every RFC 04 §3.2 reconciliation), and a recorded
+//! HLC silently loses every `Latest` reconciliation, core §4.1), and a recorded
 //! delete passes the same retire gate as a live one
 //! ([`crate::bus::write::check_retire`]: the operator's act, priced with
 //! `--i-know`). The etiquette the
 //! CLI enforces on top — dry-run first, header-base refusal without an
-//! explicit override — is RFC 09 §5.2's.
+//! explicit override — is tooling guide §5's.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -54,7 +54,7 @@ use crate::tape::ingest::{IngestRow, parse_row};
 
 /// The current `.zrec` format version, written into every header.
 ///
-/// Version 2 (RFC 13 §4.1, v1.34; #218) adds the state preamble — rows
+/// Version 2 (tooling guide §5; #218) adds the state preamble — rows
 /// marked `"preamble": true` at `t: 0` ahead of the first observed row —
 /// and the interleaved `{"trigger": …}` record. A version-1 file is a
 /// version-2 file with neither.
@@ -72,7 +72,7 @@ pub const ZREC_VERSION: u32 = 3;
 
 /// The versions [`ZrecReader`] speaks: the current one and every earlier
 /// one whose lines it still reads verbatim. A version outside this list is
-/// refused, never guessed at (RFC 13 §4.1's unknown-version rule) — and
+/// refused, never guessed at (tooling guide §5's unknown-version rule) — and
 /// the list is what lets a version-3 reader read versions 1 and 2 while an
 /// older reader refuses version 3, both by the rule they already had.
 pub const ZREC_READS: [u32; 3] = [1, 2, 3];
@@ -117,7 +117,7 @@ impl ZrecHeader {
 /// Why a replayer skips a preamble row unless told otherwise — one sentence,
 /// spelled once, carried on every [`ReplayEvent::PreambleSkipped`].
 pub const PREAMBLE_SKIP_REASON: &str = "state at capture start; re-stamping it republishes a \
-     snapshot over live state (RFC 13 §4.2) — pass --seed-state to mean it";
+     snapshot over live state (tooling guide §5) — pass --seed-state to mean it";
 
 /// RFC 3339 UTC "now", seconds precision — the header's provenance stamp.
 /// A hand-rolled civil-date conversion (Hinnant's days algorithm) beats a
@@ -165,7 +165,7 @@ pub struct ZrecWriter<W: Write> {
 }
 
 /// What a writer or sink has put on the file so far, by kind — and the
-/// kinds are never folded (RFC 13 §4.1: a reader counts preamble rows
+/// kinds are never folded (tooling guide §5: a reader counts preamble rows
 /// apart from observed rows, so the writer does too).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SinkCounts {
@@ -238,7 +238,7 @@ impl<W: Write> ZrecWriter<W> {
             view.express,
         ));
         // A tombstone has no payload to store: `delete` is the whole fact
-        // (RFC 04 §1.2), and an empty `bytes` would read as an empty put.
+        // (core §4.2), and an empty `bytes` would read as an empty put.
         if view.kind != SampleKind::Delete {
             row = row.with_payload_bytes(&view.payload.to_bytes());
         }
@@ -253,16 +253,16 @@ impl<W: Write> ZrecWriter<W> {
     /// The payload rides lossless (`"bytes"`), the pacing offset is the
     /// observer's arrival clock (`"t"`, µs since the capture epoch), and
     /// the publisher's HLC — when one rode the sample — is carried
-    /// informatively (`"timestamp"`): replay re-stamps (RFC 09 §5.2). QoS
+    /// informatively (`"timestamp"`): replay re-stamps (tooling guide §5). QoS
     /// is stored as a profile *name* only when the wire's actual axes match
-    /// one (RFC 04 §3); axes matching no profile are not approximated —
+    /// one (v1's five profiles); axes matching no profile are not approximated —
     /// a rule [`SampleRow::with_wire`] now enforces for every writer of the
     /// dialect rather than for this one alone (#235).
     ///
     /// A capture carries **no** `origin`/`subject`: those are the observer's
     /// reading of the key under a base it chose, and a file that outlives
     /// the session must not freeze one deployment's interpretation into
-    /// somebody else's replay (RFC 09 §5.2 — keys are recorded whole and
+    /// somebody else's replay (tooling guide §5 — keys are recorded whole and
     /// never re-derived from the header's base).
     pub fn write_sample(&mut self, view: &SampleView) -> Result<()> {
         let t_us = u64::try_from(
@@ -278,7 +278,7 @@ impl<W: Write> ZrecWriter<W> {
         Ok(())
     }
 
-    /// Write one **preamble** row (version 2, RFC 13 §4.1; #218): a value
+    /// Write one **preamble** row (version 2, tooling guide §5; #218): a value
     /// fetched at trigger time, written ahead of the first observed row.
     ///
     /// `t` is 0 — the row precedes the window, and a preamble is state, not
@@ -309,7 +309,7 @@ impl<W: Write> ZrecWriter<W> {
     }
 
     /// Write the trigger record where the transition was observed (version
-    /// 2, RFC 13 §4.1): `{"trigger": {rule, from, to, at, evidence}}` — no
+    /// 2, tooling guide §5): `{"trigger": {rule, from, to, at, evidence}}` — no
     /// `key`, like a drop record — so a reader can say what fired and where
     /// in the file it did.
     pub fn write_trigger(&mut self, transition: &Transition) -> Result<()> {
@@ -347,7 +347,7 @@ impl<W: Write> ZrecWriter<W> {
 /// a momentary write stall spends the queue instead of manufacturing drops
 /// the bus never had. Past that the queue backpressures the drain — which is
 /// where a genuinely-too-slow disk belongs, surfacing as `Dropped(n)` like
-/// any other observer that could not keep up (RFC 13 §3 O6). Bounded, not
+/// any other observer that could not keep up (tooling guide O6). Bounded, not
 /// unbounded, because a capture promises to stream in bounded memory.
 const SINK_QUEUE: usize = 4096;
 
@@ -616,17 +616,17 @@ pub enum ZrecItem {
         /// The publishing entity as the row spelled it (`zid:eid#sn`),
         /// when `SourceInfo` rode the captured sample. Lifted for the
         /// timeline (#216) so a replayed window classifies its stampers
-        /// exactly as the live one did; usually absent, RFC 09 §5.1 O7's
-        /// practical note.
+        /// exactly as the live one did; usually absent, which is why a
+        /// stamp's owner is usually unattributable (observer §8.3).
         source: Option<String>,
     },
     /// Samples the capture itself missed at this position (O6).
     Dropped(u64),
-    /// A version-2 preamble row (RFC 13 §4.1; #218): state fetched at
+    /// A version-2 preamble row (tooling guide §5; #218): state fetched at
     /// trigger time, ahead of the first observed row. `timestamp` is the
     /// HLC the fetched value carried — provenance, not pacing; the row's
     /// `t` is 0 by construction and is not repeated here. A replayer
-    /// publishes these only when told to (§4.2); a pane replay seeds its
+    /// publishes these only when told to (`--seed-state`); a pane replay seeds its
     /// fold from them.
     Preamble {
         row: IngestRow,
@@ -705,7 +705,7 @@ impl<R: BufRead> ZrecReader<R> {
                 continue;
             }
             // A drop record is `{"dropped": n}` and a trigger record
-            // `{"trigger": {..}}` — no key, not rows (RFC 13 §4.1).
+            // `{"trigger": {..}}` — no key, not rows (tooling guide §5).
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line)
                 && v.get("key").is_none()
             {
@@ -843,7 +843,7 @@ pub struct ReplaySpec<'a> {
     /// Publish the version-2 preamble rows too (`--seed-state`). Off, they
     /// are skipped and counted, with the reason stated per row: re-stamped
     /// state-at-capture-start republishes a snapshot over the live fleet
-    /// with no pacing between the rows (RFC 13 §4.2).
+    /// with no pacing between the rows (tooling guide §5).
     pub seed_state: bool,
     /// Publish into this deployment namespace (`replay --namespace`, #612,
     /// FJ5): each row's key has the capture's base stripped, and the
@@ -869,8 +869,8 @@ pub enum ReplayEvent<'a> {
     WouldRetire { key: &'a str },
     /// A row that could not be parsed — counted, never skipped.
     Malformed { reason: String },
-    /// A row a gate refused: a delete the retire gate refused (RFC 04 §1.2
-    /// v1.12), a wildcard, a key outside the capture's base under
+    /// A row a gate refused: a delete the retire gate refused (tooling
+    /// guide §4), a wildcard, a key outside the capture's base under
     /// `namespace`, or a zk2 service's own key where it runs (P3).
     Refused { key: String, reason: String },
     /// The capture itself missed this many samples here (O6): the replay
@@ -1082,9 +1082,9 @@ pub async fn replay(
                 on_event(ReplayEvent::Trigger(&t));
                 continue;
             }
-            // A preamble row is state at capture start (RFC 13 §4.1). Without
+            // A preamble row is state at capture start (tooling guide §5). Without
             // the opt-in it is skipped and *said* — a snapshot republished
-            // over a live fleet is the sharpest form of §4.2's hazard. With
+            // over a live fleet is the sharpest form of re-stamping's hazard. With
             // it, the row is a sample at `t: 0`: same retire gate, same
             // publisher, no pacing (there is none to keep).
             Ok(ZrecItem::Preamble { row, .. }) => {
@@ -1152,7 +1152,7 @@ pub async fn replay(
             }
             ReplayTarget::Bus { session } => {
                 // Original pacing, scaled — the observer's arrival clock is
-                // the only clock a capture has for "when" (RFC 09 §5.2).
+                // the only clock a capture has for "when" (tooling guide §5).
                 if let (Some(prev), Some(t)) = (prev_t, t_us)
                     && t > prev
                 {
@@ -1256,8 +1256,8 @@ mod tests {
         let reader = ZrecReader::new(sink.as_slice()).unwrap();
         assert_eq!(reader.header(), &header());
 
-        // The version after this one is refused, never guessed at (RFC 13
-        // §4.1's unknown-version rule) — and the refusal says what this
+        // The version after this one is refused, never guessed at (the
+        // tooling guide's §5: an unknown version is refused) — and the refusal says what this
         // reader does speak.
         let future = r#"{"zrec":4,"selectors":[],"base":"","captured_at":"x"}"#;
         let err = ZrecReader::new(future.as_bytes())
@@ -1371,8 +1371,8 @@ mod tests {
     }
 
     /// A version-1 file — no `preamble`, no `pre_roll`, plain rows and drop
-    /// records — reads under the version-2 reader exactly as it did (RFC 13
-    /// §4.1: a version-2 reader MUST read version 1), and the header comes
+    /// records — reads under the version-2 reader exactly as it did (the
+    /// tooling guide's §5: a reader reads every version up to its own), and the header comes
     /// back with the two blocks absent rather than defaulted.
     #[test]
     fn a_version_one_body_reads_under_the_version_two_reader() {
@@ -1547,7 +1547,7 @@ mod tests {
     }
 
     /// A version-2 capture as the CLI replays it: without `--seed-state`
-    /// the preamble row is skipped and *said* (RFC 13 §4.2's hazard), the
+    /// the preamble row is skipped and *said* (tooling guide §5's hazard), the
     /// trigger is a marker and never a put, and the observed row still
     /// counts; with it, the preamble row is a would-be put counted as
     /// seeded, apart from the observed rows.
@@ -1592,7 +1592,11 @@ mod tests {
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].0, "v1/h-0123456789ab/state/p/config");
         assert!(skipped[0].1.contains("--seed-state"), "{}", skipped[0].1);
-        assert!(skipped[0].1.contains("RFC 13 §4.2"), "{}", skipped[0].1);
+        assert!(
+            skipped[0].1.contains("tooling guide §5"),
+            "{}",
+            skipped[0].1
+        );
 
         let mut reader = source_of(&body).await;
         let mut would_put = 0;

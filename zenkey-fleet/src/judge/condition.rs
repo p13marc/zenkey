@@ -529,8 +529,8 @@ impl std::fmt::Display for Condition {
 
 // ─── the judgement rules (the vocabulary's semantic core) ───────────────────
 //
-// The three judges return the four-pole [`Judgement`] core (RFC 13, v1.24;
-// RFC 09 §5.1 pre-v1.24). None of them ever answers `NotAsked` — a judge is
+// The three judges return the four-pole [`Judgement`] core (observer §1).
+// None of them ever answers `NotAsked` — a judge is
 // only called when the question was put — but the pole exists in the currency
 // so a caller that *skipped* a judge can say so in the same vocabulary. The
 // watchdog projects each judgement onto [`CondState`] for the wire.
@@ -538,7 +538,7 @@ impl std::fmt::Display for Condition {
 /// The shortfall rule ([`Condition::RateBelow`]; `expect`'s count floor and
 /// rate floor): too little was seen. Enough seen is conclusively clean even
 /// under drops — a drop can only hide *more*. A shortfall with drops is
-/// unobservable: the dropped samples could have filled it (RFC 09 §5.1 O6).
+/// unobservable: the dropped samples could have filled it (tooling guide O6).
 pub fn judge_shortfall(short: bool, dropped: u64) -> Judgement {
     match (short, dropped) {
         (false, _) => Judgement::NotEstablished {
@@ -682,8 +682,8 @@ pub fn presence_observer(basis: PresenceBasis, pattern: &str) -> Eval {
             format!(
                 "the presence projection lost {dropped} liveliness event(s): every address \
                  under {pattern} is unobservable until a complete re-read — a token gone or \
-                 back inside that span was not seen, and nothing here says it is fine (RFC 13 \
-                 §3 O6)"
+                 back inside that span was not seen, and nothing here says it is fine (tooling \
+                 guide O6)"
             ),
         ),
         PresenceBasis::Incomplete { cut_off_during } => (

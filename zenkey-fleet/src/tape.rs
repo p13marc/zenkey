@@ -19,7 +19,7 @@
 //!   operation.
 //! * [`synth`] — payloads for the above, synthesized from a contract's
 //!   bundle (§7): JSON Schema, protobuf, raw.
-//! * [`snapshot`] — `.zsnap`, a fan-in GET kept on disk (RFC 13 §4.4): the
+//! * [`snapshot`] — `.zsnap`, a fan-in GET kept on disk (tooling guide §5): the
 //!   sibling of a capture, collected *over* a span and saying so.
 //! * [`trigger`] — the retained window as a capture: armed on a condition,
 //!   written only when it fires, with the state preamble that makes a

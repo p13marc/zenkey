@@ -1,7 +1,7 @@
 //! `zenctl replay` (issue #53): publish a `.zrec` capture back onto a bus
 //! — through declared publishers, at the capture's own pacing — or list
 //! what doing so would put (`--dry-run`, no session at all). The etiquette
-//! is RFC 09 §5.2's, enforced rather than suggested: the capture header's
+//! is tooling guide §5's, enforced rather than suggested: the capture header's
 //! base is a contract, and replaying under any other base — or from the
 //! empty base onto the empty base, which proves nothing (#506) — is refused
 //! without `--force-base`; a recorded delete keeps the retire gate's price
@@ -76,12 +76,12 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         return Err(unaskable!(
             "capture base {:?} != target base {:?} — recorded keys spell the \
              capture's deployment, and \"same keys, different deployment\" is \
-             presumed a mistake (RFC 09 §5.2). Pass --force-base to mean it.",
+             presumed a mistake (tooling guide §5). Pass --force-base to mean it.",
             header.base,
             target_base,
         ));
     }
-    // The guard above compares bases, and the empty base is the RFC v1.6
+    // The guard above compares bases, and the empty base is v1's v1.6
     // default — so a staging capture replayed onto a production bus, both
     // base-less, compared equal and republished every row under its
     // original origins, re-stamped to win last-writer-wins (#506). Two
@@ -92,7 +92,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
             "capture and target are both on the empty base — and the empty base \
              cannot tell two deployments apart, so nothing here says this bus is \
              the one the capture came from. Replaying republishes every row under \
-             its original origin, re-stamped to win over live state (RFC 09 §5.2). \
+             its original origin, re-stamped to win over live state (tooling guide §5). \
              Pass --force-base to mean this bus, or --dry-run to look first."
         ));
     }
@@ -157,7 +157,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         ReplayEvent::CaptureDropped(n) => {
             eprintln!("-- the capture itself dropped {n} sample(s) here --");
         }
-        // A version-2 preamble row, not published (RFC 13 §4.1/§4.2): listed
+        // A version-2 preamble row, not published (tooling guide §5): listed
         // on stdout like a would-be put, because it is one the operator has
         // to decide about — and the reason rides every line, so a preview
         // cut down to one row still says why.

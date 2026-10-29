@@ -265,7 +265,7 @@ impl Deployment {
 /// code attached.
 ///
 /// A `--zenoh-config` this tool refuses — one that sets a session namespace,
-/// say, which an explorer must not have (RFC 09 §5) — or an endpoint that is
+/// say, which an explorer must not have (tooling guide §8.1) — or an endpoint that is
 /// not one (#503) is *your input*, so it is refused and exits 2. A transport
 /// that would not come up is the world being unavailable — and since the
 /// session is a client (#501) that is what an unreachable router *is*. It

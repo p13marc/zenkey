@@ -1,7 +1,8 @@
 //! `check probe` (#59; zk2's since #612, FJ8b): read a zk2 resource the way a
 //! consumer does, and judge whether values arrive within a window.
 //!
-//! v1's probe was RFC 09 §6's consumer-shaped acceptance: "a probe MUST
+//! v1's probe was its cutover acceptance's consumer-shaped half (the
+//! tooling guide's §6): "a probe MUST
 //! build its keys the way the product builds them". A zk2 consumer binds a
 //! role to providers (spec §3.2 R1) and reads through the runtime's
 //! consumer, so this probe does exactly that — `Consumer::for_tool` with

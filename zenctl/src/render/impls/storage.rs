@@ -249,7 +249,7 @@ impl Render for StorageCheck {
                 Note::coverage(format!(
                     "{u} — not judged, which is not the same as agreeing"
                 ))
-                .cite("RFC 09 §5.1 O4")
+                .cite("observer §1")
             })
             .collect();
         if self.judgement.is_unobservable() {

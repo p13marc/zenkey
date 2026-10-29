@@ -19,7 +19,7 @@
 //! anything was produced — only when it was seen here.
 //!
 //! **HLC** is the sample's `uhlc` timestamp, whose id names the node that
-//! stamped it (RFC 09 §5.1 **O7** — not necessarily the publisher). What an
+//! stamped it (observer §8.3 — not necessarily the publisher). What an
 //! HLC order can claim rests on a fact about zenoh 1.10, verified in its
 //! source: `treat_timestamp!` in `net/routing/dispatcher/pubsub.rs` updates
 //! a node's HLC on receive **only when the node has an HLC**, and
@@ -240,7 +240,7 @@ pub struct PlacedBreak {
 pub enum Ingested {
     Row(TimelineRow),
     Break(Break),
-    /// A version-2 preamble row (RFC 13 §4.1): state at capture start,
+    /// A version-2 preamble row (tooling guide §5): state at capture start,
     /// not an arrival — it has no place on either axis, and a reader
     /// counts it apart from observed rows (O6). The key, so a consumer can
     /// say which.
@@ -256,7 +256,7 @@ pub enum Ingested {
 }
 
 impl Ingested {
-    /// A `.zrec` line as the live path would have seen it (RFC 09 §5.2):
+    /// A `.zrec` line as the live path would have seen it (tooling guide §5):
     /// `t` verbatim as the arrival offset, `timestamp` parsed back through
     /// `uhlc::Timestamp: FromStr`, and the stamper judged through `lens`
     /// exactly as a live sample is, so live and replay classify

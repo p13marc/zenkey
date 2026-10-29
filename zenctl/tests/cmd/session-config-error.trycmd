@@ -3,14 +3,14 @@ The `OpenFailure::Config` half of #196: your error, not the bus's — and since
 
 A zenoh config file that sets a session namespace is refused **by name** —
 an explorer runs un-namespaced so it sees the wire as it really is, foreign
-traffic included, which is what lets it spot a leak (RFC 09 §5). This half
+traffic included, which is what lets it spot a leak (tooling guide §8.1). This half
 touches no network at all: the file is rejected before a session is attempted,
 which is why it can be a test.
 
 ```console
 $ zenctl storage list --zenoh-config tests/cmd/fixtures/namespaced.json5
 ? 2
-Error: zenoh config tests/cmd/fixtures/namespaced.json5: sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (RFC 09 §5); remove the namespace from the file, or use --base to name the deployment
+Error: zenoh config tests/cmd/fixtures/namespaced.json5: sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (tooling guide §8.1); remove the namespace from the file, or use --base to name the deployment
 
 ```
 
@@ -53,7 +53,7 @@ could satisfy neither reading, because they were not one contract.
 for every mis-shaped command line, and clap is immovable — so the meaning of 2
 for user input is already fixed, whatever the rest of the tool would prefer.
 The refusals clap cannot express (a context name that is not in the file, a
-QoS profile outside RFC 04 §3's five, a class outside RFC 04 §1's three, a
+QoS profile outside v1's five, a class outside v1's three, a
 `$*` selector, a `--fault` kind, a window of zero seconds) joined it rather
 than competing with it. `2` now reads *no verdict — the question could not be
 asked*, which covers both "you did not ask it properly" and "it could not be

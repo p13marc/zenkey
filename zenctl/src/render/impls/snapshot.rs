@@ -1,4 +1,4 @@
-//! The two snapshot families (#219, RFC 13 §4.4; zk2's since #612, FJ8b):
+//! The two snapshot families (#219, tooling guide §5; zk2's since #612, FJ8b):
 //! what taking one did, and what two disagree about.
 //!
 //! `snapshot` is row-less like `record` — a file and the counts of what
@@ -78,7 +78,7 @@ impl Render for SnapshotReport {
                 "collected over {:.2}s, not at an instant — a fan-in GET has no single moment",
                 h.collection_span_s
             ))
-            .cite("RFC 13 §4.4"),
+            .cite("tooling guide §5"),
         ];
         let excluded = zenkey_fleet::zrec_excluded(&h.selectors);
         if excluded.iter().any(|v| v == "@state") {
@@ -217,7 +217,7 @@ impl Render for SnapshotDiff {
                 self.b.collection_span_s,
                 self.b.collected_at,
             ))
-            .cite("RFC 13 §4.4"),
+            .cite("tooling guide §5"),
         ];
         if self.a.base != self.b.base {
             notes.push(

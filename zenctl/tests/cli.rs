@@ -24,7 +24,7 @@
 //! **`tests/live.rs`** (#499): the real binary against an in-process producer
 //! on an OS-given port — `get`, `echo`, `rate`, `pub`, `retire`, `service
 //! call`, every 0 and 1 of `check expect` and `why`, and the `config` write
-//! lifecycle against an RFC 05 §5.1 double (#500) — and by
+//! lifecycle against a double of v1's configuration procedures (#500) — and by
 //! **`tests/live_zk2.rs`** (FJ4–FJ6): `service`, `iface`, `graph`,
 //! `namespace`, `schema`, `compat`, the acts and reads, and every exit of
 //! `doctor` against services the zk2 runtime brings up from the tcgui

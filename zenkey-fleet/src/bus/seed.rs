@@ -1,5 +1,5 @@
 //! A late joiner's seed — core §4.2 (0.26) as an engine helper (#614, FL4;
-//! issue #42 before it, which carried v1's RFC 04 §3.2).
+//! issue #42 before it, which carried v1's seed).
 //!
 //! A pane that shows state wants what is there now and every change after
 //! it. The rule is normative and subtle, and every state-showing pane would
@@ -84,7 +84,7 @@ pub enum SeedItem {
     Sample(SampleView),
     /// How many samples this consumer just missed: the delivery channel is
     /// bounded, and a receiver that fell behind is told the count rather
-    /// than handed a silently thinned stream (RFC 09 §5.1 O6 — the mirror
+    /// than handed a silently thinned stream (tooling guide O6 — the mirror
     /// of [`crate::StreamItem::Dropped`]). Merge suppressions are *not* in
     /// this number; they ride [`SeedCoverage::superseded`].
     Dropped(u64),

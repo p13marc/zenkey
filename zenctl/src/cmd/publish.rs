@@ -28,7 +28,7 @@
 //! answer is "it went out", and inventing a wire shape for that would be a
 //! shape with no reader. What the empty stdout buys is composition — `zenctl
 //! echo --format ndjson | zenctl pub --from ndjson` is the same row shape in
-//! both directions (#235, RFC 09 §5.2), and a report on pub's stdout would put
+//! both directions (#235, tooling guide §5), and a report on pub's stdout would put
 //! something in the pipe that the next stage did not ask for.
 //!
 //! So `--format json` here is an empty stdout on purpose. It is not a verb
@@ -174,7 +174,7 @@ fn owned_refusal(key: &str) -> Option<String> {
 ///
 /// Informative, never gating, and never a fleet verdict — a zero here means
 /// this session sees no matching subscriber, which is not the same claim as
-/// "nobody is listening" (RFC 05 §3.1). `None` when the status could not be
+/// "nobody is listening" (observer §2). `None` when the status could not be
 /// read at all: an unanswerable question earns no sentence.
 ///
 /// One spelling, once `retire` printed the same fact beside a verbatim copy

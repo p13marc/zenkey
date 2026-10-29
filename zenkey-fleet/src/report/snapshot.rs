@@ -1,4 +1,4 @@
-//! The snapshot plane (RFC 13 §4.4, v1.34; #219; zk2's since #612, FJ8b):
+//! The snapshot plane (tooling guide §5; #219; zk2's since #612, FJ8b):
 //! the `.zsnap` header, the row a snapshot is made of, what taking one
 //! reports, and what comparing two says.
 //!
@@ -25,7 +25,7 @@ use super::diff::{ByteDiff, ValueDiff};
 use super::judgement::Judgement;
 use super::observe::{Conformance, KeyIdentity, LensPresence};
 
-/// The first line of a `.zsnap` file (RFC 13 §4.4): what was asked, in
+/// The first line of a `.zsnap` file (tooling guide §5): what was asked, in
 /// which namespace, when, and — the fact a capture does not need — over
 /// what span. Recorded keys are full wire keys and are never re-derived
 /// from the namespace (O3).
@@ -104,7 +104,7 @@ pub struct SnapshotRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamper: Option<StamperWire>,
     /// The zenoh id of the session that *answered*, where the reply named
-    /// its replier (`source_zid`, RFC 13 §4.4).
+    /// its replier (`source_zid`, tooling guide §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_zid: Option<String>,
     /// The payload against its declared type: valid, invalid, undecodable,
@@ -206,7 +206,7 @@ pub struct SnapshotReport {
     pub incomplete: Vec<String>,
 }
 
-/// What two snapshots disagree about (RFC 13 §4.4), compared **by zk2 key**:
+/// What two snapshots disagree about (tooling guide §5), compared **by zk2 key**:
 /// each row's key relative to its own file's namespace, so two deployments'
 /// snapshots line up on the keys their services publish. Both spans are
 /// stated, and the facets are kept apart.
@@ -242,7 +242,7 @@ impl SnapshotDiff {
             || self.truncated > 0
     }
 
-    /// The RFC 13 §1.2 projection: a difference is the finding
+    /// The exit projection (tooling guide §1): a difference is the finding
     /// (`Established`, exit 1), identity the clean answer. A diff over two
     /// parsed files is always asked.
     pub fn to_judgement(&self) -> Judgement {
