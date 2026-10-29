@@ -293,7 +293,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   bounded queue, `bus::stall`, a read again 100 ms after a withdrawal
   leaving none known held (one per burst), a move (the transport event,
   or a withdrawal heard with no link, F-268) kept until the round trip
-  asked 100 ms after it stands (core 0.56), a governed interface's
+  asked after it stands (the barrier asking the one after an open
+  `presence::OPEN_MARGIN` after it, core 0.56, #914), a governed
+  interface's
   incumbents read once after the round trip, and a one-shot timer at
   `Arbiter::due`; the view starts, and has listened from, the declaration
   of its last stream subscription (text 0.3). `model::arbitration`'s
@@ -1190,7 +1192,14 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   transport state on a task of its own that every waiter shares
   (`Barrier::establish_within`: a waiter that stops waiting leaves it
   running and the next takes it up, its GET waiting the session's
-  interests timeout; #882, core 0.44); a GET whose time reaches the
+  interests timeout; #882, core 0.44), and never asked at once at an
+  open: within `presence::OPEN_MARGIN` (100 ms) of an open that is the
+  session's latest transport event the round trip waits out the rest on
+  its task, a move meanwhile ending it unasked (core §8.1, 0.56, #914:
+  zenoh 1.10.1 tells an open before the session's router face declares
+  the subscribers' interests again; `tests/presence.rs`'s
+  `a_barrier_round_trip_after_an_open_follows_the_reopen`, 60 of 60); a
+  GET whose time reaches the
   session's `routing/interests/timeout` is possibly incomplete
   (`PresenceRead::at_interests_timeout`: zenoh 1.10.1 ends it there with no
   error reply), and the tools' sessions run with 120 s
@@ -1411,8 +1420,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   0.1 s after a withdrawal leaving none known held, on the consumer's
   session. A move begins at the watch session's transport event or at a
   withdrawal heard while it holds no link (F-268, core 0.56); its round
-  trip is asked 100 ms after it (an open is told before the subscribers'
-  interests are declared again, core 0.56), what the watch heard before
+  trip is asked through the barrier, which asks the one after an open
+  `presence::OPEN_MARGIN` (100 ms) after it (an open is told before the
+  subscribers' interests are declared again, core 0.56, #914), what the
+  watch heard before
   the reply taken first, and asked again until one stands. A one-shot
   timer at `Arbiter::due`. `Arbitration` reads `active`, `counts`,
   `discards`, `reads`, `round_trips`, `moving`, `watching`. Scenarios
