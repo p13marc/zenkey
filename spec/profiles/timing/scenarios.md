@@ -75,7 +75,9 @@ the reference runs them as tests of `zenkey`
   timing` (§6, #908, MC); each one's `--help` is the interface a
   black-box runner drives and reads, every answer and report one JSON
   line. The owner's steps are its standard input's: `timing resume cmd`
-  and `timing pause cmd` start and stop `cmd`, `timing add <axis>`
+  and `timing pause cmd` start and stop `cmd`, `timing every <member>
+  <ms>` publishes a member at another interval than its period (§6 step
+  3, text 0.3), `timing add <axis>`
   declares an axis's member token and publishes it, `timing declare
   <axis>` declares the token alone and publishes nothing (§3 step 5, text
   0.3, F-276), `timing remove <axis>` stops it and withdraws its token,
@@ -243,6 +245,14 @@ to `axis/*`, the window's start its subscription's start, and states ε =
 100 ms. It answers §5's three questions of each member it held in the
 window, at any instant of it (F-267). The owner publishes `axis/x` every
 100 ms in every step.
+
+**The reference** (#908, MC). T is `zenctl timing 'zk2/lab/pace/**' --for
+5 --clock-bound 100 --format json`, a new run per step, its stderr's
+`timing: listening` line the window's start; the owner is the owner
+example's drive (`timing resume cmd`, `timing add x`, `timing pause cmd`
+and `timing resume cmd` for step 2, `timing every cmd 250` for step 3).
+The reference runs the section as `zenctl/tests/live_zk2.rs`'s
+`timing_s6_a_tools_window`.
 
 **Steps.**
 1. The owner publishes `cmd` every 100 ms throughout. T reads.

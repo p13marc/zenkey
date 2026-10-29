@@ -10,8 +10,9 @@ The second implementation ran 0.2 against the reference runtime (zk2py
 round 78) and filed F-273, F-275 and F-276 against `timing.v1`, all
 accepted on #908. The reference's tools (`zenctl timing`, the doctor's
 `timing-declaration`, `check conform`'s `timing-period` and
-`timing-deadline`, and zengui's Inspector, #908's MC) ran §6. This text
-answers the findings and says what the tools found. It is written
+`timing-deadline`, and zengui's Inspector, #908's MC) ran §6, `zenctl
+timing` three times in a row. This text answers the findings and says what
+the tools found. It is written
 against core 0.55, as 0.2 was.
 
 **Changed: rules (round 78).**
@@ -41,10 +42,60 @@ against core 0.55, as 0.2 was.
   arrival's `wall_ns`, the wall clock it read at the arrival, as its
   `--help` promised, where 0.2's printed null.
 
+**Changed: what the tools found (MC).**
+- **A loss the tool cannot attribute is every member's** (§2.7). A queue's
+  refusal, or a stall of the tool's receive path, names no member, and
+  0.2's "a delivery of the member" could be read as excusing a member none
+  of whose deliveries is known lost. It is lost for every member the tool
+  holds: any of them may have been the one. `conclusions.json`'s
+  description says what sets `reading.lost`. No verdict of a fixture
+  moves.
+- **A tool's known members** (§2.7). A tool holds no binding, so a member
+  is known to it only when its template has no parameter, and a selector
+  naming a concrete key binds nothing. Scenarios §6's `cmd` is known and
+  `axis/x` is not, as 0.2's expected observations already read them.
+  `periods.json`'s description says so.
+- **The lifespan across a face** (§2.8). 0.2 said it was judged "as
+  anywhere", and a descriptor does not cross a face either: a reader there
+  holds an owner's `meta.zid` only on its deployment's word, as it holds
+  ε, and without one reads every sample `unattributed` (§2.6 step 6), the
+  owner's own included. `lifespans.json` gains two cases: the same samples
+  with no `meta.zid` (unattributed) and with the deployment's (live, then
+  expired). The reference tool takes it as `--owner-zid`.
+- **Scenarios §6's step 3 on the black box**: the owner example gains
+  `timing every <member> <ms>`, a member published at another interval
+  than its period, since none of its commands could publish `cmd` every
+  250 ms; the conventions name it, and §6 names the reference tool and its
+  runs.
+
+**Stated: what the tools do** (the reference, not a rule).
+- **`zenctl timing`** follows presence on a watch session in no namespace,
+  reads presence and descriptors on its namespaced session, and starts its
+  window once a presence read after the round trip and every descriptor it
+  shows stand, trying once more when they did not (F-263); its opening is
+  in the report. Each arrival is read in the subscriber's callback, and
+  samples, token moves, owed reads and its timer are folded in one order
+  whose instants never go back. A withdrawal leaving none owes a read
+  100 ms later; a loss, a stall or a move of its watch session's transport
+  holds every owner unconfirmed until presence is read again. Every
+  verdict is `zenkey_model::timing`'s, rolled up by `roll_up`.
+- **`check conform`'s `timing-period` and `timing-deadline`** run the same
+  reader over the suite's window, one case per exposed timed stream, read
+  over its members by finding; both skipped, it sends nothing.
+- **The doctor's `timing-declaration`** is the linter's warnings of §2.2,
+  §2.3 and §2.5 read from the contracts the descriptors name.
+- **zengui's Inspector** reads a timed stream's declared values beside its
+  type, and its deadline and period over the slot's recorded history, the
+  window's own view: arrivals stamped at the data pump's callback, the
+  owner's state as the presence link landed it, and the lifespan not
+  judged for want of ε.
+
 **Deliberately not changed.**
 - **No verdict of a lifespan or a period,** and no tracker's but F-275's
   sequence.
 - **The core version.** Nothing here needs core 0.56.
+- **No zenwatch rule.** `silent-for` watches a selector's silence; a
+  deadline rule waits.
 
 ## 0.2 — 2026-10-27: what the runtime showed, and round 76's answers (#908, MB)
 

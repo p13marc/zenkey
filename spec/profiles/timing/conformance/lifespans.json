@@ -979,6 +979,82 @@
           }
         }
       ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "unattributed",
+          "verdict": "unobservable"
+        },
+        {
+          "reason": "unattributed",
+          "verdict": "unobservable"
+        }
+      ],
+      "note": "text 0.3 (§2.8): across a constrained face no descriptor crosses, so a reader with no meta.zid on its deployment's word attributes no stamp, its owner's own included",
+      "owners": [],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 5,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 250,
+            "id": "1f"
+          }
+        }
+      ]
+    },
+    {
+      "epsilon_ms": 100,
+      "expect": [
+        {
+          "reason": "live",
+          "verdict": "live"
+        },
+        {
+          "reason": "expired",
+          "verdict": "expired"
+        }
+      ],
+      "note": "text 0.3 (§2.8): the same samples across a face, the owner's meta.zid on the deployment's word: judged as anywhere",
+      "owners": [
+        "1f"
+      ],
+      "resource": {
+        "annotations": {
+          "timing.deadline_ms": 100,
+          "timing.lifespan_ms": 100,
+          "timing.period_ms": 20
+        },
+        "kind": "stream"
+      },
+      "samples": [
+        {
+          "stamp": {
+            "age_ms": 5,
+            "id": "1f"
+          }
+        },
+        {
+          "stamp": {
+            "age_ms": 250,
+            "id": "1f"
+          }
+        }
+      ]
     }
   ],
   "description": "timing.v1 §2.6: one reader's samples of one member, in arrival order, within one reading -> each sample's lifespan judgement. resource is {kind, annotations}, read as declarations.json reads one. epsilon_ms is the deployment's stated bound ε in milliseconds, null when none is stated. owners lists the meta.zid of each instance of the provider's address the reader holds a descriptor of, as written; one that is not 1 to 32 hexadecimal digits states none. A sample's stamp is null when it carries none, else {age_ms, id}: age_ms the reader's wall clock at the arrival minus the stamp's time, in milliseconds, exact to the nanosecond, negative when the stamp is ahead; id the stamp's id. Ids and zids compare by value, case and leading zeros ignored (core §3.3). Each expect entry is {verdict, reason}, by the first of these that holds: the resource is not a stream: not_this_profiles, kind; the declaration is invalid: unobservable, invalid; no timing.lifespan_ms: not_asked, no_lifespan; epsilon_ms null: unobservable, no_bound; no stamp: unobservable, unstamped; no owner's zid: unobservable, unattributed; the id is none of the owners': unobservable, foreign_stamp; the id's clock disagrees, because this stamp's age is below -ε, or an earlier sample of this case with the same id (by value) reached this step with an age below -ε: unobservable, clock_disagrees; age - ε above the lifespan: expired, expired; otherwise live, live. Both bounds are inclusive: an age of exactly the lifespan plus ε, or of exactly -ε, is live."
