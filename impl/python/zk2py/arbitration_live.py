@@ -1,4 +1,4 @@
-"""``arbitration.v1`` on a bus (profile text 0.2, core 0.56; #609, rounds 77 and 78).
+"""``arbitration.v1`` on a bus (profile text 0.3, core 0.56; #609, rounds 77, 78 and 79).
 
 - :class:`Actuator` is a consumer's runtime for one arbitrated role
   (§2.1): it refuses an invalid declaration before anything is declared
@@ -33,8 +33,10 @@
   a period, its first put 500 ms after its tokens (text 0.2, F-269), which
   holds and resumes, re-mints make-before-break, and, as a
   ``redundancy.v1`` candidate, puts raw round its writer (scenarios §11).
-- :class:`ToolView` is a tool's own view (§2.14): the same rules over its
-  own subscription, watch and clock, never the consumer's.
+- :class:`ToolView` is a tool's own view (§2.14): the actuator's runtime with
+  no service, over the tool's own subscription, watch and clock, never the
+  consumer's; no ε, outcome 6 read when every revision held governs, and
+  listening counted from its subscriptions' declaration (text 0.3).
 """
 
 from __future__ import annotations
@@ -677,64 +679,140 @@ class Commander:
             self.owner.close()
 
 
-class ToolView:
-    """A tool's own view of one consumer's role (§2.14): the role's binding
-    and parameter bindings from the consumer's descriptor, the deadline from
-    the declaration, and §2.4 to §2.11 run over the tool's own subscription,
-    watch and monotonic clock. Its selection is labelled its own, never the
-    consumer's."""
+class ToolView(Actuator):
+    """A tool's own view of one consumer's role (§2.14): §2.4 to §2.11 over
+    the tool's own subscription, watch and monotonic clock, never the
+    consumer's, with the role's binding and parameter bindings from the
+    consumer's descriptor (a ``self.system`` or ``self.service`` resolved to
+    the consumer's address by the caller) and the deadline from the
+    declaration. It is the :class:`Actuator`'s runtime with no service and no
+    application: the same watch (one liveliness subscriber per entry on
+    ``watch``, without history, its round trip after declaring them), the
+    same moves kept until the round trip asked after them stands, the same
+    read again 0.1 s after a withdrawal leaving none known held (on
+    ``reader``, a session that never held a liveliness subscriber), and the
+    same timer; its switches are its own, kept in :attr:`lines` and told to
+    no one.
+
+    What it reads that no descriptor carries (text 0.3): it states no ε, so
+    no sample is expired (§2.5 outcome 5); with ``governed`` (every revision
+    of the required interface the tool holds lists ``redundancy.v1``,
+    :func:`zk2py.arbitration.view_governed`) it reads outcome 6, learning
+    the incumbents as a consumer does, a read of each entry's presence after
+    its watch's round trip and each holder's descriptor. It has listened
+    from the declaration of its subscriptions to the role's stream, the last
+    of them (:attr:`listen_ns`), never from its watch's round trip. A stall
+    of its receive path within the last deadline is ``lost`` (core §2.7)."""
 
     def __init__(self, session: Any, watch: Any, interface: str, decl: ab.Declaration, bindings: list[str],
-                 params: dict[str, str]) -> None:
+                 params: dict[str, str], *, reader: Any = None, governed: bool = False,
+                 warn: Callable[[str], None] | None = None) -> None:
         import zenoh
 
         from .budget import StallWatch
 
         assert decl.resource is not None and decl.deadline_ms is not None
+        self.address = ""
+        self.governed = governed
+        self.zids: dict[tuple[str, str], str] = {}
+        self._getting: set[tuple[str, str]] = set()
+        self.open_margin_s = 0.1
+        self.decl = decl
+        self.iface = interface
         self.token, self.template = decl.resource.split("/", 1)
+        self.params = dict(params)
+        self.bindings = list(bindings)
+        self.emit = lambda line: None
+        self.warn = warn or (lambda line: None)
+        self.deliver = None
+        self.reread_delay_s = 0.1
+        self.retry_s = 0.1
+        self.infer_moves = True
+        self.lock = threading.RLock()
+        self.cond = threading.Condition(self.lock)
+        self.closed = False
+        self.lines: list[dict[str, Any]] = []
+        self.reads: list[dict[str, Any]] = []
+        self.round_trips: list[dict[str, Any]] = []
+        self.moves: list[tuple[int, str]] = []
+        self.log: list[tuple[float | None, str, str]] = []
+        self.gen = 0
+        self._reading: set[str] = set()
+        self.arb = ab.Arbiter(interface, self.token, self.template, self.params, decl.deadline_ms, self.bindings)
+        #: §2.14 (text 0.3): "the tool's view states no ε, and no sample is expired"
+        self.lifespan = None
+        self.angle_key = None
+        self.owner = None
+        self.session = session
+        self.watch = watch
+        self.reader = reader if reader is not None else session
+        self.listener: Any = None
+        self.watch_subs: list[Any] = []
+        self.descr_subs: list[Any] = []
+        self.subs: list[Any] = []
+        self._timer: threading.Thread | None = None
+        self.selectors = [f"zk2/{e}/@zk/alive/{interface}/**" for e in self.bindings]
         self.deadline_ns = decl.deadline_ms * MS
-        self.lock = threading.Lock()
-        self.arb = ab.Arbiter(interface, self.token, self.template, params, decl.deadline_ms, bindings)
         self.stall = StallWatch(session)
+        #: each subscription to the role's stream, as declared (§2.14, text 0.3)
+        self.subscribed_ns: list[int] = []
         self.t0 = time.monotonic_ns()
-        self.arb.start(self.t0)
-        self.watch_subs = [live.declare_liveliness_subscriber(
-            watch, f"zk2/{e}/@zk/alive/{interface}/**", self._token, history=False) for e in bindings]
-        if bindings:
-            live.settle(watch, 5.0, selector=f"zk2/{bindings[0]}/@zk/alive/{interface}/**")
-        self.subs = [session.declare_subscriber(_expr(e, interface, self.token, self.template, params),
-                                                zenoh.handlers.Callback(self._sample)) for e in bindings]
+        try:
+            with self.lock:
+                self._handle(self.arb.start(self.t0))
+            for sel in self.selectors:
+                self.watch_subs.append(live.declare_liveliness_subscriber(watch, sel, self._token, history=False))
+            try:
+                self.listener = live._info(watch).declare_transport_events_listener(
+                    zenoh.handlers.Callback(self._moved), history=False)
+            except Exception:  # noqa: BLE001 - a binding without transport events: no move is heard
+                self.listener = None
+            if self.selectors:
+                self._round_trip(0)
+            if governed:
+                for e in self.bindings:
+                    self.descr_subs.append(session.declare_subscriber(
+                        f"zk2/{e}/@zk/instance/*", zenoh.handlers.Callback(self._descriptor)))
+                self._read_at_start()
+            for e in self.bindings:
+                self.subs.append(session.declare_subscriber(
+                    _expr(e, interface, self.token, self.template, self.params),
+                    zenoh.handlers.Callback(self._sample)))
+                self.subscribed_ns.append(time.monotonic_ns())
+            self._timer = threading.Thread(target=self._timer_loop, daemon=True)
+            self._timer.start()
+        except BaseException:
+            self.close()
+            raise
 
-    def _sample(self, sample: Any) -> None:
-        import zenoh
-
-        with self.lock:
-            self.arb.sample(time.monotonic_ns(), str(sample.key_expr), delete=sample.kind == zenoh.SampleKind.DELETE)
-
-    def _token(self, sample: Any) -> None:
-        import zenoh
-
-        with self.lock:
-            now = time.monotonic_ns()
-            if sample.kind == zenoh.SampleKind.DELETE:
-                self.arb.withdrawn(now, str(sample.key_expr))
-            else:
-                self.arb.declared(now, str(sample.key_expr))
+    @property
+    def listen_ns(self) -> int | None:
+        """The instant it began to listen: its last subscription's declaration."""
+        return max(self.subscribed_ns) if self.subscribed_ns else None
 
     def view(self) -> ab.View:
         """Now: how long it listened, whether its own path stalled within the
         last deadline (core §2.7's watch), and what its view selects."""
         now = time.monotonic_ns()
         with self.lock:
-            self.arb.tick(now)
+            self._handle(self.arb.tick(now))
             active = self.arb.active
         lost = any(t >= now - self.deadline_ns for t in self.stall.losses())
-        return ab.View(now - self.t0, lost, active)
+        return ab.View(ab.listened_ns(self.subscribed_ns, now), lost, active)
+
+    def switches(self) -> list[dict[str, Any]]:
+        with self.lock:
+            return list(self.lines)
 
     def close(self) -> None:
-        for s in self.subs + self.watch_subs:
+        """Its subscriptions, its watch and its listener undone; the sessions
+        are the caller's."""
+        with self.cond:
+            self.closed = True
+            self.cond.notify_all()
+        for x in self.subs + self.watch_subs + self.descr_subs + ([self.listener] if self.listener else []):
             try:
-                s.undeclare()
+                x.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
         self.stall.close()

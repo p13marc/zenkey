@@ -1,4 +1,4 @@
-"""``timing.v1`` on a bus (profile text 0.2, core 0.55; #609, rounds 76 and 78).
+"""``timing.v1`` on a bus (profile text 0.3, core 0.55; #609, rounds 76, 78 and 79).
 
 - :class:`Reader` is a consumer of a timed resource (§2.1, §2.5, §2.6) for
   one provider address: a :class:`zk2py.timing.Tracker` per resource with a
@@ -20,6 +20,11 @@
 - :class:`Window` is a tool's window over it (§2.7): presence followed and
   the descriptors held first, then the subscriptions (the window's start),
   the trackers evaluated at its end, and §5's three questions per member.
+  It holds no binding, so only a member of a template without parameters
+  is known to it (text 0.3); a loss it cannot attribute, a stall of its
+  receive path, is every member's (text 0.3); across a constrained face it
+  follows no presence, reads no descriptor, and holds an owner's
+  ``meta.zid`` only on its deployment's word (§2.8, text 0.3).
 - :func:`stamped_clock` is an owner's stamping clock offset from its host's
   wall clock (the scenarios' ``simulate_offset``).
 """
@@ -89,13 +94,27 @@ class Reader:
     follower's first read is folded and every instance it shows has its
     descriptor held (a tool's window, §2.7). With ``subscribe_first`` they
     are declared before the follower exists, as scenarios §6 lists a tool's
-    steps (F-263)."""
+    steps (F-263).
+
+    ``follow_presence`` False is a reader that follows no presence (§2.5,
+    §2.8): every owner unseen, no descriptor read. ``across_face`` is a
+    reader across a constrained face (§2.8): it follows no presence, and
+    holds a ``meta.zid`` only from ``owner_zids``, its deployment's word
+    (text 0.3, :func:`zk2py.timing.owners_held`); elsewhere ``owner_zids``
+    is refused, since its descriptors are the word."""
 
     def __init__(self, session: Any, watch: Any, address: str, contract: Any, rids: list[str], *,
                  epsilon_ms: int | float | None = None, params: dict[str, str] | None = None,
                  on_value: Callable[[str, bytes], None] | None = None,
                  on_report: Callable[[str, tm.Report], None] | None = None,
-                 seed_first: bool = False, seed_timeout_s: float = 3.0, subscribe_first: bool = False) -> None:
+                 seed_first: bool = False, seed_timeout_s: float = 3.0, subscribe_first: bool = False,
+                 follow_presence: bool = True, across_face: bool = False,
+                 owner_zids: list[str] | tuple[str, ...] = ()) -> None:
+        if owner_zids and not across_face:
+            raise ValueError("owner_zids is a deployment's word across a constrained face (§2.8); elsewhere the "
+                             "descriptors state meta.zid")
+        self.across_face = across_face
+        self.follows = follow_presence and not across_face
         self.session, self.watch, self.address = session, watch, address
         self.system, self.service = address.split("/", 1)
         canonical = contract.canonical if hasattr(contract, "canonical") else contract
@@ -135,7 +154,9 @@ class Reader:
             # member waited for from its member token (F-261)
             tracker = tm.tracker_for(decl, bound, known, epoch=bool(r.get("epoch")))
             self.resources[rid] = _Resource(rid, r, decl, f"{base}/{_template_expr(r['template'])}", known, tracker,
-                                            tm.LifespanReading(decl, epsilon_ms), r.get("epoch"))
+                                            tm.LifespanReading(decl, epsilon_ms,
+                                                               tm.owners_held(across_face, [], owner_zids)),
+                                            r.get("epoch"))
         self._folds_seen = 0
         #: how far the follower's heard events and reads were scanned for
         #: member tokens seen (F-261)
@@ -150,17 +171,21 @@ class Reader:
             # followed, then the descriptor read (F-263)
             self._subscribe()
         # Presence first: the follower (its seed read made in its
-        # constructor), then the descriptors' puts.
-        self.follower = PresenceFollower(session, watch, f"zk2/{address}/@zk/**")
-        import zenoh
+        # constructor), then the descriptors' puts. A reader that follows no
+        # presence holds every owner unseen (§2.5), and across a face no
+        # descriptor crosses (§2.8): it reads none.
+        self.follower: PresenceFollower | None = None
+        self._threads = [threading.Thread(target=self._timer_loop, daemon=True)]
+        if self.follows:
+            self.follower = PresenceFollower(session, watch, f"zk2/{address}/@zk/**")
+            import zenoh
 
-        self.subs.append(session.declare_subscriber(f"zk2/{address}/@zk/instance/*",
-                                                    zenoh.handlers.Callback(self._descriptor_put)))
-        self._threads = [threading.Thread(target=self._presence_loop, daemon=True),
-                         threading.Thread(target=self._timer_loop, daemon=True)]
+            self.subs.append(session.declare_subscriber(f"zk2/{address}/@zk/instance/*",
+                                                        zenoh.handlers.Callback(self._descriptor_put)))
+            self._threads.append(threading.Thread(target=self._presence_loop, daemon=True))
         for th in self._threads:
             th.start()
-        if seed_first:
+        if seed_first and self.follower is not None:
             self.wait_seeded(seed_timeout_s)
         if not subscribe_first:
             self._subscribe()
@@ -210,6 +235,8 @@ class Reader:
     def wait_seeded(self, timeout_s: float) -> bool:
         """Until the follower's first read is folded and every instance it
         shows has its descriptor held."""
+        if self.follower is None:
+            return False
         end = time.monotonic() + timeout_s
         while time.monotonic() < end:
             with self.follower.lock:
@@ -338,6 +365,7 @@ class Reader:
         # from the follower's first version: a fold before this thread first
         # waits is never missed
         v: int | None = 0
+        assert self.follower is not None
         while not self.closed:
             got = self.follower.next_move(0.5, since=v)
             if self.closed:
@@ -403,6 +431,8 @@ class Reader:
         from .slug import slug
         from . import templates
 
+        if self.follower is None:
+            return
         tokenless = self._tokenless()
         f = self.follower
         with f.lock:
@@ -522,7 +552,8 @@ class Reader:
                 s.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
-        self.follower.close()
+        if self.follower is not None:
+            self.follower.close()
 
 
 class Window:
@@ -530,11 +561,19 @@ class Window:
     the descriptors first, then subscribes (the window's start, F-263), and
     at the end evaluates every tracker and answers §5's questions of every
     member it held in the window, one that ended in it included (§2.7's
-    "each member it holds over a window", F-267)."""
+    "each member it holds over a window", F-267).
+
+    A tool holds no binding (§2.7, text 0.3): it is handed none, so only a
+    member of a template without parameters is known to it, and a member of
+    ``axis/{axis}`` is judged from its first arrival, as §6's ``axis/x``.
+    Across a constrained face (``across_face``) it follows no presence and
+    reads no descriptor (§2.8), so the deadline and the period are
+    unobservable, and ``owner_zids``, the deployment's word, is every
+    ``meta.zid`` it holds for the lifespan (text 0.3)."""
 
     def __init__(self, session: Any, watch: Any, address: str, contract: Any, rids: list[str], *,
-                 epsilon_ms: int | float | None = None, params: dict[str, str] | None = None,
-                 across_face: bool = False, seed_first: bool = True) -> None:
+                 epsilon_ms: int | float | None = None, across_face: bool = False,
+                 owner_zids: list[str] | tuple[str, ...] = (), seed_first: bool = True) -> None:
         """``seed_first`` False opens the window (the subscriptions) before
         the first presence read lands, as §6's setup lists the steps
         (F-263): the owner is then unseen at the window's start."""
@@ -542,8 +581,10 @@ class Window:
 
         self.across_face = across_face
         self.stall = StallWatch(session)
-        self.reader = Reader(session, watch, address, contract, rids, epsilon_ms=epsilon_ms, params=params,
-                             seed_first=seed_first, subscribe_first=not seed_first)
+        self.reader = Reader(session, watch, address, contract, rids, epsilon_ms=epsilon_ms,
+                             seed_first=seed_first and not across_face,
+                             subscribe_first=not seed_first and not across_face, across_face=across_face,
+                             owner_zids=owner_zids)
         self.start_ns = self.reader.start_ns
         self.end_ns: int | None = None
 
@@ -554,7 +595,11 @@ class Window:
         self.end_ns = end = time.monotonic_ns()
         rd.tick(end)
         gap_ms, closed = self.stall.reading()
-        lost = closed or gap_ms > self.stall.bound_ms
+        # §2.7 (text 0.3): a stall of the receive path names no member, so it
+        # is "lost for every member it holds"; zk2py's subscriptions hand
+        # each sample to its callback with no queue of its own, so no
+        # refusal is known of one member alone
+        unattributed = closed or gap_ms > self.stall.bound_ms
         out: dict[str, dict[str, tm.Answer]] = {}
         self.readings: dict[str, tm.Reading] = {}
         start = self.start_ns
@@ -568,6 +613,7 @@ class Window:
                 if res.tracker is not None:
                     members |= set(res.tracker.members)
                 for m in sorted(members):
+                    lost = tm.lost_for(m, (), unattributed)
                     out[m] = tm.conclude(res.decl, self._reading(res, m, start, end, lost, present_throughout))
         return out
 

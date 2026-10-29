@@ -1,0 +1,186 @@
+"""``timing.v1``'s tool on a bus (§2.7, §5; #609, round 79): ``python -m
+zk2py.timing_tool -c ENDPOINT [--for SECS] [--clock-bound MS]
+[--contracts PATH]... [--across-face [--owner-zid ZID]...] SELECTOR``.
+
+Written from ``spec/profiles/timing/v1.md`` (text 0.3) §2.7 and §5, as a
+tool's implementer reads them. ``SELECTOR`` names one owner's members,
+``zk2/<system>/<service>/**`` or narrower; for each timed stream it reaches
+(a ``stream`` or ``@stream`` resource with a ``timing.*`` annotation):
+
+1. the owner's presence and each instance's descriptor (core §3.3), and the
+   revision each names, held offline (``--contracts``) or retrieved (core
+   §8.4);
+2. a window (:class:`zk2py.timing_live.Window`) of ``--for`` seconds: its
+   presence followed and every descriptor held first, then its
+   subscriptions, the window's start (F-263), which standard error's
+   ``timing: listening`` line marks; no binding, so a member is known only
+   when its template has no parameter (text 0.3); a stall of its receive
+   path is every member's loss (text 0.3); ε is ``--clock-bound``, never
+   the HLC's delta;
+3. §5's three questions of each member it held, and each read over its
+   resource and over the run by its finding (F-264).
+
+Across a constrained face (``--across-face``) no presence and no descriptor
+cross: the contracts are ``--contracts``, the deployment's word, and each
+``--owner-zid`` is a ``meta.zid`` on its word (§2.8, text 0.3); without
+one every lifespan is ``unattributed``.
+
+It prints one JSON document (``report``, ``rows``, ``run``, ``exit``), and
+exits 1 on a finding over the run (a deadline missed with its owner
+present and nothing lost, a period not kept likewise, a sample expired), 0
+when every question asked is answered on its other pole over the run, 2
+otherwise (no member held, a question unobservable).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from typing import Any
+
+from . import live
+from . import timing as tm
+
+
+def timed_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
+    """The timed streams of a contract the selector reaches: a stream with a
+    ``timing.*`` key among its resolved annotations (§0's timed resource,
+    the invalid ones included, which §5 reads ``invalid``)."""
+    import zenoh
+
+    from .timing_live import _template_expr
+
+    sel = zenoh.KeyExpr(selector)
+    out = []
+    for r in canonical.get("resources") or []:
+        if tm.kind_of(r["kind"]) != "stream" or not any(k.startswith("timing.") for k in r.get("annotations") or {}):
+            continue
+        expr = zenoh.KeyExpr(f"zk2/{address}/{canonical['interface']}/{r['token']}/{_template_expr(r['template'])}")
+        if sel.intersects(expr):
+            out.append(f"{r['token']}/{r['template']}")
+    return out
+
+
+def _address(selector: str) -> str:
+    parts = selector.split("/")
+    if len(parts) < 3 or parts[0] != "zk2" or "*" in parts[1] or "*" in parts[2]:
+        raise SystemExit(f"timing: {selector!r}: zk2py's tool reads one owner, zk2/<system>/<service>/…")
+    return f"{parts[1]}/{parts[2]}"
+
+
+def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s: float, clock_bound_ms: int | None,
+        across_face: bool = False, owner_zids: tuple[str, ...] = (), timeout: float = 1.0,
+        listening: Any = None) -> dict[str, Any]:
+    from .arbitration_tool import Store
+    from .timing_live import Window
+
+    address = _address(selector)
+    store = Store(None if across_face else session, offline, timeout)
+    contracts: list[dict[str, Any]] = []
+    if across_face:
+        contracts = [c.canonical for c in offline]
+    else:
+        from .arbitration_tool import _descriptor
+
+        p = live.list_presence(session, f"zk2/{address}/@zk/instance/*", timeout)
+        for inst in sorted({x["instance"] for x in p.instances}):
+            doc = _descriptor(session, address, inst, timeout)
+            for e in (doc or {}).get("interfaces") or []:
+                canon = store.get(e.get("iface"), e.get("contract")) if isinstance(e, dict) else None
+                if canon is not None and canon not in contracts:
+                    contracts.append(canon)
+    plans = [(c, rids) for c in contracts if (rids := timed_rids(c, selector, address))]
+    windows = [Window(session, watch, address, c, rids, epsilon_ms=clock_bound_ms, across_face=across_face,
+                      owner_zids=owner_zids) for c, rids in plans]
+    if listening is not None:
+        listening(windows)
+    starts = [w.start_ns for w in windows if w.start_ns is not None]
+    if starts:
+        end = max(starts) + int(window_s * 1_000_000_000)
+        while time.monotonic_ns() < end:
+            time.sleep(min(0.05, max(0.0, (end - time.monotonic_ns()) / 1e9)))
+    rows: list[dict[str, Any]] = []
+    members: dict[str, list[tm.Answer]] = {"deadline": [], "period": [], "lifespan": []}
+    for (canon, rids), w in zip(plans, windows):
+        got = w.end()
+        rd = w.reader
+        w.close()
+        for rid in rids:
+            res = rd.resources[rid]
+            mine = {m: a for m, a in got.items() if m in set(res.first_held) | set(res.known)
+                    | (set(res.tracker.members) if res.tracker is not None else set())}
+            rows.append({"row": "resource", "address": address, "iface": canon["interface"], "resource": rid,
+                         "declaration": res.decl.expect(), "members": len(mine),
+                         "questions": {q: tm.rollup(q, [a[q] for a in mine.values()]).pair()
+                                       for q in ("deadline", "period", "lifespan")}})
+            start, end = w.start_ns or 0, w.end_ns or 0
+            for m, a in sorted(mine.items()):
+                r = w.readings.get(m)
+                arrivals = sum(1 for x in rd.arrivals if x.key == m and x.handed)
+                reps = [x for rid_, x in rd.reports if rid_ == rid and x.member == m and start <= x.at_ns <= end]
+                misses = [{"at_ms": tm.ns_to_ms(x.at_ns - start), "due_ms": tm.ns_to_ms((x.due_ns or 0) - start),
+                           "owner": x.owner} for x in reps if x.event == "missed"]
+                ended = next(({"at_ms": tm.ns_to_ms(x.at_ns - start), "reason": x.reason}
+                              for x in reversed(reps) if x.event == "ended"), None)
+                rows.append({"row": "member", "key": m, "address": address, "iface": canon["interface"],
+                             "resource": rid, "known": m in res.known, "arrivals": arrivals,
+                             "held_ms": None if r is None else tm.ns_to_ms(r.deadline.held_ns),
+                             "missed_present": None if r is None else r.deadline.missed_present,
+                             "missed_not_present": None if r is None else r.deadline.missed_not_present,
+                             "misses": misses, "ended": ended,
+                             **{q: a[q].pair() for q in ("deadline", "period", "lifespan")}})
+                for q in members:
+                    members[q].append(a[q])
+    runq = {q: tm.rollup(q, members[q]).pair() for q in members}
+    # §5 over the run, read by each question's finding (F-264): a question
+    # whose every member is set aside rolls up unobservable as the sentence
+    # and conclusions.json #33 read it, so such a run has no verdict here
+    finding = any(runq[q]["answer"] == tm.FINDING[q] for q in runq)
+    clean = all(runq[q]["answer"] == (tm.NO if tm.FINDING[q] == tm.YES else tm.YES) for q in runq)
+    code = 1 if finding else 0 if clean else 2
+    return {"report": "timing", "selector": selector, "across_face": across_face, "clock_bound_ms": clock_bound_ms,
+            "window_s": window_s, "rows": rows, "run": runq, "exit": code}
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="python -m zk2py.timing_tool", description=__doc__.split("\n")[0])
+    ap.add_argument("selector")
+    ap.add_argument("-c", "--connect", required=True)
+    ap.add_argument("--for", dest="window", type=float, default=10.0)
+    ap.add_argument("--clock-bound", type=int, default=None)
+    ap.add_argument("--contracts", action="append", default=[])
+    ap.add_argument("--across-face", action="store_true")
+    ap.add_argument("--owner-zid", action="append", default=[])
+    ap.add_argument("--timeout", type=float, default=1.0)
+    args = ap.parse_args(argv)
+    from .arbitration_tool import _load
+
+    if args.owner_zid and not args.across_face:
+        print("timing: --owner-zid is the deployment's word across a face (§2.8): give --across-face",
+              file=sys.stderr)
+        return 2
+    offline = _load(args.contracts)
+    session, watch = live.open_client(args.connect), live.open_client(args.connect)
+
+    def listening(windows: list[Any]) -> None:
+        print(f"timing: listening {args.window}s to {len(windows)} window(s)", file=sys.stderr, flush=True)
+
+    try:
+        doc = run(session, watch, args.selector, offline, window_s=args.window, clock_bound_ms=args.clock_bound,
+                  across_face=args.across_face, owner_zids=tuple(args.owner_zid), timeout=args.timeout,
+                  listening=listening)
+    finally:
+        live.close(session)
+        live.close(watch)
+    print(json.dumps(doc, indent=2))
+    return doc["exit"]
+
+
+if __name__ == "__main__":
+    code = main()
+    sys.stdout.flush()
+    import os
+
+    os._exit(code)

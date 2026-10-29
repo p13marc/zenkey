@@ -1,9 +1,9 @@
 """``arbitration.v1``: one commander at a time, in the binding's order
-(profile text 0.2, draft, written against core 0.56 and ``timing.v1`` text
-0.2; ``spec/profiles/arbitration/v1.md``).
+(profile text 0.3, draft, written against core 0.56 and ``timing.v1`` text
+0.3; ``spec/profiles/arbitration/v1.md``).
 
 Read cold from the text, its fixtures and its scenarios alone (#609, round
-77; text 0.2 in round 78). The session-free half:
+77; text 0.2 in round 78, text 0.3 in round 79). The session-free half:
 - :func:`declaration` reads one role against the revision of its required
   interface held (§2.2, §2.3), as ``conformance/declarations.json`` does:
   not arbitrated, arbitrated (its policy, its stream, its deadline and
@@ -21,7 +21,9 @@ Read cold from the text, its fixtures and its scenarios alone (#609, round
   counts;
 - :func:`conclude` is §5's three questions over a tool's reading, as
   ``conformance/conclusions.json`` does, ``no_descriptor`` with no
-  consumer's descriptor read (text 0.2, F-272);
+  consumer's descriptor read (text 0.2, F-272); :func:`view_governed` and
+  :func:`listened_ns` are what a tool's view reads that no descriptor
+  carries, and when it has listened (§2.14, text 0.3);
 - :func:`lint`, §2.2's linter SHOULD (checks 1 to 7), which has no core
   code.
 
@@ -643,6 +645,25 @@ class View:
     listened_ns: int
     lost: bool
     active: str | None
+
+
+def view_governed(revisions: Iterable[dict[str, Any]]) -> bool:
+    """§2.14 (text 0.3): a tool's view "reads §2.5's outcome 6 with the
+    required interface governed when every revision of it the tool holds
+    lists ``redundancy.v1``". A descriptor names no revision of the required
+    interface, so the tool cannot pick the consumer's; with none held, there
+    is no view (the declaration is unread)."""
+    revs = list(revisions)
+    return bool(revs) and all("redundancy.v1" in (r.get("uses") or []) for r in revs)
+
+
+def listened_ns(subscribed_ns: Iterable[int], now_ns: int) -> int:
+    """§2.14 "Listening" (text 0.3): "It has listened from the instant its
+    subscriptions to the role's stream are declared, the last of them":
+    a watch's round trip before them is no listening. Before the last is
+    declared, nothing."""
+    subs = list(subscribed_ns)
+    return 0 if not subs else max(0, now_ns - max(subs))
 
 
 def conclude(declared: str | Declaration, bindings: list[str] | None, view: View | None) -> dict[str, Answer]:
