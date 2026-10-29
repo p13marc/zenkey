@@ -67,21 +67,30 @@ DEADLINE_MS, BOUND_MS, MARGIN_MS = 300, 306, 50
 EXACT = ["lab/safety", "lab/teleop", "lab/autopilot"]
 
 
+#: The checks an open finding is known to fail, each by its identity
+#: (section, name), never by a count (review-bot on PR #919). None is open
+#: here since F-274 (resolved by the reference, text 0.3). A failing check
+#: not here fails the run; one here that passes prints XPASS.
+KNOWN: dict[tuple[str, str], str] = {}
+
+
 class Report:
     """Each check's row: its section, name, outcome, detail, and the open
-    finding it is known to fail by, if any. A known failure prints XFAIL,
-    naming the finding, and still counts as failed; one that passes prints
-    XPASS, so a fix shows."""
+    finding :data:`KNOWN` says it is known to fail by, if any. A known
+    failure prints XFAIL, naming the finding; a known check that passes
+    prints XPASS, so a fix shows (:mod:`zk2py.checks`)."""
 
     def __init__(self) -> None:
         self.rows: list[tuple[str, str, bool, str, str | None]] = []
         self.late_ms: list[float] = []
 
-    def check(self, section: str, name: str, ok: bool, detail: str = "", known: str | None = None) -> bool:
+    def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
+        from .checks import tag
+
+        known = KNOWN.get((section, name))
         self.rows.append((section, name, ok, detail, known))
-        mark = ("XPASS" if ok else "XFAIL") if known else ("PASS" if ok else "FAIL")
         why = f" (known: {known})" if known else ""
-        print(f"{mark} [{section}] {name}{why}" + (f": {detail}" if detail else ""), flush=True)
+        print(f"{tag(ok, known)} [{section}] {name}{why}" + (f": {detail}" if detail else ""), flush=True)
         return ok
 
     def note(self, section: str, text: str) -> None:
@@ -1327,6 +1336,7 @@ def section11(report: Report, oi: str = "py", ci: str = "py") -> None:
                          f"{[(sw(x), x['at_ms']) for x in sws]}; {len(ang)} angle puts in step 1, "
                          f"{len(foreign)} not C_s1's; not_incumbent +{ni}, X put {len(raw)} raw (S saw them)")
         n1 = {a.service: len(a.switches()) for a in acts}
+        t_hold = time.monotonic()
         cs1.hold()
         # Beside the section (text 0.3, §2.14): both tools read A_l over
         # steer.v1 minor 1, every revision they hold governed, so their views
@@ -1334,13 +1344,16 @@ def section11(report: Report, oi: str = "py", ci: str = "py") -> None:
         # not_incumbent: safety ineligible, teleop selected. The control:
         # both tools holding minor 0 offline beside minor 1 retrieved from
         # C_s1's descriptor, so not every revision held governs, X's samples
-        # are arrivals, and safety stays selected.
-        time.sleep(0.4)
+        # are arrivals, and safety stays selected. The tools start once
+        # each actuator's deadline switch shows C_s1 has stopped (no C_s1
+        # sample can then reach their views), and step 3 comes no sooner
+        # than 2 s after the hold, by the clock (review-bot on PR #919).
+        _wait(lambda: all(len(a.switches()) > n1[a.service] for a in acts), 2.0)
         procs = {t: ToolProc(t, bus.endpoint, "lab/rudder-l", [RUDDER, GOVERNED], 1.0) for t in TOOLS}
         ctl = {t: ToolProc(t, bus.endpoint, "lab/rudder-l", [RUDDER, STEER], 1.0) for t in TOOLS}
         views = {t: p.result() for t, p in procs.items()}
         ctls = {t: p.result() for t, p in ctl.items()}
-        time.sleep(max(0.0, 2.0 - 0.4 - 1.5))
+        time.sleep(max(0.0, t_hold + 2.0 - time.monotonic()))
         for a in acts:
             new = a.switches()[n1[a.service]:]
             report.check(sec, f"Expected 2 ({a.service}): C_s1 holds: to teleop, cause deadline, at_ms − last_ms "
@@ -1440,22 +1453,10 @@ def main(argv: list[str] | None = None) -> int:
 
                 traceback.print_exc()
                 report.check(f"§{name} [{oi}→{ci}]", "the section ran to its end", False, f"{type(e).__name__}: {e}")
-    passed = sum(1 for r in report.rows if r[2])
-    failed = len(report.rows) - passed
-    known = [r for r in report.rows if not r[2] and r[4]]
-    findings = sorted({r[4] for r in known if r[4]})
-    late = max(report.late_ms, default=0.0)
-    print(f"arbitration scenarios: {passed} passed, {failed} failed"
-          + (f" ({len(known)} of them known: {', '.join(findings)})" if known else "")
-          + f"; the largest lateness past the detection bound {late:.3f} ms")
-    for sec, name, ok, detail, why in report.rows:
-        if not ok:
-            print(f"{'XFAIL' if why else 'FAIL'} [{sec}] {name}" + (f" (known: {why})" if why else "") + f": {detail}")
-        elif why:
-            print(f"XPASS [{sec}] {name} (known: {why}): passes now")
-    # exit 1 on a failure no open finding explains; a known one is counted
-    # and printed, and leaves the exit 0
-    return 1 if failed > len(known) else 0
+    from .checks import summarise
+
+    return summarise("arbitration scenarios", report.rows,
+                     f"the largest lateness past the detection bound {max(report.late_ms, default=0.0):.3f} ms")
 
 
 if __name__ == "__main__":

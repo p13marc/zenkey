@@ -31,9 +31,10 @@ OWNER and READER ``py`` or ``rs`` (#609, rounds 78 and 79).
   0.3): zk2py's (``python -m zk2py.timing_tool``) and the reference's
   (``zenctl timing``, a black box), each a process, their windows' starts
   their ``timing: listening`` lines; each tool's answers checked against
-  Expected, then the two compared token by token. A check an open finding
-  is known to fail prints XFAIL naming it (F-277), is counted as failed,
-  and leaves the exit 0.
+  Expected, then the two compared token by token. The checks an open
+  finding is known to fail are named one by one in :data:`KNOWN` (F-277's
+  roll-up): each prints XFAIL when it fails and XPASS when it passes, and
+  any other failing check fails the run (:mod:`zk2py.checks`).
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -67,17 +68,37 @@ BOUND_MS, RUNNER_MS = 10, 50
 PERIOD_S = 0.1
 
 
+#: The two tools' readings across a face beside §6 (§2.8), by name.
+FACE_ZID, FACE_NONE = "the owner's zid on the deployment's word", "no zid stated"
+#: The name of the check, at each of §6's steps and §2.8's readings, that a
+#: roll-up whose every member is not asked reads alike in both tools.
+ROLLUP = ("a roll-up whose every member is not asked: the two tools agree (F-277: zk2py unobservable by §5's "
+          "sentence and conclusions.json #33, zenctl not_asked)")
+#: The checks an open finding is known to fail, each by its identity
+#: (section, name), never by a count (review-bot on PR #919): F-277's
+#: roll-up at each of §6's four steps and §2.8's two readings, beside each
+#: owner. A failing check not here fails the run; one here that passes
+#: prints XPASS, so its entry is seen and removed.
+KNOWN: dict[tuple[str, str], str] = {
+    **{(f"§6 [{oi}→both tools]", f"step {n}: {ROLLUP}"): "F-277" for oi in ("py", "rs") for n in "1234"},
+    **{(f"§2.8 beside §6 [{oi}→both tools]", f"{reading}: {ROLLUP}"): "F-277"
+       for oi in ("py", "rs") for reading in (FACE_ZID, FACE_NONE)},
+}
+
+
 class Report:
     def __init__(self) -> None:
         self.rows: list[tuple[str, str, bool, str, str | None]] = []
         self.late: list[tuple[str, float]] = []
 
-    def check(self, section: str, name: str, ok: bool, detail: str = "", known: str | None = None) -> bool:
-        """``known`` names an open finding the check is known to fail by:
-        printed XFAIL, counted as failed, and the exit left 0."""
+    def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
+        """A check whose identity is in :data:`KNOWN` prints XFAIL when it
+        fails, naming its finding, and XPASS when it passes."""
+        known = KNOWN.get((section, name))
         self.rows.append((section, name, ok, detail, known))
-        tag = "PASS" if ok else ("XFAIL" if known else "FAIL")
-        print(f"{tag} [{section}] {name}" + (f" (known: {known})" if known and not ok else "")
+        from .checks import tag
+
+        print(f"{tag(ok, known)} [{section}] {name}" + (f" (known: {known})" if known else "")
               + (f": {detail}" if detail else ""), flush=True)
         return ok
 
@@ -1055,6 +1076,15 @@ def tool_answers(doc: dict[str, Any] | None) -> dict[tuple[str, str], dict[str, 
     return out
 
 
+def _rollup_diffs(diffs: list[tuple[Any, str, Any, Any]]) -> list[tuple[Any, str, Any, Any]]:
+    """The differences F-277 makes: a resource's or the run's roll-up whose
+    every member is not asked, zk2py unobservable (``no_member``), zenctl
+    not asked. Checked apart, under :data:`ROLLUP`, so the comparison of
+    everything else stays strict."""
+    return [d for d in diffs if d[0][0] in ("resource", "run") and d[3] is not None
+            and d[3][0] == "not_asked" and d[2] == ("unobservable", "no_member")]
+
+
 def _member_row(doc: dict[str, Any] | None, key: str) -> dict[str, Any]:
     return next((r for r in (doc or {}).get("rows") or [] if r.get("row") == "member" and r.get("key") == key), {})
 
@@ -1188,18 +1218,15 @@ def section6(report: Report, oi: str) -> None:
                     va, vb = ta.get(k, {}).get(q), tb.get(k, {}).get(q)
                     if va != vb:
                         diffs.append((k, q, va, vb))
-            known = [d for d in diffs if d[0][0] in ("resource", "run") and d[3] is not None
-                     and d[3][0] == "not_asked" and d[2] == ("unobservable", "no_member")]
-            other = [d for d in diffs if d not in known]
+            rollups = _rollup_diffs(diffs)
+            other = [d for d in diffs if d not in rollups]
             results.append((step, {"diffs": diffs, "exits": (ca, cb)}))
             report.check(sec, f"step {step}: the two tools' answers agree, token by token, members, resources and "
                               f"the run",
                          not other and ca == cb,
                          f"exits zk2py {ca}, zenctl {cb}; differences {other or 'none'}")
-            if known:
-                report.check(sec, f"step {step}: a roll-up whose every member is not asked: zk2py unobservable "
-                                  f"(§5's sentence, conclusions.json #33), zenctl not_asked",
-                             False, f"{[(k, q, a, b) for k, q, a, b in known]}", known="F-277")
+            report.check(sec, f"step {step}: {ROLLUP}", not rollups,
+                         f"{[(k, q, a, b) for k, q, a, b in rollups] or 'none'}")
             if step != "4":
                 time.sleep(0.5)
     finally:
@@ -1221,8 +1248,8 @@ def section6_face(report: Report, oi: str) -> None:
         o.resume("cmd")
         time.sleep(0.3)
         face = ["--across-face", "--contracts", str(PACE)]
-        for name, extra, life in (("the owner's zid on the deployment's word", ["--owner-zid", o.zid], ("no", "live")),
-                                  ("no zid stated", [], ("unobservable", "unattributed"))):
+        for name, extra, life in ((FACE_ZID, ["--owner-zid", o.zid], ("no", "live")),
+                                  (FACE_NONE, [], ("unobservable", "unattributed"))):
             runs = {t: ToolRun(t, bus.endpoint, 2.0, face + extra) for t in ("zk2py", "zenctl")}
             got = {t: r.result() for t, r in runs.items()}
             ans = {t: tool_answers(d) for t, (_, d) in got.items()}
@@ -1240,15 +1267,13 @@ def section6_face(report: Report, oi: str) -> None:
             diffs = [(k, q, ta.get(k, {}).get(q), tb.get(k, {}).get(q)) for k in sorted(set(ta) | set(tb))
                      for q in ("deadline", "period", "lifespan", "known")
                      if ta.get(k, {}).get(q) != tb.get(k, {}).get(q)]
-            known = [d for d in diffs if d[0][0] in ("resource", "run") and d[3] is not None
-                     and d[3][0] == "not_asked" and d[2] == ("unobservable", "no_member")]
-            other = [d for d in diffs if d not in known]
+            rollups = _rollup_diffs(diffs)
+            other = [d for d in diffs if d not in rollups]
             report.check(sec, f"{name}: the two tools' answers agree, token by token, and their exits",
                          not other and got["zk2py"][0] == got["zenctl"][0],
                          f"exits zk2py {got['zk2py'][0]}, zenctl {got['zenctl'][0]}; differences {other or 'none'}")
-            if known:
-                report.check(sec, f"{name}: a roll-up whose every member is not asked", False,
-                             f"{[(k, q, a, b) for k, q, a, b in known]}", known="F-277")
+            report.check(sec, f"{name}: {ROLLUP}", not rollups,
+                         f"{[(k, q, a, b) for k, q, a, b in rollups] or 'none'}")
         o.pause("cmd")
     finally:
         bus.close()
@@ -1307,17 +1332,11 @@ def main(argv: list[str] | None = None) -> int:
 
                 traceback.print_exc()
                 report.check(f"§6 [{oi}]", "the section ran to its end", False, f"{type(e).__name__}: {e}")
-    passed = sum(1 for r in report.rows if r[2])
-    failed = len(report.rows) - passed
-    known = [r for r in report.rows if not r[2] and r[4]]
-    late = max((x for _, x in report.late), default=0.0)
-    print(f"timing interop: {passed} passed, {failed} failed"
-          + (f" ({len(known)} of them known: {', '.join(sorted({r[4] for r in known if r[4]}))})" if known else "")
-          + f"; the largest lateness past the 10 ms bound {late:.3f} ms")
-    for sec, name, ok, detail, why in report.rows:
-        if not ok:
-            print(f"{'XFAIL' if why else 'FAIL'} [{sec}] {name}" + (f" (known: {why})" if why else "") + f": {detail}")
-    return 1 if failed > len(known) else 0
+    from .checks import summarise
+
+    return summarise("timing interop", report.rows,
+                     f"the largest lateness past the 10 ms bound {max((x for _, x in report.late), default=0.0):.3f} ms")
+
 
 
 if __name__ == "__main__":

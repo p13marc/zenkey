@@ -2192,7 +2192,9 @@ both tools:
   `zenctl timing` not asked.
 - **Results:** 116 checks passed in each of two runs, §1 to §5 in all four
   pairings and both tools beside both owners, and the 12 checks of F-277
-  printed XFAIL, the exit 0.
+  printed XFAIL, the exit 0. The checks a finding is known to fail are
+  named one by one (`KNOWN`, `zk2py.checks`): any other failure fails the
+  run, and a known check that passes prints XPASS.
 
 ## arbitration.v1 (profile text 0.3, core 0.56)
 
@@ -3707,6 +3709,7 @@ impl/python/
     adminspace.py     §4.2 App. B a router or a peer in a process of its own, the load beside it, the @/** recorder,
                                 and the freeze measurement (never a suite), under access control too (0.50)
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
+    checks.py                   a live runner's checks: known failures by identity, XFAIL and XPASS, the exit
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
                       sysinfo_x, tracker, order, order_b, budget, plans, epoch (presence.md §3); freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
                       telemetry/ meter.v1 and meter.json, telemetry.v1's scenarios' contract, and meterx.v1,

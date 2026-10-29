@@ -218,12 +218,32 @@ def read(session: Any, watch: Any, consumer: str | None, offline: list[Any], *, 
     return rows
 
 
+#: §5's "Finding on" per question: the declaration's no (invalid), the
+#: selection's no only as dead_man, and the binding's yes. The binding's yes
+#: has exactly two reasons in §5's table, wildcard and shadowed, both
+#: warnings and both findings, so its answer alone decides it; the reasons
+#: are named here so a third would not pass unseen.
+BINDING_FINDINGS = ("wildcard", "shadowed")
+
+
+def is_finding(row: dict[str, Any]) -> bool:
+    """§5: a declaration invalid; the view in the dead-man ("No, dead_man,
+    where the deployment expects a commander"); a wildcard or a shadowed
+    entry. ``unbound`` is the selection's own no and "is informative", never
+    a finding: §5 puts it under the selection, not the binding."""
+    decl, sel, binding = row["declaration"], row["selection"], row["binding"]
+    if binding["answer"] == "yes":
+        assert binding["reason"] in BINDING_FINDINGS, f"§5 gives the binding's yes no reason {binding['reason']!r}"
+    return (decl["answer"] == "no"
+            or (sel["answer"] == "no" and sel["reason"] == "dead_man")
+            or (binding["answer"] == "yes" and binding["reason"] in BINDING_FINDINGS))
+
+
 def exit_code(rows: list[dict[str, Any]]) -> int:
     """1 on any finding, 0 when every question asked answers its other pole
-    (``unbound`` informative), 2 otherwise."""
-    finding = any(r["declaration"]["answer"] == "no" or r["binding"]["answer"] == "yes"
-                  or (r["selection"]["answer"] == "no" and r["selection"]["reason"] == "dead_man") for r in rows)
-    if finding:
+    (the selection's ``unbound`` informative), 2 otherwise: an answer
+    unobservable, or nothing arbitrated in scope."""
+    if any(is_finding(r) for r in rows):
         return 1
     if any(r[q]["answer"] == "unobservable" for r in rows for q in ("declaration", "selection", "binding")):
         return 2

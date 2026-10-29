@@ -15573,6 +15573,34 @@ XFAIL. Wording that would settle it, either way:
   zk2py's runner, which pauses between windows, resumes it. This is the
   black box's interface, read from its `--help`.
 
+**After review-bot on PR #919.**
+- **Known failures by identity.** Each runner names the checks an open
+  finding is known to fail, one by one, by section and name (`KNOWN`):
+  F-277's roll-up at each of §6's four steps and §2.8's two readings,
+  beside each owner, in `timing_interop`, and none in
+  `arbitration_scenarios`. Any other failing check fails the run. A known
+  check that passes prints XPASS, so its entry is seen and removed.
+  `zk2py.checks` holds the summary both runners share. The roll-up check
+  is now made at every step, so a fix shows as XPASS. Before, it was made
+  only when the difference appeared.
+- **`ToolView` and the `Actuator` share one initialiser,**
+  `Actuator._init_runtime`, which sets every attribute the runtime's
+  methods read. The view passes it what a tool has: no address and no
+  application, no ε.
+- **zk2py's arbitration tool's exit.** A finding is the
+  declaration's no, the selection's `dead_man`, or the binding's yes, whose
+  only reasons in §5 are `wildcard` and `shadowed`. `unbound` is the
+  selection's, informative, never a finding.
+- **zk2py's timing tool** exits 2 when it held no member. The empty
+  roll-up is unobservable (#32, #33), and the check is now made by itself.
+- §11's step 2 waits for each actuator's deadline switch before the
+  tools start, and for 2 s after the hold by the clock.
+
+After the fixes: `just py-conformance` 3449 of 3449. `timing.v1` §6 and
+§2.8 with both tools beside both owners: 40 passed, the 12 F-277 checks
+XFAIL, exit 0. `arbitration.v1` §10 and §11 in the four pairings: 128 of
+128.
+
 **Counts at timing.v1 0.3, arbitration.v1 0.3 and core 0.56:** 277
 entries.
 - **Open: F-277,** one. It changes a verdict: a resource row's answer, and

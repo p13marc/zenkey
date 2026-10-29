@@ -139,7 +139,12 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
     # and conclusions.json #33 read it, so such a run has no verdict here
     finding = any(runq[q]["answer"] == tm.FINDING[q] for q in runq)
     clean = all(runq[q]["answer"] == (tm.NO if tm.FINDING[q] == tm.YES else tm.YES) for q in runq)
-    code = 1 if finding else 0 if clean else 2
+    # No member held, or no timed resource in scope, is no verdict: the
+    # empty roll-up is unobservable (conclusions.json #32, "no member at
+    # all", and #33, every one set aside), so a run with no member row can
+    # never exit 0, checked here by itself (review-bot on PR #919)
+    held = any(r["row"] == "member" for r in rows)
+    code = 2 if not held else 1 if finding else 0 if clean else 2
     return {"report": "timing", "selector": selector, "across_face": across_face, "clock_bound_ms": clock_bound_ms,
             "window_s": window_s, "rows": rows, "run": runq, "exit": code}
 
