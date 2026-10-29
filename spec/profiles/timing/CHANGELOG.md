@@ -50,7 +50,7 @@ about a tool's window, F-278 to F-280, all accepted on #908
 **The reference** (MC's tools, brought to the text).
 - `zenkey_model::timing::Holding` is the held time: a member counts while
   its tracker holds it heard, missed or waited for, until its first
-  `ended`. The fleet's `TimingBook`, which `zenctl timing`, `check
+  `ended`. The fleet's `TimingBook`, which `zenctl timing` and `check
   conform`'s `timing-period` and `timing-deadline` read, takes it, so its
   held time stops at a member's first end; it read F-278's rule from the
   tracker's states already.
@@ -65,10 +65,11 @@ about a tool's window, F-278 to F-280, all accepted on #908
   to 1,103 ms, its span the same, its 39 arrivals over both lives.
 
 **Deliberately not changed.**
-- **A heard member** counts held from its first arrival to the window's
-  end, or to its first end, whatever presence says after it: only a known
-  member never heard is held only while waited for. A missed member counts
-  held while it stays missed, and §5 reads its misses first.
+- **A heard member** counts held from the instant it was first held (its
+  first arrival, or a known member's wait) to the window's end, or to its
+  first end, whatever presence says after it: only a known member never
+  heard is held only while waited for. A missed member counts held while
+  it stays missed, and §5 reads its misses first.
 - **Two waits are one count.** A known member waited for, its owner
   absent, then waited for again, counts both waits together, as §2.7's
   "how long it held the member" reads a sum. Round 80's case is one wait
