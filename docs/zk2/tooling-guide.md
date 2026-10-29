@@ -1,14 +1,21 @@
 # zk2 tooling guide
 
-**Status: non-normative for the core.** [`spec/core.md`](../../spec/core.md)
-binds what participants put on the wire. This guide binds what a **tool**
-tells a person about the wire: zenctl, zengui, zenwatch, a probe, a
-dashboard, a recording. Where it restates a core rule, the core wins.
+**Status: guidance.** The rules a tool follows are normative in
+[`spec/observer.md`](../../spec/observer.md) since #925: the judgement
+shape, silence never being a verdict, the reader's discipline (reading
+presence, state and the admin space, windows and the population budget),
+and the observer obligations that cite evidence. They came from this
+guide and from the core. [`spec/core.md`](../../spec/core.md) binds what
+participants put on the wire. Where this guide restates a rule,
+`observer.md` or the core wins.
 
-It carries v1's observer conformance (RFC 13, frozen on the `v1` branch at
-v1.50) over to zk2. Most of its rules answer a mistake a v1 tool actually
-made; the zk2 additions answer what porting found. The reference tools (`zenkey-fleet` and zenctl) are
-held to it by their tests (§7). This is #612's tooling guide.
+What stays here is guidance: how the reference tools (`zenkey-fleet`,
+zenctl, zengui, zenwatch) spell those rules, the observer obligations
+that no fixture or scenario checks yet, recording and replay, what did
+not carry over from v1's observer conformance (RFC 13, frozen on the `v1`
+branch at v1.50), and how the reference tools test themselves (§7). An
+obligation leaves this guide for `observer.md` once a fixture or a
+scenario can check it. This is #612's tooling guide.
 
 Contents:
 1. [The judgement shape](#1-the-judgement-shape)
@@ -23,34 +30,20 @@ Contents:
 
 ## 1. The judgement shape
 
-Every verdict a tool presents fits one shape. That includes a badge, a
-table cell, a report field and an exit code.
-
-```text
-Established(yes) | Established(no)
-Unestablished(NotAsked) | Unestablished(Unobservable { reason })
-```
-
-- **Established:** the question was put to the bus, and the bus answered.
-  Both poles are answers, and each claims evidence.
-- **NotAsked:** nobody put the question. No contract was retrieved, no
-  window ran, the flag was not passed. The tool has learned nothing, and
-  renders nothing, never the negative answer.
-- **Unobservable:** the question was put, and the observation could not be
-  had. The session did not open, the bundle did not verify, the bytes did
-  not decode. The `reason` is part of the verdict: it names what stood in
-  the way.
-
-The two Unestablished kinds stay apart in every medium. They call for
-different actions: NotAsked is cured by asking, Unobservable by fixing the
-named impediment.
+The shape itself is normative: [`observer.md`](../../spec/observer.md)
+§1 (Established yes and no, NotAsked, Unobservable with its reason, the
+two unestablished kinds kept apart, an empty scope unobservable). This
+section keeps what no fixture checks: the polarity, the exit codes, and
+the reference's mappings.
 
 **Polarity.** Every verdict vocabulary documents its mapping onto the
 shape, and names which Established pole is the *finding*. A vocabulary
 named for the sought answer (`compatible`, `Met`) has its finding on *no*.
 One named for a condition firing (`Explained`, `split-brain`) has its
 finding on *yes*. A renderer or an exit map that assumes the wrong polarity
-inverts every verdict, and still looks honest.
+inverts every verdict, and still looks honest. A profile's §5 states its
+polarity, as its template asks
+([`spec/profiles/README.md`](../../spec/profiles/README.md)).
 
 **Exit codes.** A judging tool projects the shape onto its exit code, after
 the polarity mapping:
@@ -61,84 +54,63 @@ the polarity mapping:
 | **1** | Established, and a finding. |
 | **2** | Unestablished, either kind. The report says which. |
 
-- **An empty scope is Unobservable.** When nothing in scope was observed (no
-  token, no reply, no sample), the judgement exits 2, never 0. A monitor
-  pointed at the wrong namespace must not be green.
+- **An empty scope** is Unobservable (observer §1), so the judgement exits
+  2, never 0.
 - **zenctl's spelling.** Its exit contract (`zenctl/src/exit.rs`) is this
   projection, and every verdict exits through
   `zenkey_fleet::judgement_exit_code`. Usage errors and refused input also
   exit 2: asking nothing is not a verdict.
 
-Worked mappings in the zk2 tools:
+Worked mappings in the zk2 tools (sections are the core's, or
+`observer.md`'s where marked):
 
 | Vocabulary (question) | yes | no | Unestablished |
 |---|---|---|---|
 | `compat`: is the new revision compatible with the old one? (§9.8) | `compatible` | `review` or `breaking`: the finding | a side that does not load or retrieve (Unobservable) |
-| A presence read: does a token match? (§8.1) | the tokens | complete and empty, worded "no token visible to this reader" (below) | a read that ended at its timeout: possibly incomplete (Unobservable) |
+| A presence read: does a token match? (observer §3) | the tokens | complete and empty, worded "no token visible to this reader" (below) | a read that ended at its timeout: possibly incomplete (Unobservable) |
 | A state GET: what is the current value? (S4) | the owner's value, or its deletion | none: a GET answers or is silent | silence (Unobservable). An archive's answer is a *different* question (§2). |
-| Split-brain: do two instances serve one exclusive operation at once? (§6) | `split-brain`: the finding | none seen | a holder whose descriptor or bundle could not be read (`undecided`) |
+| Split-brain: do two instances serve one exclusive operation at once? (observer §6.1) | `split-brain`: the finding | none seen | a holder whose descriptor or bundle could not be read (`undecided`) |
 | A `doctor` check: does its condition fire? Every id names the condition, `split-brain` to `router-version-skew` (#612, FJ6), then `health-failed`, `health-degraded`, `health-stale`, `health-inconsistent` and `hostid-duplicate` (#721), then `population-over-bound` (#735, `--deep`) | a finding, with its severity, subject and evidence | clean, with the evidence that makes it clean as the reason | a subject it could not decide (Unobservable, each listed `unjudged` with why): for the `health-*` checks a status whose age no trusted clock reads (the doctor measures none: `--clocks-synced`), for `hostid-duplicate` an instance whose minting is unobservable, unless the counted ones establish it, for `population-over-bound` a population within its bound by a GET that ended at its timeout; every check that reads presence over an empty scope (Unobservable); a check the run did not ask (NotAsked) |
 | A `why` rung: is the silence caused here? `namespace` to `last-known` (#702) | a cause: the finding, and the ladder stops | healthy, with its evidence | a rung whose read could not be had, the owner's silence included (Unobservable); every rung past the stop, and an operation's answer, never called (NotAsked) |
-| A `check conform` case: does the service break this rule here? `contract-served` to `state-get` (#703), `freshness` (#720), `health` and `health-aggregation` (#721), `budget`, `rate` and `budget-window` (#735) | a violation, with what broke it; for `health`, unhealthy or stale, and for `health-aggregation`, a check worse than a fresh status in both readings; for `budget` and `budget-window`, more live members than the bound in any reading; for `rate`, n + 1 occurrences of one member less than the period apart | passed, with the evidence; for `budget`, only by the owner's GET of a state that ran to its final reply; for `budget-window`, only over a window of a whole liveness span, lossless, the owner present throughout; "lossless" established, never assumed (core 0.25): the run lost nothing and the resource is reliable with `block` | a resource silent in the window, a stamp no `meta.zid` attributes, a present service's silent call without `--calls-granted` (§5.1, 0.17), a status whose age no trusted clock reads, a population within its bound from an incomplete GET or an incomplete window, a `rate` window shorter than one period (Unobservable); an operation not idempotent without `--i-know`, a raw type, a service whose descriptor does not list `health.v1`, the no-ceiling bound, a case `--skip`ped (NotAsked) |
+| A `check conform` case: does the service break this rule here? `contract-served` to `state-get` (#703), `freshness` (#720), `health` and `health-aggregation` (#721), `budget`, `rate` and `budget-window` (#735) | a violation, with what broke it; for `health`, unhealthy or stale, and for `health-aggregation`, a check worse than a fresh status in both readings; for `budget` and `budget-window`, more live members than the bound in any reading; for `rate`, n + 1 occurrences of one member less than the period apart | passed, with the evidence; for `budget`, only by the owner's GET of a state that ran to its final reply; for `budget-window`, only over a window of a whole liveness span, lossless, the owner present throughout; "lossless" established, never assumed (observer §5.2): the run lost nothing and the resource is reliable with `block` | a resource silent in the window, a stamp no `meta.zid` attributes, a present service's silent call without `--calls-granted` (observer §7.2), a status whose age no trusted clock reads, a population within its bound from an incomplete GET or an incomplete window, a `rate` window shorter than one period (Unobservable); an operation not idempotent without `--i-know`, a raw type, a service whose descriptor does not list `health.v1`, the no-ceiling bound, a case `--skip`ped (NotAsked) |
 | `zenctl health`: is this service healthy? (`health.v1` §2.11, §5; #721) | `healthy`, at its level | `unhealthy` at its level (its status, a current check worse than it, or a check under an unknown status), and `stale`, its own verdict and never a level: the findings | `unobservable` (a reply's age with no trusted clock, a silent GET, an unknown level, a face closed to the status, nothing crossed yet); `not_asked` (absent: presence's word, never FAILED; not listing `health.v1`; only an archive's status, last-known). The run: 1 on a finding, 2 when a service is unobservable or none is asked |
 | `zenctl health`: does its status agree with its checks? (§2.2) | `yes`: a fresh status, no current check worse | `no`, the finding about the owner, only when both readings a grace apart show it | one reading's `no`, a status not fresh, an unknown level, checks not read (Unobservable); as the first question's (NotAsked) |
 | `zenctl health`: is its clock ahead? (§2.5) | `yes`, the finding: a `clock_ahead` fault no confirmation of the status followed | a confirmation heard after the last fault, or with none heard — never from the faults' silence | nothing heard in the window (Unobservable); no window (NotAsked) |
 
 ## 2. Silence is never a verdict
 
-**The absence of a signal is evidence about nothing in particular.** A
-tool that heard nothing has established nothing (not absence, not health,
-not death) unless its procedure made the silence *attributable*. That needs
-three things:
-- a bounded window that was provably open;
-- a named party expected to speak within it;
-- an independent check that speaking was possible.
-
-Unattributable silence is Unestablished, never Established(no).
-
-zk2's instances, each normative where it lives:
-- **The reply set (core §5, O5).** An empty reply set is not "no such
-  operation". A caller attributes silence through presence: the service
-  was present and silent, or absent. Envelopes in a fan-out carry no key,
-  so they are reported unattributed (§5.1).
-- **Presence (core §8.1).**
-  - A liveliness read that reached its timeout ends with an error reply. It
-    is possibly incomplete, never a list of what exists.
-  - A read that access control refuses is answered **complete and empty**,
-    exactly like a selector no token matches (0.8). So a tool words absence
-    as what its reader could see: "no token visible to this reader".
-    Absence is a verdict only under grants that let the reader see presence
-    (§11.1). `zenctl acl gen` grants every Consume and Call those reads.
-- **State (core §4.2, S4–S6).** Silence from the owner's GET is not "no
-  value". A tool that then reads an archive presents the answer as
-  **last-known**, never current, and says which archive answered.
-- **Contracts (core §8.4, §9.6).** A bundle that no holder served, or that
-  failed verification, is "contract unavailable", not "no contract". A tool
-  never decodes with an unverified bundle.
-- **Constrained faces (core §8.5, R7).** What `link.v1` does not expose
-  across a face is *unobservable* from the far side, never absent.
+Normative: [`observer.md`](../../spec/observer.md) §2, and core O5. What
+stays here is how the reference tools word it:
+- **Presence.** A refused read is complete and empty (observer §3.4), so
+  a tool words absence as what its reader could see: "no token visible to
+  this reader". `zenctl acl gen` grants every Consume and Call those reads
+  (core §11.1).
+- **State.** A tool that reads an archive after the owner's silence
+  presents the answer as **last-known**, never current (core S6), and
+  says which archive answered.
+- **Contracts.** A tool never decodes with an unverified bundle (core
+  §8.4).
 
 ## 3. The observer obligations
 
-An observer is any tool that reads the bus without owning keys on it. A
-verdict reaches a person through three media, and a conforming tool keeps
-its claims straight in all three:
-- a **table cell**, the aligned rendering a person scans;
-- a **report field**, the serialized shape a script branches on;
-- a **note**, a statement *about* a report: coverage, silence, bounds,
-  caveats.
+An observer is any tool that reads the bus without owning keys on it. Its
+verdicts reach a person through three media, a table cell, a report field
+and a note ([`observer.md`](../../spec/observer.md) §1). The reference
+tools render one report struct through all three. That is what keeps the
+three in agreement.
 
-The reference tools render one report struct through all three. That is
-what keeps the three in agreement.
+The obligations that a fixture or a scenario checks are normative in
+`observer.md`: **O1** (a key that is not zk2 is a fact) is its §8.1,
+**O4** (not asked is not answered no) is in its §1, **O5** (a wildcard
+scope is not total coverage, and everything is three selectors) is its
+§8.2, and **O7** (a timestamp names who stamped it) is its §8.3. What
+stays below is the rest, guidance for want of evidence, and how the
+reference spells the promoted ones.
 
-**O1. A key that is not zk2 is a fact, not an error.** The bus is shared
-(core §1.7): v1 keys, rmw_zenoh keys and other applications coexist.
-- A tool never hides or refuses a foreign key. It shows what it can still
-  establish: the chunks, the traffic, and a structural rendering of the
-  payload (§7.2's last rung). Then it states what it could not.
-- In a report, it is a partial report whose verdict says how far
-  description got. The fields below the failure point are absent, never
-  defaulted. The fleet's spelling is `Unresolved::NotZk2`.
+**O1, the report's shape.** In a report, a key that is not zk2 is a
+partial report whose verdict says how far description got. The fields
+below the failure point are absent, never defaulted. The fleet's spelling
+is `Unresolved::NotZk2`.
 
 **O2. Classify by degrading, in this order.** Each failed rung weakens the
 claim. None discards the key.
@@ -156,7 +128,7 @@ claim. None discards the key.
 Every rung outcome has its own spelling in every medium, so a script
 branches on the rung, never on prose. The fleet's `Unresolved` and
 `Rendered` enums are that spelling. A type is named one way, decoded or
-not (core §7.2, 0.8). zenctl's raw observers (`echo`, `rate`, `field`,
+not (observer §7.3, 0.8). zenctl's raw observers (`echo`, `rate`, `field`,
 `timeline`, `snapshot`, `watchdog`; #612, FJ8b) walk this ladder through
 one session-free lens, so a `.zrec` read later resolves exactly as the
 live window did; each key's outcome rides as its `identity` (`KeyGroup`
@@ -169,8 +141,7 @@ contain one. Naming namespaces is `namespace list`'s job. It reads instance
 tokens, whose form has a fixed arity (`<ns>/zk2/<system>/<service>/@zk/instance/<id>`),
 and so attributes from the right.
 
-**O4. Not asked is not answered no.** A tool distinguishes a question it
-has not put from one answered negatively.
+**O4, its spelling in each medium.**
 - **Table cell:** a reserved unknown mark (`—`), distinct from the empty
   answer and every negative word.
 - **Report field:** a not-asked field is *absent*, never a defaulted
@@ -178,40 +149,14 @@ has not put from one answered negatively.
 - **Note:** names what was not asked and how to ask it ("contract not
   retrieved; pass `--contracts`, or let the tool fetch it").
 
-**O5. A wildcard scope is not total coverage.** `*` and `**` never match a
-verbatim chunk. So an ambient selector (`zk2/**`, `zk2/<system>/**`) never
-delivers:
-- `@stream` or `@state` samples;
-- `@op` queryables;
-- `@adv` sidecars;
-- control keys under `@zk`, contract bundles included (`zk2/@zk/contract/…`).
-
-That guard is a gift, and a trap (core §1.3). A tool that offers a
-wildcard scope either names the verbatim kinds it watches beside it, or
-states that they are excluded. The exact selectors ride the report (a
-`scopes` field), and a recording's header carries them too.
-
-**Everything is three selectors.** This is the reference's rule (#924);
-#925 moves it into the observer rules. Positions 1–5 of a zk2 key have
-fixed arity (core §1.3), so these three reach every data key of every
-service of a deployment, present or future, with no presence read:
-- `<ns>/zk2/**`, the ambient kinds;
-- `<ns>/zk2/*/*/*/@stream/**`, the explicit streams;
-- `<ns>/zk2/*/*/*/@state/**`, the explicit state.
-
-Together they are the deployment's whole data plane apart from its
-operations (`@op`) and its control keys (`@zk`). An `@adv` subtree is
-advanced publication's own (core §2.5), not data. A tool that offers
-"everything" spells all three, and still names `@op`, `@zk` and `@adv`
-as excluded. The explicit two are an opt-in, never a default: the guard
-exists so that nobody pulls a camera's frames by accident.
-
-zenctl's raw observers opt in with `--explicit`: `record` (with `--on`
-too), `echo` and `timeline` add both selectors beside the default, and
-`snapshot` adds `@state` alone, since a stream answers no GET. Beside a
-selector the operator typed, the flag is refused (exit 2): it would add
-every service's explicit traffic to the scope typed. zengui's
-`explicit` preset names the same two selectors.
+**O5, its spelling.** The exact selectors ride the report (a `scopes`
+field), and a recording's header carries them too (§5). zenctl's raw
+observers opt in to observer §8.2's explicit two with `--explicit`:
+`record` (with `--on` too), `echo` and `timeline` add both selectors
+beside the default, and `snapshot` adds `@state` alone, since a stream
+answers no GET. Beside a selector the operator typed, the flag is refused
+(exit 2): it would add every service's explicit traffic to the scope
+typed. zengui's `explicit` preset names the same two selectors.
 
 **O6. A bounded observer reports what it dropped.** It counts three things
 and never folds them into one number:
@@ -223,20 +168,11 @@ A non-zero count makes every "observed N" in the same report a lower bound,
 and the report says so. A view that shrinks silently cannot be told from a
 bus that went quiet. In zk2, R6's discards are a fourth, separate count: a
 sample put on a wildcard key, which a consumer drops by rule (core §3.2).
-They are not losses.
+They are not losses. A window's own loss, which decides whether it is
+complete, is normative in observer §5.2.
 
-**O7. A tool that reports a timestamp names who stamped it.** A state
-sample's stamp carries its clock's id (core §4.1, §4.3).
-- **The owner's own stamp.** It is the owner's when S1 holds, and its id
-  then matches the owner's session, which the descriptor's `meta.zid`
-  names where present. Two zids compare by value, never by their text:
-  zenoh drops leading zeros (core §3.3, 0.11).
-- **A router's stamp.** A router stamps what arrives unstamped.
-- **No stamp.** A stream sample may carry none.
-
-A tool says whose clock a time, an age or a latency is on. It never pools
-measurements from different stampers into one distribution: a pooled median
-describes neither clock.
+**O7, pooling.** A tool never pools measurements from different stampers
+into one distribution: a pooled median describes neither clock.
 
 ## 4. Tools do not write what they do not own
 
@@ -261,8 +197,8 @@ P3 (core §6, §11.1): a key is written only by the service that owns it.
 ## 5. Recording and replay
 
 v1's `.zrec` format minimum (RFC 13 §4.1, on the `v1` branch) carries over:
-- **The header** carries the selectors the recording watched (O5), the
-  namespace the operator stated, and when it was captured.
+- **The header** carries the selectors the recording watched (observer
+  §8.2), the namespace the operator stated, and when it was captured.
 - **Payloads** are recorded losslessly, as bytes. A decoded rendering
   beside them is not the payload.
 - **A gap** is a drop record placed where it happened, never summed at the
@@ -274,12 +210,12 @@ v1's `.zrec` format minimum (RFC 13 §4.1, on the `v1` branch) carries over:
 zenctl's `.zrec` is version 3 (#612, FJ8a). Its header adds `excluded`: the
 verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`) that no selector
 of the capture names, so the file cannot contain them whatever the bus
-carried (O5). A capture taken with `--explicit` lists all three of O5's
-selectors, and its `excluded` names only `@op`, `@zk` and `@adv` (#924).
-Each row adds `qos_axes`, the sample's priority, congestion control,
-reliability and express as received, which a replay honours. Versions 1
-and 2 still read; their rows' v1 QoS profile names do not (#612, FJ9), so
-such a row replays on the axes the operator gives.
+carried (observer §8.2). A capture taken with `--explicit` lists all three
+of observer §8.2's selectors, and its `excluded` names only `@op`, `@zk`
+and `@adv` (#924). Each row adds `qos_axes`, the sample's priority,
+congestion control, reliability and express as received, which a replay
+honours. Versions 1 and 2 still read; their rows' v1 QoS profile names do
+not (#612, FJ9), so such a row replays on the axes the operator gives.
 
 **A replayer stands in for the recorded owners** (r4 §4.1, spike S13). It
 republishes under the original addresses in a namespace of its own, a
@@ -319,8 +255,9 @@ lands at the bus root, where no consumer of the deployment listens.
   counter's §2.11 rate with a gap at each reset, and a decrease within an
   in-band epoch as the finding.
   The population budget was among them until core 0.24 (#735) made it core
-  (spec §2.7): `check conform`'s `budget`, `budget-window` and `rate` cases and the doctor's
-  `population-over-bound` ask it.
+  (spec §2.7; what a tool reads and concludes is observer §5 since #925):
+  `check conform`'s `budget`, `budget-window` and `rate` cases and the
+  doctor's `population-over-bound` ask it.
   A tool says *not asked*, never *clean*. `freshness.v1` exists since #720:
   `check conform`'s `freshness` case asks it, and `field-stuck` is still to
   be ported onto it. `health.v1` exists since #721: `zenctl health`, the
@@ -346,3 +283,7 @@ pose, assert that the not-asked spelling differs from every answered one.
 Run that against a fixture where every count is non-zero, because a
 renderer that sums the counts passes any fixture where two are zero.
 Honesty tests that pin copy are the tests people delete.
+
+`observer.md`'s rules are checked the other way, by the spec's fixtures
+and scenarios, which every implementation runs; these two corpora are how
+the reference tools hold to them and to this guide.
