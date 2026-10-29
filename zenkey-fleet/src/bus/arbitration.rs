@@ -387,10 +387,21 @@ pub async fn observe(
                     obs.asked.extend(l.asked.iter().cloned());
                     obs.roles[i].view = Some((book, l));
                 }
-                Err(why) => obs.roles[i]
-                    .read
-                    .notes
-                    .push(format!("the tool's view did not listen: {why}")),
+                Err(why) => {
+                    // A view that was due and could not listen heard
+                    // nothing it should have: lost whole, so its selection
+                    // is unobservable, never not asked (§2.14's `lost`;
+                    // review-bot on PR #918).
+                    let r = &mut obs.roles[i].read;
+                    r.reading.view = Some(zenkey_model::arbitration::View {
+                        listened: Duration::ZERO,
+                        lost: true,
+                        active: None,
+                    });
+                    r.notes.push(format!(
+                        "the tool's view did not listen, so it lost whatever was sent: {why}"
+                    ));
+                }
             }
         }
     }
@@ -590,6 +601,7 @@ async fn listen(
         asked_zids: BTreeSet::new(),
         burst: BTreeSet::new(),
         awaiting_event: None,
+        tasks: tokio::task::JoinSet::new(),
     };
     // §2.5's outcome 6: a governed interface's incumbents, read once after
     // the round trip, with their descriptors.
@@ -743,6 +755,10 @@ struct Follow {
     /// A move begun at a withdrawal whose transport event has not come
     /// yet (F-268): the barrier's count of transport events when it began.
     awaiting_event: Option<u64>,
+    /// The reads again and descriptor GETs it spawned: aborted when the
+    /// view ends, so a repeated sweep leaves none running (review-bot on
+    /// PR #918).
+    tasks: tokio::task::JoinSet<()>,
 }
 
 impl Follow {
@@ -810,14 +826,16 @@ impl Follow {
     }
 
     /// One read again of `a`, on the deployment's session, beside the view.
-    fn read_again(&self, a: Addr) {
+    fn read_again(&mut self, a: Addr) {
         let (session, t, tx, iface) = (
             self.session.clone(),
             self.timeout,
             self.answers.clone(),
             self.iface.clone(),
         );
-        tokio::spawn(async move {
+        // The finished ones are let go, so a long window holds none.
+        while self.tasks.try_join_next().is_some() {}
+        self.tasks.spawn(async move {
             let sel = format!("zk2/{}/{}/@zk/alive/{iface}/**", a.system, a.service);
             match crate::bus::presence::liveliness_read(&session, &sel, t).await {
                 Ok(r) => {
@@ -857,7 +875,9 @@ impl Follow {
             return;
         }
         let (session, t, tx) = (self.session.clone(), self.timeout, self.answers.clone());
-        tokio::spawn(async move {
+        // The finished ones are let go, so a long window holds none.
+        while self.tasks.try_join_next().is_some() {}
+        self.tasks.spawn(async move {
             let reads = crate::bus::presence::describe_each(&session, wanted, t).await;
             for ((a, i), r) in reads {
                 let zid = r

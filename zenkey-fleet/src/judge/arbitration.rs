@@ -217,7 +217,11 @@ pub fn role_row(
     listened: Option<&(ViewBook, Listened)>,
 ) -> ArbitrationRole {
     let mut reading = read.reading.clone();
-    reading.view = listened.map(|(b, l)| b.view(l.end));
+    // A view that was due and could not listen is already in the reading,
+    // lost whole (review-bot on PR #918).
+    if let Some((b, l)) = listened {
+        reading.view = Some(b.view(l.end));
+    }
     let mut notes = read.notes.clone();
     if let Some((_, l)) = listened {
         notes.extend(l.notes.iter().cloned());
@@ -447,5 +451,30 @@ mod tests {
             "no_contract"
         );
         assert!(crate::model::arbitration::in_scope(&missing));
+        // Governance is read from every revision held (text 0.3, §2.14):
+        // a governed minor alone governs, and beside an ungoverned one it
+        // does not, so no sample is `not_incumbent`. Pinned until #909's
+        // next text says otherwise (review-bot on PR #918).
+        let governed = contract("steer-governed.v1");
+        let alone = read_role(s, Declaring::Held(&rudder), &[(fp(3), &governed)]);
+        assert!(alone.governed);
+        let mixed = read_role(
+            s,
+            Declaring::Held(&rudder),
+            &[(fp(1), &steer), (fp(3), &governed)],
+        );
+        assert_eq!(role_row(s, &mixed, None).declaration.reason, "valid");
+        assert!(!mixed.governed, "governed only when every revision is");
+        // A view that was due and could not listen lost whole: its
+        // selection unobservable, never not asked (review-bot on PR #918).
+        let mut failed = one.clone();
+        failed.reading.view = Some(zenkey_model::arbitration::View {
+            listened: std::time::Duration::ZERO,
+            lost: true,
+            active: None,
+        });
+        let row = role_row(s, &failed, None);
+        assert_eq!(row.selection.answer.as_str(), "unobservable");
+        assert_eq!(row.selection.reason, "lost");
     }
 }
