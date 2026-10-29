@@ -1,0 +1,15 @@
+# `cardinality = "unbounded"` is the no-ceiling value's name (§2.2, 0.57):
+# the canonical form writes 4294967295 for it, so this contract and
+# ok-cardinality-no-ceiling, which writes the number, have one canonical
+# form and one fingerprint. It lints clean.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources."{origin...}"]
+kind = "state"
+explicit = true
+type = { raw = "application/octet-stream" }
+params = { origin = "path" }
+cardinality = "unbounded"

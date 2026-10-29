@@ -1,5 +1,8 @@
-//! The authoring format, draft 1 (`examples/zk2/README.md`, r3.3): the
+//! The authoring format, draft 2 (`examples/zk2/README.md`, r3.3): the
 //! TOML shape a contract file has, before any validation or defaulting.
+//! Draft 2 is draft 1 plus one spelling, `cardinality = "unbounded"`
+//! ([`Cardinality`], core 0.57, #937); the canonical form did not change,
+//! so its `format` tag is still `zk2-contract/draft-1`.
 //!
 //! `spec/contract.schema.json` is generated from these types (schemars) and
 //! committed. A test fails when the two drift.
@@ -194,7 +197,7 @@ pub struct ResourceSpec {
     #[serde(default)]
     pub params: BTreeMap<String, ParamType>,
     #[serde(default)]
-    pub cardinality: Option<u64>,
+    pub cardinality: Option<Cardinality>,
     #[serde(default)]
     pub epoch: Option<String>,
     #[serde(default)]
@@ -378,6 +381,92 @@ pub struct RawType {
     pub raw: String,
     #[serde(default)]
     pub media_param: Option<String>,
+}
+
+/// A templated resource's `cardinality` as written (core §2.2): a number,
+/// the most members one instance will hold, or `"unbounded"`, the name of
+/// the no-ceiling value (draft 2, core 0.57, #937). Both resolve to one
+/// integer, so `"unbounded"` and 4294967295 have one canonical form and
+/// one fingerprint (`spec/conformance/contracts/ok-cardinality-unbounded`).
+/// Any other string, a negative integer or a float is not the format's
+/// shape (E000); zero reads, and is E013's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cardinality {
+    /// An integer, as written.
+    Count(u64),
+    /// `"unbounded"`: [`crate::budget::NO_CEILING`], 2^32−1.
+    Unbounded,
+}
+
+impl Cardinality {
+    /// The spelling of [`Cardinality::Unbounded`].
+    pub const UNBOUNDED: &'static str = "unbounded";
+
+    /// The integer the contract carries: `"unbounded"` is 4294967295.
+    #[must_use]
+    pub fn value(self) -> u64 {
+        match self {
+            Self::Count(n) => n,
+            Self::Unbounded => crate::budget::NO_CEILING,
+        }
+    }
+}
+
+impl Serialize for Cardinality {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Count(n) => s.serialize_u64(*n),
+            Self::Unbounded => s.serialize_str(Self::UNBOUNDED),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Cardinality {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl serde::de::Visitor<'_> for V {
+            type Value = Cardinality;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a number, the most members one instance will hold, or \"unbounded\"")
+            }
+            fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<Cardinality, E> {
+                Ok(Cardinality::Count(n))
+            }
+            fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<Cardinality, E> {
+                u64::try_from(n)
+                    .map(Cardinality::Count)
+                    .map_err(|_| E::invalid_value(serde::de::Unexpected::Signed(n), &self))
+            }
+            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Cardinality, E> {
+                if s == Cardinality::UNBOUNDED {
+                    Ok(Cardinality::Unbounded)
+                } else {
+                    Err(E::invalid_value(serde::de::Unexpected::Str(s), &self))
+                }
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+impl JsonSchema for Cardinality {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Cardinality".into()
+    }
+
+    /// `"unbounded"` as a one-member `enum`, the keyword the schema's other
+    /// strings use, not `const`, which it uses nowhere.
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A templated resource's `cardinality`: a number, the most members \
+                            one instance will hold, or `\"unbounded\"`, which is 4294967295 \
+                            (core §2.2).",
+            "anyOf": [
+                {"type": "integer", "format": "uint64", "minimum": 0},
+                {"type": "string", "enum": ["unbounded"]}
+            ]
+        })
+    }
 }
 
 /// `gate = "capability:rssi"` or a list of them (AND).

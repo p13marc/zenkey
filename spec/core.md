@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.56** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.57** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -282,21 +282,25 @@ A resource's **template** is its path below the kind chunk.
   `[F: contracts/w101-overlap]`
 
 **Cardinality.** A template with parameters MUST declare `cardinality`, a
-positive integer that bounds its population in one instance. A template
-without parameters MUST NOT declare it. An instance MAY declare a lower
-bound in its descriptor, from 1 to the contract's (§3.3). On an event,
-`cardinality` bounds the template's own parameters, and the key population
-is cardinality × rate × retention. `[F: contracts/e013-cardinality, e014-field]`
+positive integer that bounds its population in one instance, or
+`"unbounded"` (below). A template without parameters MUST NOT declare it.
+An instance MAY declare a lower bound in its descriptor, from 1 to the
+contract's (§3.3). On an event, `cardinality` bounds the template's own
+parameters, and the key population is cardinality × rate × retention.
+`[F: contracts/e013-cardinality, e014-field]`
 What a member is, when one is live, and what a tool concludes from a
 reading are §2.7's (0.24).
 - **No ceiling.** A template whose population no contract can fix, such as
-  an archive's `{origin...}` (§4.4), still declares a cardinality. By
-  convention it declares **4294967295** (2^32−1), which reads "no ceiling".
-  The value is a positive integer like any other, so E013 holds and the
-  authoring format needs no second spelling for it. A tool reads it as no
-  bound, never as a population to budget or estimate with. An instance
-  that knows its population MAY still lower it in its descriptor (§3.3).
-  `[F: contracts/ok-cardinality-no-ceiling]`
+  an archive's `{origin...}` (§4.4), still declares a cardinality, written
+  **`"unbounded"`** (the canonical form's 4294967295, 2^32−1), which reads
+  "no ceiling" (0.57). Its value is a positive integer like any other, so
+  E013 holds. A contract MAY write the number instead: the two spellings
+  have one canonical form (§9.5), so one fingerprint, and an
+  implementation MUST read them alike. Any other string is E000 (§9.1). A
+  tool reads the value as no bound, never as a population to budget or
+  estimate with. An instance that knows its population MAY still lower it
+  in its descriptor (§3.3).
+  `[F: contracts/ok-cardinality-unbounded, ok-cardinality-no-ceiling, e000-cardinality-string]`
 
 ### 2.3 Resource attributes
 
@@ -397,6 +401,12 @@ does not, is §2.7's.
   (spike S5). `[Sc: state.md §8]`
 
 ### 2.7 The population budget
+
+**At scale.** A deployment needs this section only once a service's
+templated resources hold members that come and go in numbers near their
+`cardinality`, or a tool judges their budget; below that, an owner writes
+its `cardinality` (§2.2) and keeps each event's `rate` (below), and the
+rest is for a tool that judges budgets.
 
 A templated resource's `cardinality` (§2.2) is a budget the owner keeps,
 and a tool can see broken (0.24). It counts members, not tokens: the
@@ -760,6 +770,10 @@ gate does not name.
   by** on: it implements the interface, lists it, and serves none of it
   now (§6). Absent is serving, and `false` written out is the same as
   absent, as for a role's `optional`. `[F: descriptors/ok-standby]`
+  - **At scale.** A deployment needs this only once it runs a service in
+    two instances, one standing by for the other under `redundancy.v1`
+    (§6); with one instance per service, no entry is marked, and absent is
+    serving.
   - **It exposes nothing.** A standby entry exposes none of the
     interface's resources, required ones included (§8.2). Its
     `unavailable` and `cardinality` state what the instance will expose
@@ -1663,7 +1677,7 @@ has a **type identity**: (kind, name, sha256 of its schema artifact).
 | `raw` | media type only | Images, audio, opaque buffers |
 
 `flatbuffer`, `ros2msg` and `cdr` are reserved kinds. Authoring format
-draft 1 has no spelling for them, so a contract declares such payloads as
+draft 2 has no spelling for them, so a contract declares such payloads as
 `raw` with a media type, and tools MAY decode them through a plugin.
 `[Sc: types.md §2]`
 
@@ -1803,6 +1817,9 @@ Liveliness tokens carry no payload; everything is in the key.
   holds no interface token for it, and no member token.
   `[Sc: profiles/redundancy/scenarios.md §1]`
 - **The tokenless set** (U22, decided at acceptance).
+  - **At scale.** A deployment needs this only once a presence domain
+    nears the presence budget, about 10–15k tokens (§8.3); below that, it
+    leaves the set empty, and every interface keeps its token.
   - A deployment MAY configure an owner with interfaces for which it holds
     no interface token. These SHOULD be the interfaces every service of the
     deployment implements: `health.v1`
@@ -1828,6 +1845,12 @@ Liveliness tokens carry no payload; everything is in the key.
   (`[F: contracts/e022-two-epochs]`). The owner MUST hold one member token
   per member, and cycle it whenever that member's continuity breaks.
   `[Sc: presence.md §3]`
+  - **At scale.** A deployment needs this only once a contract declares
+    `epoch`, as one service serving its devices, containers or streams as
+    members does, the shape §1.5 gives above about 5,000 devices per
+    presence domain; below that, a service per device keeps each one's
+    continuity in its own instance id (§1.5), and an owner whose contract
+    declares no `epoch` holds no member token.
   - A member exists from the owner's first declaration of it, when the
     entity its value names appears (a device enumerated, a first value to
     publish), never because the contract declares the template.
@@ -2312,6 +2335,11 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
 
 ### 8.3 The presence budget
 
+**At scale.** A deployment needs this section only once a presence domain
+nears 10,000 liveliness tokens (§8.1); below that, spike S2 measured
+discovery under 2 s (under 50 ms at 1,000 tokens), and the budget asks
+nothing of it.
+
 Presence costs per token, whatever the layout. A router holds 2.1–2.4 KiB per
 token, and a router-to-router link carries 63–85 B per declaration (spike
 S2). A **presence domain** is the set of routers whose router-to-router
@@ -2514,6 +2542,10 @@ is not TOML is **E000**, reported once, and it stops the load.
   have no JSON form, and an integral float of magnitude beyond 2^53−1 and
   below 10^21 serializes as an integer outside it: both are E028.
   `[F: contracts/e028-float, e028-non-finite, ok-float-integral]`
+- `cardinality` is an integer or the string `"unbounded"`, which is
+  4294967295 from resolution on (§2.2, §9.5, 0.57). Any other string is a
+  value of the wrong type, so E000.
+  `[F: contracts/ok-cardinality-unbounded, e000-cardinality-string]`
 - Every other value has the type `contract.schema.json` gives it.
 - A field is judged as written: `history = false` on an event is E019, as
   any `history` there is. `[F: contracts/e019-history-false]`
@@ -2739,7 +2771,7 @@ always present.
 | `template` | the template as written |
 | `kind` | `stream`, `state`, `event` or `operation` |
 | `params` | parameter name → `string`, `uint` or `path`; `{}` when none |
-| `cardinality` | an integer, or `null` |
+| `cardinality` | an integer, or `null`; `"unbounded"` is written 4294967295 (§2.2, 0.57) |
 | `epoch` | a parameter name, or `null` |
 | `optional` | a boolean |
 | `gate` | the gates, sorted and deduplicated; `[]` when none |

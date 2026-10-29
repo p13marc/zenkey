@@ -173,7 +173,7 @@ pub const CODES: &[(&str, &str)] = &[
     ),
     (
         "E013",
-        "a templated resource has no `cardinality`, or it is zero",
+        "a templated resource has no `cardinality` (a number, or \"unbounded\"), or it is zero",
     ),
     (
         "E014",

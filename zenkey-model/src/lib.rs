@@ -3,7 +3,7 @@
 //! This is the static half of zk2 (epic #585, issue #608): everything that
 //! can be decided from files, and never needs a bus. The design of record is
 //! `docs/zk2/architecture.md` (r4), stated normatively by `spec/core.md`;
-//! the authoring format is draft 1
+//! the authoring format is draft 2
 //! (`examples/zk2/README.md`).
 //!
 //! Layer map:
@@ -18,7 +18,7 @@
 //!   ([`grammar::blind_spots`], #614 FL4).
 //! - [`template`]: resource templates, with build, match, overlap and the
 //!   most-literal-first precedence (r3.3 D1).
-//! - [`authoring`]: the TOML authoring format, draft 1, as serde types;
+//! - [`authoring`]: the TOML authoring format, draft 2, as serde types;
 //!   `spec/contract.schema.json` is generated from them.
 //! - [`diag`]: diagnostics with stable codes, the conformance surface of
 //!   the lints.

@@ -919,7 +919,7 @@ impl ContractSet {
         self.revisions.is_empty()
     }
 
-    /// Loads authoring files (draft 1). Every lint runs (`load_path`), and
+    /// Loads authoring files (draft 2). Every lint runs (`load_path`), and
     /// so do the set-level checks (`check_set`) over what loaded: a file
     /// that is not a valid contract is a problem, never a silent skip.
     pub fn load_files<P: AsRef<Path>>(paths: &[P]) -> (ContractSet, Vec<LoadProblem>) {

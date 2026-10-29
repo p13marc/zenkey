@@ -483,6 +483,13 @@ mod tests {
             none.admit(&format!("m{i}"), t).unwrap();
         }
         assert_eq!(none.live(t), 0, "no ceiling tracks nothing");
+        // `"unbounded"` is the same value (core §2.2, 0.57; #937).
+        let named = budget(&STATE.replace("cardinality = 2", "cardinality = \"unbounded\""));
+        for i in 0..1000 {
+            named.admit(&format!("m{i}"), t).unwrap();
+        }
+        assert_eq!(named.bound().0, Bound::NoCeiling);
+        assert_eq!(named.live(t), 0, "\"unbounded\" tracks nothing either");
     }
 
     #[test]

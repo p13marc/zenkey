@@ -952,7 +952,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
 ## zk2 — the redesign in progress (epic #585)
 
-- **The design of record** is `docs/zk2/architecture.md` (proposal r4, after the spike; contracts in `examples/zk2/`, authoring format draft 1).
+- **The design of record** is `docs/zk2/architecture.md` (proposal r4, after the spike; contracts in `examples/zk2/`, authoring format draft 2).
   Its history (brief → r1 → review → r2) sits beside it, indexed by
   `docs/zk2/README.md`. Issues cite it as `r3 §x`; r3.x and r4 keep r3's
   section numbers. The r-number moves only through a reviewed revision carrying a
@@ -965,7 +965,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 - **`zenkey-model/`** (MIT, unpublished: the maintainer's call, #585, #929) is zk2's session-free
   half (#608): keys, templates, §1.3's kind selectors and what a selector
   cannot see (`grammar::blind_spots`, #614 FL4), the authoring format
-  (draft 1) and its lints with stable codes (`diag::CODES`), the canonical
+  (draft 2: draft 1 plus `cardinality = "unbounded"`, the no-ceiling
+  value's name, resolved to 4294967295 so no fingerprint moved, and the
+  canonical form's tag still `zk2-contract/draft-1`; #937) and its lints
+  with stable codes (`diag::CODES`; E013's message ends with what to
+  write, a number or `"unbounded"`), the canonical
   form, fingerprints,
   bundles and `.history`, the compatibility classifier (`compat`,
   #618), a late joiner's merge (`seed`, core 0.27: zenoh's timestamp
@@ -1505,7 +1509,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.56 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.57 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1545,7 +1549,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     routes, its own subscriber's included, round 76's F-265, #908; 0.56:
     a watch session told a close's withdrawals before its transport event,
     and an open before its subscribers' interests are declared again,
-    round 77's F-268, #909 BB;
+    round 77's F-268, #909 BB; 0.57: `cardinality = "unbounded"` (the
+    canonical form's 4294967295, `contracts/ok-cardinality-unbounded`), and
+    an informative "At scale." line opening §2.7, §3.3's `standby`, §8.1's
+    tokenless set and member tokens, and §8.3, no rule changed, #937;
     changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
@@ -1599,6 +1606,23 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   - no new tier before an adopter asks: #613's remaining profiles start
     only when an adopter's mapping needs one, `media.v1` first in line
     (`zs.parallax.v1` lists it in `uses`).
+
+- **Decided 2026-10-29 (#937, epic #921 Track C): the scale machinery out
+  of a newcomer's path.**
+  - `cardinality = "unbounded"` is the authoring format's spelling of no
+    ceiling (draft 2, core 0.57): `authoring::Cardinality`, resolved to
+    4294967295 before the canonical form, so both spellings have one
+    fingerprint (`ok-cardinality-unbounded` beside `ok-cardinality-no-ceiling`)
+    and any other string is E000 (`e000-cardinality-string`). An omitted
+    `cardinality` stays E013, never unbounded. `archive.v1`'s minimal
+    contract writes `"unbounded"`;
+  - the core's sections that matter only past some size open with
+    "**At scale.** A deployment needs this … only once …; below that, …":
+    §2.7, §3.3's `standby`, §8.1's tokenless set and member tokens, §8.3;
+  - the runtime asks a newcomer nothing more: a templated service needs
+    `ServiceBuilder::new`, `implement`, a writer and `start`
+    (`zenkey/tests/budget.rs`,
+    `a_templated_service_needs_nothing_beyond_its_contract`).
 
 ## Commands
 

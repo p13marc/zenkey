@@ -8,7 +8,7 @@ Build scripts, CI tools and the conformance runners stand on it.
   values over `zenoh_keyexpr::OwnedKeyExpr`, resource templates with
   most-literal-first precedence (r3.3 D1), and v1's injective slugging.
 - **Contracts** (`authoring`, `contract`, `diag`): the TOML authoring format,
-  draft 1 (`examples/zk2/README.md`), with defaults expanded, types resolved
+  draft 2 (`examples/zk2/README.md`), with defaults expanded, types resolved
   (protobuf through `protox`, JSON Schema, raw media types), and every lint
   reported with a stable code.
 - **Identity** (`canonical`, `bundle`, `history`): the canonical JSON form,

@@ -1,5 +1,11 @@
 {
   "cases": {
+    "e000-cardinality-string": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
     "e000-integer-range": {
       "codes": [
         "E000"
@@ -391,6 +397,10 @@
       "fingerprint": null
     },
     "ok-cardinality-no-ceiling": {
+      "codes": [],
+      "fingerprint": "sha256:daec59e632e3fb1e98f9f088cb5747d0115eae4f89ad25bc8d332a9aac161338"
+    },
+    "ok-cardinality-unbounded": {
       "codes": [],
       "fingerprint": "sha256:daec59e632e3fb1e98f9f088cb5747d0115eae4f89ad25bc8d332a9aac161338"
     },

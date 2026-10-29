@@ -1,7 +1,9 @@
 # A templated resource whose population no contract can fix, such as an
-# archive's (§4.4), still declares a cardinality (E013). By convention it
-# declares 4294967295 (2^32-1), which reads "no ceiling" (§2.2). It is a
-# positive integer like any other, so the contract is valid.
+# archive's (§4.4), still declares a cardinality (E013): the no-ceiling
+# value, 4294967295 (2^32-1), which reads "no ceiling" (§2.2). This
+# contract writes the number, a positive integer like any other, so it is
+# valid; ok-cardinality-unbounded writes its name, "unbounded" (0.57), and
+# has the same fingerprint.
 [interface]
 name = "seed"
 major = 1

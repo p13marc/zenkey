@@ -50,8 +50,9 @@ use crate::state::DEFAULT_WINDOW;
 /// `archive.v1`'s minimal contract, until `archive.v1` is specified (#613).
 /// Its population is the sum of what it records, which no contract can fix
 /// in advance (§4.4), yet E013 wants a `cardinality` on a templated
-/// resource: 4294967295 (2^32−1) is the conventional "no ceiling" (spec
-/// §2.2, 0.6), never a bound a tool may budget against.
+/// resource: `"unbounded"`, the no-ceiling value 4294967295 (2^32−1) by its
+/// name (spec §2.2, 0.57), never a bound a tool may budget against. It
+/// fingerprints as the number did (0.6 to 0.56).
 pub const CONTRACT: &str = r#"[interface]
 name = "archive"
 major = 1
@@ -63,7 +64,7 @@ kind = "state"
 explicit = true
 type = { raw = "application/octet-stream" }
 params = { origin = "path" }
-cardinality = 4294967295
+cardinality = "unbounded"
 "#;
 
 /// `archive.v1`'s contract.
@@ -756,6 +757,19 @@ mod tests {
         assert!(zenkey_model::grammar::parse(&k).is_ok());
         assert_eq!(origin_of(&x).as_deref(), Some("zk2/g/s/i.v1/@state/x"));
         assert_eq!(contract().iface.to_string(), "archive.v1");
+    }
+
+    /// `"unbounded"` moved no fingerprint (spec §2.2, 0.57; #937): the
+    /// contract is the one 0.6 to 0.56 wrote with the number.
+    #[test]
+    fn the_archive_contract_fingerprints_as_the_number_did() {
+        use zenkey_model::canonical::Fingerprint;
+        let number = super::CONTRACT.replace("\"unbounded\"", "4294967295");
+        assert_ne!(number, super::CONTRACT);
+        let was = zenkey_model::contract::load_str(&number, std::path::Path::new("."), None)
+            .contract
+            .expect("the number loads");
+        assert_eq!(Fingerprint::of(&contract()), Fingerprint::of(&was));
     }
 
     /// Spec §4.4 (0.6, G-3): a selector's archive form keeps `*` and `**`,

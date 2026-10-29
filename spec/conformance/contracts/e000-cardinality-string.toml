@@ -1,0 +1,13 @@
+# `cardinality` is an integer or the string "unbounded" (§2.2, §9.1, 0.57).
+# Any other string is a value of the wrong type, so it is E000, even one
+# that names a number or differs from "unbounded" only in case.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources."a/{x}"]
+kind = "stream"
+type = { raw = "text/plain" }
+params = { x = "string" }
+cardinality = "Unbounded"
