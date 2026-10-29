@@ -32,6 +32,8 @@
 //!    - one subscriber per entry on the deployment's session, each sample's
 //!      instant read **in its callback**, a sample two entries' selectors
 //!      cover handed over once, by the first (§2.4), as the runtime does;
+//!      the view starts once the last is declared, and has listened from
+//!      then (§2.14, text 0.3);
 //!    - a governed interface's incumbents read once after the round trip
 //!      (§2.5, outcome 6), and the descriptor of each holder whose
 //!      `meta.zid` is not held;
@@ -96,8 +98,12 @@ pub struct ArbitrationSpec {
     /// trip.
     pub timeout: Duration,
     /// How long each view listens; zero: no view (the selection not
-    /// asked, `not_listened`).
+    /// asked, `not_listened`), unless `deadlines` is given.
     pub listen: Duration,
+    /// Each view listens this many of its own role's deadlines instead of
+    /// `listen`: what a frontend asks without knowing the deadline before
+    /// it reads the declaration (zengui's Workbench, two).
+    pub deadlines: Option<u32>,
     /// Only this role; `None`: every role carrying a policy, or whose
     /// declaring contract is not in hand.
     pub role: Option<String>,
@@ -115,6 +121,7 @@ impl ArbitrationSpec {
         ArbitrationSpec {
             timeout,
             listen: DEFAULT_LISTEN,
+            deadlines: None,
             role: None,
             lease: zenkey_model::budget::DEFAULT_LEASE,
             wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
@@ -334,7 +341,7 @@ pub async fn observe(
         }
     }
     // 3. The views, all at once.
-    if spec.listen > Duration::ZERO {
+    if spec.listen > Duration::ZERO || spec.deadlines.is_some_and(|n| n > 0) {
         let sp = &spec;
         let views = obs.roles.iter().enumerate().filter_map(|(i, r)| {
             let declared = r.read.arbitrated.as_ref()?;
@@ -345,6 +352,9 @@ pub async fn observe(
             let required = required_of(&r.subject.required)
                 .into_iter()
                 .find(|c| r.read.revisions.contains(c.fingerprint()))?;
+            let span = sp
+                .deadlines
+                .map_or(sp.listen, |n| declared.deadline.saturating_mul(n));
             Some(async move {
                 (
                     i,
@@ -356,6 +366,7 @@ pub async fn observe(
                         binding.clone(),
                         required.shared_contract(),
                         r.read.governed,
+                        span,
                         sp,
                     )
                     .await,
@@ -366,6 +377,13 @@ pub async fn observe(
         for (i, v) in done {
             match v {
                 Ok((book, l)) => {
+                    if spec.deadlines.is_some() {
+                        // What it listened, the longest view's: no figure
+                        // was asked.
+                        obs.listen = obs
+                            .listen
+                            .max(l.end.saturating_duration_since(book.origin()));
+                    }
                     obs.asked.extend(l.asked.iter().cloned());
                     obs.roles[i].view = Some((book, l));
                 }
@@ -437,6 +455,7 @@ async fn listen(
     binding: Binding,
     required: Arc<Contract>,
     governed: bool,
+    span: Duration,
     spec: &ArbitrationSpec,
 ) -> Result<(ViewBook, Listened), String> {
     let t = spec.timeout;
@@ -471,8 +490,6 @@ async fn listen(
         refused: Arc::clone(&refused),
     };
     let mut held = Vec::new();
-    let origin = Instant::now();
-    let mut book = ViewBook::new(declared, binding, s.params.clone(), governed, origin);
     // §2.7: the watch, then its round trip.
     let mut barrier = None;
     if let Some(w) = watch {
@@ -546,6 +563,12 @@ async fn listen(
         l.asked.push(ke.to_string());
     }
     drop(queue);
+    // The view starts, and has listened from here (§2.14, text 0.3): its
+    // subscriptions to the role's stream are declared, the last of them, so
+    // an arrival can reach it. What the watch heard before is decided at
+    // this instant, as heard: at start there is no move (§2.8).
+    let origin = Instant::now();
+    let mut book = ViewBook::new(declared, binding, s.params.clone(), governed, origin);
     let stall = StallWatch::start(session).await;
     if let Err(why) = &stall {
         l.notes.push(format!(
@@ -599,7 +622,7 @@ async fn listen(
         v.describe(&book);
     }
     // The window.
-    let end = tokio::time::Instant::from_std(origin + spec.listen);
+    let end = tokio::time::Instant::from_std(origin + span);
     let mut moves_seen = barrier.as_ref().map_or(0, zenkey::presence::Barrier::moves);
     let mut trip: Option<Trip> = None;
     let mut burst_due: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;

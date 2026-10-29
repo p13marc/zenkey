@@ -158,11 +158,18 @@ pub enum CheckId {
     /// (`timing.v1` §2.2, §2.3, §2.5; #908), read from the contracts the
     /// descriptors name. A warning, as a contract linter's.
     TimingDeclaration,
+    /// A running consumer's role carrying `arbitration.policy` whose
+    /// declaration is invalid (an error: its consumer cannot start on it),
+    /// or whose binding leaves a priority to an order nobody chose, a
+    /// wildcard or a shadowed entry (a warning) (`arbitration.v1` §2.2,
+    /// §2.4, §2.14; #909), read from its descriptor and the contracts it
+    /// names, over every revision of the required interface in hand.
+    ArbitrationDeclaration,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 32] = [
+    pub const ALL: [CheckId; 33] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -195,6 +202,7 @@ impl CheckId {
         CheckId::DesiredLastKnown,
         CheckId::RedundancyVacancy,
         CheckId::TimingDeclaration,
+        CheckId::ArbitrationDeclaration,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -232,6 +240,7 @@ impl CheckId {
             CheckId::DesiredLastKnown => "desired-last-known",
             CheckId::RedundancyVacancy => "redundancy-vacancy",
             CheckId::TimingDeclaration => "timing-declaration",
+            CheckId::ArbitrationDeclaration => "arbitration-declaration",
         }
     }
 
@@ -276,6 +285,7 @@ impl CheckId {
             CheckId::DesiredLastKnown => "desired.v1 §2.9",
             CheckId::RedundancyVacancy => "redundancy.v1 §2.15",
             CheckId::TimingDeclaration => "timing.v1 §2.2",
+            CheckId::ArbitrationDeclaration => "arbitration.v1 §2.14",
         }
     }
 
@@ -394,6 +404,11 @@ impl CheckId {
                 "does a contract an owner implements declare timing.v1 values a reader cannot \
                  judge: an invalid one, a deadline below its period, or timing keys on a resource \
                  that is not a stream or on a requirement?"
+            }
+            CheckId::ArbitrationDeclaration => {
+                "does a running consumer hold an arbitrated role whose declaration is invalid, \
+                 or whose binding leaves a priority to an order nobody chose (a wildcard or a \
+                 shadowed entry)?"
             }
         }
     }
@@ -1094,6 +1109,7 @@ mod check_id_tests {
                 "desired-last-known",
                 "redundancy-vacancy",
                 "timing-declaration",
+                "arbitration-declaration",
             ]
         );
     }
