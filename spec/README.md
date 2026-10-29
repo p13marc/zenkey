@@ -8,7 +8,7 @@ measurements behind it are [`docs/zk2/spike-report.md`](../docs/zk2/spike-report
 | Path | What it is | Source |
 |---|---|---|
 | [`core.md`](core.md) | **The normative core.** Its header gives its version, the date its first version was accepted, and a link to [`CHANGELOG.md`](CHANGELOG.md), which records every amendment since. Every MUST cites a fixture or a scenario. | written from r4 |
-| [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 1. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
+| [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 2. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
 | [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge. Seeded by `zenkey-model` (#608), completed by #607. | `zenkey-model/tests/conformance.rs` |

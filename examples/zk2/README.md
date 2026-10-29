@@ -2,7 +2,8 @@
 
 These are contracts written in the **zk2 authoring format**: the walkthrough
 interfaces of `docs/zk2/architecture.md` (r3.3) and the three adopters'
-mappings. They are design artifacts, all in draft 1. `zenkey-model` (#608)
+mappings. They are design artifacts, written in draft 1 and valid in draft 2,
+which only adds a spelling. `zenkey-model` (#608)
 validates, canonicalizes, fingerprints and bundles every one of them, and
 requires each to load without a single finding
 (`zenkey-model/tests/examples.rs`). To check one by hand:
@@ -32,7 +33,7 @@ cargo run -p zenkey-model --bin zk2 -- contract bundle <file> --history examples
 | [`acl/`](acl/) | Access-control enrollments (spec §11) for the walkthrough's vehicle router and the tcgui pilot: principals, the services, archives and tools they run, their bindings and calls; and the vehicle router's face policy toward the ground (`walkthrough.face.toml`, `link.v1`). `zenctl acl gen` plans them; `*.enrollment.toml` and `*.face.toml` are deployment files, not contracts | #612, #769 |
 | [`link/`](link/) | `link.v1`'s scenarios as an example: the `radio.v1` contract, every kind exposed in part, with its enrollment and the lab router's face policy. `zenctl acl gen --face-policy` compiles them into the `access_control` and `downsampling` blocks; `zenctl check face` judges a router's block against them | #769 |
 
-## The authoring format (draft 1, r3.3)
+## The authoring format (draft 2, r3.3)
 
 **Draft 1** applies r3.3's decisions (D1–D26, `docs/zk2/architecture.md`
 §0.3) to draft 0, which the mappings were first written in. `zenkey-model`
@@ -42,6 +43,14 @@ is generated from its authoring types, and its lints carry stable codes
 [`spec/conformance/contracts/`](../../spec/conformance/contracts/)). **Changes
 from draft 0 are marked ✱.** What implementing it settled is listed
 [at the end](#what-implementing-draft-1-settled-608).
+
+**Draft 2** (core 0.57, #937) is draft 1 plus one spelling:
+`cardinality = "unbounded"`, the name of the no-ceiling value, marked ✱✱.
+It resolves to 4294967295, so a contract that writes it has the canonical
+form and the fingerprint of one that writes the number
+([`ok-cardinality-unbounded`](../../spec/conformance/contracts/ok-cardinality-unbounded.toml)).
+The canonical form did not change, so its `format` tag is still
+`zk2-contract/draft-1`, and no published fingerprint moved.
 
 ### One file per interface major
 
@@ -127,7 +136,7 @@ chunk.
 | `kind` | `"stream"` \| `"state"` \| ✱ `"event"` \| `"operation"` | The key's kind chunk is `stream`/`@stream`, `state`/✱`@state`, ✱`events`, or `@op`. |
 | `doc` | string | Documentation; not in the fingerprint. |
 | `params` | `{ <name> = "string" \| "uint" \| "path" }` | Required when the template has parameters. `path` is for `{x...}` only. |
-| `cardinality` | integer | **Required** when the template has a parameter: the contract's ceiling on the population. ✱ An instance's descriptor may declare a lower one (D8). |
+| `cardinality` | integer \| ✱✱ `"unbounded"` | **Required** when the template has a parameter: the contract's ceiling on the population, the most members one instance will hold. ✱✱ `"unbounded"` is no ceiling (core §2.2), the same as writing 4294967295; any other string is refused (E000). ✱ An instance's descriptor may declare a lower one (D8). |
 | ✱ `epoch` | parameter name | Per-member continuity epochs: the implementation holds a member token per value of that parameter, cycled on discontinuity (D9). |
 | `optional` | bool (default false) | An implementation may declare the resource unavailable. |
 | ✱ `gate` | `"build:<n>"` \| `"config:<n>"` \| `"capability:<n>"`, or a list of them (AND) | Only with `optional = true`. Names are `[a-z0-9][a-z0-9_.-]*`. Draft 0's `feature:` is now `build:` (D4). |
