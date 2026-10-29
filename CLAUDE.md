@@ -270,6 +270,46 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   operation or a requirement), and `check conform`'s `timing-period` and
   `timing-deadline` run the same reader over the suite's window
   (`ConformObservation::timing`, none when both are skipped).
+  `arbitration.v1` (#909, BC) runs through all four layers too. The fleet
+  runs the model's `Arbiter` itself rather than the runtime's
+  `Consumer::arbitrate` (which takes a namespaced watch and tells an
+  application): `bus::arbitration`'s `run_arbitration` reads presence and
+  descriptors of the consumers in scope, the revisions they name, and the
+  bound providers' (`Scope::entry`, a `*` kept) where that read did not
+  reach them; each `requires` entry is a subject (`model::arbitration::
+  subjects`, `self.system`/`self.service` resolved), read only when it
+  carries a policy, its declaring contract is not in hand (`no_contract`)
+  or `--role` names it; with `--role` and no descriptor listing it, each
+  contract in hand declaring the role is read with no descriptor (F-272).
+  `read_role` is §2.2 over every revision of the required interface the
+  store holds (`held_over`; governed when every one lists redundancy.v1).
+  Then the tool's own view of every arbitrated, bound role at once, each
+  over `ArbitrationSpec::listen` (or `deadlines` × its own deadline): one
+  liveliness subscriber per entry on the `WatchSession`
+  (`zk2/<entry>/@zk/alive/<iface>/**`) and its barrier, one subscriber per
+  entry on the namespaced session (a sample two entries cover handed over
+  once, by the first), each arrival's `Instant` read in the callback, one
+  bounded queue, `bus::stall`, a read again 100 ms after a withdrawal
+  leaving none known held (one per burst), a move (the transport event,
+  or a withdrawal heard with no link, F-268) kept until the round trip
+  asked 100 ms after it stands (core 0.56), a governed interface's
+  incumbents read once after the round trip, and a one-shot timer at
+  `Arbiter::due`; the view starts, and has listened from, the declaration
+  of its last stream subscription (text 0.3). `model::arbitration`'s
+  `ViewBook` is session-free: the `Arbiter` over the tool's instants,
+  never going back, `zenkey_model::arbitration::Incumbents` beside it (moved
+  out of the runtime at BC), its switches (64 kept), and `lost` (a
+  refusal or a stall within the last deadline); `roles_in` reads a
+  presence read already made with no view (the doctor's, zengui's).
+  `judge::arbitration` maps `judge_declaration`, `judge_selection` and
+  `judge_binding` onto `report::arbitration` (every `conclusions.json` case
+  checked through it), the selection's `whose` always "the tool's own
+  view"; `ArbitrationReport::judgement` is 1 on any question's finding (an
+  invalid declaration, `dead_man`, a wildcard or shadowed entry), 0 every
+  question asked on its other pole (`unbound` informative), 2 otherwise.
+  The doctor's `arbitration-declaration` asks the first and third
+  questions of every running consumer's arbitrated role, with no view: an
+  invalid declaration an error, a wildcard or shadowed entry a warning.
 - `zenkey-explorer-config/` — the **shared explorer config crate**
   (Apache-2.0, **not published**): named connection contexts, the path
   policy (`~/.config/zenkey-explorer/config.toml`, legacy zenctl read
@@ -384,7 +424,15 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   the latest's only, RD): each instance's role a chip off the
   fleet's judge, §5's questions under REDUNDANCY, and the descriptor's
   standby mark shown apart as the descriptor's word (shots scene
-  `workbench-redundancy`); zk2's doctor, the admin pane's S4
+  `workbench-redundancy`), and `arbitration.v1` at the same settle for an
+  address whose descriptor requires a role (#909, BC:
+  `nodes::ArbitrationState`, `services::sweep::arbitration` over
+  `run_arbitration`, its view's watch on the presence monitor's watch
+  session, listening two of each role's deadlines,
+  `ArbitrationSpec::deadlines`): each role's declaration, its binding
+  naming wildcard and shadowed entries, and the selection under
+  ARBITRATION as the tool's own view (shots scene
+  `workbench-arbitration`); zk2's doctor, the admin pane's S4
   rows (`on_owner_state`), the mesh; Send publishes a foreign key only, on
   `WireQos` axes (P3 and wildcards refused, a tombstone behind
   `--i-know`), and calls an operation through its contract on `@op`
@@ -501,8 +549,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirty-two
-  checks since #908's MC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: thirty-three
+  checks since #909's BC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
@@ -675,6 +723,19 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   runs as `live_zk2.rs`'s `timing_s6_a_tools_window`, on the owner
   example's timing drive compiled in (`timing every <member> <ms>` its
   step 3, `timing declare <axis>` a member token alone).
+  #909's BC added `arbitration [SYSTEM/SERVICE] [--role R] [--for SECS]
+  [--lease] [--wait-before-close] [--contracts]`, a root judgement beside
+  `timing` and `redundancy` over `run_arbitration`: §5's three questions
+  per consumer's arbitrated role in the fixtures' tokens, the selection
+  labelled the tool's own view in every medium, the binding naming its
+  wildcard and shadowed entries; exit 1 an invalid declaration, the view
+  in the dead-man or a wildcard or shadowed entry (a warning); 0 every
+  question asked on its other pole; 2 otherwise; `--for 0` listens not at
+  all (`not_listened`). The doctor gains `arbitration-declaration` (33
+  checks). arbitration scenarios §10 runs as `live_zk2.rs`'s
+  `arbitration_s10_a_tools_questions`, against the actuator and the
+  commanders brought up through the runtime as the owner example's
+  `--arbitrate` and `--commander` do.
   `--skip` sends nothing: no call for `operation`, no fan-out probe for
   `fanout-refused`, no standby probe for `redundancy-standby` (#841, RD).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
@@ -840,8 +901,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   clean stop; and it caches no discovery: it is not the noun
   `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
   doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
-  (`deep`, thirty-two checks since #908's MC, `timing-declaration` among
-  them; top-level `clocks_synced` for the `health-*` checks, which a
+  (`deep`, thirty-three checks since #909's BC, `arbitration-declaration`
+  among them; top-level `clocks_synced` for the `health-*` checks, which a
   `doctor` rule reads too) every few **hours** beside the drain, as a rule
   of its own (`RuleKind::ScheduledDoctor`, id `doctor`). The first run is a
   **baseline** (one `info` notification; every finding assumed); later runs
@@ -1079,7 +1140,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   withdrawn provider, `Switch::last` (from's last arrival, kept across
   its withdrawal, the line's `last_ms`), and a tool with no consumer's
   descriptor (`Reading::binding` `None`) answering the selection and the
-  binding not asked, `no_descriptor`).
+  binding not asked, `no_descriptor`; text 0.3, #909 BC: `Incumbents` and
+  `Holding`, a governed interface's incumbents (redundancy.v1 §2.10) kept
+  through a move, moved here from the runtime so a tool's view follows
+  them alike; §2.14 says what a tool's view reads that no descriptor
+  carries, no ε and governance from every revision held, and that it has
+  listened from its stream subscriptions' declaration).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1317,11 +1383,15 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   scenarios.md's C as a black box, one JSON line per event.
   `arbitration` (#909, BB) is `arbitration.v1`'s runtime over
   `zenkey_model::arbitration`'s `Arbiter`, deciding nothing itself.
-  `ServiceBuilder::arbitrate(role, revision)` hands the start the revision
-  of the required interface held, and `start()` reads every role carrying
-  `arbitration.policy` over it (checks 1 to 5 without one), refusing an
-  invalid declaration with nothing declared: `not started: <address>: role
-  "cmd" (steer.v1): arbitration.v1 invalid: <reason>`.
+  `ServiceBuilder::arbitrate(role, revision)` reads the role's declaration
+  over the revision of the required interface held at once, refusing an
+  invalid one with the start's own error (text 0.3, F-274: so an owner
+  that puts a state's value before its tokens calls it first and puts
+  nothing of an instance that never starts), and `start()` reads every
+  role carrying `arbitration.policy` again (checks 1 to 5 without a
+  revision), refusing an invalid declaration with nothing declared: `not
+  started: <address>: role "cmd" (steer.v1): arbitration.v1 invalid:
+  <reason>`.
   `Consumer::arbitrate(on_event)` subscribes the role's one stream per
   entry (a sample two entries' subscribers hear handed over once, by the
   first), hands the arbiter each sample at its instant (never earlier
@@ -1347,9 +1417,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   control; `tests/walkthrough.rs`'s `w4_2_a_control_loop_arbitrated` is
   architecture §4.2. The owner example's `--arbitrate <entry>,...` is an
   actuator printing its switches as JSON lines and answering `arbitrate
-  counts|state|reads`, and `--commander` a commander (`commander
+  counts|state|reads`, refused before anything of it is declared or put
+  (F-274), and `--commander` a commander (`commander
   hold|resume|raw on|off|sent|new-epoch|zid`, its first put 500 ms after
-  its tokens).
+  its tokens, `raw on` putting `standby <n>` round its writer, scenarios
+  §11's `X`, F-276).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.

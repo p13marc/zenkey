@@ -363,7 +363,208 @@ pub fn doctor_report() -> DoctorReport {
                 "2 timed resource(s) in 1 revision(s) named by descriptors, each declaration one \
                  a reader judges",
             ),
+            CheckReport::of(
+                CheckId::ArbitrationDeclaration,
+                vec![],
+                vec![],
+                "1 arbitrated role(s) of running consumers, each declaration valid and each \
+                 binding of exact entries, none shadowed",
+            ),
         ],
+        unobservable: None,
+    }
+}
+
+/// `zenctl arbitration` (#909, BC): `lab/rudder-l`'s `cmd`, valid, the
+/// tool's own view following `lab/autopilot` through a wildcard entry (the
+/// binding's warning, the finding), its switches and counts; and a copy of
+/// `rudder.v1` read offline with no consumer (scenarios §10 step 4),
+/// invalid, its selection and binding not asked (`no_descriptor`).
+pub fn arbitration_report() -> ArbitrationReport {
+    use std::collections::BTreeMap;
+    let declaration = |answer, reason: &str, says: &str| ArbitrationDeclaration {
+        answer,
+        reason: reason.into(),
+        says: says.into(),
+        reasons: vec![],
+        policy: None,
+        resource: None,
+        deadline_ms: None,
+        period_ms: None,
+        finding: false,
+    };
+    let valid = ArbitrationDeclaration {
+        policy: Some("priority".into()),
+        resource: Some("stream/cmd".into()),
+        deadline_ms: Some(300),
+        period_ms: Some(50),
+        ..declaration(
+            ArbitrationAnswerToken::Yes,
+            "valid",
+            "arbitrated, priority over stream/cmd, deadline 300 ms, period 50 ms",
+        )
+    };
+    let invalid = ArbitrationDeclaration {
+        reasons: vec!["policy_unsupported".into()],
+        finding: true,
+        ..declaration(
+            ArbitrationAnswerToken::No,
+            "invalid",
+            "invalid: freshest and lease are reserved; arbitration.v1 1.0 defines priority only \
+             (policy_unsupported)",
+        )
+    };
+    let not_asked = ArbitrationSelection {
+        answer: ArbitrationAnswerToken::NotAsked,
+        reason: "no_descriptor".into(),
+        says: "no consumer's descriptor read: no binding, and no view".into(),
+        provider: None,
+        whose: TOOLS_OWN_VIEW,
+        finding: false,
+    };
+    let fp = format!("sha256:{}", "d".repeat(64));
+    ArbitrationReport {
+        namespace: "acme".into(),
+        target: None,
+        role: None,
+        listen_s: 2.0,
+        asked: vec![
+            "zk2/*/*/@zk/**".into(),
+            "zk2/lab/safety/@zk/alive/steer.v1/**".into(),
+            "zk2/lab/*/@zk/alive/steer.v1/**".into(),
+            "zk2/lab/safety/steer.v1/stream/cmd".into(),
+            "zk2/lab/*/steer.v1/stream/cmd".into(),
+        ],
+        roles: vec![
+            ArbitrationRole {
+                consumer: Some("lab/rudder-l".into()),
+                instance: Some("000000000000000a".into()),
+                role: "cmd".into(),
+                iface: "steer.v1".into(),
+                declared_by: Some("rudder.v1".into()),
+                declaring: Some(fp.clone()),
+                bindings: Some(vec!["lab/safety".into(), "lab/*".into()]),
+                params: BTreeMap::new(),
+                revisions: vec![format!("sha256:{}", "5".repeat(64))],
+                declaration: valid,
+                selection: ArbitrationSelection {
+                    answer: ArbitrationAnswerToken::Yes,
+                    reason: "selected".into(),
+                    says: "the tool's own view follows this provider".into(),
+                    provider: Some("lab/autopilot".into()),
+                    whose: TOOLS_OWN_VIEW,
+                    finding: false,
+                },
+                binding: ArbitrationBinding {
+                    answer: ArbitrationAnswerToken::Yes,
+                    reason: "wildcard".into(),
+                    says: "a wildcard entry: the byte order among its addresses is a priority \
+                           nobody chose"
+                        .into(),
+                    wildcards: vec![1],
+                    shadowed: vec![],
+                    wildcard_entries: vec!["lab/*".into()],
+                    shadowed_entries: vec![],
+                    finding: true,
+                },
+                view: Some(ArbitrationView {
+                    whose: TOOLS_OWN_VIEW,
+                    listened_ms: 2000.0,
+                    lost: false,
+                    active: Some("lab/autopilot".into()),
+                    watching: true,
+                    governed: false,
+                    switches: vec![
+                        ArbitrationSwitch {
+                            from: None,
+                            to: None,
+                            cause: "start".into(),
+                            at_ms: 0.0,
+                            last_ms: None,
+                        },
+                        ArbitrationSwitch {
+                            from: None,
+                            to: Some("lab/teleop".into()),
+                            cause: "sample".into(),
+                            at_ms: 12.5,
+                            last_ms: None,
+                        },
+                        ArbitrationSwitch {
+                            from: Some("lab/teleop".into()),
+                            to: Some("lab/autopilot".into()),
+                            cause: "sample".into(),
+                            at_ms: 31.0,
+                            last_ms: Some(12.5),
+                        },
+                    ],
+                    switches_dropped: 0,
+                    providers: vec![
+                        ArbitrationProvider {
+                            address: "lab/safety".into(),
+                            delivered: 0,
+                            not_active: 0,
+                            deleted: 0,
+                            expired: 0,
+                            not_incumbent: 0,
+                            withdrawn: false,
+                        },
+                        ArbitrationProvider {
+                            address: "lab/autopilot".into(),
+                            delivered: 40,
+                            not_active: 0,
+                            deleted: 0,
+                            expired: 0,
+                            not_incumbent: 0,
+                            withdrawn: false,
+                        },
+                        ArbitrationProvider {
+                            address: "lab/teleop".into(),
+                            delivered: 1,
+                            not_active: 39,
+                            deleted: 0,
+                            expired: 0,
+                            not_incumbent: 0,
+                            withdrawn: false,
+                        },
+                    ],
+                    discards: BTreeMap::from([
+                        ("unbound".to_owned(), 0),
+                        ("unresolved".to_owned(), 0),
+                        ("wild".to_owned(), 0),
+                    ]),
+                    reads: 0,
+                    round_trips: 1,
+                    losses: 0,
+                }),
+                notes: vec![],
+            },
+            ArbitrationRole {
+                consumer: None,
+                instance: None,
+                role: "cmd".into(),
+                iface: "steer.v1".into(),
+                declared_by: Some("rudder.v1".into()),
+                declaring: Some(format!("sha256:{}", "e".repeat(64))),
+                bindings: None,
+                params: BTreeMap::new(),
+                revisions: vec![format!("sha256:{}", "5".repeat(64))],
+                declaration: invalid,
+                selection: not_asked.clone(),
+                binding: ArbitrationBinding {
+                    answer: ArbitrationAnswerToken::NotAsked,
+                    reason: "no_descriptor".into(),
+                    says: "no consumer's descriptor read: no binding, and no view".into(),
+                    wildcards: vec![],
+                    shadowed: vec![],
+                    wildcard_entries: vec![],
+                    shadowed_entries: vec![],
+                    finding: false,
+                },
+                view: None,
+                notes: vec![],
+            },
+        ],
+        skipped: vec![],
         unobservable: None,
     }
 }

@@ -158,6 +158,42 @@ impl Scope {
         }
     }
 
+    /// A binding entry's services, `<system>/<service>`, either chunk `*`
+    /// (core §1.2, D009): `zk2/<system>/<service>/@zk/**`, a `*` kept, as
+    /// `arbitration.v1`'s tool reads a role's providers (#909, BC). A chunk
+    /// that is neither `*` nor a plain chunk is refused.
+    pub fn entry(entry: &str) -> Result<Scope> {
+        let (sys, svc) = entry.split_once('/').ok_or_else(|| {
+            Error::unaskable(
+                entry.to_owned(),
+                "a binding entry is <system>/<service>, either chunk *",
+            )
+        })?;
+        let chunk = |what: &'static str, c: &str| -> Result<Option<Name>> {
+            if c == "*" {
+                Ok(None)
+            } else {
+                Name::new(what, c)
+                    .map(Some)
+                    .map_err(|e| Error::unaskable_from(c, e))
+            }
+        };
+        Ok(Scope {
+            system: chunk("system", sys)?,
+            service: chunk("service", svc)?,
+        })
+    }
+
+    /// Whether every service `other` covers is one of this scope's.
+    pub fn covers(&self, other: &Scope) -> bool {
+        let chunk = |a: &Option<Name>, b: &Option<Name>| match (a, b) {
+            (None, _) => true,
+            (Some(a), Some(b)) => a == b,
+            (Some(_), None) => false,
+        };
+        chunk(&self.system, &other.system) && chunk(&self.service, &other.service)
+    }
+
     /// The liveliness selector, base-relative. `@zk` is named because `*`
     /// and `**` never cross a verbatim chunk; after it, `**` reaches every
     /// token form (`instance/…`, `alive/…`, `member/…`).

@@ -53,11 +53,10 @@ use zenkey_model::contract::Contract;
 use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey, parse};
 use zenoh::pubsub::Subscriber;
 use zenoh::sample::{Sample, SampleKind};
-use zenoh::time::Timestamp;
 
 pub use zenkey_model::arbitration::{
-    Arbiter, Arbitrated, Binding, Cause, Counts, Declaration, Discards, Event, Invalid, Outcome,
-    Policy, declaration, declaration_of,
+    Arbiter, Arbitrated, Binding, Cause, Counts, Declaration, Discards, Event, Holding, Incumbents,
+    Invalid, Outcome, Policy, declaration, declaration_of,
 };
 
 use crate::consumer::{Delivery, Provider};
@@ -95,69 +94,6 @@ pub struct Switched {
 /// [`crate::timing`]'s engine lock is taken.
 fn lock(core: &Mutex<Core>) -> MutexGuard<'_, Core> {
     core.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// A presence event as the incumbents of a governed interface follow it
-/// (`redundancy.v1` §2.10), kept, as the arbiter keeps its own, through a
-/// move (§2.8).
-#[derive(Debug, Clone)]
-enum Held {
-    Declared(Addr, InstanceId),
-    Withdrawn(Addr, InstanceId),
-    Read(Addr, bool, BTreeSet<InstanceId>),
-}
-
-/// The incumbent of each provider of a governed required interface
-/// (`redundancy.v1` §2.10): the lowest instance holding the interface's
-/// token, and the `meta.zid` its descriptor states.
-#[derive(Debug, Default)]
-struct Incumbents {
-    holders: BTreeMap<Addr, BTreeSet<InstanceId>>,
-    zids: BTreeMap<(Addr, InstanceId), u128>,
-    kept: Vec<Held>,
-}
-
-impl Incumbents {
-    fn apply(&mut self, h: Held) {
-        match h {
-            Held::Declared(a, i) => {
-                self.holders.entry(a).or_default().insert(i);
-            }
-            Held::Withdrawn(a, i) => {
-                self.holders.entry(a).or_default().remove(&i);
-            }
-            Held::Read(a, complete, held) => {
-                let known = self.holders.entry(a).or_default();
-                if complete {
-                    *known = held;
-                } else {
-                    known.extend(held);
-                }
-            }
-        }
-    }
-
-    /// Whether `stamp` is the incumbent's of `addr` (§2.10): its id the
-    /// lowest holder's `meta.zid`, by value. Nothing is accepted with no
-    /// incumbent seen, or no `meta.zid` held of it, or no stamp.
-    fn accepts(&self, addr: &Addr, stamp: Option<&Timestamp>) -> bool {
-        let Some(lowest) = self.holders.get(addr).and_then(|h| h.iter().next()) else {
-            return false;
-        };
-        let Some(zid) = self.zids.get(&(addr.clone(), lowest.clone())) else {
-            return false;
-        };
-        stamp.and_then(timing::stamp_id) == Some(*zid)
-    }
-
-    /// The holders whose `meta.zid` is not held.
-    fn undescribed(&self) -> Vec<(Addr, InstanceId)> {
-        self.holders
-            .iter()
-            .flat_map(|(a, is)| is.iter().map(move |i| (a.clone(), i.clone())))
-            .filter(|k| !self.zids.contains_key(k))
-            .collect()
-    }
 }
 
 /// A role's arbitration, behind one lock.
@@ -221,7 +157,7 @@ impl Core {
 
     /// A presence event, to the arbiter and to the incumbents, each kept
     /// through a move (§2.8): the arbiter keeps its own.
-    fn presence(&mut self, at: Instant, event: Event<'_>, held: Option<Held>) {
+    fn presence(&mut self, at: Instant, event: Event<'_>, held: Option<Holding>) {
         let moving = self.arbiter.moving();
         let stood = matches!(event, Event::Stood);
         self.observe(at, event);
@@ -229,16 +165,10 @@ impl Core {
             return;
         };
         if let Some(h) = held {
-            if moving {
-                inc.kept.push(h);
-            } else {
-                inc.apply(h);
-            }
+            inc.hear(h, moving);
         }
         if stood && moving {
-            for h in std::mem::take(&mut inc.kept) {
-                inc.apply(h);
-            }
+            inc.stood();
         }
         for k in inc.undescribed() {
             if self.asked.insert(k.clone()) {
@@ -249,24 +179,8 @@ impl Core {
 
     /// An interface token heard, declared or withdrawn: its provider's
     /// incumbents' event, for a bound address of the required interface.
-    fn token(&self, key: &str, put: bool) -> Option<Held> {
-        let Ok(ZkKey::Alive {
-            addr,
-            iface,
-            instance,
-            ..
-        }) = parse(key)
-        else {
-            return None;
-        };
-        if iface != self.iface || self.arbiter.binding().rank(&addr).is_none() {
-            return None;
-        }
-        Some(if put {
-            Held::Declared(addr, instance)
-        } else {
-            Held::Withdrawn(addr, instance)
-        })
+    fn token(&self, key: &str, put: bool) -> Option<Holding> {
+        Holding::of_token(key, put, &self.iface, self.arbiter.binding())
     }
 }
 
@@ -612,9 +526,9 @@ where
                     _ => Some(premise),
                 };
                 let not_incumbent = !delete
-                    && c.incumbents
-                        .as_ref()
-                        .is_some_and(|inc| !inc.accepts(&addr, sample.timestamp()));
+                    && c.incumbents.as_ref().is_some_and(|inc| {
+                        !inc.accepts(&addr, sample.timestamp().and_then(timing::stamp_id))
+                    });
                 let outcome = c.observe(
                     arrival,
                     Event::Sample(zenkey_model::arbitration::Sample {
@@ -673,7 +587,7 @@ where
                     if let Some((addr, instance, zid)) = described(&s)
                         && let Some(inc) = lock(&c).incumbents.as_mut()
                     {
-                        inc.zids.insert((addr, instance), zid);
+                        inc.described(addr, instance, zid);
                     }
                 })
                 .await
@@ -821,7 +735,7 @@ async fn describe(
         match zid {
             Some(z) => {
                 if let Some(inc) = c.incumbents.as_mut() {
-                    inc.zids.insert((addr, instance), z);
+                    inc.described(addr, instance, z);
                 }
             }
             // Asked again at the holder's next sight.
@@ -882,7 +796,7 @@ async fn read_into_core(
                 complete: read.complete,
                 held: held.clone(),
             },
-            Some(Held::Read(address, read.complete, held)),
+            Some(Holding::Read(address, read.complete, held)),
         );
     }
 }

@@ -139,6 +139,68 @@ fn a_health_reading_lands_only_on_the_selected_address_in_this_namespace() {
     ));
 }
 
+/// `arbitration.v1`'s reading (#909, BC) lands under the health reading's
+/// guard: only the selected address's, only in this namespace; a window
+/// with no session in the namespace owes none.
+#[test]
+fn an_arbitration_reading_lands_only_on_the_selected_address_in_this_namespace() {
+    use crate::nodes::ArbitrationState;
+    use crate::view::nodes::NodesMsg;
+    use zenkey_model::grammar::Addr;
+
+    let report = |addr: &Addr| {
+        std::sync::Arc::new(zenkey_fleet::judge_arbitration(
+            &zenkey_fleet::ArbitrationObservation {
+                namespace: String::new(),
+                target: Some(addr.clone()),
+                role: None,
+                listen: std::time::Duration::ZERO,
+                asked: vec![],
+                roles: vec![],
+                skipped: vec![],
+                unobservable: Some("no session".into()),
+            },
+        ))
+    };
+    let nav: Addr = "robot1/nav".parse().expect("an address");
+    let tc: Addr = "host-a/tc".parse().expect("an address");
+    let mut app = test_app();
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Address(
+        nav.clone(),
+    ))));
+    assert!(
+        matches!(
+            app.work.verdicts.nodes.arbitration,
+            ArbitrationState::NotAsked
+        ),
+        "no session in the namespace: nothing owed"
+    );
+    let land = |app: &mut crate::app::Zengui, addr: &Addr, ns: &str| {
+        let _ = app.update(Message::Pane(crate::message::PaneMsg::Nodes(
+            NodesMsg::ArbitrationRead(addr.clone(), ns.to_string(), report(addr)),
+        )));
+    };
+    land(&mut app, &tc, "");
+    assert!(matches!(
+        app.work.verdicts.nodes.arbitration,
+        ArbitrationState::NotAsked
+    ));
+    land(&mut app, &nav, "elsewhere");
+    assert!(matches!(
+        app.work.verdicts.nodes.arbitration,
+        ArbitrationState::NotAsked
+    ));
+    land(&mut app, &nav, "");
+    assert!(
+        app.work
+            .verdicts
+            .nodes
+            .arbitration
+            .report(&nav)
+            .is_some_and(|r| r.unobservable.is_some())
+    );
+}
+
 /// `redundancy.v1`'s reading (#841, RC) lands under the health reading's
 /// guard: only the selected address's, only in this namespace — and a
 /// window with no session in the namespace asks nothing, and says so.

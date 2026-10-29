@@ -2375,11 +2375,50 @@ async fn the_owner_example_arbitrates() {
             .unwrap()
             > 0
     );
+    // Raw, round the writer, resumed: `standby <n>`, scenarios §11 step
+    // 1's payload (text 0.3, F-276).
+    let tool = client(&ep).await;
+    let (raw_tx, raw_rx) = flume::unbounded::<String>();
+    let _raw = tool
+        .declare_subscriber("zk2/lab/safety/steer.v1/stream/cmd")
+        .callback(move |x: Sample| {
+            let _ = raw_tx.send(String::from_utf8_lossy(&x.payload().to_bytes()).into_owned());
+        })
+        .await
+        .unwrap();
+    assert_eq!(ask_json(&s, "commander raw on").await["raw"], true);
+    assert_eq!(ask_json(&s, "commander resume").await["on"], true);
+    tokio::time::timeout(SETTLE, async {
+        while let Ok(p) = raw_rx.recv_async().await {
+            if p.starts_with("standby ") {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("a raw put's payload is `standby <n>`");
     s.stop().await;
     t.stop().await;
     a.stop().await;
 
-    // A reserved policy: refused at start, exit 1 from main.
+    // A reserved policy: refused at start, exit 1 from main, and nothing of
+    // the instance put or declared (§2.2; scenarios §8; text 0.3, F-274):
+    // a subscriber and a liveliness subscriber on `zk2/lab/**`, opened
+    // before it starts, hear nothing of `lab/rudder-l`.
+    let heard: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::default();
+    let (h1, h2) = (std::sync::Arc::clone(&heard), std::sync::Arc::clone(&heard));
+    let _puts = tool
+        .declare_subscriber("zk2/lab/**")
+        .callback(move |x: Sample| h1.lock().unwrap().push(x.key_expr().as_str().to_owned()))
+        .await
+        .unwrap();
+    let watch = client(&ep).await;
+    let _tokens = presence::declare_subscriber(&watch, "zk2/lab/**")
+        .callback(move |x: Sample| h2.lock().unwrap().push(x.key_expr().as_str().to_owned()))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    heard.lock().unwrap().clear();
     let dir = tempfile::tempdir().unwrap();
     let freshest = dir.path().join("rudder.v1.toml");
     std::fs::write(
@@ -2405,6 +2444,15 @@ async fn the_owner_example_arbitrates() {
         e.starts_with("not started: lab/rudder-l: role \"cmd\" (steer.v1): arbitration.v1 invalid: policy_unsupported"),
         "{e}"
     );
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let rudder: Vec<String> = heard
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|k| k.starts_with("zk2/lab/rudder-l/"))
+        .cloned()
+        .collect();
+    assert!(rudder.is_empty(), "no put and no token: {rudder:?}");
 }
 
 #[test]

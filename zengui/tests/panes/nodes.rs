@@ -349,3 +349,51 @@ fn health_without_clocks_reads_age_unobservable() {
             .is_err()
     );
 }
+
+/// `arbitration.v1` on the nodes card (#909, BC): an arbitrated consumer's
+/// role, its declaration, its binding naming the wildcard, and the
+/// selection said to be the tool's own view, each in the engine's tokens
+/// and words; nothing derived in the view.
+#[test]
+fn an_arbitrated_role_reads_as_the_tools_own_view() {
+    let world = common::World::new();
+    let rudder = addr(common::RUDDER);
+    let mut live = LivePresence::new(PresenceScope::all());
+    live.seed(&world.observed_with_rudder(), SystemTime::now());
+    let presence = update(live);
+    let mut nodes = NodesState::default();
+    nodes.asking_arbitration(rudder.clone());
+    let mut ui = render(Some(&presence), &nodes, Some(&rudder));
+    assert!(ui.find("ARBITRATION (ARBITRATION.V1)").is_ok());
+    assert!(
+        ui.find(
+            "reading arbitration.v1 — the descriptor, the contracts, and the tool's own view \
+             listening two deadlines"
+        )
+        .is_ok()
+    );
+    drop(ui);
+    nodes.arbitration_read(rudder.clone(), world.rudder_arbitration());
+    let mut ui = render(Some(&presence), &nodes, Some(&rudder));
+    assert!(ui.find("cmd → steer.v1: a warning").is_ok());
+    assert!(
+        ui.find(
+            "declaration: yes (valid) — arbitrated, priority over stream/cmd, deadline 300 ms, \
+             period 50 ms"
+        )
+        .is_ok()
+    );
+    assert!(
+        ui.find("the tool's own view: follows lab/autopilot (selected), over 600 ms")
+            .is_ok()
+    );
+    assert!(
+        ui.find("binding: yes (wildcard lab/*) — bound [lab/safety, lab/*]")
+            .is_ok()
+    );
+    drop(ui);
+    // An address that requires no role shows no section at all.
+    let nav = addr("robot1/nav");
+    let mut ui = render(Some(&presence), &nodes, Some(&nav));
+    assert!(ui.find("ARBITRATION (ARBITRATION.V1)").is_err());
+}

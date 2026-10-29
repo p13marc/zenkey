@@ -5,8 +5,9 @@ the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §9 and §11 are the
 runtime's: the reference runs them as tests of `zenkey`, one test per
 section, named after it (`zenkey/tests/profile_arbitration.rs`, #909's
-BB). §10 is a tool's, and the reference tool runs it as a test of zenctl
-(#909's BC).
+BB). §10 is a tool's, and the reference tool, `zenctl arbitration`, runs
+it as a test of zenctl (`zenctl/tests/live_zk2.rs`'s
+`arbitration_s10_a_tools_questions`, #909's BC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -339,6 +340,14 @@ subscription and a watch of its own, as §2.14 says.
    and reads `A_l` of step 1.
 6. T listens to `A_l` of step 1 for 100 ms only, all three holding.
 
+**The reference tool** is `zenctl arbitration` (#909's BC), with
+`--contracts` holding the contracts T holds offline, `--for` its listen,
+and `--format json` its answers, each selection's `whose` "the tool's own
+view". `zenctl/tests/live_zk2.rs`'s `arbitration_s10_a_tools_questions`
+runs the six steps against the owner example's actuator and commanders,
+compiled in (`zenkey/examples/owner/arbitrate.rs`); its exits are 0, 1, 1,
+1, 2 and 2.
+
 **Expected.** T answers as `conclusions.json` does for the same reading,
 and says each selection is its own view:
 1. The declaration: yes, `valid`; the selection: yes, `selected`,
@@ -370,7 +379,8 @@ bound to `["lab/safety", "lab/teleop"]`.
 
 **Steps.**
 1. `X`, `C_s2`'s own session, puts `cmd` every 50 ms raw, round its
-   runtime's writer, payload `standby <n>`, stamped by its own HLC.
+   runtime's writer, payload `standby <n>`, stamped by its own HLC (the
+   reference's `commander raw on`, text 0.3, F-276).
 2. 1 s later, `C_s1` holds; `X` goes on putting.
 3. 2 s later, `C_s1` resumes.
 

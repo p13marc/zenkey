@@ -34,6 +34,7 @@
 
 pub mod admin;
 pub mod alarms;
+pub mod arbitration;
 pub mod config;
 pub mod conform;
 pub mod consume;

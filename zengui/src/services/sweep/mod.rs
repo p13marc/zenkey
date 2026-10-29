@@ -24,4 +24,4 @@ pub use budget::budget;
 pub use config::config;
 pub use declared::declared;
 pub use doctor::doctor;
-pub use nodes::{HEALTH_GRACE, health, redundancy};
+pub use nodes::{ARBITRATION_DEADLINES, HEALTH_GRACE, arbitration, health, redundancy};

@@ -303,6 +303,26 @@ pub fn catalog_revision() -> Arc<zenkey_fleet::model::catalog::Revision> {
     ))
 }
 
+/// The arbitrated consumer of the arbitration scene (#909, BC): the
+/// scenarios' `lab/rudder-l` on `rudder.v1`, its role `cmd` over
+/// `steer.v1` bound to `[lab/safety, lab/*]`, as scenarios §9 binds it.
+pub const RUDDER: &str = "lab/rudder-l";
+pub const RUDDER_INSTANCE: &str = "00000000000000d1";
+pub const RUDDER_BINDING: [&str; 2] = ["lab/safety", "lab/*"];
+
+/// One of the arbitration scenarios' contracts, as the runtime's tests
+/// keep it (`zenkey/tests/contracts/`).
+pub fn arbitration_revision(name: &str) -> Arc<zenkey_fleet::model::catalog::Revision> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts")
+        .join(format!("{name}.toml"));
+    let l = zenkey_model::contract::load_path(&path);
+    Arc::new(zenkey_fleet::model::catalog::Revision::from_contract(
+        l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+        zenkey_fleet::report::ContractSource::File,
+    ))
+}
+
 /// The instant a config reading of this world ended, on this host's clock:
 /// fixed, so a countdown renders the same twice.
 pub fn config_read_at() -> std::time::SystemTime {
@@ -988,6 +1008,143 @@ impl World {
             &zenkey_fleet::RedundancySpec::new(Duration::from_secs(2)),
             &obs,
         ))
+    }
+
+    /// This world's presence with `lab/rudder-l` beside it (#909, BC): its
+    /// instance token and its descriptor, requiring `cmd` of `steer.v1`,
+    /// declared by `rudder.v1`, bound to [`RUDDER_BINDING`].
+    pub fn observed_with_rudder(&self) -> zenkey_fleet::model::catalog::Observed {
+        use std::collections::BTreeMap;
+        use zenkey_fleet::model::catalog::DescriptorRead;
+        use zenkey_model::descriptor::{Descriptor, InterfaceEntry, RequireEntry};
+        use zenkey_model::grammar::{Addr, InstanceId, ZkKey};
+        let addr: Addr = RUDDER.parse().expect("an address");
+        let rudder = arbitration_revision("rudder.v1");
+        let instance: InstanceId = RUDDER_INSTANCE.parse().expect("an instance id");
+        let mut observed = self.observed.clone();
+        let mut descriptors = observed.descriptors.clone().unwrap_or_default();
+        observed.with_token(ZkKey::Instance {
+            addr: addr.clone(),
+            instance: instance.clone(),
+        });
+        observed.with_token(ZkKey::Alive {
+            addr: addr.clone(),
+            iface: rudder.iface().clone(),
+            instance: instance.clone(),
+            fp: rudder.fingerprint().hex().fp16(),
+        });
+        descriptors.insert(
+            (addr, instance),
+            DescriptorRead::Served(Box::new(Descriptor {
+                format: "zk2-descriptor/0.1".into(),
+                service: RUDDER.into(),
+                instance: RUDDER_INSTANCE.into(),
+                interfaces: vec![InterfaceEntry {
+                    iface: rudder.iface().to_string(),
+                    contract: rudder.fingerprint().to_string(),
+                    minor: 0,
+                    standby: false,
+                    token: true,
+                    unavailable: Vec::new(),
+                    cardinality: BTreeMap::new(),
+                }],
+                capabilities: Vec::new(),
+                requires: vec![RequireEntry {
+                    role: "cmd".into(),
+                    interface: "steer.v1".into(),
+                    declared_by: Some("rudder.v1".into()),
+                    bindings: RUDDER_BINDING.iter().map(|b| (*b).to_owned()).collect(),
+                    params: BTreeMap::new(),
+                    optional: false,
+                }],
+                profiles: vec!["arbitration.v1".into()],
+                meta: BTreeMap::from([("zid".to_owned(), serde_json::json!("d10"))]),
+            })),
+        );
+        observed.descriptors = Some(descriptors);
+        observed
+    }
+
+    /// A presence landing for this world with `lab/rudder-l` beside it.
+    /// The lens moves with it (generation 2).
+    pub fn presence_update_with_rudder(&self) -> Arc<zengui::presence_link::PresenceUpdate> {
+        let observed = self.observed_with_rudder();
+        let mut presence = zenkey_fleet::LivePresence::new(zenkey_fleet::PresenceScope::all());
+        let moved = presence.seed(&observed, std::time::SystemTime::now());
+        Arc::new(zengui::presence_link::PresenceUpdate {
+            presence: Arc::new(presence),
+            moved,
+            catalog: Some(Arc::new(zenkey_fleet::Catalog::new(&observed))),
+            generation: 2,
+            seed: zenkey_fleet::SeedOutcome::Complete,
+        })
+    }
+
+    /// `lab/rudder-l`'s `arbitration.v1` reading, judged by the engine: its
+    /// role read from [`World::observed_with_rudder`] over `rudder.v1` and
+    /// `steer.v1` in hand, and the tool's own view over 600 ms, two
+    /// deadlines of 300 ms, fed teleop's samples and then autopilot's (the
+    /// wildcard ranking autopilot first): valid, autopilot selected, the
+    /// binding's wildcard a warning.
+    pub fn rudder_arbitration(&self) -> Arc<zenkey_fleet::report::ArbitrationReport> {
+        use zenkey_fleet::model::arbitration::{Declaring, read_role, served, subjects};
+        let rudder = arbitration_revision("rudder.v1");
+        let steer = arbitration_revision("steer.v1");
+        let observed = self.observed_with_rudder();
+        let subject = subjects(served(&observed), None)
+            .into_iter()
+            .find(|s| s.consumer.as_ref().is_some_and(|c| c.to_string() == RUDDER))
+            .expect("lab/rudder-l's role");
+        let read = read_role(
+            &subject,
+            Declaring::Held(rudder.contract()),
+            &[(steer.fingerprint().clone(), steer.contract())],
+        );
+        let declared = read.arbitrated.clone().expect("arbitrated");
+        let binding = read.reading.binding.clone().expect("a binding");
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut book =
+            zenkey_fleet::ViewBook::new(&declared, binding, subject.params.clone(), false, t0);
+        for n in 0..12u64 {
+            book.sample(
+                ms(20 + n * 50),
+                "zk2/lab/teleop/steer.v1/stream/cmd",
+                false,
+                None,
+            );
+            if n >= 2 {
+                book.sample(
+                    ms(45 + n * 50),
+                    "zk2/lab/autopilot/steer.v1/stream/cmd",
+                    false,
+                    None,
+                );
+            }
+        }
+        let listened = zenkey_fleet::ArbitrationListened {
+            end: ms(600),
+            watching: true,
+            reads: 0,
+            round_trips: 1,
+            asked: vec![],
+            notes: vec![],
+        };
+        let obs = zenkey_fleet::ArbitrationObservation {
+            namespace: String::new(),
+            target: Some(RUDDER.parse().expect("an address")),
+            role: None,
+            listen: Duration::from_millis(600),
+            asked: vec!["zk2/lab/rudder-l/@zk/**".into()],
+            roles: vec![zenkey_fleet::RoleObserved {
+                subject,
+                read,
+                view: Some((book, listened)),
+            }],
+            skipped: vec![],
+            unobservable: None,
+        };
+        Arc::new(zenkey_fleet::judge_arbitration(&obs))
     }
 
     /// A presence landing for this world with `lab/rf0` beside it, the

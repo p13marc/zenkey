@@ -1468,7 +1468,8 @@ async fn s11_a_governed_commanders_standby() {
 // --- the declaration at start, without the scenarios ------------------------------------
 
 /// §2.2: a role carrying a policy whose revision is not given at the
-/// builder is still checked at start by checks 1 to 5; `arbitrate` is
+/// builder is still checked at start by checks 1 to 5; one given is
+/// checked by `arbitrate` at once (text 0.3, F-274); `arbitrate` is
 /// refused for a role carrying none, and for a manifest's role.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_declaration_at_the_builder_and_at_start() {
@@ -1486,6 +1487,44 @@ async fn the_declaration_at_the_builder_and_at_start() {
     b.expose(&rudder(), "state/angle").unwrap();
     let e = b.start().await.err().expect("refused");
     assert!(e.to_string().contains("invalid: policy_unsupported"), "{e}");
+    // With the revision given, `arbitrate` reads the declaration at once
+    // and refuses as the start would (text 0.3, F-274): a caller putting
+    // before its tokens puts nothing of an instance that never starts.
+    for (from, to, why) in [
+        ("\"priority\"", "\"freshest\"", "policy_unsupported"),
+        (
+            "cardinality = \"many\"",
+            "cardinality = \"one\"",
+            "cardinality",
+        ),
+    ] {
+        let mut b = ServiceBuilder::new(&s, cfg());
+        b.implement(zenkey::Implementation::new(copy("rudder.v1", from, to)))
+            .unwrap();
+        let e = b
+            .arbitrate("cmd", Arc::new(contract("steer.v1")))
+            .err()
+            .expect("refused at once");
+        let text = e.to_string();
+        assert!(matches!(e, Error::NotExposed(_)), "{text}");
+        assert!(
+            text.starts_with(&format!(
+                "not started: lab/rudder-l: role \"cmd\" (steer.v1): arbitration.v1 invalid: {why}"
+            )),
+            "{text}"
+        );
+    }
+    let mut b = ServiceBuilder::new(&s, cfg());
+    b.implement(zenkey::Implementation::new(contract("rudder.v1")))
+        .unwrap();
+    let e = b
+        .arbitrate(
+            "cmd",
+            Arc::new(copy("steer.v1", ", \"timing.deadline_ms\" = 300", "")),
+        )
+        .err()
+        .expect("refused at once, check 7");
+    assert!(e.to_string().contains("invalid: no_deadline"), "{e}");
     // A manifest's role.
     let mut b = ServiceBuilder::new(&s, cfg());
     b.require("cmd", steer(), false);

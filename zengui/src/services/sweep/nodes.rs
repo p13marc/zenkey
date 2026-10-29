@@ -1,4 +1,5 @@
-//! One address's health, asked on selection.
+//! One address's health, asked on selection; who serves it, and what its
+//! arbitrated roles follow, once the selection settles.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,6 +85,53 @@ pub fn redundancy(
         },
         |(addr, ran, report)| {
             Message::Pane(PaneMsg::Nodes(NodesMsg::RedundancyRead(addr, ran, report)))
+        },
+    )
+}
+
+/// How many of each role's own deadlines the Workbench's view listens
+/// (#909, BC): one is `listening`'s threshold (§2.14), and a second lets a
+/// commander arrive within it.
+pub const ARBITRATION_DEADLINES: u32 = 2;
+
+/// One address's `arbitration.v1` (#909, BC), at the selection's settle
+/// beside `redundancy.v1`, never polled: read as
+/// `zenctl arbitration <address>` reads it, through the engine's `run_arbitration` on the
+/// session **in** the namespace — presence, the descriptor, the declaring
+/// contract and every revision of the required interface in the window's
+/// store — and the tool's own view over [`ARBITRATION_DEADLINES`] of each
+/// role's deadline, its watch on the presence monitor's watch session (in
+/// no namespace on the wire keys). Without one, the deadline alone, as the
+/// report says. Every answer is the fleet's judge's.
+pub fn arbitration(
+    session: zenoh::Session,
+    watch: Option<zenkey_fleet::WatchSession>,
+    namespace: String,
+    addr: Addr,
+    store: zenkey_fleet::BundleStore,
+    timeout: Duration,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let mut spec = zenkey_fleet::ArbitrationSpec::new(timeout);
+            spec.listen = Duration::ZERO;
+            spec.deadlines = Some(ARBITRATION_DEADLINES);
+            let offline = zenkey_fleet::ContractSet::new();
+            let report = zenkey_fleet::run_arbitration(
+                &session,
+                watch.as_ref(),
+                &namespace,
+                Some(addr.clone()),
+                // The window's, seeded with the contracts held offline.
+                &store,
+                &offline,
+                spec,
+            )
+            .await;
+            (addr, namespace, Arc::new(report))
+        },
+        |(addr, ran, report)| {
+            Message::Pane(PaneMsg::Nodes(NodesMsg::ArbitrationRead(addr, ran, report)))
         },
     )
 }

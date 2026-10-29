@@ -913,6 +913,135 @@ fn timing_declaration(p: &Presence<'_>) -> CheckReport {
     )
 }
 
+/// The doctor's revisions in hand, as `crate::model::catalog::Contracts`:
+/// what [`arbitration_declaration`] reads a role over.
+struct InHand<'o>(&'o BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>);
+
+impl crate::model::catalog::Contracts for InHand<'_> {
+    fn state(&self, iface: &IfaceId, fingerprint: &Fingerprint) -> Option<ContractState> {
+        match self.0.get(&(iface.clone(), fingerprint.clone()))? {
+            Ok(s) => Some(s.clone()),
+            Err(e) => Some(ContractState::Unreadable { reason: e.clone() }),
+        }
+    }
+
+    fn held_of(&self, iface: &IfaceId) -> Vec<Arc<Revision>> {
+        self.0
+            .iter()
+            .filter(|((i, _), _)| i == iface)
+            .filter_map(|(_, s)| match s {
+                Ok(ContractState::Held(r)) => Some(Arc::clone(r)),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// `arbitration.v1` §2.2, §2.4, §2.14 (#909, BC): every role a running
+/// consumer's descriptor requires that carries `arbitration.policy`, read
+/// from the contract its `declared_by` names at the revision the descriptor
+/// lists, over every revision of the required interface the doctor holds
+/// (the providers' descriptors name theirs), by
+/// `zenkey_model::arbitration`'s `judge_declaration` and `judge_binding`:
+/// an invalid declaration is an error, its consumer refusing to start on it
+/// (a running one holds another revision, or no runtime that checks); a
+/// wildcard or a shadowed entry a warning, a priority nobody chose. A role
+/// whose declaring contract is not in hand, or whose revisions disagree or
+/// are none, is unjudged. No view: which provider a role follows is
+/// `zenctl arbitration`'s, over a listen.
+fn arbitration_declaration(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::ArbitrationDeclaration;
+    use zenkey_model::arbitration::{Answer, judge_binding, judge_declaration};
+    let mut findings = Vec::new();
+    let mut undecided = p.undescribed("the roles it requires are unknown");
+    let roles = crate::model::arbitration::roles_in(p.after, &InHand(&p.obs.contracts), None);
+    let mut judged = 0usize;
+    for (s, read) in &roles {
+        let who = s
+            .consumer
+            .as_ref()
+            .map_or_else(String::new, ToString::to_string);
+        let subject = format!("{who} requires.{} ({})", s.role, s.required);
+        let (d, why) = judge_declaration(&read.reading);
+        match d.answer {
+            Answer::No => findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                subject.clone(),
+                format!(
+                    "its declaration is invalid over the {} revision(s) of {} in hand: {} — a \
+                     consumer's runtime refuses to start on it (arbitration.v1 §2.2)",
+                    read.revisions.len(),
+                    s.required,
+                    why.iter()
+                        .map(|w| format!("{} ({})", w.says(), w.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
+            )),
+            Answer::Unobservable => {
+                undecided.push(unjudged(
+                    subject.clone(),
+                    format!(
+                        "its declaration is unobservable, {}{}",
+                        d.reason.as_str(),
+                        read.notes
+                            .first()
+                            .map(|n| format!(": {n}"))
+                            .unwrap_or_default()
+                    ),
+                ));
+                continue;
+            }
+            _ => {}
+        }
+        judged += 1;
+        let (b, wild, shadowed) = judge_binding(&read.reading);
+        if b.answer == Answer::Yes {
+            let entries: Vec<String> = s.bindings.clone().unwrap_or_default();
+            let named = |at: &[usize]| {
+                at.iter()
+                    .filter_map(|i| entries.get(*i).map(|e| format!("{e} (entry {i})")))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let mut what = Vec::new();
+            if !wild.is_empty() {
+                what.push(format!(
+                    "the wildcard {} ranks its addresses by system then service, byte by byte: \
+                     a priority nobody chose",
+                    named(&wild)
+                ));
+            }
+            if !shadowed.is_empty() {
+                what.push(format!(
+                    "{} ranks no address of its own (shadowed)",
+                    named(&shadowed)
+                ));
+            }
+            findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                subject,
+                format!(
+                    "bound [{}]: {} (arbitration.v1 §2.4, §2.14)",
+                    entries.join(", "),
+                    what.join("; ")
+                ),
+            ));
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{judged} arbitrated role(s) of running consumers, each declaration valid and each \
+             binding of exact entries, none shadowed"
+        ),
+    )
+}
+
 /// `telemetry.v1` §2.6 (#819, TC), with `--deep`: every value reply of the
 /// owners' state GETs (the ones `state-stamp-foreign` makes) that is a
 /// sample of a state metric member, read by `zenkey_model::telemetry::check`.
@@ -1318,6 +1447,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::DesiredLastKnown => desired_last_known(p, spec),
                 CheckId::RedundancyVacancy => redundancy_vacancy(p),
                 CheckId::TimingDeclaration => timing_declaration(p),
+                CheckId::ArbitrationDeclaration => arbitration_declaration(p),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -6374,6 +6504,94 @@ mod tests {
             ))
             .contains("unavailable")
         );
+    }
+
+    /// A scenarios' contract, as the runtime's tests keep it.
+    fn scenario_contract(name: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts")
+            .join(format!("{name}.toml"));
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"))
+    }
+
+    /// `arbitration-declaration` (#909, BC): `rudder.v1`'s `cmd` over
+    /// `steer.v1`, the providers' revision in hand, is clean bound to exact
+    /// entries; a wildcard entry is a warning naming it; a copy whose policy
+    /// is `freshest` an error with its reason; the declaring contract not in
+    /// hand unjudged; a role carrying no policy not asked of.
+    #[test]
+    fn an_arbitrated_roles_declaration_and_binding_are_read_from_the_contracts() {
+        let rudder = load(&scenario_contract("rudder.v1"));
+        let steer = load(&scenario_contract("steer.v1"));
+        let freshest =
+            load(&scenario_contract("rudder.v1").replace("\"priority\"", "\"freshest\""));
+        let consumer = |by: &Contract, bindings: &[&str]| {
+            observed(
+                &[inst("lab/rudder-l", A), inst("lab/safety", B)],
+                vec![
+                    (
+                        ("lab/rudder-l", A),
+                        descriptor(
+                            "lab/rudder-l",
+                            A,
+                            &[entry(by)],
+                            &[json!({"role": "cmd", "interface": "steer.v1",
+                                     "declared_by": "rudder.v1", "bindings": bindings})],
+                        ),
+                    ),
+                    (
+                        ("lab/safety", B),
+                        descriptor("lab/safety", B, &[entry(&steer)], &[]),
+                    ),
+                ],
+            )
+        };
+        let exact = consumer(&rudder, &["lab/safety", "lab/teleop"]);
+        let r = check(
+            &obs(exact, &[&rudder, &steer], &[]),
+            CheckId::ArbitrationDeclaration,
+        );
+        assert!(clean(&r).starts_with("1 arbitrated role(s)"), "{r:#?}");
+        let wild = consumer(&rudder, &["lab/safety", "lab/*"]);
+        let r = check(
+            &obs(wild, &[&rudder, &steer], &[]),
+            CheckId::ArbitrationDeclaration,
+        );
+        let f = found(&r);
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert_eq!(f.subject, "lab/rudder-l requires.cmd (steer.v1)");
+        assert!(f.evidence.contains("lab/* (entry 1)"), "{f:#?}");
+        let refused = consumer(&freshest, &["lab/safety"]);
+        let r = check(
+            &obs(refused, &[&freshest, &steer], &[]),
+            CheckId::ArbitrationDeclaration,
+        );
+        let f = found(&r);
+        assert_eq!(f.severity, DoctorSeverity::Error);
+        assert!(f.evidence.contains("policy_unsupported"), "{f:#?}");
+        let unheld = consumer(&rudder, &["lab/safety"]);
+        let r = check(
+            &obs(unheld, &[&steer], &[&rudder]),
+            CheckId::ArbitrationDeclaration,
+        );
+        assert!(unseen(&r).contains("no_contract"), "{r:#?}");
+        let plain = load(
+            &scenario_contract("rudder.v1")
+                .replace(
+                    ", annotations = { \"arbitration.policy\" = \"priority\" }",
+                    "",
+                )
+                .replace(
+                    "annotations = { \"arbitration.policy\" = \"priority\" }",
+                    "",
+                ),
+        );
+        let none = consumer(&plain, &["lab/*"]);
+        let r = check(
+            &obs(none, &[&plain, &steer], &[]),
+            CheckId::ArbitrationDeclaration,
+        );
+        assert!(clean(&r).starts_with("0 arbitrated role(s)"), "{r:#?}");
     }
 
     /// `telemetry-sample` (#819, TC), with `--deep`: a state metric member's

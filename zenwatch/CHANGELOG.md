@@ -7,6 +7,12 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the doctor reads `arbitration.v1` declarations (#909, BC)
+
+| Before | Now | Notes |
+|---|---|---|
+| the scheduled doctor and a `doctor` rule: thirty-two checks | thirty-three: `arbitration-declaration` (error: a running consumer's arbitrated role whose declaration is invalid; warning: a wildcard or shadowed entry in its binding) | the `zenwatch.v1` schema's check id stays an open string, so its contract is unchanged; no rule of zenwatch's own follows a role's selection (`zenctl arbitration` is the tool's view) |
+
 ## Unreleased (`main`, zk2) — the doctor reads `timing.v1` declarations (#908, MC)
 
 | Before | Now | Notes |

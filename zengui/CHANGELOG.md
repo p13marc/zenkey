@@ -4,6 +4,12 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the Workbench reads an arbitrated consumer (#909, BC)
+
+| Before | Now | Notes |
+|---|---|---|
+| — | an address whose descriptor requires a role: ARBITRATION (ARBITRATION.V1) under REDUNDANCY on its nodes card and the Inspector's address view, read once the selection settles (300 ms, the latest's only, beside `redundancy.v1`), "read again" re-asking; per arbitrated role its declaration (`yes (valid)` with policy, stream and deadline, or `no (invalid)` with its reasons), "the tool's own view: follows <provider>" (or its other answers), and its binding naming wildcard and shadowed entries | through the engine's `run_arbitration` on the session in the namespace, its view's watch on the presence monitor's watch session, listening two of each role's deadlines; every answer the fleet's judge's; the shots scene `workbench-arbitration` |
+
 ## Unreleased (`main`, zk2) — a deny block refuses the declared entities (#894, WL)
 
 Since core 0.50, `zenctl acl gen`'s admin read grants a tool the three reads

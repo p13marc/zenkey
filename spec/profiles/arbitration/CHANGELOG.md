@@ -3,6 +3,105 @@
 Amendments to [`v1.md`](v1.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.3 — 2026-10-29: round 78's answers, and the tools (#909, BC)
+
+The second implementation ran 0.2 against the reference runtime (zk2py
+round 78: every section in four pairings, both implementations' actuators
+beside both runners) and filed F-274 and F-276's arbitration part, both
+accepted on #909 (issuecomment-37441). Neither changes a rule: each was the
+reference's. The reference's tools (`zenctl arbitration`, the doctor's
+`arbitration-declaration` and zengui's Workbench row, #909's BC) ran §10,
+`zenctl arbitration` three times in a row. This text answers the findings
+and says what the tools found. It is written against core 0.56, as 0.2
+was, and `timing.v1` text 0.3, whose changes (F-275's epoch member, its
+tools) touch nothing this text reads.
+
+**Changed: the reference (round 78), no rule.**
+- **A refused actuator put `angle`** (§2.2; F-274). The owner example put
+  each raw state's value before its start, so §8.2's "State values" landed
+  before the tokens, and the arbitration check ran only in `start()`: at
+  20 of 20 refusals S heard `angle` = `ok`, which §2.2's "nothing of the
+  instance is declared or put" forbids, `[Sc: §8]`. The runtime's
+  `ServiceBuilder::arbitrate` now reads the declaration at once over the
+  revision given and refuses an invalid one with the start's own error,
+  `start()` reading it again; the example calls it as soon as the
+  declaring contract is implemented, before any writer is declared or put.
+  A valid one's value still lands before its tokens. The text needed
+  nothing.
+- **The commander's raw payload** (§11 step 1; F-276). `commander raw on`
+  put the commander's own `<service> <n>`, so Expected 1's "S sees no
+  `standby` payload" could not be read by the payload; it puts `standby
+  <n>` now, and §11 names it as the reference's `X`.
+
+**Changed: what the tools found (BC).**
+- **What a tool's view reads that no descriptor carries** (§2.14). A
+  descriptor lists a role's bindings and parameter bindings, never its
+  binding's `clock_bound_ms` (core §3.3), so a tool's view states no ε,
+  and §2.5's outcome 5 makes nothing expired: its view may follow a
+  provider whose samples the consumer discards, which "another path, with
+  another latency and another loss" already allows. And a descriptor names
+  no revision of the required interface, so the view reads outcome 6 with
+  the interface governed when every revision of it the tool holds lists
+  `redundancy.v1`, learning the incumbents as a consumer does (§2.5). 0.2
+  said neither. No verdict of a fixture moves: `conclusions.json` takes a
+  view as given.
+- **Listening counts from the stream's subscriptions** (§2.14). "Before the
+  tool has listened for one deadline" did not say from when. A tool that
+  counted from its first act, its watch's declaration, would count its
+  round trip, which can take seconds after a reopen beside a large
+  population (core §8.1, 0.44), as listening while no arrival could reach
+  it, and answer `dead_man` of a role whose commanders publish. It counts
+  from the declaration of its subscriptions to the role's stream, the
+  last of them. `conclusions.json`'s description says so; no case moves.
+
+**Stated: what the tools do** (the reference, not a rule).
+- **`zenctl arbitration [SYSTEM/SERVICE] [--role R] [--for SECS]`** reads
+  presence and every descriptor of the consumers in scope on its
+  namespaced session, the revisions they name, and the bound providers'
+  descriptors and revisions where that read did not reach them; each role
+  a descriptor requires that carries a policy, or whose declaring
+  contract is not in hand (`no_contract`, never "not this profile's"), or
+  the one `--role` names. With `--role` and no descriptor listing it,
+  each contract in hand declaring the role is read with no descriptor
+  (F-272). Its view runs `zenkey_model::arbitration`'s `Arbiter`: one
+  liveliness subscriber per entry on a watch session in no namespace on
+  the wire keys, its round trip, one subscriber per entry on the
+  namespaced session, a sample two entries cover handed over once by the
+  first, every arrival's instant read in its callback, one bounded queue,
+  a read again 0.1 s after a withdrawal leaving none known held, a move
+  kept until the round trip asked 100 ms after it stands (core 0.56), a
+  withdrawal heard with no link beginning one (F-268), and a one-shot timer
+  at the active provider's due. A refusal of its queue, or a stall of its
+  receive path beyond core §2.7's bound, within the last deadline is
+  `lost`. Every answer is `judge_declaration`'s, `judge_selection`'s and
+  `judge_binding`'s; the selection is labelled the tool's own view in
+  every medium; exit 1 on any question's finding, 0 every question asked
+  on its other pole (`unbound` informative), 2 otherwise.
+- **The doctor's `arbitration-declaration`** asks the first and third
+  questions of every running consumer's role carrying a policy, with no
+  view: an invalid declaration an error, a wildcard or shadowed entry a
+  warning.
+- **zengui's Workbench** reads the selected address's arbitrated roles,
+  300 ms after the selection settles, the latest's only, with a listen of
+  two deadlines; the selection shown as the tool's own view.
+
+**Deliberately not changed.**
+- **No fixture for the view's inputs.** `conclusions.json` takes a view as
+  given, and `arbitrations.json` each sample's `expired` and
+  `not_incumbent` as given: which a tool can read is its descriptor's
+  reach, which only a tool's run shows (§10).
+- **No ε flag for a tool.** A tool told the consumer's ε would still read
+  its own clock against the owners', not the consumer's; the view stays a
+  view.
+- **§2.14's `lost`** keeps core §2.7's stall bound: a stall shorter than it
+  delays arrivals and decides them late, which the view's instants already
+  carry.
+
+**Evidence:** `conformance/declarations.json` (41 cases),
+`conformance/rankings.json` (14), `conformance/arbitrations.json` (41),
+`conformance/conclusions.json` (24), 120 in all, none changed. Eleven
+scenario sections, ten the runtime's and one the tool's, which now runs.
+
 ## 0.2 — 2026-10-28: what the runtime showed, and round 77's answers (#909, BB)
 
 The reference runtime (`zenkey::arbitration`, #909's BB) ran scenarios §1

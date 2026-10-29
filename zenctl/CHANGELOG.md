@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `arbitration.v1` in the tools: `arbitration` and the doctor (#909, BC)
+
+`arbitration.v1` (`spec/profiles/arbitration/v1.md`) lets a consumer bound
+to several commanders of one stream follow one at a time, in the binding's
+order; §5's three questions of one consumer's role become surfaces.
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `zenctl arbitration [SYSTEM/SERVICE] [--role R] [--for SECS] [--lease SECS] [--wait-before-close SECS] [--contracts PATH]`: each consumer's role carrying `arbitration.policy`, read from its descriptor and the contract `declared_by` names, over every revision of the required interface in hand; "is its declaration valid?", "which provider does the tool's view select?" (always labelled the tool's own view) and "does the binding leave a priority to an order nobody chose?", in the profile's tokens; the view the profile's arbiter over the tool's own subscriptions, watch session and clock for `--for` (2 s; 0 listens not at all); with `--role` and no consumer, each contract in hand declaring it read with no descriptor (F-272) | exit 1 an invalid declaration, the view in the dead-man, or a wildcard or shadowed entry (a warning); 0 every question asked on its other pole (`unbound` informative); 2 no verdict |
+| `doctor`: thirty-two checks | thirty-three: `arbitration-declaration` (error: a running consumer's arbitrated role whose declaration is invalid; warning: a wildcard or shadowed entry in its binding) | read from the descriptors and the contracts they name; no view |
+
 ## Unreleased (`main`, zk2) — `timing.v1` in the tools: `timing`, the doctor, two conform cases (#908, MC)
 
 `timing.v1` (`spec/profiles/timing/v1.md`) says how often an owner
