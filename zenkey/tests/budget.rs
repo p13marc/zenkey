@@ -1269,3 +1269,125 @@ async fn s7_an_owner_keeps_its_rate() {
     .await;
     assert_eq!(heard_a(), 3, "the fourth never left");
 }
+
+/// A newcomer's contract (#937): one templated stream, its `cardinality`
+/// written as a number, then as `"unbounded"`, and nothing else.
+const SENSORS: &str = r#"
+[interface]
+name = "sensors"
+major = 1
+minor = 0
+
+[resources."temperature/{sensor}"]
+kind = "stream"
+type = { raw = "text/plain" }
+params = { sensor = "string" }
+cardinality = CARDINALITY
+"#;
+
+/// #937: a service with one templated resource needs nothing beyond its
+/// contract and a configuration naming its address. The contract declares
+/// the `cardinality`; the application declares no member token (the
+/// template has no `epoch`, core §8.1), configures no tokenless set (the
+/// deployment's, §8.1), and states no bound (§3.3): it declares a writer,
+/// starts, and puts. The runtime holds the interface token and keeps the
+/// contract's bound (§2.7): a third member past `cardinality = 2` is
+/// refused, and under `"unbounded"` (§2.2, 0.57) none is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_templated_service_needs_nothing_beyond_its_contract() {
+    use zenkey::model::budget::Bound;
+    let _serial = SERIAL.lock().await;
+    let sensors: IfaceId = "sensors.v1".parse().unwrap();
+    let resource = "stream/temperature/{sensor}";
+    for (written, bound) in [("2", Bound::Of(2)), ("\"unbounded\"", Bound::NoCeiling)] {
+        let l = load_str(
+            &SENSORS.replace("CARDINALITY", written),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+            None,
+        );
+        assert!(l.report.0.is_empty(), "no finding at all:\n{}", l.report);
+        let contract = l.contract.expect("sensors.v1 loads");
+        let (_r, ep) = router(None).await;
+        let s = client(&ep).await;
+        let reader = client(&ep).await;
+        let keys: Arc<Mutex<Vec<String>>> = Arc::default();
+        let k = Arc::clone(&keys);
+        let _sub = reader
+            .declare_subscriber("zk2/lab/sensors/sensors.v1/**")
+            .callback(move |s| k.lock().unwrap().push(s.key_expr().as_str().to_owned()))
+            .await
+            .unwrap();
+        let heard = |tail: &str| keys.lock().unwrap().iter().any(|k| k.ends_with(tail));
+
+        // The whole of the owner's setup: the contract, its address, a writer.
+        let mut b = ServiceBuilder::new(&s, ServiceConfig::new("lab/sensors".parse().unwrap()));
+        b.implement(Implementation::new(contract)).unwrap();
+        let a = b
+            .declare_writer(&sensors, resource, &one("sensor", "a"))
+            .await
+            .unwrap();
+        let svc = b.start().await.unwrap();
+
+        assert_eq!(
+            svc.tokens_held(),
+            vec![sensors.clone()],
+            "its interface token"
+        );
+        assert!(
+            !svc.holds_member(&sensors, "a"),
+            "no member token without `epoch`"
+        );
+        let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+        let entry = &d["interfaces"][0];
+        assert_eq!(entry["iface"], "sensors.v1");
+        assert_eq!(entry["token"], true, "no tokenless set: {d}");
+        assert!(
+            entry
+                .get("cardinality")
+                .is_none_or(|c| c.as_object().is_some_and(serde_json::Map::is_empty)),
+            "no bound stated: {d}"
+        );
+
+        // A stream put before the reader's subscription reaches the owner
+        // is dropped at its source: put again until one is heard. Putting
+        // on a live member adds none (§2.7).
+        eventually("a member is heard", || async {
+            a.put("21.5").await.unwrap();
+            heard("/temperature/a")
+        })
+        .await;
+        let b2 = svc
+            .writer(&sensors, resource, &one("sensor", "b"))
+            .await
+            .unwrap();
+        b2.put("19.0").await.unwrap();
+        let c = svc
+            .writer(&sensors, resource, &one("sensor", "c"))
+            .await
+            .unwrap();
+        let third = c.put("18.5").await;
+        let (live, got, source) = svc.budget(&sensors, resource).unwrap().unwrap();
+        assert_eq!(got, bound, "the contract's bound, from {written}");
+        assert_eq!(source, zenkey::budget::Source::Contract);
+        match bound {
+            Bound::Of(n) => {
+                let (breach, said) = breach(third.unwrap_err());
+                assert_eq!(
+                    breach,
+                    zenkey::budget::Breach::Bound {
+                        bound: n,
+                        source: zenkey::budget::Source::Contract,
+                        live: 2
+                    },
+                    "{said}"
+                );
+                assert_eq!(live, 2);
+            }
+            _ => {
+                third.expect("no ceiling refuses no member");
+                assert_eq!(live, 0, "no ceiling tracks nothing");
+            }
+        }
+        svc.close().await.unwrap();
+    }
+}
