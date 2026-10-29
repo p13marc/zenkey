@@ -54,18 +54,19 @@ jobs:
       # One seam for liveliness subscribers (#830): each one marks its
       # session, and the runtime refuses a presence read beside it.
       - run: ./scripts/check-liveliness-seam.sh
-      # RFC status lines agree with the CHANGELOG's Amends ledger (v1.25 S6).
-      # Doc-only pushes are `paths-ignore`d here and run this same gate on
-      # the Docs lane (docs.yml, #420); it stays here too so a code push that
-      # also touches an RFC runs it in the same status set.
-      - run: ./scripts/check-rfc-status.sh
       # The zk2 spec's version and inventory, stated once (#922): core.md's
       # header names the CHANGELOG's newest amendment, observer.md's its
       # changelog's newest text (#925), README.md and spec/README.md state
       # neither version, and the profiles index lists
-      # every spec/profiles/<name>/v<N>.md. Run here and on the Docs lane,
-      # as check-rfc-status.sh is.
+      # every spec/profiles/<name>/v<N>.md. Doc-only pushes are
+      # `paths-ignore`d here and run this same gate on the Docs lane
+      # (docs.yml, #420); it stays here too so a code push that also touches
+      # the spec runs it in the same status set.
       - run: ./scripts/check-spec-status.sh
+      # No source or report fixture cites v1's RFC set (#925): it is on the
+      # `v1` branch only, and a zk2 tool cites observer.md, the core, a
+      # profile or the tooling guide.
+      - run: ./scripts/check-v1-citations.sh
 
   # The type scale, by role (#191): `.size(` outside `kit/`/`tokens.rs`
   # must take a `font::` constant, and a bare `text(` must not appear outside
