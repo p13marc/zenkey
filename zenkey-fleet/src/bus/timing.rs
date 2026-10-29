@@ -77,6 +77,10 @@ pub const QUEUE: usize = 1024;
 /// (core §8.1, 0.37; the scenarios' 100 ms).
 pub const REREAD: Duration = Duration::from_millis(100);
 
+/// How long the window's opening waits before its second presence read
+/// when the first did not stand (§2.7, F-263).
+pub const RETRY: Duration = Duration::from_secs(1);
+
 /// How many times a descriptor GET is asked for an address at a stamp of
 /// an id it holds no `meta.zid` for, and how far apart.
 const ASK_LIMIT: u32 = 5;
@@ -470,7 +474,23 @@ pub async fn observe(
         }
     } else {
         let mut opening = None;
-        for _ in 0..2 {
+        for attempt in 0..2 {
+            if attempt > 0 {
+                // A silent descriptor or an unsettled read is asked again a
+                // pause later, as the telemetry reader's seed is, never at
+                // once (review-bot on PR #917). The queue is folded while it
+                // waits, so a fast stream fills nothing.
+                let until = tokio::time::Instant::now() + RETRY;
+                loop {
+                    tokio::select! {
+                        () = tokio::time::sleep_until(until) => break,
+                        d = rx.recv() => match d {
+                            Some(d) => reader.fold(&mut obs.book, d),
+                            None => break,
+                        },
+                    }
+                }
+            }
             let settled = reader.establish().await;
             let read = crate::bus::presence::observe(session, &presence_scope, t).await;
             let at = Instant::now();

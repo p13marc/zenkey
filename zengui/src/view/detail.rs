@@ -1435,6 +1435,12 @@ fn timing_section<'a>(t: &'a crate::timing::TimingRead, sp: Spacing) -> Element<
         t.span.as_secs_f64(),
         t.owner_now.as_str()
     )));
+    if t.evicted > 0 {
+        col = col.push(kit::muted(format!(
+            "the history ring dropped {} older, so this window starts at the oldest it kept",
+            kit::plural(usize::try_from(t.evicted).unwrap_or(usize::MAX), "entry")
+        )));
+    }
     if let Some(j) = &t.deadline {
         col = col.push(timing_badge(Question::Deadline, "deadline", j));
         col = col.push(kit::muted(j.reason.says()));

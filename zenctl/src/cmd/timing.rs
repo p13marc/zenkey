@@ -118,7 +118,7 @@ pub async fn run(cli: TimingArgs) -> Result<()> {
     spec.across_face = across_face;
     spec.owner_zids = owner_zids;
     spec.settle = ASKING.ask(std::time::Duration::try_from_secs_f64(settle).map_err(|_| {
-        if settle.is_finite() && settle > 0.0 {
+        if settle > 0.0 {
             unaskable!("--settle is longer than a wait can be: {settle:e} seconds")
         } else {
             unaskable!("--settle must be zero or a positive number of seconds, got {settle}")

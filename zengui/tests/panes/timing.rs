@@ -79,3 +79,32 @@ fn a_replay_reads_no_arrival() {
     let d = read.declared().expect("declared");
     assert_eq!(d.deadline, Some(std::time::Duration::from_millis(100)));
 }
+
+/// A ring that dropped older entries says its window starts at the oldest
+/// it kept, never at the slot's start (review-bot on PR #917).
+#[test]
+fn an_evicting_ring_says_where_its_window_starts() {
+    let world = common::World::timed();
+    let resolved = world.resolve(common::TWIST_CMD).resolved.expect("resolves");
+    let mut rec = HistoryRecorder::new(common::TWIST_CMD, 2);
+    let t0 = Instant::now();
+    for i in 0..3u64 {
+        rec.observe(&common::sample(
+            common::TWIST_CMD,
+            b"{}",
+            "application/json",
+            t0 + std::time::Duration::from_millis(20 * i),
+        ));
+    }
+    let read = zengui::timing::read(
+        &resolved,
+        &rec.ring,
+        &zengui::timing::OwnerTrack::default(),
+        false,
+        false,
+        t0 + std::time::Duration::from_millis(60),
+    )
+    .expect("a timed stream");
+    assert_eq!(read.evicted, 1);
+    assert_eq!(read.arrivals, 2, "the window holds what the ring kept");
+}

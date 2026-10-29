@@ -16,7 +16,9 @@
 //!   this host's monotonic clock: what §2.5 judges a deadline on. A replayed
 //!   row's or a snapshot's is not an arrival of the live member, and the
 //!   slot says so: a replay reads unobservable here.
-//! - **The window** is the ring's: from its oldest retained entry to now.
+//! - **The window** is the ring's: from its oldest retained entry to now,
+//!   and when the ring has evicted entries the view says it starts at the
+//!   oldest kept, not at the slot's start ([`TimingRead::evicted`]).
 //!   The member is judged from its first arrival in it (§2.5's "any other
 //!   member"): the ring does not know when the subscription started, so it
 //!   never waits for a member it has not heard.
@@ -127,6 +129,10 @@ pub struct TimingRead {
     pub arrivals: usize,
     /// The window: the oldest retained entry's arrival to now.
     pub span: Duration,
+    /// Entries the ring dropped to stay within its bounds: when any, the
+    /// window starts at the oldest it kept, never at the slot's start
+    /// (review-bot on PR #917).
+    pub evicted: u64,
     /// §5's deadline question; `None` when the read is not made (a replay).
     pub deadline: Option<Judged>,
     /// §5's period question.
@@ -175,6 +181,7 @@ pub fn read(
         revision,
         arrivals: 0,
         span: Duration::ZERO,
+        evicted: ring.evicted(),
         deadline: None,
         period: None,
         period_reading: None,
