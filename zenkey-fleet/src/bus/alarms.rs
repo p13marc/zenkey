@@ -45,9 +45,10 @@
 //! never waits on a read. [`observe`] is the one-shot reading `zenctl
 //! alarms` makes: the feed, listened to for a window when asked, then the
 //! longer of a lease and `wait_before_close`, and the reply timeout, more
-//! while its owners are watched (core §2.7, 0.25; observer §5.2). The window opens once the feed is open, its subscriptions
-//! declared and its first refresh read after them (zk2py round 47's F-154,
-//! #819 TE), so the router holds them, and a put from then on is heard.
+//! while its owners are watched (core §2.7, 0.25; observer §5.2). The
+//! window opens once the feed is open, its subscriptions declared and its
+//! first refresh read after them (zk2py round 47's F-154, #819 TE), so the
+//! router holds them, and a put from then on is heard.
 
 use std::collections::BTreeSet;
 use std::str::FromStr;

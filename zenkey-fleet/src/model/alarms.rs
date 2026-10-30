@@ -1388,6 +1388,23 @@ mod tests {
     use std::collections::BTreeMap;
     use zenoh::time::{NTP64, TimestampId};
 
+    /// A window's tail is the longer of a lease and `wait_before_close`,
+    /// plus the reply timeout (observer §5.2, F-320): a `wait_before_close`
+    /// above the lease lengthens it, one below changes nothing.
+    #[test]
+    fn the_tail_takes_the_longer_of_the_lease_and_wait_before_close() {
+        let mut s = BookSpec::new(Duration::from_secs(1));
+        s.lease = Duration::from_secs(10);
+        s.wait_before_close = Duration::from_secs(5);
+        assert_eq!(s.tail(), Duration::from_secs(11), "the lease is the longer");
+        s.wait_before_close = Duration::from_secs(30);
+        assert_eq!(
+            s.tail(),
+            Duration::from_secs(31),
+            "wait_before_close is the longer"
+        );
+    }
+
     const A: &str = "zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da";
     const ZID: &str = "a1";
 
