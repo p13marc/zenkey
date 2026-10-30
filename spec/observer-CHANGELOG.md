@@ -13,6 +13,84 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.6 — 2026-10-30: zk2py round 85's F-315 to F-321, the watch after a window settled (#935)
+
+zk2py round 85 (PR #957) read 0.5 and core 0.61 cold. It found that 0.5
+changed no rule but F-295's wording, and filed F-315 to F-323: eight hard
+to read, and one ambiguous, F-320. This text answers F-315 to F-321.
+Core 0.62 answers F-322 and F-323. This is #935's third part (epic #921
+Track B), beside five profiles' texts, and the text is written against
+core 0.62.
+
+**Settled: the watch after a window** (§5.2; F-320, ambiguous).
+- **The gap.** 0.5 said that after a window a tool watches the owner's
+  instance tokens for one lease plus its reply timeout. It then said "a
+  `wait_before_close` longer than its lease lengthens it", without saying
+  by how much. One reading took the longer of the two. The other added
+  `wait_before_close` to the lease.
+- **Now: the first reading.** A tool watches for the longer of one lease
+  and the routers' `wait_before_close`, plus its reply timeout. A push
+  that cannot queue within `wait_before_close` closes its transport (core
+  Appendix B). So a router that waits it tells the withdrawal that late.
+  The lease, `wait_before_close` and the reply timeout are an item each,
+  with its default. The rule keeps its `[Sc: budget.md §2]`. Rule 1's
+  "(one lease and the reply timeout, below)" is "(below)".
+- **Where it shows.** Under zenoh's defaults, a 10 s lease against a 5 s
+  `wait_before_close`, the watch is the lease's, as before. A 1 s lease
+  beside the default `wait_before_close`, as `scenarios/budget.md` §1's
+  tool window runs, watches 5 s plus the timeout. 0.5's words gave 1 s.
+- **The reference.** `ConformSpec::presence_tail()` returned the lease
+  plus the timeout, so `wait_before_close` never lengthened it. It is now
+  `max(lease, wait_before_close) + timeout`, through
+  `zenkey_model::budget::presence_tail`. `zenctl check conform` watches
+  so, and so does `zenctl alarms --for`, through the alarms book's
+  `tail()`. The timing, telemetry and arbitration readers keep no watch
+  after a window. `alarms.v1` restated the old length, and now cites
+  §5.2 (its changelog).
+- **Not changed.** The premise is still that the owner is present until
+  one lease after the end; the watch is how a tool sees it. No verdict
+  moves under zenoh's defaults, and no fixture moves.
+
+**Editorial: the hard-to-read findings** (F-315 to F-319, F-321). Each
+keeps its keyword, condition, scope and evidence. Each takes its
+finding's rewrite unless said.
+- **F-315, §1.** NotAsked "renders no answer, never the negative one",
+  where it rendered "nothing". The second spelling is an item of its
+  own. What the bullet says of NotAsked does not hold of it, and asking
+  again does not cure it.
+- **F-316, §3.3.** "Apart from that timeout" is "apart from the GET's own
+  timeout".
+- **F-317, §3.7.** The reason after the watch session's SHOULD is two
+  sentences. They name the round trip and the history.
+- **F-318, §3.7.** The SHOULD over two acts is two SHOULDs. "After a
+  move" leads the first, where the finding's "the round trip after a move
+  longer than …" could read as a long move. The second is "It SHOULD run
+  its interests timeout above that time too."
+- **F-319, §3.7.** "The next that needs one" names what is needed: a
+  round trip, or a read of that scope. "Whichever wait ended" says a wait
+  for that one.
+- **F-321, §8.2.** "They" is "the verbatim kinds". "It" is "the names or
+  the statement", and "them" on standard error.
+
+**How "no rule changed" was checked**, as for 0.5.
+- **The method.** The sentences holding an RFC 2119 keyword were diffed
+  before and after, keyed by section.
+- **The counts.** 43 before, 44 after, and 41 unchanged. F-317's SHOULD
+  lost its reason to sentences of its own. F-318's SHOULD is two, and
+  the second is the one added.
+- **The rest.** Every other sentence was diffed too, and each rewrite was
+  read beside its old text. F-320's rule holds no keyword, as before.
+  Its change is the one this entry names.
+
+**The figures.** This text's mean went from 18.64 words to 18.43, with
+no sentence over 50 words and no tag. `spec/.prose-baseline.json` is
+lowered to it.
+
+**Deliberately not changed.**
+- **No other rule**, and no section number, label or anchor. §5.2's "The
+  owner present until one lease after the end" keeps its label.
+- **Appendix A**, which is history.
+
 ## 0.5 — 2026-10-30: editorial: round 84's hard-to-read findings and the long sentences, no rule changed (#935)
 
 zk2py round 84 (PR #955) read 0.4 and core 0.60 cold. It found that 0.4

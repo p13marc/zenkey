@@ -229,9 +229,8 @@ holds nothing, and has `alarms.v1` in its tokenless set (core §8.1).
    `warning`? At or above `critical`?
 2. T listens 905 s, losing no delivery, both owners present throughout,
    and asks again at `critical`. Its window counts as core §2.7 counts
-   one, from the subscription's declaration plus the reply timeout, and
-   its owners are watched a lease and the reply timeout past it (§2.15,
-   0.3).
+   one, from the subscription's declaration plus the reply timeout. Its
+   owners are watched past it as observer §5.2 says (§2.15, 0.3).
 3. `lab/b` raises B at `critical`, and T asks at `critical`.
 
 **Expected.**
