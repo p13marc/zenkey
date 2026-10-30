@@ -312,7 +312,11 @@ def main(argv) -> int:
             return 2
         rel = argv[i + 1]
         limit, _ = tree_of(rel)
-        figures, over, found = measure(ROOT / rel, limit)
+        try:
+            figures, over, found = measure(ROOT / rel, limit)
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"spec-prose: {rel} cannot be read: {e}", file=sys.stderr)
+            return 2
         for line, w, s in over:
             print(f"{rel}:{line}: {w} words: {s}")
         for line, tag in found:
