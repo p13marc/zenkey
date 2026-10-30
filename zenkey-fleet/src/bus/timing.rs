@@ -68,7 +68,7 @@ use crate::bus::contracts::BundleStore;
 use crate::bus::stall::{StallSeen, StallWatch};
 use crate::model::catalog::{Catalog, ContractSet, ContractState, DescriptorRead, Observed};
 use crate::model::timing::{Owed, TimedResource, TimedSample, TimingBook, TimingScope};
-use crate::report::TimingOpening;
+use crate::report::{ScopeReach, TimingOpening, UnreachedResource};
 
 /// The queue the subscriptions call back into.
 pub const QUEUE: usize = 1024;
@@ -156,15 +156,38 @@ pub struct TimingObservation {
     pub discarded: u64,
     /// What in scope could not be read, one line each.
     pub skipped: Vec<String>,
+    /// What the selector cannot reach (`spec/observer.md` §8.2; #950):
+    /// `None` with no selector.
+    pub reach: Option<ScopeReach>,
     /// Set when the reading could not be made at all, with why.
     pub unobservable: Option<String>,
 }
 
 /// The timed resources in scope: every revision the descriptors in scope
 /// name and the store holds, or, across a face, every contract in hand of
-/// the one owner the scope names. A revision not in hand is skipped, with
-/// why.
+/// the one owner the scope names, those the selector reaches. A revision
+/// not in hand is skipped, with why.
 pub fn timed_resources_in_scope(
+    scope: &TimingScope,
+    catalog: Option<&Catalog>,
+    store: &BundleStore,
+    offline: &ContractSet,
+    skipped: &mut Vec<String>,
+) -> Vec<TimedResource> {
+    timed_resources_of_owners(scope, catalog, store, offline, skipped)
+        .into_iter()
+        .filter(|r| {
+            scope
+                .subscription_to(&r.address, &r.iface, &r.selector)
+                .is_some()
+        })
+        .collect()
+}
+
+/// [`timed_resources_in_scope`] before the selector: every timed resource
+/// of the owners and interfaces in scope, so that what the selector misses
+/// can be named (`spec/observer.md` §8.2; #950).
+pub fn timed_resources_of_owners(
     scope: &TimingScope,
     catalog: Option<&Catalog>,
     store: &BundleStore,
@@ -176,6 +199,7 @@ pub fn timed_resources_in_scope(
         if scope
             .subscription_to(&r.address, &r.iface, &r.selector)
             .is_some()
+            || scope.misses(&r.address, &r.iface, &r.selector)
         {
             out.push(r);
         }
@@ -213,6 +237,16 @@ pub fn timed_resources_in_scope(
         }
     }
     out
+}
+
+/// A timed resource the selector misses, as a report names it.
+fn unreached(r: &TimedResource) -> UnreachedResource {
+    UnreachedResource {
+        address: r.address.to_string(),
+        iface: r.iface.to_string(),
+        resource: r.resource.clone(),
+        selector: r.selector.clone(),
+    }
 }
 
 /// One reading: [`observe`], then [`crate::judge::timing::judge`].
@@ -300,6 +334,7 @@ pub async fn observe(
         opening: None,
         discarded: 0,
         skipped: Vec::new(),
+        reach: None,
         unobservable: None,
     };
     if spec.across_face && scope.one_owner().is_none() {
@@ -331,9 +366,18 @@ pub async fn observe(
         }
     };
     let mut skipped = Vec::new();
-    let resources =
-        timed_resources_in_scope(&scope, catalog.as_ref(), store, offline, &mut skipped);
+    let (resources, missed): (Vec<TimedResource>, Vec<TimedResource>) =
+        timed_resources_of_owners(&scope, catalog.as_ref(), store, offline, &mut skipped)
+            .into_iter()
+            .partition(|r| {
+                scope
+                    .subscription_to(&r.address, &r.iface, &r.selector)
+                    .is_some()
+            });
     obs.skipped = skipped;
+    // What the selector misses is said even when it reaches nothing
+    // (`spec/observer.md` §8.2; zk2py round 82's F-287, #950).
+    obs.reach = scope.reach(missed.iter().map(unreached).collect());
     if resources.is_empty() {
         return obs;
     }

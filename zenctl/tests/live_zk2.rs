@@ -3959,6 +3959,158 @@ async fn explicit_captures_the_camera_frames_a_zk2_capture_excludes() {
     assert!(!Path::new(&refused).exists(), "nothing written: {run}");
 }
 
+/// grammar.md §1's owner, `g/svc` on `g.v1`, as far as a tool's step needs
+/// it: a plain `stream` and an `@stream`, both timed (`timing.v1`), a
+/// `state` and an `@state`, each put every 50 ms.
+async fn guard_owner(bus: &mut Bus) {
+    let g = contract_text(
+        "g.v1",
+        "[interface]\nname = \"g\"\nmajor = 1\nminor = 0\nuses = [\"timing.v1\"]\n\
+         [resources.tick]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+         annotations = { \"timing.period_ms\" = 100, \"timing.deadline_ms\" = 500 }\n\
+         [resources.frame]\nkind = \"stream\"\nexplicit = true\ntype = { raw = \"text/plain\" }\n\
+         annotations = { \"timing.period_ms\" = 100, \"timing.deadline_ms\" = 500 }\n\
+         [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+         [resources.grid]\nkind = \"state\"\nexplicit = true\ntype = { raw = \"text/plain\" }\n",
+    );
+    let id = iface("g.v1");
+    let none = Bindings::new();
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("g/svc".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(g)).expect("implement g.v1");
+    let tick = b
+        .declare_writer(&id, "stream/tick", &none)
+        .await
+        .expect("a tick writer");
+    let frame = b
+        .declare_writer(&id, "@stream/frame", &none)
+        .await
+        .expect("a frame writer");
+    let mode = b
+        .declare_state_writer(&id, "state/mode", &none)
+        .await
+        .expect("a mode writer");
+    let grid = b
+        .declare_state_writer(&id, "@state/grid", &none)
+        .await
+        .expect("a grid writer");
+    b.serve_state(&id).expect("serve state");
+    bus.services.push(b.start().await.expect("g/svc"));
+    bus.keep(Task(tokio::spawn(async move {
+        loop {
+            let _ = tick.put(b"t".to_vec()).await;
+            let _ = frame.put(b"f".to_vec()).await;
+            let _ = mode.put(b"m".to_vec()).await;
+            let _ = grid.put(b"g".to_vec()).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })));
+}
+
+/// grammar.md §1 step 5 (`spec/observer.md` §8.2, text 0.2; zk2py round
+/// 82's F-287, #950): a tool whose scope is `zk2/g/**` reports `@stream`,
+/// `@state`, `@op`, `@adv` and `@zk` excluded beside what it watched.
+/// `echo`'s table shows the ambient samples, never an explicit one, and
+/// says so on stderr (#924). `timing`, given the selector, says so on stderr and in
+/// its report's `scope`, and names the timed `@stream` the selector misses,
+/// of which F-287 measured it saying nothing; with no selector it reads
+/// both timed streams, and its report carries no `scope`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn grammar_s1_a_tools_wildcard_scope_names_what_it_excludes() {
+    let mut bus = Bus::bare(None).await;
+    guard_owner(&mut bus).await;
+    wait_for(&bus, &["g/svc"]).await;
+    let excluded = "@stream, @state, @op, @zk, @adv excluded: no selector names them, and \
+                    `*`/`**` never match one";
+
+    let run = bus
+        .until(
+            &["echo", "zk2/g/**", "--count", "12", "--format", "table"],
+            |r| r.code == 0 && r.stdout.contains("stream/tick") && r.stdout.contains("state/mode"),
+        )
+        .await;
+    exits(&run, 0);
+    assert!(
+        run.stderr
+            .contains(&format!("echoing zk2/g/** — {excluded}")),
+        "{run}"
+    );
+    assert!(
+        !run.stdout.contains("@stream/frame") && !run.stdout.contains("@state/grid"),
+        "a zk2/g/** watch shows no explicit sample: {run}"
+    );
+
+    let timing = |selector: Option<&'static str>| {
+        let mut args = vec!["timing"];
+        args.extend(selector);
+        args.extend(["--for", "1", "--timeout", "1", "--format", "json"]);
+        args
+    };
+    let resources = |doc: &Value| -> BTreeSet<String> {
+        rows_of(doc, "resource")
+            .into_iter()
+            .filter_map(|r| r["resource"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let run = bus
+        .until(&timing(Some("zk2/g/**")), |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| !resources(&d).is_empty())
+        })
+        .await;
+    let doc = run.json();
+    assert_eq!(
+        resources(&doc),
+        BTreeSet::from(["stream/tick".to_owned()]),
+        "{run}"
+    );
+    assert_eq!(
+        doc["scope"],
+        json!({
+            "excluded": ["@stream", "@state", "@op", "@zk", "@adv"],
+            "unreached": [{
+                "address": "g/svc",
+                "iface": "g.v1",
+                "resource": "@stream/frame",
+                "selector": "zk2/g/svc/g.v1/@stream/frame",
+            }],
+        }),
+        "{run}"
+    );
+    assert!(
+        run.stderr
+            .contains(&format!("timing: under zk2/g/** — {excluded}")),
+        "{run}"
+    );
+    assert!(
+        run.stderr.contains(
+            "timing: 1 timed stream(s) of the owners in scope out of the selector's reach, so \
+             not read: g/svc g.v1 @stream/frame"
+        ),
+        "{run}"
+    );
+    let notes = notes_text(&doc);
+    assert!(
+        notes.contains("@stream, @state, @op, @zk, @adv excluded from this reading"),
+        "{notes}"
+    );
+
+    let run = bus
+        .until(&timing(None), |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| resources(&d).len() == 2)
+        })
+        .await;
+    let doc = run.json();
+    assert_eq!(
+        resources(&doc),
+        BTreeSet::from(["@stream/frame".to_owned(), "stream/tick".to_owned()]),
+        "{run}"
+    );
+    assert!(doc.get("scope").is_none(), "no selector, no scope: {run}");
+    assert!(!run.stderr.contains("excluded"), "{run}");
+}
+
 // ── FK1: why, check conform, storage gen, admin graph (#702–#705) ──────────
 
 /// The rows of a `--format json` document tagged `instance`, by address.
@@ -4838,6 +4990,76 @@ async fn check_conform_names_a_wrong_type_a_qos_mismatch_and_a_silent_operation(
     assert!(
         s["verdict"]["reason"].to_string().contains("§11.3"),
         "{run}"
+    );
+}
+
+/// operations.md §5 step 2 (`spec/observer.md` §7.2, text 0.2; zk2py round
+/// 82's F-284, #950): O3 judged from outside, `check conform` calling the
+/// frozen server's `diagnostics` (its handler holds every call 4 s, past
+/// the 1 s timeout). Told that its grants let it call (`--calls-granted`,
+/// true here: the deployment runs no access control), the silence of an
+/// owner whose tokens it reads is the O3 finding, an access-control
+/// refusal named beside it; not told, the same silence is unobservable,
+/// the premise it lacked named (§11.3).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn operations_s5_a_frozen_servers_silence_is_the_o3_finding_only_on_the_operators_word() {
+    let mut bus = Bus::bare(None).await;
+    let _seen = tc_instance(
+        &mut bus,
+        "h1/tc",
+        Tc {
+            frozen: true,
+            ..Tc::default()
+        },
+    )
+    .await;
+    wait_for(&bus, &["h1/tc"]).await;
+    let told = [
+        "check",
+        "conform",
+        "h1/tc",
+        "tc.v1",
+        "--for",
+        "1",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+        "--calls-granted",
+    ];
+    let diagnostics = |r: &Run| -> Option<Value> {
+        serde_json::from_str::<Value>(&r.stdout).ok().and_then(|d| {
+            rows_of(&d, "case")
+                .into_iter()
+                .find(|c| c["case"] == "operation" && c["subject"] == "@op/diagnostics")
+                .cloned()
+        })
+    };
+    let answer = |r: &Run| diagnostics(r).map(|c| c["verdict"]["answer"].clone());
+    let run = bus
+        .until(&told, |r| answer(r) == Some(json!("established")))
+        .await;
+    let case = diagnostics(&run).unwrap_or_else(|| panic!("no operation case: {run}"));
+    assert_eq!(case["verdict"]["answer"], "established", "{run}");
+    let detail = case["detail"].to_string();
+    assert!(
+        detail.contains("holds its tokens")
+            && detail.contains("never silence (O3)")
+            && detail.contains("unless access control refused it"),
+        "the finding, and the refusal it rests on not being one, beside it: {run}"
+    );
+    let unsaid = &told[..told.len() - 1];
+    let run = bus
+        .until(unsaid, |r| answer(r) == Some(json!("unobservable")))
+        .await;
+    let case = diagnostics(&run).unwrap_or_else(|| panic!("no operation case: {run}"));
+    assert_eq!(case["verdict"]["answer"], "unobservable", "{run}");
+    let reason = case["verdict"]["reason"].to_string();
+    assert!(
+        reason.contains("holds its tokens")
+            && reason.contains("no tool can observe its grants (§11.3)")
+            && reason.contains("only when the operator says the grants let this tool call"),
+        "the premise it lacked, named: {run}"
     );
 }
 

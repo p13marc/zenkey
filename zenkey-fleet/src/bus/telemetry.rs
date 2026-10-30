@@ -162,6 +162,9 @@ pub struct TelemetryObservation {
     pub unresolved: u64,
     /// What in scope could not be read, one line each.
     pub skipped: Vec<String>,
+    /// What the selector cannot reach (`spec/observer.md` §8.2; #950):
+    /// `None` with no selector.
+    pub reach: Option<crate::report::ScopeReach>,
     /// Set when the reading could not be made at all, with why.
     pub unobservable: Option<String>,
     /// What the window opened on; `None` when it never opened.
@@ -203,9 +206,25 @@ fn sample_of(s: &Sample, via: SampleVia) -> MetricSample {
 
 /// The metric resources in scope: every revision the descriptors in scope
 /// name and the store holds, or, across a face, every contract in hand of
-/// the one owner the scope names. A revision not in hand is skipped, with
-/// why.
+/// the one owner the scope names, those the selector reaches. A revision
+/// not in hand is skipped, with why.
 pub fn metric_resources(
+    scope: &TelemetryScope,
+    catalog: Option<&Catalog>,
+    store: &BundleStore,
+    offline: &ContractSet,
+    skipped: &mut Vec<String>,
+) -> Vec<Arc<MetricResource>> {
+    metric_resources_of_owners(scope, catalog, store, offline, skipped)
+        .into_iter()
+        .filter(|m| scope.subscription(m).is_some())
+        .collect()
+}
+
+/// [`metric_resources`] before the selector: every metric resource of the
+/// owners and interfaces in scope, so that what the selector misses can
+/// be named (`spec/observer.md` §8.2; #950).
+pub fn metric_resources_of_owners(
     scope: &TelemetryScope,
     catalog: Option<&Catalog>,
     store: &BundleStore,
@@ -214,7 +233,7 @@ pub fn metric_resources(
 ) -> Vec<Arc<MetricResource>> {
     let mut out = Vec::new();
     let mut push = |m: MetricResource| {
-        if scope.subscription(&m).is_some() {
+        if scope.subscription(&m).is_some() || scope.misses(&m.address, &m.iface, &m.selector) {
             out.push(Arc::new(m));
         }
     };
@@ -310,6 +329,7 @@ pub async fn observe(
         listened: Duration::ZERO,
         unresolved: 0,
         skipped: Vec::new(),
+        reach: None,
         unobservable: None,
         opening: None,
     };
@@ -342,8 +362,25 @@ pub async fn observe(
         }
     };
     let mut skipped = Vec::new();
-    obs.resources = metric_resources(&scope, catalog.as_ref(), store, offline, &mut skipped);
+    let (reached, missed): (Vec<_>, Vec<_>) =
+        metric_resources_of_owners(&scope, catalog.as_ref(), store, offline, &mut skipped)
+            .into_iter()
+            .partition(|m| scope.subscription(m).is_some());
+    obs.resources = reached;
     obs.skipped = skipped;
+    // What the selector misses is said even when it reaches nothing
+    // (`spec/observer.md` §8.2; zk2py round 82's F-287, #950).
+    obs.reach = scope.reach(
+        missed
+            .iter()
+            .map(|m| crate::report::UnreachedResource {
+                address: m.address.to_string(),
+                iface: m.iface.to_string(),
+                resource: m.resource.clone(),
+                selector: m.selector.clone(),
+            })
+            .collect(),
+    );
     if obs.resources.is_empty() {
         return obs;
     }
@@ -1182,6 +1219,48 @@ mod tests {
         assert!(TelemetryScope::parse("lab/**").is_err(), "base-relative");
     }
 
+    /// What a selector misses (`spec/observer.md` §8.2; #950): a resource
+    /// of an owner it selects whose members it does not intersect, an
+    /// explicit stream under `**` above all; never one of an owner it does
+    /// not select, never one with no selector, and its reach names the
+    /// verbatim chunks excluded.
+    #[test]
+    fn a_selector_names_what_it_misses_of_the_owners_it_selects() {
+        let addr: zenkey_model::grammar::Addr = "lab/beat".parse().unwrap();
+        let other: zenkey_model::grammar::Addr = "lab/other".parse().unwrap();
+        let beat: zenkey_model::grammar::IfaceId = "beat.v1".parse().unwrap();
+        let (plain, explicit) = (
+            "zk2/lab/beat/beat.v1/stream/cmd",
+            "zk2/lab/beat/beat.v1/@stream/frame",
+        );
+        let wide = TelemetryScope::parse("zk2/lab/beat/**").unwrap();
+        assert!(!wide.misses(&addr, &beat, plain), "reached");
+        assert!(
+            wide.misses(&addr, &beat, explicit),
+            "`**` crosses no `@stream`"
+        );
+        let named = TelemetryScope::parse("zk2/lab/beat/*/@stream/**").unwrap();
+        assert!(named.misses(&addr, &beat, plain));
+        assert!(!named.misses(&addr, &beat, explicit));
+        let one = TelemetryScope::parse("zk2/lab/beat/**").unwrap();
+        assert!(
+            !one.misses(&other, &beat, "zk2/lab/other/beat.v1/@stream/frame"),
+            "an owner out of scope is out of scope, not missed"
+        );
+        let all = TelemetryScope::all();
+        assert!(!all.misses(&addr, &beat, explicit));
+        assert_eq!(all.reach(Vec::new()), None, "no selector, no reach");
+        let reach = wide.reach(Vec::new()).expect("a selector");
+        assert_eq!(
+            reach.excluded,
+            ["@stream", "@state", "@op", "@zk", "@adv"].map(String::from)
+        );
+        assert_eq!(
+            named.reach(Vec::new()).expect("a selector").excluded,
+            ["@state", "@op", "@zk", "@adv"].map(String::from)
+        );
+    }
+
     const I1: &str = "00000000000000a1";
     const I2: &str = "00000000000000a2";
 
@@ -1352,6 +1431,7 @@ mod tests {
             listened: Duration::ZERO,
             unresolved: 0,
             skipped: vec![],
+            reach: None,
             unobservable: None,
             opening: None,
         };

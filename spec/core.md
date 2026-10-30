@@ -1,12 +1,13 @@
 # zk2 core specification
 
-**Version 0.58** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.59** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
 This is the normative core of zk2, the keyspace and contract layer for
 applications built on Zenoh. It is written so that an implementation in any
-language can be built from it, plus the fixtures in
+language can be built from it, plus [`observer.md`](observer.md) for a
+participant that reads (below), the fixtures in
 [`conformance/`](conformance/) and the scenarios in [`scenarios/`](scenarios/),
 without reading the Rust reference implementation (`zenkey-model`, the
 runtime that follows it).
@@ -2927,10 +2928,13 @@ The format is the generator's own. The reference reads an enrollment file
 
 ## 12. Conformance levels
 
-**Full.** An implementation at the full level meets every rule above.
+**Full.** An implementation at the full level meets every rule above, and
+every rule of [`observer.md`](observer.md) that binds a role it plays
+(0.59): a tool, or a participant where it reads presence, state or the
+admin space and concludes from what it read (observer.md §0).
 
 **Constrained.** An implementation at the constrained level meets every rule
-above, with these relaxations and additions:
+the full level does, with these relaxations and additions:
 
 | Topic | Relaxation or addition |
 |---|---|

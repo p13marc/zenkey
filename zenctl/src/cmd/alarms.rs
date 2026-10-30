@@ -43,6 +43,9 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
+    // No scope note here, as `timing` and `telemetry` give (#950): every
+    // alarms.v1 key is plain state, `zk2/<s>/<v>/alarms.v1/state/alarms/<key>`,
+    // so the verbatim chunks a wildcard excludes hold no alarm.
     let scope = ASKING.ask(AlarmScope::parse(&selector).map_err(|why| unaskable!("{why}")));
     if across_face.is_some() && scope.one_owner().is_none() {
         ASKING.ask::<(), _>(Err(unaskable!(

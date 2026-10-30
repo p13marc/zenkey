@@ -339,6 +339,94 @@ async fn split_brain_is_diagnosed_as_operations_8_runs_it() {
     assert!(why.contains("replicated serving"), "{why}");
 }
 
+/// operations.md §8 step 6 (`spec/observer.md` §3.2, text 0.2; zk2py round
+/// 82's F-282, #950): an owner between core §8.2's steps 3 and 4, serving
+/// its descriptor with `tc.v1` exposed and declaring its interface token a
+/// second later, is no finding. The doctor's first read falls within that
+/// second and sees the shape, its second, a grace later, sees the token,
+/// and a run after it sees the token in both. A control that never
+/// declares its token is the finding in both runs, so the descriptor is
+/// read as exposing `tc.v1`: the step is not passed by reading nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn operations_8_step_6_an_interface_token_a_second_after_its_descriptor_is_no_finding() {
+    use zenkey_fleet::model::catalog::Observed;
+    use zenkey_model::grammar::ZkKey;
+    // Longer than the second the token waits: the first two reads are a
+    // grace apart, and that second lies between them.
+    const SECOND_GRACE: Duration = Duration::from_secs(2);
+    let (_r, ep) = router(false).await;
+    let (owners, tool, raw) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let tc = scenario("tc.v1");
+    // A real owner of tc.v1 serves the bundle the doctor retrieves.
+    let _h1 = bring_up(&owners, config("h1/tc"), std::slice::from_ref(&tc)).await;
+    let (late, never) = ("00000000000000f4", "00000000000000f5");
+    let _late = fake(
+        &raw,
+        "h4/tc",
+        late,
+        descriptor("h4/tc", late, json!([entry(&tc)])),
+    )
+    .await;
+    let _never = fake(
+        &raw,
+        "h5/tc",
+        never,
+        descriptor("h5/tc", never, json!([entry(&tc)])),
+    )
+    .await;
+    settled(&tool, &["h1/tc", "h4/tc", "h5/tc"]).await;
+    let on = bus(&tool, &tool, "");
+    let mut only = spec(&[CheckId::TokenMissing]);
+    only.grace = SECOND_GRACE;
+    let token = format!(
+        "zk2/h4/tc/@zk/alive/tc.v1/{late}/{}",
+        Fingerprint::of(&tc).hex().fp16()
+    );
+    let held = |read: &Option<Result<Observed, String>>, alive: bool| -> bool {
+        let read = read.as_ref().expect("asked").as_ref().expect("read");
+        read.tokens.iter().any(|t| match t {
+            ZkKey::Alive { addr, .. } => alive && addr.to_string() == "h4/tc",
+            ZkKey::Instance { addr, .. } => !alive && addr.to_string() == "h4/tc",
+            _ => false,
+        })
+    };
+    let no_finding_on_h4 = |r: &DoctorReport| {
+        let c = verdict(r, CheckId::TokenMissing);
+        assert!(
+            !c.findings.iter().any(|f| f.subject.starts_with("h4/tc"))
+                && !c.unjudged.iter().any(|u| u.subject.starts_with("h4/tc")),
+            "a shape in one read is no fault (observer §3.2): {c:#?}"
+        );
+        let f = found(r, CheckId::TokenMissing, &format!("h5/tc@{never} tc.v1"));
+        assert!(f.evidence.contains("holds no interface token"), "{f:?}");
+    };
+
+    // Once within the second, then a grace later, after the token.
+    let first = tokio::spawn({
+        let (on, only) = (on.clone(), only.clone());
+        async move { zenkey_fleet::observe_doctor(&on, &BundleStore::new(T), &only).await }
+    });
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let _alive = raw
+        .liveliness()
+        .declare_token(token.as_str())
+        .await
+        .expect("the interface token, a second after the descriptor");
+    let first = first.await.expect("the doctor");
+    assert!(
+        held(&first.before, false) && !held(&first.before, true),
+        "the first read falls within the second: the instance token, and no interface token"
+    );
+    assert!(
+        held(&first.after, true),
+        "the second, a grace later, holds it"
+    );
+    no_finding_on_h4(&zenkey_fleet::judge_doctor(&first, &only));
+
+    // Twice more, a grace apart, both after it.
+    no_finding_on_h4(&doctor(&on, &only).await);
+}
+
 // ─── presence.md §1, §2, §5: a deployment that keeps the rules ──────────────
 
 /// The tcgui pilot, as FJ4 reads it: two hosts' `tc` (host-b with

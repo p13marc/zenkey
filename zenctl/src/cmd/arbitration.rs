@@ -70,6 +70,9 @@ pub async fn run(cli: ArbitrationArgs) -> Result<()> {
         false => Some(ASKING.ask(dep.watch_session().await)),
     };
     let store = zk2::store(&dep, &offline);
+    // No scope note here, as `timing` and `telemetry` give (#950): the view
+    // subscribes to each binding entry's stream by its contract's key
+    // expression, which names its kind token, and offers no wildcard scope.
     if !spec.listen.is_zero() {
         eprintln!(
             "arbitration: each arbitrated role's view listens {}s (--for): the tool's own, on \

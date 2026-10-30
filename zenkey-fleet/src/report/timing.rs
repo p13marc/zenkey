@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::judgement::Judgement;
+use super::observe::ScopeReach;
 
 /// One of §5's answers, as `conclusions.json` spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -268,6 +269,12 @@ pub struct TimingReport {
     /// descriptors in scope declare.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector: Option<String>,
+    /// What the selector cannot reach (`spec/observer.md` §8.2; zk2py
+    /// round 82's F-287, #950): the verbatim chunks it names none of, and
+    /// the timed streams of the owners in scope it misses. Absent with no
+    /// selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ScopeReach>,
     /// Read across a constrained face (§2.8): no presence, the contracts in
     /// hand, and the deadline and period unobservable.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -346,7 +353,18 @@ impl TimingReport {
             return Judgement::Unobservable {
                 reason: format!(
                     "no timed resource in scope in {ns}: a reading over an empty scope answered \
-                     nothing"
+                     nothing{}",
+                    match self.scope.as_ref().and_then(|s| s.unreached.first()) {
+                        Some(u) => format!(
+                            "; {} timed stream(s) of the owners in scope are out of the \
+                             selector's reach (the first, {} {} {}: observer §8.2)",
+                            self.scope.as_ref().map_or(0, |s| s.unreached.len()),
+                            u.address,
+                            u.iface,
+                            u.resource
+                        ),
+                        None => String::new(),
+                    }
                 ),
             };
         }
@@ -442,6 +460,7 @@ mod tests {
         TimingReport {
             namespace: "acme".into(),
             selector: None,
+            scope: None,
             across_face: false,
             clock_bound_ms: Some(100),
             opening: Some(TimingOpening {
@@ -598,6 +617,33 @@ mod tests {
             .into(),
             "every optional field absent when empty"
         );
+        // #950: a selector's reach, the verbatim chunks it excludes and the
+        // timed stream it misses, beside it.
+        let mut under = report(clean());
+        under.selector = Some("zk2/lab/beat/**".into());
+        under.scope = Some(ScopeReach::of(
+            "zk2/lab/beat/**",
+            vec![crate::report::UnreachedResource {
+                address: "lab/beat".into(),
+                iface: "beat.v1".into(),
+                resource: "@stream/frame".into(),
+                selector: "zk2/lab/beat/beat.v1/@stream/frame".into(),
+            }],
+        ));
+        let v = serde_json::to_value(&under).unwrap();
+        assert_eq!(v["selector"], "zk2/lab/beat/**");
+        assert_eq!(
+            v["scope"],
+            json!({
+                "excluded": ["@stream", "@state", "@op", "@zk", "@adv"],
+                "unreached": [{
+                    "address": "lab/beat",
+                    "iface": "beat.v1",
+                    "resource": "@stream/frame",
+                    "selector": "zk2/lab/beat/beat.v1/@stream/frame",
+                }],
+            })
+        );
         let miss = TimingMiss {
             at_ms: 2401.5,
             due_ms: 2400.0,
@@ -650,5 +696,23 @@ mod tests {
         let mut empty = report(clean());
         empty.resources.clear();
         assert_eq!(judgement_exit_code(&empty.judgement()), 2);
+        // #950: an empty scope's reason names a timed stream the selector
+        // misses.
+        empty.selector = Some("zk2/lab/beat/*/stream/**".into());
+        empty.scope = Some(ScopeReach::of(
+            "zk2/lab/beat/*/stream/**",
+            vec![crate::report::UnreachedResource {
+                address: "lab/beat".into(),
+                iface: "beat.v1".into(),
+                resource: "@stream/frame".into(),
+                selector: "zk2/lab/beat/beat.v1/@stream/frame".into(),
+            }],
+        ));
+        let j = empty.judgement();
+        assert!(
+            matches!(&j, Judgement::Unobservable { reason }
+                if reason.contains("1 timed stream(s)") && reason.contains("@stream/frame")),
+            "{j:?}"
+        );
     }
 }

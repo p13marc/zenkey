@@ -124,11 +124,23 @@ last is called once: retrying is opt-in.
 
 ## §5 Silence (O5)
 
-**Steps.** Call an operation that the access control refuses, then one whose
-server is frozen.
+**Steps.**
+1. Call an operation that the access control refuses, then one whose
+   server is frozen.
+2. **O3 judged from outside** (observer.md §7.2; 0.59, F-284). A tool
+   judging O3 from outside, as a conformance suite does, calls the frozen
+   server's operation twice: once told that its grants let it call it,
+   which is true of that call (it reached the server in step 1), and once
+   not told.
 
-**Expected.** Both return no reply. A tool reports "no answer", and
-attributes it through presence. It never reports "no such operation".
+**Expected.**
+1. Both return no reply. A tool reports "no answer", and attributes it
+   through presence. It never reports "no such operation".
+2. Told, the tool holds the silence of an owner whose tokens it reads as
+   the O3 finding, and says beside it that an access-control refusal is
+   silent too. Not told, it reports the silence unobservable, never the
+   finding, and names the premise it lacked: grants that let it call,
+   which no tool can observe (core §11.3).
 
 ## §6 Many replies (O6)
 
@@ -160,7 +172,7 @@ them. The second is metadata with an actor and no request id. The rest are
 no metadata, and each call is served all the same. Nothing authenticates
 any of them.
 
-## §8 Split-brain diagnosis (core §6)
+## §8 Split-brain diagnosis, and a shape seen in one read (core §6; observer.md §3.2, §6.1)
 
 **Steps.**
 1. Two instances of one service hold an interface token for one interface
@@ -174,11 +186,22 @@ any of them.
 5. One instance exposes an interface's exclusive resources and its
    replicated operation; a second exposes the replicated operation only,
    and lists the exclusive optional resources `unavailable`.
+6. **An interface token a second after the descriptor** (observer.md
+   §3.2; 0.59, F-282). An instance of `tc` on `h4` serves its descriptor,
+   which lists `tc.v1` outside its tokenless set with its resources
+   exposed, and holds its instance token (core §8.2, step 3), then
+   declares its `tc.v1` token one second later (step 4), as an owner that
+   pauses between the two steps would. The tool reads presence three
+   times, `grace` apart, its grace longer than that second: the first
+   read within it, the next two after it.
 
 **Expected.** A finding for 1. No finding for 2, whose overlap is shorter
 than the grace period. No finding for 3. No finding for 4 or 5, which the
 tool decides from the contract and the holders' descriptors: at most one
-holder exposes an exclusive resource. The runtime fences nothing.
+holder exposes an exclusive resource. No finding for 6: the interface its
+descriptor lists, exposed and holding no token, shows in the first read
+alone, so neither pair of reads a grace apart holds it. The runtime
+fences nothing.
 
 The tool reads presence twice, `grace` apart; a holder seen in one read
 only is not part of a finding.

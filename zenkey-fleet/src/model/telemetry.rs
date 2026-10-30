@@ -63,7 +63,7 @@ use zenoh::time::Timestamp;
 use crate::bus::presence::Scope;
 use crate::model::catalog::{Observed, Revision};
 use crate::model::presence_live::{LivePresence, PresenceBasis};
-use crate::report::MemberId;
+use crate::report::{MemberId, ScopeReach, UnreachedResource};
 
 /// The most members a book holds; a member past it is refused and counted.
 pub const MAX_MEMBERS: usize = 4_096;
@@ -290,6 +290,24 @@ impl TelemetryScope {
             None => true,
             Some((_, sel)) => KeyExpr::try_from(key).is_ok_and(|k| sel.intersects(&k)),
         }
+    }
+
+    /// Whether the selector misses a resource of an owner and an interface
+    /// in scope, whose members are under `selector`: the resource is there,
+    /// and out of the selector's reach (`spec/observer.md` §8.2; #950).
+    /// Never with no selector, which subscribes to each resource by its own
+    /// key expression.
+    pub fn misses(&self, address: &Addr, iface: &IfaceId, selector: &str) -> bool {
+        self.selector.is_some()
+            && self.selects_owner(address)
+            && self.iface.as_ref().is_none_or(|i| i == iface)
+            && self.subscription_to(address, iface, selector).is_none()
+    }
+
+    /// What the selector cannot reach, over `missed` (those
+    /// [`TelemetryScope::misses`] finds); `None` with no selector.
+    pub fn reach(&self, missed: Vec<UnreachedResource>) -> Option<ScopeReach> {
+        self.selector().map(|s| ScopeReach::of(s, missed))
     }
 }
 

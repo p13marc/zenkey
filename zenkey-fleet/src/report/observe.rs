@@ -11,6 +11,9 @@
 //! compares the QoS a sample rode with the one its contract declares
 //! (§2.4). [`LensScope`] is what the observer had to resolve with: a
 //! namespace, a presence read or none, and the revisions in hand.
+//! [`ScopeReach`] is what a reader's selector cannot reach: the verbatim
+//! chunks it names none of, and the resources of its kind it misses
+//! (`spec/observer.md` §8.2; #950).
 
 use std::collections::BTreeMap;
 
@@ -279,10 +282,114 @@ pub struct LensPresence {
     pub services: usize,
 }
 
+/// What a reader's selector cannot reach (`spec/observer.md` §8.2, core
+/// §1.3's guard; zk2py round 82's F-287, #950): `timing` and `telemetry`,
+/// given a selector, read only the resources it intersects, and `*` and
+/// `**` never match a verbatim chunk, so an explicit stream under
+/// `zk2/lab/beat/**` is out of reach, which must not read as nothing
+/// there. Absent from a report with no selector: such a reading
+/// subscribes to each resource by its own key expression, which names its
+/// kind token, and nothing of its kind is out of its reach.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeReach {
+    /// zk2's verbatim chunks the selector names none of, in
+    /// `crate::VERBATIM`'s order: nothing under one is in the reading,
+    /// whatever the bus carries. The same list `record`'s header gives
+    /// (`excluded`, #924).
+    pub excluded: Vec<String>,
+    /// The resources of the reading's kind, of the owners in scope and the
+    /// revisions in hand, that the selector does not intersect: there,
+    /// and not read.
+    pub unreached: Vec<UnreachedResource>,
+}
+
+/// One resource a [`ScopeReach`] names out of reach.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct UnreachedResource {
+    /// `<system>/<service>`.
+    pub address: String,
+    pub iface: String,
+    /// `<kind token>/<template>`.
+    pub resource: String,
+    /// Its members' key expression, base-relative: what the selector would
+    /// have to intersect.
+    pub selector: String,
+}
+
+impl ScopeReach {
+    /// The reach of `selector` over `missed`, the resources it does not
+    /// intersect: the verbatim chunks it names none of
+    /// ([`crate::zrec_excluded`], the raw observers' helper since #924),
+    /// and the resources sorted.
+    pub fn of(selector: &str, mut missed: Vec<UnreachedResource>) -> ScopeReach {
+        missed.sort();
+        missed.dedup();
+        ScopeReach {
+            excluded: crate::tape::record::excluded_by(&[selector.to_owned()]),
+            unreached: missed,
+        }
+    }
+
+    /// What a frontend says of the resources missed, each of `kind` (`timed
+    /// stream`, `metric resource`); empty when none is. The chunks excluded
+    /// are said as the raw observers say them (zenctl's `scope_note`).
+    pub fn unreached_words(&self, kind: &str) -> String {
+        if self.unreached.is_empty() {
+            return String::new();
+        }
+        format!(
+            "{} {kind}(s) of the owners in scope out of the selector's reach, so not read: {}",
+            self.unreached.len(),
+            self.unreached
+                .iter()
+                .map(|u| format!("{} {} {}", u.address, u.iface, u.resource))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// #950: a selector over `zk2/g/**` excludes the five verbatim chunks,
+    /// and names the explicit stream it misses with its key expression;
+    /// every field present, an empty list included.
+    #[test]
+    fn a_scope_reach_pins_its_shape_and_names_what_it_misses() {
+        let frame = UnreachedResource {
+            address: "g/svc".into(),
+            iface: "g.v1".into(),
+            resource: "@stream/frame".into(),
+            selector: "zk2/g/svc/g.v1/@stream/frame".into(),
+        };
+        let r = ScopeReach::of("zk2/g/**", vec![frame.clone(), frame]);
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            json!({
+                "excluded": ["@stream", "@state", "@op", "@zk", "@adv"],
+                "unreached": [{
+                    "address": "g/svc",
+                    "iface": "g.v1",
+                    "resource": "@stream/frame",
+                    "selector": "zk2/g/svc/g.v1/@stream/frame",
+                }],
+            })
+        );
+        assert_eq!(
+            r.unreached_words("timed stream"),
+            "1 timed stream(s) of the owners in scope out of the selector's reach, so not read: \
+             g/svc g.v1 @stream/frame"
+        );
+        let named = ScopeReach::of("zk2/g/*/*/@stream/**", Vec::new());
+        assert_eq!(
+            serde_json::to_value(&named).unwrap(),
+            json!({"excluded": ["@state", "@op", "@zk", "@adv"], "unreached": []})
+        );
+        assert_eq!(named.unreached_words("timed stream"), "");
+    }
 
     /// A resolved key carries its group, its values and no reason; an
     /// unresolved one carries the rung it stopped at, and no values.

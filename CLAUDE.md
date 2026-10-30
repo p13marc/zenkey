@@ -737,7 +737,17 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   likewise, or a sample expired; 0 every question asked on its other
   pole; 2 otherwise (no `--clock-bound` leaves every lifespan `no_bound`).
   The doctor gains `timing-declaration` (32 checks), and `check conform`
-  `timing-period` and `timing-deadline` (31 cases). timing scenarios §6
+  `timing-period` and `timing-deadline` (31 cases). Given a selector,
+  `timing` and `telemetry` report what it cannot reach (#950, F-287:
+  `report::ScopeReach`, a `scope` field, the verbatim chunks it names
+  none of through `zrec_excluded` and the timed streams or metric
+  resources of the owners in scope it misses; a note, and stderr through
+  `cmd::zk2::scope_note`, observer.md §8.2); `alarms` needs none, every
+  alarms.v1 key being plain state, and `arbitration` offers no wildcard.
+  grammar.md §1 step 5 runs as `live_zk2.rs`'s
+  `grammar_s1_a_tools_wildcard_scope_names_what_it_excludes`, and
+  operations.md §5 step 2 (O3 judged from outside, `--calls-granted` or
+  not) as its `operations_s5_a_frozen_servers_silence_…`. timing scenarios §6
   runs as `live_zk2.rs`'s `timing_s6_a_tools_window`, on the owner
   example's timing drive compiled in (`timing every <member> <ms>` its
   step 3, `timing declare <axis>` a member token alone; text 0.5's step
@@ -1507,7 +1517,14 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   O3 and §7's decoding its §7), each old home a one-line pointer with the
   section number kept, so `core §8.1` still leads there; and the tooling
   guide's judgement shape, silence never a verdict and its O1, O4, O5 and
-  O7, promoted with their evidence (its §1, §2, §8). The guide
+  O7, promoted with their evidence (its §1, §2, §8). Since core 0.59
+  (#950, F-285) §12's conformance levels cover every rule of
+  `observer.md` that binds a role an implementation plays, and the
+  preamble names it; observer text 0.2 answers round 82's F-281 to F-290
+  (its §1's "not this profile's", an Unestablished answer of its own;
+  §7.4's memlock check reporting the largest pool the limit admits, as
+  the doctor's `shm-memlock-low` does; operations.md §8 step 6, §3.2's
+  transient half, run by `zenkey-fleet/tests/zk2_doctor.rs`). The guide
   (`docs/zk2/tooling-guide.md`) keeps guidance: the polarity and exit
   codes, O2, O3, O6, the reference's spellings, recording and replay, what
   did not carry over from v1, and how the tools test themselves. Beside

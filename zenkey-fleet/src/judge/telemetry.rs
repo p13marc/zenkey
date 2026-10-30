@@ -479,6 +479,7 @@ pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
     TelemetryReport {
         namespace: obs.namespace.clone(),
         selector: obs.scope.selector().map(str::to_owned),
+        scope: obs.reach.clone(),
         presence,
         across_face: obs.spec.across_face,
         window_s: obs.listened.as_secs_f64(),
@@ -622,6 +623,7 @@ mod tests {
                 listened: Duration::from_secs(2),
                 unresolved: 0,
                 skipped: vec![],
+                reach: None,
                 unobservable: None,
                 opening: None,
             })
@@ -782,6 +784,7 @@ mod tests {
                 listened: Duration::from_secs(2),
                 unresolved: 0,
                 skipped: vec![],
+                reach: None,
                 unobservable: None,
                 opening: None,
             })

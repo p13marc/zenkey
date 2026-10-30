@@ -5616,6 +5616,7 @@ mod tests {
             listened: Duration::from_secs(2),
             unresolved: 0,
             skipped: vec![],
+            reach: None,
             unobservable: None,
             opening: None,
         });
@@ -5740,6 +5741,7 @@ mod tests {
             opening: None,
             discarded: 0,
             skipped: vec![],
+            reach: None,
             unobservable: None,
         });
         let cases = timing_cases(&o);
