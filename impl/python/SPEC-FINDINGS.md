@@ -17828,3 +17828,439 @@ round 83.
 - **#935's pass changed no rule**: no keyword, condition or scope moved,
   every moved measurement is reachable from its rule, and every reason
   stands in words.
+
+## At observer.md 0.5 and core 0.61: round 84's answers, and every long sentence split (#935)
+
+Round 85 read `spec/observer.md` text 0.5 whole and cold, and core 0.61's
+changed sections, on main c9bde0af (PR #956). It checked F-295 to F-314,
+checked the claim that #935's second pass changed no rule but F-295's
+wording, implemented F-295 where zk2py's tools showed a bare not asked,
+and ran the live runners. It read for **hard to read** throughout. The
+reference's parties and tool ran as black boxes (`owner`, `consume` and
+`zenctl` in `/srv/dev/targets/zenkey-tier/blackbox/`, built 2026-10-30
+04:52), their source never read. It read, as a newcomer would:
+- `spec/observer.md` 0.5 whole, and `observer-CHANGELOG.md`'s 0.5 entry;
+- `spec/CHANGELOG.md`'s 0.61 entry, and every line 0.61 changed in
+  `core.md`, each with the section around it;
+- for §1's F-295 rule, the three fixtures it cites; for §3.5, the
+  profiles' presence premises (`health.v1`, `alarms.v1`, `desired.v1`,
+  `config.v1`, `redundancy.v1`); for §5.2, `scenarios/budget.md` §1 and
+  core Appendix B's "What a path drops".
+
+Since round 84, `spec/` changed in five commits: beebb871 (core 0.61),
+e7fa32b7 (observer 0.5), 904e6fc2 (`spec/.prose-baseline.json`),
+a97700ed and 07c91c81 (§3.3's example: which time it measures). zk2py
+diffed `core.md` and `observer.md` against 692de94a, the merge of PR
+#955. No fixture, scenario or schema changed, and `examples/zk2/` did
+not. zk2py did not run `scripts/check-spec-prose.py`.
+
+### F-295 to F-314
+
+| | Status | Why |
+|---|---|---|
+| F-295 | **resolved** | §1's second spelling now reads "**That NotAsked keeps its reason in every medium.** A table cell, a report field and a note each say not this profile's, or name the reason, and never show a bare not asked", citing the three fixtures. NotAsked's bullet points at it: "A profile can also spell not this profile's as NotAsked (below): there the question was put, and its premise does not hold." 0.5 keeps NotAsked's definition, where the proposal widened it, and says why. What that leaves in the bullet is F-315. |
+| F-296 | **resolved** | §2.4: "since with `real_time` it lost samples and gained no latency (spike S9, Appendix B)". §12 and Appendix B: "A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on receiving". Each reason is now as wide as its measurement. |
+| F-297 | **resolved** | Two MUSTs, one per object. "(below)" is "(§3.7)". The reason is the round trip's: "The round trip was asked, so it was made, but it establishes nothing." |
+| F-298 | **resolved: reading B** | Three items under the SHOULD. Such a reader "bounds its own wait for the read apart"; "This rule measures that bound, never the GET's own timeout: such a reader meets it when the longest it waits is below the interests timeout"; and 0.3's example with its wait, 120 s, 121 s and at most 30 s, "Its 30 s wait is what is measured, never its GETs' 121 s." Reading A has no sentence left to stand on. **Now unambiguous**, but for one word of the first item, "that timeout", which the second item settles (F-316). |
+| F-299 | **resolved** | The SHOULD is a sentence of its own, "SHOULD be the one that opens that session", so "itself" is gone. The handed session is four sentences, and the default holds "only when the session's configuration states no interests timeout". |
+| F-300 | **resolved** | "A reader SHOULD NOT make such a read." The first check stops a read, which is not made; a read whose second check finds no link "was cut off while it ran (below)". |
+| F-301 | **resolved** | Three statements: the profile's answer, the read's own reason beside it, and the kinds of read the report keeps apart ("a read not made apart from a read possibly incomplete and from one refused"). |
+| F-302 | **resolved** | The three things a withdrawal can leave with nothing held are a list, and reporting is a SHOULD of its own. "Shows none" is "shows no such token held". |
+| F-303 | **resolved** | "A reader whose wait ends before the round trip's reply reads what it reads meanwhile as possibly incomplete, as any read made while no round trip stands (below)". "Takes up" points at the bullet that defines it. |
+| F-304 | **resolved** | "A session with no link hears no withdrawal except those its own close tells." The SHOULD names its two instants, and the last clause is a consequence, a sentence of its own. |
+| F-305 | **resolved** | "A GET that its own timeout ends is over for the reader: zenoh hands the reader an error reply and the final reply, and nothing after them. Such a GET cannot be taken up." 0.5 rightly leaves out the "then" zk2py's rewrite had added: Appendix B states no order. |
+| F-306 | **resolved** | The bullet names the withdrawal first: "A router tells the withdrawal of a token declared before the subscribers, and withdrawn after the round trip, by the token's key (above)." |
+| F-307 | **resolved** | "So a tool whose user asks for that read reads none of these records through that router." |
+| F-308 | **resolved** | "The runtime does not fence. For an interface whose contract uses `redundancy.v1`, its holders step down … That is no fence either". |
+| F-309 | **resolved** | "the tool holds as the finding a silence from an owner whose tokens it reads." |
+| F-310 | **resolved** | The two alternatives are a list under "in every medium it writes", and each medium is a sentence. A table is still not named, deliberately. Two pronouns the rewrite kept are F-321. |
+| F-311 | **resolved** | "for one lease plus its reply timeout"; the default and the transit are a sentence of their own. What the split left of the next sentence is F-320. |
+| F-312 | **resolved** | "Router to router, they would cross it (spike S3, Appendix B)." |
+| F-313 | **resolved** | Three sentences: every one of a router's records, never a peer's nor a client's, and `@/*/*` refused. |
+| F-314 | **resolved** | "(Appendix B gives zenoh-python's smallest step)" and "(Appendix B gives its size under zenoh-pico's default)". |
+
+### No rule changed: the check
+
+**Every RFC 2119 sentence, before and after.** zk2py split both texts
+into sentences keyed by section, as in round 84 (a scratch splitter that
+reads a table cell as running text, so its core totals are not the
+changelog's). It kept each one holding MUST, MUST NOT, SHOULD, SHOULD
+NOT, MAY, RECOMMENDED, REQUIRED or SHALL.
+- **Observer:** 39 before and 43 after, 31 unchanged. Eight changed, and
+  four more are second halves of a split. That is the changelog's count
+  exactly.
+- **Core:** 161 before and 161 after, 158 unchanged and 3 changed. The
+  changelog counts 152 and 149: the same three.
+- **Each changed sentence, read against its old text:**
+
+| Text | § | Keyword | 0.4 or 0.60 | 0.5 or 0.61 | Moved |
+|---|---|---|---|---|---|
+| observer | §3.3 | MUST (a read at the interests timeout) | "read a read whose time reached … as possibly incomplete, as it reads one that received an error reply" | "read as possibly incomplete a read whose time reached …, as it reads a read that received an error reply" | nothing |
+| observer | §3.3 | MUST (a round trip at it), now its own | "and a round trip (below) that ended there as not standing" | "MUST read as not standing a round trip (§3.7) that ended at that timeout" | nothing: "there" was the interests timeout |
+| observer | §3.3 | SHOULD (open the session) | "open the session itself with a value it sets, and so knows" | "be the one that opens that session, with an interests timeout it sets, so that it knows the value" | nothing |
+| observer | §3.5 | SHOULD NOT (a read through a session cut off) | "make it: before a read, and again when it ends, it checks …, and reports a read not made" | "make such a read"; the first check stops a read not made, the second finds one cut off while it ran | nothing: "A read cut off while it runs" said the second already |
+| observer | §3.6 | SHOULD (read again), SHOULD (report), was one | "read again soon after … — one read for a burst of them, and report what that read establishes" | two SHOULDs; "One read serves a burst of such withdrawals" | nothing (below) |
+| observer | §3.7 | SHOULD (a session that never held a subscriber), SHOULD (the watch session), was one | "…(one undeclared leaves its session exposed), and hold its liveliness subscribers on another session" | two SHOULDs; "One undeclared still leaves its session exposed." | nothing |
+| observer | §3.7 | SHOULD (where a move begins) | "at its transport event or at a withdrawal …, whichever comes first" | "at the first of two instants: its watch session's transport event, or a withdrawal …" | nothing |
+| observer | §3.7 | SHOULD NOT (a round trip in flight), SHOULD NOT (a read in flight), was one | "…is in flight, nor ask a read while one it asked of the same scope is" | two SHOULD NOTs | nothing |
+| observer | §3.7 | SHOULD NOT (a read through a watch session cut off) | "a read it would follow from it" | "a read that it would follow from that watch session" | nothing |
+| core | §2.4 | SHOULD (`express` on measurement) | "since it can lose samples and gain no latency" | "since with `real_time` it lost samples and gained no latency" | the reason narrowed (F-296); the rule kept |
+| core | §8.5 | MUST (`declare_queryable` on egress) | one sentence with its reason and the inclusion check | "It learns of queryables only from the declarations the near router sends it. So the far side's principal MUST …, as the owner declares it. A declaration is checked by inclusion …" | nothing |
+| core | §12 | MUST (one fragment) | "(its size: Appendix B)" | "(Appendix B gives its size under zenoh-pico's default)" | nothing (F-314) |
+
+**The rest of what changed, not only the keyword sentences.** zk2py read
+the word diff of both texts whole: 97 lines of `core.md` and 303 of
+`observer.md` in the diff's count. Besides the table and the findings' rewrites, the pass
+split the preamble's two sentences, §0's scope (now a list), §1's "not
+this profile's" (its examples now "for example"), §3.6's
+`arbitration.v1` sentence, §3.7's open and its watch session cut off,
+§4.4's owner's stamp ("Those are"), §5.2's "What a deployment provides"
+(a list), and in the core §2.7's and §8.1's "At scale", §4.2's "Observing
+S1", §5.1's concrete call, §10's list of profiles and five lines of
+Appendix B. None moves a condition, an object or a scope. Two needed a
+second look:
+- **§3.5, "A profile's premise".** 0.4: "Where a profile names a presence
+  read possibly incomplete or refused, a read not made is read as that
+  premise reads it: unobservable." 0.5: "Some profiles answer unobservable
+  where a presence read was possibly incomplete or refused. A read not
+  made gives the same answer". The new text would be narrower if a
+  profile named such a read with another answer. None does: `health.v1`
+  and `alarms.v1` answer unobservable, `presence_incomplete`; `desired.v1`
+  answers it `author_presence_incomplete`; `config.v1` and
+  `redundancy.v1` read it as unobservable too. No scope moved.
+- **§3.6, "one read for a burst of them".** It sat inside the one
+  SHOULD, and F-302 read it as a permission. 0.5 states it without a
+  keyword: "One read serves a burst of such withdrawals." Read the other
+  way, as a SHOULD to coalesce, it asks no more than §3.7's "It SHOULD
+  NOT ask a read while one it asked of the same scope is in flight".
+  zk2py's follower makes one read per burst either way.
+
+**F-295's wording is the one rule gained**, and the changelog names it.
+F-298's three items restore 0.3's meaning, which zk2py implemented all
+along. **No rule zk2py implements changed.** Round 82's table of the
+rules zk2py implements holds for 0.5 and 0.61 row by row. No section
+moved, so every citation in zk2py's modules still leads to its rule.
+
+**The long sentences.** By zk2py's splitter, no sentence of either text's
+prose is over 50 words. Its count finds three in observer 0.5 and twelve
+in core 0.61: table cells, observer §4.3's key expression (a code span
+with a space in it), and two Appendix B lines whose bold label puts them
+at 55 and 53 words (50 and 46 without it). The changelogs count prose
+alone, so their claim holds.
+
+### F-315 · hard to read · observer §1, NotAsked's bullet beside the second spelling
+
+> "**NotAsked:** nobody put the question. No contract was retrieved, no
+> window ran, the flag was not passed. The tool has learned nothing, and
+> renders nothing, never the negative answer. A profile can also spell
+> not this profile's as NotAsked (below): there the question was put, and
+> its premise does not hold."
+
+- **Hard:** a term with two meanings. The bullet says three things of
+  NotAsked: nobody put the question, the tool learned nothing, it renders
+  nothing. Its last sentence then names a NotAsked of which the first is
+  untrue, and leaves the reader to decide whether the other two hold of
+  it. The rule below answers: "That NotAsked keeps its reason in every
+  medium". So "renders nothing" does not hold of it, and neither does the
+  next bullet's "NotAsked is cured by asking".
+- **Took:** the bullet's first three sentences are of NotAsked proper. A
+  profile's `not_asked` that spells not this profile's was asked, the tool
+  learned that the premise fails, and it renders that reason. Asking again
+  does not cure it. "Renders nothing" means it renders no answer.
+- **Rewrite:**
+  - "**NotAsked:** nobody put the question. No contract was retrieved, no
+    window ran, the flag was not passed. The tool has learned nothing, and
+    renders no answer, never the negative one."
+  - "A profile can also spell not this profile's as NotAsked (below).
+    There the question was put, and its premise does not hold. What this
+    bullet says of NotAsked does not hold of that spelling, and asking
+    again does not cure it."
+- **Changes:** wording only. No keyword, and no verdict.
+
+### F-316 · hard to read · observer §3.3, "apart from that timeout"
+
+> "A reader that asks each GET with its own timeout at or above the
+> interests timeout (§3.7) bounds its own wait for the read apart from
+> that timeout."
+
+- **Hard:** a pronoun with two possible antecedents. The sentence names
+  two timeouts before "that timeout": the GET's own, and the interests
+  timeout, the nearer. The next item, "never the GET's own timeout", and
+  the changelog, "bounds its wait apart from the GET's timeout", both mean
+  the GET's own.
+- **Took:** the GET's own timeout.
+- **Rewrite:** "… bounds its own wait for the read apart from the GET's
+  own timeout."
+- **Changes:** wording only. It is the one word F-298's restored items
+  leave to settle.
+
+### F-317 · hard to read · observer §3.7, "without it is one round trip"
+
+> "**The watch session's subscribers SHOULD have no history** when their
+> reader seeds by a read on its other session: the round trip's final
+> reply follows their history, so with history it waits for the
+> population, and without it is one round trip (core Appendix B)."
+
+- **Hard:** a garden path. "Without it" reads first as "without the
+  round trip", or as "without the history" with "is one round trip" left
+  without a subject. The subject is "it", the round trip, which the clause
+  does not name: "and without [history] it is one round trip". Earlier,
+  "with history it waits" uses "it" for the round trip as well.
+- **Took:** with history, the round trip waits for the population.
+  Without history, it is one round trip.
+- **Rewrite:** "… when their reader seeds by a read on its other session.
+  The round trip's final reply follows their history. So with history the
+  round trip waits for the population, and without history it is one
+  round trip (core Appendix B)."
+- **Changes:** wording only.
+
+### F-318 · hard to read · observer §3.7, the wait for the round trip after a move
+
+> "A reader SHOULD wait for the round trip after a move, and run its
+> interests timeout, above that time at its population: about what a
+> session's first read of the population costs, every matching token sent
+> once."
+
+- **Hard:**
+  - One SHOULD over two acts, "wait" and "run", which 0.5 split
+    everywhere else in §3.7.
+  - "Wait for the round trip … above that time" is split by a second
+    verb phrase. The commas make "above that time at its population" a
+    complement of both verbs.
+  - "That time" points at the bullet before, "the first after each
+    reopen of its transport, which waits for the reopening's telling",
+    which names a wait, not a time.
+- **Took:** the reader SHOULD wait for the round trip after a move longer
+  than the reopening's telling takes at its population. It SHOULD run its
+  session's interests timeout above that time too. That time is about
+  what a session's first read of the population costs.
+- **Rewrite:** "A reader SHOULD wait for the round trip after a move
+  longer than the reopening's telling takes at its population. It SHOULD
+  run its interests timeout above that time too. That time is about what
+  a session's first read of the population costs, every matching token
+  sent once."
+- **Changes:** wording only. The keyword, the condition (a move) and the
+  scope (a reader that waits for that round trip) are kept, as two
+  SHOULDs.
+
+### F-319 · hard to read · observer §3.7, "The next that needs one"
+
+> "The next that needs one takes up the one in flight, whichever wait
+> ended first, its caller's or the reader's own."
+
+- **Hard:**
+  - "The next" has no noun: it could be a read, a caller or a need.
+  - "One" stands in turn for a round trip or a read, from the two SHOULD
+    NOTs before it.
+  - "Whichever wait ended first" does not say a wait for what, nor first
+    before what.
+- **Took:** a round trip or a read of a scope is in flight, and its wait
+  has ended. The next time the reader needs one, it takes up the one in
+  flight, whether its caller's wait for that one ended or its own.
+- **Rewrite:** "When the reader next needs a round trip, or a read of
+  that scope, it takes up the one in flight. It does so whichever wait
+  for that one ended: its caller's, or its own."
+- **Changes:** wording only. zk2py's follower does this (presence §10
+  step 10's "taken up" counts).
+
+### F-320 · ambiguous · observer §5.2, "lengthens it": a `wait_before_close` longer than the lease
+
+> "After the window's end, a tool watches the owner's instance tokens for
+> one lease plus its reply timeout. The lease is 10 s by default, and the
+> reply timeout allows for the withdrawal's transit. A deployment that
+> sets a longer lease, or a `wait_before_close` longer than its lease,
+> lengthens it."
+
+- **Hard:**
+  - "It" is the watch, two sentences back, past "the lease", "the reply
+    timeout" and "the withdrawal's transit". F-311's split moved it a
+    sentence further from its antecedent.
+  - The watch's length, "one lease plus its reply timeout", names no
+    `wait_before_close`. So the sentence says what lengthens the watch,
+    and not to what.
+- **Two readings,** for a `wait_before_close` longer than the lease:
+  - **A.** The watch is the longer of the two, plus the reply timeout.
+    A push that waits on a full queue closes its transport only after
+    `wait_before_close` (core Appendix B, "What a path drops": "the
+    owner's own push had waited `wait_before_close` too, and its session
+    closed its transport to its router"), so a failure shows within the
+    longer of the two.
+  - **B.** The watch is the lease plus `wait_before_close`, plus the reply
+    timeout: the lengthening added to the lease rather than put in its
+    place.
+- **Every rewrite chooses.** A's: "A deployment that sets a longer lease
+  lengthens the watch. One whose `wait_before_close` is longer than its
+  lease watches for that `wait_before_close` in place of the lease, plus
+  the reply timeout." B's: "… adds its `wait_before_close` to the lease."
+- **Not in zk2py until now.** zk2py's window watched one lease plus the
+  reply timeout, whatever `wait_before_close` was. That is too short under
+  either reading. It now reads **A** (`budget.watch_after_s`).
+- **Where it shows.** Under zenoh's defaults (5 s against a 10 s lease)
+  both readings are the lease. `scenarios/budget.md` §1's tool window
+  runs a 1 s lease beside the default 5 s `wait_before_close`, which is
+  the case the clause names. zk2py's watch after that window is now 6 s,
+  not 2 s (B would give 7 s). Its owner stays present, so no verdict
+  moves there.
+- **Changes:** an implementation, and a test's length. A verdict moves
+  only where `wait_before_close` exceeds the lease and the owner fails
+  within the longer watch. A watch that is too short reads the owner as
+  present throughout, and the window as complete.
+
+### F-321 · hard to read · observer §8.2, "they" and "it" in the scope's exclusions
+
+> "A tool that offers a wildcard scope does one of two things, in every
+> medium it writes:
+> - it names, beside the scope, the verbatim kinds it watches;
+> - or it states that they are excluded.
+>
+> A report carries it in a field. A stream of rows with no place for a
+> field (NDJSON) carries it on the tool's standard error."
+
+- **Hard:** two pronouns, each with the wrong antecedent nearest.
+  - "They" has one antecedent, "the verbatim kinds it watches", and a
+    tool cannot both watch them and state that they are excluded. It means
+    the verbatim kinds of the list above, those the scope never reaches.
+  - "Carries it" has two: the names of the first item, or the statement
+    of the second. F-310's rewrite said "the statement"; 0.5 kept "it".
+- **Took:** a tool names the verbatim kinds it watches, or states that
+  the verbatim kinds are excluded. A report carries whichever it does in a
+  field, and NDJSON carries it on standard error.
+- **Rewrite:**
+  - "it names, beside the scope, the verbatim kinds it watches;
+  - or it states that the verbatim kinds are excluded.
+
+  A report carries the names or the statement in a field. A stream of
+  rows with no place for a field (NDJSON) carries them on the tool's
+  standard error."
+- **Changes:** wording only. Both of zk2py's tools and `zenctl echo` do
+  this (`observer_scenarios`, grammar.md §1 step 5).
+
+### F-322 · hard to read · core 0.61 §4.2, "Observing S1": "It checks the check"
+
+> "A tester therefore runs the owner as a client of a router with
+> timestamping enabled, which keeps the stamp a put carries unless it is
+> future-dated (§4.1). It checks the check against a control: a put
+> without a timestamp, from a session whose HLC is not enabled (§4.1),
+> through the same router, arrives with the router's zid."
+
+- **Hard:** a pronoun with several antecedents. 0.61 split one sentence
+  here, so "It" now begins a sentence. The nouns before it are "the
+  owner", "a router" and "it is future-dated" (the stamp). The tester,
+  two clauses back, is meant.
+- **Took:** the tester checks the check against the control.
+- **Rewrite:** "The tester checks the check against a control: …".
+- **Changes:** wording only. It describes a tester's method, with no
+  keyword. zk2py runs it (`state_scenarios`, state.md §1).
+
+### F-323 · hard to read · core §8.5, "For a state GET that is the owner's state queryables"
+
+> "For a state GET that is the owner's state queryables over `state/**`
+> and `@state/**` (S2); for a call, the operation's queryable on its
+> concrete key or over its template (O1), `@op/set/*` for a call of
+> `set/duty`; for an archive, its `@state` forms (§4.4)."
+
+- **Hard:**
+  - A garden path. "A state GET that is the owner's state queryables"
+    reads as a relative clause, a GET that is queryables. The "that" is a
+    demonstrative for the MUST's "every queryable its side may query", two
+    sentences back.
+  - The verb is left out after the first item.
+- **Took:** the queryables the grant covers are, for a state GET, the
+  owner's state queryables over `state/**` and `@state/**`; for a call,
+  the operation's queryable; for an archive, its `@state` forms.
+- **Rewrite:** "The queryables the grant covers are:
+  - for a state GET, the owner's state queryables over `state/**` and
+    `@state/**` (S2);
+  - for a call, the operation's queryable on its concrete key or over its
+    template (O1): `@op/set/*` for a call of `set/duty`;
+  - for an archive, its `@state` forms (§4.4)."
+- **Changes:** wording only. zk2py's generator emits no face declarations
+  (README, "What it does not cover").
+
+### observer.md 0.5 in zk2py
+
+- **F-295 in zk2py's tools.** `judgement.cell` already kept the reason
+  (round 84). One tool did not. `freshness.read_service`, zk2py's tool for
+  `freshness.v1` §5 (scenarios §6), gave each member's verdict token
+  alone, so a deleted member read a bare `not_asked` in its report field.
+  Each member is now `{"verdict", "reason"}` (`freshness.member_fields`).
+  The desired, telemetry, timing and arbitration readers keep their
+  reasons already, and no zk2py tool renders a table.
+- **F-320, reading A** (`budget.watch_after_s`). A window's watch after its
+  end is the longer of the lease and `wait_before_close`, plus the reply
+  timeout. A caller's own `lease_s` in `Window.reading` still stands in
+  for both.
+- **F-298** is the reading `live.py` cites now, in 0.5's words.
+- **`readings`: 653, up from 645.** Eight cases:
+  - the rule cites §1's three NotAsked-spelled fixtures;
+  - their 15 NotAsked answers that spell not this profile's (6, 1 and 8);
+  - no cell of them is a bare not asked, and each says not this profile's
+    or names its reason;
+  - each field keeps `not_asked` with its reasons;
+  - each note names both;
+  - the freshness tool's member field keeps each reason;
+  - a deleted member's cell is not this profile's;
+  - the watch after a window.
+- **`just py-conformance`: 3610 of 3610.**
+
+### Live
+
+Every run used in-process zenoh-python 1.10.1 routers, each listener on
+a free loopback port, under `taskset -c 0-1`. "zenctl" is the reference
+tool, and "Rust" the reference's owner example.
+
+`python -m zk2py.observer_scenarios`, whole: **48 passed**, with no XFAIL
+and no failure, as in round 84.
+
+| Step | Owner | Tool | Checks | Result |
+|---|---|---|---|---|
+| grammar.md §1 steps 1–4 | zk2py; Rust | zk2py's consumer | 4; 4 | the guard holds |
+| grammar.md §1 step 5 | zk2py; Rust | zk2py's echo tool, JSON and NDJSON, and its cut stream | 5; 5 | three samples; five kinds excluded, in its `scope` and on stderr; a closed stdout exits 2 |
+| | zk2py; Rust | `zenctl echo`, table and ndjson | 5; 5 | the samples; "echoing zk2/g/** — @stream, @state, @op, @zk, @adv excluded: …" on stderr; every ndjson line a row |
+| | zk2py; Rust | `zenctl timing zk2/g/**`, zk2py's timing tool | 4; 4 | `stream/cmd` alone, the five excluded, `@stream/frame` unreached; the tools agree |
+| operations.md §5 steps 1–2 | zk2py (frozen, under `deny` grants) | zk2py's tool; `zenctl check conform --i-know` | 5; 2 | told, the O3 finding; not told, unobservable |
+| operations.md §8 step 6 | zk2py (token 1 s late) | zk2py's tool; `zenctl doctor --check token-missing` | 3; 2 | the shape in the first read alone, no finding; the control, the finding |
+
+`python -m zk2py.presence_scenarios --only 9 --only 10 --owner-bin …
+--zenctl …`, the regression for the rules 0.5 split most (§3.3, §3.5,
+§3.7). No check failed:
+
+| Owner, reader | §9 | §10 | Not run |
+|---|---|---|---|
+| zk2py, zk2py | 9 | 46 | |
+| Rust, zk2py | 9 | 40 | §10 step 7 (the owner example takes no namespace) |
+| zk2py, zenctl | – | 9 | §9; §10 step 9 (not observable from zenctl's output) |
+| Rust, zenctl | – | 8 | §9; §10 steps 7, 9 |
+
+The regression for what round 85 changed in zk2py:
+- `python -m zk2py.freshness_scenarios`, whole: **21 of 21**. §6's tool
+  now gives each member's reason beside its token.
+- `python -m zk2py.budget_scenarios --only 1b`: **2 of 2**. The watch
+  after each window is now 6 s: a 1 s lease, zenoh's 5 s
+  `wait_before_close`, and a 1 s reply timeout.
+- `python -m zk2py.live_interop --only freshness --only budget --only
+  tool-rules`, against the owner and consume examples and zenctl:
+  - **46 of 46** twice;
+  - **45 of 46** once, on the first run: "the owner example's windows"
+    read `lab/rw`'s owner absent (`owner_absent`) at its window's
+    reading. That window passes its own 10 s lease, a path round 85 did
+    not change.
+  - `--only budget` alone then passed 16 of 16, and the combined run
+    46 of 46. The failure was not reproduced, and is not a finding.
+
+### Counts at observer.md 0.5 and core 0.61
+
+323 entries.
+- **Open: F-315 to F-323,** nine, all of the new class. None is a blocker.
+  - **Hard to read, eight:** F-315 to F-319 and F-321 to F-323. Each has
+    a rewrite that keeps its keyword, condition, scope and evidence.
+    Wording only.
+  - **Ambiguous, one: F-320.** What a `wait_before_close` longer than the
+    lease does to the watch after a window. It is the one that could move
+    a verdict, and only under that configuration. zk2py reads A.
+  - Five of them come from #935's second pass: a sentence it added
+    (F-315) or rewrote (F-316, F-321), a split (F-322), or an antecedent
+    a split moved away (F-320). The other four were there before it.
+- **Resolved: F-295 to F-314,** F-298 as reading B, now unambiguous.
+- **#935's second pass changed no rule** but F-295's gained wording,
+  which the changelog names. No keyword, condition or scope moved.
