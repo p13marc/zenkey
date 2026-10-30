@@ -3,6 +3,48 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.63 — 2026-10-30: editorial: Appendix B says what was not measured for observer §5.2's watch, no rule changed (#935)
+
+zk2py round 86 (PR #959) read 0.62 and `observer.md` 0.6 cold. It found
+that 0.62 changed no rule, and filed F-324 to F-335. F-324 is a gap in
+evidence. Observer §5.2's watch after a window allows for a withdrawal
+up to `wait_before_close` late, and no measurement shows one later than
+one lease. This version answers the core's half of it. `observer.md`
+moves to text 0.7 beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)),
+written against this version, and answers the rest. This is #935's
+fourth part (epic #921 Track B), beside the texts of `alarms.v1`,
+`telemetry.v1` and `desired.v1`.
+
+**Added to Appendix B: what was not measured** (F-324).
+- **The line.** Under "What a path drops, and what a reader sees", after
+  the owner's push that waited `wait_before_close`: "Not measured: a
+  withdrawal later than one lease, under a `wait_before_close` longer
+  than the lease." Every run there had a `wait_before_close` shorter
+  than its lease, as `budget.md` §1's at zenoh's 10 s lease. Or its link
+  closed or went silent, as `budget.md` §2's at a 1 s lease.
+- **Why observer §5.2 keeps the term.** A push that cannot queue within
+  `wait_before_close` closes its transport, and the runs above saw the
+  owner's own push do so. So a path that stays up while its queue is
+  full can tell a withdrawal that late, which the watch allows for. A
+  longer watch can only read a window incomplete, never complete. The
+  appendix shows nothing against that reasoning, and nothing measures
+  its later case.
+- **Not changed.** No rule, and no fixture or scenario.
+
+**How "no rule changed" was checked**, as for 0.62. Every sentence
+holding MUST, MUST NOT, SHOULD, SHOULD NOT, MAY or RECOMMENDED was
+extracted before and after, keyed by section, and the two sets diffed.
+Both hold 152, and all 152 are unchanged. The added item holds no
+keyword.
+
+**The figures.** This text's mean went from 16.48 words to 16.47, with
+no sentence over 50 words and no tag. `spec/.prose-baseline.json` is
+lowered to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, and this changelog's earlier entries.
+
 ## 0.62 — 2026-10-30: editorial: round 85's F-322 and F-323, no rule changed (#935)
 
 zk2py round 85 (PR #957) read 0.61 and `observer.md` 0.5 cold. It found

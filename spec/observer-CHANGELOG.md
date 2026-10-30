@@ -13,6 +13,64 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.7 — 2026-10-30: zk2py round 86's F-324 and F-325, no rule changed (#935)
+
+zk2py round 86 (PR #959) read 0.6 and core 0.62 cold. It found that 0.6
+changed no rule but F-320's watch, and filed F-324 to F-335. This text
+answers F-324, a gap in evidence, and F-325, hard to read. Core 0.63
+answers F-324's other half, and the profiles' texts the rest. This is
+#935's fourth part (epic #921 Track B). The text is written against
+core 0.63, since it cites that version's Appendix B line.
+
+**Said plainly: the `wait_before_close` half of the watch** (§5.2;
+F-324, gap).
+- **The gap.** The watch after a window runs for the longer of one
+  lease and the routers' `wait_before_close`, plus the reply timeout. It
+  cites `[Sc: budget.md §2]`. That section runs a 1 s lease beside the
+  default 5 s `wait_before_close`, and measures the withdrawal one lease
+  after a link goes silent, never at `wait_before_close`. The item's
+  reason, "a router that waits it … tells the withdrawal that late",
+  claimed more than any measurement shows. It was hard to read too:
+  "waits it" took a duration as its object, and "that late" named no
+  time.
+- **Now.** The item takes the finding's rewrite. A push that cannot
+  queue within `wait_before_close` closes the transport it pushes on. A
+  path that stays up while its queue is full keeps its lease. So its
+  withdrawal can reach the reader up to `wait_before_close` after the
+  failure, later than a silent link's when `wait_before_close` is longer
+  than the lease.
+- **A sub-item says what it rests on.** The half rests on that behaviour
+  of a push alone, and is not measured. `budget.md` §2 measures a silent
+  link's withdrawal one lease after the failure. No run has shown one
+  later than a lease, as core Appendix B's new "Not measured" line says.
+  The bound is conservative: a longer watch can only read a window
+  incomplete that a shorter one would read complete.
+- **Not changed.** The term stays, and so does the rule's length and its
+  citation. zk2py reads it so, and so does the reference. No scenario
+  step was added: the finding offered one or a statement, and this is
+  the statement.
+
+**Editorial: F-325, §1's NotAsked** (hard to read). "What this bullet
+says of NotAsked" had two referents: the item that holds the sentence,
+or NotAsked's bullet above it. It now reads "What NotAsked's bullet says
+above (nobody put the question, the tool has learned nothing, and it
+renders no answer) does not hold of that spelling", the finding's
+rewrite. "Asking again does not cure it" is a sentence of its own.
+
+**How "no rule changed" was checked**, as for 0.6. The sentences holding
+an RFC 2119 keyword were diffed before and after, keyed by section: 44
+before and after, all unchanged. Every other sentence was diffed too,
+and each rewrite read beside its old text. §5.2's rule, which holds no
+keyword, is word for word the same.
+
+**The figures.** This text's mean went from 18.43 words to 18.31, with
+no sentence over 50 words and no tag. `spec/.prose-baseline.json` is
+lowered to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, which is history.
+
 ## 0.6 — 2026-10-30: zk2py round 85's F-315 to F-321, the watch after a window settled (#935)
 
 zk2py round 85 (PR #957) read 0.5 and core 0.61 cold. It found that 0.5

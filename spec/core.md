@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.62** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.63** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -3247,6 +3247,12 @@ Appendix B. These are the ones the rules above cite:
   one withdrawal had another transport close beside the reader's: the
   owner's own push had waited `wait_before_close` too, and its session
   closed its transport to its router.
+- **Not measured: a withdrawal later than one lease, under a
+  `wait_before_close` longer than the lease.** Every run above had a
+  `wait_before_close` shorter than its lease, or a link that closed or
+  went silent. Observer §5.2's watch after a window allows for such a
+  withdrawal all the same. It reasons from the push above, which waits
+  `wait_before_close` before its transport closes.
 - A session sees its own transports open and close through zenoh's
   transport events (`Session::info().transport_events_listener()`,
   unstable). A close is reported once the session's receive task has
