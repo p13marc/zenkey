@@ -292,6 +292,17 @@ impl Recorder {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
+
+    /// Waits until a delivery on `key` since `mark` holds `f`. The report
+    /// and Run are two writers, so a test that saw the report converge waits
+    /// for Run's put rather than read it at once.
+    async fn until_on(&self, key: &str, since: usize, what: &str, f: impl Fn(&Rec) -> bool) {
+        let deadline = tokio::time::Instant::now() + SETTLE;
+        while !self.on(key, since).iter().any(&f) {
+            assert!(tokio::time::Instant::now() < deadline, "never: {what}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
 }
 
 // --- the author and the target ---------------------------------------------------
@@ -832,12 +843,10 @@ async fn s5_a_restart_acts_again() {
     w.drive.release();
     s.until("converged on v1 again", |r| converged_on(r, &s1, 1))
         .await;
-    let runs = s.on(RUN, mark);
-    assert!(
-        runs.iter()
-            .any(|r| r.value() == v(1) && r.stamp.unwrap().get_id().to_string() == zid),
-        "v1 put on Run by the new instance"
-    );
+    s.until_on(RUN, mark, "v1 put on Run by the new instance", |r| {
+        r.value() == v(1) && r.stamp.unwrap().get_id().to_string() == zid
+    })
+    .await;
     assert_eq!(w.target.acts(), 1, "it acted on v1 again");
     w.svc.close().await.unwrap();
     a.svc.close().await.unwrap();
@@ -1035,7 +1044,8 @@ async fn s7_last_known_from_an_archive_the_author_absent() {
     assert_eq!(seed.answered, 0, "the GET drew no reply");
     assert_eq!(seed.author, desired::AuthorSeen::Absent);
     assert_eq!(seed.archive, Some(true));
-    assert!(s.on(RUN, mark).iter().any(|r| r.value() == v(1)));
+    s.until_on(RUN, mark, "v1 put on Run", |r| r.value() == v(1))
+        .await;
     let acts = w.target.acts();
     assert_eq!(acts, 1);
 
