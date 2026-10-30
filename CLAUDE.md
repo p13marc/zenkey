@@ -124,8 +124,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   reading. `model::alarms`' `AlarmBook` is session-free: each key merged by
   stamp and read through the model's `Track` and strict `decode`; each
   owner's seed and window, restarted at the first complete GET after a
-  loss or a gap in presence and counted to a lease and the timeout before
-  now; the latest GET's answered keys and each key's last arrival, so a
+  loss or a gap in presence and counted to the watch after a window before
+  now (the longer of a lease and `wait_before_close`, and the timeout:
+  `BookSpec::tail`, observer text 0.6's F-320); the latest GET's answered keys and each key's last arrival, so a
   key that GET left out reaches the judge as `left_out` and loses its
   sample once its owner is established, a reply dated by its GET's ask
   (text 0.5, F-136), and a receive path that could not be watched is a
@@ -784,8 +785,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   establishes "lossless" rather than assuming it: the reader lost nothing
   and the resource is `reliable` with `block` (`budget::lossless`), the
   owner held its token until a lease after the window (`--lease`, zenoh's
-  10 s by default), and the window counts from its declaration plus the
-  reply timeout; the run's subscription detects no misses. Core 0.27
+  10 s by default), watched past it for the longer of `--lease` and
+  `--wait-before-close`, plus the reply timeout
+  (`zenkey_model::budget::presence_tail`, `ConformSpec::presence_tail`;
+  observer text 0.6's F-320, which made `wait_before_close` lengthen it),
+  and the window counts from its declaration plus the reply timeout; the run's subscription detects no misses. Core 0.27
   (#753) adds the reader's own stall: `bus::stall` watches the run's
   session's transport events and a ticker on a thread of its own over the
   window and the watch after it, and a closed transport or a gap past
@@ -1526,7 +1530,17 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   over 50 words in the two texts, so their baseline holds none, and
   changed no rule but one wording: observer §1's not this profile's,
   spelled as NotAsked, keeps its reason in every medium, never a bare
-  "not asked" in a cell (F-295).
+  "not asked" in a cell (F-295). #935 part 3 did the same for the
+  profiles a user meets first and two more: `freshness.v1` 0.5,
+  `health.v1` 0.5, `hostid.v1` 0.8, `config.v1` 0.6 and `link.v1` 0.9,
+  each `v1.md` and `scenarios.md` with no tag and no sentence over 50
+  words, no rule changed (a measurement stays beside its rule, as a
+  sentence of its own, since none of them has an appendix of
+  measurements). With it, core 0.62 and observer text 0.6 answer zk2py
+  round 85's F-315 to F-323: eight rewrites, and F-320's watch after a
+  window, the longer of one lease and the routers' `wait_before_close`,
+  plus the reply timeout (observer §5.2), which `alarms.v1` §2.15 now
+  cites, keeping its text 0.8.
   `observer.md` holds the reader's discipline core 0.58 moved out, word
   for word, no rule changed (§8.1's "Reading presence" its §3, §2.7's
   readings and conclusions its §5, §4.2's seed, admin-space and S1 checks
