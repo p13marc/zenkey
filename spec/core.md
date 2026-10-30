@@ -1580,11 +1580,11 @@ Liveliness tokens carry no payload; everything is in the key.
   - a liveliness GET that ended at its timeout, and **A read that runs to
     its session's interests timeout is not complete**: observer §3.3;
   - **A refused read is complete, and empty**: observer §3.4;
-  - **A read through a session cut off is not complete**, with **What the
-    check reads**, **A read cut off while it runs** and **A profile's
-    premise**: observer §3.5;
-  - **Absence is established only by a complete read**, with **Acting on a
-    withdrawal**: observer §3.6;
+  - **A read through a session cut off is not complete**, with
+    **What the check reads**, **A read cut off while it runs** and
+    **A profile's premise**: observer §3.5;
+  - **Absence is established only by a complete read**, with
+    **Acting on a withdrawal**: observer §3.6;
   - **The read that establishes absence goes on a session with no
     liveliness subscriber**, the watch session and its round trip:
     observer §3.7;
@@ -3260,8 +3260,8 @@ Appendix B. These are the ones the rules above cite:
   40 closes in eight runs, and held no link when each was heard; its first
   close, before it had been told the tokens, told nothing. zk2py measured
   0.15–0.5 ms on zenoh-python 1.10.1.
-- **An open is told before the subscribers' interests are declared
-  again.** A transport that opens is handed to the session's handlers
+- **An open is told before the subscribers' interests are declared again.**
+  A transport that opens is handed to the session's handlers
   first, the transport events listener's among them, and only then to the
   router, whose `new_transport_unicast` makes the face and re-propagates
   the subscribers' interests (`net/runtime/mod.rs`, `new_unicast`;
