@@ -2340,6 +2340,17 @@ def run_python_freshness(report: Report, exe: Path, consume: Path) -> None:
                          verdicts == {"state/status": fr.FRESH, "state/intent": fr.FRESH,
                                       "state/note": fr.NOT_ASKED, "stream/level": fr.UNOBSERVABLE},
                          str({k: (v.pair(), m) for k, (v, m) in got_r.items()}))
+            # observer §1 (text 0.5, F-295): each member field is its verdict
+            # and its reason, read through service_members, which refuses any
+            # other shape
+            try:
+                members: Any = {k: sorted(m.values()) for k, m in fr.service_members(got_r).items()}
+            except TypeError as e:
+                members = f"refused: {e}"
+            report.check(run, "zk2py's tool's member fields are each a verdict and its reason: status, intent and "
+                              "note one member each, judged as its resource; level none",
+                         members == {"state/status": [fr.FRESH], "state/intent": [fr.FRESH],
+                                     "state/note": [fr.NOT_ASKED], "stream/level": []}, str(members))
 
         # -- a stopped re-put goes stale ----------------------------------
         run = "freshness.v1 0.1: the owner example's re-puts stopped"

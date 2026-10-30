@@ -18188,8 +18188,8 @@ alone, so their claim holds.
   reasons already, and no zk2py tool renders a table.
 - **F-320, reading A** (`budget.watch_after_s`). A window's watch after its
   end is the longer of the lease and `wait_before_close`, plus the reply
-  timeout. A caller's own `lease_s` in `Window.reading` still stands in
-  for both.
+  timeout. A caller's own `lease_s` in `Window.reading` is read the same
+  way, since review-bot on PR #957 (below).
 - **F-298** is the reading `live.py` cites now, in 0.5's words.
 - **`readings`: 653, up from 645.** Eight cases:
   - the rule cites §1's three NotAsked-spelled fixtures;
@@ -18247,6 +18247,49 @@ The regression for what round 85 changed in zk2py:
     not change.
   - `--only budget` alone then passed 16 of 16, and the combined run
     46 of 46. The failure was not reproduced, and is not a finding.
+
+### After review-bot on PR #957
+
+Nothing was blocking. The bot's should-fix and nits:
+- **The member field's callers** (`freshness.py`). `read_service`'s
+  member value changed from a token string to `{"verdict", "reason"}`.
+  Its callers are `freshness_scenarios` §6 and `live_interop`'s
+  freshness run, and no report writer or other tool calls it. Both
+  printed the member map without reading it. Each now reads it through
+  `freshness.service_members`, which checks every field through
+  `member_verdicts`, and adds a check of its own. Each resource's one
+  member is judged as its resource is, and the interop run's `level`
+  has none.
+  - The boundary is typed both ways. `member_fields` refuses a member
+    that is not a `Verdict`. `member_verdicts` refuses anything but
+    exactly `verdict` and `reason`, both strings, the verdict one of §5's
+    tokens: round 84's bare token, a field without its reason, one with
+    more, and a verdict that is not §5's are each a `TypeError`.
+- **A caller's lease** (`budget.py`). `Window.reading(lease_s=…)` ignored
+  `wait_before_close`, so reading A did not hold on that path. The
+  caller's lease now goes through `watch_after_s` too. No caller's watch
+  is shorter than `wait_before_close` plus the reply timeout:
+  `live_interop`'s `lease_s=0` readings now watch 6 s.
+- **The pinned 15** (`conformance.py`) has a comment saying it is a
+  deliberate tripwire, as round 84's counts are.
+- **`readings`: 657** (four more):
+  - `service_members` reading `read_service`'s shape;
+  - the four shapes `member_verdicts` refuses, and a bare token through
+    `service_members`;
+  - `member_fields` refusing a token string;
+  - a caller's lease of 0 s or 1 s watching 6 s.
+
+  **`just py-conformance`: 3614 of 3614.**
+- **Live, again:**
+  - `freshness_scenarios`: **23 of 23**, with §6's two member checks.
+  - `live_interop --only freshness --only budget`: **32 of 32**, and
+    `--only freshness` alone 16 of 16. Two other runs of that pair failed
+    four checks of the freshness run's first owner. Right after its
+    `ready` line, the owner example's descriptor GET did not return
+    exactly one ok reply, so the descriptor, its `meta.zid` and its
+    fingerprint read as none. That GET (`live.get_descriptor`) comes
+    before any line round 85 changed, and it passed in four of six runs
+    today. Neither failing run reached the new check.
 
 ### Counts at observer.md 0.5 and core 0.61
 

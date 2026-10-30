@@ -327,8 +327,39 @@ def member_fields(members: dict[str, Verdict]) -> dict[str, dict[str, str]]:
     never the token alone. Observer §1 (text 0.5, F-295): freshness.v1
     spells not this profile's as not asked with a reason naming the failed
     premise (``kind``, ``deleted``), and "That NotAsked keeps its reason in
-    every medium … never show a bare not asked". A deleted member is one."""
+    every medium … never show a bare not asked". A deleted member is one.
+
+    The boundary is typed both ways: a member that is not a :class:`Verdict`
+    is refused here, and :func:`member_verdicts` refuses a field that is not
+    ``{"verdict", "reason"}``, so a caller still reading round 84's token
+    string fails at once rather than reading a character of it."""
+    for k, v in members.items():
+        if not isinstance(v, Verdict):
+            raise TypeError(f"member {k}: {v!r} is not a freshness Verdict")
     return {k: v.pair() for k, v in members.items()}
+
+
+def member_verdicts(fields: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Each member's verdict token, read from :func:`read_service`'s member
+    field, after checking its shape: a mapping of exactly ``verdict`` and
+    ``reason``, both strings, the verdict one of §5's tokens. Anything else,
+    a bare token string among them, is a :class:`TypeError`."""
+    out: dict[str, str] = {}
+    for k, f in fields.items():
+        if not (isinstance(f, dict) and set(f) == {"verdict", "reason"}
+                and all(isinstance(x, str) for x in f.values())
+                and f["verdict"] in (FRESH, STALE, UNOBSERVABLE, NOT_ASKED)):
+            raise TypeError(f"member {k}: {f!r} is not a member field {{'verdict', 'reason'}} (observer §1, F-295)")
+        out[k] = f["verdict"]
+    return out
+
+
+def service_members(got: dict[str, tuple[Verdict, dict[str, dict[str, str]]]]) -> dict[str, dict[str, str]]:
+    """:func:`read_service`'s members, per resource, as verdict tokens, each
+    member field's shape checked by :func:`member_verdicts` (a
+    :class:`TypeError` otherwise). The callers of :func:`read_service` read
+    its members through this."""
+    return {rid: member_verdicts(m) for rid, (_, m) in got.items()}
 
 
 # -- the runtime half: a GET reader's clock (§2.6) ---------------------------------

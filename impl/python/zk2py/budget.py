@@ -436,15 +436,15 @@ class Window:
         """The window's reading, once its owner, and its own receive path,
         have been watched for one lease after its end, and the reply timeout
         more (:func:`watch_after_s`: the longer of the lease and
-        ``wait_before_close``, text 0.5). ``lease_s``, when given, is the
-        caller's own watch, in place of both. Ends the window now if
-        :meth:`end` was not called."""
+        ``wait_before_close``, text 0.5, F-320's reading A). ``lease_s``,
+        when given, is the caller's lease in place of the window's own, and
+        is read the same way, so no caller's watch is shorter than
+        ``wait_before_close`` and the reply timeout (review-bot on PR #957).
+        Ends the window now if :meth:`end` was not called."""
         from . import live
 
-        if lease_s is None:
-            watch_s = watch_after_s(self.lease_s, self.wait_before_close_s, self.reply_timeout_ns / NS)
-        else:
-            watch_s = lease_s + self.reply_timeout_ns / NS
+        watch_s = watch_after_s(self.lease_s if lease_s is None else lease_s, self.wait_before_close_s,
+                                self.reply_timeout_ns / NS)
         if self.end_ns is None:
             self.end()
         assert self.end_ns is not None
