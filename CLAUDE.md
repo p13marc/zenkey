@@ -1521,7 +1521,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `docs/guide/`) and its inline history tags only go down. `--update`
   lowers the baseline and records a new file; a rise is a hand edit of
   the baseline, which a reviewer sees. `--list <file>` prints a text's
-  long sentences and tags with their lines.
+  long sentences and tags with their lines. Core 0.61 and observer text
+  0.5 (#935 part 2, zk2py round 84's F-295 to F-314) split every sentence
+  over 50 words in the two texts, so their baseline holds none, and
+  changed no rule but one wording: observer §1's not this profile's,
+  spelled as NotAsked, keeps its reason in every medium, never a bare
+  "not asked" in a cell (F-295).
   `observer.md` holds the reader's discipline core 0.58 moved out, word
   for word, no rule changed (§8.1's "Reading presence" its §3, §2.7's
   readings and conclusions its §5, §4.2's seed, admin-space and S1 checks

@@ -2,23 +2,23 @@
 
 | | |
 |---|---|
-| **Text version** | 0.4 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.5 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.60 ([`core.md`](core.md)) |
+| **Written against** | core 0.61 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
-conclude from what it read: how it reads presence, state and the admin
-space, when a read is complete, what a window over a stream or an event
-shows, and what a tool tells a person. [`core.md`](core.md) states what a
-participant puts on the wire and how an owner serves; this text states
-what is read off it. It is normative.
+conclude from what it read. It states how a reader reads presence, state
+and the admin space, when a read is complete, what a window over a stream
+or an event shows, and what a tool tells a person. [`core.md`](core.md)
+states what a participant puts on the wire and how an owner serves; this
+text states what is read off it. It is normative.
 
 Most of it is the reader's discipline that the core held, moved here
-with no rule changed: core §8.1's "Reading presence", core
-§2.7's readings and conclusions, core §4.2's seed and admin-space checks,
-and the tool rules that sat beside owners' rules elsewhere (Appendix A
-lists each block and its old home). The rest is
+with no rule changed. That is core §8.1's "Reading presence", core §2.7's
+readings and conclusions, core §4.2's seed and admin-space checks, and
+the tool rules that sat beside owners' rules elsewhere. Appendix A lists
+each block and its old home. The rest is
 [`docs/zk2/tooling-guide.md`](../docs/zk2/tooling-guide.md)'s judgement
 shape, its three states and those of its observer obligations that cite
 evidence, promoted to normative text (§1, §2, §8). The guide keeps what
@@ -30,13 +30,16 @@ themselves, and the obligations that stayed for want of evidence.
 ## 0. Conventions
 
 **Who it binds.** Every rule names the role it binds, as the core's do
-(core §0). This text is normative for the **tool** role, and for any
-other participant where it reads presence, state or the admin space and
-concludes from what it read: a consumer waiting on presence (core R5) or
-seeding a state, a caller attributing silence (core O5), an owner that
-follows another service's presence, as a `desired.v1` target or a
-`redundancy.v1` candidate does. A **reader** is any of them, reading.
-Each rule moved here binds exactly whom it bound in the core.
+(core §0). This text is normative for the **tool** role. It is
+normative too for any other participant where it reads presence, state
+or the admin space and concludes from what it read:
+- a consumer waiting on presence (core R5) or seeding a state;
+- a caller attributing silence (core O5);
+- an owner that follows another service's presence, as a `desired.v1`
+  target or a `redundancy.v1` candidate does.
+
+A **reader** is any of them, reading. Each rule moved here binds exactly
+whom it bound in the core.
 
 **Keywords, roles and evidence** are the core's (core §0). `[F: path]` is
 a fixture under [`conformance/`](conformance/), and `[Sc: file §n]` a
@@ -84,7 +87,9 @@ Unestablished(NotAsked) | Unestablished(Unobservable { reason })
   Both poles are answers, and each claims evidence.
 - **NotAsked:** nobody put the question. No contract was retrieved, no
   window ran, the flag was not passed. The tool has learned nothing, and
-  renders nothing, never the negative answer.
+  renders nothing, never the negative answer. A profile can also spell
+  not this profile's as NotAsked (below): there the question was put, and
+  its premise does not hold.
 - **Unobservable:** the question was put, and the observation could not be
   had. The session did not open, the bundle did not verify, the bytes did
   not decode. The `reason` is part of the verdict: it names what stood in
@@ -98,12 +103,12 @@ Unestablished(NotAsked) | Unestablished(Unobservable { reason })
 - **Not asked is not answered no.** A tool distinguishes a question it has
   not put from one answered negatively, in each of the three media.
   `[F: budget/population.json]` `[Sc: profiles/desired/scenarios.md §9]`
-- **Not this profile's.** A profile's question can
-  carry a premise of its own, and where the premise does not hold the
-  profile answers **not this profile's** (its §5,
-  [`profiles/README.md`](profiles/README.md)): a role that carries none of
-  its policy (`arbitration.v1`), an interface it does not govern
-  (`redundancy.v1`), a resource of a kind it does not read (`timing.v1`).
+- **Not this profile's.** A profile's question can carry a premise of its
+  own. Where the premise does not hold, the profile answers **not this
+  profile's** (its §5, [`profiles/README.md`](profiles/README.md)). The
+  subject is then, for example, a role that carries none of its policy
+  (`arbitration.v1`), an interface it does not govern (`redundancy.v1`) or
+  a resource of a kind it does not read (`timing.v1`).
   That answer is Unestablished, and never Established(no), since the
   subject is not one the question is about. A profile spells it one of
   two ways, and its fixtures say which:
@@ -113,6 +118,11 @@ Unestablished(NotAsked) | Unestablished(Unobservable { reason })
   - as NotAsked with a reason that names the failed premise:
     `freshness.v1` (`kind`, `deleted`), `telemetry.v1` (a reason
     `not_this_profiles`) and `desired.v1` (`not_a_target`).
+    **That NotAsked keeps its reason in every medium.** A table cell, a
+    report field and a note each say not this profile's, or name the
+    reason, and never show a bare not asked. A bare not asked reads as
+    cured by asking, and here asking again changes nothing.
+    `[F: profiles/freshness/conformance/judgements.json, profiles/telemetry/conformance/samples.json, profiles/desired/conformance/conclusions.json]`
 
   Either way it is never folded into Unobservable, nor into no.
   `[F: profiles/timing/conformance/conclusions.json, profiles/arbitration/conformance/conclusions.json, profiles/redundancy/conformance/conclusions.json, profiles/freshness/conformance/judgements.json, profiles/telemetry/conformance/samples.json, profiles/desired/conformance/conclusions.json]`
@@ -207,28 +217,37 @@ re-minting and the caller's timeouts stay in core §8.1.
   `routing/interests/timeout` (10 s by default), with the final reply
   alone and no error reply, whatever the GET's own timeout (core
   Appendix B).
-  - A reader MUST read a read whose time reached its session's
-    interests timeout as possibly incomplete, as it reads one that
-    received an error reply, and a round trip (below) that ended there
-    as not standing: it was asked, so it was made, and what it
-    establishes is nothing.
+  - A reader MUST read as possibly incomplete a read whose time reached
+    its session's interests timeout, as it reads a read that received an
+    error reply.
+  - A reader MUST read as not standing a round trip (§3.7) that ended at
+    that timeout. The round trip was asked, so it was made, but it
+    establishes nothing.
   - A reader whose reads may wait longer SHOULD run its session with an
     interests timeout above the longest it waits for one: its long
-    reads can then be complete (core Appendix B). A reader that asks each
-    GET with its own timeout at or above the interests timeout (below)
-    bounds that wait apart, and meets this by it.
+    reads can then be complete (core Appendix B).
+    - A reader that asks each GET with its own timeout at or above the
+      interests timeout (§3.7) bounds its own wait for the read apart
+      from that timeout.
+    - This rule measures that bound, never the GET's own timeout: such a
+      reader meets it when the longest it waits is below the interests
+      timeout.
+    - For example, a reader whose session's interests timeout is 120 s,
+      which asks each GET with 121 s and waits at most 30 s for a read,
+      meets it. Its 30 s wait is what is measured, never its GETs' 121 s.
   - **Its time** is counted from before the GET is asked to its final
     reply, so it is never less than the time the runtime counted. The
     read itself carries no sign of the interests timeout, so the rule
     needs the session's value: a reader reads it from the session's
     configuration (core Appendix B).
-  - A reader that cannot read its session's interests timeout SHOULD
-    open the session itself with a value it sets, and so knows; a
-    session it is handed and cannot read, it takes at zenoh's default,
-    10 s. That holds only of a session whose configuration states none:
-    a lower value ends a read sooner, with nothing in the read to show
-    it, so such a reader says that its reads' completeness rests on the
-    default.
+  - A reader that cannot read its session's interests timeout SHOULD be
+    the one that opens that session, with an interests timeout it sets,
+    so that it knows the value.
+  - A reader handed a session whose interests timeout it cannot read
+    takes that timeout as zenoh's default, 10 s. The default is right
+    only when the session's configuration states no interests timeout. A
+    lower value ends a read sooner, and nothing in the read shows it. So
+    such a reader says that its reads' completeness rests on the default.
 
   `[Sc: presence.md §10]`
 
@@ -259,11 +278,14 @@ re-minting and the caller's timeouts stay in core §8.1.
   - Such a read is **not complete, whatever its replies say.** A reader
     MUST NOT conclude absence from it, and MUST NOT take it as healing a
     loss (§5.2).
-  - A reader SHOULD NOT make it: before a read, and again when it ends,
-    it checks that its session holds a transport to another node, and
-    reports a read not made, with that reason, as it reports one
-    possibly incomplete. What a read not made would have established is
-    unobservable.
+  - A reader SHOULD NOT make such a read. Before each read, and again
+    when it ends, the reader checks that its session holds a transport to
+    another node.
+    - A read the first check stops is not made. The reader reports it so,
+      with that reason, as it reports a read possibly incomplete. What it
+      would have established is unobservable.
+    - A read whose second check finds no link was cut off while it ran
+      (below).
   - **What the check reads.** zenoh 1.10.1 closes a transport in
     three steps: it drops the transport's links, then closes its routing
     face, which answers every read in flight, then removes the transport
@@ -280,12 +302,15 @@ re-minting and the caller's timeouts stay in core §8.1.
     says the session was cut off during it: the tokens it returned were
     seen, and what it shows absent establishes nothing. A reader that
     finds no link when a read ends reads it so.
-  - **A profile's premise.** Where a profile names a
-    presence read possibly incomplete or refused, a read not made is read
-    as that premise reads it: unobservable. The profile's reason stands,
-    and a tool reports the read's own reason beside it (not made: cut
-    off, or beside a liveliness subscriber). The kinds stay apart in the
-    tool's report; the profile's answer does not change.
+  - **A profile's premise.** Some profiles answer unobservable where a
+    presence read was possibly incomplete or refused. A read not made
+    gives the same answer: unobservable, with the profile's reason.
+    - Beside the profile's reason, a tool reports the read's own: not
+      made, because its session was cut off or because the read would be
+      beside a liveliness subscriber.
+    - The tool's report keeps a read not made apart from a read possibly
+      incomplete and from one refused. The profile's answer does not
+      change.
 
   `[Sc: presence.md §7]`
 
@@ -301,12 +326,16 @@ re-minting and the caller's timeouts stay in core §8.1.
     token at once, and their owners may never have left (core Appendix B). A
     reader MUST NOT conclude absence from a withdrawal alone.
   - A reader that follows presence live SHOULD read again soon after a
-    withdrawal that leaves something with nothing held — an address its
-    instance tokens, an interface its tokens, a member its epochs — one
-    read for a burst of them, and report what that read establishes:
-    absent when it is complete and shows none, present when it shows
-    one. Until then what was withdrawn is **unconfirmed**: an address
-    unobservable, never down, and a withdrawn token not yet gone.
+    withdrawal that leaves one of these with nothing held:
+    - an address, with none of its instance tokens;
+    - an interface, with none of its tokens;
+    - a member, with none of its epochs.
+
+    One read serves a burst of such withdrawals. The reader SHOULD report
+    what that read establishes: absent when the read is complete and
+    shows no such token held, present when it shows one. Until then what
+    was withdrawn is **unconfirmed**: an address unobservable, never down,
+    and a withdrawn token not yet gone.
   - A make-before-break re-mint (core §8.1) leaves nothing with nothing
     held, so it owes no read: another instance holds throughout.
   - A read not made (above) leaves the withdrawal unconfirmed until the
@@ -317,10 +346,10 @@ re-minting and the caller's timeouts stay in core §8.1.
     absent from it, and reads again as above. What the read then shows
     held undoes the act. [`arbitration.v1`](profiles/arbitration/v1.md)
     so stops following a provider at its withdrawal, ineligible and never
-    absent, and re-admits it only when a token is heard declared or a
-    read shows one held (its §2.7), while a move of its watch session
-    holds back what the move makes it hear until its round trip stands
-    (its §2.8). `[Sc: profiles/arbitration/scenarios.md §3, §4, §7]`
+    absent. It re-admits the provider only when a token is heard declared
+    or a read shows one held (its §2.7). A move of its watch session holds
+    back what the move makes it hear until its round trip stands (its
+    §2.8). `[Sc: profiles/arbitration/scenarios.md §3, §4, §7]`
 
   `[Sc: presence.md §8]`
 
@@ -334,10 +363,11 @@ re-minting and the caller's timeouts stay in core §8.1.
   happens with history or without, and by zenoh's code it lasts after the
   subscriber is undeclared (core Appendix B).
   - A reader SHOULD make every liveliness read it may conclude absence
-    from — a seed, a re-read, a tool's presence read — on a session that
-    has never held a liveliness subscriber of any kind (one undeclared
-    leaves its session exposed), and hold its liveliness
-    subscribers on another session of its own: a **watch session**.
+    from (a seed, a re-read, a tool's presence read) on a session that
+    has never held a liveliness subscriber of any kind. One undeclared
+    still leaves its session exposed. The reader SHOULD hold its
+    liveliness subscribers on another session of its own: a **watch
+    session**.
   - zenoh orders one session's messages at its router, never two
     sessions'. A reader that seeds on one session and follows
     withdrawals on its watch session SHOULD make one round trip on the
@@ -365,8 +395,10 @@ re-minting and the caller's timeouts stay in core §8.1.
     after the round trip is still heard going: the router tells its
     withdrawal by its key. `[Sc: presence.md §10]`
   - **In a namespace, a watch session in no namespace, on the wire
-    keys.** In zenoh 1.10.1 a namespaced session does not strip its
-    namespace from that key, and its subscriber without history never
+    keys.** A router tells the withdrawal of a token declared before the
+    subscribers, and withdrawn after the round trip, by the token's key
+    (above). In zenoh 1.10.1 a namespaced session does not strip its
+    namespace from that key. So its subscriber without history never
     hears the withdrawal (core Appendix B). A history there brings the
     population back into every round trip, long enough to reach the
     scenarios' 5 s wait and, in a debug build, to pass zenoh's 10 s
@@ -412,21 +444,22 @@ re-minting and the caller's timeouts stay in core §8.1.
       1.10.1 a watch session's
       subscribers are told the withdrawals of a close before the
       session's transport events listener hears the close, and the
-      session holds no link by the time each is told (core Appendix B). No
-      withdrawal reaches a session with no link but a close's own
-      telling, so a reader that holds back what a move makes it hear
-      SHOULD begin the move at its transport event or at a withdrawal
-      its watch hears while the watch session holds no link, whichever
-      comes first; one that begins it at the event alone applies the
-      close's withdrawals as heard. A subscriber without history that
-      was told no token hears no withdrawal at its first close (above).
+      session holds no link by the time each is told (core Appendix B).
+      A session with no link hears no withdrawal except those its own
+      close tells. So a reader that holds back what a move makes it hear
+      SHOULD begin the move at the first of two instants: its watch
+      session's transport event, or a withdrawal its watch hears while
+      the watch session holds no link. A reader that begins the move at
+      the transport event alone applies the close's withdrawals as heard.
+      A subscriber without history that was told no token hears no
+      withdrawal at its first close (above).
       `[Sc: profiles/arbitration/scenarios.md §7]`
     - **An open is told before the subscribers' interests are declared
-      again.** In zenoh 1.10.1 a session's transport events
-      listener hears a transport open before the session's router face
-      on it declares the subscribers' interests again, so a round trip
-      asked at once at the open can find no face, and is answered at
-      once, complete and empty, before the reopen tells a token
+      again.** In zenoh 1.10.1 a session's transport events listener
+      hears a transport open before the session's router face on it
+      declares the subscribers' interests again. So a round trip asked at
+      once at the open can find no face. It is then answered at once,
+      complete and empty, before the reopen tells a token
       (core Appendix B): it stands and says nothing. A reader SHOULD ask the
       round trip after an open a margin after its event (the reference:
       100 ms), and SHOULD take what its watch heard before the round
@@ -447,29 +480,32 @@ re-minting and the caller's timeouts stay in core §8.1.
         short. Its seed, on a session that has not read the population
         before, is a session's first read, and the one it can time. The
         round trip after a reopen can run longer than the seed did, so a
-        wait sized from a seed keeps a margin (core Appendix B). One whose
-        wait ends first reads possibly incomplete (below), as before, and
-        before its next read takes up the round trip in flight (below),
-        asking another only once that one has ended without standing.
+        wait sized from a seed keeps a margin (core Appendix B).
+      - A reader whose wait ends before the round trip's reply reads
+        what it reads meanwhile as possibly incomplete, as any read made
+        while no round trip stands (below). Before its next read, it takes
+        up the round trip still in flight (below, "One round trip, and
+        one read, at a time"). It asks another round trip only once that
+        one has ended without standing.
       - **One round trip, and one read, at a time.** zenoh
         1.10.1 tells a router nothing of a liveliness GET whose caller
         stops waiting for it, by dropping it, by its timeout or by
         cancelling it, and the router answers it in full (core Appendix B).
         A reader SHOULD NOT ask a round trip while one it asked since
-        its watch session's transport last moved is in flight, nor ask
-        a read while one it asked of the same scope is: the next that
-        needs one takes up the one in flight, whichever wait ended
-        first, its caller's or the reader's own. A reader that asks
-        again instead can ask read after read and fold none (core
+        its watch session's transport last moved is in flight. It SHOULD
+        NOT ask a read while one it asked of the same scope is in flight.
+        The next that needs one takes up the one in flight, whichever
+        wait ended first, its caller's or the reader's own. A reader that
+        asks again instead can ask read after read and fold none (core
         Appendix B).
         - **In flight is at the reader**: from the GET's
-          ask until its final reply reaches the reader. A GET its own
-          timeout ends is over for the reader, which zenoh hands an
-          error reply and the final reply and nothing after them, and
-          cannot be taken up. Its router answers it in full all the
-          same (core Appendix B), and a GET asked on that session meanwhile
-          waits behind it, for what is left of its router's answer
-          (core Appendix B).
+          ask until its final reply reaches the reader. A GET that its
+          own timeout ends is over for the reader: zenoh hands the reader
+          an error reply and the final reply, and nothing after them.
+          Such a GET cannot be taken up. Its router answers it in full all
+          the same (core Appendix B), and a GET asked on that session
+          meanwhile waits behind it, for what is left of its router's
+          answer (core Appendix B).
         - A reader MAY ask each GET with its own timeout at or above
           its session's interests timeout, where zenoh's runtime ends
           it, and bound its own wait apart, so that none ends before the
@@ -482,16 +518,16 @@ re-minting and the caller's timeouts stay in core §8.1.
       with the final reply alone (above), and a round trip is a
       liveliness GET. So a round trip through a watch session that holds
       no link to another node, or held none when it ended, does not
-      stand, whatever its replies say: a reader checks the watch
+      stand, whatever its replies say. A reader checks the watch
       session's links before the round trip and when it ends, as it
-      checks a read's, and asks none through a session cut off. It makes
+      checks a read's. It asks none through a session cut off, and makes
       the round trip when the transport opens again.
     - **A reader whose watch session is cut off follows nothing**: its
-      subscribers hear nothing. It SHOULD NOT make a
-      read it would follow from it, whatever its reading session's
-      links: it reports the read as not made, the reason its watch
-      session's, and what the read would establish is unobservable until
-      the transport opens, a round trip stands and a read after it is
+      subscribers hear nothing. It SHOULD NOT make a read that it would
+      follow from that watch session, whatever its reading session's
+      links. It reports the read as not made, the reason its watch
+      session's. What the read would establish is unobservable until the
+      transport opens, a round trip stands and a read after it is
       complete.
     - **A read made while no round trip stands**, a seed or a re-read, is
       possibly incomplete: an address it shows is up,
@@ -646,9 +682,9 @@ cannot tell under `Latest` which replier answered.
     `config/`.
   - Under `deny`, the admin read admits none of them (core §11.1). A
     router under a generated block refuses such a GET from a tool's
-    credentials, so a tool its user asks reads nothing of them through
-    it, and says the admin space did not answer, never that nothing is
-    declared.
+    credentials. So a tool whose user asks for that read reads none of
+    these records through that router. It says that the admin space did
+    not answer, never that nothing is declared.
 
 ### 4.4 Whose stamp
 
@@ -661,10 +697,10 @@ cannot tell under `Latest` which replier answered.
     that is its own router stamps with that router's id, which is its own
     `meta.zid`.
   - **An owner's stamp is clean** only when the tool counted at least one
-    router's own answer ("Who answered", §4.2) and `meta.zid` is none of
-    the zids it knows to be routers: the routers its session is connected
-    to, the routers whose answers it counted, and every zid such an answer
-    lists as a `router` session.
+    router's own answer ("Who answered", §4.2), and `meta.zid` is none of
+    the zids it knows to be routers. Those are the routers its session is
+    connected to, the routers whose answers it counted, and every zid
+    such an answer lists as a `router` session.
   - **A counted answer, not a connection.** The routers a session is
     connected to are verified routers, and verification starts from them,
     but a connection alone shows nothing about the owner: only a router's
@@ -790,21 +826,23 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
     one a population reading must rule out. A subscription detects misses
     only where the resource declares them (`history.miss_detection_ms`);
     elsewhere it has nothing to detect. `[Sc: budget.md §3]`
-  - **What a deployment provides**, which no tool can see: links that
-    zenoh counts reliable, since a reliable sample crosses a UDP link
-    best-effort when no reliable link is up; and routers in processes of
-    their own, since a process that runs a router beside a subscriber
-    whose callback blocks shares zenoh's receive threads with it, and has
-    lost deliveries with no transport closed (core Appendix B).
+  - **What a deployment provides**, which no tool can see:
+    - links that zenoh counts reliable, since a reliable sample crosses a
+      UDP link best-effort when no reliable link is up;
+    - routers in processes of their own, since a process that runs a
+      router beside a subscriber whose callback blocks shares zenoh's
+      receive threads with it, and has lost deliveries with no transport
+      closed (core Appendix B).
 - **The owner present until one lease after the end.** A link that
   closes withdraws the owner's instance token at the reader at once. One
   that goes silent withdraws it only when its lease runs out, and the
   deliveries put meanwhile are lost (core Appendix B). So a failure in the
-  window's last lease is seen after the window ends. A tool watches the
-  owner's instance tokens for one lease after the window's end, zenoh's
-  default being 10 s, and its reply timeout more for the withdrawal's
-  transit. A deployment that sets a longer lease, or a `wait_before_close`
-  longer than its lease, lengthens it. `[Sc: budget.md §2]`
+  window's last lease is seen after the window ends. After the window's
+  end, a tool watches the owner's instance tokens for one lease plus its
+  reply timeout. The lease is 10 s by default, and the reply timeout
+  allows for the withdrawal's transit. A deployment that sets a longer
+  lease, or a `wait_before_close` longer than its lease, lengthens it.
+  `[Sc: budget.md §2]`
 - **A window counts from its subscription reaching the owner.** A
   sample the owner put before its router knew of the subscription was
   never routed to it, and no reader can see that moment. A tool counts a
@@ -860,11 +898,10 @@ there.
 
 Two instances of one service holding an interface token for the same
 interface, for longer than a grace period, is a **finding**, except
-where replicated serving explains it (below). A tool diagnoses it, and the
-runtime does not fence, but for an interface whose contract uses
-`redundancy.v1`: its holders step down as that profile's §2.9 says,
-which is no fence either, since writes in flight still land
-(core §6).
+where replicated serving explains it (below). A tool diagnoses it. The
+runtime does not fence. For an interface whose contract uses
+`redundancy.v1`, its holders step down as that profile's §2.9 says. That
+is no fence either, since writes in flight still land (core §6).
 
 - **A holder is an incumbent, whatever its mark.** The check
   counts the instances holding the token. One whose descriptor marks
@@ -932,8 +969,8 @@ that reaches an owner's queryable gets a value or an envelope.
     grants (core §11.3). It learns that they let it call from its operator, or
     from the deployment's core §11.1 input when it holds one; a deployment that
     runs no access control lets every principal call.
-  - **Told so,** the tool holds a silence from an owner whose tokens it
-    reads as the finding. **Not told,** the silence is unobservable, and
+  - **Told so,** the tool holds as the finding a silence from an owner
+    whose tokens it reads. **Not told,** the silence is unobservable, and
     the tool names the premise it lacked: a silence is never a verdict on
     its own (O5).
 
@@ -1001,9 +1038,13 @@ what it could not. `[F: keys.json]` `[Sc: state.md §11]`
 - control keys under `@zk`, contract bundles included (`zk2/@zk/contract/…`).
 
 That guard is a gift, and a trap (core §1.3). A tool that offers a
-wildcard scope either names the verbatim kinds it watches beside it, or
-states that they are excluded, in every medium it writes: a field of its report, or, for a stream of rows that has no
-place for one (NDJSON), its standard error. `[Sc: grammar.md §1]`
+wildcard scope does one of two things, in every medium it writes:
+- it names, beside the scope, the verbatim kinds it watches;
+- or it states that they are excluded.
+
+A report carries it in a field. A stream of rows with no place for a
+field (NDJSON) carries it on the tool's standard error.
+`[Sc: grammar.md §1]`
 
 **Everything is three selectors.** Positions 1–5 of a zk2 key have fixed
 arity (core §1.3), so these three reach every data key of every service

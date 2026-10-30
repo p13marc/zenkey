@@ -3,6 +3,66 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.61 — 2026-10-30: editorial: round 84's hard-to-read findings and the long sentences, no rule changed (#935)
+
+zk2py round 84 (PR #955) read 0.60 and `observer.md` 0.4 cold. It found
+that #935's first pass changed no rule, and filed F-295 to F-314, none of
+which changes a verdict either implementation gives. This version is
+#935's second part (epic #921 Track B): it answers the core's findings
+and splits the core's last sentences over 50 words. `observer.md` moves
+to text 0.5 beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)),
+written against this version, and answers the rest.
+
+**Narrowed: two reasons, to what was measured** (F-296).
+- **§2.4, `express`.** "Since it can lose samples and gain no latency"
+  named `express` alone. Spike S9 measured it beside `real_time`. It now
+  reads "since with `real_time` it lost samples and gained no latency".
+  The SHOULD still asks for a measurement.
+- **§12, bundles.** "A constrained owner can send one" made one binding's
+  measurement a claim about every constrained owner. It now reads "A
+  zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on
+  receiving". Appendix B's line under "One binding's facts" says the
+  same. A gateway holder still serves the bundles where a device cannot
+  receive or hold them.
+
+**Editorial: round 84's hard-to-read findings and the long sentences, no
+rule changed.**
+- **F-312, §8.5.** In "where router to router they would cross", "where"
+  read as a place on the link. It is now a sentence of its own: "Router
+  to router, they would cross it."
+- **F-313, §11.1.** "A GET of every record of a router's (a peer's and a
+  client's it never reaches)" is now three sentences. A wider admin read
+  would admit a GET of every one of a router's records. It never reaches
+  a peer's records, nor a client's. It would refuse a GET of `@/*/*`.
+- **F-314, §4.3 and §12.** "(a binding's smallest step: Appendix B)" and
+  "(its size: Appendix B)" read as definitions. They now say what
+  Appendix B gives: zenoh-python's smallest step, and the fragment's size
+  under zenoh-pico's default.
+- **The long sentences.** The eleven over 50 words are split, their words
+  kept: §2.7's and §8.1's "At scale", §4.2's "Observing S1", §5.1's
+  concrete call, §8.5's grant of `declare_queryable`, §10's list of the
+  profiles a rule names, and five in Appendix B. §8.5's MUST is the one
+  with a keyword. It is now a sentence between its reason and the check
+  by inclusion.
+
+**How "no rule changed" was checked**, as for 0.60. Every sentence
+holding MUST, MUST NOT, SHOULD, SHOULD NOT, MAY or RECOMMENDED was
+extracted before and after, keyed by section, and the two sets diffed.
+Both hold 152. 149 are unchanged. The other three keep their keyword,
+condition and scope: §2.4's SHOULD (F-296), §8.5's MUST (split from its
+reason) and §12's descriptor MUST (F-314). No fixture moved, and no
+scenario.
+
+**The figures.** This text's sentences over 50 words went from 11 to
+none, and its mean from 16.74 words to 16.51. `spec/.prose-baseline.json`
+is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, and this changelog's earlier entries.
+- **The profiles' texts and the scenarios.** They keep their tags and
+  long sentences, for #935's later parts.
+
 ## 0.60 — 2026-10-30: editorial: inline history taken out of the rules, no rule changed (#935)
 
 The rules carried their own history (#935, epic #921 Track B). A rule

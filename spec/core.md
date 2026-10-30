@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.60** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.61** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -344,8 +344,8 @@ with it. The fields map one-to-one onto Zenoh's stable QoS.
   their way to a storage (spike S5, Appendix B).
 - **What a tool can conclude rests on it**: [`observer.md`](observer.md) §5.1.
 - **`express`** is opt-in. A contract's author SHOULD set it only on
-  measurement, since it can lose samples and gain no latency (spike S9,
-  Appendix B).
+  measurement, since with `real_time` it lost samples and gained no
+  latency (spike S9, Appendix B).
 - **Operations** carry a recommended `priority`. Zenoh replies inherit the
   query's QoS, so the caller applies it.
 
@@ -409,7 +409,7 @@ does not, is §2.7's.
 
 **At scale.** A deployment needs this section only once a service's
 templated resources hold members that come and go in numbers near their
-`cardinality`, or a tool judges their budget; below that, an owner writes
+`cardinality`, or a tool judges their budget. Below that, an owner writes
 its `cardinality` (§2.2) and keeps each event's `rate` (below), and the
 rest is for a tool that judges budgets.
 
@@ -908,7 +908,7 @@ owner's session's zid, against the router's (§4.1). Where the owner's
 session is itself the router, the two zids are one, and the check proves
 nothing. A tester therefore runs the owner as a client of a router with
 timestamping enabled, which keeps the stamp a put carries unless it is
-future-dated (§4.1), and checks the check against a control: a put without
+future-dated (§4.1). It checks the check against a control: a put without
 a timestamp, from a session whose HLC is not enabled (§4.1), through
 the same router, arrives with the router's zid.
 `[Sc: state.md §1]`
@@ -927,7 +927,7 @@ the same router, arrives with the router's zid.
     above the last. Timestamps are compared by their time, an NTP64 value
     (Appendix B), whose unit is 2^−32 s: the reference adds one unit. A
     larger step keeps the rule, which needs only that each stamp exceed the
-    last (a binding's smallest step: Appendix B).
+    last (Appendix B gives zenoh-python's smallest step).
 - **Catch-up.** An owner MUST NOT stamp at or below the last timestamp it
   issued for its keys. Before its first write, it takes that timestamp from
   its own persistent record, else from an explicit read of an archive on its
@@ -1079,9 +1079,9 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
 **Calling.**
 - **A concrete call (O1).** `BestMatching` reaches one `complete`
   queryable on each router, and consolidation `None` delivers each reply as
-  it arrives, as on every operation call (O2, O6). zenoh's default on a
-  concrete key is `Latest` (§4.1): it holds the reply until the query
-  completes, and keeps one reply per key, so the second execution of a
+  it arrives, as on every operation call (O2, O6). On a concrete key,
+  zenoh's default is `Latest` (§4.1): it holds the reply until the query
+  completes, and keeps one reply per key. So the second execution of a
   split-brain would arrive unseen. A one-reply caller takes the first value
   or envelope on the call's key, without waiting for the query to
   complete. `[Sc: operations.md §1]`
@@ -1560,10 +1560,10 @@ Liveliness tokens carry no payload; everything is in the key.
   `[Sc: presence.md §3]`
   - **At scale.** A deployment needs this only once a contract declares
     `epoch`, as one service serving its devices, containers or streams as
-    members does, the shape §1.5 gives above about 5,000 devices per
-    presence domain; below that, a service per device keeps each one's
-    continuity in its own instance id (§1.5), and an owner whose contract
-    declares no `epoch` holds no member token.
+    members does. That is the shape §1.5 gives above about 5,000 devices
+    per presence domain. Below that, a service per device keeps each
+    one's continuity in its own instance id (§1.5), and an owner whose
+    contract declares no `epoch` holds no member token.
   - A member exists from the owner's first declaration of it, when the
     entity its value names appears (a device enumerated, a first value to
     publish), never because the contract declares the template.
@@ -1772,9 +1772,10 @@ facts.
   `@zk` deny on the face** (U23, §13):
   - **A far router in a south region** of the near router: the far router
     names its region (`region_name`), and the near router lists that name in
-    `gateway.south`, while keeping its own clients and peers south. Declarations
-    then cross on interest, and the deny keeps the denied families off the
-    link, where router to router they would cross (spike S3, Appendix B).
+    `gateway.south`, while keeping its own clients and peers south.
+    Declarations then cross on interest, and the deny keeps the denied
+    families off the link. Router to router, they would cross it (spike
+    S3, Appendix B).
     The far site keeps its own router and clients.
     `[Sc: constrained.md §6]`
   - **One far-side session, or a gateway session, as a client** of the near
@@ -1803,12 +1804,12 @@ facts.
   waits behind them. The reference generator compiles a face policy into
   these denies and the downsampling rules (`zenctl acl gen --face-policy`).
 - **A far router in a south region needs declarations sent toward it.**
-  It learns of queryables only from the declarations the
-  near router sends it, so the far side's principal MUST be granted
+  It learns of queryables only from the declarations the near router
+  sends it. So the far side's principal MUST be granted
   `declare_queryable` on egress over every queryable its side may query,
-  as the owner declares it: a declaration is checked by
-  inclusion against the queryable's own key expression (§11.3), which the
-  far side's selectors need not include. For a state GET that is the
+  as the owner declares it. A declaration is checked by inclusion against
+  the queryable's own key expression (§11.3), which the far side's
+  selectors need not include. For a state GET that is the
   owner's state queryables over `state/**` and `@state/**` (S2); for a
   call, the operation's queryable on its concrete key or over its template
   (O1), `@op/set/*` for a call of `set/duty`; for an archive, its `@state`
@@ -2582,16 +2583,16 @@ the new variant, and an old reader refuses it. A branch added to an
 
 A **profile** is an independently versioned specification, such as
 `timing.v1` or `archive.v1`. The core never depends on one. Where a rule
-here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
+here names a profile, it names the standard way to meet the rule, which
+the core states in its own terms. The profiles named so are
+[`health.v1`](profiles/health/v1.md) for reporting,
 [`link.v1`](profiles/link/v1.md) for face configuration, `archive.v1` for archives,
 [`freshness.v1`](profiles/freshness/v1.md) for a value's age,
 [`telemetry.v1`](profiles/telemetry/v1.md) for a counter's epoch,
 [`desired.v1`](profiles/desired/v1.md) for store-and-forward,
-[`redundancy.v1`](profiles/redundancy/v1.md) for exclusivity,
+[`redundancy.v1`](profiles/redundancy/v1.md) for exclusivity, and
 [`arbitration.v1`](profiles/arbitration/v1.md) for choosing between bound
-providers), it names
-the standard way to meet the rule, which the core states in its own
-terms. A profile contributes through these four points, and through no
+providers. A profile contributes through these four points, and through no
 other:
 1. **A standard contract or a standard schema.**
    - **A standard contract** is an interface the profile defines. It
@@ -2746,8 +2747,9 @@ The format is the generator's own. The reference reads an enrollment file
     every node's root document, which a mesh view reads. None intersects
     those keys.
   - A wider admin read, `@/*/router` and `@/*/router/**`, would admit a
-    GET of every record of a router's (a peer's and a client's it never
-    reaches), and would refuse `@/*/*`, which neither key includes.
+    GET of every one of a router's records. It never reaches a peer's
+    records, nor a client's. It would refuse a GET of `@/*/*`, which
+    neither of its keys includes.
   - Under `allow`, the generator compiles no admin read, and a GET wider
     than every deny is in none (§11.3), so a router there is not
     protected: a tool's GET of `@/*/router/queryable/**` under an `allow`
@@ -2930,8 +2932,8 @@ the full level does, with these relaxations and additions:
 |---|---|
 | Clock (S7) | A wall clock with a per-session bump instead of the HLC. The catch-up and the ahead bound still apply. |
 | Namespace (§1.6) | The deployment prefix written literally in keys |
-| Descriptor (§3.3) | MUST fit one fragment (its size: Appendix B) `[Sc: constrained.md §5]` |
-| Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A constrained owner can send one, so the limit is on receiving (Appendix B). |
+| Descriptor (§3.3) | MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) `[Sc: constrained.md §5]` |
+| Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on receiving (Appendix B). |
 | Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md)). Presence never crosses. |
 
 `[Sc: constrained.md]`
@@ -2993,15 +2995,15 @@ Appendix B. These are the ones the rules above cite:
   It counts from the Unix epoch, 1970-01-01T00:00:00Z: an HLC's physical
   clock is its host's wall clock (uhlc's `system_time_clock`).
 - A node with its HLC enabled updates it with the stamp of every put it
-  routes, a put a session receives for its own subscriber included: its
+  routes, a put a session receives for its own subscriber included. Its
   clock moves to a later stamp, and a stamp more than its delta ahead of
   its clock is refused, the put re-stamped or dropped
   (`dispatcher/pubsub.rs`, `treat_timestamp`; uhlc 0.8's
-  `update_with_timestamp`; §4.1). A put it routes with no stamp it
-  stamps from its own HLC (`treat_timestamp`: "Timestamp not present; add
-  one"; measured by the second implementation: a client whose HLC is on
-  received 20 of 20 samples of an unstamped owner, through a router that
-  stamps nothing, stamped with its own zid; §4.1).
+  `update_with_timestamp`; §4.1). It stamps from its own HLC each put it
+  routes that carries no stamp (`treat_timestamp`: "Timestamp not
+  present; add one"; §4.1). Measured by the second implementation, a
+  client whose HLC is on received 20 of 20 samples of an unstamped owner,
+  through a router that stamps nothing, stamped with its own zid.
 - Timestamps order by time, then by id. An id is stored as the 16 bytes
   of its 128-bit value little-endian, and compared as that byte array
   (uhlc 0.8's derived `Ord` on `Timestamp` and `ID`), so its least
@@ -3023,8 +3025,9 @@ Appendix B. These are the ones the rules above cite:
   (`@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`),
   its `linkstate/*` and a `route/successor/src/<zid>/dst/<zid>` key while
   it holds the routing tables' read lock, and each reply takes that read
-  lock again. std leaves the `RwLock`'s priority policy to the platform;
-  on Linux its futex lock makes a new reader wait behind a waiting writer.
+  lock again. Rust's std leaves the `RwLock`'s priority policy to the
+  platform; on Linux its futex lock makes a new reader wait behind a
+  waiting writer.
   There, a declaration, an interest or a new session from
   another face between two replies deadlocks the node: every put, query
   and declaration through it stops for good (`net/runtime/adminspace.rs`,
@@ -3189,8 +3192,8 @@ Appendix B. These are the ones the rules above cite:
 - zenoh-pico 1.10.1 has no session namespaces (§1.6).
 - One fragment is 4 KB with zenoh-pico's default `Z_FRAG_MAX_SIZE` (§12,
   the descriptor).
-- A zenoh-pico 1.10.1 owner sent 100 KB replies, so a constrained
-  device's limit on bundles is on receiving (§12).
+- A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit on bundles
+  is on receiving (§12).
 - zenoh-python builds an NTP64 from seconds and nanoseconds, so its
   smallest step above a timestamp is 1 ns (§4.3, a tick).
 - zenoh-python 1.10.1 has no unbounded handler, so a callback is its way
@@ -3256,10 +3259,10 @@ Appendix B. These are the ones the rules above cite:
   `f268_a_close_tells_its_withdrawals_before_its_transport_event`): a
   watch session through a link the test cut and healed, its subscriber
   without history on three interface tokens, heard each close's three
-  withdrawals 0.025–0.51 ms before its listener heard the close, at 40 of
-  40 closes in eight runs, and held no link when each was heard; its first
-  close, before it had been told the tokens, told nothing. zk2py measured
-  0.15–0.5 ms on zenoh-python 1.10.1.
+  withdrawals 0.025–0.51 ms before its listener heard the close. It did
+  so at 40 of 40 closes in eight runs, and held no link when each was
+  heard. Its first close, before it had been told the tokens, told
+  nothing. On zenoh-python 1.10.1, zk2py measured 0.15–0.5 ms.
 - **An open is told before the subscribers' interests are declared again.**
   A transport that opens is handed to the session's handlers
   first, the transport events listener's among them, and only then to the
@@ -3268,9 +3271,9 @@ Appendix B. These are the ones the rules above cite:
   `hat/client/mod.rs`). Measured by the reference (`zenkey/tests/presence.rs`,
   `a_round_trip_asked_at_the_open_event_can_precede_the_reopen`): a round
   trip asked at the open event stood before the reopen's telling at 6 of
-  60 reopens in six runs (0 to 2 of each run's 10), in 0.24 ms where one
-  that reached the router took 41–45 ms; one asked 100 ms after the event
-  followed the telling at 60 of 60.
+  60 reopens in six runs (0 to 2 of each run's 10). It stood in 0.24 ms,
+  where one that reached the router took 41–45 ms. One asked 100 ms after
+  the event followed the telling at 60 of 60.
 - A reliable sample takes any link when no reliable one is up: over a UDP
   link alone it travels best-effort (link selection in
   `unicast/universal/tx.rs`).

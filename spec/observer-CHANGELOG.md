@@ -13,6 +13,132 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.5 — 2026-10-30: editorial: round 84's hard-to-read findings and the long sentences, no rule changed (#935)
+
+zk2py round 84 (PR #955) read 0.4 and core 0.60 cold. It found that 0.4
+changed no rule, and filed F-295 to F-314, none of which changes a
+verdict either implementation gives. This text answers F-295 and F-297
+to F-311, and splits its last sentences over 50 words; core 0.61
+answers F-296 and F-312 to F-314. This is #935's second part (epic #921
+Track B), and the text is written against core 0.61.
+
+**Gained: what a cell shows for not this profile's spelled as NotAsked**
+(§1; F-295). It is the one wording a rule gains.
+- **The gap.** A profile spells not this profile's as a token of its
+  own, or as NotAsked with a reason that names the failed premise. §1
+  kept the token apart in every medium. Of the second spelling it said
+  only that it is never folded into Unobservable, nor into no. So a tool
+  could show `freshness.v1`'s event as a bare "not asked" and meet §1. A
+  person reads that as cured by asking, and asks again, to no end.
+- **Now.** That NotAsked keeps its reason in every medium. A table cell,
+  a report field and a note each say not this profile's, or name the
+  reason, and never show a bare not asked. The rule cites the three
+  fixtures that spell it so. NotAsked's own bullet now says that a
+  profile can spell not this profile's as NotAsked, where the question
+  was put and its premise does not hold.
+- **Where it departs from the proposal.** NotAsked's definition stays
+  "nobody put the question", with that pointer beside it. The proposal's
+  second clause would have left "the tool has learned nothing" and
+  "cured by asking" untrue of the second spelling.
+- **Not changed:** no verdict, no fixture and no profile's token.
+
+**Restored: what "meets this by it" meant** (§3.3; F-298, ambiguous). It
+is 0.3's rule, restored, so no rule changed.
+- **The gap.** 0.4 took out 0.3's example with its tag: "zk2py's
+  follower runs 120 s and asks its GETs with 121 s". Without it, "a
+  reader that asks each GET with its own timeout at or above the
+  interests timeout bounds that wait apart, and meets this by it" read
+  two ways. Read one way, such a reader meets the SHOULD whatever it
+  waits. Read the other, it meets it when its wait is below the
+  interests timeout.
+- **0.3's meaning was the second.** Core 0.49 wrote the sentence for
+  F-250: the SHOULD is about the reader's wait, and §3.7's MAY about a
+  GET's own timeout. Its example's waits were its callers', 1 s by
+  default and 30 s in presence §10 step 10, under the 120 s. The first
+  reading would let the SHOULD ask nothing of such a reader, against its
+  own reason, that long reads can then be complete.
+- **Now.** Three items under the SHOULD. Such a reader bounds its wait
+  apart from the GET's timeout. The SHOULD measures that bound, never the
+  GET's own timeout, and is met when the longest wait is below the
+  interests timeout. The example is 0.3's with its wait: 120 s, 121 s,
+  and at most 30 s. It names no implementation.
+
+**Editorial: the hard-to-read findings** (F-297, F-299 to F-311). Each
+keeps its keyword, condition, scope and evidence. Each takes its
+finding's rewrite unless said.
+- **F-297, §3.3.** One MUST over a read and a round trip is two MUSTs.
+  The reason, "it was asked, so it was made", is the round trip's, and
+  "(below)" is "(§3.7)".
+- **F-299, §3.3.** The SHOULD is a sentence of its own. "Open the
+  session itself" is "be the one that opens that session", since the
+  finding's "itself" could still be the session's. A session handed and
+  unreadable, taken at the default, is four short sentences.
+- **F-300, §3.5.** "SHOULD NOT make it" names the read. The check before
+  a read stops a read, which is not made. One whose check when it ends
+  finds no link was cut off while it ran, as the bullet below says.
+- **F-301, §3.5.** "A profile's premise" is three statements: the
+  profile's answer, the read's own reason beside it, and the kinds of
+  read the tool keeps apart. The read is not made "because the read
+  would be beside a liveliness subscriber", 0.4's word, where the
+  finding had "because it held" one.
+- **F-302, §3.6.** What a withdrawal can leave with nothing held is a
+  list: an address, an interface, a member. Reporting what the read
+  establishes is a SHOULD of its own, since the one SHOULD covered both
+  verbs. "Shows none" is "shows no such token held".
+- **F-303, §3.7.** "One whose wait ends first" names the reader and the
+  round trip's reply, in sentences rather than the finding's list. "As
+  before" is gone: it pointed at "A read made while no round trip
+  stands", below. "Takes up" points at "One round trip, and one read, at
+  a time", which defines it.
+- **F-304, §3.7.** "But a close's own telling" reads "except". The
+  SHOULD names its two instants in one sentence, not the finding's
+  nested list. The clause after the semicolon is a consequence, a
+  sentence of its own.
+- **F-305, §3.7.** A GET its own timeout ends is over for the reader,
+  handed an error reply and the final reply, and cannot be taken up.
+  The finding's "then" is left out: Appendix B states no order.
+- **F-306, §3.7.** "That key" and "the withdrawal" are named. They are
+  the withdrawal of a token declared before the subscribers and
+  withdrawn after the round trip, told by the token's key.
+- **F-307, §4.3.** "A tool its user asks" is "a tool whose user asks for
+  that read", and "them" the declaration records.
+- **F-308, §6.1.** "But for" read as an exception to "does not fence".
+  The runtime fences no interface. Under `redundancy.v1` the holders
+  step down, and that is no fence either.
+- **F-309, §7.2.** "As the finding" moves beside "holds".
+- **F-310, §8.2.** The two alternatives are a list, both under "in every
+  medium it writes", and each medium a sentence. It keeps "one of two
+  things", 0.4's either-or. No medium is added: a table is still not
+  named.
+- **F-311, §5.2.** The watch after a window is one lease plus the reply
+  timeout. The default and the transit are a sentence of their own.
+
+**The long sentences.** The fourteen over 50 words are split, their
+words kept: the preamble's two, §0's, §1's "not this profile's", §3.6's
+two, six in §3.7, §4.4's owner's stamp and §5.2's "What a deployment
+provides". Two of §3.7's held a SHOULD over two acts, and each is now
+two SHOULDs: a liveliness read on a session that never held a
+subscriber, and the subscribers on a watch session; no round trip
+beside one in flight, and no read beside one in flight.
+
+**How "no rule changed" was checked**, as for 0.4. The sentences
+holding an RFC 2119 keyword were diffed before and after, keyed by
+section: 39 before, 43 after. 31 are unchanged. Eight are reworded, and
+four more are the second halves of a sentence split: F-297's MUSTs,
+F-302's SHOULDs, and the two SHOULD pairs of §3.7. Each was read by
+hand, and none moves a keyword, a condition or a scope. F-295's wording
+and F-298's restored meaning carry no keyword, as §1's rules carry none,
+and were read beside them.
+
+**The figures.** This text's sentences over 50 words went from 14 to
+none, and its mean from 20.84 words to 18.65. `spec/.prose-baseline.json`
+is lowered to them.
+
+**Deliberately not changed.**
+- **No rule** but F-295's wording, and no section number, label or
+  anchor.
+- **Appendix A**, which is history.
+
 ## 0.4 — 2026-10-30: editorial: inline history taken out of the rules, no rule changed (#935)
 
 Its rules carried their history, as the core's did (#935, epic #921
