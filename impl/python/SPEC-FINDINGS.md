@@ -18307,3 +18307,600 @@ Nothing was blocking. The bot's should-fix and nits:
 - **Resolved: F-295 to F-314,** F-298 as reading B, now unambiguous.
 - **#935's second pass changed no rule** but F-295's gained wording,
   which the changelog names. No keyword, condition or scope moved.
+
+## At observer.md 0.6 and core 0.62, and five profiles without history (#935)
+
+Round 86 read `spec/observer.md` text 0.6 whole and cold, core 0.62's
+two changed passages with the sections around them, and five profiles'
+`v1.md` and `scenarios.md` whole: `freshness.v1` 0.5, `health.v1` 0.5,
+`hostid.v1` 0.8, `config.v1` 0.6 and `link.v1` 0.9. It did so on main
+f59622d2 (PR #958). It checked F-315 to F-323, checked each profile's
+claim that no rule changed, made zk2py's alarms reader watch as observer
+§5.2 now says, and ran the live runners. It read for **hard to read**
+throughout. The reference's parties and tool ran as black boxes (`owner`,
+`consume` and `zenctl` in `/srv/dev/targets/zenkey-tier/blackbox/`, built
+2026-10-30 08:57, after PR #958's merge), their source never read. It
+read, as a newcomer would:
+- `spec/observer.md` 0.6 whole, `observer-CHANGELOG.md`'s 0.6 entry and
+  `CHANGELOG.md`'s 0.62 entry;
+- core §4.2's "Observing S1" and §8.5's south region, as 0.62 left them;
+- the five profiles' texts and scenarios whole, each with its new
+  CHANGELOG entry, and `profiles/README.md`'s index and process;
+- `alarms.v1`'s §2.15, its scenarios' §10 and its changelog's "0.8, read
+  against observer.md 0.6", which PR #958 changed beside them;
+- for §5.2's settled rule, `scenarios/budget.md` §2, which it cites, and
+  core Appendix B's "What a path drops".
+
+Since round 85 (PR #957, merged as 9c3c9b70), `spec/` changed in nine
+commits:
+- da3a252f, bef697a1, 86f90207, aa1babf0 and c6fb10df: the five
+  profiles;
+- e96123b3: observer 0.6 and core 0.62, with `alarms.v1`'s two
+  citations;
+- 32f6f0d5 (`config.v1`'s changelog), dde515fd (the prose baseline) and
+  865dd50d (`link.v1` §2.4 rewrapped).
+
+zk2py diffed every changed file against 9c3c9b70, word by word. No
+fixture, schema or `examples/zk2/` file changed. zk2py did not run
+`scripts/check-spec-prose.py`.
+
+### F-315 to F-323
+
+| | Status | Why |
+|---|---|---|
+| F-315 | **resolved** | NotAsked "renders no answer, never the negative one", where it rendered "nothing". The second spelling is an item of its own under NotAsked's bullet: "There the question was put, and its premise does not hold. What this bullet says of NotAsked does not hold of that spelling, and asking again does not cure it." Both halves of the finding are answered. Which bullet "this bullet" is, now that the sentence sits inside the one it speaks of, is F-325. |
+| F-316 | **resolved** | "bounds its own wait for the read apart from the GET's own timeout." |
+| F-317 | **resolved** | "The round trip's final reply follows their history. So with history the round trip waits for the population, and without history it is one round trip". Both pronouns are named. |
+| F-318 | **resolved** | Two SHOULDs: "After a move, a reader SHOULD wait for the round trip longer than the reopening's telling takes at its population. It SHOULD run its interests timeout above that time too." "After a move" leads, so the words cannot read as a long move, which zk2py's own rewrite allowed. "That time" now follows the time it names. |
+| F-319 | **resolved** | "When the reader next needs a round trip, or a read of that scope, it takes up the one in flight. It does so whichever wait for that one ended: its caller's, or its own." |
+| F-320 | **resolved: reading A** | "After the window's end, a tool watches the owner's instance tokens for the longer of one lease and the routers' `wait_before_close`, plus its reply timeout." The lease, `wait_before_close` and the reply timeout are an item each. zk2py's budget windows have read A since round 85 (`budget.watch_after_s`). Its alarms reader did not. It followed `alarms.v1` §2.15's own words, one lease and the reply timeout, which PR #958 changed under the same text version (F-326). It now watches as §5.2 says (below). The sentence that says why the new length is right claims more than the scenario it cites shows (F-324). |
+| F-321 | **resolved** | "or it states that the verbatim kinds are excluded. A report carries the names or the statement in a field. A stream of rows … carries them on the tool's standard error." |
+| F-322 | **resolved** | Core §4.2: "The tester checks the check against a control". |
+| F-323 | **resolved** | Core §8.5: "The queryables the grant covers are:", then three items, each a GET's, a call's or an archive's queryables. |
+
+### No rule changed: the check
+
+**Every RFC 2119 sentence, before and after.** zk2py split each text
+into sentences keyed by section, with a scratch splitter like round 85's.
+It reads a table cell as running text, and keeps a bold run-in label with
+the sentence after it. It kept each sentence holding MUST, MUST NOT,
+SHOULD, SHOULD NOT, MAY, RECOMMENDED, REQUIRED or SHALL.
+
+| Text | Before | After | Unchanged | The changed ones, each read against its old text | Moved |
+|---|---|---|---|---|---|
+| observer | 43 | 44 | 41 | F-317's SHOULD lost its reason to sentences of its own. F-318's SHOULD over two acts is two. | nothing |
+| core | 161 | 161 | 161 | none: F-322's and F-323's sentences hold no keyword | nothing |
+| `freshness.v1` | 16 | 16 | 16 | none: each tag sat in a sentence with no keyword | nothing |
+| `health.v1` | 27 | 27 | 24 | §2.2's SHOULD lost its reason to a sentence of its own, "In one reading, a reader that pairs …". §2.3's "keeps its SHOULD (core 0.23)" and §2.5's MAY lost a tag. | nothing |
+| `hostid.v1` | 22 | 22 | 20 | §2.4's MUST: its label "**Under a root**" lost its tag, so zk2py's splitter now joins them. §2.8's MUST lost "0.19". | nothing |
+| `config.v1` | 39 | 39 | 38 | §2.5's MUST: "the first of these" is "the first of the checks below". The list of the core's refusals now sits between the MUST's paragraph and the table, and the new words name the table, as the old ones did. | nothing |
+| `link.v1` | 23 | 23 | 22 | §2.4's MAY lost "(0.2 allowed it in both postures)". | nothing |
+
+The splitter's core totals are not the changelog's 152, as in rounds 84
+and 85. Its observer and profile counts are each changelog's. The
+scenarios hold few keyword sentences by zk2py's count, so zk2py read
+their word diffs line by line instead. Every changed Expected line lost
+a tag or history, or was split, and none moved an observation.
+
+**The rest of what changed, not only the keyword sentences.** Most of
+the five profiles' rules hold no keyword: a check, a table row, a step.
+zk2py read each profile's word diff whole, in its full context, which
+was also the cold read. In words of diff:
+
+| Profile | `v1.md` | `scenarios.md` |
+|---|---|---|
+| `freshness.v1` | 809 | none |
+| `health.v1` | 518 | 433 |
+| `hostid.v1` | 1,711 | 700 |
+| `config.v1` | 2,163 | 91 |
+| `link.v1` | 4,943 | 1,632 |
+
+Each tag's removal left its sentence's words as they were. Each rewrite
+was read beside its old text, and none moves a condition, an object or a
+scope. The ones that needed a second look:
+- **`hostid.v1` §2.12, the finding**, three sentences over 50 words in
+  0.7. "Counting only instances … (yes: …; 0.2), and not a recognised
+  standby (below, 0.6): when each read shows … not necessarily the same
+  instances in both reads, that is a finding" became two items:
+  - "The counted instances are those … That question answers yes when …";
+  - "When each read shows … that is a finding … They need not be the same
+    instances in both reads."
+
+  The condition, its two reads and its counted set are 0.7's.
+  **Undecided** now states its verdict first, then lists the four
+  descriptors that leave the address unobservable. They are 0.7's four.
+  What the list does to the third is F-328.
+- **`config.v1` §2.5.** The core's four refusals are a list, each with
+  its refusal, and `fanout_forbidden` with its reason ("since every
+  operation of the contract forbids fan-out"). "Why this order" is a list
+  of five in the same order. Neither holds a keyword, and the table's
+  fourteen rows are unchanged.
+- **`config.v1` §2.18.**
+  - "Fed through `desired.v1`" is three sentences: whom it binds, an act
+    on each version once in an instance, and the adoption of a version
+    equal to the last one acted on or adopted.
+  - "A delete" is three sentences: the revert, what each parameter goes
+    back to, and how. Their conditions are 0.5's, "a refused document's
+    aside" among them (F-331).
+  - "(config.v1 text 0.4: an owner fed through `desired.v1` acts as its
+    §2.7 says, below; …)" is now a sentence of its own, and says nothing
+    more.
+- **`link.v1` §2.4.** "Not in a policy of its own" lost its history and
+  gained a sentence naming the mechanism (F-332). "A far principal of two
+  or more faces" moved its measurement to an item. The far principal's
+  subject keeps its MUST NOT under `allow` and its MAY under `deny`.
+- **`link.v1` §2.8.** "the contract states none (core 0.29 removed the
+  interim `link.downsample_ms`)" is "the contract states none: a contract
+  that writes `link.downsample_ms` draws W105 (§4)". That reads like a new
+  lint, but §4 has said it all along: "Any other key `link.<key>`,
+  `link.downsample_ms` among them, is outside it: W105".
+- **`link.v1` §2.15.** "A subject naming both kinds adds none. Under 0.4
+  such a subject … made that policy one the face subject could ride, and
+  every session … got …" is now a conditional, "Counted as the far
+  principal's, … would make …" (F-334). The reason is 0.8's, and the
+  rule, "adds none", is unchanged.
+- **`link.v1` scenarios §11.** Its opening said what 0.4 read and 0.5
+  fixed. It now states the rule it tests, "Such a subject binds no name
+  it lists alone …" (F-335). Expected 9 lost "0.4 reported nothing …",
+  and its list of what the tool reports is 0.8's.
+
+**`alarms.v1` §2.15 did change a rule**, as the brief and observer 0.6's
+changelog say, under its text version 0.8 (F-326). "the owner is watched
+one lease and the reply timeout past the end" is now "The owner is
+watched past the end as observer §5.2 says: the longer of one lease and
+the routers' `wait_before_close`, plus the reply timeout". Under zenoh's
+defaults the two lengths are one. The scenarios' §10 step 2 cites §5.2
+in place of the old length.
+
+**No rule zk2py implements changed**, in the five profiles, observer 0.6
+or core 0.62, but F-320's watch length. zk2py's budget windows have had
+that length since round 85, and its alarms reader has it now. No section
+moved, so every citation in zk2py's modules still leads to its rule. The
+five profile modules now say in their headers that they were read again
+against these texts.
+
+**The long sentences.** By zk2py's splitter, no prose sentence of the
+five profiles or of observer 0.6 is over 50 words. What the splitter
+counts over 50 is table cells, bold run-in labels joined to the sentence
+after them, and pairs of sentences where the second begins with `§`,
+which it does not split before. zk2py has no finding on the count.
+
+### F-324 · gap · observer §5.2, the watch's `wait_before_close` item: the reason claims more than its scenario shows
+
+> "- **`wait_before_close`** is the deployment's too, 5 s by default. A
+>   push that cannot queue within it closes its transport (core Appendix
+>   B, "What a path drops"). So a router that waits it before closing a
+>   transport tells the withdrawal that late, when it is longer than the
+>   lease."
+
+- **The gap: no scenario shows the half of the rule that 0.6 settled.**
+  - The rule cites `[Sc: budget.md §2]`. That section runs a 1 s lease
+    beside zenoh's default 5 s `wait_before_close`, so a
+    `wait_before_close` longer than the lease, the very case the item
+    names.
+  - It measures the withdrawal one lease after a stall began, 986 to
+    1,037 ms, never at `wait_before_close`. Its links close or go silent,
+    and neither makes a push wait on a full queue.
+  - The mechanism is measured elsewhere: `budget.md` §1 step 3's router
+    gives up on a stalled consumer after `wait_before_close` (5 s), and
+    core Appendix B's "the owner's own push had waited
+    `wait_before_close` too, and its session closed its transport". Both
+    ran beside zenoh's default 10 s lease, so before it.
+  - So no measurement shows a withdrawal told later than one lease. The
+    scenario the rule cites shows a router whose `wait_before_close` is
+    above its lease telling it one lease late.
+- **Hard to read too.** "Waits it" takes a duration as its object.
+  "That late" is a time the sentence does not name: `wait_before_close`
+  after the failure. "It" in "when it is longer" is `wait_before_close`,
+  two clauses back past "a router" and "a transport". The condition comes
+  last.
+- **Took:** a push that cannot queue within `wait_before_close` closes
+  the transport it pushes on. A path that stays up while its queue is
+  full keeps its lease, so the withdrawal it causes can reach the reader
+  up to `wait_before_close` after the failure. A silent link's comes one
+  lease after it. The watch covers the later of the two.
+- **Rewrite:**
+  - "**`wait_before_close`** is the deployment's too, 5 s by default. A
+    push that cannot queue within it closes the transport it pushes on
+    (core Appendix B, "What a path drops"). A path that stays up while its
+    queue is full keeps its lease. So its withdrawal can reach the reader
+    up to `wait_before_close` after the failure, later than a silent
+    link's when `wait_before_close` is longer than the lease."
+  - And evidence for that half: a step of `budget.md` §2 that fills a
+    queue on a path that stays up (a router whose receive is slowed, its
+    keep-alives still crossing), and measures when the owner's token is
+    withdrawn. Or the item says that this half rests on Appendix B's
+    mechanism alone, with no measurement.
+- **Changes:** a test (a scenario step) and wording. The rule's length
+  is unchanged, and zk2py has it. A longer watch can only leave a window
+  incomplete that a shorter one would call complete, so it errs toward
+  unobservable.
+
+### F-325 · hard to read · observer §1, "What this bullet says of NotAsked"
+
+> "- **NotAsked:** nobody put the question. No contract was retrieved, no
+>   window ran, the flag was not passed. The tool has learned nothing, and
+>   renders no answer, never the negative one.
+>   - A profile can also spell not this profile's as NotAsked (below).
+>     There the question was put, and its premise does not hold. What this
+>     bullet says of NotAsked does not hold of that spelling, and asking
+>     again does not cure it."
+
+- **Hard:** a term with two referents. "This bullet" is either the item
+  that holds the sentence, or NotAsked's bullet above it. Read as the
+  item, the sentence says that "the question was put" does not hold of
+  the spelling it has just described. The words are zk2py's own, from
+  F-315's rewrite, where the second spelling was a bullet of its own and
+  "this bullet" named itself, which was no better. 0.6 made it an item
+  inside NotAsked's bullet, which leaves the word two referents.
+- **Took:** NotAsked's bullet: nobody put the question, the tool learned
+  nothing, it renders no answer.
+- **Rewrite:** "What NotAsked's bullet says above (nobody put the
+  question, the tool has learned nothing, and it renders no answer) does
+  not hold of that spelling, and asking again does not cure it."
+- **Changes:** wording only.
+
+### F-326 · minor · `alarms.v1` §2.15 changed under its text version 0.8
+
+> "The text keeps its version, as it did for core 0.38's F-187. The rule
+> is observer §5.2's, which this text restated." (`alarms/CHANGELOG.md`,
+> "0.8, read against observer.md 0.6")
+
+- **The issue:**
+  - `profiles/README.md`'s process says "The text's version `0.N` moves
+    through the profile's own `CHANGELOG.md`". It names one change that
+    moves without a version, a status.
+  - §2.15's span did change. "the owner is watched one lease and the
+    reply timeout past the end" is now "the longer of one lease and the
+    routers' `wait_before_close`, plus the reply timeout".
+  - Beside a `wait_before_close` above the lease, a reader of 0.8 as
+    first published and a reader of 0.8 as it now reads end their windows
+    at different instants. zk2py's alarms reader was the first kind until
+    this round. Round 85 settled its own reading of F-320 in its budget
+    windows, and the alarms reader kept §2.15's words.
+  - A reader holding "`alarms.v1` 0.8" cannot tell which §2.15 it holds.
+    The precedent the entry cites, F-187, and `config.v1` 0.4's F-182 are
+    the same practice, and `profiles/README.md` does not state it.
+- **Took:** the rule is observer §5.2's, and 0.8 now cites it. zk2py now
+  reads it so.
+- **Fix:** either `alarms.v1` 0.9 with this entry, or a line of the
+  README's process. That line would say when an entry "read against"
+  another text keeps the version: when the text restated another text's
+  rule, and now cites it.
+- **Changes:** an implementation, zk2py's alarms reader, fixed this
+  round. No verdict under zenoh's defaults.
+
+### F-327 · hard to read · `health.v1` scenarios, Conventions, "T's clock"
+
+> "A tool in a deployment takes that word only as its operator's option
+> (`freshness.v1` §2.6). Without it, a tool measures its clock from puts
+> it hears during its reading, and the status is re-put every 30 s, so
+> the reading lasts 30 s, or its subscription is declared before the
+> owners start."
+
+- **Hard:** a requirement stated as a fact, and an "or" that joins a
+  duration to a precondition. "So the reading lasts 30 s" reads as what
+  every such reading does.
+- **Took:** a tool without the deployment's word needs a put of the
+  owner's clock to measure from. The status is re-put every 30 s. So its
+  reading must last 30 s, unless its subscription was declared before
+  the owners started, when it hears their first puts.
+- **Rewrite:** "Without it, a tool measures its clock from puts it hears
+  during its reading. The status is re-put every 30 s. So such a tool's
+  reading lasts 30 s, unless its subscription is declared before the
+  owners start."
+- **Changes:** wording only. It is a runner's convention, which
+  zk2py's §5 to §7 do not need: T takes the word.
+
+### F-328 · hard to read · `hostid.v1` §2.12, "Undecided", its third item
+
+> "- **Undecided.** The address is unobservable, never clean, when the
+>   instances that could be counted do not establish the finding, and an
+>   instance's descriptor:
+>   - could not be read;
+>   - or states no `meta.zid`;
+>   - or lists `hostid.v1` while whether its system is minted is
+>     unobservable, by §5's first question: a contract it implements
+>     lists `hostid.v1` in `uses`, or could not be read;
+>   - or lists only governed interfaces while `redundancy.v1`'s question
+>     is unobservable for one of them."
+
+- **Hard:** a subject left out. Every item continues "an instance's
+  descriptor", and the first is "could not be read". The third ends "or
+  could not be read", which reads first as the descriptor again. Its
+  subject is "a contract it implements", from §5's first question ("a
+  contract it implements could not be read (core §8.4)"). 0.8's list put
+  the two "could not be read" side by side, where 0.7's parenthesis kept
+  them apart.
+- **Took:** §5's first question is unobservable when a contract the
+  instance implements lists `hostid.v1` in `uses`, or when a contract it
+  implements could not be read.
+- **Rewrite:** "- or lists `hostid.v1` while §5's first question is
+  unobservable for it: a contract it implements lists `hostid.v1` in
+  `uses`, or a contract it implements could not be read;"
+- **Changes:** wording only. zk2py's `live.hostid_collision` reads it so
+  (scenarios §6 step 5).
+
+### F-329 · hard to read · `config.v1` §2.3, "Two keys, one revision"
+
+> "So `instance` and `revision` name the running values, never a pair: a
+> reader that reads both pairs them only when the status is the view's
+> projection (§2.19), and otherwise takes each by itself, judged by its
+> own freshness."
+
+- **Hard:**
+  - "A pair" and "pairs them" name different things.
+  - "Both" and "them" have two antecedents: `instance` and `revision`,
+    the sentence's subject, or the view and the status, the paragraph's.
+  - "The status is the view's projection" is §2.19's MUST of every
+    status, so the condition reads as always true. It means the status
+    the reader read is the projection of the view it read.
+- **Took:** an `instance` and a `revision` do not name one version of the
+  two documents, since an arm or a confirm re-puts both at the same
+  revision. A reader that read the view and the status takes them as one
+  reading only when the status it read is the projection of the view it
+  read. Otherwise it judges each by its own freshness.
+- **Rewrite:** "So `instance` and `revision` name the running values,
+  never one version of the two documents. A reader that reads the view
+  and the status takes them together only when the status it read is the
+  projection of the view it read (§2.19). Otherwise it takes each by
+  itself, judged by its own freshness."
+- **Changes:** wording only. zk2py's §5 reader (`config.read`) takes each
+  by itself.
+
+### F-330 · hard to read · `config.v1` §2.13, persist's first refusal
+
+> "1. no persisted layer: `unavailable`, cause `config`. An owner with
+>    none does not expose `persist`, and the core refuses the call so
+>    before any handler runs, its request's type included (below). A layer
+>    it cannot write to now is refused the same way, first of the
+>    handler's refusals: before the request's type too, so that the
+>    refusal does not depend on whether the layer was ever there;"
+
+- **Hard:**
+  - "So" stands for the refusal the item opens with.
+  - "Its request's type included" is an absolute phrase. It means
+    "before even the check of its request's type", and reads first as
+    the request's type included in the refusal.
+  - "(below)" points at the bullet "No persisted layer", past the rest of
+    the list and three more bullets.
+- **Took:** an owner with no persisted layer lists `persist` unavailable.
+  So the core answers `unavailable`, cause `config`, before any handler
+  runs, and so before the request's type is checked. An owner whose layer
+  cannot be written now refuses the same way, in its handler, first of its
+  refusals and before it checks the request's type.
+- **Rewrite:** "1. no persisted layer: `unavailable`, cause `config`:
+   - An owner with none does not expose `persist`. The core refuses the
+     call so before any handler runs, and so before it checks the
+     request's type ("No persisted layer", below).
+   - A layer it cannot write to now is refused the same way by the
+     handler, before its other refusals and before the request's type.
+     The refusal then does not depend on whether the layer was ever
+     there;"
+- **Changes:** wording only. `validation.json` pins the order, and zk2py
+  meets it.
+
+### F-331 · hard to read · `config.v1` §2.18, "A delete": "a refused document's aside"
+
+> "Each parameter named by a document it acted on in this instance, a
+> refused document's aside, goes back to its startup value (§2.12)."
+
+- **Hard:** an absolute phrase with its noun left out. Aside what of a
+  refused document: the document, or its parameters? 0.6's split made
+  the phrase the middle of a sentence of its own. It could mean that a
+  refused document is not among those acted on, so that a parameter a
+  converged document named reverts whatever a later refused one named.
+  Or it could mean that a refused document's parameters stay out even
+  where a converged document named them. The second would leave a
+  converged value standing after the delete, against `desired.v1` §2.16's
+  baseline, "what a restart would start it from". So the first, and the
+  sentence is hard to read, not ambiguous.
+- **Took:** a document the owner refused counts for nothing: it applied
+  none of it.
+- **Rewrite:** "Each parameter named by a document it acted on in this
+  instance goes back to its startup value (§2.12). A document it refused
+  counts for none: it applied nothing of it (above)."
+- **Changes:** wording only. zk2py's config owner converges a document
+  bound to it directly (scenarios §12). It is never fed through
+  `desired.v1`, so it reverts nothing, and no test of zk2py's reads this.
+
+### F-332 · hard to read · `link.v1` §2.4, "Not in a policy of its own"
+
+> "That is the mechanism for which core §11.2 compiles "every principal"
+> into each principal's own policy. In the far principal's policy it
+> undoes nothing."
+
+- **Hard:**
+  - "That" points at the measured sentence before it, and "for which"
+    means "because of which".
+  - "It" in the next sentence is the face subject, three sentences back.
+    Its nearest antecedents are now core §11.2 and "every principal".
+  - 0.9 rewrote 0.8's "That is F-87's mechanism (core §11.2), which kept
+    0.1 and 0.2 from defining a face subject at all". Those last words
+    were the antecedent the next sentence's "it" leaned on.
+- **Took:** any allow wins across subjects, so a subject in a policy of
+  its own undoes the denies of another's. That is why core §11.2
+  compiles "every principal" into each principal's own policy. A face
+  subject in the far principal's policy undoes nothing.
+- **Rewrite:** "Core §11.2 compiles "every principal" into each
+  principal's own policy for the same reason: any allow wins across
+  subjects. A face subject in the far principal's policy undoes nothing."
+- **Changes:** wording only.
+
+### F-333 · hard to read · `link.v1` §2.4 and §2.15, "outside every face whose far principal it is not"
+
+> §2.4: "A subject bound to a principal is selected by the link protocols
+> of §2.1's closed list outside every face whose far principal it is not,
+> in that list's order."
+>
+> §2.15, `narrowed_too_far`: "under `allow`, a name the block binds, read
+> by its kind, and a link protocol of §2.1's list outside every face whose
+> far principal it is not, that no subject answering for that name
+> selects."
+
+- **Hard:**
+  - A negative relative clause ("whose far principal it is not") inside
+    "outside".
+  - "It" has two antecedents in each. In §2.4 they are the subject and the
+    principal, and only the principal can be a far principal. In §2.15
+    they are the name and the link protocol.
+  - §2.15's finding is a pair, a name and a link protocol, and its last
+    clause belongs to the pair, past a second relative clause.
+- **Took:**
+  - §2.4: the subject is selected by §2.1's list, in its order, less the
+    link protocols of every face whose far principal is another
+    principal.
+  - §2.15: the finding is a name and a link protocol that §2.4 does not
+    keep the name off, when no subject answering for that name selects
+    the protocol.
+- **Rewrite:**
+  - §2.4: "A subject bound to a principal P is selected by §2.1's closed
+    list of link protocols, in that list's order, less those of every
+    face whose far principal is not P."
+  - §2.15: "under `allow`, a name the block binds, read by its kind, and
+    a link protocol that §2.4 does not keep that name off: one of §2.1's
+    list that no face selects whose far principal is not that name. It is
+    the finding when no subject answering for that name selects that link
+    protocol."
+- **Changes:** wording only. zk2py's generator (`link.compile_faces`,
+  with `narrow`) and its check (`link.narrowed_too_far`) read it so.
+
+### F-334 · hard to read · `link.v1` §2.15, "The far principal's policies"
+
+> "A subject naming both kinds adds none. Counted as the far principal's,
+> such a subject in a near principal's policy would make that policy one
+> the face subject could ride. Every session over the face would then get
+> that principal's grants that the far principal's denies do not include,
+> its writes to an owner's keys among them (measured, `[Sc: §11]`)."
+
+- **Hard:**
+  - A participle whose subject comes after it: "counted" belongs to
+    "such a subject".
+  - "Ride" is not defined in `v1.md`. Its Appendices A and B, and the
+    scenarios' §10, use it for being listed in a policy.
+  - "That principal" has two antecedents, the far principal and the near
+    one.
+  - 0.9 turned 0.8's history, "Under 0.4 such a subject … made that
+    policy one the face subject could ride", into this conditional.
+- **Took:** if a subject naming both kinds counted as the far principal's,
+  a near principal's policy that lists it would be one of the far
+  principal's policies. `face_subject_misplaced` would then want the face
+  subject listed there. Every session over the face would then get that
+  near principal's grants.
+- **Rewrite:** "A subject naming both kinds adds none. If it counted as
+  the far principal's, a near principal's policy that lists it would be
+  one of the far principal's policies, and the face subject would be
+  listed in it (`face_subject_misplaced`, below). Every session over the
+  face would then get that near principal's grants that the far
+  principal's denies do not include, its writes to an owner's keys among
+  them (measured, `[Sc: §11]`)."
+- **Changes:** wording only.
+
+### F-335 · hard to read · `link.v1` scenarios §11's opening, "binds no name it lists alone"
+
+> "Such a subject binds no name it lists alone, and is not the far
+> principal's even when one of its lists names the far principal alone
+> (v1.md §2.4, §2.15)."
+
+- **Hard:** "alone" can modify "binds" (it binds none of its names by
+  itself) or "lists" (a name it lists alone, the only one in its list).
+  The second clause's "names the far principal alone" uses it the second
+  way, which pulls the first toward it. 0.9 wrote the sentence from 0.8's
+  "0.4 read such a subject as binding each name it lists".
+- **Took:** by itself, such a subject binds none of the names it lists:
+  v1.md §2.4's "Across its two lists, a subject binds no one alone".
+- **Rewrite:** "By itself, such a subject binds none of the names it
+  lists. It is not the far principal's even when one of its lists names
+  the far principal alone (v1.md §2.4, §2.15)."
+- **Changes:** wording only.
+
+### observer.md 0.6 in zk2py
+
+- **§5.2's watch, in the alarms reader** (F-320, F-326). `alarms.v1`
+  §2.15 now watches the owner past a window's end "as observer §5.2
+  says". `alarms.window_end_ns` ends a reader's window by
+  `budget.watch_after_s`, the longer of the lease and
+  `wait_before_close`, plus the reply timeout. Before, `AlarmsReader`
+  ended it one lease and the reply timeout before the instant judged.
+  `alarms_scenarios` §10 listens for the new length too. Under zenoh's
+  defaults, 10 s against 5 s, nothing changes.
+- **`readings`: 663, up from 657.** Six cases:
+  - observer 0.6's sentence, as `observer.md` states it;
+  - `alarms.v1` §2.15's and scenarios §10 step 2's citations of it;
+  - the alarms window's end at four sets of lengths, 89, 94, 79 and 83 s
+    for a reader judging at 100 s;
+  - the alarms reader's watch the budget windows', at five sets;
+  - `AlarmsReader.window` itself, with no session, its state set as a run
+    leaves it: 88, 93 and 78 s listened at three sets, where 0.8's old
+    words gave 97 s beside a 1 s lease.
+- **The five profiles' modules** (`freshness`, `health`, `hostid`,
+  `config`, `link`) say in their headers that they were read again
+  against 0.5, 0.5, 0.8, 0.6 and 0.9, and that none of their rules moved.
+  `observer_scenarios` names observer 0.6 and core 0.62.
+
+- **`just py-conformance`: 3620 of 3620.**
+
+### Live
+
+Every run used in-process zenoh-python 1.10.1 routers, each listener on
+a free loopback port, under `taskset -c 0-1`, from 09:08 to 09:39. No
+check failed, and no run was repeated. "Rust" is the reference's owner
+example, "consume" its consumer example and "zenctl" its tool.
+
+| Runner | Pairing | Result |
+|---|---|---|
+| `freshness_scenarios` | zk2py's owner, subscriber, GET reader and tool | **23 of 23**: §1 7, §2 5, §3 2, §4 3, §5 2, §6 4 |
+| `live_interop --only freshness` | Rust serving `beacon.v1`, consume, zk2py's readers | **16 of 16** |
+| `health_scenarios` | zk2py | **29 of 29**: §1 5, §2 2, §3 4, §4 5 and its [moved clock] 2, §5 2, §6 2, §7 2, §8 run A 3 and run B 2 |
+| `live_interop --only health` | Rust, consume, zk2py's reader | **25 of 25** |
+| `hostid_scenarios` | zk2py's runtime over temporary roots | **35 of 35**: §1 8, §2 4, §3 5, §4 6, §5 6, §6 6 |
+| `live_interop --only hostid` | Rust over a root, a zk2py consumer on the same root, the shared file made by each and read by the other | **28 of 28**, `bindings.md` §5's three among them |
+| `config_scenarios` | zk2py's owner | **51 of 51**, §1 to §14 |
+| `config_scenarios --owner` | Rust (`--config`) | **51 of 51**, §1 to §14 |
+| `live_interop --only config` | Rust: the order of refusals zk2py predicts against its answers, and the scenarios | **97 of 97** |
+| `link_scenarios` | zk2py's generator, on zenoh-python routers | **89 of 89**, §1 to §13 |
+| `observer_scenarios` | grammar.md §1 with zk2py's and Rust's owner, zk2py's tools and `zenctl echo`, `zenctl timing`; operations.md §5 and §8 step 6 with zenctl beside | **48 of 48**: 18 and 18, 7, 5 |
+| `live_interop --only budget` | Rust's windows, zk2py's owner and tool | **16 of 16** |
+| `alarms_scenarios --only 10` | zk2py's owners; Rust's | **17 of 17** each, the regression for the alarms reader's watch |
+
+`python -m zk2py.presence_scenarios --only 9 --only 10 --owner-bin …
+--zenctl …`, by owner and reader, the regression for observer §3.7's
+three rewritten sentences (F-317 to F-319):
+
+| Owner, reader | §9 | §10 | Not run |
+|---|---|---|---|
+| zk2py, zk2py | 9 | 46 | |
+| Rust, zk2py | 9 | 40 | §10 step 7 (the owner example takes no namespace) |
+| zk2py, zenctl | – | 9 | §9; §10 step 9 (not observable from zenctl's output) |
+| Rust, zenctl | – | 8 | §9; §10 steps 7 and 9 |
+
+The counts are round 85's, check for check.
+
+**What did not run.**
+- **`link_scenarios` has no reference party.** It runs zk2py's generator
+  and checks on zenoh-python routers. zk2py did not run `zenctl acl gen
+  --face-policy` or `zenctl check face` beside it this round.
+- **A live alarms window beside a `wait_before_close` above the lease.**
+  zk2py's §10 runs at zenoh's defaults, where the old and new watches are
+  both 11 s. The readings cover the other lengths.
+- **The presence steps above**, as in round 85.
+
+### Counts at observer.md 0.6 and core 0.62, and five profiles without history
+
+335 entries.
+- **Open: F-324 to F-335,** twelve. None is a blocker, and none moves a
+  verdict.
+  - **Hard to read, ten:** F-325 and F-327 to F-335. Each has a rewrite
+    that keeps its keyword, condition, scope and evidence, so each is
+    wording only. Six are in sentences #935's third pass wrote or split:
+    F-325 (zk2py's own words, from F-315), F-328, F-331, F-332, F-334 and
+    F-335. The other four were there before it.
+  - **Gap, one: F-324.** §5.2's reason for the longer watch, which no
+    measurement shows, and which the scenario it cites shows otherwise
+    for a silent link. A scenario step, and wording.
+  - **Minor, one: F-326.** `alarms.v1` §2.15 changed under its version
+    0.8. zk2py's alarms reader was on the old length, and is fixed.
+- **Resolved: F-315 to F-323,** F-320 as reading A.
+- **#935's third pass changed no rule** in the five profiles, nor in
+  core 0.62. Observer 0.6 changed the one it names, F-320's watch, and
+  `alarms.v1` §2.15 with it, as observer 0.6's changelog says.
