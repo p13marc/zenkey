@@ -56,8 +56,8 @@ pointer:
 NOT, SHOULD, SHOULD NOT, MAY or RECOMMENDED was extracted before and
 after, keyed by section, and the two sets diffed. Both hold 152 such
 sentences. 134 are unchanged, and the rest differ only by a tag taken
-out, a pointer's history taken out, or a measurement moved with its
-reason kept. No keyword, condition or scope moved. No fixture moved, and
+out, a pointer's history taken out, or a measurement or a binding's note
+moved to Appendix B with its reason kept. No keyword, condition or scope moved. No fixture moved, and
 no scenario.
 
 **A check keeps it so.** `scripts/check-spec-prose.py` measures each

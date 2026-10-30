@@ -58,8 +58,8 @@ facts".
 
 **How "no rule changed" was checked**, as for core 0.60: the 39
 sentences holding an RFC 2119 keyword, before and after, keyed by
-section. 32 are unchanged, three lost a tag only, and four lost a tag
-and a measurement or an implementation note, their keyword and condition
+section. 32 are unchanged, three lost a tag only, and four lost a tag,
+a measurement or an implementation note, their keyword and condition
 kept. This text's tags went from 109 to none, and its sentences over 50
 words from 24 to 14.
 
