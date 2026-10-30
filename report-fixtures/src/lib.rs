@@ -847,6 +847,7 @@ pub fn timing_report() -> TimingReport {
         }),
         discarded: 0,
         skipped: vec![],
+        reach: None,
         unobservable: None,
     })
 }
@@ -1043,6 +1044,7 @@ pub fn telemetry_report() -> TelemetryReport {
     TelemetryReport {
         namespace: "acme".into(),
         selector: None,
+        scope: None,
         presence: Some(TelemetryPresence {
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,

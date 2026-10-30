@@ -324,6 +324,7 @@ pub fn judge(obs: &TimingObservation) -> TimingReport {
     TimingReport {
         namespace: obs.namespace.clone(),
         selector: obs.scope.selector().map(str::to_owned),
+        scope: obs.reach.clone(),
         across_face: obs.spec.across_face,
         clock_bound_ms: whole_ms(obs.spec.clock_bound),
         opening: obs.opening.clone(),

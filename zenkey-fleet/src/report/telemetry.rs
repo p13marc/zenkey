@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::judgement::Judgement;
+use super::observe::ScopeReach;
 
 /// §5's first answer, as the fixtures spell it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -321,6 +322,11 @@ pub struct TelemetryReport {
     /// the descriptors in scope declare.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector: Option<String>,
+    /// What the selector cannot reach (`spec/observer.md` §8.2; #950): the
+    /// verbatim chunks it names none of, and the metric resources of the
+    /// owners in scope it misses. Absent with no selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ScopeReach>,
     /// Presence as read; absent across a face, where it does not cross.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presence: Option<TelemetryPresence>,
@@ -405,11 +411,22 @@ impl TelemetryReport {
             return Judgement::Unobservable {
                 reason: format!(
                     "no metric resource in scope in {}: a reading over an empty scope answered \
-                     nothing",
+                     nothing{}",
                     if self.namespace.is_empty() {
                         "the bus root".to_owned()
                     } else {
                         format!("namespace {:?}", self.namespace)
+                    },
+                    match self.scope.as_ref().and_then(|s| s.unreached.first()) {
+                        Some(u) => format!(
+                            "; {} metric resource(s) of the owners in scope are out of the \
+                             selector's reach (the first, {} {} {}: observer §8.2)",
+                            self.scope.as_ref().map_or(0, |s| s.unreached.len()),
+                            u.address,
+                            u.iface,
+                            u.resource
+                        ),
+                        None => String::new(),
                     }
                 ),
             };
@@ -536,6 +553,7 @@ mod tests {
         TelemetryReport {
             namespace: "acme".into(),
             selector: None,
+            scope: None,
             presence: Some(TelemetryPresence {
                 selector: "zk2/*/*/@zk/**".into(),
                 complete: true,
@@ -667,6 +685,7 @@ mod tests {
         );
         for absent in [
             "selector",
+            "scope",
             "across_face",
             "lost",
             "refused",
