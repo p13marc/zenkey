@@ -3426,8 +3426,109 @@ def family_readings(root: Path) -> list[Result]:
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
-        + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root)
+        + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
+        + _observer_05_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _observer_05_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``observer.md`` text 0.5 (#609, round 85): §1's NotAsked that spells
+    not this profile's keeps its reason in every medium (F-295), over every
+    such answer of the three fixtures the rule cites, and in zk2py's
+    freshness tool's member field; and §5.2's watch after a window, the
+    longer of the lease and ``wait_before_close`` (F-320). No session is
+    opened."""
+    from . import budget as bg
+    from . import freshness as fr
+    from . import judgement as jd
+
+    label = "observer 0.5 §1"
+    spec = root.parent
+    out: list[tuple[str, Any, Any]] = []
+    # "That NotAsked keeps its reason in every medium. A table cell, a
+    # report field and a note each say not this profile's, or name the
+    # reason, and never show a bare not asked."
+    cited = {"freshness.v1": "profiles/freshness/conformance/judgements.json",
+             "telemetry.v1": "profiles/telemetry/conformance/samples.json",
+             "desired.v1": "profiles/desired/conformance/conclusions.json"}
+    out.append((f"{label}: the rule cites the three fixtures §1 names for the NotAsked spelling",
+                cited, {p: jd.FIXTURES[p] for p in jd.SPELLINGS}))
+    spelled: list[jd.Judgement] = []
+    for profile, rel in cited.items():
+        doc = json.loads((spec / rel).read_text())
+        spelled += [j for j in (jd.read(profile, a, rs) for a, rs in jd.answers(doc))
+                    if j.shape == jd.TOKEN and j.spelled == jd.NOT_ASKED]
+    bare = ("not asked", "not_asked", "")
+
+    def says(text: str, j: jd.Judgement) -> bool:
+        return "not this profile's" in text or any(r in text for r in j.reasons)
+
+    # The 15 (6, 1 and 8) is pinned on purpose, a tripwire, as round 84's
+    # counts are: a fixture that gains or loses a NotAsked of the second
+    # spelling fails here, so the rule is read against it again rather than
+    # passing on whatever the fixtures now hold (review-bot on PR #957)
+    out += [
+        (f"{label}: the three fixtures give 15 NotAsked answers that spell not this profile's",
+         len(spelled), 15),
+        (f"{label}: no cell of them is a bare not asked, and each says not this profile's or names its reason",
+         [jd.cell(j) for j in spelled if jd.cell(j).strip().lower() in bare or not says(jd.cell(j), j)], []),
+        (f"{label}: each field keeps the profile's not_asked with its reasons, never an empty list",
+         [jd.field(j) for j in spelled if not jd.field(j)["reasons"] or jd.field(j)["answer"] != "not_asked"], []),
+        (f"{label}: each note says not this profile's and names the reason",
+         [jd.note(j) for j in spelled if not (says(jd.note(j), j) and "not this profile's" in jd.note(j))], []),
+    ]
+    # zk2py's freshness tool (scenarios §6): a member's field is its token
+    # and its reason, so a deleted member reads not asked, deleted
+    members = {"m/1": fr.Verdict(fr.FRESH, "within_horizon"), "m/2": fr.Verdict(fr.NOT_ASKED, "deleted"),
+               "m/3": fr.Verdict(fr.UNOBSERVABLE, "silent")}
+    fields = fr.member_fields(members)
+    out += [
+        (f"{label}: zk2py's freshness tool keeps each member's reason beside its token", fields,
+         {"m/1": {"verdict": "fresh", "reason": "within_horizon"}, "m/2": {"verdict": "not_asked", "reason": "deleted"},
+          "m/3": {"verdict": "unobservable", "reason": "silent"}}),
+        (f"{label}: its deleted member's cell is not this profile's, the reason named",
+         jd.cell(jd.read(fr.PROFILE, fields["m/2"]["verdict"], fields["m/2"]["reason"])),
+         "not this profile's (deleted), spelled not asked"),
+    ]
+
+    # The member field's boundary, typed both ways (review-bot on PR #957):
+    # a caller still reading round 84's bare token fails, never reads a
+    # character of it
+    def refused(f: Any, *a: Any) -> str:
+        try:
+            f(*a)
+        except TypeError:
+            return "refused"
+        return "read"
+
+    got = {"state/status": (fr.Verdict(fr.FRESH, "within_horizon"), fields), "stream/level": (
+        fr.Verdict(fr.UNOBSERVABLE, "no_observation"), {})}
+    out += [
+        (f"{label}: service_members reads read_service's members as their verdicts, each field's shape checked",
+         fr.service_members(got), {"state/status": {"m/1": "fresh", "m/2": "not_asked", "m/3": "unobservable"},
+                                   "stream/level": {}}),
+        (f"{label}: member_verdicts refuses round 84's bare token, a field without its reason, one with more, and "
+         f"a verdict that is not §5's",
+         [refused(fr.member_verdicts, {"m": "not_asked"}), refused(fr.member_verdicts, {"m": {"verdict": "fresh"}}),
+          refused(fr.member_verdicts, {"m": {"verdict": "fresh", "reason": "x", "detail": ""}}),
+          refused(fr.member_verdicts, {"m": {"verdict": "gone", "reason": "x"}}),
+          refused(fr.service_members, {"r": (fr.Verdict(fr.FRESH, "x"), {"m": "fresh"})})],
+         ["refused"] * 5),
+        (f"{label}: member_fields refuses a member that is not a Verdict (a token string)",
+         refused(fr.member_fields, {"m": "deleted"}), "refused"),
+    ]
+    # §5.2: "for one lease plus its reply timeout … A deployment that sets a
+    # longer lease, or a wait_before_close longer than its lease, lengthens
+    # it" (F-320: zk2py reads the longer of the two)
+    out.append(("observer 0.5 §5.2: the watch after a window is one lease plus the reply timeout, the longer of the "
+                "lease and wait_before_close standing for the lease",
+                [bg.watch_after_s(), bg.watch_after_s(20.0, 5.0, 1.0), bg.watch_after_s(10.0, 15.0, 2.0)],
+                [11.0, 21.0, 17.0]))
+    # A caller's own lease is read the same way (review-bot on PR #957): a
+    # lease of 0 still watches wait_before_close and the reply timeout
+    out.append(("observer 0.5 §5.2: a caller's lease of 0 s or 1 s still watches zenoh's 5 s wait_before_close and "
+                "the reply timeout", [bg.watch_after_s(0.0), bg.watch_after_s(1.0)], [6.0, 6.0]))
+    return out
 
 
 def _observer_04_readings(root: Path) -> list[tuple[str, Any, Any]]:

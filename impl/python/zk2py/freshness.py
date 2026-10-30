@@ -322,6 +322,46 @@ def resource_verdict(kind: str, annotations: dict[str, Any] | Horizon,
     return Verdict(UNOBSERVABLE, first.reason, "no member stale, and at least one unobservable"), []
 
 
+def member_fields(members: dict[str, Verdict]) -> dict[str, dict[str, str]]:
+    """The report field of each member's verdict: its token and its reason,
+    never the token alone. Observer §1 (text 0.5, F-295): freshness.v1
+    spells not this profile's as not asked with a reason naming the failed
+    premise (``kind``, ``deleted``), and "That NotAsked keeps its reason in
+    every medium … never show a bare not asked". A deleted member is one.
+
+    The boundary is typed both ways: a member that is not a :class:`Verdict`
+    is refused here, and :func:`member_verdicts` refuses a field that is not
+    ``{"verdict", "reason"}``, so a caller still reading round 84's token
+    string fails at once rather than reading a character of it."""
+    for k, v in members.items():
+        if not isinstance(v, Verdict):
+            raise TypeError(f"member {k}: {v!r} is not a freshness Verdict")
+    return {k: v.pair() for k, v in members.items()}
+
+
+def member_verdicts(fields: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Each member's verdict token, read from :func:`read_service`'s member
+    field, after checking its shape: a mapping of exactly ``verdict`` and
+    ``reason``, both strings, the verdict one of §5's tokens. Anything else,
+    a bare token string among them, is a :class:`TypeError`."""
+    out: dict[str, str] = {}
+    for k, f in fields.items():
+        if not (isinstance(f, dict) and set(f) == {"verdict", "reason"}
+                and all(isinstance(x, str) for x in f.values())
+                and f["verdict"] in (FRESH, STALE, UNOBSERVABLE, NOT_ASKED)):
+            raise TypeError(f"member {k}: {f!r} is not a member field {{'verdict', 'reason'}} (observer §1, F-295)")
+        out[k] = f["verdict"]
+    return out
+
+
+def service_members(got: dict[str, tuple[Verdict, dict[str, dict[str, str]]]]) -> dict[str, dict[str, str]]:
+    """:func:`read_service`'s members, per resource, as verdict tokens, each
+    member field's shape checked by :func:`member_verdicts` (a
+    :class:`TypeError` otherwise). The callers of :func:`read_service` read
+    its members through this."""
+    return {rid: member_verdicts(m) for rid, (_, m) in got.items()}
+
+
 # -- the runtime half: a GET reader's clock (§2.6) ---------------------------------
 
 @dataclass
@@ -478,7 +518,7 @@ def get_reading(session: Any, key: str, timeout: float = 1.0) -> GetReading:
 
 def read_service(session: Any, address: str, contracts: list[dict[str, Any]], window_s: float,
                  trust: ClockTrust, on_subscribed: Any = None,
-                 get_timeout: float = 1.0) -> dict[str, tuple[Verdict, dict[str, str]]]:
+                 get_timeout: float = 1.0) -> dict[str, tuple[Verdict, dict[str, dict[str, str]]]]:
     """§5's second question for each resource of ``address`` (a
     ``<system>/<service>``), over a window, as scenarios §6 reads: "it
     subscribes to every exposed stream and state resource first, then GETs
@@ -488,7 +528,10 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
 
     ``contracts`` are canonical forms (a bundle's, core §9.5). A member is
     one the tool knows exists, received or answered (§2.5). Returns
-    ``{"<token>/<template>": (verdict, {member key: its verdict token})}``."""
+    ``{"<token>/<template>": (verdict, {member key: {"verdict", "reason"}})}``:
+    each member's reason is kept beside its token (:func:`member_fields`,
+    observer §1, text 0.5), so a deleted member reads not asked, ``deleted``,
+    never a bare not asked."""
     from .owner import _template_key
 
     plain = []
@@ -516,7 +559,7 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
         now_mono, now_utc = time.monotonic_ns(), time.time_ns()
         import zenoh
 
-        out: dict[str, tuple[Verdict, dict[str, str]]] = {}
+        out: dict[str, tuple[Verdict, dict[str, dict[str, str]]]] = {}
         for _, r, key in plain:
             rid = f"{r['token']}/{r['template']}"
             h = horizon(r["kind"], r["annotations"])
@@ -528,7 +571,7 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
                 if r["kind"] == "state":
                     obs.append(readings.get(m, GetReading(None)).observation(trust, now_utc))
                 members[m] = judge(r["kind"], h, obs)
-            out[rid] = (resource_verdict(r["kind"], h, members)[0], {k: v.verdict for k, v in members.items()})
+            out[rid] = (resource_verdict(r["kind"], h, members)[0], member_fields(members))
         return out
     finally:
         sub.close()

@@ -429,6 +429,21 @@ def section5(report: Report) -> None:
 
 # -- §6 ------------------------------------------------------------------------------
 
+def _members_check(report: Report, sec: str, step: str, got: dict[str, Any], want: dict[str, str]) -> None:
+    """Each resource's members as zk2py's tool gives them: each member field
+    its verdict and its reason (observer §1, text 0.5, F-295), read through
+    :func:`zk2py.freshness.service_members`, which refuses any other shape.
+    Every resource of §6 has one member, judged as its resource is."""
+    try:
+        members = fr.service_members(got)
+    except TypeError as e:
+        report.check(sec, f"{step}: each member field is its verdict and its reason", False, str(e))
+        return
+    report.check(sec, f"{step}: each member field is its verdict and its reason, each resource's one member "
+                      f"judged as its resource", {k: sorted(m.values()) for k, m in members.items()}
+                 == {k: [v] for k, v in want.items()}, str(members))
+
+
 def section6(report: Report) -> None:
     sec = "§6 a tool's verdict on a resource"
     bus = Bus()
@@ -455,6 +470,7 @@ def section6(report: Report) -> None:
         v1 = {k: v.verdict for k, (v, _) in got1.items()}
         report.check(sec, "step 1: status fresh, intent fresh (never stale), note not asked (no horizon), level "
                           "fresh", v1 == want1, str({k: (v.pair(), m) for k, (v, m) in got1.items()}))
+        _members_check(report, sec, "step 1", got1, want1)
 
         def on_subscribed() -> None:
             def later() -> None:
@@ -472,6 +488,7 @@ def section6(report: Report) -> None:
         report.check(sec, "step 2: status stale, level stale, intent fresh, note not asked: the run's verdict is "
                           "the finding", v2 == want2 and finding,
                      str({k: (v.pair(), m) for k, (v, m) in got2.items()}))
+        _members_check(report, sec, "step 2", got2, want2)
         stop.set()
     finally:
         bus.close()
