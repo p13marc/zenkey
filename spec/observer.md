@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.1 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.2 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.58 ([`core.md`](core.md)) |
+| **Written against** | core 0.59 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -47,6 +47,9 @@ cites what checks it.
 **References.**
 - A bare section number, `§3.4`, is this text's. `core §8.1` is the
   core's, and a profile's is written with its name, `redundancy.v1 §2.5`.
+- A list after `core` is the core's throughout: `core §4.2, §5.1` names
+  two of its sections. A semicolon ends it, so `(core R7; §7.1)` names
+  the core's R7 and this text's §7.1 (text 0.2, F-289).
 - The rule names S1–S7, O1–O7 and R1–R7 are the core's (core §4.2, §5.1,
   §3.2), and so is P3, one writer per key (core §6).
 - A version in parentheses, as in "(0.37, #839)", is the core amendment
@@ -94,6 +97,18 @@ Unestablished(NotAsked) | Unestablished(Unobservable { reason })
 - **Not asked is not answered no.** A tool distinguishes a question it has
   not put from one answered negatively, in each of the three media.
   `[F: budget/population.json]` `[Sc: profiles/desired/scenarios.md §9]`
+- **Not this profile's** (text 0.2, F-286). A profile's question can
+  carry a premise of its own, and where the premise does not hold the
+  profile answers **not this profile's** (its §5,
+  [`profiles/README.md`](profiles/README.md)): a role that carries none of
+  its policy (`arbitration.v1`), an interface it does not govern
+  (`redundancy.v1`), a resource of a kind it does not read (`timing.v1`).
+  That answer is Unestablished, a kind of its own: kept
+  apart from NotAsked and from Unobservable in every medium, as they are
+  kept apart from each other, and never Established(no), since the
+  subject is not one the question is about. The profiles' fixtures give
+  it as the token `not_this_profiles`.
+  `[F: profiles/timing/conformance/conclusions.json, profiles/arbitration/conformance/conclusions.json, profiles/redundancy/conformance/conclusions.json]`
 - **An empty scope is Unobservable.** When nothing in scope was observed
   (no token, no reply, no sample), the judgement is unobservable, never
   clean. A monitor pointed at the wrong namespace must not be green.
@@ -126,13 +141,13 @@ Its instances, each normative where it lives:
   read is complete and empty (§3.4); a read through a session cut off is
   not complete (§3.5); absence is established only by a complete read
   (§3.6).
-- **State** (core S4–S6, §4). Silence from the owner's GET is not "no
+- **State** (core S4–S6; §4). Silence from the owner's GET is not "no
   value". An archive's answer is last-known, never current (core S6).
 - **Contracts** (core §8.4, §9.6). A bundle that no holder served, or that
   failed verification, is "contract unavailable", not "no contract".
 - **A window** (§5.2). What a window did not hear may be live, unless the
   window is complete.
-- **Constrained faces** (core R7, §7.1). What does not cross a face is
+- **Constrained faces** (core R7; §7.1). What does not cross a face is
   *unobservable* from the far side, never absent.
 
 ---
@@ -164,6 +179,12 @@ tokenless set, re-minting and the caller's timeouts stay in core §8.1.
   the deployment's longest re-mint overlap. Start-up, re-mint and
   teardown pass through such shapes briefly, by design. §6.1 states the
   rule for split-brain, and it holds for every such shape.
+  - **The transient half** (text 0.2, F-282). An owner between core
+    §8.2's steps 3 and 4 serves a descriptor that lists an interface
+    whose token it has not yet declared. Seen in one of two reads a
+    grace apart, that shape is no fault.
+
+  `[Sc: operations.md §8; profiles/hostid/scenarios.md §6; profiles/redundancy/scenarios.md §12]`
 
 ### 3.3 Possibly incomplete
 
@@ -518,7 +539,7 @@ tokenless set, re-minting and the caller's timeouts stay in core §8.1.
   reader that must see its own token as the bus holds it reads on a
   session that does not hold it: `redundancy.v1`'s candidate, whose
   check of its own claim is what tells a refused read from a lone
-  candidate's (its §2.5).
+  candidate's (its §2.5). `[Sc: profiles/redundancy/scenarios.md §5]`
 
 ### 3.9 What a complete read covers
 
@@ -541,6 +562,8 @@ tokenless set, re-minting and the caller's timeouts stay in core §8.1.
     client of a router, or a peer linked to that peer. `redundancy.v1`
     makes it a MUST of its candidates and of the tools that read them
     (its §2.5).
+
+  `[Sc: profiles/redundancy/scenarios.md §5]`
 
 ### 3.10 What a tool can count
 
@@ -659,17 +682,12 @@ cannot tell under `Latest` which replier answered.
 
 ### 4.4 Whose stamp
 
-- **A tool attributes a state stamp to its owner** by comparing the
-  stamp's id with the owner's `meta.zid` (core §3.3; S1, core §4.2,
-  "Observing S1"). Without it, a stamp's clock is unattributable, never
-  foreign. Moved from core §3.3's `meta` (core 0.58).
-- **Two zids compare by value** (0.11). A tool MUST compare two zids by
-  value, never by their text: case and leading zeros carry no meaning.
-  How zenoh 1.10.1 writes a zid, and how an owner writes `meta.zid`, stay
-  in core §3.3, "How a zid compares", from which this sentence moved
-  (core 0.58).
-- **A tool's S1 check** (0.16, 0.17). A tool attributes a state reply's
-  stamp by comparing its id with the owner's `meta.zid` (core §3.3), by value.
+- **A tool's S1 check** (0.16, 0.17). A tool attributes a state stamp
+  to its owner by comparing the stamp's id with the owner's `meta.zid`
+  (core §3.3; S1, core §4.2, "Observing S1"), by value (below). Without
+  `meta.zid`, a stamp's clock is unattributable, never foreign: that
+  sentence moved from core §3.3's `meta` (core 0.58).
+  `[Sc: profiles/timing/scenarios.md §4, §5]`
   - **A foreign stamp is a finding** whatever else the tool read: an owner
     that is its own router stamps with that router's id, which is its own
     `meta.zid`.
@@ -687,6 +705,11 @@ cannot tell under `Latest` which replier answered.
     counted no router's answer (it has no admin read, the admin space is
     off, or it cannot read the replier id, core Appendix B), so the owner may be
     a router it cannot see.
+- **Two zids compare by value** (0.11). A tool MUST compare two zids by
+  value, never by their text: case and leading zeros carry no meaning.
+  How zenoh 1.10.1 writes a zid, and how an owner writes `meta.zid`, stay
+  in core §3.3, "How a zid compares", from which this sentence moved
+  (core 0.58). `[F: profiles/timing/conformance/lifespans.json]`
 
 ### 4.5 An archive's alignment
 
@@ -871,7 +894,10 @@ stay.
 Two instances of one service holding an interface token for the same
 interface, for longer than a grace period, is a **finding**, except
 where replicated serving explains it (below). A tool diagnoses it, and the
-runtime does not fence (core §6).
+runtime does not fence, but for an interface whose contract uses
+`redundancy.v1`: its holders step down as that profile's §2.9 says
+(0.39), which is no fence either, since writes in flight still land
+(core §6).
 
 - **A holder is an incumbent, whatever its mark** (0.39). The check
   counts the instances holding the token. One whose descriptor marks
@@ -921,7 +947,7 @@ tool's `self.system`.
   never inferred. `[Sc: bindings.md §3]`
 - **Liveness across a face** (core R7). Where nothing crosses, liveness is
   *unobservable*, and a tool MUST say so rather than report the provider
-  down. `[Sc: constrained.md §3]`
+  down. `[Sc: constrained.md §3; profiles/link/scenarios.md §6]`
 - **A tool has no system of its own.** A tool that is not a service MUST
   refuse a `self.system` provider, as it refuses a parameter bound to
   `self.system` (R2). `[Sc: bindings.md §5]`
@@ -975,6 +1001,12 @@ Moved from core §7.4 (core 0.58), where SHM's facts and the deployment's
 
 - A tool SHOULD check the limit at start: the `RLIMIT_MEMLOCK` that core
   §7.4 asks a deployment to set to at least the pool plus 2 MiB.
+  - **What the check reports** (text 0.2, F-290). The pool is a
+    publisher's, which a tool at its start does not know, so the check
+    reports what the limit admits: the largest pool its soft limit
+    covers, the limit less 2 MiB, or, below 2 MiB, that it admits none.
+    An unlimited limit admits any pool, and a limit the tool cannot read
+    leaves the check unobservable.
 
 ---
 
@@ -1085,12 +1117,17 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `scenarios/state.md` §1, §11, §12 | §4.1, §4.3, §8.1, §8.3 |
 | `scenarios/security.md` §3 | §4.2 |
 | `scenarios/budget.md` §1–§3 | §5.2 |
-| `scenarios/operations.md` §3, §5, §8 | §2, §6.1, §7.2 |
+| `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6, text 0.2), §6.1, §7.2 (§5 step 2, text 0.2) |
 | `scenarios/bindings.md` §3, §5 | §7.1 |
 | `scenarios/constrained.md` §3 | §7.1 |
 | `scenarios/types.md` §2 | §7.3 |
-| `scenarios/grammar.md` §1, §2 | §8.2 |
+| `scenarios/grammar.md` §1, §2 | §8.2 (§1 step 5, text 0.2) |
+| `profiles/*/conformance/conclusions.json` (`arbitration`, `redundancy`, `timing`) | §1, not this profile's (text 0.2) |
+| `profiles/timing/conformance/lifespans.json` | §4.4, zids compared by value (text 0.2) |
 | `profiles/arbitration/scenarios.md` §3, §4, §7 | §3.6, §3.7 |
-| `profiles/redundancy/scenarios.md` §12 | §6.2 |
+| `profiles/hostid/scenarios.md` §6 | §3.2 (text 0.2) |
+| `profiles/redundancy/scenarios.md` §5 | §3.8, §3.9 (text 0.2) |
+| `profiles/redundancy/scenarios.md` §12 | §3.2 (text 0.2), §6.2 |
+| `profiles/link/scenarios.md` §6 | §7.1, liveness across a face (text 0.2) |
 | `profiles/desired/scenarios.md` §9 | §1 |
-| `profiles/timing/scenarios.md` §4, §5 | §8.3 |
+| `profiles/timing/scenarios.md` §4, §5 | §4.4 (text 0.2), §8.3 |

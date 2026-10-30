@@ -3,6 +3,70 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.59 — 2026-10-30: conformance names `observer.md`, and a scenario step for three of its rules (#950)
+
+zk2py round 82 (PR #949) read 0.57, 0.58 and `observer.md` text 0.1
+cold and found that the move lost no rule (#950, epic #921 Track B). Of
+its ten findings, F-285 is this document's: in 0.57, §12's "every rule
+above" held the reader's discipline, and since 0.58 the rules above are
+pointers to it, so an implementation could claim full conformance
+without [`observer.md`](observer.md), which the preamble did not name
+either. F-282, F-284 and F-287 asked for evidence of three of
+`observer.md`'s rules, which is a step each in this document's
+scenarios. `observer.md` moves to text 0.2 beside it
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), written against this
+version.
+
+**Changed:**
+- **§12, the full level** meets every rule above and every rule of
+  `observer.md` that binds a role it plays: a tool, or a participant
+  where it reads presence, state or the admin space and concludes from
+  what it read (observer §0). **The constrained level** meets every rule
+  the full level does, with its relaxations and additions: its "every
+  rule above" held the reader's discipline in 0.57 as the full level's
+  did, and none of its relaxations is a reader's, so F-285 holds of it
+  too.
+- **The preamble** names `observer.md` beside the fixtures and the
+  scenarios, for a participant that reads.
+
+**A scenario step each:**
+- **`operations.md` §5 step 2** (F-284; observer §7.2). A tool judging
+  O3 from outside calls a frozen server's operation told that its grants
+  let it call, and not told: told, the silence of an owner whose tokens
+  it reads is the finding, an access-control refusal named beside it;
+  not told, it is unobservable, the premise named. §5's one step is step
+  1, its words unchanged.
+- **`operations.md` §8 step 6** (F-282; observer §3.2's transient half).
+  An owner whose interface token comes a second after its descriptor,
+  read once within that second and twice a grace apart after, is no
+  finding; §8's title names it beside split-brain. Steps 1 to 5 already
+  showed a shape in one read (a re-mint's overlap) and shapes held
+  through both reads; none showed an owner between §8.2's steps 3 and 4.
+- **`grammar.md` §1 step 5** (F-287; observer §8.2). A tool watching
+  `zk2/g/**` reports `@stream`, `@state`, `@op`, `@adv` and `@zk`
+  excluded beside what it watched.
+
+The reference runs each: §5 step 2 as `zenctl check conform`, with and
+without `--calls-granted` (`zenctl/tests/live_zk2.rs`,
+`operations_s5_a_frozen_servers_silence_is_the_o3_finding_only_on_the_operators_word`);
+§8 step 6 as the doctor's `token-missing`, its first read inside the
+second (`zenkey-fleet/tests/zk2_doctor.rs`,
+`operations_8_step_6_an_interface_token_a_second_after_its_descriptor_is_no_finding`,
+beside a control that never declares its token and is the finding); and
+§1 step 5 as `zenctl echo` and `zenctl timing`
+(`grammar_s1_a_tools_wildcard_scope_names_what_it_excludes`), `timing`
+naming in its report's `scope` the timed `@stream` its selector misses.
+
+**Deliberately not changed.**
+- **No rule of this document, and no fixture.** The constrained level's
+  relaxations and additions stand as they were; what binds an
+  implementation that plays no reading role is unchanged.
+- **Appendix C's rows.** The three steps evidence `observer.md`'s rules,
+  which its Appendix B indexes; the core sections each scenario file is
+  written against do not move.
+- **Every profile text's "Written against"**, and every profile text's
+  version.
+
 ## 0.58 — 2026-10-29: the reader's discipline moved to `observer.md`, no rule changed (#925)
 
 The rules a tool follows lived in three places under three statuses
