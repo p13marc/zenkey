@@ -4,6 +4,37 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-30: editorial: round 86's F-327, no rule changed (#935)
+
+zk2py round 86 (PR #959) read 0.5 cold, beside core 0.62 and
+`observer.md` 0.6. It found that 0.5 changed no rule, and filed one
+finding against this text, F-327, hard to read. This is #935's fourth
+part.
+
+**Editorial: F-327, the scenarios' "T's clock".**
+- **The gap.** "Without it, a tool measures its clock from puts it hears
+  during its reading, and the status is re-put every 30 s, so the
+  reading lasts 30 s, or its subscription is declared before the owners
+  start" stated a requirement as a fact. Its "or" joined a duration to a
+  precondition.
+- **Now.** Three sentences, the finding's rewrite. The tool measures its
+  clock from the puts it hears. The status is re-put every 30 s. So such
+  a tool's reading lasts 30 s, unless its subscription is declared
+  before the owners start.
+
+**How "no rule changed" was checked**, as for 0.5. The scenarios' 44
+keyword sentences and Expected lines are unchanged. The rewrite holds
+no keyword, and was read beside its old text: the tool, the 30 s and
+the precondition are the same. `v1.md` is unchanged but for its header.
+No fixture moved.
+
+**The figures.** `scenarios.md`'s mean went from 13.70 words to 13.50.
+`spec/.prose-baseline.json` is lowered to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Written against core 0.23**, still.
+
 ## 0.5 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60
