@@ -4,6 +4,46 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-10-30: editorial: §2.18's instance is `desired.v1`'s run, for round 87's F-336 (#935)
+
+zk2py round 87 (PR #961) found a contradiction between this text and
+`desired.v1` 0.9 (F-336). Take an owner fed through `desired.v1`,
+converged on a version, that re-mints in its process. By §2.12 a
+re-mint is a restart from its startup values, and by §2.18 its new
+instance acts again. By `desired.v1` §2.7 a re-mint kept its run, so the
+owner would not act again, and its device would run its startup values
+while its view said the document converged.
+
+This text's rule stands, and `desired.v1` 0.10 says so: for a
+`config.v1` owner, a re-mint is a restart, and begins a new run
+(`desired.v1` §2.16, where its one rule changed is). This version only
+makes §2.18's words agree with it.
+
+**Editorial: §2.18, "Fed through `desired.v1`".** After "once in an
+instance", two sentences: "Its instance and desired.v1's run are the
+same thing. A re-mint is a restart (§2.12), which begins a new run, as
+desired.v1 §2.16 says." `desired.v1` §2.16 says the same from its side:
+"For a `config.v1` owner a run and an instance are the same thing".
+
+**Evidence.** `desired.v1`'s scenarios gain §12, "A `config.v1` owner's
+re-mint is a restart", on this text's scenarios' owner `lab/rf0`. It
+states what §2.12 lets the reference do, refusing the re-mint while it
+runs, and that the restart acts on the bound version again.
+
+**How "no rule changed" was checked**, as for 0.7, with the tool of
+#935's third part. This text's 39 keyword sentences are unchanged, and
+so are the scenarios. The two new sentences hold no keyword, and state
+what §2.12 and §2.18 already said of an instance. No fixture moved.
+
+**The figures.** This text's mean went from 17.95 words to 17.92.
+`spec/.prose-baseline.json` is lowered to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **§2.12's re-mint**, and the reference's refusal of one while
+  `config.v1` runs.
+- **Written against core 0.28**, still.
+
 ## 0.7 — 2026-10-30: editorial: round 86's F-329 to F-331, no rule changed (#935)
 
 zk2py round 86 (PR #959) read 0.6 cold, beside core 0.62 and

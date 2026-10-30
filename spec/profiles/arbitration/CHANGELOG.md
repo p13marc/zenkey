@@ -3,6 +3,114 @@
 Amendments to [`v1.md`](v1.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.4 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the core version that made what
+it cites, as in "(core §8.1, 0.41 to 0.45)", or the finding that caused
+it, as in "(text 0.2, F-268)". This changelog and the core's already hold
+that history. So the text now states each rule and cites its evidence,
+and nothing else. This is #935's fifth part, beside `redundancy.v1` and
+`timing.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **The core's versions,** after a citation that stays:
+  - the opening's binding "(core R1, R3, 0.54)", and §2.4's;
+  - §0's watch session, round trip, move and complete read, "core
+    §8.1's (0.37, 0.41, 0.42)";
+  - §1's table and §4's note, "the interim row of core Appendix D (core
+    0.54)", and §1's "(core R1, R3, which 0.54 makes ordered)";
+  - §2.5 outcome 6's watch without history;
+  - §2.7's re-mint a watch could not see, its read again (twice), "Ineligible is
+    never absent", its "Core §8.1 says since 0.54", and "Heard on a watch
+    session"'s three, "(core §8.1, 0.37)", "(0.41)" and "(0.42)";
+  - §2.8's nine, from "(core §8.1, 0.41)" to "(core §8.1, 0.44, 0.45)".
+    "(core §8.1, 0.42: a token withdrawn then is never told)" keeps its
+    reason, as "(core §8.1: …)";
+  - §2.10's "core `presence.md` §10 (0.46)".
+- **Two pointers made plain.** §2.8's "(…; Appendix B)" twice, after
+  core §8.1's versions, meant the core's Appendix B, Zenoh 1.10.1's facts.
+  This text's own Appendix B is the record. Each now reads "(core §8.1,
+  core Appendix B)".
+- **This text's versions and findings,** each after a run-in label that
+  now stands alone: §2.8's "Where a move begins (text 0.2, F-268)",
+  §2.14's "No consumer's descriptor (text 0.2, F-272)", and its "What the
+  view reads that the descriptor does not carry (text 0.3, BC)". §2.14's
+  "Listening" loses "(text 0.3, BC)" too.
+- **The scenarios.** The opening names the reference's tests without
+  "#909's BB" and "#909's BC". The conventions lose "(text 0.2, F-269:
+  …)", which keeps its reason, "core §8.1, 0.37", "(text 0.2, F-271)",
+  "(#909's BB)" and a "0.46". §3's Expected 2, §7's setup, its Expected 1
+  (four) and 2, §9's Expected 1, §10's reference tool and its Expected 4,
+  and §11's step 1 each lose a tag. §11's opening loses "Text 0.2, F-270:",
+  and its sentence keeps its words.
+
+**The long sentences, split.** The 15 over 50 words in this text:
+- **§2.2, check 7,** `no_deadline`: its three ways a stream has no
+  deadline are a list, then "Read only when check 6 passes".
+- **§2.3, "What it means":** two sentences, the reading per key, then
+  the miss.
+- **§2.4, shadowed:** the exact entries, then "So is a wildcard entry".
+- **§2.5, outcome 6:** the watch without history, then "So a consumer …
+  SHOULD read".
+- **§2.7:** the re-mint a watch could not see is two sentences, the
+  read again's re-admission and what it costs. The read again's SHOULD
+  gives the reference's 0.1 s read a sentence of its own. "Ineligible is
+  never absent" is the rule, then what the consumer does.
+- **§2.8:** "What a move does" is what zenoh tells, then "It tells them
+  unordered". "Where a move begins" was one with the sentence after it,
+  which opened with a lowercase "zenoh": that one opens "Zenoh" now. The
+  rule's two MUSTs are two sentences. Its round trip after a cut is four:
+  none through a session cut off, when it is asked, what zenoh tells at an
+  open, and the margin. "As one change" is three, one per address's end.
+- **§2.9:** the timer is two sentences, the active provider's, then none
+  with no provider active. "One order" is the threads, then the instant.
+- **§2.14, "The tool's view":** three sentences, what it runs over, with
+  what, and what it reports.
+
+The scenarios' one, the conventions' commanders, is three sentences: the
+payload, the first put 500 ms after the tokens with its reason, and the
+tokens held.
+
+**Nothing moved to an appendix.** No tag held a measurement. S11's
+figures in §2.7, §2.9 and §2.13 carry no tag, and Appendix B, the record,
+already gives them.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61, with
+the tool of #935's third part.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY, REQUIRED or RECOMMENDED was extracted before and after. Each
+  was keyed by section, and the two sets diffed. The scenarios' Expected
+  lines were diffed too, keyword or not.
+- **This text.** 22 before and 23 after: §2.8's sentence holding two
+  MUSTs is two sentences. 19 are unchanged. The other three keep their
+  keyword, condition and scope, each split from the words around it and
+  its tag taken out: §2.5's SHOULD, §2.7's read again's SHOULD and §2.8's
+  first MUST.
+- **The scenarios.** 51 keyword sentences and Expected lines before and
+  after. 45 are unchanged, and six lost a tag only.
+- **The rest.** Every other sentence and table row was diffed too, and
+  each rewrite read beside its old text. Of 357 before and 378 after in
+  this text, 325 are unchanged; of the scenarios' 192 and 194, 175. None
+  moves a condition, an object or a scope. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 27 to none, sentences over 50 words from 15
+  to none, and a mean from 22.71 words to 21.03, under #935's target of
+  22. The check did not count the opening's tag, above §0.
+- **`scenarios.md`:** tags from 13 to none, sentences over 50 words from
+  1 to none, and a mean from 16.37 to 15.93. The check did not count the
+  opening's and the conventions' seven.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label, heading or anchor.
+- **Appendix A**, against v1, and **Appendix B**, the record, which are
+  history: their "(core 0.54)", "(#594)" and "(#909's BB)" stay.
+- **Written against core 0.56**, still, the status `experimental`, and
+  the header's `timing.v1` text 0.3 and `redundancy.v1` text 0.5.
+
 ## experimental — 2026-10-29: no adopter yet (#938)
 
 The text's status moves from `draft` to `experimental`, the status of a

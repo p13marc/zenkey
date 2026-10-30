@@ -4,6 +4,44 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-10-30: editorial: round 87's F-337 and F-338, no rule changed (#935)
+
+zk2py round 87 (PR #961) read 0.9 cold, beside `telemetry.v1` 0.6 and
+`desired.v1` 0.9. It found that 0.9 changed no rule but §2.15's watch,
+which 0.8 already held, and filed two findings against this text, F-337
+and F-338, both hard to read. This is #935's fifth part. Each rewrite is
+the finding's, and keeps its keyword, condition, scope and evidence.
+
+**Editorial: round 87's hard-to-read findings.**
+- **F-337, §2.14 step 4, "The establishing GET heals the keys it leaves
+  out".** "Otherwise" named no condition: it stood for 0.8's "Before
+  0.5", which 0.9 took out. And "as before" pointed at nothing in
+  particular. The sentence now opens "Without this rule, a key whose
+  resolve and delete a loss took would read `incomplete` …". The last
+  sentence is two: a key something of which arrived after that GET was
+  asked is not left out. "A GET that answers it heals it, as step 4's
+  first sentence says."
+- **F-338, §2.16, "A key's first answer".** "Neither splits by its
+  reason" read as "neither yes nor no", right after them. It is now "An
+  answer of neither, unobservable or not asked, splits by its reason, in
+  two closed lists". "Neither" is the third answer that "What is a
+  change to report" names.
+
+**How "no rule changed" was checked**, as for 0.9, with the tool of
+#935's third part. This text's 36 keyword sentences are unchanged, and
+the scenarios are. Of every sentence and table row, 421 of 425 are
+unchanged. The others are the header and the three sentences above, one
+of them split in two, each read beside its old text. No fixture moved.
+
+**The figures.** This text's mean went from 18.07 words to 18.06, with
+no sentence over 50 words and no tag. `spec/.prose-baseline.json` is
+lowered to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Written against core 0.34**, still, and the header's `freshness.v1`
+  text 0.3.
+
 ## 0.9 — 2026-10-30: the watch after a window under a version of its own, and editorial: inline history taken out of the rules and long sentences split (#935)
 
 The rules carried their own history, as the core's did before core 0.60

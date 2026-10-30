@@ -12,7 +12,7 @@ and its instance token.
 2. The consumer GETs `zk2/g/**`.
 3. The consumer runs a liveliness GET on `zk2/g/**`, then on `zk2/g/*/@zk/**`.
 4. The consumer subscribes to and GETs `zk2/*/*/*/state/**`.
-5. **A tool's wildcard scope** (observer.md §8.2; 0.59, F-287). A tool
+5. **A tool's wildcard scope** (observer.md §8.2). A tool
    watches `zk2/g/**`, as step 1's consumer subscribes, and reports what
    it watched.
 
@@ -24,12 +24,11 @@ and its instance token.
 3. The first liveliness GET returns no token; the second returns the
    instance token.
 4. Plain state only: no `stream`, `events` or `@state` sample or reply.
-5. The tool shows step 1's samples, and reports `@stream`, `@state`,
-   `@op`, `@adv` and `@zk` excluded from its scope, beside what it
-   watched, in every medium it writes: a field of a report, or, for a
-   stream of rows (NDJSON), its standard error (observer.md §8.2, text
-   0.3, F-292). The `@stream` and `@state` samples it does not show are
-   not absent, but out of its reach.
+5. The tool shows step 1's samples, and reports `@stream`, `@state`, `@op`,
+   `@adv` and `@zk` excluded from its scope, beside what it watched, in
+   every medium it writes: a field of a report, or, for a stream of rows
+   (NDJSON), its standard error (observer.md §8.2). The `@stream` and
+   `@state` samples it does not show are not absent, but out of its reach.
 
 *Spike S1: passed, also under a namespace.*
 

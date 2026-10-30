@@ -3,6 +3,144 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.64 — 2026-10-30: editorial: the core's scenarios and the profiles' index without inline history, no rule changed (#935)
+
+The core's scenarios, the profiles' index and the compatibility
+fixtures' README still carried their history inline, as the core's
+rules did before 0.60. A step or an Expected line named the version that
+made it and the finding that caused it, as in "(0.42, F-229)" or
+"(observer.md §3.2, text 0.3, F-293)". The scenarios are the core's
+evidence, and the index and the process sit beside the core's texts with
+no version of their own, so this version holds the change. It is #935's
+fifth and last part (epic #921 Track B), beside the texts of
+`redundancy.v1`, `timing.v1` and `arbitration.v1`. `observer.md` keeps
+text 0.7, written against 0.63: none of its rules moved.
+
+**Editorial: the scenarios, no rule changed.** Each file's tags are
+gone, a reason a tag carried stays in words, and every sentence over 50
+words is split, its words kept.
+- **`presence.md`:**
+  - §7 to §10's headings lose their core versions; nothing links their
+    anchors, and their numbers stay;
+  - §1, §2, §4, §6 to §10's Measured notes lose "(#609)", "(F-68)",
+    "(0.37)", "(0.38)", "(0.41, #851)" and the like. "Before #882" is
+    "Before its round trip and read ran on tasks of their own", and
+    "alarms.v1 0.4 first measured" is "alarms.v1's reader first
+    measured";
+  - §6 step 3's "(0.8 read `zk2/**` here, … F-75, fixed in 0.9.)" now
+    says why: "(Not `zk2/**`, which by core §1.3's guard selects no
+    control token, so the "no token" below could never fail.)";
+  - §10's steps 5, 6 and 10 and Expected 4 keep their parenthesised
+    reasons as sentences of their own, step 7 is a list of its three
+    watch sessions, and Expected 8 is split at its semicolon;
+  - its thirteen sentences over 50 words are split: §4's two Measured
+    notes, step 10's reader loop, and the rest in §10, by step and at
+    their semicolons.
+- **`security.md`:** §1's labels lose "(0.8)" and "(0.27)", and "Added in
+  0.8, after S14" is "Not among spike S14's checks". §2 cites core §11.2
+  alone. §3 loses its version tags, and Expected 3's account of what 0.12
+  wrote goes, the sentence before it stating the rule. §4's heading
+  loses "0.50". "0.15's admin read" is "a wider admin read", as core
+  §11.1 says it, and "0.11's storages selector" is named by its key. Its
+  Measured note, one sentence of 74 words, is four.
+- **`state.md`:** §10 to §12's headings lose "0.26", "0.27" and "0.48,
+  0.50, 0.51", and §1's label, §7 step 3 and §12's Expected 3 their
+  tags. §1's Measured note says "by the second implementation" for
+  "(#609)", and is split at its semicolon. "0.11's second selector" is
+  "A wider storages selector", its key unchanged.
+- **`budget.md`:** the opening names "lost no delivery" without "0.25's".
+  §1 loses "(0.27)" four times, and Expected 3 loses "correcting 0.25's
+  …". Its Measured note of 2026-10-11, 76 words, is a list of steps 3 and
+  4, and "(#753)" goes.
+- **`operations.md`:** §4's label loses "(0.8)", and §5 step 2 and §8 step
+  6 their observer tags. §8 step 3's "(core 0.39; …)" cites core §3.3.
+  Step 6, 57 words, is two sentences. "Steps 4 and 5 are new in core 0.7:
+  …" is "A check that compares tokens only would report steps 4 and 5
+  both."
+- **`grammar.md`**, step 5 and Expected 5; **`bindings.md`**, §5's and
+  §6's headings, which nothing links; **`types.md`**, a label;
+  **`retrieval.md`**, two Measured notes' "(#609)".
+- **`README.md`:** the table loses its versions, "Since core 0.58" goes,
+  and "their automated runner comes with the runtime (#610 onward)" is
+  "the reference runtime's tests run them".
+
+**Editorial: the profiles' index and process, no rule changed.** The
+index's README has no version of its own, so its line is here.
+- **"A profile that needs the core to change"** said which core version
+  each profile needed, "`hostid.v1` needed 0.19, so that …", in one
+  paragraph with a sentence of 62 words. It is now a list, one item per
+  profile, of what each needed, in the same words. The versions are this
+  changelog's, which the bullet now points to.
+- **Tags elsewhere:** "(core §10, 0.19)", "(core §9.7, 0.23)" and "(core
+  §10 point 1, 0.35)" cite the sections alone, in the template, the
+  process and the layout. "The tiers #613 still plans" is "the tiers
+  still planned".
+- **The index rows** move with this part's texts: `redundancy.v1` 0.6,
+  `timing.v1` 0.6, `arbitration.v1` 0.4, and, for zk2py round 87,
+  `alarms.v1` 0.10, `telemetry.v1` 0.7, `desired.v1` 0.10 and `config.v1`
+  0.8.
+
+**Editorial: the fixtures' READMEs.**
+- **`conformance/compat/README.md`:** "The protobuf cases added by
+  amendment 0.5 (…) were not measured with buf" is "These protobuf cases
+  were not measured with buf: …", the same seven.
+- **`conformance/README.md`:** its table's `budget/` row cites §2.7 and
+  `observer.md` §5 without "0.24" and "since 0.58", and loses "0.27" and
+  "0.25". The `seed/` row loses "0.27", and the opening "(#609)". The
+  check counted none of them: the table sits above the file's first
+  `## ` heading.
+
+**The check.** `scripts/check-spec-prose.py` read a section number such
+as `§0.2,` as a version tag. Its version pattern now skips one after
+`§`. No text's count moved: the one such number before a comma,
+`config.v1`'s, was reworded by its text 0.6.
+
+**How "no rule changed" was checked**, with the tool of #935's third
+part.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY, REQUIRED or RECOMMENDED was extracted before and after, keyed
+  by section, and the two sets diffed. The scenarios hold almost none:
+  `operations.md` has two, both unchanged, and the profiles' README one,
+  unchanged. So every sentence and table row was diffed too, Expected
+  lines among them, and each rewrite read beside its old text.
+- **What it found.** Every changed sentence lost a tag, or was split with
+  its words kept, or names by what it is an object it named by a version.
+  No step, observation, condition or scope moved. No fixture moved.
+
+**The figures**, mean words per sentence, sentences over 50 words, and
+tags, before and after:
+
+| Text | Before | After |
+|---|---|---|
+| `scenarios/presence.md` | 21.62, 13, 66 | 19.56, 0, 0 |
+| `scenarios/security.md` | 15.59, 1, 19 | 15.21, 0, 0 |
+| `scenarios/state.md` | 15.66, 1, 11 | 15.54, 0, 0 |
+| `scenarios/budget.md` | 12.19, 1, 6 | 11.8, 0, 0 |
+| `scenarios/operations.md` | 14.51, 1, 6 | 14.22, 0, 0 |
+| `scenarios/grammar.md` | 11.16, 0, 2 | 11.04, 0, 0 |
+| `scenarios/bindings.md` | 11.47, 0, 2 | 11.47, 0, 0 |
+| `scenarios/retrieval.md` | 13.05, 0, 2 | 12.95, 0, 0 |
+| `scenarios/types.md` | 13.38, 0, 1 | 13.38, 0, 0 |
+| `scenarios/README.md` | 13.62, 0, 0 | 12.62, 0, 0 |
+| `profiles/README.md` | 18.8, 1, 24 | 17.56, 0, 0 |
+| `conformance/compat/README.md` | 15.17, 0, 1 | 15.0, 0, 0 |
+| `conformance/README.md` | 14.4, 0, 0 | 14.36, 0, 0 |
+
+The check counts no tag above a text's first `## ` heading, so the
+scenarios' openings, and the README's table, held more than it shows.
+They are gone too. `spec/.prose-baseline.json` is lowered to the
+figures. With this part, no text under `spec/` holds an inline history
+tag outside a changelog or a history section.
+
+**Deliberately not changed.**
+- **No rule**, and no section number. The headings that lost a tag keep
+  their numbers, and nothing linked their anchors.
+- **What a scenario measured.** Each count and date stays as a plain
+  statement beside its step, as do the spike's names and zenoh's issue
+  numbers, which are evidence.
+- **This text's rules**, which 0.60 and 0.61 already freed of their
+  history, and Appendix A.
+
 ## 0.63 — 2026-10-30: editorial: Appendix B says what was not measured for observer §5.2's watch, no rule changed (#935)
 
 zk2py round 86 (PR #959) read 0.62 and `observer.md` 0.6 cold. It found

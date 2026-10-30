@@ -1,11 +1,11 @@
 # Budget scenarios (core §2.7)
 
-§1–§3 are the measurements 0.25's "lost no delivery" rests on (§2.7,
-Appendix B), run as the spike ran its own: sessions on loopback, routers
-linked R2 → R1, each number recorded. §4–§7 are an owner keeping its
-bound and its rate, which a black-box runner drives through the reference
-owner (`zenkey/examples/owner.rs`: `--cardinality`, and the `put`,
-`delete` and `fill` commands).
+§1–§3 are the measurements "lost no delivery" rests on (§2.7, Appendix B),
+run as the spike ran its own: sessions on loopback, routers linked R2 → R1,
+each number recorded. §4–§7 are an owner keeping its bound and its rate,
+which a black-box runner drives through the reference owner
+(`zenkey/examples/owner.rs`: `--cardinality`, and the `put`, `delete` and
+`fill` commands).
 
 The contract of §2 and §4–§7, `budget.v1`:
 
@@ -39,12 +39,11 @@ retention = "2s"
 
 ## §1 A reliable, blocking path loses nothing to a slow reader
 
-**Setup.** R2 → R1, **each a process of its own**. An owner, a client of
-R2, holds an instance token. A consumer, a client of R1, subscribes to the
+**Setup.** R2 → R1, **each a process of its own**. An owner, a client of R2,
+holds an instance token. A consumer, a client of R1, subscribes to the
 owner's key and takes 2 ms over each sample in its callback. Beside it, it
 holds a liveliness subscriber on the owner's instance tokens, watches its
-own session's transport events, and runs a ticker on a thread of its own
-(0.27).
+own session's transport events, and runs a ticker on a thread of its own.
 
 **Steps.** The owner puts 1,000 numbered samples of 16 KiB as fast as its
 publisher lets it:
@@ -53,30 +52,32 @@ publisher lets it:
 3. reliable, `block`, the consumer's callback stuck for 7 s on the 100th;
 4. reliable, `block`, the consumer in a process of its own, and that
    process stopped (SIGSTOP) for 7 s at the 100th, then continued. The
-   owner's token reaches the consumer before the samples start (0.27).
+   owner's token reaches the consumer before the samples start.
 
 **Expected.**
 1. All 1,000 arrive, in order, and the owner's token is never withdrawn.
    The owner's put waits for the path.
 2. Some never arrive, and nothing the consumer receives says so.
-3. The consumer's router gives up on it after `wait_before_close` (5 s)
-   and closes its transport. Samples are lost. The consumer's session sees
-   its own transport close. It sees the owner's token withdrawn only if
-   the token had reached it before it stalled (0.27, correcting 0.25's
-   "the consumer sees the owner's token withdrawn"). Its ticker sees no
-   gap: only zenoh's receive thread was held.
+3. The consumer's router gives up on it after `wait_before_close` (5 s) and
+   closes its transport. Samples are lost. The consumer's session sees its
+   own transport close. It sees the owner's token withdrawn only if the
+   token had reached it before it stalled. Its ticker sees no gap: only
+   zenoh's receive thread was held.
 4. Samples are lost. The consumer's ticker sees a gap of at least 7 s on
    its first tick after the stop. Its session sees its transport close,
    and it sees the owner's token withdrawn.
 
 *Measured 2026-10-10: 1,000 of 1,000; 695–832 lost; 691–794 lost.
-Measured 2026-10-11 (0.27): step 3, 433–786 lost, the consumer's transport
-closed in 27 of 27 runs, the owner's token withdrawn in each of the 23
-where it had reached the consumer and in none of the 4 where it had not,
-the ticker's worst gap under 107 ms; step 4, 421–765 lost in 13 runs, the
-ticker's gap 7.0–7.1 s, the transport's close read 0.35–0.51 s after it
-(4 runs timed), the token withdrawn each time. Six earlier runs of step 3
-saw no withdrawal in 2 (#753).*
+Measured 2026-10-11:*
+- *step 3: 433–786 lost, the consumer's transport closed in 27 of 27
+  runs, the owner's token withdrawn in each of the 23 where it had
+  reached the consumer and in none of the 4 where it had not, the
+  ticker's worst gap under 107 ms;*
+- *step 4: 421–765 lost in 13 runs, the ticker's gap 7.0–7.1 s, the
+  transport's close read 0.35–0.51 s after it (4 runs timed), the token
+  withdrawn each time.*
+
+*Six earlier runs of step 3 saw no withdrawal in 2.*
 
 The reference (`zenkey/tests/budget.rs`) asserts only the loss in step 3,
 and the loss and the ticker's gap in step 4, and reports the rest for the
@@ -91,7 +92,7 @@ closes stalled, and no token was withdrawn while the run lasted. That is a
 measurement of the process, not of the path, and §2.7 names it as a
 premise a deployment provides.
 
-**A tool's window over a stalled reader** (0.27, core §2.7). The case
+**A tool's window over a stalled reader** (core §2.7). The case
 §2.7's "its reader lost none" (observer §5.2) exists for, read by a tool.
 - *Setup.* An owner of an event of two sources at most, `reliable` with
   `block` and a 2 s retention, publishing both every 200 ms, its instance

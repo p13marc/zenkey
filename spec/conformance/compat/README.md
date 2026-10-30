@@ -68,10 +68,9 @@ Every other case agrees: `doc-only` (ok), and `move-into-oneof`,
 `proto2-required-added`, `proto2-required-removed`,
 `proto2-optional-to-required` (breaking).
 
-The protobuf cases added by amendment 0.5 (`move-between-oneofs`,
+These protobuf cases were not measured with buf: `move-between-oneofs`,
 `proto2-default-changed`, `packed-option`, `message-renamed`,
-`enum-value-renumbered`, `proto2-to-proto3`, `nested-type-added`) were not
-measured with buf.
+`enum-value-renumbered`, `proto2-to-proto3` and `nested-type-added`.
 
 ## Rule names and buf's
 

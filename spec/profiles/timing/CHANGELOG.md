@@ -4,6 +4,121 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it and the
+finding that caused it, as in "(text 0.2, F-263)" or "(text 0.5,
+F-278)". This changelog and the core's already hold that history. So
+the text now states each rule and cites its evidence, and nothing else.
+This is #935's fifth part, beside `redundancy.v1` and `arbitration.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions and findings,** "(text 0.2)" to "(text 0.5,
+  F-280)". Some opened a run-in label, which now stands alone:
+  - §0's unseen owner, the tokenless interface's owner and a known
+    member;
+  - §2.2's consumer that holds no tracker;
+  - §2.5's epoch template's known member, twice, `beyond_bound`, the
+    read that ends nothing, the deadline below the period, and
+    "Following presence";
+  - §2.6's "Without an HLC too", ε's unit, "How a reader holds
+    `meta.zid`", and the two findings after it, "(F-266)" and "(F-265)";
+  - §2.7's window, "Its start", a delivery lost for every member, the
+    longest stretch, a tool's known members, and "A member that ends and
+    is heard again";
+  - §2.8's "(§2.6 step 6; text 0.3)", which cites step 6 alone;
+  - §5's roll-up, its not asked over members all set aside, and "A
+    roll-up's reason".
+- **Reasons kept.**
+  - §0's "(text 0.2; the reference follows interface tokens alone)" is
+    "(the reference follows interface tokens alone)".
+  - §2.5's "(text 0.2, F-260: the report names an owner's breach …)" is
+    a sentence of its own in parentheses, after the MUST it explains.
+  - §2.5's "Following presence" and §2.6's "How a reader holds
+    `meta.zid`" keep "(what the reference measured)".
+- **The core's versions.** "(core §8.1, 0.37)" three times, "(core §8.1,
+  0.41)", "(core §4.1, 0.53)", "(core §4.1, 0.55)", "(core Appendix B,
+  0.53)" and "(core §2.7, 0.27)" cite the section alone. "(core 0.53)" is
+  gone from §1's table and from §4.
+
+**The long sentences, split.** The seven over 50 words in this text:
+- **§2.5, an epoch template's known member,** is the rule, then its
+  reason, which a colon joined: such a member exists from its owner's
+  first declaration of it.
+- **§2.5, "Following presence",** is three sentences: the two sessions,
+  the seed, and what a known member is then waited for from.
+- **§2.6, "What ε bounds",** held two sentences that the check read as
+  one, since the second opened with "ε". It now opens "Since ε bounds",
+  its "so" turned round, and states the same consequence.
+- **§2.6, "How a reader holds `meta.zid`",** ends in three sentences:
+  the two keys with the second implementation's measurement, then "So a
+  reader can read a new instance's first samples so", then the runner's
+  wait. The measurement stays where it was, a plain statement: this text
+  has no appendix of measurements.
+- **§5, not asked over members all set aside,** is the answer, then its
+  reason, then the run with no lifespan, three sentences in the item.
+- **Appendix A's opening** is four sentences, its words kept, and **"The
+  record"** lists its two precisions.
+
+**The scenarios.**
+- **Tags.** The opening names the reference's tests without "#908, MB"
+  and "#908, MC". The conventions lose "(0.37)", "(text 0.2, F-265)",
+  "(core §4.1, 0.55)", "(text 0.2, F-266)", "(#908, MB)", "(§6, #908,
+  MC)", "(§6 step 3, text 0.3)", "(§3 step 5, text 0.3, F-276)" and
+  "(text 0.3, F-273)", each citation of a section kept. §3 step 5, §4's
+  setup, §6's setup, §6's reference, and §6's steps 5 and 6 each lose
+  theirs.
+- **The long sentences.** The two over 50 words are lists: the owner's
+  standard-input steps in the conventions, and the owner example's drive
+  per step in §6's reference.
+- **Kept.** No heading moved, so every anchor stays.
+
+**Nothing moved to an appendix.** This text's one appendix is Appendix
+A, "Against v1", which is history.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61, with
+the tool of #935's third part.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY, REQUIRED or RECOMMENDED was extracted before and after. Each
+  was keyed by section, and the two sets diffed. The scenarios' Expected
+  lines were diffed too, keyword or not.
+- **This text.** Both sets hold 23, and all 23 are unchanged: every tag
+  sat in a sentence with no keyword, in a run-in label or in its own
+  sentence of evidence.
+- **The scenarios.** Both hold 55 keyword sentences and Expected lines,
+  and all 55 are unchanged.
+- **The rest.** Every other sentence and table row was diffed too, and
+  each rewrite read beside its old text.
+  - This text's 306 are 316. 266 are unchanged and 28 lost a tag only.
+    The tool reads ten as rewrites: the header's version, §2.5's reason
+    for `beyond_bound`, the seven splits above, and an evidence sentence
+    whose tag was all its words, paired with a split's half. Two more
+    such sentences are left with no pair, and twelve are the splits' new
+    sentences.
+  - The scenarios' 163 are 175. 146 are unchanged, and 15 lost a tag
+    only, five of which the tool reads as rewrites, since "MB" and "MC"
+    are words. Two are the lists' heads, and twelve their items.
+  - None moves a condition, an object or a scope. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 35 to none, sentences over 50 words from 7 to
+  none, and a mean from 22.74 words to 21.59, under #935's target of 22.
+- **`scenarios.md`:** tags from 9 to none, sentences over 50 words from
+  2 to none, and a mean from 17.32 to 15.66. The check does not count the
+  conventions' tags, which sit above the first heading, and they are
+  gone too.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label, heading or anchor.
+- **Appendix A**, which is history, but for its two splits: its "(v1.26)"
+  stays.
+- **Evidence that is not history:** spike S11's measurements in §2.5 and
+  §2.6, and the record's E14.
+- **Written against core 0.55**, still, and the status `experimental`.
+
 ## experimental — 2026-10-29: no adopter yet (#938)
 
 The text's status moves from `draft` to `experimental`, the status of a

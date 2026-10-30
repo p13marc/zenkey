@@ -47,7 +47,7 @@ discards all 10.
 
 *Spike S10: 10 of 10 discarded; spike S1: about 10 ns per check.*
 
-## §5 A provider on the service's own system (R1, R3; 0.20)
+## §5 A provider on the service's own system (R1, R3)
 
 **Setup.** Detectors `vehicle-01/det0`, `vehicle-01/det1` and
 `vehicle-02/det0` implement `detections.v1`. Two trackers on
@@ -72,7 +72,7 @@ A system that a profile derives resolves the same way, from the derived
 system: `hostid.v1`'s scenarios bind `self.system/sysinfo` from a service
 whose system is minted (`profiles/hostid/scenarios.md` §5).
 
-## §6 A binding's order kept (R1, R3; 0.54)
+## §6 A binding's order kept (R1, R3)
 
 **Setup.** A tracker `vehicle-01/tracker` binds `detections.v1` as
 `sources`, as §1's does, in this order: `vehicle-01/det1`, `vehicle-01/*`,

@@ -11,8 +11,8 @@ holders on one router and `BestMatching`, one reply. From a session that
 holds the bundle itself, `BestMatching` gives two: its own holder's and the
 nearest remote one's.
 
-*Measured with zenoh-python 1.10.1 (#609), a client of the owner's router
-holding a queryable of its own: two replies to `BestMatching`.*
+*Measured with zenoh-python 1.10.1, a client of the owner's router holding a
+queryable of its own: two replies to `BestMatching`.*
 
 ## §2 A slow, an unreachable, a corrupt nearest holder
 
@@ -28,9 +28,9 @@ core §8.4 requires `None`.
 *Spike S4: the first valid reply arrived in 1.1–1.5 ms; waiting for
 completion cost 1,001 ms.*
 
-*Measured with zenoh-python 1.10.1 (#609): a corrupt 12-byte reply after
-2 s, a valid 4,800-byte one at once. Default consolidation, either target:
-the corrupt reply alone, at 2.0 s. Consolidation `None`, either target: the
+*Measured with zenoh-python 1.10.1: a corrupt 12-byte reply after 2 s, a
+valid 4,800-byte one at once. Default consolidation, either target: the
+corrupt reply alone, at 2.0 s. Consolidation `None`, either target: the
 valid reply at 0.001 s, then the corrupt one.*
 
 ## §3 No valid holder; a constrained holder

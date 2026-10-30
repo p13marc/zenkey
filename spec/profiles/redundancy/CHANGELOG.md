@@ -4,6 +4,131 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it and the
+finding that caused it, as in "(0.2, F-204)" or "(core §8.1, 0.37, 0.38)".
+This changelog and the core's already hold that history. So the text now
+states each rule and cites its evidence, and nothing else. This is #935's
+fifth part, beside `timing.v1` and `arbitration.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions and findings,** "(0.2)" to "(0.4, F-221)". Most
+  opened a run-in label, which now stands alone:
+  - §2.5's "Its read goes on a session of its own", "Where its sessions are"
+    and "What it hears while a read runs";
+  - §2.7's "A poll, where no watch session can be held", and §2.8's "When a
+    departure is seen";
+  - §2.9's "A heal read that ends nothing" and "Its own re-mint is no
+    appearance";
+  - §2.15's "One split, one finding", "A standby's exposure, probed" and
+    "Its wildcards".
+  The others sat after a sentence. In §0, §2.4 and §2.6: the read made
+  off the claim's session, the refused write, and the state from an
+  earlier incumbency. In §2.9 and §2.11: the step-down's writes, the
+  `external` split, the lock regained and two locks. In §2.15: the tool's
+  sessions, a contract not read, the offline contract, `hostid.v1`'s
+  standby and "Never a call that would run".
+- **A history told as a tag.** §2.7's "(0.2; a MUST at 0.1)" after the
+  watch's SHOULD is gone: the rule is the SHOULD.
+- **The core's versions.** "(core §3.3, 0.39)", "(core §8.1, 0.37, 0.38)",
+  "(core §8.1, 0.40)", "(core §6, 0.39; §2.15)" and the like cite the
+  section alone, in §0's terms, §1, §2.3, §2.4, §2.5, §2.7, §2.8, §2.9,
+  §2.14 and §2.15. §0's "Read" loses two "(0.37, 0.38)", a "(0.38)" and a
+  "(0.37)", and keeps every condition of its completeness. Its "Watch
+  session" loses a "(0.37)". "(core §8.1, 0.38: a profile's premise)" keeps
+  its reason, as "(core §8.1: a profile's premise)", in §2.5 step 3 and
+  §2.15. §1's and §4's "core Appendix D (core 0.39)" are "core Appendix D",
+  and §2.14's "(core 0.39)" after `archive.v1` is gone.
+- **The core's labels, for its versions.** §2.6's "(core 0.39, "serving
+  later")" and §2.9's "(core 0.39, "stopping")" now name the item they
+  meant: "(core §8.2, "Serving later, and stopping")".
+- **`hostid.v1`'s versions.** §2.15's "(its text 0.6, its reads of the
+  address's `@zk/**` since 0.7)" is gone: `hostid.v1` §2.12 is cited.
+- **ZenSight's issues.** §2.5's "(ZenSight #1104)" and "(ZenSight
+  #1105)", and §2.10's "(#1104)", now point to Appendix A, which names
+  both issues and what each fixed. Appendix A keeps its own.
+- **The scenarios.** The opening names the reference's tests without "#841,
+  RB" and "#841, RC". The conventions lose "(0.2, F-204)", "(core §8.1,
+  0.37)", "(0.2, F-202)", "(0.38)", "(0.2, F-201)", "(#841, RB)", "(0.4,
+  F-220)", "(0.3, F-216)" and "(0.4, F-221)". §1's Expected 1 and 4, §3's
+  step 1 and Expected 1, §5's setup and Expected 1 to 3, §7's Expected 4,
+  §10's steps 3 and 5 and Expected 4, §11's Expected 1 and 2, and §12's
+  setup, steps 8 and 9 and Expected 6 to 9 each lose a tag. §4's Expected
+  2's "(ZenSight #1104)" is "(v1.md Appendix A)". No heading held a tag.
+
+**The long sentences, split.** The nine over 50 words in this text:
+- **§2.5, "Where its sessions are",** is its MUST, then the complete read's
+  reach, then the peer that takes over beside a live incumbent.
+- **§2.5, "What it hears while a read runs",** is the events kept, then how
+  each is decided, as a list of its three. The MUST that follows is a
+  paragraph of its own, its scope unchanged.
+- **§2.7, the poll,** is the read every period, its MUST, then the
+  appearance and the withdrawal.
+- **§2.15:**
+  - "Completeness" is the read not made, its answer, and the reason the tool
+    reports;
+  - premise 3 is a list of its three answers, the offline contract a
+    paragraph after it;
+  - the first question's fourth step is a list of its five answers, in their
+    order;
+  - `hostid.v1` §2.12's standby is the answer, then what the instance is;
+  - "A standby's exposure, probed" is its MAY, then why a reply is a
+    queryable, then that the finding is the tool's.
+- **Appendix A's record** is two sentences, the second opening "Architecture
+  r3.2's".
+
+The scenarios' six:
+- **The conventions' crash** is the two ways, then each way's meaning.
+- **§1's Expected 1** is its claim, then the GET at the instance token, then
+  the one at the interface token.
+- **§3's Expected 1:** the GET at the instance token, then each instance's
+  first read.
+- **§5's setup:** the peers and why, then their retry period.
+- **§7's Expected 4:** what is dated before the withdrawal, then what
+  follows it.
+- **§10's Expected 3:** V2's takeover, then G's reads.
+
+**Nothing moved to an appendix.** No rule held a measurement. §2.8's lease,
+"10 s by default", and the reference's "0.1 s after the first" carry no tag,
+and stay.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61, with the
+tool of #935's third part.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT,
+  MAY, REQUIRED or RECOMMENDED was extracted before and after. Each was
+  keyed by section, and the two sets diffed. The scenarios' Expected lines
+  were diffed too, keyword or not.
+- **This text.** Both sets hold 40. 30 are unchanged and four lost a tag
+  only. The other six keep their keyword, condition and scope:
+  - §2.5's sessions MUST, §2.7's poll MUST and §2.15's probe MAY, each split
+    from the words after it;
+  - §2.6's and §2.9's MUSTs, whose core tag is now the core's label;
+  - §2.7's SHOULD, which lost "a MUST at 0.1": the tool counts that
+    history's MUST as a keyword.
+- **The scenarios.** 68 keyword sentences and Expected lines before, and 73
+  after. 49 are unchanged and 14 lost a tag only. Five were split, and their
+  five new sentences are the rest of the old ones. §4's Expected 2 points to
+  Appendix A for ZenSight's issue.
+- **The rest.** Every other sentence and table row was diffed too, and each
+  rewrite read beside its old text. None moves a condition, an object or a
+  scope. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 58 to none, sentences over 50 words from 9 to
+  none, and a mean from 21.45 words to 19.73.
+- **`scenarios.md`:** tags from 29 to none, sentences over 50 words from 6
+  to none, and a mean from 18.1 to 16.93.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, which is history: its ZenSight issues and its "Core 0.37"
+  stay.
+- **Written against core 0.40**, still.
+
 ## 0.5 — 2026-10-25: the offline half of §12 step 8 (#841, RD)
 
 zk2py round 63 read 0.4 cold at PR #867's head: every check passed in
