@@ -43,8 +43,9 @@ pub const STREAM_LIVENESS: Duration = Duration::from_secs(3600);
 /// zenoh's default link lease (`transport/link/tx/lease`, 10 s): a link
 /// gone silent withdraws the owner's token only when it runs out
 /// (Appendix B). A window's owner must stay present for one lease after
-/// the window's end (§2.7, 0.25); a deployment that sets a longer lease, or
-/// a `wait_before_close` longer than its lease, lengthens it.
+/// the window's end (§2.7, 0.25), and a tool watches its tokens past the
+/// end for the longer of the lease and `wait_before_close`, plus the reply
+/// timeout ([`presence_tail`], observer §5.2).
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(10);
 
 /// zenoh's default keep-alive (`transport/link/tx/keep_alive`, 4): a
@@ -72,6 +73,23 @@ pub fn stall_bound(wait_before_close: Duration, lease: Duration, keep_alive: u32
     let interval = lease.as_millis().div_ceil(u128::from(keep_alive.max(1)));
     let interval = Duration::from_millis(u64::try_from(interval).unwrap_or(u64::MAX));
     wait_before_close.min(lease.saturating_sub(interval))
+}
+
+/// How long after a window's end a tool watches the owner's instance
+/// tokens (observer §5.2, `[Sc: budget.md §2]`): the longer of one lease
+/// and the routers' `wait_before_close`, plus the reply timeout.
+///
+/// A link gone silent withdraws the owner's token one lease after it went
+/// silent, and a push that cannot queue within `wait_before_close` closes
+/// its transport (Appendix B), so a router that waits that long before it
+/// closes one tells the withdrawal that late. The reply timeout allows for
+/// the withdrawal's transit. With zenoh's defaults, a 10 s lease against a
+/// 5 s `wait_before_close`, it is the lease plus the timeout; a 1 s lease
+/// beside the default `wait_before_close` watches 5 s plus the timeout
+/// (observer text 0.6, zk2py round 85's F-320).
+#[must_use]
+pub fn presence_tail(lease: Duration, wait_before_close: Duration, timeout: Duration) -> Duration {
+    lease.max(wait_before_close).saturating_add(timeout)
 }
 
 /// What a window's path declares and what its reader saw of it, for "lost
@@ -813,6 +831,27 @@ mod tests {
         assert_eq!(
             j(Kind::Event, Bound::Of(1), &w(59.0, true, true, apart)),
             (V::Unobservable, R::WindowTooShort)
+        );
+    }
+
+    #[test]
+    fn the_presence_tail_is_the_longer_of_the_lease_and_wait_before_close() {
+        let s = Duration::from_secs;
+        assert_eq!(
+            presence_tail(DEFAULT_LEASE, DEFAULT_WAIT_BEFORE_CLOSE, s(1)),
+            s(11),
+            "zenoh's defaults: the 10 s lease, then the timeout"
+        );
+        assert_eq!(
+            presence_tail(s(1), DEFAULT_WAIT_BEFORE_CLOSE, s(1)),
+            s(6),
+            "wait_before_close above the lease is the longer one: budget.md §1's 1 s lease"
+        );
+        assert_eq!(presence_tail(s(5), s(5), s(2)), s(7), "equal: either");
+        assert_eq!(
+            presence_tail(s(3), Duration::ZERO, Duration::ZERO),
+            s(3),
+            "no wait and no timeout: the lease alone"
         );
     }
 

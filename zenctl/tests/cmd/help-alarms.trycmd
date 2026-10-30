@@ -31,15 +31,15 @@ Options:
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a reply's stamp is then aged against this clock (freshness.v1 §2.6). Without it, only a clock the window measured on a live put of it is trusted
 
       --for <SECS>
-          The reading's window, seconds: a subscription to the alarms and to the owners' instance tokens, declared before the GET, then --lease and --timeout more while the owners are watched (spec §2.7, 0.25). It opens once the subscriptions are declared and the first presence read and GET were made after them, when stderr says "listening". An owner whose GET drew nothing is known whole only by a lossless window longer than 900 s, the owner present throughout (§2.15). Omitted, no subscription: the GET alone
+          The reading's window, seconds: a subscription to the alarms and to the owners' instance tokens, declared before the GET, then the longer of --lease and --wait-before-close, and --timeout, more while the owners are watched (spec §2.7, 0.25; observer §5.2). It opens once the subscriptions are declared and the first presence read and GET were made after them, when stderr says "listening". An owner whose GET drew nothing is known whole only by a lossless window longer than 900 s, the owner present throughout (§2.15). Omitted, no subscription: the GET alone
 
       --lease <SECS>
-          The deployment's link lease, seconds: a window's owner is watched for this, and --timeout, past the window's end (spec §2.7, 0.25)
+          The deployment's link lease, seconds: a window's owner is watched for this, or --wait-before-close when longer, and --timeout, past the window's end (spec §2.7, 0.25; observer §5.2)
           
           [default: 10]
 
       --wait-before-close <SECS>
-          The routers' wait_before_close, seconds: a window is lossless only if this reader never stalled longer than it, nor than --lease less one keep-alive (spec §2.7, 0.27)
+          The routers' wait_before_close, seconds: a window is lossless only if this reader never stalled longer than it, nor than --lease less one keep-alive (spec §2.7, 0.27). Where it is longer than --lease, a window's owner is watched for it (observer §5.2)
           
           [default: 5]
 

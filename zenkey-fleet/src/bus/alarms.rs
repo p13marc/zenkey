@@ -43,9 +43,9 @@
 //! refresh — presence, the GET, the archives — is an owned
 //! [`AlarmRefresh`], run beside a drain and folded after it, so a drain
 //! never waits on a read. [`observe`] is the one-shot reading `zenctl
-//! alarms` makes: the feed, listened to for a window when asked, then a
-//! lease and the reply timeout more while its owners are watched (core
-//! §2.7, 0.25). The window opens once the feed is open, its subscriptions
+//! alarms` makes: the feed, listened to for a window when asked, then the
+//! longer of a lease and `wait_before_close`, and the reply timeout, more
+//! while its owners are watched (core §2.7, 0.25; observer §5.2). The window opens once the feed is open, its subscriptions
 //! declared and its first refresh read after them (zk2py round 47's F-154,
 //! #819 TE), so the router holds them, and a put from then on is heard.
 
@@ -79,9 +79,10 @@ pub struct AlarmSpec {
     /// Each read's timeout: presence, a descriptor, the GET, an archive.
     pub timeout: Duration,
     /// [`observe`]'s window: how long its subscription listens before the
-    /// lease and the reply timeout it watches the owners for after (core
-    /// §2.7, 0.25), counted from the moment the feed is open. `None`: no
-    /// subscription, the GET alone.
+    /// watch after it, the longer of the lease and `wait_before_close`,
+    /// and the reply timeout ([`BookSpec::tail`], observer §5.2), counted
+    /// from the moment the feed is open. `None`: no subscription, the GET
+    /// alone.
     pub window: Option<Duration>,
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1).
@@ -89,7 +90,9 @@ pub struct AlarmSpec {
     /// The deployment's link lease (core §2.7, 0.25).
     pub lease: Duration,
     /// The routers' `wait_before_close`: with the lease, the longest this
-    /// reader may stall and keep a window lossless (core §2.7, 0.27).
+    /// reader may stall and keep a window lossless (core §2.7, 0.27), and,
+    /// where it is longer than the lease, how long the owners are watched
+    /// past a window (observer §5.2).
     pub wait_before_close: Duration,
     /// Across a constrained face (§2.11): whether the face lets this
     /// reader GET the alarms. `None`: no face.
@@ -118,6 +121,7 @@ impl AlarmSpec {
         BookSpec {
             timeout: self.timeout,
             lease: self.lease,
+            wait_before_close: self.wait_before_close,
             clocks_synced: self.clocks_synced,
             face: self.face,
         }
@@ -819,8 +823,8 @@ pub async fn run_alarms(
 
 /// The one-shot reading of the module doc: the feed opened (listening when
 /// `spec.window` is set, its owners' instance tokens on `watch`, #830),
-/// drained over the window and the lease and reply timeout after it, its
-/// owners watched throughout. With a window, `listening` runs once the feed
+/// drained over the window and the watch after it ([`BookSpec::tail`]),
+/// its owners watched throughout. With a window, `listening` runs once the feed
 /// is open, and the window counts from then; with none, or a feed that
 /// could not be opened, it never runs.
 pub async fn observe(

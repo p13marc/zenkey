@@ -490,8 +490,8 @@ fn loss_words(
     }
 }
 
-/// Why the owner was not present throughout a window and the lease after it
-/// (core §2.7, 0.25), as a reader says it.
+/// Why the owner was not present throughout a window and the watch after
+/// it (core §2.7, 0.25; observer §5.2), as a reader says it.
 fn absence_words(obs: &ConformObservation) -> String {
     let tail = obs.spec.presence_tail();
     match &obs.window_presence {
@@ -513,9 +513,9 @@ fn absence_words(obs: &ConformObservation) -> String {
             p.tail.as_secs_f64()
         ),
         Some(Ok(p)) => format!(
-            "its instance tokens were watched {:.1}s past the window's end, short of the lease \
-             and the reply timeout ({:.1}s): a path that failed in the window's last lease would \
-             not have shown yet",
+            "its instance tokens were watched {:.1}s past the window's end, short of the longer \
+             of the lease and wait_before_close, and the reply timeout ({:.1}s): a path that \
+             failed in the window's last lease would not have shown yet",
             p.tail.as_secs_f64(),
             tail.as_secs_f64()
         ),
@@ -524,8 +524,8 @@ fn absence_words(obs: &ConformObservation) -> String {
     }
 }
 
-/// Whether the owner was present throughout the window and the lease after
-/// it (core §2.7, 0.25).
+/// Whether the owner was present throughout the window and the watch after
+/// it (core §2.7, 0.25; observer §5.2).
 fn present_throughout(obs: &ConformObservation) -> bool {
     match &obs.window_presence {
         Some(Ok(p)) => p.throughout(obs.spec.presence_tail()),
@@ -4033,7 +4033,8 @@ mod tests {
             heard: BTreeMap::new(),
             gets: BTreeMap::new(),
             gets_complete: BTreeMap::from([("state/status/{dev}".to_owned(), true)]),
-            // Watched a lease and the reply timeout past the window (0.25).
+            // Watched the longer of a lease and wait_before_close, and the
+            // reply timeout, past the window (0.25; observer §5.2).
             window_presence: Some(Ok(WindowPresence {
                 held: [format!("zk2/lab/m/@zk/instance/{INST}")].into(),
                 complete: true,
@@ -4957,8 +4958,9 @@ mod tests {
             "{b:#?}"
         );
         // The owner's tokens watched only 2 s past the window, short of the
-        // lease and the reply timeout: a failure in the last lease could
-        // still be on its way, for the population and for the rate.
+        // longer of the lease and wait_before_close, and the reply timeout:
+        // a failure in the last lease could still be on its way, for the
+        // population and for the rate.
         let mut short_tail = o.clone();
         if let Some(Ok(p)) = &mut short_tail.window_presence {
             p.tail = Duration::from_secs(2);
@@ -4973,7 +4975,9 @@ mod tests {
         .unwrap();
         assert!(
             matches!(&b.verdict, Judgement::Unobservable { reason }
-                if reason.contains("short of the lease and the reply timeout (11.0s)")),
+                if reason.contains(
+                    "short of the longer of the lease and wait_before_close, and the reply \
+                     timeout (11.0s)")),
             "{b:#?}"
         );
         assert!(matches!(&rate(&short_tail, &long).verdict,
@@ -5073,11 +5077,14 @@ mod tests {
         assert!(matches!(b, Judgement::NotEstablished { .. }), "{b:#?}");
         assert!(matches!(r, Judgement::NotEstablished { .. }), "{r:#?}");
         // A 1 s lease bounds a stall at 750 ms, past its last keep-alive:
-        // an 800 ms gap is beyond it.
+        // an 800 ms gap is beyond it. Its owner is watched 6 s past the
+        // window: wait_before_close's 5 s, longer than the lease, and the
+        // 1 s reply timeout (observer §5.2).
         let mut short = o.clone();
         short.spec.lease = Duration::from_secs(1);
+        assert_eq!(short.spec.presence_tail(), Duration::from_secs(6));
         if let Some(Ok(p)) = &mut short.window_presence {
-            p.tail = Duration::from_secs(2);
+            p.tail = Duration::from_secs(6);
         }
         short.reader_stall = seen(800, 0);
         let (b, _) = verdicts(&short);

@@ -1480,8 +1480,9 @@ pub(crate) enum CheckCmd {
     /// router queue drops. A best-effort or drop resource's window never
     /// is, whatever its length, and its case names the QoS. A window's span
     /// counts from its subscription plus --timeout, and the owner is
-    /// watched --lease and --timeout past its end, where a window could
-    /// pass. Over the same span this run watches itself (0.27): a transport
+    /// watched past its end, where a window could pass: the longer of
+    /// --lease and --wait-before-close, and --timeout (observer §5.2).
+    /// Over the same span this run watches itself (0.27): a transport
     /// of its own session that closed, or a stall of its process longer
     /// than --wait-before-close (or --lease less one keep-alive), means a
     /// router may have given up on it, and no window is lossless.
@@ -3100,7 +3101,8 @@ pub(crate) struct CheckConformArgs {
     /// The deployment's link lease, seconds (zenoh's
     /// `transport/link/tx/lease`): a path gone silent withdraws the owner's
     /// token only when it runs out, so a window that could pass is followed
-    /// by this, and --timeout, of watching the owner (spec §2.7, 0.25).
+    /// by this, or --wait-before-close when longer, and --timeout, of
+    /// watching the owner (spec §2.7, 0.25; observer §5.2).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
     pub(crate) lease: f64,
@@ -3108,7 +3110,10 @@ pub(crate) struct CheckConformArgs {
     /// `transport/link/tx/queue/congestion_control/block/wait_before_close`):
     /// a router waits that long on this run's full queue, then closes the
     /// transport. A window is lossless only if this run never stalled longer
-    /// than it, nor than --lease less one keep-alive (spec §2.7, 0.27).
+    /// than it, nor than --lease less one keep-alive (spec §2.7, 0.27). A
+    /// router that waits it tells a withdrawal that late, so where it is
+    /// longer than --lease, a window's owner is watched for it (observer
+    /// §5.2).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,
@@ -3419,8 +3424,9 @@ pub(crate) struct AlarmsArgs {
     #[arg(long)]
     pub(crate) clocks_synced: bool,
     /// The reading's window, seconds: a subscription to the alarms and to
-    /// the owners' instance tokens, declared before the GET, then --lease
-    /// and --timeout more while the owners are watched (spec §2.7, 0.25).
+    /// the owners' instance tokens, declared before the GET, then the longer
+    /// of --lease and --wait-before-close, and --timeout, more while the
+    /// owners are watched (spec §2.7, 0.25; observer §5.2).
     /// It opens once the subscriptions are declared and the first presence
     /// read and GET were made after them, when stderr says "listening". An
     /// owner whose GET drew nothing is known whole only by a lossless window
@@ -3429,13 +3435,15 @@ pub(crate) struct AlarmsArgs {
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
     /// The deployment's link lease, seconds: a window's owner is watched for
-    /// this, and --timeout, past the window's end (spec §2.7, 0.25).
+    /// this, or --wait-before-close when longer, and --timeout, past the
+    /// window's end (spec §2.7, 0.25; observer §5.2).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
     pub(crate) lease: f64,
     /// The routers' wait_before_close, seconds: a window is lossless only if
     /// this reader never stalled longer than it, nor than --lease less one
-    /// keep-alive (spec §2.7, 0.27).
+    /// keep-alive (spec §2.7, 0.27). Where it is longer than --lease, a
+    /// window's owner is watched for it (observer §5.2).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,

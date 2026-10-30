@@ -27,8 +27,9 @@
 //!    event is exposed, whether the owner held its instance token from
 //!    before the window until a lease after its end — a liveliness
 //!    subscriber on its instance tokens, then a read of them, before the
-//!    window opens, kept for the lease and the reply timeout after it
-//!    (0.25) — which a window needs to be a complete reading of a stream's
+//!    window opens, kept for the longer of the lease and
+//!    `wait_before_close`, and the reply timeout, after it (0.25; observer
+//!    §5.2) — which a window needs to be a complete reading of a stream's
 //!    or an event's, and a rate window to be clean; and, over the same
 //!    span, what this run saw of its own receive path (0.27, #753): a
 //!    ticker's worst gap and its session's transports closed
@@ -113,14 +114,17 @@ pub struct ConformSpec {
     pub clocks_synced: bool,
     /// The deployment's link lease: a path gone silent withdraws the
     /// owner's token only when it runs out, so a window's owner is watched
-    /// for it, and `timeout` more, after the window (core §2.7, 0.25).
-    /// zenoh's default, `zenkey_model::budget::DEFAULT_LEASE`, unless the
-    /// deployment lengthens it.
+    /// for it, or `wait_before_close` when that is longer, and `timeout`
+    /// more, after the window ([`ConformSpec::presence_tail`], observer
+    /// §5.2). zenoh's default, `zenkey_model::budget::DEFAULT_LEASE`,
+    /// unless the deployment lengthens it.
     pub lease: Duration,
     /// The routers' `wait_before_close`: how long a router waits on this
     /// run's full queue before it closes the transport, and with the lease
     /// the longest this run may stall and still read a window lossless
-    /// (core §2.7, 0.27). zenoh's default,
+    /// (core §2.7, 0.27). A router that waits it before closing a transport
+    /// tells a withdrawal that late, so a window's owner is watched for it
+    /// where it is longer than the lease (observer §5.2). zenoh's default,
     /// `zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE`, unless the
     /// deployment changes it.
     pub wait_before_close: Duration,
@@ -175,10 +179,13 @@ impl ConformSpec {
     }
 
     /// How long after a window's end the owner's instance tokens are
-    /// watched: a lease, and the reply timeout for the withdrawal's
-    /// transit (core §2.7, 0.25).
+    /// watched: the longer of the lease and `wait_before_close`, and the
+    /// reply timeout for the withdrawal's transit (observer §5.2,
+    /// `zenkey_model::budget::presence_tail`). Before observer text 0.6
+    /// (zk2py round 85's F-320) it was the lease alone, so a
+    /// `wait_before_close` longer than the lease never lengthened it.
     pub fn presence_tail(&self) -> Duration {
-        self.lease + self.timeout
+        zenkey_model::budget::presence_tail(self.lease, self.wait_before_close, self.timeout)
     }
 
     /// How much of a subscription's listening counts toward a window's
@@ -712,8 +719,9 @@ async fn suite(
     } else {
         None
     };
-    // 0.25: the watch outlasts the window by a lease and the reply timeout
-    // where a window could read clean: a resource reliable with `block`
+    // 0.25: the watch outlasts the window by the longer of a lease and
+    // `wait_before_close`, and the reply timeout (observer §5.2), where a
+    // window could read clean: a resource reliable with `block`
     // whose span or period the window covers. Elsewhere nothing waits on it.
     let tail = if windowed && clean_reachable(&exposed, &spec) {
         spec.presence_tail()
@@ -1524,6 +1532,47 @@ async fn config_suite(
         first,
         reading,
         probes,
+    }
+}
+
+#[cfg(test)]
+mod tail_tests {
+    use super::*;
+
+    fn spec(lease: u64, wait_before_close: u64) -> ConformSpec {
+        ConformSpec {
+            timeout: Duration::from_secs(1),
+            window: Duration::from_secs(4),
+            call_all: false,
+            seed: 0,
+            trust_admin: false,
+            calls_granted: false,
+            clocks_synced: false,
+            lease: Duration::from_secs(lease),
+            wait_before_close: Duration::from_secs(wait_before_close),
+            skip: Skipped::default(),
+        }
+    }
+
+    /// A window's owner is watched past its end for the longer of the
+    /// lease and `wait_before_close`, plus the reply timeout (observer
+    /// §5.2, zk2py round 85's F-320): a router that waits
+    /// `wait_before_close` before it closes a transport tells the
+    /// withdrawal that late.
+    #[test]
+    fn the_tail_with_wait_before_close_above_the_lease_is_the_longer_one() {
+        let s = Duration::from_secs;
+        assert_eq!(
+            spec(10, 5).presence_tail(),
+            s(11),
+            "zenoh's defaults: the lease"
+        );
+        assert_eq!(
+            spec(1, 5).presence_tail(),
+            s(6),
+            "a 1 s lease beside the default 5 s wait_before_close"
+        );
+        assert!(spec(1, 5).presence_tail() > spec(1, 0).presence_tail());
     }
 }
 
