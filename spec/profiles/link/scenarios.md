@@ -3,11 +3,9 @@
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. They are a generator's and a
-router's: the reference runs them as tests of the tool that compiles a
-face policy into a router's configuration (`zenctl acl gen`), against live
-routers, one test per section, named after it (#769, LB; §7 and §8 since
-0.3, LC; §9 and §10 since 0.4, LD; §11 since 0.5, LE; §12 and §13 since
-0.7, LH).
+router's. The reference runs them as tests of the tool that compiles a
+face policy into a router's configuration (`zenctl acl gen`), against
+live routers, one test per section, named after it.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -18,10 +16,11 @@ routers, one test per section, named after it (#769, LB; §7 and §8 since
   authenticates as a user of its own. Timeouts are 1 s unless stated.
 - **The generator** compiles N's `access_control` block, under `deny`
   unless a section says `allow`, from the enrollment below, the contract
-  and the face policy, with the plan's denies in the far principal's
-  policy and every other principal's subject narrowed off the face (§2.4,
-  0.3), the plan's `downsampling` block beside it, and N's `gateway` block
-  for a south region (§2.5). "The block" is what it wrote.
+  and the face policy. The block holds the plan's denies in the far
+  principal's policy, and every other principal's subject narrowed off
+  the face (§2.4). The generator writes the plan's `downsampling` block
+  beside it, and N's `gateway` block for a south region (§2.5). "The
+  block" is what it wrote.
 - **The contract** is `radio.v1`:
 
   ```toml
@@ -118,7 +117,7 @@ routers, one test per section, named after it (#769, LB; §7 and §8 since
   subscription or a GET only when a grant includes its key expression
   (core §11.3): a reader subscribed wider than its grants, to
   `zk2/lab/*/**`, would receive nothing at all, so the readers subscribe
-  exactly to what they are granted (0.2, F-116).
+  exactly to what they are granted.
 - **"The owner's traffic"**: for 5 s, the owner publishes
   `air/dropped_total` and `air/frames_total` at 20 Hz, `frames` and `raw`
   at 20 Hz with 1 KB payloads, puts `oper` 10 times, one every half
@@ -142,7 +141,7 @@ routers, one test per section, named after it (#769, LB; §7 and §8 since
    one rule per crossing stream of `lab/radio-a` at 1 Hz, as `plan.json`'s
    third case derives them, with this policy's attachment and interval.
    Every subject but `ground`'s is selected by the link protocols other
-   than `unixsock-stream` (§2.4, 0.3).
+   than `unixsock-stream` (§2.4).
 2. L receives every sample, put and occurrence, about 100 of each stream.
    G receives:
    - `air/dropped_total` 4 to 6 times, and `frames` 4 to 6 times: one per
@@ -169,7 +168,7 @@ of F, not of N. The enrollment's principal `ground` becomes
 The owner serves its state as core S2 says, one queryable over
 `…/radio.v1/state/**`, and `reset` over its own key (core §5). The block
 grants the far principal `declare_queryable` on egress over both, as the
-owner declares them (§2.5, core §8.5, 0.30).
+owner declares them (§2.5, core §8.5).
 
 **Steps.**
 1. As §1, steps 1 to 3.
@@ -178,7 +177,7 @@ owner declares them (§2.5, core §8.5, 0.30).
    its GET and its call.
 3. **Control:** the grant covers G's own GET and call selectors only,
    `…/state/peers/*` and `…/@op/reset`, and not the owner's
-   `…/radio.v1/state/**` (0.2, F-117). G repeats its GET and its call.
+   `…/radio.v1/state/**`. G repeats its GET and its call.
 4. **Control:** the policy says `attach = "router"`.
 
 **Expected.**
@@ -252,8 +251,8 @@ opens a new one, keeping G's merged members.
 1. The owner, configured with a tombstone window of 6 s, the plan's floor,
    puts `oper` and `peers/x`. G seeds: it subscribes to its granted
    selectors over `lab/radio-a`'s state, `…/radio.v1/state/oper` and
-   `…/radio.v1/state/peers/*`, then GETs each as core S4 says (0.2: never
-   `state/**`, which no grant includes, F-116). The face denies the
+   `…/radio.v1/state/peers/*`, then GETs each as core S4 says, never
+   `state/**`, which no grant includes. The face denies the
    subscription to `peers/*`, which does not cross; the GET crosses.
 2. The face goes down for 4 s. Meanwhile the owner deletes `oper` and
    `peers/x`.
@@ -293,11 +292,11 @@ opens a new one, keeping G's merged members.
 
 ## §7 A near principal's credentials on the face (§2.4)
 
-zenoh ties no credential to a link: a subject bound by a user name alone
-matches that principal's session over the face too (0.3, F-118). This
-section shows that 0.2's block let a near credential across the face
-carrying its own grants, and that 0.3's keeps it to nothing under `deny`
-and to the far principal's share under `allow`.
+Zenoh ties no credential to a link: a subject bound by a user name alone
+matches that principal's session over the face too. This section shows
+that a block with no subject narrowed lets a near credential across the
+face, carrying its own grants. The generator's block keeps it to nothing
+under `deny`, and to the far principal's share under `allow`.
 
 **Setup.** As §1. X is a client of N over the face with `local`'s
 credentials. Each of G, X and L subscribes as the Conventions say, to the
@@ -310,8 +309,7 @@ console's selectors under either posture.
    puts five times on `zk2/lab/radio-a/radio.v1/stream/air/dropped_total`,
    a key only `lab/radio-a` may write (core §11.1), and L counts what
    reaches it.
-2. **Control:** 0.2's block, the same with no subject narrowed. X as in
-   step 1.
+2. **Control:** the same block with no subject narrowed. X as in step 1.
 3. Under `allow`: as step 1.
 4. **Control:** under `allow`, the subjects narrowed and no subject of the
    face's own. X as in step 1.
@@ -343,8 +341,7 @@ console's selectors under either posture.
 6. Steps 1 and 3: no finding. Step 2: `near_subject_on_face` for
    `ground-router`, `local`, `radio-a` and `radio-b`. Step 4:
    `face_subject_missing` at `unixsock-stream`. Step 5:
-   `face_subject_misplaced` at the face's subject (0.4; 0.3 left it to the
-   comparison with the plan, which names the policy too).
+   `face_subject_misplaced` at the face's subject.
 
 ## §8 Two minors that disagree on a stream's exposure (§2.3, §2.7)
 
@@ -370,14 +367,14 @@ N reads keys, never descriptors.
    `air/frames_total` from each.
 2. The plan has a rule for each owner's `air/frames_total`, and no deny of
    it: G receives 4 to 6 from each owner, `lab/radio-b`'s among them,
-   though the minor it runs keeps it home (F-119).
+   though the minor it runs keeps it home.
 
 ## §9 Who a subject binds (§2.4, §2.15)
 
 A subject that names the far principal and a near one binds the near one
 too, and a principal narrowed further than §2.4 narrows it matches no
-subject where it is narrowed off (0.4, F-120). Each step is a hand edit
-of the generator's block.
+subject where it is narrowed off. Each step is a hand edit of the
+generator's block.
 
 **Setup.** As §7, with G, X and L as §7 says. A session "over TCP" is a
 client of N on the near side, with the credentials named.
@@ -429,7 +426,7 @@ client of N on the near side, with the credentials named.
 
 A face subject that selects more than the face's link protocols, or rides
 another policy than the far principal's, or none, hands sessions what
-§2.4 forbids (0.4, F-120).
+§2.4 forbids.
 
 **Setup.** As §9.
 
@@ -474,11 +471,12 @@ another policy than the far principal's, or none, hands sessions what
 
 ## §11 A subject naming both kinds (§2.4, §2.15)
 
-zenoh matches one value of each property a subject names, so a subject
+Zenoh matches one value of each property a subject names, so a subject
 naming user names and CNs matches only a session presenting one of each.
-0.4 read such a subject as binding each name it lists, and as the far
-principal's when one of its lists named the far principal alone (0.5,
-F-121). Each step but step 4 is a hand edit of the generator's block.
+Such a subject binds no name it lists alone, and is not the far
+principal's even when one of its lists names the far principal alone
+(v1.md §2.4, §2.15). Each step but step 4 is a hand edit of the
+generator's block.
 
 **Setup.** As §9. For step 4, N also listens on
 `tls/127.0.0.1:<port>`, on the near side, with mTLS: its certificate and
@@ -487,13 +485,13 @@ minted for the run. A session over TLS presents its certificate's CN
 beside its user name.
 
 **Steps.**
-1. F-121 (i). Under `allow`, `local`'s subject narrowed off `tcp` too,
+1. Under `allow`, `local`'s subject narrowed off `tcp` too,
    and a subject naming `ground` as its user name and `local` as its CN,
    with no link protocol, listed in `ground`'s policy. A session over TCP
    with `local`'s credentials puts five times on
    `zk2/lab/radio-a/radio.v1/stream/air/dropped_total`, and L counts what
    reaches it.
-2. F-121 (ii). Under `allow`, `local`'s subject narrowed off `tcp` too,
+2. Under `allow`, `local`'s subject narrowed off `tcp` too,
    and a subject naming `local` as a CN, selected by the eight near link
    protocols, listed in `local`'s policy. As step 1.
 3. **Control:** under `allow`, `local`'s subject narrowed off `tcp`, and
@@ -538,20 +536,18 @@ beside its user name.
    subject two policies list holds both's. G receives what §1's G
    receives, through `ground`'s own subject. X matches the face's subject
    alone, and what it receives depends on the complement the generator
-   wrote for `radio-a` (core §11.2, 0.31; 0.6, F-122):
+   wrote for `radio-a` (core §11.2):
    - where the generator leaves a principal's own keys out of its
      complement (the reference), `radio-a`'s policy denies nothing of
      `radio-a`'s own traffic, and X receives exactly what §1's G receives;
    - where it denies a principal its own keys on the messages and flows
      its Own grant does not name, `put` toward it among them, X receives
-     nothing at all: §1's G's share is `radio-a`'s traffic alone, so no
+     nothing at all. §1's G's share is `radio-a`'s traffic alone, so no
      sample, token or descriptor reaches X, and neither its GET nor its
      call is answered (measured by the spec-only implementation).
 8. All five of each one's puts reach L: denying `@zk` in `radio-a`'s
    policy changes nothing of step 5's writes.
-9. 0.4 reported nothing for steps 1, 2, 4 and 8, `narrowed_too_far` at
-   `local` for step 3, and only `zk_not_denied` for steps 5 to 7, because
-   the added subject's policy holds no `@zk` deny. 0.5 reports:
+9. The tool reports:
    - step 1: `narrowed_too_far` at `local`, and `near_subject_on_face`
      at the added subject, which is on the face and names both kinds;
    - steps 2 to 4: `narrowed_too_far` at `local`;
@@ -567,11 +563,11 @@ beside its user name.
 
 ## §12 What a block omits (§2.15)
 
-zenoh fills in what a router's configuration leaves out of its access
+Zenoh fills in what a router's configuration leaves out of its access
 control: `enabled` false, `default_permission` `deny`, and a rule's
 `flows` both flows. A block whose access control is not enabled enforces
-none of its rules (0.7, F-124). Each step but the last is a hand edit of
-the text of the generator's `deny` block.
+none of its rules. Each step but the last is a hand edit of the text of
+the generator's `deny` block.
 
 **Setup.** As §7, with G, X and L as §7 says.
 
@@ -619,8 +615,8 @@ the text of the generator's `deny` block.
 
 Each face of a policy has a plan of its own, but every deny of each goes
 into the far principal's policy, and no zenoh rule is limited to a link
-protocol: a far principal of two faces carries both plans' denies on each
-(0.7, F-125).
+protocol. So a far principal of two faces carries both plans' denies on
+each.
 
 **Setup.** As §1, under `deny`, with a second face in the face policy:
 
