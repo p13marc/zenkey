@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.59** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.60** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -15,7 +15,7 @@ runtime that follows it).
 What a reader does with what it reads is a normative text of its own,
 [`observer.md`](observer.md), with its own version and changelog: how a
 tool, or any participant reading presence, state or the admin space,
-reads, when a read is complete, and what it may conclude (0.58, #925).
+reads, when a read is complete, and what it may conclude.
 This document states what participants put on the wire, and how owners,
 consumers, callers and deployments behave. A block moved to `observer.md`
 leaves a one-line pointer in its old place, so its section number still
@@ -51,8 +51,7 @@ An archive (§4.4) is an owner of its own keys.
   runs;
 - `[Sc: file §n]` is a scenario under `scenarios/`: a network behaviour with
   a setup, steps and expected observations;
-- `[F: pending]` would mark a fixture still owed. None is, in this version
-  (#607).
+- `[F: pending]` would mark a fixture still owed. None is, in this version.
 
 **Zenoh.** zk2 is specified against Zenoh **1.10.1**. Facts about Zenoh that
 the rules depend on are listed in Appendix B. A participant uses only stable
@@ -202,10 +201,9 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
     discontinuity.
   - A counter that crosses a face where neither is visible SHOULD carry
     its epoch in-band, in its value or its attachment, as
-    [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9,
-    0.35). Without one, a reader across the face reads a decrease as a
-    reset ([`link.v1`](profiles/link/v1.md) §2.13, 0.29;
-    `telemetry.v1` §2.10, §2.14).
+    [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9).
+    Without one, a reader across the face reads a decrease as a reset
+    ([`link.v1`](profiles/link/v1.md) §2.13; `telemetry.v1` §2.10, §2.14).
 
   `[Sc: presence.md §3]`
 - **Moving a service to another host changes no key.**
@@ -214,7 +212,7 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   spelled by name or wildcard, never defaulted from the local process.
   `[F: keys.json]` A binding to `self.system` (R1, R2) is spelled in the
   configuration, so it is not an implicit identity: it names the service's
-  own system, and is resolved once, at start (0.20).
+  own system, and is resolved once, at start.
 
 ### 1.6 Namespaces and base-relative keys
 
@@ -224,7 +222,7 @@ and strips it on ingress. Application code SHOULD NOT spell a deployment
 prefix. `[Sc: grammar.md §2]`
 
 At the constrained level (§12), a participant without session namespaces
-(zenoh-pico 1.10.1) writes the prefix literally in its keys. A namespaced
+(Appendix B) writes the prefix literally in its keys. A namespaced
 peer reads those keys as base-relative. `[Sc: constrained.md §2]`
 
 ### 1.7 Coexistence
@@ -299,11 +297,11 @@ contract's (§3.3). On an event, `cardinality` bounds the template's own
 parameters, and the key population is cardinality × rate × retention.
 `[F: contracts/e013-cardinality, e014-field]`
 What a member is, when one is live, and what a tool concludes from a
-reading are §2.7's (0.24).
+reading are §2.7's.
 - **No ceiling.** A template whose population no contract can fix, such as
   an archive's `{origin...}` (§4.4), still declares a cardinality, written
   **`"unbounded"`** (the canonical form's 4294967295, 2^32−1), which reads
-  "no ceiling" (0.57). Its value is a positive integer like any other, so
+  "no ceiling". Its value is a positive integer like any other, so
   E013 holds. A contract MAY write the number instead: the two spellings
   have one canonical form (§9.5), so one fingerprint, and an
   implementation MUST read them alike. Any other string is E000 (§9.1). A
@@ -341,13 +339,13 @@ with it. The fields map one-to-one onto Zenoh's stable QoS.
   `best_effort` relies on re-puts to heal a lost update: zenoh-modem re-puts
   each document every `ttl_s/2`, as
   [`freshness.v1`](profiles/freshness/v1.md) §2.4 requires of an owner
-  whose state declares a horizon (0.21). An archive (§4.4)
-  recording such a state can then miss values between re-puts. Spike S5
-  lost 10,917 of 100,000 values put with `drop` on their way to a storage.
-- **What a tool can conclude rests on it** (0.25). Moved to [`observer.md`](observer.md) §5.1 (core 0.58); no rule changed.
+  whose state declares a horizon. An archive (§4.4) recording such a
+  state can then miss values between re-puts, and `drop` loses values on
+  their way to a storage (spike S5, Appendix B).
+- **What a tool can conclude rests on it**: [`observer.md`](observer.md) §5.1.
 - **`express`** is opt-in. A contract's author SHOULD set it only on
-  measurement. Spike S9 measured `real_time` + express losing 0.6–4 % of
-  samples at 1–5 kHz on loopback, with no latency gain.
+  measurement, since it can lose samples and gain no latency (spike S9,
+  Appendix B).
 - **Operations** carry a recommended `priority`. Zenoh replies inherit the
   query's QoS, so the caller applies it.
 
@@ -368,7 +366,7 @@ unstable API (§0). An advanced publisher declares its own queryable and
 token under `<key>/@adv/…`, so its grants (§11.1) must include that
 subtree.
 
-**`history.miss_detection_ms`** (0.25) declares miss detection: the
+**`history.miss_detection_ms`** declares miss detection: the
 owner's advanced publisher numbers its samples, and sends a heartbeat
 with the last number every that many milliseconds, so that a subscriber
 can detect a gap (zenoh-ext's sample-miss detection). Without it, an
@@ -383,8 +381,8 @@ does not, is §2.7's.
   a lowercase ULID (§1.2) minted by the owner. A reader strips it before
   resolving the template. `[F: keys.json]`
 - **`rate`** is `rare` (at most 1/h), `low` (at most 1/min) or `burst(<n>/h)`,
-  for each member of the template, within any period that long (§2.7,
-  0.24). **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`.
+  for each member of the template, within any period that long (§2.7).
+  **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`.
   Both are required on an event. `[F: contracts/e015-event, e026-rate]`
   - In a rate, `<n>` is decimal without a leading zero, from 1 to 2^32−1:
     the canonical form keeps the rate's text, so `burst(012/h)` would be a
@@ -396,7 +394,7 @@ does not, is §2.7's.
     MUST also be within ±(2^53−1) (E028), so 2^63 s is E028 alone.
     `[F: contracts/ok-retention-leading-zero, e026-retention-range, e028-retention]`
 - **Storage.** A deployment MAY run a union storage on `zk2/*/*/*/events/**`.
-  A union storage prunes nothing by retention (0.16). zenoh 1.10.1's
+  A union storage prunes nothing by retention. zenoh 1.10.1's
   storage manager garbage-collects tombstones only (Appendix B), so an
   occurrence outlives its retention unless a backend, or the operator,
   prunes it. The retention is the bound a consumer applies on replay
@@ -416,7 +414,7 @@ its `cardinality` (§2.2) and keeps each event's `rate` (below), and the
 rest is for a tool that judges budgets.
 
 A templated resource's `cardinality` (§2.2) is a budget the owner keeps,
-and a tool can see broken (0.24). It counts members, not tokens: the
+and a tool can see broken. It counts members, not tokens: the
 presence budget (§8.3) is another. `[F: budget/]`
 
 - **The bound.** In an instance, a templated resource's bound is the
@@ -441,7 +439,7 @@ presence budget (§8.3) is another. `[F: budget/]`
   - **event:** for the retention after its last occurrence.
 
   `[F: budget/population.json]` `[Sc: budget.md §4–§6]`
-  - **Keeping it** (0.25). An owner keeps its bound by refusing the write
+  - **Keeping it.** An owner keeps its bound by refusing the write
     that would make a new member live while its live members are at the
     bound: a put of a new state key, a publication on a stream member not
     live, an occurrence of an event member not live. A put to a key that
@@ -472,7 +470,7 @@ presence budget (§8.3) is another. `[F: budget/]`
     tool measures it from keys alone: the ULID stripped and the template
     resolved (§2.2). A rate per instance could not be measured, since a
     key names no instance, and a re-mint does not reset it.
-  - **Across a restart** (0.28). A restart is a re-mint (§1.5), so the
+  - **Across a restart.** A restart is a re-mint (§1.5), so the
     rate holds across it: a restarted owner counts the occurrences its
     earlier instances published within the period, from a record of their
     instants that it keeps across the restart. The bus need not give them
@@ -483,9 +481,9 @@ presence budget (§8.3) is another. `[F: budget/]`
   - A template without parameters has one member, so its rate bounds the
     resource.
 
-**What a tool reads.** Moved to [`observer.md`](observer.md) §5.2 (core 0.58); no rule changed.
+**What a tool reads**: [`observer.md`](observer.md) §5.2.
 
-**What a tool concludes.** Moved to [`observer.md`](observer.md) §5.3 (core 0.58); no rule changed.
+**What a tool concludes**: [`observer.md`](observer.md) §5.3.
 
 ---
 
@@ -513,20 +511,20 @@ the required interface, and MUST NOT be empty.
 
 | # | Rule | Evidence |
 |---|---|---|
-| R1 | **Deployment:** a role MUST be bound by configuration, never in code. A binding is an ordered list of service addresses, exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface). A provider on the service's own system is spelled `self.system/<service>`, or `self.system/*` for every service on it that implements the interface (0.20, below). The order is the configuration's, and it is significant only where a profile says so (0.54, below). The binding configuration's format is a recommendation, not a rule. | `[Sc: bindings.md §1, §5, §6]` |
+| R1 | **Deployment:** a role MUST be bound by configuration, never in code. A binding is an ordered list of service addresses, exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface). A provider on the service's own system is spelled `self.system/<service>`, or `self.system/*` for every service on it that implements the interface (below). The order is the configuration's, and it is significant only where a profile says so (below). The binding configuration's format is a recommendation, not a rule. | `[Sc: bindings.md §1, §5, §6]` |
 | R2 | **Deployment:** a template parameter MAY be bound too. `{vehicle} = self.system` (or `self.service`) binds the consumer to its own slice of a provider's collection. | `[Sc: bindings.md §2]` |
-| R3 | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings, in their configured order, and its parameter bindings, as configured, a `self.system` provider resolved in its place (0.20, 0.54, below). **Tool:** the data-flow graph: moved to [`observer.md`](observer.md) §7.1 (core 0.58); no rule changed. | `[Sc: bindings.md §3, §5, §6]` `[F: descriptors/ok-binding-order]` |
+| R3 | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings, in their configured order, and its parameter bindings, as configured, a `self.system` provider resolved in its place (below). **Tool:** the data-flow graph: [`observer.md`](observer.md) §7.1. | `[Sc: bindings.md §3, §5, §6]` `[F: descriptors/ok-binding-order]` |
 | R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.8). | `[F: compat/]` |
 | R5 | A consumer MAY wait on presence for its bound providers. A binding resolves at once without it. | `[Sc: bindings.md §1]` |
 | R6 | **Consumer:** MUST discard a sample, or a GET reply, whose key expression is not concrete. Zenoh delivers a put on a wildcard key with the publisher's key. | `[Sc: bindings.md §4]` |
-| R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it (0.21). Where nothing crosses, liveness is *unobservable*; what a tool says of it: moved to [`observer.md`](observer.md) §7.1 (core 0.58); no rule changed. A `health.v1` status that crosses is such evidence, and its health is unobservable where the face closes it ([`health.v1`](profiles/health/v1.md) §2.8, 0.23). | `[Sc: constrained.md §3]` |
+| R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it. Where nothing crosses, liveness is *unobservable*; what a tool says of it: [`observer.md`](observer.md) §7.1. A `health.v1` status that crosses is such evidence, and its health is unobservable where the face closes it ([`health.v1`](profiles/health/v1.md) §2.8). | `[Sc: constrained.md §3]` |
 
 When several providers are bound, choosing between them is the consumer's.
 [`arbitration.v1`](profiles/arbitration/v1.md) says how, for a role whose
-contract declares a policy (0.54); a `many` role without one receives
+contract declares a policy; a `many` role without one receives
 from every bound provider.
 
-- **A binding is ordered** (0.54). A runtime keeps a role's bindings in the
+- **A binding is ordered.** A runtime keeps a role's bindings in the
   order its configuration gives them, an address listed twice included,
   and its descriptor lists them so (R3). The core reads no order: a
   binding means the same set of providers in any order, and a checker
@@ -535,7 +533,7 @@ from every bound provider.
   `arbitration.v1` reads it as a priority, the first entry the highest
   (its §2.4). `[Sc: bindings.md §6]` `[F: descriptors/ok-binding-order]`
 
-- **A provider on the service's own system** (0.20). A runtime MUST
+- **A provider on the service's own system.** A runtime MUST
   resolve a provider whose system position is `self.system` into the
   service's own system, once, when the service starts, as it resolves the
   rest of its configuration: `self.system/<service>` becomes
@@ -546,7 +544,7 @@ from every bound provider.
   `[Sc: bindings.md §5]`
   - **The descriptor lists the provider resolved** (R3): a tool draws an
     edge to an address it can find. A parameter bound to `self.system`
-    (R2) is listed as configured, as before.
+    (R2) is listed as configured.
   - **`self.system` at a provider's system position always means the
     service's own system.** It is also a plain chunk (§1.2), so a system
     literally named `self.system` is bound only by `*`. A deployment
@@ -554,7 +552,7 @@ from every bound provider.
   - **Only the system position.** `self.service` is not a provider
     spelling, and neither is `self.system` at the service position: each
     is the literal plain chunk it spells.
-  - **A tool has no system of its own.** Moved to [`observer.md`](observer.md) §7.1 (core 0.58); no rule changed.
+  - **A tool has no system of its own**: [`observer.md`](observer.md) §7.1.
 
 - **An unbound required role.** An owner whose configuration binds a
   required role to nothing MUST NOT start, as one missing a required
@@ -616,7 +614,7 @@ gate does not name.
     minus the optional ones gated on a capability the instance does not
     hold, minus those listed in `unavailable`.
   - An entry marked `"standby": true` exposes none of them, whatever else
-    it says (below, 0.39).
+    it says (below).
   - `unavailable` lists only optional resources whose absence the missing
     capabilities do not already imply.
   - Each entry gives a cause, `build`, `config` or `capability`, saying why
@@ -629,8 +627,8 @@ gate does not name.
 - **`token`** is `false` for an interface in the owner's tokenless set
   (§8.1), and `true` otherwise, which is the default. It states the
   configuration, not what is held now: a standby's entry states `true`,
-  and its instance holds no token of the interface (§6, 0.39).
-- **`standby`** (0.39) is `true` for an interface the instance **stands
+  and its instance holds no token of the interface (§6).
+- **`standby`** is `true` for an interface the instance **stands
   by** on: it implements the interface, lists it, and serves none of it
   now (§6). Absent is serving, and `false` written out is the same as
   absent, as for a role's `optional`. `[F: descriptors/ok-standby]`
@@ -654,7 +652,7 @@ gate does not name.
 - **`cardinality`** MAY lower a template's bound for this instance, keyed
   `<kind token>/<template>`, to a value from 1 to the contract's. It MUST
   NOT raise it. `[F: descriptors/d007-*]` The bound it states is the one
-  the instance's owner keeps, and a tool judges against (§2.7, 0.24).
+  the instance's owner keeps, and a tool judges against (§2.7).
 - **Integers.** As in a contract (§9.1), the schema's `format` is a bound,
   not an annotation. Here `uint64` is 0 to 2^64−1, a JSON number with no
   TOML limit, for `minor` and every `cardinality` value. A value outside it
@@ -666,23 +664,22 @@ gate does not name.
   `declared_by`. A role declared by the component's manifest names `null`.
   A role the configuration leaves unbound is listed with `"bindings": []`
   (§3.2). A `self.system` provider is listed resolved, as
-  `<system>/<service>` (R1, 0.20). The bindings keep their configured
-  order, an address listed twice included (R3, 0.54).
+  `<system>/<service>` (R1). The bindings keep their configured
+  order, an address listed twice included (R3).
   `[F: descriptors/d009-*, ok-binding-order]` `[Sc: bindings.md §5, §6]`
-  - **`optional`** (0.10) is `true` for a role the instance works without,
-    and absent otherwise: absent is required, and `false` written out is
-    the same as absent. For a manifest role it is the only place a tool
-    learns the role's need, which is why it was added. For a role a
-    contract declares, it repeats that contract's `[requires]`, and a tool
-    takes the need from the contract: a value that disagrees is not checked
-    (0.11, below). `[F: descriptors/ok-optional-role,
+  - **`optional`** is `true` for a role the instance works without, and
+    absent otherwise: absent is required, and `false` written out is the
+    same as absent. For a manifest role it is the only place a tool learns
+    the role's need. For a role a contract declares, it repeats that
+    contract's `[requires]`, and a tool takes the need from the contract:
+    a value that disagrees is not checked (below). `[F: descriptors/ok-optional-role,
     ok-optional-unchecked]`
 - **`profiles`** lists the profiles the instance follows, deduplicated,
   and sorted as §9.5 sorts a contract's `uses`: by name as a string, then
-  by major as a number (0.20). So `views.v2` comes before `views.v10`, and
+  by major as a number. So `views.v2` comes before `views.v10`, and
   `a.v1` before `a.b.v1`, where a sort of the whole strings gives the
   reverse of each. The checker does not read the order (cascade 8). It is
-  the union of two sets (0.19):
+  the union of two sets:
   - the `uses` of the contracts the instance implements;
   - the derivation-only profiles the instance follows (§10). Today that is
     `hostid.v1`, listed by an instance whose system is minted
@@ -690,14 +687,14 @@ gate does not name.
 
   `[F: descriptors/ok-derivation-profile]`
 - **`meta`** is informative: host, process, build, and nothing in it is
-  checked. One member is used (0.10): an owner SHOULD state its session's
-  zid as `meta.zid`, as the reference does. How a tool attributes a state
-  stamp by it: moved to [`observer.md`](observer.md) §4.4 (core 0.58); no rule changed.
-  - **How a zid compares** (0.11). zenoh 1.10.1 writes a zid as lowercase
+  checked. One member is used: an owner SHOULD state its session's zid
+  as `meta.zid`, as the reference does. How a tool attributes a state
+  stamp by it: [`observer.md`](observer.md) §4.4.
+  - **How a zid compares.** zenoh 1.10.1 writes a zid as lowercase
     hexadecimal without leading zeros, at most 32 digits (Appendix B), so a
     zid's text can be shorter than 32 digits, and another writer can spell
     the same id differently. An owner SHOULD write `meta.zid` as zenoh
-    writes it. How a tool compares two zids: moved to [`observer.md`](observer.md) §4.4 (core 0.58); no rule changed.
+    writes it. How a tool compares two zids: [`observer.md`](observer.md) §4.4.
 - **Size.** A descriptor SHOULD stay within 1 KB. At the constrained level
   (§12), it MUST fit one fragment. `[Sc: constrained.md §5]`
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
@@ -726,8 +723,8 @@ and reports these codes. `[F: descriptors/]`
 | D008 | a capability is not `[a-z0-9][a-z0-9_.-]*`; or one is listed twice | error | once per malformed occurrence; once more for the list when any value repeats, however many do (below) |
 | D009 | in a requirement entry: `role` is not `[a-z][a-z0-9_]*`; `interface` is not an interface id; `declared_by` is not one of the interfaces this descriptor lists; a `params` key is not `[a-z][a-z0-9_]*`, or its value is empty; a binding is not `<system>/<service>`, each chunk plain or `*` | error | per finding |
 | D010 | a profile is not `<name>.v<major>`; or one is listed twice | error | as D008: once per malformed occurrence, once for the repeats |
-| D011 | an interface entry for `archive.v1` is marked `"token": false`: an archive is never tokenless (§4.4, 0.17) | error | per entry |
-| D012 | an interface entry is marked both `"standby": true` and `"token": false`: an interface with a standby is never tokenless (§6, §8.1, 0.39) | error | per entry |
+| D011 | an interface entry for `archive.v1` is marked `"token": false`: an archive is never tokenless (§4.4) | error | per entry |
+| D012 | an interface entry is marked both `"standby": true` and `"token": false`: an interface with a standby is never tokenless (§6, §8.1) | error | per entry |
 
 **Cascades and scope.**
 1. D000 stops the check: no other code is reported.
@@ -747,14 +744,14 @@ and reports these codes. `[F: descriptors/]`
    fingerprint (D005–D007). An interface none of the given contracts
    declares is checked for syntax only; one given at other fingerprints
    only is D004. `[F: descriptors/ok-unknown-interface, d004-revision]`
-6. D011 reads an entry's `iface` and `token`, and nothing else (0.18). It
+6. D011 reads an entry's `iface` and `token`, and nothing else. It
    is reported for every entry whose `iface` is `archive.v1`, whether or
    not that contract is given, and whatever its `contract` says: cascades
    3 and 5 do not suppress it. An entry checked no further by cascade 2 is
    no `archive.v1` entry. `[F: descriptors/d011-tokenless-archive,
    d011-bad-fingerprint]`
-7. D012 reads an entry's `standby` and `token`, and nothing else (0.39),
-   as D011 reads its `iface` and `token`: cascades 3 and 5 do not
+7. D012 reads an entry's `standby` and `token`, and nothing else, as
+   D011 reads its `iface` and `token`: cascades 3 and 5 do not
    suppress it, and an entry checked no further by cascade 2 is not
    checked for it. An `archive.v1` entry so marked gives D011 and D012.
    `[F: descriptors/d012-standby-tokenless, d012-bad-fingerprint]`
@@ -767,15 +764,15 @@ and reports these codes. `[F: descriptors/]`
      `[requires]`, and that `params` values fit the required interface;
    - that `profiles` is the union of the contracts' `uses` and the
      derivation-only profiles the instance follows: a checker cannot see
-     which profiles an instance follows (0.19), so a profile no given
+     which profiles an instance follows, so a profile no given
      contract uses is not a finding `[F: descriptors/ok-derivation-profile]`;
-   - the order of `profiles` (0.20): an owner writes it, and a tool reads
+   - the order of `profiles`: an owner writes it, and a tool reads
      the list as a set;
-   - the order of a role's `bindings`, and an address listed twice
-     (0.54): an owner writes them as configured (R3), and a profile that
+   - the order of a role's `bindings`, and an address listed twice: an
+     owner writes them as configured (R3), and a profile that
      gives the order a meaning says what a repeat means
      (`arbitration.v1` §2.4) `[F: descriptors/ok-binding-order]`;
-   - that a `self.system` provider was resolved (0.20): `self.system` is a
+   - that a `self.system` provider was resolved: `self.system` is a
      plain chunk, so an unresolved one reads as a system of that name.
      `bindings.md §5` checks the runtime instead;
    - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
@@ -783,12 +780,12 @@ and reports these codes. `[F: descriptors/]`
      `archive.v1` (D011, cascade 6) and beside `standby` (D012, cascade
      7);
    - that a standby's interface is one a profile governs, and that a
-     `"token": false` entry's contract does not use `redundancy.v1`
-     (0.39): a checker reads the mark for its form, and the profile says
+     `"token": false` entry's contract does not use `redundancy.v1`: a
+     checker reads the mark for its form, and the profile says
      what a tool concludes of either (`redundancy.v1` §2.14, its
      `descriptors.json`). The owner's start refuses the second (§8.2);
-   - that a role's `optional` agrees with the contract that declares it
-     (0.11): a tool reads the contract's `[requires]` instead.
+   - that a role's `optional` agrees with the contract that declares it:
+     a tool reads the contract's `[requires]` instead.
      `[F: descriptors/ok-optional-unchecked]`
 
 ---
@@ -802,8 +799,8 @@ and reports these codes. `[F: descriptors/]`
   network.
 - A session whose HLC is enabled, as a serving session's is (§4.3), stamps
   every put it is not given a timestamp for, a stream sample included, from
-  its own clock (0.23).
-- **An HLC follows the stamps it receives** (0.53). A node whose HLC is
+  its own clock.
+- **An HLC follows the stamps it receives.** A node whose HLC is
   enabled, a session's included, moves it to the stamp of each put it
   routes, a put it receives for its own subscriber included, when that
   stamp is later than its own clock and within its delta. A stamp further
@@ -813,7 +810,7 @@ and reports these codes. `[F: descriptors/]`
   owner's stamps and a reader's clock disagree must hold of the stamps,
   not of the hosts' clocks alone ([`timing.v1`](profiles/timing/v1.md)
   §2.6).
-- **An HLC stamps an unstamped put it routes** (0.55, F-265). A node whose
+- **An HLC stamps an unstamped put it routes.** A node whose
   HLC is enabled, a session's included, stamps each put it routes that
   carries no stamp, a put it receives for its own subscriber included,
   from its own clock, as a router does. So a reader whose own session has
@@ -836,13 +833,13 @@ and reports these codes. `[F: descriptors/]`
 |---|---|---|
 | S1 | **Owner:** every state mutation, put **and** delete, MUST carry a timestamp the owner set. | `[Sc: state.md §1]` |
 | S2 | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
-| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it (0.29). | `[Sc: state.md §2, §6]` |
+| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it. | `[Sc: state.md §2, §6]` |
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
 | S6 | **Consumer:** current state is the owner's answer. A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or presence shows it absent. That silence is not a verdict about the key (O5). The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
 | S7 | **Owner:** clocks are bounded both ways (§4.3). | `[Sc: state.md §7]` |
 
-**A re-put is a mutation** (0.21). A put that repeats a member's current
+**A re-put is a mutation.** A put that repeats a member's current
 value, as an owner refreshing it under
 [`freshness.v1`](profiles/freshness/v1.md) §2.4 makes, is a put like any
 other: it carries a timestamp the owner set (S1), minted above every stamp
@@ -850,7 +847,7 @@ it issued (§4.3), and the owner's GET answers carry that stamp from then
 on (S2). A reply represents the member's latest put, not its latest change.
 `[Sc: profiles/freshness/scenarios.md §1]`
 
-**A late joiner's seed** (0.26). A consumer or a tool that wants an
+**A late joiner's seed.** A consumer or a tool that wants an
 owner's current state and every change after it, a **late joiner**, seeds
 from S4's GET and follows a subscription.
 - **The order.** A late joiner MUST declare its subscription first, then
@@ -866,7 +863,7 @@ from S4's GET and follows a subscription.
     delete is.
   - Two samples with equal stamps are the same mutation, kept once.
   - **Stamps compare as `Latest` compares replies** (§4.1), which is
-    zenoh's timestamp order, spelled out in 0.27 (#752). First by time, an
+    zenoh's timestamp order (Appendix B). First by time, an
     unsigned 64-bit NTP64 value. On equal times, by id: each id's 128-bit
     value written as 16 bytes little-endian, least significant byte first,
     and the two compared byte by byte from the first. So the least
@@ -877,11 +874,11 @@ from S4's GET and follows a subscription.
       within one seed mean the owner started a new epoch inside the seed's
       window: a value of the old epoch that arrives after one of the new
       is §4.3's residual risk.
-  - **An unstamped sample** (0.27) ranks below every stamped one, as
+  - **An unstamped sample** ranks below every stamped one, as
     `Latest` ranks an unstamped reply lowest (§4.1). It is no owner's
     (S1): it is a foreign key's (§1.7), put by a session with no HLC
-    through no node that stamps, the reader's own session included (0.55,
-    §4.1).
+    through no node that stamps, the reader's own session included
+    (§4.1).
     - It is kept on a key that holds nothing, or only unstamped samples,
       and never over a stamped one.
     - Two unstamped samples of a key have no order but their arrival, so
@@ -889,22 +886,22 @@ from S4's GET and follows a subscription.
       after a live sample.
 
     `[F: seed/merge.json]` `[Sc: state.md §11]`
-- **R6 and a tool's seed** (0.27). Moved to [`observer.md`](observer.md) §4.1 (core 0.58); no rule changed.
+- **R6 and a tool's seed**: [`observer.md`](observer.md) §4.1.
 - **A selector over several owners.** A GET on a selector that matches
   several owners' keys is addressed to the owner's keys, as S4 requires,
   when each key it matches has one owner (P3, §6): `Latest` then
   consolidates each key over that owner's answers. The keys it matches
   that no zk2 owner has, foreign keys (§1.7), are outside S4, and a storage
   may answer them.
-- **What a seed cannot know.** Moved to [`observer.md`](observer.md) §4.1 (core 0.58); no rule changed.
+- **What a seed cannot know**: [`observer.md`](observer.md) §4.1.
 
-A **tool** checks S4 against the routers' storage admin space: moved to [`observer.md`](observer.md) §4.2 (core 0.58); no rule changed.
+A **tool** checks S4 against the routers' storage admin space: [`observer.md`](observer.md) §4.2.
 - **The admin space is off by default** in zenoh 1.10.1 (Appendix B). A
   deployment that wants S4 checked enables it, read-only, for the tools'
-  principals (0.10).
-- **What the check reads** (0.11; the second selector since 0.48): observer §4.2.
-- **What a tool does not ask** (0.48, 0.50): observer §4.3.
-- **Who answered** (0.12, F-80): observer §4.2.
+  principals.
+- **What the check reads**: observer §4.2.
+- **What a tool does not ask**: observer §4.3.
+- **Who answered**: observer §4.2.
 
 **Observing S1.** An owner's stamp is told from a router's by its id: the
 owner's session's zid, against the router's (§4.1). Where the owner's
@@ -912,10 +909,10 @@ session is itself the router, the two zids are one, and the check proves
 nothing. A tester therefore runs the owner as a client of a router with
 timestamping enabled, which keeps the stamp a put carries unless it is
 future-dated (§4.1), and checks the check against a control: a put without
-a timestamp, from a session whose HLC is not enabled (§4.1, 0.23), through
+a timestamp, from a session whose HLC is not enabled (§4.1), through
 the same router, arrives with the router's zid.
 `[Sc: state.md §1]`
-- **A tool's S1 check** (0.16, 0.17). Moved to [`observer.md`](observer.md) §4.4 (core 0.58); no rule changed.
+- **A tool's S1 check**: [`observer.md`](observer.md) §4.4.
 
 ### 4.3 Clocks (S7)
 
@@ -930,8 +927,7 @@ the same router, arrives with the router's zid.
     above the last. Timestamps are compared by their time, an NTP64 value
     (Appendix B), whose unit is 2^−32 s: the reference adds one unit. A
     larger step keeps the rule, which needs only that each stamp exceed the
-    last: zenoh-python builds an NTP64 from seconds and nanoseconds, so its
-    smallest step is 1 ns.
+    last (a binding's smallest step: Appendix B).
 - **Catch-up.** An owner MUST NOT stamp at or below the last timestamp it
   issued for its keys. Before its first write, it takes that timestamp from
   its own persistent record, else from an explicit read of an archive on its
@@ -952,9 +948,9 @@ the same router, arrives with the router's zid.
     own puts are never echoed back.
   - When a detection shows it beyond the delta, it MUST stop writing
     state, re-puts included, and SHOULD report it. Its members then go
-    stale, by design ([`freshness.v1`](profiles/freshness/v1.md) §2.10,
-    0.21). `[Sc: profiles/freshness/scenarios.md §2]`
-  - **The report is not state** (0.23). A state value saying so would be
+    stale, by design ([`freshness.v1`](profiles/freshness/v1.md) §2.10).
+    `[Sc: profiles/freshness/scenarios.md §2]`
+  - **The report is not state.** A state value saying so would be
     a write the rule stops. The standard way is a stream sample: a
     `health.v1` owner publishes a `faults` sample with code
     `clock_ahead`, and its status goes stale
@@ -968,8 +964,8 @@ the same router, arrives with the router's zid.
 
 ### 4.4 Archives
 
-An **archive** is a service implementing `archive.v1` (a profile, #613). This
-section is what the core requires of it.
+An **archive** is a service implementing `archive.v1`, a profile not yet
+written. This section is what the core requires of it.
 
 - **It records** owners' mutations under its own address, with each
   mutation's timestamp and type identity (§7.1), and keeps tombstones for at
@@ -1047,17 +1043,17 @@ section is what the core requires of it.
     key that alignment never confirms. The archive MAY drop such a key after
     a deployment-set horizon, and MUST keep serving it as unconfirmed until
     then.
-- **Found by its token** (0.16). An archive MUST hold its `archive.v1`
+- **Found by its token.** An archive MUST hold its `archive.v1`
   interface token: it is never in the tokenless set (§8.1). Consumers and
   tools find archives by that token for last-known reads (S6), and a
   tokenless one would be invisible to them. An owner whose tokenless set
   names `archive.v1` is refused at §8.2's step 2, and a descriptor that
-  marks it `"token": false` is D011 (0.17).
+  marks it `"token": false` is D011.
   `[F: descriptors/d011-tokenless-archive]`
 - **Placement.** An archive on the consumer's side covers losing the link,
   and one on the owner's side covers losing the owner. Store-and-forward
-  ([`desired.v1`](profiles/desired/v1.md) §2.9, 0.36) uses both.
-- **What a tool can see** (0.10). Moved to [`observer.md`](observer.md) §4.5 (core 0.58); no rule changed.
+  ([`desired.v1`](profiles/desired/v1.md) §2.9) uses both.
+- **What a tool can see**: [`observer.md`](observer.md) §4.5.
 
 `[Sc: state.md §4–§6, §9]`
 
@@ -1073,8 +1069,8 @@ section is what the core requires of it.
 | O2 | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden`, unless the operation declares `fanout = "allowed"`, whatever the access control allows. **Caller:** a call to a fan-out operation MUST use target `All` and consolidation `None`. | `[Sc: operations.md §2]` |
 | O3 | **Owner:** a reply MUST go on the operation's own concrete key, a member's for a call over a template (below). Success is a value reply; failure is a `reply_err` carrying the error envelope (§5.2). Every call that reaches an owner's queryable MUST get one or the other, never silence (below). The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. A standby declares no operation queryable (§6), so it cannot intercept calls. | `[Sc: operations.md §3]`; `[F: errors/cases.json]` |
 | O4 | **Caller:** MUST NOT retry an operation that is not declared `idempotent`, and retries one that is only after silence (below). | `[Sc: operations.md §4]` |
-| O5 | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. Access-control refusals return empty since zenoh 1.3. A tool attributes silence through presence, which a refusal can empty too (observer.md §3.4, 0.8). | `[Sc: operations.md §5]` |
-| O6 | **Owner:** an operation declared `replies = "many"` gives zero or more value replies, then completion. With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. **Caller:** MUST use consolidation `None`. `Latest` and `Auto` kept 1 reply of 10 in spike S6. A replier without exactly one summary is possibly partial (below). | `[Sc: operations.md §6]`; `[F: contracts/e033-summary]` |
+| O5 | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. Access-control refusals return empty since zenoh 1.3. A tool attributes silence through presence, which a refusal can empty too (observer.md §3.4). | `[Sc: operations.md §5]` |
+| O6 | **Owner:** an operation declared `replies = "many"` gives zero or more value replies, then completion. With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. **Caller:** MUST use consolidation `None`, since `Latest` and `Auto` drop replies (spike S6, Appendix B). A replier without exactly one summary is possibly partial (below). | `[Sc: operations.md §6]`; `[F: contracts/e033-summary]` |
 | O7 | **Caller:** a request MAY carry an attachment, the JSON object `{"actor", "request_id"}` (strings), which an owner MAY record for audit. It is claimed, never authentication, and never a reason to refuse a call (below). | `[Sc: operations.md §7]` |
 
 Work that outlives a query timeout belongs to `jobs.v1`. A request type
@@ -1109,8 +1105,8 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
 **Answering.**
 - **Every call is answered (O3).** A call that reaches an owner's
   queryable gets a value or an envelope. How a tool judges O3 from
-  outside (0.16), **Where a tool learns its grants** (0.17) and what it
-  holds when **Told so**: moved to [`observer.md`](observer.md) §7.2 (core 0.58); no rule changed.
+  outside, **Where a tool learns its grants** and what it holds when
+  **Told so**: [`observer.md`](observer.md) §7.2.
 
   A handler that ends without
   replying is answered `internal`, so a live server's own bug is never
@@ -1118,14 +1114,14 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
   a handler that ends without it is answered `internal`, after any values
   it sent (O6). Without one, zero values then completion is the
   operation's own answer, which a caller cannot tell from silence.
-  - **Sending nothing needs no member** (0.9, F-76). Only a reply needs a
+  - **Sending nothing needs no member.** Only a reply needs a
     key (below, "Over a template"). So a server over a template whose
     handler names no member and sends nothing ends the call as zero values
     then completion, when no `summary` is declared, and is answered
     `internal` when one is.
 
   `[Sc: operations.md §2, §3, §6]`
-- **The order of refusals** (0.9, F-74). Before any handler runs, an owner
+- **The order of refusals.** Before any handler runs, an owner
   refuses a call for the first of these that applies, in this order:
   1. a key expression that is not concrete, on an operation that forbids
      fan-out: `fanout_forbidden` (O2);
@@ -1171,7 +1167,7 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
     answers `unavailable` where another would have served.
 
   `[Sc: operations.md §3, §8]`
-- **`unavailable` from a handler** (0.28). An operation the instance
+- **`unavailable` from a handler.** An operation the instance
   exposes may still be unavailable for one member of its template: a
   member its configuration or its capabilities leave out now, such as
   `config.v1`'s groups outside the startup allowlist. Its handler MAY then
@@ -1245,7 +1241,7 @@ A failed call replies with `reply_err` and an envelope with these fields:
 | `cause` | string or null | With `unavailable` only, and then required: `build`, `config` or `capability` (§2.3) |
 | `detail` | a value, bytes, or null | With `app` only, and optional: a value of the operation's declared `error` type, inline (JSON, CBOR), as its encoded message (protobuf), or as base64 text of its bytes (raw, below) |
 
-**The codes** (0.28). Each says what failed, for a caller that reads no
+**The codes.** Each says what failed, for a caller that reads no
 message:
 - `invalid_request`: the request, or the member the key names, is
   malformed, or breaks the operation's rules (§5.1, "The request" and "A
@@ -1355,7 +1351,7 @@ any other reply error is the transport's.
   Each instance that exposes a replicated operation is active on its
   interface (§5.1), and so holds the interface's token, tokenless sets
   aside (§8.1).
-- **No core roles, one mark** (0.39).
+- **No core roles, one mark.**
   - **A standby.** An instance **stands by** on an interface it implements
     when its descriptor marks the interface's entry `"standby": true`
     (§3.3). It exposes none of the interface's resources, required ones
@@ -1374,15 +1370,15 @@ any other reply error is the transport's.
     where replicated serving explains it. A tool diagnoses it,
     and the runtime does not fence, but for an interface whose contract
     uses `redundancy.v1`: its holders step down as that profile's §2.9
-    says (0.39), which is no fence either, since writes in flight still
+    says, which is no fence either, since writes in flight still
     land.
     - How a tool diagnoses it (**A holder is an incumbent, whatever its
       mark**, **Replicated serving**, **Longer than the grace period**, and
-      the grace period a tool setting): moved to [`observer.md`](observer.md) §6.1 (core 0.58); no rule changed.
+      the grace period a tool setting): [`observer.md`](observer.md) §6.1.
     - An owner SHOULD keep a re-mint's overlap below one second.
 
     `[Sc: operations.md §8]`
-  - **Reading the mark** (0.39). Moved to [`observer.md`](observer.md) §6.2 (core 0.58); no rule changed.
+  - **Reading the mark**: [`observer.md`](observer.md) §6.2.
   - Election and fencing belong to `redundancy.v1`. An actuator keeps an
     exclusivity lock outside the bus, which the profile names
     `election = "external"` and does not replace (its §2.11).
@@ -1405,7 +1401,7 @@ has a **type identity**: (kind, name, sha256 of its schema artifact).
 `flatbuffer`, `ros2msg` and `cdr` are reserved kinds. Authoring format
 draft 2 has no spelling for them, so a contract declares such payloads as
 `raw` with a media type. `[Sc: types.md §2]` What a generic tool decodes,
-these kinds through a plugin included: moved to [`observer.md`](observer.md) §7.3 (core 0.58); no rule changed.
+these kinds through a plugin included: [`observer.md`](observer.md) §7.3.
 
 **Type references in a contract:**
 
@@ -1435,7 +1431,7 @@ listed files.
   attachment declares its own `attachment_encoding` by the same rule.
   Protobuf is always binary, and `encoding` on a protobuf or raw type is
   ignored, with a warning. `[F: contracts/w103-encoding]`
-- **Decode order** for a tool, and **Honest rendering**: moved to [`observer.md`](observer.md) §7.3 (core 0.58); no rule changed.
+- **Decode order** for a tool, and **Honest rendering**: [`observer.md`](observer.md) §7.3.
 
 ### 7.3 The JSON Schema subset
 
@@ -1485,7 +1481,7 @@ any change inside one conservatively, as *review*, a nullable form aside
   it that carries meaning, holding two branches in either order: the null
   schema, whose `type` is exactly `null` and which holds nothing else that
   carries meaning, and any schema S.
-  - **"Exactly `null`"** (0.8, F-71) reads the `type` as a set of names,
+  - **"Exactly `null`"** reads the `type` as a set of names,
     as everywhere in this subset: `"null"` and `["null"]` are both the
     null schema. `[F: compat/payload/jsonschema/nullable-null-as-list]`
 - **Its reading** is S, its `$ref`s followed (§9.8), with `null` added to
@@ -1512,7 +1508,7 @@ accept SHM buffers.
 - A deployment SHOULD set `RLIMIT_MEMLOCK` to at least the pool plus 2 MiB.
   Below the pool's need, SHM silently falls back to TCP, and a metadata
   segment that cannot be locked panics.
-- A tool's check of the limit at start: moved to [`observer.md`](observer.md) §7.4 (core 0.58); no rule changed.
+- A tool's check of the limit at start: [`observer.md`](observer.md) §7.4.
 
 ---
 
@@ -1530,10 +1526,10 @@ Liveliness tokens carry no payload; everything is in the key.
   one resource**, and none otherwise, except for its **tokenless set**.
   "Who implements `nav.v2`" is the liveliness selector
   `zk2/*/*/@zk/alive/nav.v2/**`. `[Sc: presence.md §1]`
-  A standby (§6, 0.39) exposes none of the interface's resources, so it
+  A standby (§6) exposes none of the interface's resources, so it
   holds no interface token for it, and no member token.
   `[Sc: profiles/redundancy/scenarios.md §1]`
-- **The tokenless set** (U22, decided at acceptance).
+- **The tokenless set** (U22, §13).
   - **At scale.** A deployment needs this only once a presence domain
     nears the presence budget, about 10–15k tokens (§8.3); below that, it
     leaves the set empty, and every interface keeps its token.
@@ -1541,11 +1537,11 @@ Liveliness tokens carry no payload; everything is in the key.
     no interface token. These SHOULD be the interfaces every service of the
     deployment implements: `health.v1`
     ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1`
-    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13, 0.34) and
+    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) and
     the rest of a framework set.
   - The owner's descriptor marks each such interface `"token": false`
     (§3.3).
-  - It never names `archive.v1` (§4.4), nor, since 0.39, an interface
+  - It never names `archive.v1` (§4.4), nor an interface
     whose contract uses `redundancy.v1`: the instance serving it is known
     by its interface token (§6, [`redundancy.v1`](profiles/redundancy/v1.md)
     §2.14). §8.2 step 2 refuses both.
@@ -1578,23 +1574,23 @@ Liveliness tokens carry no payload; everything is in the key.
   §8.2's order (the descriptor's queryable and first put, then the
   tokens), then undeclare the old ones. There is an overlap, never a gap.
   `[Sc: presence.md §3]`
-- **Reading presence.** Moved to [`observer.md`](observer.md) §3 (core 0.58); no rule changed. Its parts keep their names there:
+- **Reading presence**: [`observer.md`](observer.md) §3. Its parts keep their names there:
   - **The subscribers bind too:** observer §3.1;
-  - **A fault read from presence shapes holds in two reads** (0.10): observer §3.2;
+  - **A fault read from presence shapes holds in two reads**: observer §3.2;
   - a liveliness GET that ended at its timeout, and **A read that runs to
-    its session's interests timeout is not complete** (0.41): observer §3.3;
-  - **A refused read is complete, and empty** (0.8): observer §3.4;
-  - **A read through a session cut off is not complete** (0.37), with
-    **What the check reads** (0.38), **A read cut off while it runs** and
+    its session's interests timeout is not complete**: observer §3.3;
+  - **A refused read is complete, and empty**: observer §3.4;
+  - **A read through a session cut off is not complete**, with
+    **What the check reads**, **A read cut off while it runs** and
     **A profile's premise**: observer §3.5;
-  - **Absence is established only by a complete read** (0.37), with
-    **Acting on a withdrawal** (0.54): observer §3.6;
+  - **Absence is established only by a complete read**, with
+    **Acting on a withdrawal**: observer §3.6;
   - **The read that establishes absence goes on a session with no
-    liveliness subscriber** (0.37), the watch session and its round trip:
+    liveliness subscriber**, the watch session and its round trip:
     observer §3.7;
-  - **A read on a token's own session answers that token itself** (0.40):
+  - **A read on a token's own session answers that token itself**:
     observer §3.8;
-  - **What a complete read covers** (0.40): observer §3.9.
+  - **What a complete read covers**: observer §3.9.
 - **Timeouts are the caller's.** How long a liveliness GET, a descriptor
   GET (§3.3) or a retrieval attempt (§8.4) waits, and how long a tool waits
   for presence after an owner starts, are the caller's choices. The
@@ -1606,8 +1602,7 @@ Liveliness tokens carry no payload; everything is in the key.
     can see: its own session connected to the network the owner joins, and
     the owner's launch. Where the owner's session is the router the tool
     connects to, a client connects only once that session is open, so the
-    connection is the later. Measured from there, zenoh-python saw the
-    reference owner's tokens within about 1 ms (#609).
+    connection is the later (Appendix B).
 
 ### 8.2 Start-up order
 
@@ -1622,7 +1617,7 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
 
 `[Sc: presence.md §1]`
 
-- **The address comes first** (0.20). An owner's address, and every key
+- **The address comes first.** An owner's address, and every key
   built from it, is fixed before step 1, and a pure consumer's before its
   instance token. Where the deployment asks a profile to derive the system
   (§10; `hostid.v1` mints one, [`profiles/hostid/v1.md`](profiles/hostid/v1.md)
@@ -1657,19 +1652,19 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
   `unavailable`), and one both exposed and listed. A descriptor's exposure
   is compact (§3.3), so an optional resource left out of `unavailable` is
   claimed. It also refuses an owner whose tokenless set names `archive.v1`,
-  whether or not the owner implements it (§4.4, 0.17): the set is the
+  whether or not the owner implements it (§4.4): the set is the
   deployment's configuration, and naming the archive in it is an error.
   `[Sc: presence.md §2]` And it refuses one whose tokenless set names an
-  interface it implements whose contract uses `redundancy.v1` (0.39): that
+  interface it implements whose contract uses `redundancy.v1`: that
   interface's incumbent is the instance holding its token
   ([`redundancy.v1`](profiles/redundancy/v1.md) §2.14).
   `[Sc: profiles/redundancy/scenarios.md §11]`
-- **A standby** (§6, 0.39) exposes none of an interface's resources,
+- **A standby** (§6) exposes none of an interface's resources,
   required ones included, and its descriptor says so (§3.3): step 2 does
   not refuse it. It validates at its start what it will expose once it
   serves, as its entry's `unavailable` states, so that its taking over
   cannot fail step 2. `[Sc: profiles/redundancy/scenarios.md §1]`
-- **Serving later, and stopping** (0.39). An instance that starts to
+- **Serving later, and stopping.** An instance that starts to
   serve an interface while it runs, a standby taking over, does steps 1
   to 4 for that interface, in their order: its resources, then its
   descriptor put again without the mark, then the interface's token, so
@@ -1691,27 +1686,26 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
   - A profile MAY make it a MUST for its own resources. `health.v1` does
     for its status, which a reader then finds when the instance token
     appears, tokenless or not
-    ([`profiles/health/v1.md`](profiles/health/v1.md) §2.3, 0.23).
+    ([`profiles/health/v1.md`](profiles/health/v1.md) §2.3).
     `[Sc: profiles/health/scenarios.md §1]`
 
 ### 8.3 The presence budget
 
 **At scale.** A deployment needs this section only once a presence domain
-nears 10,000 liveliness tokens (§8.1); below that, spike S2 measured
-discovery under 2 s (under 50 ms at 1,000 tokens), and the budget asks
-nothing of it.
+nears 10,000 liveliness tokens (§8.1); below that, discovery is quick
+(Appendix B), and the budget asks nothing of it.
 
-Presence costs per token, whatever the layout. A router holds 2.1–2.4 KiB per
-token, and a router-to-router link carries 63–85 B per declaration (spike
-S2). A **presence domain** is the set of routers whose router-to-router
-links carry each other's declarations.
+Presence costs per token, whatever the layout: every router holds each
+token, and a router-to-router link carries each declaration (spike S2's
+costs are in Appendix B). A **presence domain** is the set of routers whose
+router-to-router links carry each other's declarations.
 
-A deployment SHOULD keep a domain within about 10–15k tokens, which kept
-discovery within 2–4 s in spike S2. At 50k tokens, discovery took 46–49 s or
-never finished. The budget is shared with every other declaration, which
-spike S2 did not measure.
+A deployment SHOULD keep a domain within about 10–15k tokens. Above that,
+discovery slows, until it can fail to finish (spike S2, Appendix B). The
+budget is shared with every other declaration, which spike S2 did not
+measure.
 
-**What a tool can count** (0.10). Moved to [`observer.md`](observer.md) §3.10 (core 0.58); no rule changed.
+**What a tool can count**: [`observer.md`](observer.md) §3.10.
 
 ### 8.4 Contract retrieval
 
@@ -1736,16 +1730,16 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
 - **Consolidation `None` is a MUST.** zenoh's default consolidation on a
   concrete key holds every reply until the query finalizes (`Latest`,
   §4.1), so step 2 cannot happen, and a slow corrupt reply can displace the
-  valid one: measured, the corrupt reply alone arrived at 2 s, the valid
-  one never, and a caller following the steps would report the contract
-  unavailable. A caller MUST set consolidation `None` on both attempts.
+  valid one, so that a caller following the steps would report the
+  contract unavailable (Appendix B). A caller MUST set consolidation
+  `None` on both attempts.
   `[Sc: retrieval.md §2]`
 - **The reply.** A holder answers with one reply, the bundle's bytes, with
   `Encoding` `application/json`. A caller MUST NOT depend on the encoding:
   the hash is the check. `[Sc: retrieval.md §1]`
 - **An attempt ends** when its GET completes, or at the caller's timeout
   (§8.1).
-- **From a token to a fingerprint** (0.8). An interface token carries
+- **From a token to a fingerprint.** An interface token carries
   `fp16`, the first 16 hex digits of the fingerprint (§1.2), which is not
   enough to retrieve by. A tool reads the full fingerprint from the
   instance's descriptor (§3.3, the interface's `contract`), and retrieves
@@ -1758,7 +1752,7 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
 A **face** is a router's link to a part of the network. A deployment marks
 a face constrained, and gives its maximum outage, in its face configuration.
 [`link.v1`](profiles/link/v1.md) standardizes that configuration, its
-face policy (§2.1, 0.29), but the core rules below need only the two
+face policy (§2.1), but the core rules below need only the two
 facts.
 - **No `@zk` traffic is required across it.** Bindings resolve statically
   (R7), and bundles come from holders on the same side or are
@@ -1766,7 +1760,7 @@ facts.
 - **Liveness and health across it** come from what crosses (R7). A
   `health.v1` status re-put every 30 s is one put per service across the
   face, and the far side's only word on that service's health
-  ([`profiles/health/v1.md`](profiles/health/v1.md) §2.8, 0.23). A face
+  ([`profiles/health/v1.md`](profiles/health/v1.md) §2.8). A face
   that closes it leaves health unobservable there.
 - **Attachment decides what crosses.**
   - A router-to-router link carries every declaration of both sides. A
@@ -1775,12 +1769,12 @@ facts.
   - A session that is a **client** of the near router receives only the
     declarations its interests ask for.
 - **A deployment SHOULD attach the far side in one of two shapes, with a
-  `@zk` deny on the face** *(0.2, U23)*:
+  `@zk` deny on the face** (U23, §13):
   - **A far router in a south region** of the near router: the far router
     names its region (`region_name`), and the near router lists that name in
     `gateway.south`, while keeping its own clients and peers south. Declarations
     then cross on interest, and the deny keeps the denied families off the
-    link: 200 denied tokens cost 506 B, against 11.3 KB router to router.
+    link, where router to router they would cross (spike S3, Appendix B).
     The far site keeps its own router and clients.
     `[Sc: constrained.md §6]`
   - **One far-side session, or a gateway session, as a client** of the near
@@ -1795,10 +1789,8 @@ facts.
   `[Sc: constrained.md §1]`
 - **A batch SHOULD take at most a third of the lease to cross the face.**
   - At 2,400 bit/s with the 10 s lease, a batch of up to 1,000 B
-    qualifies: 1,000 B take 3.33 s, exactly a third (0.29: 0.1 said
-    "1 KB", and the spike's 1,024 B batches take 3.41 s, a little over,
-    though the link held).
-    zenoh's 64 KB default does not: the link reconnected in a loop.
+    qualifies: 1,000 B take 3.33 s, exactly a third. zenoh's 64 KB
+    default does not: the link reconnected in a loop (Appendix B).
   - A link's batch is the minimum of the configured size, the link's MTU and
     the other end's. Over TCP, the face therefore needs a router configured
     for it.
@@ -1806,16 +1798,15 @@ facts.
   `[Sc: constrained.md §4]`
 - **`@stream` keys SHOULD be denied across the face** unless `link.v1`
   downsamples them: an `@stream` resource whose contract exposes it, one
-  rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8,
-  0.29). A named key's frames are queued, not dropped, and every request
+  rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8).
+  A named key's frames are queued, not dropped, and every request
   waits behind them. The reference generator compiles a face policy into
-  these denies and the downsampling rules (`zenctl acl gen --face-policy`,
-  0.30).
-- **A far router in a south region needs declarations sent toward it**
-  (0.14, measured). It learns of queryables only from the declarations the
+  these denies and the downsampling rules (`zenctl acl gen --face-policy`).
+- **A far router in a south region needs declarations sent toward it.**
+  It learns of queryables only from the declarations the
   near router sends it, so the far side's principal MUST be granted
   `declare_queryable` on egress over every queryable its side may query,
-  as the owner declares it (0.30, measured): a declaration is checked by
+  as the owner declares it: a declaration is checked by
   inclusion against the queryable's own key expression (§11.3), which the
   far side's selectors need not include. For a state GET that is the
   owner's state queryables over `state/**` and `@state/**` (S2); for a
@@ -1900,7 +1891,7 @@ is not TOML is **E000**, reported once, and it stops the load.
   below 10^21 serializes as an integer outside it: both are E028.
   `[F: contracts/e028-float, e028-non-finite, ok-float-integral]`
 - `cardinality` is an integer or the string `"unbounded"`, which is
-  4294967295 from resolution on (§2.2, §9.5, 0.57). Any other string is a
+  4294967295 from resolution on (§2.2, §9.5). Any other string is a
   value of the wrong type, so E000.
   `[F: contracts/ok-cardinality-unbounded, e000-cardinality-string]`
 - Every other value has the type `contract.schema.json` gives it.
@@ -1917,7 +1908,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 |---|---|---|
 | E000 | not TOML 1.0 (1.1-only syntax and integers beyond 64 bits included), or outside the format's shape (§9.1) | once; stops the load |
 | E001 | the interface name is not one or more `.`-joined segments `[a-z][a-z0-9_]*`, or it ends in, or is, a segment `v<digits>` | once |
-| E002 | a `uses` entry is not `<name>.v<major>`; or two entries name one profile at two majors (0.22): an annotation key names its profile without a major (§10 point 2) | per entry; once per profile listed at more than one major |
+| E002 | a `uses` entry is not `<name>.v<major>`; or two entries name one profile at two majors: an annotation key names its profile without a major (§10 point 2) | per entry; once per profile listed at more than one major |
 | E010 | a template is empty, has an empty segment, a literal that is not a plain chunk or starts with `x-`, a parameter name not `[a-z][a-z0-9_]*`, a repeated parameter, or a rest parameter that is not last | per resource; stops that resource's other checks |
 | E011 | a template parameter missing from `params`, or a `params` entry the template lacks | per parameter |
 | E012 | a `path` parameter that is not a rest parameter, or a rest parameter that is not `path` | per parameter |
@@ -1950,7 +1941,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | W102 | an operation's request type has a top-level field named like a template parameter | per resource |
 | W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it, judged on resolved types only (cascade 6) | per field (a defaulted one is silent) |
 | W104 | `minor` is absent | once |
-| W105 | an annotation key outside its profile's vocabulary: the table the profile publishes, else its interim one (Appendix D, 0.21); a profile with neither has none to be outside of (§10) | per key |
+| W105 | an annotation key outside its profile's vocabulary: the table the profile publishes, else its interim one (Appendix D); a profile with neither has none to be outside of (§10) | per key |
 | W107 | the file is not named `<name>.v<major>.toml` | once |
 
 **Cascades.** A fixture's codes do not depend on the order lints run in,
@@ -2128,7 +2119,7 @@ always present.
 | `template` | the template as written |
 | `kind` | `stream`, `state`, `event` or `operation` |
 | `params` | parameter name → `string`, `uint` or `path`; `{}` when none |
-| `cardinality` | an integer, or `null`; `"unbounded"` is written 4294967295 (§2.2, 0.57) |
+| `cardinality` | an integer, or `null`; `"unbounded"` is written 4294967295 (§2.2) |
 | `epoch` | a parameter name, or `null` |
 | `optional` | a boolean |
 | `gate` | the gates, sorted and deduplicated; `[]` when none |
@@ -2225,8 +2216,8 @@ annotation in this version.
 - A `views.document` value references one document by its id, a
   `sha256:…` string. Another value references nothing, and requirement
   annotations carry no extras.
-- Where a builder finds the document for an id is `views.v1`'s to define
-  (#613), not the core's. Until it does, a core builder carries no extras,
+- Where a builder finds the document for an id is `views.v1`'s to define,
+  a profile not yet written, and not the core's. Until it does, a core builder carries no extras,
   and the bundle of a contract that uses `views.document` fails step 11
   below, so it cannot be published. A verifier checks extras as below
   meanwhile.
@@ -2269,9 +2260,9 @@ The steps' details `[F: bundles/*]`:
 - **Verification checks hashes, not content.** A protobuf artifact that
   hashes to its id verifies even if it does not decode. So does a JSON
   Schema artifact holding a `$ref` that names no artifact of the bundle,
-  such as the bundle 0.5's rule built from two identical files. A
-  conforming builder produces neither: the `$ref` is E032, or, for two
-  files with one id, E024 since 0.6 (§9.4). The classifier reads both as
+  such as one built from two identical files. A conforming builder
+  produces neither: the `$ref` is E032, or, for two files with one id,
+  E024 (§9.4). The classifier reads both as
   `schema_unreadable` (§9.8). `[F: bundles/ref-names-no-artifact]`
 - **One id listed twice** in `contract.schemas` is one artifact. A
   conforming builder lists each id once, under one name. Two listed JSON
@@ -2292,7 +2283,7 @@ The steps' details `[F: bundles/*]`:
     `contracts/.history`, or `examples/zk2/.history` for every example in
     that tree, or `spec/profiles/.history` for the profiles' standard
     contracts (§10).
-  - **One revision, two roots** (0.23). A contract that moves to a new
+  - **One revision, two roots.** A contract that moves to a new
     root keeps its published revisions in the old one, which is
     append-only, and is published in the new one from then on, its
     revisions copied there byte for byte. A bundle's file name is its
@@ -2350,7 +2341,7 @@ reverse. Each rule below is a transition from the earlier revision to the
 candidate, and its class already accounts for an old reader of a new writer
 and a new reader of an old writer: that is what "both directions" means.
 
-- **On the bus, revisions carry no order** (0.10). A bundle keeps no
+- **On the bus, revisions carry no order.** A bundle keeps no
   `minor` (§9.5), and two providers can serve two revisions side by side.
   A tool that classifies them against each other MAY take the order from
   the `minor` their descriptors state, when the two differ. Otherwise it
@@ -2530,7 +2521,7 @@ declares. Annotations are ignored.
   inlining a definition is none. A `$ref` back to a target already being
   followed is compared as written, which ends a recursive type, and one
   that resolves to nothing is `schema_unreadable`.
-  - **"As written"** (0.8, F-72) means by its text: the `$ref` value and
+  - **"As written"** means by its text: the `$ref` value and
     its siblings, annotations dropped, not the target it resolves to. So
     renaming a recursive definition reached from inside one of these
     keywords is a change there (review), although the type is the same,
@@ -2607,13 +2598,13 @@ other:
      lives in the profile's directory, published in
      [`profiles/.history/`](profiles/.history/) (§9.7). The first is
      `health.v1`'s
-     ([`profiles/health/health.v1.toml`](profiles/health/health.v1.toml),
-     0.23); `config.v1`'s and `alarms.v1`'s followed
-     ([`profiles/alarms/alarms.v1.toml`](profiles/alarms/alarms.v1.toml),
-     0.34). An instance implementing it lists the contract's `uses` in its
+     ([`profiles/health/health.v1.toml`](profiles/health/health.v1.toml));
+     `config.v1`'s and `alarms.v1`'s followed
+     ([`profiles/alarms/alarms.v1.toml`](profiles/alarms/alarms.v1.toml)).
+     An instance implementing it lists the contract's `uses` in its
      descriptor's `profiles`, as for any contract (§3.3), and the
      interface in its `interfaces`.
-   - **A standard schema** (0.35) is a schema artifact that contracts
+   - **A standard schema** is a schema artifact that contracts
      list, as they list any file (§9.4). It lives in the profile's
      directory. Its types are the profile's when the artifact's id (§7.1,
      §9.4: the hash of its JCS bytes) is one the profile publishes, so a
@@ -2621,9 +2612,9 @@ other:
      profile's types, and a type of the same name in another artifact
      does not. The first is `telemetry.v1`'s
      ([`profiles/telemetry/telemetry.v1.json`](profiles/telemetry/telemetry.v1.json),
-     its §3, 0.35), and `desired.v1`'s followed
+     its §3), and `desired.v1`'s followed
      ([`profiles/desired/desired.v1.json`](profiles/desired/desired.v1.json),
-     its §3, 0.36). A standard schema adds no interface, and a
+     its §3). A standard schema adds no interface, and a
      contract that lists it is classified and published as any other
      (§9.7, §9.8).
 2. **An annotation vocabulary.** Keys are `<profile>.<key>`. A contract
@@ -2634,28 +2625,28 @@ other:
    Appendix D does not list has no interim table, so none of its keys is
    outside one: no W105. `[F: contracts/ok-profile-without-vocabulary]`
    A published vocabulary replaces its interim table, and W105 reads it
-   the same way (0.21). The first is `freshness.v1`'s
+   the same way. The first is `freshness.v1`'s
    ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4);
-   `link.v1`'s ([`profiles/link/v1.md`](profiles/link/v1.md) §4, 0.29),
+   `link.v1`'s ([`profiles/link/v1.md`](profiles/link/v1.md) §4),
    `telemetry.v1`'s
-   ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35),
-   `desired.v1`'s ([`profiles/desired/v1.md`](profiles/desired/v1.md) §4,
-   0.36), `redundancy.v1`'s
-   ([`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4, 0.39),
-   `timing.v1`'s ([`profiles/timing/v1.md`](profiles/timing/v1.md) §4,
-   0.53) and `arbitration.v1`'s, the first read on a requirement
-   ([`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4, 0.54)
+   ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4),
+   `desired.v1`'s ([`profiles/desired/v1.md`](profiles/desired/v1.md) §4),
+   `redundancy.v1`'s
+   ([`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4),
+   `timing.v1`'s ([`profiles/timing/v1.md`](profiles/timing/v1.md) §4)
+   and `arbitration.v1`'s, the first read on a requirement
+   ([`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4),
    followed. `[F: contracts/w105-redundancy-epoch,
    w105-timing-max-rate, w105-arbitration-deadline]` A requirement's
    annotations are checked as a resource's are (§9.2).
    `[F: contracts/e020-requirement]`
    A profile may publish an empty one, as `alarms.v1` does
-   ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4, 0.34): it
+   ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4): it
    defines no key, so W105 warns of every key under its name.
    `[F: contracts/w105-alarms-vocabulary]`
    What a published vocabulary defines (`views.v1`'s documents among them,
    §9.6) is the profile's, not the core's.
-   **One major per contract** (0.22). A key names its profile without a
+   **One major per contract.** A key names its profile without a
    major, so a contract uses one major of a profile: two in one `uses` is
    E002. `[F: contracts/e002-two-majors]` Two contracts of one instance may
    use two majors of it, so a descriptor's `profiles` can list both
@@ -2665,12 +2656,12 @@ other:
    version defines their form.
 4. **The descriptor's `profiles` list** (§3.3).
 
-**The standby mark** (0.39) is the core's own member (§3.3, §6), not a
+**The standby mark** is the core's own member (§3.3, §6), not a
 fifth point: the core says what a standby is, holds and exposes, and a
 profile says only when an instance stands by and when it serves, as
 `redundancy.v1` does for an interface whose contract uses it.
 
-**Derivation-only profiles** (0.19). A profile uses any of the four points,
+**Derivation-only profiles.** A profile uses any of the four points,
 and states which. One that uses point 4 alone is **derivation-only**:
 - it defines how a participant derives something it puts on the bus, and
   no contract, annotation or kind. `hostid.v1` derives a system name from
@@ -2687,7 +2678,7 @@ derivation-only profile, and a checker reads `profiles` for its form
 alone: each entry `<name>.v<major>`, none repeated (D010).
 `[F: descriptors/ok-derivation-profile]`
 
-**Where profiles live** (0.19). Each profile has a directory under
+**Where profiles live.** Each profile has a directory under
 [`profiles/`](profiles/): its text, one file per wire major
 (`hostid/v1.md`), its own `CHANGELOG.md`, its fixtures and its scenarios.
 [`profiles/README.md`](profiles/README.md) holds the index, the template
@@ -2701,10 +2692,10 @@ every profile follows, and the process.
 
 Ownership (§6) reduces access control to a few grant shapes.
 
-**The input** (0.15, F-82). A generator compiles a deployment:
+**The input.** A generator compiles a deployment:
 - its principals, each bound to a user name or a certificate CN, never both
   and never a zid (§11.3). A generator MUST refuse an input that binds one
-  principal by both (0.33, #788): zenoh matches one value of each property
+  principal by both: zenoh matches one value of each property
   a subject names, so a subject naming both matches only a session
   presenting both, and under `default_permission: allow` a session
   presenting one of them would be allowed everything.
@@ -2713,8 +2704,8 @@ Ownership (§6) reduces access control to a few grant shapes.
 - each holder's bindings: role, interface, providers, resources,
   parameters (R2), and whether it reads with history;
 - each holder's calls: interface, providers, operations;
-- the services a tool inspects without binding or calling them (0.27),
-  and whether it reads the admin space;
+- the services a tool inspects without binding or calling them, and
+  whether it reads the admin space;
 - the archives: what each records, and its peers;
 - the namespace (§1.6).
 
@@ -2723,19 +2714,19 @@ The format is the generator's own. The reference reads an enrollment file
 
 | Grant | Rule |
 |---|---|
-| **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (0.14, measured in spike S14). |
-| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1, 0.8) and the descriptor's GET and subscription (§3.3, 0.14) on the `…/@zk/**` subtree of each provider they name. |
+| **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (spike S14). |
+| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1) and the descriptor's GET and subscription (§3.3) on the `…/@zk/**` subtree of each provider they name. |
 | **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
-| **Tool** (0.14, 0.27) | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data (0.27). A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4, runs a doctor or draws the mesh (§4.2) also holds the **admin read** (0.15, 0.50): `query` on `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
+| **Tool** | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data. A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4, runs a doctor or draws the mesh (§4.2) also holds the **admin read**: `query` on `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
-- **No principal declares queryables under `@/**`** (0.12): the routers
+- **No principal declares queryables under `@/**`**: the routers
   serve the admin space themselves. A generator allows it to none under
   `deny`, and denies it to every principal under `allow` (observer.md
   §4.2, "Who answered"). `[Sc: security.md §3]`
-- **The admin read admits no GET of a node's declaration records**
-  (0.50, zenkey #894). A node answers its declaration records, its
+- **The admin read admits no GET of a node's declaration records.** A
+  node answers its declaration records, its
   `linkstate/*` and its `route/successor/**` under its routing tables'
   read lock, and one GET of them beside another face's declaration
   freezes it for good (observer.md §4.3, Appendix B). A query is admitted by
@@ -2745,25 +2736,25 @@ The format is the generator's own. The reference reads an enrollment file
     ingress `query` on a key expression that intersects one of those keys
     of any node,
     `@/<zid>/<whatami>/{subscriber,publisher,queryable,querier,token}/**`,
-    `…/linkstate/*` or `…/route/successor/**` (0.51, F-256: the GET that
-    freezes a node is the asker's, decided at the asker's face on
-    ingress). A router then refuses a GET of them from any principal at
+    `…/linkstate/*` or `…/route/successor/**`. The GET that freezes a
+    node is the asker's, decided at the asker's face on ingress. A router
+    then refuses a GET of them from any principal at
     its ingress, before the admin space runs, and answers it complete and
     empty. `[Sc: security.md §4]`
   - The admin read is the three selectors the reference's tools read:
     S4's two (§4.2), which the doctor and the conformance suite read, and
     every node's root document, which a mesh view reads. None intersects
     those keys.
-  - 0.15's admin read, `@/*/router` and `@/*/router/**`, admitted a GET of
-    every record of a router's (a peer's and a client's it never
-    reached). It also refused `@/*/*`, which neither key includes.
+  - A wider admin read, `@/*/router` and `@/*/router/**`, would admit a
+    GET of every record of a router's (a peer's and a client's it never
+    reaches), and would refuse `@/*/*`, which neither key includes.
   - Under `allow`, the generator compiles no admin read, and a GET wider
     than every deny is in none (§11.3), so a router there is not
-    protected: a tool's GET of `@/*/router/queryable/**` under either
-    generator's `allow` block was admitted and answered (zk2py, round 74).
-    This protects a router under `deny` alone (0.51, F-256).
+    protected: a tool's GET of `@/*/router/queryable/**` under an `allow`
+    block is admitted and answered (Appendix B). This protects a router
+    under `deny` alone.
 - **There are no cross-principal write grants.**
-- **The shapes compose per principal** (0.27, #748). A principal holds
+- **The shapes compose per principal.** A principal holds
   the union of the grants of everything it runs: a principal that runs
   services may run a tool too, and holds the tool's grants beside its
   Own, the admin read included. This is safe because no shape writes
@@ -2772,13 +2763,13 @@ The format is the generator's own. The reference reads an enrollment file
   - a tool's grants read, and call specific operations: Consume, Call,
     presence and the admin read write nothing;
   - the admin read is a `query` on the nodes' admin space, each node with
-    its admin space on answering for itself (0.52, F-258: since 0.50 it
-    includes `@/*/*`, which a client's and a peer's root documents answer
-    too), and every principal is still denied a queryable under `@/**`.
+    its admin space on answering for itself (the read includes `@/*/*`,
+    which a client's and a peer's root documents answer too), and every
+    principal is still denied a queryable under `@/**`.
 
   A principal's grants therefore never let it write what a service it
   does not run owns, which is what §6 rests on. `[Sc: security.md §1]`
-- **Inspection travels to the provider** (0.27). A liveliness read is
+- **Inspection travels to the provider.** A liveliness read is
   answered by the routers and never reaches the provider, but the
   descriptor's GET and subscription, which ride the same presence grant,
   do. A wildcard presence selector, an inspection of `*/*` or a binding
@@ -2789,8 +2780,8 @@ The format is the generator's own. The reference reads an enrollment file
   liveliness read still answers. `[Sc: security.md §1, §2]`
 - **An archive principal** has Own on its own prefix, plus Consume on what it
   records, on each peer archive's form of it (§4.4), and presence on the
-  owners and peers it reads (0.14).
-- **The descriptor rides presence** (0.14). It shares the `@zk` subtree
+  owners and peers it reads.
+- **The descriptor rides presence.** It shares the `@zk` subtree
   with the tokens, so the grant that reads one reads the other. A consumer
   resolves a token's `fp16` through it (§8.4), and a refused descriptor
   read is as silent as a refused token read.
@@ -2816,7 +2807,7 @@ The format is the generator's own. The reference reads an enrollment file
   This is RECOMMENDED where the router can afford the enumeration.
 - **Under `allow`**, Zenoh does not evaluate allow rules. A grant compiles
   into denies of its complement, regenerated on every contract revision.
-- **A query is admitted by inclusion** (0.50, measured on zenoh 1.10.1).
+- **A query is admitted by inclusion** (Appendix B).
   A rule allows a query when its key expression includes the query's,
   never when the two only intersect. Under an allowed `@/*/router`, a
   query on `@/*/*` is refused; under an allowed
@@ -2829,21 +2820,21 @@ The format is the generator's own. The reference reads an enrollment file
   grant every consumer selector that intersects what the provider serves.
   A provider serves its descriptor, so this includes every presence
   selector that intersects its `…/@zk/**` and that its Own grant does not
-  include: a reader's descriptor GET and subscription (0.27, above). Not
+  include: a reader's descriptor GET and subscription (above). Not
   for the provider's ingress `reply`: no refusal answers a descriptor
   read.
 - **A value reply is checked against its own key, an error reply against
-  the query's** (0.14). This was measured on zenoh 1.10.1. S14's "a reply
+  the query's**. This was measured on zenoh 1.10.1. S14's "a reply
   is checked against the query's key" holds only for refusals, which carry
   no key (§5.2).
   - So a provider's value replies pass through its Own grant.
   - A generator MUST grant the consumer selectors above for the provider's
     ingress `reply` too, so that its refusals reach the caller.
-- **An R2-narrowed grant has no complement by inclusion** (0.14). Under
+- **An R2-narrowed grant has no complement by inclusion.** Under
   `allow`, the members of a template that no other principal names stay
   readable. `deny` is the posture that holds such a grant exactly. A
   generator warns.
-- **Messages and flows** (0.15, F-83). §11.1 names actions; zenoh's access
+- **Messages and flows.** §11.1 names actions; zenoh's access
   control names messages on a flow. Under `deny`, each grant compiles to
   these allow rules. Both implementations measured them on zenoh 1.10.1:
 
@@ -2860,13 +2851,12 @@ The format is the generator's own. The reference reads an enrollment file
 
   A liveliness read needs both of its rows. Without the egress
   `liveliness_token`, a reader's liveliness GET returns nothing.
-- **The complement's key set** (0.15, F-85). Key expressions have no
+- **The complement's key set.** Key expressions have no
   negation. Under `allow`, a grant's complement is taken over the
   deployment's own keys: each resource the enrolled services' contracts
   declare, each service's `…/@zk/**`, and the contract keys. Keys no
   contract declares stay open under `allow`.
-  - **A principal's own keys** (0.31, F-122; per message and flow, 0.32,
-    F-123). A generator MUST deny, in each principal's policy, on each
+  - **A principal's own keys.** A generator MUST deny, in each principal's policy, on each
     message and flow, the keys of the services it does not run that its
     grants do not name for that message and flow. A Consume grant on
     another service's key names it for reading and receiving only, so the
@@ -2883,8 +2873,8 @@ The format is the generator's own. The reference reads an enrollment file
     writes such a subject, and `link.v1` reports one on a face. No fixture
     pins either reading, since none carries a principal's complement;
     `link.v1`'s scenario §11, step 7, shows both. `[Sc: link.v1 scenarios §11]`
-- **"Every principal" compiles into each principal's own policy** (0.15,
-  F-87). In zenoh 1.10.1, a subject that matches every session (one with
+- **"Every principal" compiles into each principal's own policy.** In
+  zenoh 1.10.1, a subject that matches every session (one with
   no attribute, or `link_protocols: ["tcp"]`) makes the per-user subjects
   lose their denies. This was measured. The `@/**` queryable deny (§11.1)
   is therefore a rule in each principal's policy, never one catch-all
@@ -2912,14 +2902,14 @@ The format is the generator's own. The reference reads an enrollment file
   so a reader the grants refuse attributes silence to absence.
 - Any session can answer under `@/**`, a router's own keys included,
   unless the grants deny it (observer.md §4.2, "Who answered").
-- **Under `allow`, a wildcard call is in no deny** (0.14, measured). A
+- **Under `allow`, a wildcard call is in no deny.** A
   `fanout = "allowed"` operation executes on every provider for a
   principal never granted it; only its answers are denied. Under `allow`,
   an operation that must not run for everyone MUST be `fanout =
   "forbidden"`, which its server refuses (O2), or the deployment runs
   `deny`.
-- **Under `allow`, an ungranted wildcard GET gets nothing back** (0.14,
-  measured): each value reply is denied by its own key.
+- **Under `allow`, an ungranted wildcard GET gets nothing back**: each
+  value reply is denied by its own key.
 - **A session that matches no subject gets no policy**, so it gets
   `default_permission`, which under `allow` is everything. A deployment
   under `allow` MUST refuse unauthenticated sessions at the link.
@@ -2929,8 +2919,8 @@ The format is the generator's own. The reference reads an enrollment file
 ## 12. Conformance levels
 
 **Full.** An implementation at the full level meets every rule above, and
-every rule of [`observer.md`](observer.md) that binds a role it plays
-(0.59): a tool, or a participant where it reads presence, state or the
+every rule of [`observer.md`](observer.md) that binds a role it plays: a
+tool, or a participant where it reads presence, state or the
 admin space and concludes from what it read (observer.md §0).
 
 **Constrained.** An implementation at the constrained level meets every rule
@@ -2940,9 +2930,9 @@ the full level does, with these relaxations and additions:
 |---|---|
 | Clock (S7) | A wall clock with a per-session bump instead of the HLC. The catch-up and the ahead bound still apply. |
 | Namespace (§1.6) | The deployment prefix written literally in keys |
-| Descriptor (§3.3) | MUST fit one fragment (4 KB with zenoh-pico's default `Z_FRAG_MAX_SIZE`) `[Sc: constrained.md §5]` |
-| Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so the limit is on receiving. |
-| Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md), 0.29). Presence never crosses. |
+| Descriptor (§3.3) | MUST fit one fragment (its size: Appendix B) `[Sc: constrained.md §5]` |
+| Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A constrained owner can send one, so the limit is on receiving (Appendix B). |
+| Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md)). Presence never crosses. |
 
 `[Sc: constrained.md]`
 
@@ -2950,13 +2940,13 @@ the full level does, with these relaxations and additions:
 
 ## 13. Open items
 
-The items left open by the design, with their state at acceptance. A
-decision that changes a rule lands as an amendment.
+The items the design left open, and how each was settled. A decision
+that changes a rule lands as an amendment.
 
 | # | Question | Lean | Rule affected |
 |---|---|---|---|
-| U22 | Cutting the per-service token multiplier above the presence budget | **Decided at acceptance (2026-10-08):** a deployment-configured tokenless set, recommended for the framework interfaces every service implements; the descriptor records it (§8.1, §3.3) | §8.1 |
-| U23 | The far side of a constrained face when it is more than one session: a site with its own router, or a service commanding many vehicles | **Settled by amendment 0.2:** the far router is placed in a `gateway.south` region of the near router, with the `@zk` deny. Measured: 506 B for 200 denied tokens, against 11.3 KB router to router (spike S3, U23 addendum) | §8.5 attachment |
+| U22 | Cutting the per-service token multiplier above the presence budget | **Decided:** a deployment-configured tokenless set, recommended for the framework interfaces every service implements; the descriptor records it (§8.1, §3.3) | §8.1 |
+| U23 | The far side of a constrained face when it is more than one session: a site with its own router, or a service commanding many vehicles | **Settled:** the far router is placed in a `gateway.south` region of the near router, with the `@zk` deny (spike S3, U23 addendum; Appendix B) | §8.5 attachment |
 
 ---
 
@@ -3001,23 +2991,23 @@ Appendix B. These are the ones the rules above cite:
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
   It counts from the Unix epoch, 1970-01-01T00:00:00Z: an HLC's physical
-  clock is its host's wall clock (uhlc's `system_time_clock`, 0.53).
+  clock is its host's wall clock (uhlc's `system_time_clock`).
 - A node with its HLC enabled updates it with the stamp of every put it
   routes, a put a session receives for its own subscriber included: its
   clock moves to a later stamp, and a stamp more than its delta ahead of
   its clock is refused, the put re-stamped or dropped
   (`dispatcher/pubsub.rs`, `treat_timestamp`; uhlc 0.8's
-  `update_with_timestamp`; 0.53, §4.1). A put it routes with no stamp it
+  `update_with_timestamp`; §4.1). A put it routes with no stamp it
   stamps from its own HLC (`treat_timestamp`: "Timestamp not present; add
   one"; measured by the second implementation: a client whose HLC is on
   received 20 of 20 samples of an unstamped owner, through a router that
-  stamps nothing, stamped with its own zid; 0.55, §4.1).
+  stamps nothing, stamped with its own zid; §4.1).
 - Timestamps order by time, then by id. An id is stored as the 16 bytes
   of its 128-bit value little-endian, and compared as that byte array
   (uhlc 0.8's derived `Ord` on `Timestamp` and `ID`), so its least
   significant byte decides first. `Latest` keeps the reply whose
   timestamp is greatest in that order, an unstamped one lowest, and a
-  later one on a tie (`api/session.rs`, 0.27). Checked against zenoh's
+  later one on a tie (`api/session.rs`). Checked against zenoh's
   own `Timestamp` by `zenkey-fleet`'s `bus::seed` tests.
 - A reply error carries a payload and an encoding, and no key expression.
   `Reply::replier_id` is behind the `unstable` feature. It names the session
@@ -3034,12 +3024,12 @@ Appendix B. These are the ones the rules above cite:
   its `linkstate/*` and a `route/successor/src/<zid>/dst/<zid>` key while
   it holds the routing tables' read lock, and each reply takes that read
   lock again. std leaves the `RwLock`'s priority policy to the platform;
-  on Linux its futex lock makes a new reader wait behind a waiting writer
-  (0.50, F-255). There, a declaration, an interest or a new session from
+  on Linux its futex lock makes a new reader wait behind a waiting writer.
+  There, a declaration, an interest or a new session from
   another face between two replies deadlocks the node: every put, query
   and declaration through it stops for good (`net/runtime/adminspace.rs`,
   `resources_data`; `dispatcher/queries.rs`, `route_send_response`; the
-  same on zenoh's main; 0.48, §4.2;
+  same on zenoh's main; §4.2;
   `docs/zk2/upstream/adminspace-reply-under-tables-read-lock.md`). Its
   root document (`@/<zid>/<whatami>`), its metrics and the plugins' status
   are answered without the lock held across a reply.
@@ -3048,7 +3038,7 @@ Appendix B. These are the ones the rules above cite:
   `policy_decision_point`, `nodes_including`). A request refused on
   ingress is answered at once with its final response alone, and never
   routed (`primitives/demux.rs`, `handle_message`), so a refused admin GET
-  never reaches the admin space (0.50, §11.1).
+  never reaches the admin space (§11.1).
 - A query that sets no timeout waits `queries_default_timeout`, 10 s by
   default.
 - A client connects to one endpoint at a time.
@@ -3061,56 +3051,155 @@ Appendix B. These are the ones the rules above cite:
   not finished at `routing/interests/timeout` (10 s by default) with the
   final reply alone and no error reply, before the GET's own timeout when
   that is longer (`dispatcher/interests.rs`, `CurrentInterestCleanup`;
-  0.41, §8.1).
+  §8.1).
 - A liveliness GET whose caller drops it, times it out or cancels it is
   answered in full all the same: the session sends its router nothing
   (`api/session.rs`, `liveliness_query`, `cancel_liveliness_query`). The
   runtime ends it at `routing/interests/timeout`, and logs each reply that
   arrives after that `Unknown interest` (`hat/client/interests.rs`;
-  0.44, §8.1; `docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`).
+  §8.1; `docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`).
   A GET its own timeout ends is handed an error reply, `Timeout`, and its
   final reply, and nothing after them (`api/session.rs`,
   `liveliness_query`); its router answers it all the same, and a GET the
-  session asks meanwhile waits behind it (0.45, §8.1, F-243).
+  session asks meanwhile waits behind it (§8.1).
 - A client whose transport opens again declares its session's interests
   again in `CurrentFuture` mode, whatever mode they were declared in
   (`hat/client/interests.rs`, `repropagate_interests`): a liveliness
   subscriber without history is told every token it matches, those
   declared while the transport was down included, and none withdrawn
   then. A liveliness GET on that session asked after the reopen ends
-  after that telling (0.44, §8.1).
+  after that telling (§8.1).
 - A router handles one session's interests in turn: a liveliness GET's
   final reply follows the registration, and the history, of every
   subscriber's interest the session sent before it, whatever the GET
   matches. A router resolves a client's interest itself and ignores one
   from another router (`dispatcher/interests.rs`,
   `hat/router/interests.rs`); one access control refuses is answered with
-  its final reply at ingress, in turn (`net/primitives/demux.rs`; 0.41,
+  its final reply at ingress, in turn (`net/primitives/demux.rs`;
   §8.1).
 - A liveliness subscriber without history is told a token's withdrawal
   by the token's key though it was never told the token
   (`hat/broker/token.rs`, `maybe_unpropagate_token`), and a session in a
   namespace does not strip its namespace from that key
-  (`routing/namespace.rs`, `ENamespace`), so it hears none (0.41, §8.1).
+  (`routing/namespace.rs`, `ENamespace`), so it hears none (§8.1).
   A session in no namespace subscribed to the wire key, the namespace in
-  front, hears it (0.42, §8.1).
+  front, hears it (§8.1).
 - A liveliness GET that access control refuses is answered with the final
   reply alone: no token and no error reply. The session's own tokens are
-  in it all the same, answered by the session itself (0.40, §8.1).
+  in it all the same, answered by the session itself (§8.1).
 - A router propagates no liveliness token from one of its peers to
   another: under the `auto` gateway its peers are one region, expected to
   be linked to each other (`hat/peer/token.rs`).
   `routing.router.peers_failover_brokering` is deprecated, and has no
-  effect (`zenoh-config`; 0.40, §8.1).
+  effect (`zenoh-config`; §8.1).
 - A session with no transport to another zenoh node has every liveliness
-  GET answered at once with the final reply alone, and every GET (0.37;
-  first measured by `alarms.v1` 0.4; [`scenarios/presence.md`](scenarios/presence.md)
-  §7). A transport that closes withdraws, at the reader, every token
+  GET answered at once with the final reply alone, and every GET
+  ([`scenarios/presence.md`](scenarios/presence.md) §7). A transport that closes withdraws, at the reader, every token
   learned through it, while their owners still hold them (§8).
 - Under `allow`, allow rules are not evaluated, and access control works by
   inclusion.
 
-**What a path drops, and what a reader sees** (0.25, §2.7). Measured on
+**Measured for the rules above**, each with the rule it serves:
+- **State's and events' QoS** (§2.4): spike S5 lost 10,917 of 100,000
+  values put with `drop` on their way to a storage.
+- **`express`** (§2.4): spike S9 measured `real_time` + express losing
+  0.6–4 % of samples at 1–5 kHz on loopback, with no latency gain.
+- **A call with many replies** (O6): `Latest` and `Auto` kept 1 reply of
+  10 in spike S6.
+- **The wait for presence** (§8.1): counted from a client's connection to
+  the router that is the owner's session, zenoh-python saw the reference
+  owner's tokens within about 1 ms.
+- **The presence budget** (§8.3, spike S2): a router holds 2.1–2.4 KiB per
+  token, and a router-to-router link carries 63–85 B per declaration.
+  Below 10,000 tokens discovery took under 2 s (under 50 ms at 1,000). At
+  10–15k tokens it took 2–4 s. At 50k it took 46–49 s, or never finished.
+- **Retrieval's consolidation** (§8.4): with zenoh's default consolidation
+  on a concrete key, the corrupt reply alone arrived, at 2 s, and the
+  valid one never (`scenarios/retrieval.md` §2).
+- **A far router in a south region** (§8.5, U23; spike S3, U23 addendum):
+  200 denied tokens cost 506 B, against 11.3 KB router to router.
+- **A batch against the lease** (§8.5): at 2,400 bit/s with the 10 s
+  lease, the spike's 1,024 B batches took 3.41 s to cross, a little over a
+  third of the lease, and the link held. With zenoh's 64 KB default
+  batch, the link reconnected in a loop.
+- **The admin read under `allow`** (§11.1): zk2py's GET of
+  `@/*/router/queryable/**` under either generator's `allow` block was
+  admitted and answered.
+
+**Measured for observer.md's reads**, each with the section it serves:
+- **Handlers** (observer §3.1): on a session holding a liveliness
+  subscriber, a liveliness GET with zenoh's default 256-slot handler hung
+  at every size measured from 996 tokens (zenoh#2678). A bounded
+  subscriber nobody drained starved a callback GET on its session: with
+  zenoh-python 1.10.1, the GET ended at its timeout with 257 of 2,002
+  tokens, and said nothing.
+- **The interests timeout** (observer §3.3): measured by the reference, a
+  read with a 110 s timeout beside 10,000 tokens came back at 10 s, with
+  no error reply, holding 6,121 of them. The same read was whole, in
+  22 s, under a 120 s interests timeout.
+- **A refused read** (observer §3.4): measured with a `liveliness_query`
+  deny on the query's ingress at the router. On `egress` alone, the same
+  rule refused nothing.
+- **The links check** (observer §3.5): measured by the reference,
+  `transports()` missed the cut in 4 of 10 runs of `presence.md` §7 step
+  5, and `links()` in none of 20.
+- **A watch session's history** (observer §3.7): with history, its round
+  trip took 23 s beside 10,000 tokens in a debug build (the reference),
+  and without it 6 ms there. In a namespace with history, a release
+  build took 3.1–5.9 s (zk2py, under load).
+- **The wire keys** (observer §3.7): a watch session in no namespace, its
+  subscribers without history on the wire keys, made its round trip in
+  1.2 ms beside 2,000 tokens in `ns`, and in 44 ms beside 10,000, debug
+  builds.
+- **The round trip after a reopen** (observer §3.7): beside 10,000 tokens
+  in `ns` it took 3.9–4.1 s in a release build (zk2py: 3.2–4.7 s) and
+  24 s in a debug one, where the round trip at the session's start took
+  49–66 ms; beside 2,000, 0.15 s and 0.75–1.5 s. The next was one round
+  trip again (zk2py, release: beside 10,000 tokens 3.7–4.2 s after the
+  reopen, then 0.8–1.7 ms; beside 2,000, 145–146 ms, then 0.3–0.8 ms).
+- **A session's first read** (observer §3.7): beside 10,000 tokens a
+  session's first read took 3.3–4.2 s and a later one 0.52–0.58 s
+  (zk2py, release). zk2py's follower seeded in 3.1–3.9 s, and its next
+  read took 0.47–0.49 s. The round trip after a reopen ran to 4.54 s
+  beside those seeds' 3.91 s.
+- **One read at a time** (observer §3.7): measured by the reference
+  before it kept to it, a reader whose caller dropped its call every
+  250 ms, beside 10,000 tokens whose read took 0.5–3 s, asked 450 reads
+  in 120 s and folded none, and never read its scope complete again
+  after a 3 s cut.
+- **A GET behind one its timeout ended** (observer §3.7): beside 10,000
+  tokens, a GET waited 258–280 ms after a read its own 0.2 s timeout
+  ended on a session that had read them before, and 2.6–3.4 s after a
+  session's first read, against 6–10 ms on a quiet session (zk2py).
+- **A read on a token's own session** (observer §3.8): through a router
+  whose access control refuses `liveliness_query` on ingress, the
+  holder's own read was complete and held its token, and the same read
+  on another session of the same router was complete and empty, in each
+  of five reads (the reference, `zenkey/tests/presence.rs`,
+  `a_refused_read_on_a_tokens_own_session_still_returns_it`).
+- **Peers behind one router** (observer §3.9): two peers behind one
+  router, neither listening, one holding a token. The other's read was
+  complete and empty in every one of six reads over 3 s, with gossip on
+  and with it off, while a client of the same router read the token.
+  With both listening, and gossiping through a router that gossips, they
+  linked and the token was read (the reference,
+  `a_peers_read_through_a_router_misses_an_unlinked_peers_token`).
+
+**One binding's facts**, which a rule's wording allows for:
+- zenoh-pico 1.10.1 has no session namespaces (§1.6).
+- One fragment is 4 KB with zenoh-pico's default `Z_FRAG_MAX_SIZE` (§12,
+  the descriptor).
+- A zenoh-pico 1.10.1 owner sent 100 KB replies, so a constrained
+  device's limit on bundles is on receiving (§12).
+- zenoh-python builds an NTP64 from seconds and nanoseconds, so its
+  smallest step above a timestamp is 1 ns (§4.3, a tick).
+- zenoh-python 1.10.1 has no unbounded handler, so a callback is its way
+  to meet observer §3.1.
+- In Rust, `Session::config()` reads an open session's interests timeout;
+  zenoh-python 1.10.1 gives an open session no accessor for it (observer
+  §3.3).
+
+**What a path drops, and what a reader sees** (§2.7). Measured on
 2026-10-10 by [`scenarios/budget.md`](scenarios/budget.md) §1–§3
 (`zenkey/tests/budget.rs`), with the source each rests on:
 - A sample that is `reliable` with congestion `block` is not droppable. A
@@ -3125,16 +3214,16 @@ Appendix B. These are the ones the rules above cite:
   - best effort, `drop`: 695–832 of 1,000 were lost, and nothing the
     reader received said so;
   - reliable, `block`, the reader's callback stuck for 7 s on one sample:
-    433–786 were lost in 27 runs that recorded what follows (0.27,
-    correcting 0.25's "each time"). The reader's own transport closed in
+    433–786 were lost in 27 runs that recorded what follows. The
+    reader's own transport closed in
     every one. It saw the owner's instance token withdrawn only when the
     token had reached it before it stalled: in each of the 23 runs where
     it had, never in the 4 where it had not. On 2026-10-11 six runs that
-    did not record it lost 661–792, and saw no withdrawal in 2 (#753). A ticker on a thread of the reader's own
+    did not record it lost 661–792, and saw no withdrawal in 2. A ticker on a thread of the reader's own
     process saw no gap above 107 ms meanwhile: only zenoh's receive
     thread was held;
   - reliable, `block`, the reader's whole process stopped (SIGSTOP) for
-    7 s, the owner's token received first (0.27): 421–765 were lost in 13
+    7 s, the owner's token received first: 421–765 were lost in 13
     runs. Each time its ticker saw a gap of 7.0–7.1 s on its first tick
     after, its session read its transport's close (0.35–0.51 s later in
     the 4 runs that timed it), and it saw the token withdrawn.
@@ -3143,7 +3232,7 @@ Appendix B. These are the ones the rules above cite:
   reader within 1–2 ms when the link closes, and one lease after a link
   goes silent: 986–1,037 ms at a 1 s lease, 9,961–10,047 ms at the default
   10 s (spike S10). The samples put meanwhile are lost.
-- **Only a token the reader had received is withdrawn** (0.27, #753). A
+- **Only a token the reader had received is withdrawn.** A
   router that gives up on a stalled reader closes the reader's transport
   and discards its queue toward it. In the runs above with no
   withdrawal, the reader read everything its router had sent before the
@@ -3158,12 +3247,11 @@ Appendix B. These are the ones the rules above cite:
   read it, after a stalled callback returns (`unicast/universal/
   transport.rs`, `delete`), and a link's removal as soon as its task
   fails (`del_link`, `link.rs`).
-- **A close's withdrawals come before its transport event** (0.56,
-  `arbitration.v1` F-268). A closing transport's links go first, then its
+- **A close's withdrawals come before its transport event.** A closing transport's links go first, then its
   routing face, which tells the session's liveliness subscribers each
   token learned through it withdrawn, then the transport itself, whose
-  close the transport events listener hears (the order 0.38's cut-off
-  check reads). Measured by the reference
+  close the transport events listener hears (the order observer.md
+  §3.5's cut-off check reads). Measured by the reference
   (`zenkey/tests/presence.rs`,
   `f268_a_close_tells_its_withdrawals_before_its_transport_event`): a
   watch session through a link the test cut and healed, its subscriber
@@ -3171,9 +3259,9 @@ Appendix B. These are the ones the rules above cite:
   withdrawals 0.025–0.51 ms before its listener heard the close, at 40 of
   40 closes in eight runs, and held no link when each was heard; its first
   close, before it had been told the tokens, told nothing. zk2py measured
-  0.15–0.5 ms on zenoh-python 1.10.1 (round 77).
-- **An open is told before the subscribers' interests are declared again**
-  (0.56). A transport that opens is handed to the session's handlers
+  0.15–0.5 ms on zenoh-python 1.10.1.
+- **An open is told before the subscribers' interests are declared again.**
+  A transport that opens is handed to the session's handlers
   first, the transport events listener's among them, and only then to the
   router, whose `new_transport_unicast` makes the face and re-propagates
   the subscribers' interests (`net/runtime/mod.rs`, `new_unicast`;
@@ -3197,7 +3285,7 @@ Appendix B. These are the ones the rules above cite:
   `block` samples. The routers' transport closes stalled, and no token was
   withdrawn while the runs lasted.
 
-**A liveliness GET beside a liveliness subscriber** (0.37, #830). Measured
+**A liveliness GET beside a liveliness subscriber.** Measured
 on 2026-10-24 by the zenoh-only reproduction in
 [`docs/zk2/upstream/liveliness-get-repro/`](../docs/zk2/upstream/liveliness-get-repro/),
 61,920 trials per version on zenoh 1.10.1 and on zenoh's main branch at
@@ -3214,7 +3302,7 @@ reader, clients, some under CPU load:
 - A GET issued right after declaring a history subscriber on the same
   session missed nearly every time: 720 of 720 (1.10.1) and 719 of 720
   (main) in the reproduction; zenoh-python 1.10.1 held the token in 7 of
-  120 (zk2py, 0.42, F-235). It is the race below, which the session's own
+  120 (zk2py). It is the race below, which the session's own
   answer can win.
 - **Why**, shown by traces and by a one-condition patch that took both
   races to 0 of 6,480 trials: the GET is a `Current` token interest,
@@ -3238,8 +3326,8 @@ reader, clients, some under CPU load:
 
 ## Appendix C. Evidence index
 
-Since 0.58 the evidence of the rules moved to [`observer.md`](observer.md)
-is indexed there too (its Appendix B). The rows below keep the core
+The evidence of the rules in [`observer.md`](observer.md) is indexed
+there too (its Appendix B). The rows below keep the core
 section each was written against, whose pointer leads on.
 
 | Evidence | Covers |
@@ -3251,30 +3339,30 @@ section each was written against, whose pointer leads on.
 | `conformance/history/` | §9.7 |
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
-| `conformance/budget/` | §2.7 (0.24; `lossless.json` 0.25, the reader's stall 0.27) |
-| `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order and unstamped samples (0.27) |
+| `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
+| `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order and unstamped samples |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27); §12 S4's check reads beside a router that is declaring (0.48), where its recorder can hear a read that freezes a node (0.51) |
+| `scenarios/state.md` | §4; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time (0.44); step 10's counts, the reader's own sessions' (0.45); what a black box is judged on there (0.46), at what period its output is sampled (0.47), and one that prints nothing while its link is cut (0.49); Appendix B |
-| `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor (0.54) |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
+| `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
-| `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion (0.50) |
+| `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
-| `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7) (0.25); a stalled reader, and a tool's window over one (§1, 0.27); Appendix B |
+| `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7); a stalled reader, and a tool's window over one (§1); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
-| `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
-| `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
-| `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
-| `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36), and an owner silent within the timeout across a cut, its own answer after the heal (§10, 0.37) |
-| `profiles/arbitration/scenarios.md` §3, §4, §7, §9 | §3.2, §3.3 a binding's order kept by the descriptor, and read as a priority (§9); §8.1 a withdrawal heard live acted on without concluding absence, and undone by a token or a read (§3, §4), and what a move of the watch session makes a reader hear held back until its round trip stands (§7) (0.54); a close's withdrawals told before its transport event, and a move begun at the first (§7's control, 0.56); the round trip after an open asked a margin after its event (§7, 0.56) |
-| `profiles/redundancy/scenarios.md` §1, §5, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby (0.39); §8.1 a refused read on the claim's own session, and peers that link (§5, 0.40) |
-| `profiles/timing/scenarios.md` §4, §5 | §4.1 a stream sample stamped by its owner's HLC, by a router when its owner's session has none, and unstamped through a router that stamps nothing; §3.3 `meta.zid` attributing a stamp (0.53) |
+| `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead |
+| `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream |
+| `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face |
+| `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent, and an owner silent within the timeout across a cut, its own answer after the heal (§10) |
+| `profiles/arbitration/scenarios.md` §3, §4, §7, §9 | §3.2, §3.3 a binding's order kept by the descriptor, and read as a priority (§9); §8.1 a withdrawal heard live acted on without concluding absence, and undone by a token or a read (§3, §4), and what a move of the watch session makes a reader hear held back until its round trip stands (§7); a close's withdrawals told before its transport event, and a move begun at the first (§7's control); the round trip after an open asked a margin after its event (§7) |
+| `profiles/redundancy/scenarios.md` §1, §5, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby; §8.1 a refused read on the claim's own session, and peers that link (§5) |
+| `profiles/timing/scenarios.md` §4, §5 | §4.1 a stream sample stamped by its owner's HLC, by a router when its owner's session has none, and unstamped through a router that stamps nothing; §3.3 `meta.zid` attributing a stamp |
 
 The compatibility cases (`compat/`) are evaluated by the reference
-classifier (#618). [`compat/README.md`](conformance/compat/README.md)
+classifier. [`compat/README.md`](conformance/compat/README.md)
 records where its protobuf verdicts depart from `buf breaking` with WIRE,
 and why.
 
@@ -3297,53 +3385,53 @@ E019).
 | `request`, `response` | — | — | — | required | no |
 | `error`, `summary`, `idempotent`, `fanout`, `serving`, `replies`, `timeout_ms` | — | — | — | ✓ | yes, except `error` and `summary` |
 
-**Published annotation vocabularies** (W105 outside them, 0.21): the
+**Published annotation vocabularies** (W105 outside them): the
 profile's own table replaces its interim one.
 
 | Profile | Keys | Published by |
 |---|---|---|
 | `freshness` | `ttl_s` | [`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4 |
-| `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 (0.29) |
-| `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 (0.34) |
-| `telemetry` | `kind`, `unit`, `buckets`, `semantic` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4 (0.35) |
-| `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 (0.36) |
-| `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 (0.39) |
-| `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 (0.53) |
-| `arbitration` | `policy`, on a requirement | [`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4 (0.54) |
+| `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 |
+| `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 |
+| `telemetry` | `kind`, `unit`, `buckets`, `semantic` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4 |
+| `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 |
+| `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 |
+| `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 |
+| `arbitration` | `policy`, on a requirement | [`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4 |
 
-`link.downsample_ms` left with the interim `link` row (0.29): a face's
+`link.downsample_ms` left with the interim `link` row: a face's
 rate is its face policy's `interval_s` (`link.v1` §2.8), a deployment
 fact, so it is outside `link.v1`'s published table, and a contract that
 writes it draws W105. `[F: contracts/w105-link-downsample]`
 
-`alarms.severity_default` left with the interim `alarms` row (0.34): an
+`alarms.severity_default` left with the interim `alarms` row: an
 alarm's document always carries its `severity` (`alarms.v1` §2.4), so
 there is nothing for a default to fill, and `alarms.v1` publishes no key.
 A contract that writes `alarms.<key>` draws W105.
 `[F: contracts/w105-alarms-vocabulary]`
 
-`desired.target` left with the interim `desired` row (0.36): the binding
+`desired.target` left with the interim `desired` row: the binding
 already says which identity fills each target parameter (R2), and no
 contract wrote it, so it is outside `desired.v1`'s published table, and a
 contract that writes it draws W105. `[F: contracts/w105-desired-target]`
 
 `redundancy.v1` publishes the interim `redundancy` row's one key
-unchanged (0.39): `election`, `claim` or `external`, which a contract
+unchanged: `election`, `claim` or `external`, which a contract
 writes once on `[defaults]` (`redundancy.v1` §2.2). A contract that writes
 any other `redundancy.<key>`, a fencing epoch among them, draws W105: the
 profile carries no epoch in a payload at 1.0 (its §2.16).
 `[F: contracts/w105-redundancy-epoch]`
 
-`timing.v1` publishes the interim `timing` row's three keys unchanged
-(0.53): `period_ms`, `deadline_ms` and `lifespan_ms`, each a whole number
-of milliseconds, meaningful on a stream (`timing.v1` §2.2, §2.3). A
+`timing.v1` publishes the interim `timing` row's three keys unchanged:
+`period_ms`, `deadline_ms` and `lifespan_ms`, each a whole number of
+milliseconds, meaningful on a stream (`timing.v1` §2.2, §2.3). A
 contract that writes any other `timing.<key>` draws W105: a rate ceiling
 among them, since a period is a floor on an owner's cadence, never a
 ceiling (`timing.v1` §2.4), and how often an event may occur is `rate`'s
 (§2.6). `[F: contracts/w105-timing-max-rate]`
 
 `arbitration.v1` publishes the interim `arbitration` row's one key
-unchanged (0.54): `policy`, which a contract writes on a requirement
+unchanged: `policy`, which a contract writes on a requirement
 (`[requires.<role>]`), never on a resource (`arbitration.v1` §2.2). Its
 value `priority` is defined; `freshest` and `lease` are reserved, and a
 declaration naming one is invalid until a text defines it. A contract
@@ -3382,7 +3470,7 @@ brief:
   (descriptors).
 - **`bundles/`, `history/`, `errors/`:** expected tags, or the decoded
   value. The tags' meanings are §9.6's, §9.7's and §5.2's.
-- **`budget/`** (0.24): a bound from the contract's `cardinality` and
+- **`budget/`**: a bound from the contract's `cardinality` and
   each instance's stated one (`bounds.json`); a population's verdict and
   reason class from a kind, a bound and one reading (`population.json`);
   a rate's from the occurrences a window heard (`rate.json`). A window
@@ -3390,12 +3478,12 @@ brief:
   whether the owner was present throughout. Whether a window lost no
   delivery comes from the resource's declared QoS, the reader's own loss,
   what it saw of its own receive path (its ticker's greatest gap, the
-  bound, whether a transport of its session closed: 0.27) and miss
-  detection (declared, used, misses detected) (`lossless.json`, 0.25).
+  bound, whether a transport of its session closed) and miss
+  detection (declared, used, misses detected) (`lossless.json`).
   The bound comes from `wait_before_close`, the lease and the keep-alive
-  count (`lossless.json`'s `stall_bounds`, 0.27). Each file's
+  count (`lossless.json`'s `stall_bounds`). Each file's
   description states the order a reason is chosen in.
-- **`seed/`** (0.27): two stamps → their order (`merge.json`'s `order`),
+- **`seed/`**: two stamps → their order (`merge.json`'s `order`),
   and one key's arrivals, each a stamp or none and a kind → which are
   kept (`cases`). A stamp is `{time, id}`, the id written as zenoh
   writes it.

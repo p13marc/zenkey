@@ -1,0 +1,267 @@
+{
+  "spec/CHANGELOG.md": {
+    "mean": 18.31,
+    "over": 30,
+    "tags": 0
+  },
+  "spec/README.md": {
+    "mean": 14.5,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/conformance/README.md": {
+    "mean": 14.4,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/conformance/compat/README.md": {
+    "mean": 15.17,
+    "over": 0,
+    "tags": 1
+  },
+  "spec/conformance/history/stray-entries/README.md": {
+    "mean": 4.0,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/core.md": {
+    "mean": 16.74,
+    "over": 11,
+    "tags": 0
+  },
+  "spec/observer-CHANGELOG.md": {
+    "mean": 21.1,
+    "over": 5,
+    "tags": 0
+  },
+  "spec/observer.md": {
+    "mean": 20.84,
+    "over": 14,
+    "tags": 0
+  },
+  "spec/profiles/README.md": {
+    "mean": 18.8,
+    "over": 1,
+    "tags": 24
+  },
+  "spec/profiles/alarms/CHANGELOG.md": {
+    "mean": 23.34,
+    "over": 13,
+    "tags": 0
+  },
+  "spec/profiles/alarms/scenarios.md": {
+    "mean": 13.21,
+    "over": 1,
+    "tags": 6
+  },
+  "spec/profiles/alarms/v1.md": {
+    "mean": 19.35,
+    "over": 6,
+    "tags": 36
+  },
+  "spec/profiles/arbitration/CHANGELOG.md": {
+    "mean": 25.37,
+    "over": 7,
+    "tags": 0
+  },
+  "spec/profiles/arbitration/scenarios.md": {
+    "mean": 16.37,
+    "over": 1,
+    "tags": 13
+  },
+  "spec/profiles/arbitration/v1.md": {
+    "mean": 22.71,
+    "over": 15,
+    "tags": 27
+  },
+  "spec/profiles/config/CHANGELOG.md": {
+    "mean": 20.9,
+    "over": 6,
+    "tags": 0
+  },
+  "spec/profiles/config/scenarios.md": {
+    "mean": 11.19,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/config/v1.md": {
+    "mean": 18.74,
+    "over": 5,
+    "tags": 19
+  },
+  "spec/profiles/desired/CHANGELOG.md": {
+    "mean": 25.63,
+    "over": 27,
+    "tags": 0
+  },
+  "spec/profiles/desired/scenarios.md": {
+    "mean": 14.94,
+    "over": 2,
+    "tags": 15
+  },
+  "spec/profiles/desired/v1.md": {
+    "mean": 24.59,
+    "over": 25,
+    "tags": 75
+  },
+  "spec/profiles/freshness/CHANGELOG.md": {
+    "mean": 17.96,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/freshness/scenarios.md": {
+    "mean": 13.98,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/freshness/v1.md": {
+    "mean": 16.45,
+    "over": 0,
+    "tags": 9
+  },
+  "spec/profiles/health/CHANGELOG.md": {
+    "mean": 18.66,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/health/scenarios.md": {
+    "mean": 13.75,
+    "over": 0,
+    "tags": 4
+  },
+  "spec/profiles/health/v1.md": {
+    "mean": 15.02,
+    "over": 1,
+    "tags": 5
+  },
+  "spec/profiles/hostid/CHANGELOG.md": {
+    "mean": 16.73,
+    "over": 1,
+    "tags": 0
+  },
+  "spec/profiles/hostid/scenarios.md": {
+    "mean": 13.87,
+    "over": 0,
+    "tags": 10
+  },
+  "spec/profiles/hostid/v1.md": {
+    "mean": 16.54,
+    "over": 3,
+    "tags": 18
+  },
+  "spec/profiles/link/CHANGELOG.md": {
+    "mean": 22.21,
+    "over": 12,
+    "tags": 0
+  },
+  "spec/profiles/link/scenarios.md": {
+    "mean": 15.04,
+    "over": 3,
+    "tags": 18
+  },
+  "spec/profiles/link/v1.md": {
+    "mean": 20.58,
+    "over": 9,
+    "tags": 47
+  },
+  "spec/profiles/redundancy/CHANGELOG.md": {
+    "mean": 24.22,
+    "over": 12,
+    "tags": 0
+  },
+  "spec/profiles/redundancy/scenarios.md": {
+    "mean": 18.1,
+    "over": 6,
+    "tags": 29
+  },
+  "spec/profiles/redundancy/v1.md": {
+    "mean": 21.45,
+    "over": 9,
+    "tags": 58
+  },
+  "spec/profiles/telemetry/CHANGELOG.md": {
+    "mean": 21.0,
+    "over": 2,
+    "tags": 0
+  },
+  "spec/profiles/telemetry/scenarios.md": {
+    "mean": 13.81,
+    "over": 0,
+    "tags": 3
+  },
+  "spec/profiles/telemetry/v1.md": {
+    "mean": 17.9,
+    "over": 5,
+    "tags": 40
+  },
+  "spec/profiles/timing/CHANGELOG.md": {
+    "mean": 22.51,
+    "over": 4,
+    "tags": 0
+  },
+  "spec/profiles/timing/scenarios.md": {
+    "mean": 17.32,
+    "over": 2,
+    "tags": 9
+  },
+  "spec/profiles/timing/v1.md": {
+    "mean": 22.74,
+    "over": 7,
+    "tags": 35
+  },
+  "spec/scenarios/README.md": {
+    "mean": 13.62,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/scenarios/bindings.md": {
+    "mean": 11.47,
+    "over": 0,
+    "tags": 2
+  },
+  "spec/scenarios/budget.md": {
+    "mean": 12.19,
+    "over": 1,
+    "tags": 6
+  },
+  "spec/scenarios/constrained.md": {
+    "mean": 12.82,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/scenarios/grammar.md": {
+    "mean": 11.16,
+    "over": 0,
+    "tags": 2
+  },
+  "spec/scenarios/operations.md": {
+    "mean": 14.51,
+    "over": 1,
+    "tags": 6
+  },
+  "spec/scenarios/presence.md": {
+    "mean": 21.62,
+    "over": 13,
+    "tags": 66
+  },
+  "spec/scenarios/retrieval.md": {
+    "mean": 13.05,
+    "over": 0,
+    "tags": 2
+  },
+  "spec/scenarios/security.md": {
+    "mean": 15.59,
+    "over": 1,
+    "tags": 19
+  },
+  "spec/scenarios/state.md": {
+    "mean": 15.66,
+    "over": 1,
+    "tags": 11
+  },
+  "spec/scenarios/types.md": {
+    "mean": 13.38,
+    "over": 0,
+    "tags": 1
+  }
+}
