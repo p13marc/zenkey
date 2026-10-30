@@ -4,6 +4,117 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-10-30: the watch after a window under a version of its own, and editorial: inline history taken out of the rules and long sentences split (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it and the
+finding that caused it, as in "(0.3, 0.5)" or "(0.5, F-135)". This
+changelog and the core's already hold that history. So the text now
+states each rule and cites its evidence, and nothing else. This is
+#935's fourth part, beside `telemetry.v1` and `desired.v1`.
+
+**The watch after a window, now under a version of its own** (§2.15;
+F-326).
+- **What changed under 0.8.** §2.15's span said that the owner is
+  watched "one lease and the reply timeout past the end". Since the entry
+  "0.8, read against observer.md 0.6" below, it says that the owner is
+  watched as observer §5.2 says. That is the longer of one lease and the
+  routers' `wait_before_close`, plus the reply timeout. The scenarios'
+  §10 step 2 cites observer §5.2 the same way.
+- **Why a version now.** Beside a `wait_before_close` longer than the
+  lease, two readers of 0.8 end their windows at different instants: one
+  of 0.8 as first published, and one of 0.8 as it read after that entry.
+  A reader holding "0.8" could not tell which §2.15 it held. zk2py round
+  86 found it (F-326). So this version is the one that holds the change.
+- **Not changed.** The rule is still observer §5.2's, and §2.15 cites
+  it. Under zenoh's defaults, a 10 s lease against a 5 s
+  `wait_before_close`, the length is the one 0.8 first gave. No fixture
+  moved.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions,** "(0.2)" to "(0.8)". Most opened a run-in
+  label, which now stands alone:
+  - §2.4's "Strict JSON first" and "Whitespace", §2.5's "A duplicate
+    observation", §2.6's absent `category` and §2.7's evaluation that
+    finds the condition again;
+  - §2.9's "How "before its token" is observed", "The work's order" and
+    "What the record holds";
+  - §2.14 step 4's heal and "The establishing GET heals the keys it
+    leaves out", and step 5's "(0.3, 0.5)" and foreign stamp;
+  - §2.15's "The window", a GET's date, "Its span", "A gap in the
+    owner's presence", "The order", "The owners in scope", "Whole", a
+    presence read's date, "An archive's read plays no part in it", step
+    3's "(above, 0.5)" and the count of owners asked;
+  - §2.16's opening, its two "(0.6)", its "(0.7)" and the "(…; 0.8)"
+    after `silent`.
+- **The core's versions.** "(core §2.7, 0.25)" in §2.15 cites the
+  section alone, and its "Lost no delivery" loses "(0.27)". §1's
+  "(§4, core 0.34)" is "(§4)", and §4's "None, published (core 0.34)" is
+  "None, published".
+- **Issues.** "(#622)" is gone from §3, and "(#800, AD)" and "(#800, AC)"
+  from Appendix B's zenwatch row.
+- **History told as text.** §2.14 step 4's "Before 0.5, a key … read
+  `incomplete`" now says what would happen otherwise. Such a key "would
+  read `incomplete` for as long as the reader held it", and the reason
+  is a sentence of its own.
+- **The scenarios.** The opening names the reference's tests without
+  "#800, AB" and "#800, AC". The conventions lose "(0.2)", "(0.3)" and
+  "(0.3, F-133)". §5's Expected 3 loses "(0.5, F-135)" and two "0.2",
+  §8's Expected 3 a "0.2" and a "(0.3)", and §10's step 2 a "0.3".
+
+**The long sentences, split.** The six over 50 words in this text:
+- **§2.9, "Why not resolve them",** is two sentences of reason, then
+  v1's ground. That opens "Under v1" now, so it reads as a sentence of
+  its own.
+- **§2.14 step 5, `not_held`,** is the rule, then what "left the key
+  out" means.
+- **§2.15, "Established",** is the two ways, then the three things both
+  need as a list, then "And either:" over `answered` and `window`.
+- **§2.16, "The answer after the change",** is two sentences: a raise
+  that is no firing to report, and a resolve that is no resolve to
+  report.
+- **§2.16, "A loss is the reader's",** is the rule, then the alarm
+  firing before the loss and after it.
+- **§2.16, "The reader's own sight",** says first that it is no answer
+  to report. Its reasons follow as a list, `freshness.v1`'s five as
+  items of their own.
+
+The scenarios' one, the conventions' owner example, is two sentences:
+the owner a black-box runner drives, and its agreed interface.
+
+**Nothing moved to an appendix.** No rule held a measurement.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61,
+against 0.8 as it read after observer 0.6.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY, REQUIRED or RECOMMENDED was extracted before and after. Each
+  was keyed by section, and the two sets diffed. The scenarios' Expected
+  lines were diffed too, keyword or not.
+- **This text.** Both sets hold 36, and all 36 are unchanged: every tag
+  sat in a sentence with no keyword, or in a run-in label.
+- **The scenarios.** Both hold 54 keyword sentences and Expected lines.
+  49 are unchanged, and five lost a tag only.
+- **The rest.** Every other sentence and table row was diffed too, and
+  each rewrite read beside its old text. None moves a condition, an
+  object or a scope. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 36 to none, sentences over 50 words from 6 to
+  none, and a mean from 19.33 words to 18.07.
+- **`scenarios.md`:** tags from 6 to none, sentences over 50 words from
+  1 to none, and a mean from 13.08 to 12.87.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule but §2.15's, which 0.8 already held,** and no section
+  number, label or anchor.
+- **Appendix A**, which is history: its "(core 0.34)", "(ZenSight
+  #882)" and "(#1081)" stay.
+- **Written against core 0.34**, still, and the header's `freshness.v1`
+  text 0.3.
+- **This changelog's earlier entries**, the two 0.8 entries among them.
+
 ## 0.8, read against observer.md 0.6 (2026-10-30, #935): the watch after a window
 
 zk2py round 85 found observer §5.2's watch after a window ambiguous

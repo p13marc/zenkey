@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.6 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.7 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.62 ([`core.md`](core.md)) |
+| **Written against** | core 0.63 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -89,9 +89,10 @@ Unestablished(NotAsked) | Unestablished(Unobservable { reason })
   window ran, the flag was not passed. The tool has learned nothing, and
   renders no answer, never the negative one.
   - A profile can also spell not this profile's as NotAsked (below).
-    There the question was put, and its premise does not hold. What this
-    bullet says of NotAsked does not hold of that spelling, and asking
-    again does not cure it.
+    There the question was put, and its premise does not hold. What
+    NotAsked's bullet says above (nobody put the question, the tool has
+    learned nothing, and it renders no answer) does not hold of that
+    spelling. Asking again does not cure it.
 - **Unobservable:** the question was put, and the observation could not be
   had. The session did not open, the bundle did not verify, the bytes did
   not decode. The `reason` is part of the verdict: it names what stood in
@@ -846,10 +847,17 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
   `[Sc: budget.md §2]`
   - **The lease** is the deployment's, 10 s by default.
   - **`wait_before_close`** is the deployment's too, 5 s by default. A
-    push that cannot queue within it closes its transport (core Appendix
-    B, "What a path drops"). So a router that waits it before closing a
-    transport tells the withdrawal that late, when it is longer than the
-    lease.
+    push that cannot queue within it closes the transport it pushes on
+    (core Appendix B, "What a path drops"). A path that stays up while its
+    queue is full keeps its lease. So its withdrawal can reach the reader
+    up to `wait_before_close` after the failure. That is later than a
+    silent link's when `wait_before_close` is longer than the lease.
+    - **A bound reasoned, not measured.** This half rests on that
+      behaviour of a push alone. `budget.md` §2 measures a silent link's
+      withdrawal one lease after the failure. No run has shown one later
+      than a lease (core Appendix B, "Not measured"). The bound is
+      conservative. A longer watch can only read a window incomplete that
+      a shorter one would read complete, never the reverse.
   - **The reply timeout** allows for the withdrawal's transit.
 - **A window counts from its subscription reaching the owner.** A
   sample the owner put before its router knew of the subscription was

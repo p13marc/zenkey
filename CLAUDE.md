@@ -1016,7 +1016,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   0.7, F-124 and F-125, #769 LH: `Block::enabled` and `check_block`'s
   `block_disabled`, and the linter's `far_of_two_faces`, a warning with no
   face; text 0.8, #819 TA: §2.13 cites `telemetry.v1`'s counter and
-  epoch), `alarms.v1`'s (`alarms`, #800 AA: the key recipe byte for
+  epoch; texts 0.9 and 0.10, #935: inline history out, and round 86's
+  F-332 to F-335 rewritten, no rule changed), `alarms.v1`'s (`alarms`,
+  #800 AA: the key recipe byte for
   byte ZenSight's — `host` and `host.*` removed first, labels by name then
   value in byte order, FNV-1a 64 — as the strict `alert_key`, the public
   `sanitize` step and the reader's `derive`, which never refuses; `Alarm`,
@@ -1030,7 +1032,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   not whole are `scope_incomplete`, never no nor not asked, F-137),
   `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.8 (#800
   AE–AH), with core 0.34 publishing its vocabulary empty, and the contract moved under
-  `spec/profiles/alarms/` with its fingerprint unchanged), and
+  `spec/profiles/alarms/` with its fingerprint unchanged; text 0.9, #935:
+  §2.15's watch after a window, as observer §5.2 says, under a version of
+  its own (round 86's F-326), and inline history out, no other rule
+  changed), and
   `telemetry.v1`'s (`telemetry`, #819 TA: the vocabulary, published by
   core 0.35; the standard schema `spec/profiles/telemetry/telemetry.v1.json`,
   whose types are the profile's by artifact id (`PUBLISHED`: ZenSight's
@@ -1054,8 +1059,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   JSON and CBOR, and §2.9's presence only from a complete seed; text 0.4,
   F-152, #819 TE: a counter or histogram read with no pair could not tell;
   text 0.5, F-156 to F-158, #819 TF: a bignum read exactly, an unreadable
-  sample could not tell, the scenarios' R on a complete liveliness read),
-  and `desired.v1`'s (`desired`, #840 DA: the declaration,
+  sample could not tell, the scenarios' R on a complete liveliness read;
+  text 0.6, #935: inline history out, no rule changed), and
+  `desired.v1`'s (`desired`, #840 DA: the declaration,
   `target_param` naming one or two template parameters, the first bound to
   `self.system` and the second to `self.service`; a requirement's binding
   and its slice's key; the standard `Report` (`desired.v1.json`, by
@@ -1098,7 +1104,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   F-225, #840 DG: a requirement whose declaring contract the descriptor
   names and the tool does not hold is unread, no binding problem read,
   unobservable `no_report` beside `requirement_unread`, never every
-  resource), `redundancy.v1`'s
+  resource; text 0.9, #935: inline history out, no rule changed),
+  `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
   from every resource, invalid `not_used`, `value`, `disagrees` or
@@ -1540,7 +1547,17 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   round 85's F-315 to F-323: eight rewrites, and F-320's watch after a
   window, the longer of one lease and the routers' `wait_before_close`,
   plus the reply timeout (observer §5.2), which `alarms.v1` §2.15 now
-  cites, keeping its text 0.8.
+  cites (its text 0.9 since part 4, round 86's F-326). #935 part 4 did
+  the same for `alarms.v1` 0.9, `telemetry.v1` 0.6 and `desired.v1` 0.9,
+  no rule changed (`desired.v1`'s mean down to 21.78 words, under the
+  target; the standard schemas' revision tables say "the profile's
+  first" and "the second" where they said "text 0.1"). With it, zk2py
+  round 86's F-324 to F-335 are answered: ten rewrites, in observer text
+  0.7's §1, `health.v1` 0.6, `hostid.v1` 0.9, `config.v1` 0.7 and
+  `link.v1` 0.10; `alarms.v1` 0.9 for F-326; and F-324, observer §5.2's
+  `wait_before_close` half of the watch stated as a conservative bound,
+  reasoned from a push that closes its transport and not measured, with
+  core 0.63's Appendix B "Not measured" line beside it.
   `observer.md` holds the reader's discipline core 0.58 moved out, word
   for word, no rule changed (§8.1's "Reading presence" its §3, §2.7's
   readings and conclusions its §5, §4.2's seed, admin-space and S1 checks

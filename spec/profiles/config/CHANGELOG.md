@@ -4,6 +4,54 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-30: editorial: round 86's F-329 to F-331, no rule changed (#935)
+
+zk2py round 86 (PR #959) read 0.6 cold, beside core 0.62 and
+`observer.md` 0.6. It found that 0.6 changed no rule, and filed three
+findings against this text, F-329 to F-331, all hard to read. This is
+#935's fourth part. Each rewrite is the finding's, and keeps its
+keyword, condition, scope and evidence.
+
+**Editorial: round 86's hard-to-read findings.**
+- **F-329, §2.3's "Two keys, one revision".** "Never a pair" and "pairs
+  them" named two things, and "both" and "them" had two antecedents. "The
+  status is the view's projection" read as always true, since §2.19 asks
+  it of every status. It is three sentences now. `instance` and
+  `revision` never name one version of the two documents. A reader that
+  reads the view and the status takes them together only when the status
+  it read is the projection of the view it read. Otherwise it takes each
+  by itself.
+- **F-330, §2.13, persist's first refusal.** "So" stood for the refusal
+  the item opens with, "its request's type included" read as part of the
+  refusal, and "(below)" pointed past three bullets. The item is two
+  sub-items now, each of two sentences:
+  - an owner with no layer does not expose `persist`, and the core
+    refuses the call before any handler runs, so before it checks the
+    request's type ("No persisted layer", below);
+  - a layer that cannot be written now is refused the same way by the
+    handler, before its other refusals and the request's type, so the
+    refusal does not depend on whether the layer was ever there.
+- **F-331, §2.18's "A delete".** "A refused document's aside" left its
+  noun out. Each parameter named by a document the owner acted on goes
+  back to its startup value, and a sentence of its own says that a
+  document it refused counts for none: it applied nothing of it. That is
+  the reading the finding took, and the only one that leaves no
+  converged value standing after the delete. `desired.v1` §2.16 had the
+  same phrase, and its text 0.9 says it the same way.
+
+**How "no rule changed" was checked**, as for 0.6. This text's 39
+keyword sentences are unchanged, and so are the scenarios. The three
+rewrites hold no keyword. They were diffed sentence by sentence and read
+beside their old text. No fixture moved: `validation.json` pins the
+order of F-330's refusals.
+
+**The figures.** This text's mean went from 18.08 words to 17.95.
+`spec/.prose-baseline.json` is lowered to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Written against core 0.28**, still.
+
 ## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60

@@ -4,6 +4,38 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-10-30: editorial: round 86's F-328, no rule changed (#935)
+
+zk2py round 86 (PR #959) read 0.8 cold, beside core 0.62 and
+`observer.md` 0.6. It found that 0.8 changed no rule, and filed one
+finding against this text, F-328, hard to read. This is #935's fourth
+part.
+
+**Editorial: F-328, §2.12's "Undecided", its third item.**
+- **The gap.** Every item continues "an instance's descriptor", and the
+  first is "could not be read". The third ended "or could not be read",
+  which read first as the descriptor again. Its subject is "a contract
+  it implements", from §5's first question. 0.8's list put the two
+  "could not be read" side by side.
+- **Now.** The finding's rewrite: "or lists `hostid.v1` while §5's first
+  question is unobservable for it: a contract it implements lists
+  `hostid.v1` in `uses`, or a contract it implements could not be read".
+  §5's first question is whether the instance's system is minted, as the
+  item said before.
+
+**How "no rule changed" was checked**, as for 0.8. This text's 22
+keyword sentences are unchanged, and so are the scenarios. The item
+holds no keyword. It was read beside its old text: its two causes and
+its verdict, unobservable and never clean, are the same. No fixture
+moved.
+
+**The figures.** This text's mean stays 15.93 words, with no sentence
+over 50 words and no tag.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **The header,** written against core 0.40.
+
 ## 0.8 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60

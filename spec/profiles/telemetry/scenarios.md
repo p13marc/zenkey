@@ -5,10 +5,10 @@ the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. The reference runtime runs §1
 to §9 as tests of `zenkey` (`zenkey/tests/profile_telemetry.rs`, one test
 per section, named after it: `s1_counter_across_a_restart` to
-`s8_counter_across_a_face`, and `s9_state_counter_seeded`; #819, TB). §8
-is also a tool's: the reference tool, `zenctl telemetry --across-face`,
-runs it over a real face (`zenctl/tests/live_zk2.rs`,
-`telemetry_s8_a_counter_that_crosses_a_face`; #819, TC).
+`s8_counter_across_a_face`, and `s9_state_counter_seeded`). §8 is also a
+tool's: the reference tool, `zenctl telemetry --across-face`, runs it over
+a real face (`zenctl/tests/live_zk2.rs`,
+`telemetry_s8_a_counter_that_crosses_a_face`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.10) are v1.md's rules; core
@@ -75,8 +75,8 @@ runs it over a real face (`zenctl/tests/live_zk2.rs`,
   liveliness subscription to `zk2/lab/meter/@zk/instance/*`, with history,
   both declared before the owner starts. Then it makes a complete
   liveliness read of the same tokens (core §8.1), on which its view of
-  presence stands (§2.9, 0.3): a subscription's history alone is not a
-  complete read (0.5). It records each sample's arrival on its monotonic
+  presence stands (§2.9): a subscription's history alone is not a
+  complete read. It records each sample's arrival on its monotonic
   clock, its key, its payload and its attachment, and each token's
   appearance and withdrawal.
   - "R reads" a sample: v1.md §2.6, against the resource's declaration.
@@ -230,7 +230,7 @@ tagged `histogram` with I1 as its epoch:
 2. O starts a new epoch, as in §2 step 2. 500 ms later, it publishes
    `bytes` at 0 and 50, each with I2 as its attachment.
 3. *Raw:* `bytes` at 60, with the JSON string `""` (two bytes) as its
-   attachment (0.2).
+   attachment.
 
 **Expected.**
 1. Each attachment of steps 1 and 2 is the owner's instance id when it
@@ -246,7 +246,7 @@ tagged `histogram` with I1 as its epoch:
 **Setup.** R0 stands where a reader across a constrained face stands
 (core §8.5): it receives the data keys and nothing under `@zk`. The
 reference tool, `zenctl telemetry --across-face`, stands it behind a face
-whose access control denies `@zk/**` (`link.v1` §2.6, #819 TC); the
+whose access control denies `@zk/**` (`link.v1` §2.6); the
 runtime runs it as R0 alone, which the profile reads alike (§2.14).
 
 **Steps.**
@@ -262,7 +262,7 @@ runtime runs it as R0 alone, which the profile reads alike (§2.14).
    epoch crossed with it.
 3. R0 pairs nothing `decreased`, and derives no negative rate.
 
-## §9 A state counter seeded (§2.10, 0.2; core §4.2)
+## §9 A state counter seeded (§2.10; core §4.2)
 
 **Setup.** R is a late joiner of `total` (core §4.2): it subscribes to
 `zk2/lab/meter/meter.v1/state/total`, then GETs it as core S4 says (target

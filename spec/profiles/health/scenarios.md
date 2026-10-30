@@ -36,9 +36,9 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
   T measures nothing, and its verdicts rest on no subscription.
   - A tool in a deployment takes that word only as its operator's option
     (`freshness.v1` §2.6). Without it, a tool measures its clock from puts
-    it hears during its reading, and the status is re-put every 30 s, so
-    the reading lasts 30 s, or its subscription is declared before the
-    owners start.
+    it hears during its reading. The status is re-put every 30 s. So such
+    a tool's reading lasts 30 s, unless its subscription is declared
+    before the owners start.
   - §5 to §7 check health's reading, not the grounds of a clock's trust,
     which `freshness.v1`'s scenarios check (its §4 and §6). In §1 to §4, G
     measures its clock from S's deliveries, as above.
