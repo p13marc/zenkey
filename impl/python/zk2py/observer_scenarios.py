@@ -353,6 +353,41 @@ def grammar1(report: Report, owner_impl: str) -> None:
         r.close()
 
 
+def _cut_stream(ep: str, owner: "GuardOwner") -> tuple[int | None, list[str]]:
+    """zk2py's echo tool in NDJSON, its standard output's read end closed
+    once it listens, then step 1's puts: its exit and its standard error."""
+    env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
+    p = subprocess.Popen([sys.executable, "-u", "-m", "zk2py.echo_tool", "-c", ep, "--count", "3", "--for", "10",
+                          "--format", "ndjson", "zk2/g/**"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, env=env)
+    err: list[str] = []
+
+    def pump() -> None:
+        assert p.stderr is not None
+        for line in p.stderr:
+            err.append(line.rstrip("\n"))
+
+    th = threading.Thread(target=pump, daemon=True)
+    th.start()
+    try:
+        assert p.stdout is not None
+        p.stdout.close()
+        if not _wait(lambda: "echo: listening" in err, 10.0):
+            raise HarnessError(f"harness: zk2py's echo tool (a cut stream) never said it was listening: {err}")
+        time.sleep(0.2)  # its declaration's way to the router
+        owner.put_all()
+        try:
+            code: int | None = p.wait(timeout=15.0)
+        except subprocess.TimeoutExpired:
+            code = None
+        th.join(timeout=2.0)
+        return code, list(err)
+    finally:
+        if p.poll() is None:
+            p.kill()
+            p.wait()
+
+
 def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -> None:
     # zk2py's echo tool, stopped by its count as zenctl echo is: a leaked
     # explicit sample, put before the plain state and the event, would be
@@ -384,6 +419,9 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -
     time.sleep(0.2)  # its declaration's way to the router
     owner.put_all()
     ncode = _wait_exit(n, 15.0)
+    # Proc.lines() is the process's standard output alone, each line as it
+    # came; its standard error is Proc.err, pumped apart (review-bot on PR
+    # #955 asked)
     rows = [json.loads(x) for x in n.lines() if x.startswith("{")]
     nkeys = sorted({x.get("key") for x in rows})
     report.check(sec, "step 5, zk2py's echo tool --format ndjson: one row per sample, step 1's three, and no row "
@@ -395,6 +433,13 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -
                       "of rows having no place for it",
                  all(k in " ".join(n.err) for k in EVERY) and any("not absent" in x for x in n.err),
                  f"stderr {n.err[:1]}")
+    # A reader that stops reading cuts the stream: the tool says so and
+    # exits 2, never 0 on a truncated stream (review-bot on PR #955)
+    cut = _cut_stream(ep, owner)
+    report.check(sec, "zk2py's echo tool --format ndjson, its standard output closed by its reader: says the stream "
+                      "was cut, and exits 2",
+                 cut[0] == 2 and any(x.startswith("echo: the stream was cut") for x in cut[1]),
+                 f"exit {cut[0]}, stderr {cut[1][-1:]}")
     if not os.access(ZENCTL, os.X_OK):
         report.note(sec, f"zenctl is not at {ZENCTL}: its step 5 not run")
         return
@@ -409,6 +454,8 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -
         owner.put_all()
         code = _wait_exit(z, 15.0)
         out = _stdout(z)
+        # z.lines() is zenctl's standard output alone, z.err its standard
+        # error (Proc pumps them apart)
         if fmt == "table":
             shown = [x for x in z.lines() if x.startswith("zk2/")]
         else:

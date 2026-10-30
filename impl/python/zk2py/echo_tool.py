@@ -29,18 +29,26 @@ arrives, the rows of ``samples`` and nothing else: a stream of rows has no
 place for the scope, so standard error states it (:func:`scope_line`),
 before the first row, whatever the format (observer §8.2, text 0.3).
 
+zenoh's callback only queues each row (:class:`Rows`); the main thread
+writes them, so a reader slow to take standard output never stalls the
+session's delivery. A write that fails (a closed pipe, any ``OSError``)
+ends the run: the tool says on standard error that the stream was cut and
+exits 2, never 0 on a truncated stream (review-bot on PR #955).
+
 It judges nothing, so it exits 0 once it has watched, and 2 when it could
-not (the session did not open, or the selector is not a key expression).
+not (the session did not open, the selector is not a key expression, or
+its standard output refused a write).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import queue
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Callable, TextIO
 
 from . import live
 
@@ -91,39 +99,106 @@ def row_of(key: str, delete: bool, size: int, encoding: str) -> dict[str, Any]:
             "delete": delete, "bytes": size, "encoding": encoding}
 
 
+class StreamCut(Exception):
+    """Standard output refused a write: what the reader got is truncated."""
+
+
+#: What standard error says when the stream is cut.
+CUT = "echo: the stream was cut"
+
+
+class Rows:
+    """The rows a window hears, handed from zenoh's callback to the thread
+    that writes them. :meth:`offer`, the callback's half, keeps the row
+    under a lock and queues it, and never writes; :meth:`pump`, the main
+    thread's, hands each queued row on in arrival order. ``count``, when
+    set, keeps the first ``count`` rows and drops the rest."""
+
+    def __init__(self, count: int = 0) -> None:
+        self.count = count
+        self.got: list[dict[str, Any]] = []
+        self.queue: "queue.SimpleQueue[dict[str, Any]]" = queue.SimpleQueue()
+        self.lock = threading.Lock()
+        self.done = threading.Event()
+
+    def offer(self, row: dict[str, Any]) -> None:
+        with self.lock:
+            if self.count and len(self.got) >= self.count:
+                return
+            self.got.append(row)
+            self.queue.put(row)
+            if self.count and len(self.got) >= self.count:
+                self.done.set()
+
+    def pump(self, each: Callable[[dict[str, Any]], None] | None, until: float) -> None:
+        """Hand each row to ``each`` on the caller's thread until the
+        monotonic instant ``until``, or until the count is reached and every
+        row has been handed on. An exception ``each`` raises ends it."""
+        while True:
+            left = until - time.monotonic()
+            if left <= 0 or (self.done.is_set() and self.queue.empty()):
+                return
+            try:
+                row = self.queue.get(timeout=min(left, 0.05))
+            except queue.Empty:
+                continue
+            if each is not None:
+                each(row)
+
+    def rest(self, each: Callable[[dict[str, Any]], None] | None) -> None:
+        """Hand on every row still queued, the window over."""
+        while True:
+            try:
+                row = self.queue.get_nowait()
+            except queue.Empty:
+                return
+            if each is not None:
+                each(row)
+
+    def rows(self) -> list[dict[str, Any]]:
+        with self.lock:
+            return list(self.got)
+
+
+def writer(out: TextIO) -> Callable[[dict[str, Any]], None]:
+    """One NDJSON line per row on ``out``, flushed at once; a write that
+    fails raises :class:`StreamCut`."""
+
+    def line(row: dict[str, Any]) -> None:
+        try:
+            out.write(json.dumps(row) + "\n")
+            out.flush()
+        except OSError as e:
+            raise StreamCut(str(e) or type(e).__name__) from e
+
+    return line
+
+
 def watch(session: Any, selector: str, window_s: float, count: int = 0,
           listening: Any = None, each: Any = None) -> list[dict[str, Any]]:
     """Every sample the selector delivers within the window, or until
     ``count`` of them, in arrival order; ``listening`` is called once the
     subscriber is declared, the window's start, and ``each`` with every
-    row as it arrives, under the lock that orders them."""
+    row in arrival order, on the caller's thread, never in zenoh's
+    callback (:class:`Rows`). What ``each`` raises ends the window and
+    reaches the caller."""
     import zenoh
 
-    got: list[dict[str, Any]] = []
-    done = threading.Event()
-    lock = threading.Lock()
+    rows = Rows(count)
 
     def received(s: Any) -> None:
-        row = row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(s.payload.to_bytes()),
-                     str(s.encoding))
-        with lock:
-            if count and len(got) >= count:
-                return
-            got.append(row)
-            if each is not None:
-                each(row)
-            if count and len(got) >= count:
-                done.set()
+        rows.offer(row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(s.payload.to_bytes()),
+                          str(s.encoding)))
 
     sub = session.declare_subscriber(selector, zenoh.handlers.Callback(received))
     if listening is not None:
         listening()
     try:
-        done.wait(window_s)
+        rows.pump(each, time.monotonic() + window_s)
     finally:
         sub.undeclare()
-    with lock:
-        return list(got)
+    rows.rest(each)
+    return rows.rows()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -145,29 +220,35 @@ def main(argv: list[str] | None = None) -> int:
         print(f"echo: the session did not open: {e}", file=sys.stderr)
         return 2
     print(scope_line(scope), file=sys.stderr, flush=True)
-
-    def line(row: dict[str, Any]) -> None:
-        print(json.dumps(row), flush=True)
-
     try:
         start = time.monotonic()
         samples = watch(session, args.selector, args.window, args.count,
                         lambda: print("echo: listening", file=sys.stderr, flush=True),
-                        line if args.format == "ndjson" else None)
+                        writer(sys.stdout) if args.format == "ndjson" else None)
         watched_s = round(time.monotonic() - start, 3)
+        if args.format == "json":
+            doc = {"report": "echo", "selector": args.selector, "scope": scope, "window_s": watched_s,
+                   "samples": samples, "notes": [scope["says"]], "exit": 0}
+            try:
+                sys.stdout.write(json.dumps(doc, indent=2) + "\n")
+                sys.stdout.flush()
+            except OSError as e:
+                raise StreamCut(str(e) or type(e).__name__) from e
+    except StreamCut as e:
+        print(f"{CUT}: {e}: what reached the reader is truncated", file=sys.stderr, flush=True)
+        return 2
     finally:
         live.close(session)
-    if args.format == "ndjson":
-        return 0
-    doc = {"report": "echo", "selector": args.selector, "scope": scope, "window_s": watched_s,
-           "samples": samples, "notes": [scope["says"]], "exit": 0}
-    print(json.dumps(doc, indent=2))
     return 0
 
 
 if __name__ == "__main__":
     code = main()
-    sys.stdout.flush()
+    try:
+        sys.stdout.flush()
+    except OSError as e:
+        print(f"{CUT}: {e}: what reached the reader is truncated", file=sys.stderr, flush=True)
+        code = code or 2
     import os
 
     os._exit(code)

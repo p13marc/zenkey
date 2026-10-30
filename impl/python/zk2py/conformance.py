@@ -3448,7 +3448,11 @@ def _observer_04_readings(root: Path) -> list[tuple[str, Any, Any]]:
         doc = json.loads((spec / rel).read_text())
         every[profile] = [jd.read(profile, a, rs) for a, rs in jd.answers(doc)]
     # What each fixture holds, by shape, and by spelling for not this
-    # profile's: the counts the fixtures give today (round 84)
+    # profile's: the counts the fixtures give today (round 84). They are
+    # pinned on purpose, a tripwire: a fixture that gains or loses a case
+    # of not this profile's fails here, so the reading is checked again
+    # against §1 rather than passing on whatever the fixture now holds
+    # (review-bot on PR #955)
     want = {
         "timing.v1": ("token", 11), "arbitration.v1": ("token", 9), "redundancy.v1": ("token", 5),
         "freshness.v1": ("not_asked", 6), "telemetry.v1": ("not_asked", 1), "desired.v1": ("not_asked", 8),
@@ -3512,6 +3516,72 @@ def _observer_04_readings(root: Path) -> list[tuple[str, Any, Any]]:
          [jd.cell(jd.read("telemetry.v1", "does_not", ["unit_invalid"])), jd.cell(jd.read("timing.v1", "no")),
           sorted(c for c in cells_na | cells_un if c in ("no", "does not", "stale"))],
          ["does not", "no", []]),
+    ]
+    # §1's two lists cover the six fixtures §1 cites, each profile once
+    out.append((f"{label}: the token-spelled and the NotAsked-spelled profiles are the six §1 cites, none twice",
+                (sorted(jd.TOKEN_SPELLED | set(jd.SPELLINGS)), jd.TOKEN_SPELLED & set(jd.SPELLINGS)),
+                (sorted(jd.FIXTURES), set())))
+    # The NDJSON rows' hand-off (review-bot on PR #955): zenoh's callback
+    # only queues a row, and the main thread writes it, so a reader slow to
+    # take standard output never stalls the session's delivery; a write
+    # that fails is the stream cut, never a clean end
+    import io
+    import threading
+    import time as _time
+
+    rows = echo_tool.Rows(count=3)
+    gate, handed = threading.Event(), []
+
+    def blocked(row: dict[str, Any]) -> None:
+        gate.wait(5.0)
+        handed.append(row["key"])
+
+    pumping = threading.Thread(target=rows.pump, args=(blocked, _time.monotonic() + 5.0), daemon=True)
+    pumping.start()
+    t0 = _time.monotonic()
+    for i in range(5):
+        rows.offer(echo_tool.row_of(f"zk2/g/svc/zk2py_guard.v1/stream/cmd{i}", False, 1, "zenoh/bytes"))
+    offered_s = _time.monotonic() - t0
+    gate.set()
+    pumping.join(5.0)
+    out += [
+        ("observer 0.4 §8.2: the callback's half returns at once while the writer is blocked, and keeps the first "
+         "--count rows",
+         [offered_s < 0.5, [r["key"][-4:] for r in rows.rows()]], [True, ["cmd0", "cmd1", "cmd2"]]),
+        ("observer 0.4 §8.2: the main thread's half hands them on in arrival order, then ends, the count reached",
+         [handed, pumping.is_alive()],
+         [[f"zk2/g/svc/zk2py_guard.v1/stream/cmd{i}" for i in range(3)], False]),
+    ]
+
+    class Refusing(io.StringIO):
+        def __init__(self, exc: OSError, on: str) -> None:
+            super().__init__()
+            self.exc, self.on = exc, on
+
+        def write(self, text: str) -> int:
+            if self.on == "write":
+                raise self.exc
+            return super().write(text)
+
+        def flush(self) -> None:
+            if self.on == "flush":
+                raise self.exc
+
+    def cut(out: io.StringIO) -> str:
+        r = echo_tool.Rows()
+        r.offer(echo_tool.row_of("zk2/g/svc/zk2py_guard.v1/stream/cmd", False, 1, "zenoh/bytes"))
+        try:
+            r.rest(echo_tool.writer(out))
+        except echo_tool.StreamCut as e:
+            return f"cut: {e}"
+        return "written"
+
+    ok = io.StringIO()
+    out += [
+        ("observer 0.4 §8.2: a row written is one NDJSON line", [cut(ok), ok.getvalue().count("\n")], ["written", 1]),
+        ("observer 0.4 §8.2: a closed pipe on write, or any OSError on flush, is the stream cut, never a clean end",
+         [cut(Refusing(BrokenPipeError(32, "Broken pipe"), "write")).startswith("cut: "),
+          cut(Refusing(OSError(5, "Input/output error"), "flush")).startswith("cut: ")], [True, True]),
     ]
     # §8.2's medium: a stream of rows has no place for the scope, so
     # standard error states it; the rows are the samples alone

@@ -45,16 +45,19 @@ NOT_ASKED, UNOBSERVABLE, ESTABLISHED = "not_asked", "unobservable", "established
 #: and not this profile's, which is Unestablished and a kind of its own.
 SHAPES = (ESTABLISHED, NOT_ASKED, UNOBSERVABLE, TOKEN)
 
-#: Each profile §1 names, and how it spells not this profile's: as the
-#: token, or as NotAsked with one of these reasons (observer §1's two
-#: bullets, each with the fixture that says so).
-SPELLINGS: dict[str, tuple[str, frozenset[str]]] = {
-    "timing.v1": ("token", frozenset()),
-    "arbitration.v1": ("token", frozenset()),
-    "redundancy.v1": ("token", frozenset()),
-    "freshness.v1": (NOT_ASKED, frozenset({"kind", "deleted"})),
-    "telemetry.v1": (NOT_ASKED, frozenset({TOKEN})),
-    "desired.v1": (NOT_ASKED, frozenset({"not_a_target"})),
+#: The profiles §1 names as spelling not this profile's as the token
+#: (observer §1's first bullet). A profile §1 does not name reads so too:
+#: the token is §1's own.
+TOKEN_SPELLED = frozenset({"timing.v1", "arbitration.v1", "redundancy.v1"})
+
+#: The profiles §1 names as spelling it as NotAsked, each with the reasons
+#: that name its failed premise (observer §1's second bullet, each with the
+#: fixture that says so). Only these read a ``not_asked`` as not this
+#: profile's.
+SPELLINGS: dict[str, frozenset[str]] = {
+    "freshness.v1": frozenset({"kind", "deleted"}),
+    "telemetry.v1": frozenset({TOKEN}),
+    "desired.v1": frozenset({"not_a_target"}),
 }
 
 #: The fixtures §1 cites for each profile's spelling, under ``spec/``.
@@ -110,8 +113,8 @@ def read(profile: str, answer: str, reasons: Iterable[str] | str | None = None) 
     if answer == TOKEN:
         return Judgement(profile, answer, rs, TOKEN, "token")
     if answer == NOT_ASKED:
-        _, premise = SPELLINGS.get(profile, ("token", frozenset()))
-        if premise and any(r in premise for r in rs):
+        premise = SPELLINGS.get(profile)
+        if premise is not None and any(r in premise for r in rs):
             return Judgement(profile, answer, rs, TOKEN, NOT_ASKED)
         return Judgement(profile, answer, rs, NOT_ASKED)
     if answer == UNOBSERVABLE:

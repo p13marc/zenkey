@@ -17760,6 +17760,21 @@ implements.
 - **`observer_scenarios`** checks zk2py's echo tool in NDJSON beside its
   JSON document, and `zenctl echo --format ndjson`'s stdout for rows alone.
   `KNOWN` is empty.
+- **After review-bot on PR #955** (nothing blocking; its should-fixes):
+  - In NDJSON, zenoh's callback only queues each row (`echo_tool.Rows`),
+    and the main thread writes it, so a reader slow to take standard
+    output never stalls the session's delivery.
+  - A write that fails (a closed pipe, any `OSError` on stdout) is the
+    stream cut: the tool says "echo: the stream was cut: …" on stderr and
+    exits 2, never 0 on a truncated stream. `observer_scenarios` checks it
+    with each owner, the tool's stdout closed by its reader.
+  - `judgement.SPELLINGS` holds only the NotAsked-spelled profiles and
+    their premise reasons, `TOKEN_SPELLED` the three others, and a
+    reading holds the two to the six fixtures §1 cites. The pinned
+    fixture counts are a deliberate tripwire, which a comment says.
+  - `readings` 645 (five more: the hand-off, the cut stream and the two
+    lists). `just py-conformance`: 3602 of 3602. `observer_scenarios`: 48
+    of 48.
 
 ### Live
 
