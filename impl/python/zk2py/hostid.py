@@ -1,5 +1,8 @@
 """``hostid.v1``: a system minted from the machine id (profile text 0.3,
-draft, written against core 0.22; ``spec/profiles/hostid/v1.md``).
+draft, written against core 0.22; ``spec/profiles/hostid/v1.md``). Read
+again against text 0.8 (#609, round 86; #935): its inline history taken
+out and §2.12's three long sentences split, no rule changed, and none of
+the rules zk2py implements (here and in ``live.hostid_collision``) moved.
 
 The session-free half:
 - :func:`derive`, §2.1 with the salt of §2.2;

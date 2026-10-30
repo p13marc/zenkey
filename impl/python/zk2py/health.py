@@ -1,5 +1,8 @@
 """``health.v1``: how well a service serves (profile text 0.1, draft,
-written against core 0.23; ``spec/profiles/health/v1.md``).
+written against core 0.23; ``spec/profiles/health/v1.md``). Read again
+against text 0.5 (#609, round 86; #935): its inline history taken out and
+§2.2's long sentence split, no rule changed, and none of this module's
+rules moved.
 
 The first standard-contract profile (core §10 point 1): its contract is
 ``spec/profiles/health/health.v1.toml``, three resources, ``state/status``

@@ -931,7 +931,8 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
     """T is :class:`zk2py.alarms.AlarmsReader`: one subscription, then a GET
     per owner at each re-read, its window as §2.15 (0.3) counts one. Step 2
     listens until the window, from the declaration plus the reply timeout to
-    a lease and the reply timeout before the instant T judges, is longer
+    the watch after it before the instant T judges (observer §5.2: the
+    longer of the lease and wait_before_close, plus the reply timeout), is longer
     than the horizon. Then, beyond scenarios.md, 0.3's two breaks of a
     window: a gap in lab/b's presence, and a loss."""
     from . import live
@@ -1001,8 +1002,10 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      {"reason": "window_short", "verdict": "unobservable"},
                      f"{[(r.address, r.verdict.expect()) for r in reads]}")
         # 900 s of window after the declaration plus the reply timeout, and
-        # the lease and the reply timeout of watch after it (0.3).
-        need_ns = int((h.ttl_s + 1.0) * fr.NS) + 2 * t.reply_timeout_ns + t.lease_ns
+        # the watch after it, as observer §5.2 says: the longer of the lease
+        # and wait_before_close, plus the reply timeout (§2.15, 0.3; scenarios
+        # §10 step 2 as read against observer.md 0.6).
+        need_ns = int((h.ttl_s + 1.0) * fr.NS) + t.reply_timeout_ns + t.watch_after_ns
         while time.monotonic_ns() - t.declared_ns < need_ns:
             time.sleep(0.2)
         reads, _ = scope()
