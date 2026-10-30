@@ -19394,8 +19394,10 @@ and bold run-in labels joined to the sentence after them, as in round 86.
     states them, and its watch's length, word for word 0.6's;
   - core 0.63's "Not measured" line;
   - observer 0.7 §1's sentence for F-325;
-  - `alarms.v1` 0.9's header and §2.15's citation of §5.2 (F-326), and the
-    alarms reader's window end, unchanged: 89 s and 94 s for a reader
+  - `alarms.v1` at text 0.9 or later, its CHANGELOG's 0.9 entry naming
+    the watch after a window, and §2.15's citation of §5.2 (F-326), so the
+    reading still holds when #935's next part moves the version on; and
+    the alarms reader's window end, unchanged: 89 s and 94 s for a reader
     judging at 100 s;
   - three of `desired.v1` 0.9's split rules, each read by zk2py's
     `TargetRole` as the new sentences state it:
@@ -19407,6 +19409,9 @@ and bold run-in labels joined to the sentence after them, as in round 86.
       same version (F-343's reading);
     - §2.7's restart: the same document under a new stamp adopted within a
       run, and acted on after a restart.
+
+  A prose reading that fails names the quotes it did not find, its `want`
+  an empty list (review-bot on PR #961).
 - **The modules' headers** (`alarms`, `telemetry`, `desired`,
   `desired_live`, `desired_tool`; `config`, `health`, `hostid`, `link`)
   say they were read again against the new texts, and that none of their

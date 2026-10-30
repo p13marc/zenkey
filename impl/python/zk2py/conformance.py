@@ -3438,6 +3438,8 @@ def _observer_07_readings(root: Path) -> list[tuple[str, Any, Any]]:
     F-326, as they read. Then the desired.v1 sentences 0.9 split whose rules
     zk2py's target implements, each read by :class:`zk2py.desired.TargetRole`
     as the new sentence states it. No session is opened."""
+    import re
+
     from . import alarms
     from . import desired as ds
 
@@ -3445,28 +3447,47 @@ def _observer_07_readings(root: Path) -> list[tuple[str, Any, Any]]:
     flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
     ns = 1_000_000_000
     observer, core, alarms_text = flat("observer.md"), flat("core.md"), flat("profiles/alarms/v1.md")
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        """The quotes the text does not hold, so a failing reading names them
+        (review-bot on PR #961)."""
+        return [q for q in quotes if q not in text]
+
+    def alarms_from_09() -> list[str]:
+        """``alarms.v1`` at text 0.9 or later, and its CHANGELOG's 0.9 entry
+        naming the watch after a window: what is missing. #935's next part
+        moves the version on, which this reading allows."""
+        gaps: list[str] = []
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", alarms_text)
+        if m is None:
+            gaps.append("alarms.v1's header names no text version")
+        elif (int(m.group(1)), int(m.group(2))) < (0, 9):
+            gaps.append(f"alarms.v1's text version {m.group(1)}.{m.group(2)}, below 0.9")
+        log = (spec / "profiles/alarms/CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+        if not any(line.startswith("## 0.9 ") and "the watch after a window" in line for line in log):
+            gaps.append("alarms.v1's CHANGELOG has no 0.9 entry naming the watch after a window")
+        return gaps
+
     out: list[tuple[str, Any, Any]] = [
         ("observer 0.7 §5.2 (F-324): the wait_before_close half says why a path that stays up tells a withdrawal "
          "late, and that it is a bound reasoned, not measured",
-         ["A path that stays up while its queue is full keeps its lease." in observer,
-          "**A bound reasoned, not measured.**" in observer,
-          "No run has shown one later than a lease (core Appendix B, \"Not measured\")." in observer],
-         [True, True, True]),
+         missing(observer, "A path that stays up while its queue is full keeps its lease.",
+                 "**A bound reasoned, not measured.**",
+                 "No run has shown one later than a lease (core Appendix B, \"Not measured\")."), []),
         ("observer 0.7 §5.2: the watch's length is the one 0.6 settled, word for word",
-         "a tool watches the owner's instance tokens for the longer of one lease and the routers' "
-         "`wait_before_close`, plus its reply timeout." in observer, True),
+         missing(observer, "a tool watches the owner's instance tokens for the longer of one lease and the routers' "
+                 "`wait_before_close`, plus its reply timeout."), []),
         ("core 0.63 Appendix B (F-324): the line that says what was not measured",
-         "**Not measured: a withdrawal later than one lease, under a `wait_before_close` longer than the "
-         "lease.**" in core, True),
+         missing(core, "**Not measured: a withdrawal later than one lease, under a `wait_before_close` longer than "
+                 "the lease.**"), []),
         ("observer 0.7 §1 (F-325): the second spelling's sentence names NotAsked's bullet",
-         "What NotAsked's bullet says above (nobody put the question, the tool has learned nothing, and it "
-         "renders no answer) does not hold of that spelling." in observer, True),
-        ("alarms.v1 0.9 (F-326): §2.15's watch after a window is held by a version of its own, and still cites "
-         "observer §5.2",
-         ["| **Text version** | 0.9 (" in alarms_text,
-          "The owner is watched past the end as observer §5.2 says: the longer of one lease and the routers' "
-          "`wait_before_close`, plus the reply timeout." in alarms_text],
-         [True, True]),
+         missing(observer, "What NotAsked's bullet says above (nobody put the question, the tool has learned "
+                 "nothing, and it renders no answer) does not hold of that spelling."), []),
+        ("alarms.v1 0.9 (F-326): §2.15's watch after a window is held by a version of its own, 0.9 or later, and "
+         "still cites observer §5.2",
+         alarms_from_09() + missing(alarms_text, "The owner is watched past the end as observer §5.2 says: the "
+                                    "longer of one lease and the routers' `wait_before_close`, plus the reply "
+                                    "timeout."), []),
         ("alarms.v1 0.9 §2.15 in AlarmsReader: a reader judging at 100 s still ends its window at 89 s under "
          "zenoh's defaults, and at 94 s beside a 1 s lease",
          [alarms.window_end_ns(100 * ns) / ns, alarms.window_end_ns(100 * ns, 1.0, 5.0, 1.0) / ns], [89.0, 94.0]),
