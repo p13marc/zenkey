@@ -89,13 +89,14 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     }
 
     let ndjson = crate::render::Mode::of(dep.format()).machine();
-    if !ndjson {
-        eprintln!(
-            "echoing {}{} (ctrl-c to stop)",
-            selectors.join(" + "),
-            zk2::scope_note(&selectors)
-        );
-    }
+    // What the scope cannot reach is said in every format: on standard
+    // error, beside an NDJSON stream of rows that has no place for it
+    // (observer §8.2, text 0.3, F-292).
+    eprintln!(
+        "echoing {}{} (ctrl-c to stop)",
+        selectors.join(" + "),
+        zk2::scope_note(&selectors)
+    );
     let mut seen = 0usize;
     let mut dropped_total = 0u64;
     let ctrl_c = tokio::signal::ctrl_c();
