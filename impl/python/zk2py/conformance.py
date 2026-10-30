@@ -3452,6 +3452,18 @@ def _observer_02_readings(root: Path) -> list[tuple[str, Any, Any]]:
             ([{shape}] * 3, ({shape}, set()), "in every read, the step's control: a fault"),
             ([set()] * 3, (set(), set()), "in none")):
         out.append((f"{label} §3.2: a shape {why}", live.shape_faults(reads), want))
+
+    def refused(seen: list[set]) -> str:
+        try:
+            live.shape_faults(seen)
+        except ValueError as e:
+            return f"refused: {e}"
+        return "read"
+
+    out.append((f"{label} §3.2: one read, or none, is no pair a grace apart, and shape_faults refuses it, as "
+                f"presence_faults refuses reads < 2 (review-bot on PR #952)",
+                [refused([{shape}]), refused([])],
+                ["refused: observer §3.2: a fault needs two reads a grace apart"] * 2))
     silent = live.CallResult(replies=[live.CallReply("transport", None, "", b"")])
     told = live.o3_verdict(silent, True, True)
     untold = live.o3_verdict(silent, None, True)

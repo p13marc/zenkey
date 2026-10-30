@@ -1261,7 +1261,11 @@ def shape_faults(seen: list[set]) -> tuple[set, set]:
     each read with the next, as operations.md §8 step 6's "neither pair of
     reads a grace apart" does, so a shape seen in two reads with one
     between them that did not see it passes too: it did not hold between
-    them."""
+    them. Fewer than two reads is no pair, and refused, as
+    :func:`presence_faults` refuses ``reads < 2`` (review-bot on PR #952):
+    one read is never the two the MUST asks for."""
+    if len(seen) < 2:
+        raise ValueError("observer §3.2: a fault needs two reads a grace apart")
     faults = set().union(*(a & b for a, b in zip(seen, seen[1:])))
     return faults, set().union(*seen) - faults
 

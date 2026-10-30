@@ -29,6 +29,9 @@ run and never read:
   the two: the reference's owner example takes no such option.
 
 Exit 0 when every check passes but those :data:`KNOWN` names, 1 otherwise.
+A failure of the runner's own parties (the reference's owner answering no
+line to a command, a tool that never starts) is a failing check of its
+own, ``harness: …``, apart from every spec check (:class:`HarnessError`).
 """
 
 from __future__ import annotations
@@ -110,6 +113,34 @@ def _router(auth: dict[str, Any] | None = None, acl: dict[str, Any] | None = Non
     return zenoh.open(conf), f"tcp/127.0.0.1:{port}"
 
 
+class HarnessError(RuntimeError):
+    """The runner's own party failed, not a party under test: the
+    reference's owner answering nothing to a command, a process that never
+    started. :func:`main` reports it as a harness failure, named so, apart
+    from every spec check (review-bot on PR #952)."""
+
+
+class Procs:
+    """Every process a section starts, each killed at the section's end if
+    it still runs, whatever ended the section."""
+
+    def __init__(self) -> None:
+        self.started: list[Proc] = []
+
+    def start(self, args: list[str]) -> Proc:
+        p = Proc(args, python=False)
+        self.started.append(p)
+        return p
+
+    def __enter__(self) -> "Procs":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        for p in self.started:
+            if p.p.poll() is None:
+                p.kill()
+
+
 def _wait_exit(p: Proc, timeout_s: float) -> int | None:
     try:
         return p.p.wait(timeout=timeout_s)
@@ -151,7 +182,10 @@ class GuardOwner:
             _wait(lambda: any(x.startswith("ready ") for x in self.p.lines()) or self.p.p.poll() is not None, 15.0)
             ready = [x for x in self.p.lines() if x.startswith("ready ")]
             if not ready:
-                raise RuntimeError(f"the reference's owner did not start: {self.p.lines()} {self.p.err}")
+                if self.p.p.poll() is None:
+                    self.p.kill()
+                raise HarnessError(f"harness: the reference's owner did not start within 15 s: {self.p.lines()} "
+                                   f"{self.p.err}")
             self.instance_key = ready[0].split()[1]
 
     def put(self, rid: str) -> None:
@@ -166,8 +200,16 @@ class GuardOwner:
                 self.o.occur(key, b"x")
             return
         n = len(self.p.lines())
-        self.p.send(f"put zk2py_guard.v1 {rid}")
-        _wait(lambda: len(self.p.lines()) > n, 5.0)
+        cmd = f"put zk2py_guard.v1 {rid}"
+        self.p.send(cmd)
+        # its documented answer, one line per line of standard input
+        if not _wait(lambda: len(self.p.lines()) > n or self.p.p.poll() is not None, 5.0) \
+                or len(self.p.lines()) <= n:
+            raise HarnessError(f"harness: the reference's owner answered no line to `{cmd}` within 5 s "
+                               f"(exit {self.p.p.poll()}; stderr {self.p.err[-3:]})")
+        answer = self.p.lines()[n]
+        if not answer.startswith(f"put {key}"):
+            raise HarnessError(f"harness: the reference's owner answered `{cmd}` with `{answer}`")
 
     def put_all(self) -> None:
         for rid in DATA:
@@ -216,9 +258,37 @@ def _liveliness_keys(session: Any, selector: str) -> list[str]:
     return sorted(out)
 
 
-def grammar1(report: Report, owner_impl: str) -> None:
-    import zenoh
+class _Heard:
+    """A subscriber's samples, each (key, payload, its stamp's text): a
+    sample delivered twice is one sample, so a count is of distinct ones."""
 
+    def __init__(self, session: Any, selector: str) -> None:
+        import zenoh
+
+        self.rows: list[tuple[str, bytes, str | None]] = []
+        self._lock = threading.Lock()
+        self.sub = session.declare_subscriber(selector, zenoh.handlers.Callback(self._got))
+
+    def _got(self, s: Any) -> None:
+        ts = s.timestamp
+        with self._lock:
+            self.rows.append((str(s.key_expr), s.payload.to_bytes(), str(ts) if ts is not None else None))
+
+    def distinct(self) -> list[tuple[str, bytes, str | None]]:
+        with self._lock:
+            return sorted(set(self.rows), key=lambda r: (r[0], r[1], r[2] or ""))
+
+    def kinds(self) -> set[str | None]:
+        return {_kind(k) for k, _, _ in self.distinct()}
+
+    def keys(self) -> list[str]:
+        return [k for k, _, _ in self.distinct()]
+
+    def close(self) -> None:
+        self.sub.undeclare()
+
+
+def grammar1(report: Report, owner_impl: str) -> None:
     from . import live
 
     sec = f"grammar §1 [{owner_impl} owner]"
@@ -228,16 +298,25 @@ def grammar1(report: Report, owner_impl: str) -> None:
         owner = GuardOwner(owner_impl, ep)
         consumer = live.open_client(ep)
         _wait(lambda: bool(_liveliness_keys(consumer, "zk2/g/*/@zk/instance/*")), 5.0)
-        # Step 1: a subscription to zk2/g/**, the owner putting on every data resource.
-        got: list[str] = []
-        sub = consumer.declare_subscriber("zk2/g/**", zenoh.handlers.Callback(lambda s: got.append(str(s.key_expr))))
-        time.sleep(0.3)
+        # Step 1: a subscription to zk2/g/**, the owner putting on every data
+        # resource. Beside it, on the same session, a control on the two
+        # explicit kinds: the router sends a session each matching sample
+        # once, and the session hands it to every subscriber it matches, so
+        # once the control holds both explicit samples, an explicit sample
+        # the step's subscriber matched would be held too. That is what the
+        # step waits for, never a fixed time after the puts.
+        got = _Heard(consumer, "zk2/g/**")
+        control = _Heard(consumer, "zk2/g/*/*/@stream/**"), _Heard(consumer, "zk2/g/*/*/@state/**")
+        time.sleep(0.3)  # the declarations' way to the router: no signal reaches the consumer
         owner.put_all()
-        _wait(lambda: len(got) >= 3, 3.0)
-        time.sleep(0.3)
-        sub.undeclare()
-        report.check(sec, "step 1: the consumer of zk2/g/** receives the stream, state and events samples only",
-                     sorted({_kind(k) for k in got}) == ["events", "state", "stream"] and len(got) == 3, str(got))
+        settled = _wait(lambda: got.kinds() >= {"stream", "state", "events"}
+                        and all(c.distinct() for c in control), 5.0)
+        for x in (got, *control):
+            x.close()
+        report.check(sec, "step 1: the consumer of zk2/g/** receives the stream, state and events samples only (each "
+                          "sample counted once, by key, payload and stamp: a duplicate delivery is no second sample)",
+                     settled and got.kinds() == {"events", "state", "stream"} and len(got.distinct()) == 3,
+                     f"{got.keys()}; {len(got.rows)} deliveries; control {[c.keys() for c in control]}")
         # Step 2: a GET of zk2/g/**.
         calls_before = list(owner.o.calls) if owner_impl == "zk2py" else []
         replies = _get_keys(consumer, "zk2/g/**")
@@ -250,19 +329,22 @@ def grammar1(report: Report, owner_impl: str) -> None:
         zk = _liveliness_keys(consumer, "zk2/g/*/@zk/**")
         report.check(sec, "step 3: a liveliness GET of zk2/g/** returns no token; of zk2/g/*/@zk/** the instance token",
                      not none and owner.instance_key in zk, f"{none} | {zk}")
-        # Step 4: zk2/*/*/*/state/**, subscribed to and GOT.
-        st: list[str] = []
-        sub = consumer.declare_subscriber("zk2/*/*/*/state/**",
-                                          zenoh.handlers.Callback(lambda s: st.append(str(s.key_expr))))
-        time.sleep(0.3)
+        # Step 4: zk2/*/*/*/state/**, subscribed to and GOT, beside a control
+        # holding every other kind the owner puts.
+        st = _Heard(consumer, "zk2/*/*/*/state/**")
+        control4 = _Heard(consumer, "zk2/g/**"), _Heard(consumer, "zk2/*/*/*/@state/**")
+        time.sleep(0.3)  # the declarations' way to the router, as above
         owner.put_all()
-        _wait(lambda: len(st) >= 1, 3.0)
-        time.sleep(0.3)
-        sub.undeclare()
+        settled = _wait(lambda: st.distinct() and control4[0].kinds() >= {"stream", "state", "events"}
+                        and bool(control4[1].distinct()), 5.0)
+        for x in (st, *control4):
+            x.close()
         gst = _get_keys(consumer, "zk2/*/*/*/state/**")
         report.check(sec, "step 4: zk2/*/*/*/state/** delivers and answers plain state only",
-                     st == [f"{PREFIX}/state/level"] and gst == [f"{PREFIX}/state/level"], f"{st} | {gst}")
-        _step5(report, sec, owner, ep)
+                     settled and st.keys() == [f"{PREFIX}/state/level"] and gst == [f"{PREFIX}/state/level"],
+                     f"{st.keys()} | {gst}")
+        with Procs() as procs:
+            _step5(report, sec, owner, ep, procs)
     finally:
         if consumer is not None:
             live.close(consumer)
@@ -271,19 +353,23 @@ def grammar1(report: Report, owner_impl: str) -> None:
         r.close()
 
 
-def _step5(report: Report, sec: str, owner: GuardOwner, ep: str) -> None:
-    # zk2py's echo tool
-    t = Proc([sys.executable, "-u", "-m", "zk2py.echo_tool", "-c", ep, "--for", "3", "zk2/g/**"], python=False)
-    _wait(lambda: "echo: listening" in t.err, 10.0)
-    time.sleep(0.2)
+def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -> None:
+    # zk2py's echo tool, stopped by its count as zenctl echo is: a leaked
+    # explicit sample, put before the plain state and the event, would be
+    # among the three
+    t = procs.start([sys.executable, "-u", "-m", "zk2py.echo_tool", "-c", ep, "--count", "3", "--for", "10",
+                     "zk2/g/**"])
+    if not _wait(lambda: "echo: listening" in t.err, 10.0):
+        raise HarnessError(f"harness: zk2py's echo tool never said it was listening: {t.err}")
+    time.sleep(0.2)  # its declaration's way to the router
     owner.put_all()
     code = _wait_exit(t, 15.0)
     doc = _json_doc(t)
-    kinds = sorted({s["kind"] for s in doc.get("samples", [])})
+    keys = sorted({x["key"] for x in doc.get("samples", [])})
+    kinds = sorted({_kind(k) for k in keys})
     sc = doc.get("scope", {})
     report.check(sec, "step 5, zk2py's echo tool: shows step 1's samples, the stream, state and events ones",
-                 code == 0 and kinds == ["events", "state", "stream"] and len(doc.get("samples", [])) == 3,
-                 f"exit {code}, {[s['key'] for s in doc.get('samples', [])]}")
+                 code == 0 and kinds == ["events", "state", "stream"] and len(keys) == 3, f"exit {code}, {keys}")
     report.check(sec, "step 5, zk2py's echo tool: reports @stream, @state, @op, @adv and @zk excluded beside what it "
                       "watched, in its report and on stderr",
                  sorted(sc.get("excluded", [])) == sorted(EVERY) and sc.get("watched") == ["stream", "state", "events"]
@@ -291,77 +377,84 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str) -> None:
                  f"{sc}; stderr {t.err[:1]}")
     if not os.access(ZENCTL, os.X_OK):
         report.note(sec, f"zenctl is not at {ZENCTL}: its step 5 not run")
-    else:
-        for fmt in ("table", "ndjson"):
-            z = Proc([str(ZENCTL), "echo", "-c", ep, "--format", fmt, "--count", "3", "--color", "never",
-                      "--contracts", str(GUARD), "zk2/g/**"], python=False)
-            # zenctl states nothing on stderr in ndjson: give it its time
-            _wait(lambda: any("echoing" in x for x in z.err), 5.0)
-            time.sleep(1.0)
-            owner.put_all()
-            code = _wait_exit(z, 15.0)
-            out = _stdout(z)
-            if fmt == "table":
-                shown = [x for x in z.lines() if x.startswith("zk2/")]
-            else:
-                shown = [json.loads(x)["key"] for x in z.lines() if x.startswith("{")]
-            report.check(sec, f"step 5, zenctl echo --format {fmt}: shows step 1's samples, the stream, state and "
-                              f"events ones",
-                         code == 0 and sorted({_kind(k) for k in shown}) == ["events", "state", "stream"]
-                         and len(shown) == 3, f"exit {code}, {shown}")
-            stated = all(k in " ".join(z.err) + out for k in EVERY) and "excluded" in " ".join(z.err) + out
-            report.check(sec, f"step 5, zenctl echo --format {fmt}: the scope's exclusion stated, in its rows or on "
-                              f"stderr", stated, f"stderr {z.err}")
-        # zenctl timing over zk2/g/**: the owner publishing both timed streams at their period
-        stop = threading.Event()
+        return
+    for fmt in ("table", "ndjson"):
+        z = procs.start([str(ZENCTL), "echo", "-c", ep, "--format", fmt, "--count", "3", "--color", "never",
+                         "--contracts", str(GUARD), "zk2/g/**"])
+        # zenctl states nothing on stderr in ndjson (F-292), and says nothing
+        # once it listens in either format: its subscription is given a
+        # margin before the puts
+        _wait(lambda: any("echoing" in x for x in z.err), 5.0)
+        time.sleep(1.0)
+        owner.put_all()
+        code = _wait_exit(z, 15.0)
+        out = _stdout(z)
+        if fmt == "table":
+            shown = [x for x in z.lines() if x.startswith("zk2/")]
+        else:
+            shown = [json.loads(x)["key"] for x in z.lines() if x.startswith("{")]
+        report.check(sec, f"step 5, zenctl echo --format {fmt}: shows step 1's samples, the stream, state and "
+                          f"events ones",
+                     code == 0 and sorted({_kind(k) for k in shown}) == ["events", "state", "stream"]
+                     and len(set(shown)) == 3, f"exit {code}, {shown}")
+        stated = all(k in " ".join(z.err) + out for k in EVERY) and "excluded" in " ".join(z.err) + out
+        report.check(sec, f"step 5, zenctl echo --format {fmt}: the scope's exclusion stated, in its rows or on "
+                          f"stderr", stated, f"stderr {z.err}")
+    # zenctl timing over zk2/g/**: the owner publishing both timed streams at their period
+    stop = threading.Event()
+    failed: list[BaseException] = []
 
-        def pump() -> None:
+    def pump() -> None:
+        try:
             while not stop.is_set():
                 owner.put("stream/cmd")
                 owner.put("@stream/frame")
                 time.sleep(0.2)
+        except BaseException as e:  # noqa: BLE001 - raised again on the section's thread
+            failed.append(e)
 
-        th = threading.Thread(target=pump, daemon=True)
-        th.start()
-        try:
-            z = Proc([str(ZENCTL), "timing", "-c", ep, "--format", "json", "--for", "2", "--contracts", str(GUARD),
-                      "zk2/g/**"], python=False)
-            code = _wait_exit(z, 30.0)
-            p = Proc([sys.executable, "-u", "-m", "zk2py.timing_tool", "-c", ep, "--for", "2", "--contracts",
-                      str(GUARD), "zk2/g/svc/**"], python=False)
-            pcode = _wait_exit(p, 30.0)
-            narrow = Proc([sys.executable, "-u", "-m", "zk2py.timing_tool", "-c", ep, "--for", "1", "zk2/g/**"],
-                          python=False)
-            ncode = _wait_exit(narrow, 15.0)
-        finally:
-            stop.set()
-            th.join()
-        zd, pd = _json_doc(z), _json_doc(p)
-        zs, ps = zd.get("scope", {}), pd.get("scope", {})
-        z_rows = sorted({x.get("resource") for x in zd.get("rows", [])})
-        p_rows = sorted({x.get("resource") for x in pd.get("rows", [])})
-        report.check(sec, "step 5, zenctl timing over zk2/g/**: reads the plain timed stream alone, reports the five "
-                          "verbatim kinds excluded and @stream/frame unreached, in its scope, its notes and on stderr",
-                     code in (0, 1) and z_rows == ["stream/cmd"] and sorted(zs.get("excluded", [])) == sorted(EVERY)
-                     and [u.get("resource") for u in zs.get("unreached", [])] == ["@stream/frame"]
-                     and any("@stream/frame" in x for x in z.err) and all(k in " ".join(z.err) for k in EVERY),
-                     f"exit {code}, rows {z_rows}, scope {zs}")
-        report.check(sec, "step 5, zk2py's timing tool over zk2/g/svc/** (it reads one owner): the plain timed stream "
-                          "alone, the five excluded and zk2py_guard.v1 @stream/frame unreached, in its scope, its "
-                          "notes and on stderr",
-                     pcode in (0, 1) and p_rows == ["stream/cmd"] and sorted(ps.get("excluded", [])) == sorted(EVERY)
-                     and ps.get("unreached") == ["zk2py_guard.v1 @stream/frame"]
-                     and any("excludes" in n for n in pd.get("notes", []))
-                     and any("@stream/frame" in x and "excludes" in x for x in p.err),
-                     f"exit {pcode}, rows {p_rows}, scope {ps}, stderr {[x for x in p.err if 'excludes' in x]}")
-        report.check(sec, "zk2py's timing tool refuses zk2/g/**, a system's, saying it reads one owner (zk2py's "
-                          "own limit, never an empty reading)",
-                     ncode not in (0, None) and any("reads one owner" in x for x in narrow.err), f"exit {ncode}")
-        report.check(sec, "the two timing tools agree: the same resources read, the same kinds excluded, the same "
-                          "stream unreached",
-                     z_rows == p_rows and sorted(zs.get("excluded", [])) == sorted(ps.get("excluded", []))
-                     and [f"{u.get('iface')} {u.get('resource')}" for u in zs.get("unreached", [])]
-                     == ps.get("unreached"), "")
+    th = threading.Thread(target=pump, daemon=True)
+    th.start()
+    try:
+        z = procs.start([str(ZENCTL), "timing", "-c", ep, "--format", "json", "--for", "2", "--contracts",
+                         str(GUARD), "zk2/g/**"])
+        code = _wait_exit(z, 30.0)
+        p = procs.start([sys.executable, "-u", "-m", "zk2py.timing_tool", "-c", ep, "--for", "2", "--contracts",
+                         str(GUARD), "zk2/g/svc/**"])
+        pcode = _wait_exit(p, 30.0)
+        narrow = procs.start([sys.executable, "-u", "-m", "zk2py.timing_tool", "-c", ep, "--for", "1", "zk2/g/**"])
+        ncode = _wait_exit(narrow, 15.0)
+    finally:
+        stop.set()
+        th.join()
+    if failed:
+        raise failed[0]
+    zd, pd = _json_doc(z), _json_doc(p)
+    zs, ps = zd.get("scope", {}), pd.get("scope", {})
+    z_rows = sorted({x.get("resource") for x in zd.get("rows", [])})
+    p_rows = sorted({x.get("resource") for x in pd.get("rows", [])})
+    report.check(sec, "step 5, zenctl timing over zk2/g/**: reads the plain timed stream alone, reports the five "
+                      "verbatim kinds excluded and @stream/frame unreached, in its scope, its notes and on stderr",
+                 code in (0, 1) and z_rows == ["stream/cmd"] and sorted(zs.get("excluded", [])) == sorted(EVERY)
+                 and [u.get("resource") for u in zs.get("unreached", [])] == ["@stream/frame"]
+                 and any("@stream/frame" in x for x in z.err) and all(k in " ".join(z.err) for k in EVERY),
+                 f"exit {code}, rows {z_rows}, scope {zs}")
+    report.check(sec, "step 5, zk2py's timing tool over zk2/g/svc/** (it reads one owner): the plain timed stream "
+                      "alone, the five excluded and zk2py_guard.v1 @stream/frame unreached, in its scope, its "
+                      "notes and on stderr",
+                 pcode in (0, 1) and p_rows == ["stream/cmd"] and sorted(ps.get("excluded", [])) == sorted(EVERY)
+                 and ps.get("unreached") == ["zk2py_guard.v1 @stream/frame"]
+                 and any("excludes" in n for n in pd.get("notes", []))
+                 and any("@stream/frame" in x and "excludes" in x for x in p.err),
+                 f"exit {pcode}, rows {p_rows}, scope {ps}, stderr {[x for x in p.err if 'excludes' in x]}")
+    report.check(sec, "zk2py's timing tool refuses zk2/g/**, a system's, saying it reads one owner (zk2py's "
+                      "own limit, never an empty reading)",
+                 ncode not in (0, None) and any("reads one owner" in x for x in narrow.err), f"exit {ncode}")
+    report.check(sec, "the two timing tools agree: the same resources read, the same kinds excluded, the same "
+                      "stream unreached",
+                 z_rows == p_rows and sorted(zs.get("excluded", [])) == sorted(ps.get("excluded", []))
+                 and [f"{u.get('iface')} {u.get('resource')}" for u in zs.get("unreached", [])]
+                 == ps.get("unreached"), "")
 
 
 # -- operations.md §5 ---------------------------------------------------------------
@@ -446,33 +539,35 @@ def ops5(report: Report) -> None:
         conf = os.path.join(work, "tool.json5")
         with open(conf, "w") as f:
             json.dump({"transport": {"auth": {"usrpwd": {"user": "tool", "password": "pw-tool"}}}}, f)
-        for granted in (True, False):
-            n = len(owner.calls)
-            z = Proc([str(ZENCTL), "check", "conform", "h2/fz", "zk2py_frozen.v1", "-c", ep, "--zenoh-config", conf,
-                      "--contracts", str(FROZEN), "--for", "1", "--timeout", "1", "--format", "json",
-                      # a call is a write, made only under --i-know
-                      "--i-know", *(["--calls-granted"] if granted else [])], python=False)
-            code = _wait_exit(z, 60.0)
-            # zenoh hands one queryable's calls to its callback in turn, so a
-            # call behind a frozen one reaches the handler once that one ends
-            _wait(lambda: len(owner.calls) > n, 6.0)
-            doc = _json_doc(z)
-            ops = [x for x in doc.get("rows", []) if x.get("case") == "operation"]
-            verdicts = [(x.get("subject"), (x.get("verdict") or {}).get("answer"), x.get("verdict"), x.get("detail"))
-                        for x in ops]
-            text = json.dumps(ops) + " ".join(z.err) + json.dumps(doc.get("notes", []))
-            if granted:
-                report.check(sec, "step 2, zenctl check conform --calls-granted: the frozen server's silence is the O3 "
-                                  "finding (exit 1), an access-control refusal named beside it",
-                             code == 1 and ops and all(v[1] in ("established", "yes", "finding") for v in verdicts)
-                             and "refus" in text and len(owner.calls) > n,
-                             f"exit {code}, {verdicts}, calls reaching the owner {n} then {len(owner.calls)}")
-            else:
-                report.check(sec, "step 2, zenctl check conform not told: the silence unobservable, never the finding "
-                                  "(exit 2), the premise it lacked named",
-                             code == 2 and ops and all(v[1] == "unobservable" for v in verdicts)
-                             and ("grant" in text) and len(owner.calls) > n,
-                             f"exit {code}, {verdicts}, calls reaching the owner {n} then {len(owner.calls)}")
+        with Procs() as procs:
+            for granted in (True, False):
+                n = len(owner.calls)
+                z = procs.start([str(ZENCTL), "check", "conform", "h2/fz", "zk2py_frozen.v1", "-c", ep,
+                                 "--zenoh-config", conf, "--contracts", str(FROZEN), "--for", "1", "--timeout", "1",
+                                 "--format", "json",
+                                 # a call is a write, made only under --i-know
+                                 "--i-know", *(["--calls-granted"] if granted else [])])
+                code = _wait_exit(z, 60.0)
+                # zenoh hands one queryable's calls to its callback in turn, so a
+                # call behind a frozen one reaches the handler once that one ends
+                _wait(lambda: len(owner.calls) > n, 6.0)
+                doc = _json_doc(z)
+                ops = [x for x in doc.get("rows", []) if x.get("case") == "operation"]
+                verdicts = [(x.get("subject"), (x.get("verdict") or {}).get("answer"), x.get("verdict"),
+                             x.get("detail")) for x in ops]
+                text = json.dumps(ops) + " ".join(z.err) + json.dumps(doc.get("notes", []))
+                if granted:
+                    report.check(sec, "step 2, zenctl check conform --calls-granted: the frozen server's silence is "
+                                      "the O3 finding (exit 1), an access-control refusal named beside it",
+                                 code == 1 and ops and all(v[1] in ("established", "yes", "finding") for v in verdicts)
+                                 and "refus" in text and len(owner.calls) > n,
+                                 f"exit {code}, {verdicts}, calls reaching the owner {n} then {len(owner.calls)}")
+                else:
+                    report.check(sec, "step 2, zenctl check conform not told: the silence unobservable, never the "
+                                      "finding (exit 2), the premise it lacked named",
+                                 code == 2 and ops and all(v[1] == "unobservable" for v in verdicts)
+                                 and ("grant" in text) and len(owner.calls) > n,
+                                 f"exit {code}, {verdicts}, calls reaching the owner {n} then {len(owner.calls)}")
     finally:
         for ev in held:
             ev.set()
@@ -498,7 +593,7 @@ def _paused_owner(ep: str, system: str, pause: float | None) -> tuple[Any, threa
     t = threading.Thread(target=o.start, daemon=True)
     t.start()
     if not _wait(lambda: o.instance_token_at is not None, 10.0):
-        raise RuntimeError(f"{system}/tc did not declare its instance token")
+        raise HarnessError(f"harness: zk2py's owner {system}/tc did not declare its instance token within 10 s")
     return o, t
 
 
@@ -556,10 +651,14 @@ def ops8(report: Report) -> None:
         body = doc.replace(b"h6", b"h7") if isinstance(doc, bytes) else doc
         q = helper.declare_queryable(k, zenoh.handlers.Callback(lambda q: q.reply(k, body,
                                                                                     encoding="application/json")))
-        time.sleep(0.3)
-        shapes = live.presence_shapes(tool, "zk2/h7/tc/@zk/**")
-        answered = live.get_descriptor(tool, k)
-        q.undeclare()
+        try:
+            # the descriptor answering is what the reading needs, not a time
+            answered: list[Any] = []
+            _wait(lambda: bool(answered.extend(a for a in live.get_descriptor(tool, k) if a.ok) or answered), 5.0,
+                  0.05)
+            shapes = live.presence_shapes(tool, "zk2/h7/tc/@zk/**")
+        finally:
+            q.undeclare()
         report.check(sec, "between core §8.2's steps 3 and 4 proper (a descriptor served, no instance token yet): "
                           "the descriptor answers, and a tool that finds instances by their tokens sees no shape at "
                           "all (F-293)", bool(answered) and not shapes, f"{len(answered)} answer(s); shapes {shapes}")
@@ -574,27 +673,35 @@ def ops8(report: Report) -> None:
         return
     # zenctl doctor's token-missing, two reads --grace apart, started at the
     # instance token so that its first read falls within the second.
+    from .contract import load_contract
+    from .owner import Owner
+
     for system, pause, control in (("h4", PAUSE_S, False), ("h5", None, True)):
         r, ep = _router()
-        o = None
+        o = sp = None
+        box: dict[str, Any] = {}
+        stop = threading.Event()
         try:
-            from .contract import load_contract
-            from .owner import Owner
-
             o = Owner(system, "tc", [load_contract(TC)], connect=ep, interface_tokens_after_s=pause)
-            box: dict[str, Any] = {}
 
-            def spawn(owner: Any = o) -> None:
-                _wait(lambda: owner.instance_token_at is not None, 10.0, 0.001)
+            def spawn(owner: Any = o, ep: str = ep) -> None:
+                # starts the doctor at the instance token, or not at all when
+                # the start failed first (stop) or the token never came
+                _wait(lambda: owner.instance_token_at is not None or stop.is_set(), 10.0, 0.001)
+                if stop.is_set() or owner.instance_token_at is None:
+                    return
                 box["at"] = time.monotonic()
                 box["z"] = Proc([str(ZENCTL), "doctor", "-c", ep, "--check", "token-missing", "--grace",
                                  f"{SHAPE_GRACE_S:g}", "--format", "json"], python=False)
 
             sp = threading.Thread(target=spawn, daemon=True)
             sp.start()
-            o.start()
+            o.start()  # its exception, if any, is the section's: the finally below hides nothing
             sp.join(10.0)
-            z = box["z"]
+            z = box.get("z")
+            if z is None:
+                raise HarnessError(f"harness: zenctl doctor was not started: {system}/tc's instance token did not "
+                                   f"come within 10 s")
             code = _wait_exit(z, 30.0)
             took = time.monotonic() - box["at"]
             doc = _json_doc(z)
@@ -613,12 +720,20 @@ def ops8(report: Report) -> None:
                              code == 1 and len(findings) == 1 and "zk2py_tc.v1" in findings[0].get("subject", ""),
                              f"exit {code}; {[f.get('evidence') for f in findings]}")
         finally:
+            stop.set()
+            if sp is not None:
+                sp.join(10.0)
+            z = box.get("z")
+            if z is not None and z.p.poll() is None:
+                z.kill()
             if o is not None:
                 o.close()
             r.close()
 
 
 SECTIONS = {"grammar1": None, "ops5": ops5, "ops8": ops8}
+#: each section's checks' label (grammar §1's is per owner, in main)
+LABELS = {"ops5": "operations §5", "ops8": "operations §8 step 6"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -632,11 +747,15 @@ def main(argv: list[str] | None = None) -> int:
     for name in SECTIONS:
         if args.only and name not in args.only:
             continue
-        runs = [(f"{name} [{o}]", lambda o=o: grammar1(report, o)) for o in owners] if name == "grammar1" \
-            else [(name, lambda fn=SECTIONS[name]: fn(report))]
+        # each run's label is its checks' section, so a crash or a harness
+        # failure lands where KNOWN and the checks name it
+        runs = [(f"grammar §1 [{o} owner]", lambda o=o: grammar1(report, o)) for o in owners] \
+            if name == "grammar1" else [(LABELS[name], lambda fn=SECTIONS[name]: fn(report))]
         for label, fn in runs:
             try:
                 fn()
+            except HarnessError as e:
+                report.check(label, "harness: the runner's own parties ran (not a spec check)", False, str(e))
             except Exception as e:  # noqa: BLE001 - a section that crashed is a failure, the rest still run
                 import traceback
 

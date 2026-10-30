@@ -17043,6 +17043,23 @@ citation is wider than its index (F-294).
   three reads, four O3 verdicts, four memlock notes, seven echo scopes),
   the two contracts, and four of F-291's spellings.
 - **`just py-conformance`: 3565 of 3565.**
+- **After review-bot on PR #952** (nothing blocking; its should-fixes):
+  - `live.shape_faults` refuses fewer than two reads, as `presence_faults`
+    refuses `reads < 2`: one read is never the two the MUST asks for. A
+    `readings` case holds it (609, 3566 of 3566).
+  - `observer_scenarios` reports a failure of its own parties as
+    `harness: …`, apart from every spec check. Such a failure is the
+    reference's owner answering no line, or a refusal, to a `put`, or an
+    owner or tool that never starts.
+  - Each grammar step waits for what it needs rather than a fixed time
+    after the puts: a control subscriber on the same session holding the
+    kinds the step must not see. Step 1 counts distinct samples by key,
+    payload and stamp, so a duplicate delivery is no second sample.
+  - Every process a section starts is killed at its end. ops8's doctor
+    block lets an owner's failed start surface as itself, never as a
+    `KeyError`.
+  - A crash's label is its checks' section, as `KNOWN` names it.
+  - `observer_scenarios` again: 38 passed, 2 XFAIL by F-292.
 
 ### Live
 
