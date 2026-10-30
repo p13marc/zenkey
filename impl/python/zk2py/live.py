@@ -1227,17 +1227,47 @@ def presence_shapes(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
 
 
 def presence_faults(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
-                    grace_s: float = SHAPE_GRACE_S) -> tuple[set, set]:
+                    grace_s: float = SHAPE_GRACE_S, reads: int = 2,
+                    log: list[tuple[float, set]] | None = None) -> tuple[set, set]:
     """observer §3.2 (0.10): "A tool that decides a fault from the shape of presence
     … MUST see it in two reads a grace apart … Start-up, re-mint and
-    teardown pass through such shapes briefly, by design."
+    teardown pass through such shapes briefly, by design." Its transient
+    half (text 0.2, F-282): "Seen in one of two reads a grace apart, that
+    shape is no fault."
 
-    Returns (faults: the shapes both reads saw, passing: the shapes only
-    the first saw)."""
-    first = presence_shapes(session, selector)
-    time.sleep(grace_s)
-    second = presence_shapes(session, selector)
-    return first & second, first - second
+    ``reads`` reads, each ``grace_s`` after the last (operations.md §8 step
+    6, core 0.59, reads three). A fault is a shape two consecutive reads,
+    a grace apart, both saw. Returns (faults, passing: the shapes some read
+    saw and no such pair holds); ``log``, when given, gets each read as
+    (the monotonic instant it was asked, its shapes), in order."""
+    if reads < 2:
+        raise ValueError("observer §3.2: a fault needs two reads a grace apart")
+    seen: list[set] = []
+    for i in range(reads):
+        if i:
+            time.sleep(grace_s)
+        at = time.monotonic()
+        seen.append(presence_shapes(session, selector))
+        if log is not None:
+            log.append((at, seen[-1]))
+    return shape_faults(seen)
+
+
+def shape_faults(seen: list[set]) -> tuple[set, set]:
+    """Observer §3.2 over reads made a grace apart, in order: (faults, the
+    shapes two consecutive reads both saw; passing, the shapes some read saw
+    and no such pair holds). A shape in one read only, as an owner's between
+    core §8.2's steps shows one (text 0.2, F-282), passes. zk2py pairs
+    each read with the next, as operations.md §8 step 6's "neither pair of
+    reads a grace apart" does, so a shape seen in two reads with one
+    between them that did not see it passes too: it did not hold between
+    them. Fewer than two reads is no pair, and refused, as
+    :func:`presence_faults` refuses ``reads < 2`` (review-bot on PR #952):
+    one read is never the two the MUST asks for."""
+    if len(seen) < 2:
+        raise ValueError("observer §3.2: a fault needs two reads a grace apart")
+    faults = set().union(*(a & b for a, b in zip(seen, seen[1:])))
+    return faults, set().union(*seen) - faults
 
 
 # -- observer §4.4, meta.zid: whose stamp (0.10) --------------------------------------
@@ -1318,19 +1348,23 @@ MIB = 1 << 20
 #: Core §7.4's words for a limit below a pool's need.
 BELOW_NEED = ("Below the pool's need, SHM silently falls back to TCP, and a metadata segment that cannot be "
               "locked panics")
-#: What a tool says when it cannot read the limit at all.
-UNREAD = "the memlock limit could not be read"
+#: What a tool says when it cannot read the limit at all: observer §7.4
+#: (text 0.2, F-290), "a limit the tool cannot read leaves the check
+#: unobservable".
+UNREAD = "the memlock check is unobservable: the limit could not be read"
 
 
 def memlock_note(limit: int | None = None) -> str:
     """Observer §7.4 (core §7.4's until 0.58): "A tool SHOULD check the limit
     at start: the ``RLIMIT_MEMLOCK`` that core §7.4 asks a deployment to set
-    to at least the pool plus 2 MiB". A tool does not know the pool, a
-    publisher's, so the note states the largest pool the soft limit admits,
-    and what core §7.4 says of a limit below a pool's need, in its words.
-    ``limit`` stands in for the process's soft limit (a reading's input);
-    ``None`` reads it. It raises when the limit cannot be read:
-    :func:`memlock_said` is what a tool calls."""
+    to at least the pool plus 2 MiB". Text 0.2 (F-290), "What the check
+    reports": "the largest pool its soft limit covers, the limit less
+    2 MiB, or, below 2 MiB, that it admits none. An unlimited limit admits
+    any pool", which zk2py's note said already, with what core §7.4 says of
+    a limit below a pool's need, in its words. ``limit`` stands in for the
+    process's soft limit (a reading's input); ``None`` reads it. It raises
+    when the limit cannot be read: :func:`memlock_said` is what a tool
+    calls, and reads that check unobservable."""
     if limit is None:
         import resource
 
@@ -1347,9 +1381,11 @@ def memlock_note(limit: int | None = None) -> str:
 
 def memlock_said(note: Any = memlock_note) -> str:
     """The note a tool prints at start (observer §7.4), whatever went wrong
-    reading it: any failure reads "the memlock limit could not be read: …",
-    and the tool goes on (review-bot on PR #949). ``note`` stands in for
-    :func:`memlock_note` in a reading."""
+    reading it: any failure reads "the memlock check is unobservable: the
+    limit could not be read: …" (text 0.2, F-290: "a limit the tool cannot
+    read leaves the check unobservable"), and the tool goes on (review-bot
+    on PR #949). ``note`` stands in for :func:`memlock_note` in a
+    reading."""
     try:
         return note()
     except Exception as e:  # noqa: BLE001 - a note, never a reason to stop
@@ -1797,6 +1833,17 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
 
 # -- observer §7.2, O3 judged from outside (0.16, 0.17) ---------------------------------
 
+#: Observer §7.2's finding, with what it says beside it (0.16: "It says so
+#: beside the finding"; core 0.59's operations.md §5 step 2: "says beside it
+#: that an access-control refusal is silent too").
+TOLD_FINDING = ("silent, from a present owner, under grants that let this caller call: the O3 finding; "
+                "an access-control refusal is silent too (O5, core §11.3), so it rests on what the tool was told")
+#: Not told (operations.md §5 step 2): "it reports the silence
+#: unobservable, never the finding, and names the premise it lacked: grants
+#: that let it call, which no tool can observe (core §11.3)".
+NOT_TOLD = ("silent, and not told that its grants let it call: unobservable, never the finding; the premise it "
+            "lacked is grants that let it call, which no tool can observe (core §11.3; O5)")
+
 def o3_verdict(result: CallResult, may_call: bool | None, present: bool | None = None) -> tuple[str, str]:
     """Observer §7.2, O3 judged from outside (0.16, 0.17). "No tool can observe its
     grants (§11.3). It learns that they let it call from its operator, or
@@ -1814,12 +1861,12 @@ def o3_verdict(result: CallResult, may_call: bool | None, present: bool | None =
     if not result.silent:
         return "clean", f"answered: {len(result.replies)} replies"
     if may_call is None:
-        return "unobservable", "silent, and not told that its grants let it call (O5)"
+        return "unobservable", NOT_TOLD
     if may_call is False:
         return "unobservable", "silent, and told that its grants do not let it call: a refusal is silent too"
     if present is False:
         return "unobservable", "silent, and the owner's tokens are not read: absent, not unanswered (O5)"
-    return "finding", "silent, from a present owner, under grants that let this caller call (O3)"
+    return "finding", TOLD_FINDING
 
 
 # -- §2.6 events replay, the consumer's bound (0.16) -----------------------------

@@ -16828,3 +16828,292 @@ the two tools agreeing.
 - **What the move lost:** no rule. Two MUSTs still cite nothing, one
   block's citation changed, and the conformance levels do not name
   `observer.md`.
+
+## At observer.md 0.2 and core 0.59: the observer's final cold read (#950)
+
+Round 83 read `spec/observer.md` text 0.2 whole and cold, and core 0.59's
+changes, on main 84d8bfdc (PR #951). It read every MUST and SHOULD
+against its evidence and Appendix B's index against the text, checked
+F-281 to F-290, implemented what 0.2 asks that zk2py did not yet do, and
+ran core 0.59's three new scenario steps. The reference's parties and
+tool ran as black boxes (`owner`, `zk2` and `zenctl` in
+`/srv/dev/targets/zenkey-tier/blackbox/`, built 2026-10-30 02:15, their
+`--help` read, their source never). It read, as a newcomer would:
+- `spec/observer.md` 0.2 whole, and `observer-CHANGELOG.md`'s 0.2 entry;
+- `spec/CHANGELOG.md`'s 0.59 entry, and the lines 0.59 changed in
+  `core.md` (the preamble, §12) and the scenarios (`grammar.md` §1 step 5,
+  `operations.md` §5 step 2 and §8 step 6);
+- every evidence 0.2 newly cites: `profiles/timing/conformance/lifespans.json`
+  #16, `profiles/hostid/scenarios.md` §6, `profiles/redundancy/scenarios.md`
+  §5 and §12, `profiles/link/scenarios.md` §6, and the three
+  `conclusions.json`; and, for §1, every profile text and fixture that
+  names "not this profile's" (F-291).
+
+Since round 82, `spec/` changed in one commit, d55d347b (six files), and
+`examples/zk2/` did not change.
+
+### F-281 to F-290
+
+| | Status | Why |
+|---|---|---|
+| F-281 | **resolved** | §4.4's MUST cites `[F: profiles/timing/conformance/lifespans.json]` (#16: `meta.zid` `001f` against `01f` and `1F`, each the owner's). Appendix B's rows for that file and for timing's §4, §5 name §4.4. No MUST of 0.2 cites nothing. |
+| F-282 | **resolved** | §3.2 cites operations.md §8, hostid's §6 and redundancy's §12, and states the transient half. operations.md §8 step 6 checks it, and zk2py ran the step with both tools (below). Its step numbers are F-293. |
+| F-283 | **resolved** | §3.8 and §3.9 cite redundancy's §5: a refused read on the claim's own session, and peers that link, which its Setup and step 3 show. §7.1's R7 cites link's §6 (liveness unobservable across the face, never down). Appendix B has the rows. |
+| F-284 | **resolved** | `observer-CHANGELOG.md` 0.2 records the citation's change, and operations.md §5 step 2 checks both halves. zk2py's tool and `zenctl check conform` each pass it, under generated grants (below). |
+| F-285 | **resolved** | Core §12's full level meets "every rule of `observer.md` that binds a role it plays", and the constrained level "every rule the full level does". The preamble names `observer.md` "for a participant that reads". |
+| F-286 | **resolved as written, for the three profiles §1 cites** | §1 names not this profile's and cites the `conclusions.json` of `timing.v1`, `arbitration.v1` and `redundancy.v1`, each of which gives the token. Three other profiles give their "not this profile's" as not asked, which §1 now forbids: F-291. Round 82's F-286 had said that `telemetry.v1`'s and `desired.v1`'s fixtures give the token. They give it as a declaration's reading, and their §5 answers fold it into not asked. |
+| F-287 | **resolved** | grammar.md §1 step 5. `zenctl timing` now reports its `scope` (`excluded`, and `unreached` with each key expression) in its JSON, its notes and on stderr. zk2py's echo tool and timing tool pass the step. `zenctl echo --format ndjson` states nothing: F-292. |
+| F-288 | **resolved** | §4.4 has one bullet, the S1 check, which keeps "unattributable, never foreign" and its origin. §6.1's opening is core §6's sentence whole, checked against core §6. |
+| F-289 | **resolved** | "(core R7; §7.1)" and "(core S4–S6; §4)", and §0 states the rule. The five other lists after `core` (`core §4.2, §5.1`, `§8.4, §9.6`, `§1.5, §8.1`, `§4.1, §4.3`) name core sections only. |
+| F-290 | **resolved** | §7.4 says what the check reports, as zk2py's note did. zk2py's unreadable limit now reads "the memlock check is unobservable" (it said "could not be read"). The reference's doctor reports the same through `shm-memlock-low`: "RLIMIT_MEMLOCK is 8192 KiB, at or above the 8 MiB floor: it admits a shared-memory pool of at most 6144 KiB, the limit less 2 MiB". The 8 MiB floor is the doctor's own: §7.4 says what the check reports, not when a limit is low. |
+
+### Every MUST and SHOULD of 0.2, against its evidence
+
+Round 82's table holds, but for these rows, which 0.2 changed:
+
+| § | Rule | Evidence | Checks it |
+|---|---|---|---|
+| §1 | not this profile's, a kind of its own, never no | three profiles' `conclusions.json` | yes, for those three; three others give it as not asked (F-291) |
+| §3.2 | MUST two reads a grace apart, every fault shape; the transient half | operations.md §8 (step 6 new); hostid's §6; redundancy's §12 | yes: step 6 is the transient half, hostid's §6 and redundancy's §12 the held shapes (step numbers: F-293) |
+| §3.8, §3.9 | an implementation note; SHOULD a client of a router, or a linked peer | redundancy's §5 | yes |
+| §4.4 | MUST compare zids by value | `lifespans.json` #16 | yes |
+| §5.3 | the four states of a population and a rate | `budget/`, `budget.md` | the fixtures; budget.md's §4–§7 are an owner's (F-294) |
+| §7.1 | MUST say unobservable across a face | constrained.md §3; link's §6 | yes |
+| §7.2 | O3 from outside, told so or not | operations.md §3, §5 (step 2 new) | yes |
+| §7.4 | SHOULD check the limit; what the check reports | none | a SHOULD; zk2py and the reference report alike |
+| §8.2 | a wildcard scope names what it excludes | grammar.md §1 (step 5 new), §2 | yes; in which medium, F-292 |
+
+Every MUST of 0.2 cites a fixture or a scenario. Every row of Appendix B
+names evidence that exists and covers the sections it lists. One
+citation is wider than its index (F-294).
+
+### F-291 · contradiction · observer 0.2 §1, "Not this profile's": kept apart from NotAsked, where three profiles report it as not asked
+
+> §1 (text 0.2, F-286): "That answer is Unestablished, a kind of its own:
+> kept apart from NotAsked and from Unobservable in every medium, as they
+> are kept apart from each other, and never Established(no) … The
+> profiles' fixtures give it as the token `not_this_profiles`."
+
+- **Three profiles give the token,** as §1 cites: `timing.v1`,
+  `arbitration.v1` and `redundancy.v1`, each in its `conclusions.json`.
+- **Three others name a "not this profile's" answer, and report it as not
+  asked:**
+  - **`freshness.v1` §5:** "A premise that does not hold is reported
+    `not_asked`, with the reason `kind` or `deleted`". `judgements.json`'s
+    "an event: not this profile's (§2.2)" and "an operation: …" expect
+    `{"verdict": "not_asked", "reason": "kind"}`, and §2.7 combines "not
+    asked, or not this profile's" as one answer.
+  - **`telemetry.v1` §5:** "'Not asked' (nobody put the question, or its
+    premise does not hold)". Its sample's row reads "**Not asked:**
+    `not_this_profiles`, `ignored`". `samples.json`'s "a composite state:
+    not this profile's" expects conformance `not_asked`, reasons
+    `["not_this_profiles"]`. Its declaration's `not_this_profiles` is a
+    resource's reading, not a §5 verdict.
+  - **`desired.v1` §2.1, §2.17:** "is not this profile's: **not asked**,
+    `not_a_target`", and `slices.json` gives `report.found`
+    `not_a_target`.
+- **So the rule and the fixtures disagree.** A freshness, telemetry or
+  desired tool that renders its profile's fixtures breaks §1, and one that
+  keeps §1 fails its fixtures. The changelog's "§1's not this profile's
+  names a token the profiles published before this text" holds of three
+  profiles out of the six that name one. `profiles/README.md`'s template
+  lists not this profile's beside the unestablished pair, and settles
+  neither reading.
+- **Proposal.** One of these:
+  - §1 admits both spellings a profile may choose: a kind of its own, or
+    NotAsked with a reason naming the premise (`kind`, `deleted`,
+    `not_this_profiles`, `not_a_target`). It then says how a tool keeps
+    the second apart from a question nobody put;
+  - the three profiles move their answers to the token, which changes
+    fixtures (freshness's `kind` and `deleted` cases, telemetry's
+    conformance, desired's §2.17 row);
+  - §1 binds only the profiles whose §5 gives the token.
+- **Changes:** the wording, or three profiles' fixtures. No verdict either
+  implementation gives today changes. zk2py follows each profile's
+  fixtures, and `readings` hold the three spellings (F-291's four cases).
+
+### F-292 · gap · observer §8.2 and grammar.md §1 step 5: which medium states a scope's exclusions
+
+> §8.2: "A tool that offers a wildcard scope either names the verbatim
+> kinds it watches beside it, or states that they are excluded."
+> grammar.md §1 step 5, expected: "reports `@stream`, `@state`, `@op`,
+> `@adv` and `@zk` excluded from its scope, beside what it watched".
+
+- **No medium named.** §1 names three media (a table cell, a report field
+  and a note), and "a tool keeps its claims straight in all three".
+  Neither §8.2 nor the step names one.
+- **Measured** (`observer_scenarios`' grammar §1, both owners):
+  - In table output, `zenctl echo zk2/g/**` states the exclusion on
+    stderr: "echoing zk2/g/** — @stream, @state, @op, @zk, @adv excluded:
+    no selector names them, and `*`/`**` never match one".
+  - Under `--format ndjson` it shows the same three samples and says
+    nothing, in its rows or on stderr. That holds whether stderr is a pipe
+    or a terminal (run under `script`). A script that reads its rows
+    cannot tell a scope that excludes the explicit kinds from one that
+    names them.
+  - `zenctl timing`'s JSON carries `scope` and two notes, and stderr says
+    the same.
+  - zk2py's echo tool and timing tool state it in the report field, in a
+    note and on stderr.
+- **Proposal.** §8.2 says the statement reaches every medium the tool
+  reports in: a field or a note in a document, an envelope line in a
+  stream of rows, and the stream's stderr line. Step 5 checks the report
+  field as well as what a person reads.
+- **Changes:** the wording, and the reference's ndjson. The two checks are
+  XFAIL in `observer_scenarios` (`KNOWN`), by this finding.
+
+### F-293 · minor · observer 0.2 §3.2's transient half and operations.md §8 step 6: the pause is within core §8.2's step 4
+
+> §3.2: "An owner between core §8.2's steps 3 and 4 serves a descriptor
+> that lists an interface whose token it has not yet declared."
+> operations.md §8 step 6: "serves its descriptor … and holds its instance
+> token (core §8.2, step 3), then declares its `tc.v1` token one second
+> later (step 4)".
+
+- **Where the instance token is.** Core §8.2's step 3 declares the
+  descriptor's queryable and puts it, then the contract queryables. Step
+  4 reads "declare the instance token, then the interface tokens", so the
+  instance token belongs to step 4.
+- **Between steps 3 and 4, a tool sees nothing.** An owner there holds no
+  instance token. A tool that finds instances by their tokens, as zk2py's
+  and the reference's doctor do, sees no instance and no shape. Measured:
+  a descriptor served with no instance token answers its GET, and zk2py's
+  tool's read over its address shows no shape.
+- **Where the step's shape is.** The shape the step shows (an instance
+  token, a descriptor, no interface token) belongs to an owner within
+  step 4, between its instance token and its interface tokens, which is
+  what the step's owner does.
+- **Proposal.** §3.2: "An owner within core §8.2's step 4, between its
+  instance token and its interface tokens". Step 6: "holds its instance
+  token (core §8.2, step 4), then declares its `tc.v1` token one second
+  later (the rest of step 4)".
+- **Changes:** wording only.
+
+### F-294 · minor (index) · observer §5.3 cites budget.md whole; Appendix B indexes its §1–§3, for §5.2 alone
+
+> §5.3: "`[F: budget/]` `[Sc: budget.md]`". Appendix B:
+> "`scenarios/budget.md` §1–§3 | §5.2".
+
+- budget.md §4–§7 are an owner keeping its bound and its rate (core
+  §2.7's owner's rule), so they check no tool's conclusion. §1–§3 are the
+  reader's premises (§5.2). §5.3's table is checked by the fixtures,
+  `budget/population.json` and `rate.json`.
+- **Proposal.** §5.3 cites `[F: budget/population.json, budget/rate.json]`
+  and `[Sc: budget.md §1–§3]`, or Appendix B's row names §5.3.
+- **Changes:** the index only.
+
+### observer.md 0.2 in zk2py
+
+- **§3.2's transient half.**
+  - `live.presence_faults(…, reads=n, log=…)` reads n times, a grace
+    apart, and logs each read's instant and its shapes.
+  - `live.shape_faults` pairs each read with the next. A fault is a shape
+    that two consecutive reads both saw, and `passing` is every other
+    shape seen. A shape seen in two reads, with one between them that did
+    not see it, passes.
+  - `Owner(interface_tokens_after_s=s)` declares its interface tokens s
+    after its instance token. With `None` it never declares them, the
+    step's control.
+- **§7.2 in operations.md §5 step 2's words.**
+  - `live.TOLD_FINDING`: the finding, with "an access-control refusal is
+    silent too" beside it.
+  - `live.NOT_TOLD`: unobservable, never the finding, naming the premise
+    it lacked: "grants that let it call, which no tool can observe (core
+    §11.3)".
+  - `acl_interop`'s check reads both.
+- **§7.4.** `live.memlock_said` reads an unreadable limit as "the memlock
+  check is unobservable: …". `timing_tool` and `arbitration_tool` carry
+  the note in their JSON (`memlock`), and `timing_tool` also carries its
+  scope in `notes`. Its stderr says what its selector excludes whenever
+  it excludes something, not only when a timed stream is unreached.
+- **§8.2.** `zk2py.echo_tool` is a generic watcher. It prints each sample
+  with its key, its kind token, and whether it is zk2 (a foreign key is
+  shown, §8.1). Its `scope` holds the kinds it watched, the verbatim kinds
+  it excluded, and §8.2's sentence, which it also says on stderr.
+- **§1.** Nothing to change (F-291).
+- **New interop contracts:**
+  - `interop/grammar/zk2py_guard.v1.toml`: grammar.md §1's owner, every
+    kind token, both streams timed;
+  - `interop/operations/zk2py_frozen.v1.toml`: §5's frozen server, one
+    operation.
+
+  Both are lint-clean in both implementations, and their fingerprints
+  agree with the reference CLI's (`a02ba266…`, `2d12b9d6…`).
+- **`readings`:** 608, up from 581: 21 of 0.2's rules (six shapes over
+  three reads, four O3 verdicts, four memlock notes, seven echo scopes),
+  the two contracts, and four of F-291's spellings.
+- **`just py-conformance`: 3565 of 3565.**
+- **After review-bot on PR #952** (nothing blocking; its should-fixes):
+  - `live.shape_faults` refuses fewer than two reads, as `presence_faults`
+    refuses `reads < 2`: one read is never the two the MUST asks for. A
+    `readings` case holds it (609, 3566 of 3566).
+  - `observer_scenarios` reports a failure of its own parties as
+    `harness: …`, apart from every spec check. Such a failure is the
+    reference's owner answering no line, or a refusal, to a `put`, or an
+    owner or tool that never starts.
+  - Each grammar step waits for what it needs rather than a fixed time
+    after the puts: a control subscriber on the same session holding the
+    kinds the step must not see. Step 1 counts distinct samples by key,
+    payload and stamp, so a duplicate delivery is no second sample.
+  - Every process a section starts is killed at its end. ops8's doctor
+    block lets an owner's failed start surface as itself, never as a
+    `KeyError`.
+  - A crash's label is its checks' section, as `KNOWN` names it.
+  - `observer_scenarios` again: 38 passed, 2 XFAIL by F-292.
+
+### Live
+
+All runs used in-process zenoh-python 1.10.1 routers, with every listener
+on a free loopback port and the runs under `taskset -c 0-1`. "zenctl" is
+the reference tool, and "Rust" the reference's owner example.
+
+`python -m zk2py.observer_scenarios` ran core 0.59's three steps: **38
+passed**, plus 2 XFAIL by F-292, with no failure.
+
+| Step | Owner | Tool | Checks | Result |
+|---|---|---|---|---|
+| grammar.md §1 steps 1–4 | zk2py; Rust | zk2py's consumer | 4; 4 | the guard holds: `zk2/g/**` delivers and answers the plain kinds alone, and its liveliness GET returns no token |
+| grammar.md §1 step 5 | zk2py; Rust | zk2py's echo tool | 2; 2 | the three samples, five kinds excluded, in its report and on stderr |
+| | zk2py; Rust | `zenctl echo`, table | 2; 2 | the three samples, five kinds excluded on stderr |
+| | zk2py; Rust | `zenctl echo`, ndjson | 1 + 1 XFAIL; 1 + 1 XFAIL | the three samples, nothing said of the scope (F-292) |
+| | zk2py; Rust | `zenctl timing zk2/g/**` | 1; 1 | `stream/cmd` alone; `scope.excluded` five, `@stream/frame` unreached |
+| | zk2py; Rust | zk2py's timing tool, `zk2/g/svc/**` | 3; 3 | the same as zenctl, agreeing; over `zk2/g/**` it refuses: it reads one owner |
+| operations.md §5 steps 1–2 | zk2py (frozen, under `deny` grants) | zk2py's tool | 5 | step 1 both silent, the refused call never reaching the owner; told, the finding with a refusal named silent too; not told, unobservable, the premise named |
+| | zk2py | `zenctl check conform --i-know` | 2 | `--calls-granted`: the O3 finding (exit 1), "unless access control refused it"; without it unobservable (exit 2), "no tool can observe its grants" |
+| operations.md §8 step 6 | zk2py (token 1 s late) | zk2py's tool, three reads 1.5 s apart | 2 | reads at 0.015, 1.517 and 3.019 s after the instance token, the token at 1.0 s: the shape in the first read alone, no finding; the control's in all three, the finding |
+| | zk2py | `zenctl doctor --check token-missing --grace 1.5` | 2 | spawned at the instance token, done in 1.56 s: no finding, exit 0; the control `token-missing`, exit 1 |
+| | a descriptor and no instance token | zk2py's tool | 1 | no shape at all (F-293) |
+
+The reference's owner example takes no option to pause between its
+tokens, so it played no owner in §8 step 6. In §5 it played none either:
+the step's frozen server is zk2py's, whose handler holds each call past
+its caller's timeout.
+
+The regressions:
+- **`python -m zk2py.presence_scenarios --only 9 --only 10`,** the same as
+  round 82. No check failed:
+
+  | Owner, reader | §9 | §10 | Not run |
+  |---|---|---|---|
+  | zk2py, zk2py | 9 | 46 | |
+  | Rust, zk2py | 9 | 40 | §10 step 7 |
+  | zk2py, zenctl | – | 9 | §9; §10 step 9 |
+  | Rust, zenctl | – | 8 | §9; §10 steps 7, 9 |
+
+- **`python -m zk2py.live_interop --only tool-rules --only acl --only
+  0.16`**, against the owner and consume examples and zenctl: **53 of
+  53**. These are the presence shapes read by the new `presence_faults`,
+  O3 from outside in the new words, and S1 from a tool.
+
+### Counts at observer.md 0.2 and core 0.59
+
+294 entries.
+- **Open: F-291 to F-294,** four. None is a blocker, and none changes a
+  verdict either implementation gives.
+  - **F-291** is a contradiction between §1 and three profiles' fixtures,
+    which a conformance claim to §1 cannot meet as written.
+  - **F-292** is a gap: which medium states a scope's exclusions, which
+    the reference's ndjson leaves out.
+  - **F-293** (step numbers) and **F-294** (the index) are minor.
+- **Resolved: F-281 to F-290.** F-286 is resolved as written, for the
+  three profiles it cites; F-291 is its remainder.

@@ -1,0 +1,139 @@
+"""A generic watcher: ``python -m zk2py.echo_tool -c ENDPOINT [--for SECS]
+[--count N] [SELECTOR]`` (#609, round 83).
+
+Written from ``spec/observer.md`` §8.1 and §8.2 (text 0.2) and
+``spec/scenarios/grammar.md`` §1 step 5 (core 0.59, F-287), as a tool's
+implementer reads them. It subscribes to ``SELECTOR``, base-relative and in
+no namespace (``zk2/**`` by default), on a callback (observer §3.1's
+handlers bind no data subscriber, but a callback keeps nothing bounded),
+for ``--for`` seconds or until ``--count`` samples, and prints one JSON
+document:
+
+- ``samples``: each sample as it arrived, its key, its kind token where the
+  key parses as zk2 (core §1.1), its byte count and its encoding. A key that
+  is not zk2 is a fact, not an error (observer §8.1): shown, with its kind
+  ``null`` and ``zk2`` false;
+- ``scope``: the selector, the kind tokens it **watches** (the plain kinds
+  ``stream``, ``state`` and ``events`` it reaches, and any verbatim kind it
+  names), and the verbatim kinds it **excludes** (:func:`zk2py.live.blind_spots`),
+  with the sentence observer §8.2 asks of it: "A tool that offers a
+  wildcard scope either names the verbatim kinds it watches beside it, or
+  states that they are excluded." The same sentence goes to standard
+  error before it listens, so a person reading either medium has it.
+
+It judges nothing, so it exits 0 once it has watched, and 2 when it could
+not (the session did not open, or the selector is not a key expression).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import threading
+import time
+from typing import Any
+
+from . import live
+
+#: The plain kinds by the data form's key (core §1.1: the kind token at
+#: position 5, then one resource chunk or more; an event's last chunk is
+#: its ULID, core §2.6). A selector watches a kind when it intersects its
+#: form, by zenoh's intersection.
+PLAIN_REACH = (
+    ("stream", "zk2/*/*/*/stream/*/**"),
+    ("state", "zk2/*/*/*/state/*/**"),
+    ("events", "zk2/*/*/*/events/*/**"),
+)
+
+
+def scope_of(selector: str) -> dict[str, Any]:
+    """Observer §8.2 for one base-relative selector: the kind tokens it
+    watches, the verbatim kinds it excludes, and what a tool says of them."""
+    import zenoh
+
+    sel = zenoh.KeyExpr(selector)
+    excluded = live.blind_spots(selector)
+    watched = [k for k, form in PLAIN_REACH if sel.intersects(zenoh.KeyExpr(form))] + [
+        k for k, _ in live.VERBATIM_REACH if k not in excluded]
+    if excluded:
+        says = (f"{selector} excludes {', '.join(excluded)}: `*` and `**` never match a verbatim chunk, so what it "
+                f"does not show of them is out of its reach, not absent (observer §8.2; core §1.3)")
+    else:
+        says = f"{selector} excludes no verbatim kind (observer §8.2)"
+    return {"selector": selector, "watched": watched, "excluded": excluded, "says": says}
+
+
+def watch(session: Any, selector: str, window_s: float, count: int = 0,
+          listening: Any = None) -> list[dict[str, Any]]:
+    """Every sample the selector delivers within the window, or until
+    ``count`` of them, in arrival order; ``listening`` is called once the
+    subscriber is declared, the window's start."""
+    import zenoh
+
+    from . import keys
+
+    got: list[dict[str, Any]] = []
+    done = threading.Event()
+    lock = threading.Lock()
+
+    def received(s: Any) -> None:
+        key = str(s.key_expr)
+        parsed = keys.parse(key)
+        row = {"key": key, "zk2": parsed is not None,
+               "kind": parsed.get("token") if parsed and parsed.get("form") == "data" else None,
+               "delete": s.kind == zenoh.SampleKind.DELETE, "bytes": len(s.payload.to_bytes()),
+               "encoding": str(s.encoding)}
+        with lock:
+            got.append(row)
+            if count and len(got) >= count:
+                done.set()
+
+    sub = session.declare_subscriber(selector, zenoh.handlers.Callback(received))
+    if listening is not None:
+        listening()
+    try:
+        done.wait(window_s)
+    finally:
+        sub.undeclare()
+    with lock:
+        return list(got)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="python -m zk2py.echo_tool", description=__doc__.split("\n")[0])
+    ap.add_argument("selector", nargs="?", default="zk2/**")
+    ap.add_argument("-c", "--connect", required=True)
+    ap.add_argument("--for", dest="window", type=float, default=5.0)
+    ap.add_argument("--count", type=int, default=0)
+    args = ap.parse_args(argv)
+    try:
+        scope = scope_of(args.selector)
+    except Exception as e:  # noqa: BLE001 - a selector zenoh refuses is no scope
+        print(f"echo: {args.selector!r}: not a key expression: {e}", file=sys.stderr)
+        return 2
+    try:
+        session = live.open_client(args.connect)
+    except Exception as e:  # noqa: BLE001 - no session, no watch
+        print(f"echo: the session did not open: {e}", file=sys.stderr)
+        return 2
+    print(f"echo: watching {', '.join(scope['watched']) or 'no kind'}; {scope['says']}", file=sys.stderr, flush=True)
+    try:
+        start = time.monotonic()
+        samples = watch(session, args.selector, args.window, args.count,
+                        lambda: print("echo: listening", file=sys.stderr, flush=True))
+        watched_s = round(time.monotonic() - start, 3)
+    finally:
+        live.close(session)
+    doc = {"report": "echo", "selector": args.selector, "scope": scope, "window_s": watched_s,
+           "samples": samples, "notes": [scope["says"]], "exit": 0}
+    print(json.dumps(doc, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    code = main()
+    sys.stdout.flush()
+    import os
+
+    os._exit(code)

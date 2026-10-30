@@ -302,11 +302,15 @@ def _deny_full(report, repo, gen, workdir) -> None:
         h2_present = bool(live.list_presence(w.sessions["caller"], "zk2/h2/tc/@zk/alive/**").alive)
         v_frozen = live.o3_verdict(frozen, acl.may_call(gen, "caller", frozen_key), h2_present)
         v_frozen_untold = live.o3_verdict(frozen, None, h2_present)
-        report.check(run, "O3 from outside (0.17): a granted call that own-h2, whose tokens the caller reads, "
-                          "leaves unanswered past the caller's timeout is the finding; the same silence, not told "
-                          "the grants, is unobservable",
+        report.check(run, "O3 from outside (0.17; operations.md §5 step 2, core 0.59): a granted call that own-h2, "
+                          "whose tokens the caller reads, leaves unanswered past the caller's timeout is the finding, "
+                          "an access-control refusal said to be silent too beside it; the same silence, not told "
+                          "the grants, is unobservable, the premise it lacked named",
                      frozen.silent and h2_present and v_frozen[0] == "finding"
-                     and v_frozen_untold[0] == "unobservable", f"{v_frozen}; not told {v_frozen_untold}")
+                     and "an access-control refusal is silent too" in v_frozen[1]
+                     and v_frozen_untold[0] == "unobservable"
+                     and "grants that let it call, which no tool can observe" in v_frozen_untold[1],
+                     f"{v_frozen}; not told {v_frozen_untold}")
         time.sleep(1.5)  # let own-h2's held call finish before the owners close
         _inspection(report, run, w)
     finally:

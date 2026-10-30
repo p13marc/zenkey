@@ -304,7 +304,8 @@ class Owner:
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
                  tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
                  params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None,
-                 lease_ms: int | None = None, namespace: str | None = None):
+                 lease_ms: int | None = None, namespace: str | None = None,
+                 interface_tokens_after_s: float | None = 0.0):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -374,6 +375,15 @@ class Owner:
           that long after (``redundancy.v1`` scenarios, "A crash").
         - ``namespace``: its session's zenoh namespace (core §1.6), which
           prefixes every key on the wire (core presence.md §10 step 7).
+        - ``interface_tokens_after_s``: at start, how long it waits after its
+          instance token before its interface tokens, "as an owner that
+          pauses between the two steps would" (operations.md §8 step 6,
+          core 0.59; observer §3.2's transient half, text 0.2): its
+          descriptor lists the interfaces exposed meanwhile, and no token
+          holds them. ``None`` never declares them, a test rig's owner whose
+          descriptor claims an exposure no token covers (core §8.1), the
+          step's control. :meth:`start` returns once they are declared, or,
+          with ``None``, once the instance token is.
         - ``standby``: the interfaces it stands by on at start (core §6,
           0.39; ``redundancy.v1`` §2.4): validated by step 2 as if exposed,
           none of their resources declared, their entries marked
@@ -478,6 +488,11 @@ class Owner:
         #: core §6 (0.39): the interfaces it stands by on now
         self.standing_by: set[str] = set(standby or ())
         self.lease_ms = lease_ms
+        self.interface_tokens_after_s = interface_tokens_after_s
+        #: monotonic instants of the instance token's and the interface
+        #: tokens' declarations at start (operations.md §8 step 6)
+        self.instance_token_at: float | None = None
+        self.interface_tokens_at: float | None = None
         #: zenoh's session namespace (core §1.6), added on egress
         self.namespace = namespace
         #: step 1's entities, per interface (a step-down undeclares them)
@@ -799,11 +814,19 @@ class Owner:
             # Step 4: the instance token, then the interface tokens.
             lv = s.liveliness()
             mine.append(lv.declare_token(key))
+            withheld = False
+            if bundles:
+                self.instance_token_at = time.monotonic()
+                withheld = self.interface_tokens_after_s is None
+                if not withheld and self.interface_tokens_after_s > 0:
+                    time.sleep(self.interface_tokens_after_s)
             for c in self.contracts:
-                if c.interface not in self.tokenless and c.interface not in self.standing_by \
+                if not withheld and c.interface not in self.tokenless and c.interface not in self.standing_by \
                         and any(status == "exposed" for _, status in plan[c.interface]):
                     tokens[c.interface] = lv.declare_token(self._alive_key(c, instance))
                     mine.append(tokens[c.interface])
+            if bundles and not withheld:
+                self.interface_tokens_at = time.monotonic()
         except Exception:
             for e in reversed(mine):
                 try:

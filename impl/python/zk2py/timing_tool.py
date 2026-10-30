@@ -236,8 +236,10 @@ def main(argv: list[str] | None = None) -> int:
         print("timing: --owner-zid is the deployment's word across a face (§2.8): give --across-face",
               file=sys.stderr)
         return 2
-    # observer §7.4: a tool checks the limit at start, and says what it admits
-    print(f"timing: {live.memlock_said()}", file=sys.stderr, flush=True)
+    # observer §7.4: a tool checks the limit at start, and says what it
+    # admits, on stderr and in its report (text 0.2, F-290)
+    memlock = live.memlock_said()
+    print(f"timing: {memlock}", file=sys.stderr, flush=True)
     offline = _load(args.contracts)
     session, watch = live.open_client(args.connect), live.open_client(args.connect)
 
@@ -251,9 +253,17 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         live.close(session)
         live.close(watch)
-    if doc["scope"]["unreached"]:
-        print(f"timing: {args.selector} reaches no {', '.join(doc['scope']['excluded']) or 'verbatim kind'}: "
-              f"not watched {', '.join(doc['scope']['unreached'])} (observer §8.2)", file=sys.stderr, flush=True)
+    doc["memlock"] = memlock
+    # observer §8.2, in the note medium as in the report field (round 83):
+    # whatever the selector excludes is said, beside any stream it misses
+    sc = doc["scope"]
+    said = "; ".join(([f"excludes {', '.join(sc['excluded'])}: `*` and `**` never match a verbatim chunk"]
+                      if sc["excluded"] else []) + ([f"not watched {', '.join(sc['unreached'])}"]
+                                                    if sc["unreached"] else []))
+    if said:
+        print(f"timing: {args.selector} {said} (observer §8.2)", file=sys.stderr, flush=True)
+    doc["notes"] = ([f"scope: {args.selector} {said} (observer §8.2)"] if said else []) + [
+        f"memlock: {memlock} (observer §7.4)"]
     print(json.dumps(doc, indent=2))
     return doc["exit"]
 

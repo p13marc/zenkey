@@ -1,0 +1,17 @@
+# zk2py's contract for operations.md §5 (O5) and its step 2, O3 judged
+# from outside (observer.md §7.2; core 0.59, F-284): one operation, raw
+# request and response, which a tool calls under generated grants that let
+# it call it, and a server that holds every call past its caller's timeout
+# answers with silence. One operation alone, so that a tool told its
+# grants let it call the service is told the truth of every call it makes.
+# It must load with no finding at all.
+[interface]
+name    = "zk2py_frozen"
+major   = 1
+minor   = 0
+summary = "operations.md §5's frozen server: one operation"
+
+[resources.poke]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
