@@ -80,9 +80,15 @@ index's README has no version of its own, so its line is here.
   `alarms.v1` 0.10, `telemetry.v1` 0.7, `desired.v1` 0.10 and `config.v1`
   0.8.
 
-**Editorial: the compatibility fixtures' README.** "The protobuf cases
-added by amendment 0.5 (…) were not measured with buf" is "These
-protobuf cases were not measured with buf: …", the same seven.
+**Editorial: the fixtures' READMEs.**
+- **`conformance/compat/README.md`:** "The protobuf cases added by
+  amendment 0.5 (…) were not measured with buf" is "These protobuf cases
+  were not measured with buf: …", the same seven.
+- **`conformance/README.md`:** its table's `budget/` row cites §2.7 and
+  `observer.md` §5 without "0.24" and "since 0.58", and loses "0.27" and
+  "0.25". The `seed/` row loses "0.27", and the opening "(#609)". The
+  check counted none of them: the table sits above the file's first
+  `## ` heading.
 
 **The check.** `scripts/check-spec-prose.py` read a section number such
 as `§0.2,` as a version tag. Its version pattern now skips one after
@@ -118,6 +124,7 @@ tags, before and after:
 | `scenarios/README.md` | 13.62, 0, 0 | 12.62, 0, 0 |
 | `profiles/README.md` | 18.8, 1, 24 | 17.56, 0, 0 |
 | `conformance/compat/README.md` | 15.17, 0, 1 | 15.0, 0, 0 |
+| `conformance/README.md` | 14.4, 0, 0 | 14.36, 0, 0 |
 
 The check counts no tag above a text's first `## ` heading, so the
 scenarios' openings, and the README's table, held more than it shows.
