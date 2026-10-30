@@ -1035,7 +1035,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `spec/profiles/alarms/` with its fingerprint unchanged; text 0.9, #935:
   §2.15's watch after a window, as observer §5.2 says, under a version of
   its own (round 86's F-326), and inline history out, no other rule
-  changed), and
+  changed; text 0.10, #935: round 87's F-337 and F-338 rewritten, no
+  rule changed), and
   `telemetry.v1`'s (`telemetry`, #819 TA: the vocabulary, published by
   core 0.35; the standard schema `spec/profiles/telemetry/telemetry.v1.json`,
   whose types are the profile's by artifact id (`PUBLISHED`: ZenSight's
@@ -1060,7 +1061,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   F-152, #819 TE: a counter or histogram read with no pair could not tell;
   text 0.5, F-156 to F-158, #819 TF: a bignum read exactly, an unreadable
   sample could not tell, the scenarios' R on a complete liveliness read;
-  text 0.6, #935: inline history out, no rule changed), and
+  text 0.6, #935: inline history out, no rule changed; text 0.7, #935:
+  round 87's F-339 and F-340 rewritten, no rule changed), and
   `desired.v1`'s (`desired`, #840 DA: the declaration,
   `target_param` naming one or two template parameters, the first bound to
   `self.system` and the second to `self.service`; a requirement's binding
@@ -1104,7 +1106,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   F-225, #840 DG: a requirement whose declaring contract the descriptor
   names and the tool does not hold is unread, no binding problem read,
   unobservable `no_report` beside `requirement_unread`, never every
-  resource; text 0.9, #935: inline history out, no rule changed),
+  resource; text 0.9, #935: inline history out, no rule changed; text
+  0.10, #935: a `config.v1` owner's re-mint is a restart, a new run that
+  acts again, §0's and §2.7's one exception (round 87's F-336, `[Sc:
+  §12]`), and F-341 to F-346 rewritten),
   `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
@@ -1129,7 +1134,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   no holder, `polls.json`; text 0.4, F-220 to F-223, #841 RD: a standby
   probe's wildcards and the MUST never to ask one that would run an
   operation, `[Sc: §12]`; text 0.5, F-226: §12 step 9, the MUST's
-  offline half), `timing.v1`'s (`timing`, #908 MA: the vocabulary,
+  offline half; text 0.6, #935: inline history out, no rule changed),
+  `timing.v1`'s (`timing`, #908 MA: the vocabulary,
   `period_ms`, `deadline_ms` and `lifespan_ms`, the interim row published
   unchanged by core 0.53; `declaration`/`declaration_of` over a resolved
   resource, whole milliseconds from 1 to 2^53−1, invalid whole
@@ -1167,7 +1173,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   again is read over its first life, its span and held time ending
   there); `roll_up_first`, the roll-up's answer with the first member
   giving it in byte order of the keys and its reason, none over no
-  member),
+  member; text 0.6, #935: inline history out, no rule changed),
   and `arbitration.v1`'s (`arbitration`, #909 BA: the
   vocabulary, `policy` on a requirement, the interim row published
   unchanged by core 0.54, the first read on a requirement;
@@ -1208,7 +1214,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   through a move, moved here from the runtime so a tool's view follows
   them alike; §2.14 says what a tool's view reads that no descriptor
   carries, no ε and governance from every revision held, and that it has
-  listened from its stream subscriptions' declaration).
+  listened from its stream subscriptions' declaration; text 0.4, #935:
+  inline history out, no rule changed).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1383,7 +1390,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   application's `Handler` on a task of its own, putting the report after
   every change. `desired_config` is config.v1's owner as a target (a
   delete reverts what the documents set to the startup values, and the
-  view drops `desired`). The owner example's `--desired-author` and
+  view drops `desired`; its re-mint is a restart, desired.v1 §2.16, so
+  `new_epoch` stays refused while it runs and a restart acts again,
+  scenarios §12, `s12_a_config_v1_owners_re_mint_is_a_restart`). The owner example's `--desired-author` and
   `--desired-target` drive it from stdin (`desired put|delete|report|…`);
   `desired put` puts the line byte for byte once it reads as strict JSON,
   `desired seeds` says what the last seed found, and `desired gets` counts
@@ -1557,7 +1566,22 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `link.v1` 0.10; `alarms.v1` 0.9 for F-326; and F-324, observer §5.2's
   `wait_before_close` half of the watch stated as a conservative bound,
   reasoned from a push that closes its transport and not measured, with
-  core 0.63's Appendix B "Not measured" line beside it.
+  core 0.63's Appendix B "Not measured" line beside it. #935 part 5 did
+  the same for `redundancy.v1` 0.6, `timing.v1` 0.6 and `arbitration.v1`
+  0.4, and, as core 0.64, for the core's scenarios (`presence.md`'s 66
+  tags and 13 long sentences among them), the profiles' index and
+  process (which core version each profile needed is now a list of what
+  it needed, the versions the core changelog's) and the fixtures'
+  READMEs, no rule changed; `check-spec-prose.py` reads a section number
+  (`§0.2,`) as no version. With it, zk2py round 87's F-336 to F-346 are
+  answered: `alarms.v1` 0.10 and `telemetry.v1` 0.7 rewrite F-337 to
+  F-340, and `desired.v1` 0.10 F-341 to F-346, no rule changed; and
+  F-336, the one rule changed: a `config.v1` owner fed through
+  `desired.v1` that re-mints restarts, a new run that acts again
+  (`desired.v1` §2.16 and its scenarios' new §12, which the reference
+  runs; `config.v1` 0.8 says its instance is that run). No text under
+  `spec/` holds an inline history tag outside its changelogs, its history
+  sections and its header.
   `observer.md` holds the reader's discipline core 0.58 moved out, word
   for word, no rule changed (§8.1's "Reading presence" its §3, §2.7's
   readings and conclusions its §5, §4.2's seed, admin-space and S1 checks
