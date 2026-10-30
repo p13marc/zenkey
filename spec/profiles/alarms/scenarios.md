@@ -4,11 +4,10 @@ The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §7 are the runtime's, and
 the reference runs them as tests of `zenkey`
-(`zenkey/tests/profile_alarms.rs`, one test per section, named after it;
-#800, AB). §8 to §10 are a tool's, and the reference tool runs them as
-tests of zenctl (`zenctl/tests/live_zk2.rs`, `alarms_s8_…` to
-`alarms_s10_…`, T being `zenctl alarms` and, in §8, the watchdog's
-`alert-firing`; #800, AC).
+(`zenkey/tests/profile_alarms.rs`, one test per section, named after
+it). §8 to §10 are a tool's, and the reference tool runs them as tests
+of zenctl (`zenctl/tests/live_zk2.rs`, `alarms_s8_…` to `alarms_s10_…`,
+T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.5) are v1.md's rules; core
@@ -36,11 +35,11 @@ tests of zenctl (`zenctl/tests/live_zk2.rs`, `alarms_s8_…` to
   §10's step 2 listens 905 s, and a runner MAY keep them in a slow tier.
   The reference keeps them there, and its default run checks what §2's
   and §6's owner puts on a copy of the standard contract with
-  `freshness.ttl_s = 4`, made in memory and never published (0.2), and
-  §10's steps 1 and 3 (0.3).
-- **The owner example** (0.3, F-133). The reference's owner,
+  `freshness.ttl_s = 4`, made in memory and never published, and §10's
+  steps 1 and 3.
+- **The owner example.** The reference's owner,
   `zenkey/examples/owner.rs` run with `--alarms`, is the one a black-box
-  runner drives, and `owner --help` is its agreed interface: its options,
+  runner drives. `owner --help` is its agreed interface: its options,
   what it prints, the command word `alarm` and each command, the
   condition's JSON, every answer line, the record file's format, and that
   a copy of the standard contract with a short horizon is accepted as a
@@ -135,17 +134,17 @@ holds two more documents, written by a test before the restart:
    `reply_del` of R's key and of P's key, stamped by it. The owner put them
    before its new instance token (a SHOULD) and before it answered a GET
    with them (a MUST), which a GET made the moment the token appears
-   observes, as core §8.2 observes "before the tokens" (0.5, F-135). S
+   observes, as core §8.2 observes "before the tokens". S
    receives, in no order against the token, which it cannot observe (a
    put and a token are two messages on two subscriptions, with no order
    kept between them):
    - A firing, unchanged, `timestamp` *t₀* kept, under the new instance's
      stamp id. S reads it **confirmed**.
    - a delete of R's key, and of P's key. S reads each **retired**: it
-     held neither (§2.6, 0.2).
+     held neither (§2.6).
    - B: a put, unchanged, which S reads **confirmed**; then, at its first
      evaluation, a resolved put and a delete, which S reads **resolved**,
-     then **retired** (0.2).
+     then **retired**.
 4. G's reply holds A, stamped by the new instance, whose `meta.zid` is the
    stamp's id; G judges A **yes**, `firing`, never `previous_instance`.
 
@@ -200,8 +199,8 @@ holds two more documents, written by a test before the restart:
    to "is anything firing at or above `warning`?" over `zk2/lab/*` counts
    the owner as not asked, and is not **yes** (§2.15). T knows of the
    owner from its step 1, so the owner is in scope though no token of it
-   is found (§2.15, "the owners in scope", 0.2). A tool whose readings end
-   with its process knows of it from the archive's keys instead (0.3).
+   is found (§2.15, "the owners in scope"). A tool whose readings end
+   with its process knows of it from the archive's keys instead.
 
 ## §9 A key that does not re-derive, for a tool (§2.2, §2.3, §5)
 
@@ -230,7 +229,7 @@ holds nothing, and has `alarms.v1` in its tokenless set (core §8.1).
 2. T listens 905 s, losing no delivery, both owners present throughout,
    and asks again at `critical`. Its window counts as core §2.7 counts
    one, from the subscription's declaration plus the reply timeout. Its
-   owners are watched past it as observer §5.2 says (§2.15, 0.3).
+   owners are watched past it as observer §5.2 says (§2.15).
 3. `lab/b` raises B at `critical`, and T asks at `critical`.
 
 **Expected.**
