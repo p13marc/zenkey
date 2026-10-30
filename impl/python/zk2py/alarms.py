@@ -1,5 +1,9 @@
 """``alarms.v1``: the active alarms of one service (profile text 0.1, draft,
-written against core 0.34; ``spec/profiles/alarms/v1.md``).
+written against core 0.34; ``spec/profiles/alarms/v1.md``). Read again
+against text 0.9 (#609, round 87; #935): its inline history taken out and
+its six long sentences split, no rule changed but §2.15's watch after a
+window, now under a version of its own (F-326), and none of this module's
+rules moved.
 
 The half a reader and a tool need, from the text alone, with no owner and
 no session:
@@ -1220,7 +1224,8 @@ def window_end_ns(at_ns: int, lease_s: float = 10.0, wait_before_close_s: float 
     owner is watched past the end as observer §5.2 says: the longer of one
     lease and the routers' `wait_before_close`, plus the reply timeout. So a
     reader judging at an instant ends its window that long before it" (§2.15
-    as read against observer.md 0.6). The length is
+    as read against observer.md 0.6, and text 0.9's own since round 87). The
+    length is
     :func:`zk2py.budget.watch_after_s`. Under zenoh's defaults, a 10 s lease
     and a 5 s ``wait_before_close``, it is 11 s, as before."""
     return at_ns - int(bg.watch_after_s(lease_s, wait_before_close_s, reply_timeout_s) * fr.NS)
@@ -1261,7 +1266,8 @@ class AlarmsReader:
       owner is watched past the end as observer §5.2 says: the longer of one
       lease and the routers' `wait_before_close`, plus the reply timeout. So
       a reader judging at an instant ends its window that long before it"
-      (§2.15 as read against observer.md 0.6, #935). That length is
+      (§2.15 as read against observer.md 0.6, #935; text 0.9's own since
+      round 87, F-326). That length is
       :func:`zk2py.budget.watch_after_s`, the one zk2py's budget windows
       watch (F-320, reading A). Before round 86 this reader watched one
       lease and the reply timeout, as 0.8's §2.15 then said, whatever

@@ -1,4 +1,5 @@
-"""desired.v1 on a bus (``spec/profiles/desired/v1.md``, text 0.3, core 0.37):
+"""desired.v1 on a bus (``spec/profiles/desired/v1.md``, text 0.3, core 0.37;
+read again against text 0.9 in round 87, no rule moved):
 zk2py's author and target, written from the text alone (#609, round 55), on
 the scenarios' contracts (``scenarios.md``, "The contracts", transcribed in
 ``impl/python/interop/desired/``).

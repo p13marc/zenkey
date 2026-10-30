@@ -2,7 +2,8 @@
 written against core 0.23; ``spec/profiles/health/v1.md``). Read again
 against text 0.5 (#609, round 86; #935): its inline history taken out and
 §2.2's long sentence split, no rule changed, and none of this module's
-rules moved.
+rules moved. Text 0.6 (round 87) rewrote only the scenarios' clock
+convention (F-327), no rule changed.
 
 The first standard-contract profile (core §10 point 1): its contract is
 ``spec/profiles/health/health.v1.toml``, three resources, ``state/status``

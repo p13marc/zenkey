@@ -2,7 +2,9 @@
 running service's configuration without locking it out. Read again
 against text 0.6 (#609, round 86; #935): its inline history taken out and
 five long sentences split, §2.5's MUST now naming "the checks below", no
-rule changed, and none of this module's rules moved.
+rule changed, and none of this module's rules moved. Read again against
+text 0.7 (round 87): §2.3, §2.13 and §2.18 rewritten for round 86's F-329
+to F-331, no rule changed.
 
 The session-free half, from the text alone:
 - **time on the wire** (§2.8): :func:`parse_time`, :func:`write_time`, and

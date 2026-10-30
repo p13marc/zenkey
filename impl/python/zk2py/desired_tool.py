@@ -1,7 +1,8 @@
 """``desired.v1``'s tool on a bus (#609, rounds 57 and 59): §2.17's reading
 of a target's roles, and §5's four questions over it (:func:`zk2py.desired.conclude`).
 
-Written from ``spec/profiles/desired/v1.md`` (text 0.5), "What a tool reads
+Written from ``spec/profiles/desired/v1.md`` (text 0.5; read again against
+0.9 in round 87, no rule moved), "What a tool reads
 to answer", on core 0.39's presence rules: every presence read on a
 session that has never held a liveliness subscriber, a read not made read
 as one not complete, and an author absent only by a complete read.

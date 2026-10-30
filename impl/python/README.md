@@ -4008,6 +4008,76 @@ Round 86 found F-324 to F-335, twelve:
 
 None is a blocker, and none moves a verdict.
 
+## `alarms.v1` 0.9, `telemetry.v1` 0.6, `desired.v1` 0.9, `observer.md` 0.7 and core 0.63 (round 87)
+
+**#935's fourth part** takes the inline history out of `alarms.v1`,
+`telemetry.v1` and `desired.v1`, and splits their long sentences. Each
+changelog claims no rule changed. The one exception is `alarms.v1` 0.9's
+§2.15, which now holds the watch after a window under a version of its own
+(F-326).
+**`observer.md` 0.7, core 0.63, `health.v1` 0.6, `hostid.v1` 0.9,
+`config.v1` 0.7 and `link.v1` 0.10** answer round 86's F-324 to F-335.
+Every one is resolved. F-324's answer is a statement, not a scenario step:
+the `wait_before_close` half of §5.2's watch is a bound reasoned and not
+measured, and core Appendix B says so in a "Not measured" line.
+
+zk2py checked the claim with every RFC 2119 sentence before and after, by
+section, and read each profile's word diff whole, in full context, as its
+cold read. **No rule zk2py implements moved.** `desired.v1`'s 60 keyword
+sentences are 62, two that each held two MUSTs split, and each changed
+sentence keeps its keyword, condition and scope. See "At alarms.v1 0.9,
+telemetry.v1 0.6, desired.v1 0.9, observer.md 0.7 and core 0.63" in
+`SPEC-FINDINGS.md`.
+
+What zk2py does for them:
+- **`readings`: 673, up from 664.** `_observer_07_readings` pins the
+  answers to F-324, F-325 and F-326 as the texts state them, and reads
+  three of `desired.v1` 0.9's split rules through `desired.TargetRole`:
+  §2.6 step 4's three sentences, step 3's "Only a version from an archive
+  is confirmed" over five deliveries, and §2.7's restart.
+- **The modules' headers** (`alarms`, `telemetry`, `desired`,
+  `desired_live`, `desired_tool`, `config`, `health`, `hostid`, `link`)
+  say they were read again against the new texts. `budget.watch_after_s`
+  quotes observer 0.7's words.
+- **Nothing else.** The texts ask nothing new of zk2py.
+- **`just py-conformance`: 3630 of 3630.**
+
+**Live, round 87.** No check failed, and no run was repeated.
+- `alarms_scenarios`: 80 of 80 with zk2py's owner, and 80 of 80 with the
+  owner example (§2, §4, §6 and §10 on the 4 s copy).
+- `telemetry_scenarios`: 57 of 57 with zk2py's owner and 56 of 56 with
+  the owner example; with `zenctl telemetry` judging beside zk2py's
+  reader, 164 of 164 and 163 of 163.
+- `desired_scenarios`, `zenctl desired` as §9's Rust tool:
+
+  | Author → target | Watch | Polling |
+  |---|---|---|
+  | zk2py → zk2py | 175 of 175 | 175 of 175 |
+  | Rust → Rust | 85 of 85 | 85 of 85 |
+  | zk2py → Rust | 85 of 85 | 85 of 85 |
+  | Rust → zk2py | 85 of 85 | 85 of 85 |
+
+  Each run counts §1 to §8, §10 and §11 (45), the edges (9), the re-mint
+  (2) and §9 (29); zk2py → zk2py adds the thirty shapes (90), each asked
+  of both tools.
+- The regression, `config_scenarios`: 51 of 51 with zk2py's owner, and
+  51 of 51 with the owner example.
+- **Not run:** `alarms_scenarios` §6 and §10 at 900 s, and the
+  `live_interop`, observer and presence runners, whose texts changed only
+  in wording.
+
+Round 87 found F-336 to F-346, eleven:
+- **F-336**, a contradiction that predates #935. A `config.v1` owner fed
+  through `desired.v1` that re-mints is a restart by `config.v1` §2.12,
+  acting again, and keeps its run by `desired.v1` §2.7, acting on nothing.
+  zk2py's config owner is never fed through `desired.v1`, and the
+  reference refuses the re-mint, so no run meets it;
+- **ten hard to read**, F-337 to F-346, each with a rewrite that keeps
+  its rule. Five are in sentences #935's fourth pass wrote or split
+  (F-337, F-342, F-344, F-345, F-346).
+
+None is a blocker, and none moves a verdict of zk2py's.
+
 ## What it does not cover
 
 - **The rest of the live half:**

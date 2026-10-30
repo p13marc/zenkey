@@ -3427,8 +3427,137 @@ def family_readings(root: Path) -> list[Result]:
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
-        + _observer_05_readings(root) + _observer_06_readings(root)
+        + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _observer_07_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``observer.md`` text 0.7, core 0.63, and ``alarms.v1`` 0.9,
+    ``telemetry.v1`` 0.6 and ``desired.v1`` 0.9 without history (#609, round
+    87; #935's fourth part). The texts' answers to round 86's F-324, F-325 and
+    F-326, as they read. Then the desired.v1 sentences 0.9 split whose rules
+    zk2py's target implements, each read by :class:`zk2py.desired.TargetRole`
+    as the new sentence states it. No session is opened."""
+    import re
+
+    from . import alarms
+    from . import desired as ds
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    ns = 1_000_000_000
+    observer, core, alarms_text = flat("observer.md"), flat("core.md"), flat("profiles/alarms/v1.md")
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        """The quotes the text does not hold, so a failing reading names them
+        (review-bot on PR #961)."""
+        return [q for q in quotes if q not in text]
+
+    def alarms_from_09() -> list[str]:
+        """``alarms.v1`` at text 0.9 or later, and its CHANGELOG's 0.9 entry
+        naming the watch after a window: what is missing. #935's next part
+        moves the version on, which this reading allows."""
+        gaps: list[str] = []
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", alarms_text)
+        if m is None:
+            gaps.append("alarms.v1's header names no text version")
+        elif (int(m.group(1)), int(m.group(2))) < (0, 9):
+            gaps.append(f"alarms.v1's text version {m.group(1)}.{m.group(2)}, below 0.9")
+        log = (spec / "profiles/alarms/CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+        if not any(line.startswith("## 0.9 ") and "the watch after a window" in line for line in log):
+            gaps.append("alarms.v1's CHANGELOG has no 0.9 entry naming the watch after a window")
+        return gaps
+
+    out: list[tuple[str, Any, Any]] = [
+        ("observer 0.7 §5.2 (F-324): the wait_before_close half says why a path that stays up tells a withdrawal "
+         "late, and that it is a bound reasoned, not measured",
+         missing(observer, "A path that stays up while its queue is full keeps its lease.",
+                 "**A bound reasoned, not measured.**",
+                 "No run has shown one later than a lease (core Appendix B, \"Not measured\")."), []),
+        ("observer 0.7 §5.2: the watch's length is the one 0.6 settled, word for word",
+         missing(observer, "a tool watches the owner's instance tokens for the longer of one lease and the routers' "
+                 "`wait_before_close`, plus its reply timeout."), []),
+        ("core 0.63 Appendix B (F-324): the line that says what was not measured",
+         missing(core, "**Not measured: a withdrawal later than one lease, under a `wait_before_close` longer than "
+                 "the lease.**"), []),
+        ("observer 0.7 §1 (F-325): the second spelling's sentence names NotAsked's bullet",
+         missing(observer, "What NotAsked's bullet says above (nobody put the question, the tool has learned "
+                 "nothing, and it renders no answer) does not hold of that spelling."), []),
+        ("alarms.v1 0.9 (F-326): §2.15's watch after a window is held by a version of its own, 0.9 or later, and "
+         "still cites observer §5.2",
+         alarms_from_09() + missing(alarms_text, "The owner is watched past the end as observer §5.2 says: the "
+                                    "longer of one lease and the routers' `wait_before_close`, plus the reply "
+                                    "timeout."), []),
+        ("alarms.v1 0.9 §2.15 in AlarmsReader: a reader judging at 100 s still ends its window at 89 s under "
+         "zenoh's defaults, and at 94 s beside a 1 s lease",
+         [alarms.window_end_ns(100 * ns) / ns, alarms.window_end_ns(100 * ns, 1.0, 5.0, 1.0) / ns], [89.0, 94.0]),
+    ]
+
+    def put(t: int, zid: int, mode: str, origin: str = ds.OWNER) -> ds.Sample:
+        doc = {"revision": t, "mode": mode, "rate_hz": 10}
+        return ds.Sample(origin, False, ds.Stamp(t, zid), ds.Payload(value=doc), t)
+
+    def acted(role: ds.TargetRole, s: ds.Sample) -> str:
+        word = role.receive(s)
+        if word in (ds.ACT, ds.REVERT):
+            role.finish(ds.Finish(ds.DONE))
+        return word
+
+    # §2.6 step 4, now three sentences: "Earlier is **older**, and a target
+    # MUST NOT act on it. Equal is **the same version**, never acted on again
+    # (§2.7). Later is admitted." A remembered id, another one held.
+    def step4() -> list[str]:
+        words = []
+        for probe in (put(9, 0xA, "idle"), put(10, 0xA, "halt"), put(11, 0xA, "halt")):
+            role = ds.TargetRole("k")
+            acted(role, put(10, 0xA, "run"))
+            acted(role, put(5, 0xB, "idle"))
+            words.append(acted(role, probe))
+        return words
+
+    out.append(("desired.v1 0.9 §2.6 step 4: of an id remembered while another is held, earlier is older, equal "
+                "the same version, later admitted", step4(), [ds.OLDER, ds.SAME_VERSION, ds.ACT]))
+
+    # §2.6 step 3: "Only a version from an archive is confirmed: any other
+    # delivery of a version held waiting, the author's own version included,
+    # is the same version". Held, then held waiting while an act runs.
+    def step3() -> list[str]:
+        words = []
+        for held_from, again_from in ((ds.ARCHIVE, ds.OWNER), (ds.OWNER, ds.OWNER), (ds.ARCHIVE, ds.ARCHIVE)):
+            role = ds.TargetRole("k")
+            acted(role, put(10, 0xA, "run", held_from))
+            words.append(role.receive(put(10, 0xA, "run", again_from)))
+        for held_from, again_from in ((ds.ARCHIVE, ds.OWNER), (ds.OWNER, ds.OWNER)):
+            role = ds.TargetRole("k")
+            role.receive(put(10, 0xA, "run"))
+            role.receive(put(20, 0xA, "halt", held_from))
+            words.append(role.receive(put(20, 0xA, "halt", again_from)))
+        return words
+
+    out.append(("desired.v1 0.9 §2.6 step 3: only a version from an archive is confirmed, held or held waiting; "
+                "any other equal delivery is the same version", step3(),
+                [ds.CONFIRMED, ds.SAME_VERSION, ds.SAME_VERSION, ds.CONFIRMED, ds.SAME_VERSION]))
+
+    # §2.7, now three sentences: "A restart begins a new run (§0), which
+    # holds nothing of the previous run's acts. It MUST act on the first
+    # version it reads, the one the previous run acted on included, and
+    # adopts nothing before it." Against a re-put of the same document, which
+    # the run before would have adopted.
+    def restart() -> list[str]:
+        words = []
+        for again in (False, True):
+            role = ds.TargetRole("k")
+            acted(role, put(10, 0xA, "run"))
+            if again:
+                role.restart()
+            words.append(role.receive(ds.Sample(ds.OWNER, False, ds.Stamp(11, 0xB),
+                                                ds.Payload(value={"revision": 10, "mode": "run", "rate_hz": 10}),
+                                                10)))
+        return words
+
+    out.append(("desired.v1 0.9 §2.7: the same document under a new stamp is adopted within a run, and acted on "
+                "after a restart", restart(), [ds.ADOPTED, ds.ACT]))
+    return out
 
 
 def _observer_06_readings(root: Path) -> list[tuple[str, Any, Any]]:
