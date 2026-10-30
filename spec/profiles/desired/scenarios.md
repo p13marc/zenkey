@@ -4,10 +4,10 @@ The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §8, §10 and §11 are the
 runtime's: the reference runs them as tests of `zenkey`
-(`zenkey/tests/profile_desired.rs`, one test per section, named after it;
-#840, DC). §9 is a tool's: the reference tool runs it as a test of zenctl
+(`zenkey/tests/profile_desired.rs`, one test per section, named after
+it). §9 is a tool's: the reference tool runs it as a test of zenctl
 (`zenctl/tests/live_zk2.rs`, `desired_s9_…`, T being `zenctl desired`,
-the doctor's `desired-*` checks beside it; #840, DD).
+the doctor's `desired-*` checks beside it).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -66,7 +66,7 @@ the doctor's `desired-*` checks beside it; #840, DD).
   optional  = true
   ```
 
-  `tasking.json` (0.2) is, byte for byte, the block below without the
+  `tasking.json` is, byte for byte, the block below without the
   list's two-space indent, its last line ending in a line feed:
 
   ```json
@@ -110,30 +110,31 @@ the doctor's `desired-*` checks beside it; #840, DD).
   `{"revision": 0, "mode": "idle", "rate_hz": 1}`. Its drive is
   simulated: a test can make an act fail after it set the rate and
   before it set the mode, and can hold an act from its start until the
-  test releases it (0.2).
+  test releases it.
 - **Documents.** `v<n>` is a `Task` with `revision` *n*, `mode` `run` and
   `rate_hz` 10 unless a step says otherwise, put by the author on `D`;
   `s<n>` is the stamp its put carries.
 - **S** subscribes to `zk2/lab/**` before anything starts, and to the
   tokens under `zk2/lab/*/@zk/**` by liveliness (core §1.3: `**` never
-  crosses `@zk`; 0.7, F-224), and records each delivery's arrival on its
-  monotonic clock, its key, its kind, its payload and its stamp. Where a section cuts a link, S is a client of R1,
-  and **S2**, a client of R2, subscribes to `Rp` and `Run` before anything
-  starts and records as S does (0.2): it sees the target's side while the
-  link is cut, which S cannot, and zenoh replays nothing at the heal.
+  crosses `@zk`), and records each delivery's arrival on its monotonic
+  clock, its key, its kind, its payload and its stamp. Where a section
+  cuts a link, S is a client of R1, and **S2**, a client of R2,
+  subscribes to `Rp` and `Run` before anything starts and records as S
+  does. S2 sees the target's side while the link is cut, which S cannot,
+  and zenoh replays nothing at the heal.
   **G** GETs as core S4 says. "The report" is the
   latest of `Rp` by its stamp; "converged on v*n*" means the report has
   `source` `desired`, `in_force` and `observed` both `{stamp: s<n>,
   revision: n}`, `outcome` `converged`, and `Run` holds v*n*'s content.
-- **The owner example** (#840, DC). The reference's author and target are
+- **The owner example.** The reference's author and target are
   `zenkey/examples/owner.rs` run with `--desired-author` and
   `--desired-target lab/author` (`--desired-unbound` for §8), and
   `owner --help` is the interface a black-box runner drives, as for
   `alarms.v1`: its drive is the one above, `desired hold`, `release` and
-  `fail-next` its knobs (0.3). A target says what its last seed found
+  `fail-next` its knobs. A target says what its last seed found
   (`desired seeds`: the replies its GET drew, the author's presence or a
   read not made, the archive), and an author how many GETs reached a
-  target's slice (`desired gets`), which §8 and §10 observe (0.4, F-197).
+  target's slice (`desired gets`), which §8 and §10 observe.
 
 ## §1 Converge after an outage (§2.5, §2.6, §2.10, §2.15)
 
@@ -155,7 +156,7 @@ holds `tasking.v1` in its tokenless set (core §8.1): it holds no
    before its tokens (§2.10). `Run` holds the baseline.
 2. S receives a put on `D` stamped by the author (core S1), then on `Rp`
    a report converged on v1.
-3. Read through S2 (0.2): `Rp` and `Run` receive nothing during the cut.
+3. Read through S2: `Rp` and `Run` receive nothing during the cut.
    The target's subscription received nothing of v2, so it acted on
    nothing, and its report is unchanged.
 4. The target sees the author's instance token appear again, seeds (core
@@ -169,7 +170,7 @@ holds `tasking.v1` in its tokenless set (core §8.1): it holds no
 **Setup.** The target converged on v2, `s2` its stamp. A test session X,
 a client of R1, can put on `D` with a timestamp it sets. X takes `s2` as S
 received it, the timestamp of the author's put of v2, and builds each
-timestamp below from that one (0.4, F-196): a binding may not build every
+timestamp below from that one: a binding may not build every
 NTP64 time from its text, and `s2`'s fraction must survive exactly.
 
 **Steps.**
@@ -224,7 +225,7 @@ v1.
 2. The author puts v3 with `rate_hz` 500.
 3. The author's instance is re-minted in its own session (core §8.1),
    keeping its zid, so it puts v3's content again from its new instance,
-   under its zid and a later time (§2.11, 0.2), and the target seeds.
+   under its zid and a later time (§2.11), and the target seeds.
 4. The author puts v4.
 5. The test sets the target's drive to fail its next act. The author puts
    v5 with `rate_hz` 20 and `mode` `halt`.
@@ -251,13 +252,13 @@ v1.
 ## §5 A restart acts again (§2.7, §2.5)
 
 **Setup.** The target converged on v1. The test holds the target's next
-act from its start (0.2): the author holds v1 throughout, so the new
+act from its start: the author holds v1 throughout, so the new
 run's first seed draws it at once, and an act left to run could put
 a converged report before G's GET reaches the target.
 
 **Steps.**
 1. The target's process ends without closing. It restarts, a new run
-   (§0, 0.4) with a new instance. G GETs `Rp` the moment S sees its new
+   (§0) with a new instance. G GETs `Rp` the moment S sees its new
    instance token. When G has its reply, the test releases the held act.
 
 **Expected.**
@@ -316,8 +317,8 @@ target converged on it, and the archive recorded it.
 
 **Expected.**
 1. The target seeds: a complete presence read shows no instance token of
-   the author's, which is absent (core §8.1, 0.37; this text 0.3), and its GET draws no
-   reply. The target reads `D`'s archive form,
+   the author's, which is absent (core §8.1), and its GET draws no reply.
+   The target reads `D`'s archive form,
    `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
    (core §4.4, S5), acts on v1 under `s1`, and its report is converged on
    v1 with `last_known: true` (§2.9).
@@ -325,7 +326,7 @@ target converged on it, and the archive recorded it.
    (§2.11), under a stamp of its new zid: another id than `s1`'s, the
    same document. The target receives it by its subscription, or as the
    answer to the seed it makes when it sees the author's instance token,
-   and **adopts** it (§2.6, §2.7, 0.2): it acts on nothing (`Run` receives
+   and **adopts** it (§2.6, §2.7). It acts on nothing (`Run` receives
    nothing), and its report moves `observed` and `in_force` to that stamp,
    `revision` 1, still `converged`, without `last_known` (§2.10). A
    delivery of the same re-put by the other path is the same version.
@@ -345,7 +346,7 @@ holds v1 on `D`.
    (core §3.2). `Rp` holds `{source: baseline}`, with no key (§2.10,
    §2.12). `Run` holds the baseline, and stays so: the target makes no
    GET of `D` (the author's queryable receives none: the owner example's
-   `desired gets lab/worker` counts them, 0.4) and acts on nothing.
+   `desired gets lab/worker` counts them) and acts on nothing.
 
 ## §9 A tool's questions (§2.17, §5)
 
@@ -353,7 +354,7 @@ holds v1 on `D`.
 its reports by type identity (§2.10), takes the one whose `key` is `D`,
 GETs `D` from the author (core S4), and asks §5's four questions. With its
 author absent, T has no descriptor of the author's to read its contract
-by, and takes `D` from the target's requirement and binding (§2.17, 0.4).
+by, and takes `D` from the target's requirement and binding (§2.17).
 The reference's T is `zenctl desired`, a judgement: exit 0 every role
 asked converged on its author's current document, 1 a refused or failed
 act or a target behind past its window, 2 no verdict.
@@ -364,7 +365,7 @@ act or a target behind past its window, 2 no verdict.
 3. After §4's step 5, T asks.
 4. After §7's step 1, T asks.
 5. Against §8's target, T asks.
-6. (0.4.) After step 3, the author puts v5, and the target converges on
+6. After step 3, the author puts v5, and the target converges on
    it. The test holds the target's next act from its start, and the
    author puts v6. T asks once; then T asks again over a window of 2 s,
    reading as often as it likes.
@@ -385,11 +386,11 @@ act or a target behind past its window, 2 no verdict.
    stamp and the author's v6's; refused **no**, `converged`. No verdict: a
    reading alone never finds a target behind. Over the window, every
    reading is not yet on v6: T finds the target behind v6 for at least
-   2 s (§2.17, 0.4), its finding, §5's answer still **not yet**. With a
+   2 s (§2.17), its finding, §5's answer still **not yet**. With a
    clock trusted to the HLC delta, T may find it at the first reading of
    a window once v6 is older than the window.
 
-## §10 Last-known confirmed by its author; a present author's silence (§2.5, §2.9, 0.2)
+## §10 Last-known confirmed by its author; a present author's silence (§2.5, §2.9)
 
 **Setup.** An archive, `lab/archive` (core §4.4), on the target's side,
 a client of R2, records `zk2/lab/author/tasking.v1/state/**`. The author
@@ -400,7 +401,7 @@ converged on it, and the archive recorded it.
 1. The test cuts the link between R2 and R1. The target's process ends
    without closing, and restarts, a new run.
 2. The test heals the link.
-3. (0.4, F-197.) The test cuts the link again. The author puts v2, which
+3. The test cuts the link again. The author puts v2, which
    neither the target nor the archive receives. X, a client of R2,
    declares an instance token at the author's address,
    `zk2/lab/author/@zk/instance/<an id of its own>`, and no queryable: the
@@ -412,7 +413,7 @@ converged on it, and the archive recorded it.
 **Expected.**
 1. The target seeds: no instance token of the author's crosses the cut,
    so a complete presence read through R2 shows none, absence by core
-   §8.1 (0.37; this text 0.3), and its GET draws no reply within the
+   §8.1, and its GET draws no reply within the
    timeout. The target reads `D`'s archive form,
    `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
    (core §4.4, S5), acts on v1 under `s1`, and, read through S2, its
@@ -438,11 +439,11 @@ converged on it, and the archive recorded it.
    author answers v2 under `s2`, and the target acts on it: its report is
    converged on v2, without `last_known`. X's withdrawal moves nothing.
 
-## §11 A role on two documents refuses the start (§2.1, §2.3, 0.7)
+## §11 A role on two documents refuses the start (§2.1, §2.3)
 
 **Setup.** One router, R1, and no author: the refusal reads the author's
 declaration, which the target holds, the contract it is compiled against
-(core R4). Two copies of the contracts (F-224):
+(core R4). Two copies of the contracts:
 - **tasking.v1, two documents**: `tasking.v1.toml` with a second desired
   resource, declared as the first is:
 

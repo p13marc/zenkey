@@ -4,6 +4,141 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it and the
+finding that caused it, as in "(0.6, F-217)" or "(0.4, found building
+the tools)", and some told their history as text: "Core S2 is
+unchanged", "text 0.2's". This changelog and the core's already hold
+that history. So the text now states each rule and cites its evidence,
+and nothing else. This is #935's fourth part, beside `alarms.v1` and
+`telemetry.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions and findings,** "(0.2)" to "(0.8, F-225)". Most
+  opened a run-in label or a reason's code, which now stands alone:
+  - §0's "Run", §2.1's "One document type per role", "A target refuses
+    to start" and "A role on no desired resource", and its two other
+    tags;
+  - §2.2's `not_string`, §2.3's `two_documents` and `wrong_self`, and
+    §2.4's stamp and revision;
+  - §2.5's "How it hears one appear", "A seed that draws nothing", "The
+    author absent", "Absence is a complete read's" and "The reference";
+  - §2.6's confirmed version, "But never an older version", "What it
+    remembers" and "While an act runs";
+  - §2.7's "Every number compares by its exact value", `invalid`, "Where
+    a refusal points", `apply` and "A re-mint is not a restart";
+  - §2.9's archive and its confirmation, and §2.10's keyless report,
+    `in_force`, `last_known`, "Finite", "Depth", the schema's exact value
+    and two in "A tool finds a target's reports";
+  - §2.11's "Its zid", "Pacing", "Live, for a paced author", "A delete
+    again keeps its window" and the record, §2.12's kill switch, and
+    §2.16's "Fed through this profile", report and revert;
+  - §2.17's steps 1 and 2, "What a tool reads to answer", and eight in
+    what it reads;
+  - §5's premises twice.
+- **Reasons kept.** §2.10's "(0.2: an absent one is not `observed`)" and
+  "(0.2: `false`, written or absent, is no finding)" keep their reasons
+  in the parenthesis. §2.17's "(0.6, F-217: one in hand that declares no
+  desired resource makes the role no target's, above)" is a sentence of
+  its own in parentheses, after the MAY it qualified.
+- **The core's versions.** "(core 0.36)" is gone from §1's table and
+  §4. "(core §8.1, 0.37)", "(core §8.1, 0.38)", "(core §4.3, 0.3)" and
+  "(core §6, 0.39)" cite the section alone, and so does §2.17 step 1's
+  "(core §8.1, 0.38: its session cut off while it ran, among them)",
+  which keeps its words.
+- **config.v1's versions.** §2.16's "(its text 0.4)" is gone, and "(…,
+  its text 0.5)" is "(`config.v1` §2.18)". Appendix B's "(0.3)" is gone,
+  and its "config.v1 text 0.4" is "config.v1 §2.18".
+- **History told as text,** now said as what it is:
+  - §2.11's "Core S2 is unchanged: "live" was always the answering
+    instance's" is "It is core S2 as written: "live" is the answering
+    instance's";
+  - §3's table names its revisions "The first" and "The second", where
+    it said "text 0.1" and "text 0.2". The note after it says the file
+    is "now the second", and names "the first revision's file".
+- **The scenarios.** The opening names the reference's tests without
+  "#840, DC" and "#840, DD". The conventions lose "(0.2)" twice, "(0.3)",
+  "0.7, F-224", "(0.4, F-197)" and "(#840, DC)". §1's Expected 3, §2's
+  setup, §4's step 3, §5's setup and step 1, §7's Expected 1 and 2, §8's
+  Expected, §9's setup, step 6 and Expected 6, and §10's step 3 and
+  Expected 1 each lose a tag. §10's and §11's headings lose "0.2" and
+  "0.7": nothing links their anchors, and their numbers stay. §11's
+  setup loses "(F-224)".
+
+**The long sentences, split.** The 25 over 50 words in this text:
+- **§2.4, "A type MAY carry its own revision".** The check read it with
+  the sentence after it, which opened with a lowercase "config.v1's".
+  That sentence opens with "Both" now, and the MAY loses its tag.
+- **§2.5:** the period's read is two sentences, the read and what it
+  misses. "The reference" is three: the rule, and the two documents an
+  archive can hold.
+- **§2.6:** "But never an older version" is the rule, then its three
+  outcomes, one sentence each. Two ids for one key are three sentences:
+  the case, what it is, and what is acted on.
+- **§2.7:** "Equal" is three sentences, and "Every number compares by
+  its exact value" two. "A restart acts again" is three: the new run,
+  its MUST, and what is gone.
+- **§2.9, "From an archive",** is the MAY, then where it never reads.
+- **§2.10:** the report's two MUSTs are two sentences, and the schema's
+  exact value three.
+- **§2.11:** the restart's MUST and SHOULD are a sentence, and its MUST
+  to delete again another.
+- **§2.13** is the cardinality, then the budget.
+- **§2.16:** "Fed through this profile" is three sentences. The report's
+  mapping is a list of its three members. "What a delete reverts it to"
+  is three sentences, and its revert two.
+- **§2.17:** steps 1 and 2 are lists of their answers. The author's
+  contract is a list of its two sources. "The slice from the target
+  alone" is five sentences. "A requirement unread" and the revision in
+  hand declaring none are two each. "How long behind" is a list of its
+  two ways.
+- **§5's premises** end in a list: not asked, and unobservable.
+- **Appendix A's opening** is three sentences, its words kept.
+
+The scenarios' two: the conventions' S2, and §7's Expected 2, each now
+two sentences.
+
+**Nothing moved to an appendix.** No rule held a measurement.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61, with
+the tool of #935's third part.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY, REQUIRED or RECOMMENDED was extracted before and after. Each
+  was keyed by section, and the two sets diffed. The scenarios' Expected
+  lines were diffed too, keyword or not.
+- **This text.** 60 before and 62 after: two sentences that each held
+  two MUSTs are two sentences, §2.10's report and §2.11's restart. 51 are
+  unchanged and two lost a tag only. The other five keep their keyword,
+  condition and scope: §2.4's MAY, §2.6's MUST NOT, §2.7's restart MUST,
+  §2.9's MAY and §2.17's MAY, each split from the words after it.
+- **The scenarios.** 87 keyword sentences and Expected lines before, and
+  88 after. 65 are unchanged, and five lost a tag only: the tool reads
+  two of them as rewrites, since "this text 0.3" holds words. §7's
+  Expected 2 is two sentences. The other sixteen are §10's and §11's,
+  unchanged under headings that lost their tags.
+- **The rest.** Every other sentence and table row was diffed too, and
+  each rewrite read beside its old text. None moves a condition, an
+  object or a scope. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 75 to none, sentences over 50 words from 25
+  to none, and a mean from 24.59 words to 21.78, under #935's target of
+  22.
+- **`scenarios.md`:** tags from 15 to none, sentences over 50 words from
+  2 to none, and a mean from 14.94 to 14.78.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor but §10's and
+  §11's headings in the scenarios.
+- **Appendix A**, which is history, but for its opening sentence's
+  split.
+- **Written against core 0.39**, still, and the header's `freshness.v1`
+  text 0.3.
+
 ## 0.8 — 2026-10-25: round 62 (#840, DG; #609)
 
 zk2py read 0.7 cold in round 62 and found F-224 resolved: §11 passed live
