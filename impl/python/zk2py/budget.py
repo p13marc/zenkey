@@ -205,6 +205,20 @@ def stall_bound(wait_before_close_ms: int = WAIT_BEFORE_CLOSE_MS, lease_ms: int 
     return min(wait_before_close_ms, lease_ms - interval)
 
 
+def watch_after_s(lease_s: float = LEASE_MS / 1000, wait_before_close_s: float = WAIT_BEFORE_CLOSE_MS / 1000,
+                  reply_timeout_s: float = 1.0) -> float:
+    """How long a tool watches the owner's instance tokens after a window's
+    end (observer §5.2, text 0.5): "for one lease plus its reply timeout …
+    A deployment that sets a longer lease, or a `wait_before_close` longer
+    than its lease, lengthens it." The text does not say by how much a
+    longer ``wait_before_close`` lengthens it (round 85, F-320): zk2py reads
+    the watch's first part as the longer of the two, since an owner whose
+    push waits on a full queue closes its transport only after
+    ``wait_before_close`` (core Appendix B, "What a path drops"). With
+    zenoh's defaults, 5 s against a 10 s lease, it is the lease."""
+    return max(lease_s, wait_before_close_s) + reply_timeout_s
+
+
 def lossless(reliability: str, congestion: str, reader_lost: int = 0,
              miss_declared: bool = False, miss_used: bool = False, misses: int = 0,
              stall_gap_ms: int = 0, stall_bound_ms: int | None = None,
@@ -376,7 +390,7 @@ class Window:
         from . import live
 
         self.event, self.qos = event, qos
-        self.lease_s = lease_s
+        self.lease_s, self.wait_before_close_s = lease_s, wait_before_close_s
         self.stall = StallWatch(session, stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
         self.reply_timeout_ns = int(reply_timeout_s * NS)
         self.lock = threading.Lock()
@@ -421,15 +435,20 @@ class Window:
     def reading(self, lease_s: float | None = None) -> WindowReading:
         """The window's reading, once its owner, and its own receive path,
         have been watched for one lease after its end, and the reply timeout
-        more. Ends the window now if :meth:`end` was not called."""
+        more (:func:`watch_after_s`: the longer of the lease and
+        ``wait_before_close``, text 0.5). ``lease_s``, when given, is the
+        caller's own watch, in place of both. Ends the window now if
+        :meth:`end` was not called."""
         from . import live
 
         if lease_s is None:
-            lease_s = self.lease_s
+            watch_s = watch_after_s(self.lease_s, self.wait_before_close_s, self.reply_timeout_ns / NS)
+        else:
+            watch_s = lease_s + self.reply_timeout_ns / NS
         if self.end_ns is None:
             self.end()
         assert self.end_ns is not None
-        watch_until = self.end_ns + int(lease_s * NS) + self.reply_timeout_ns
+        watch_until = self.end_ns + int(watch_s * NS)
         while time.monotonic_ns() < watch_until:
             time.sleep(min(0.1, (watch_until - time.monotonic_ns()) / NS))
         pres = live.list_presence(self.session, f"{self.prefix}*")

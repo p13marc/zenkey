@@ -69,7 +69,10 @@ zenoh-python has no unbounded channel: its default handler and
   run its session with an interests timeout above the longest it waits for
   one" (0.49, F-250). zk2py's readers wait 1 s by default and 30 s in
   presence §10 step 10; its follower asks each GET with 121 s and bounds its
-  wait apart, which "meets this by it".
+  wait apart. Observer text 0.5 (F-298) states the reading zk2py took:
+  "This rule measures that bound, never the GET's own timeout: such a
+  reader meets it when the longest it waits is below the interests
+  timeout", its example 120 s, 121 s and at most 30 s.
 - **The round trip's key** is ``…/@zk/settle`` under the subscribers'
   presence subtree (:func:`settle_key`): it matches no token, carries
   nothing, and a grant that admits the subscribers admits it. Before 0.41

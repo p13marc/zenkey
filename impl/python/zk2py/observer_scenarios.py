@@ -1,6 +1,7 @@
 """Core 0.59's three scenario steps for ``observer.md``, live (#609, rounds 83
-and 84; text 0.4 and core 0.60 since round 84, whose rules for these steps
-are 0.2's and 0.3's): ``python -m zk2py.observer_scenarios [--only SECTION]...
+to 85; text 0.5 and core 0.61 since round 85, whose rules for these steps
+are 0.2's and 0.3's, reworded by #935's passes with no rule changed):
+``python -m zk2py.observer_scenarios [--only SECTION]...
 [--owner zk2py|rust]...``.
 
 Each section runs on in-process zenoh-python 1.10.1 routers, every listener
@@ -835,7 +836,7 @@ def main(argv: list[str] | None = None) -> int:
                 report.check(label, "the section ran to its end", False, f"{type(e).__name__}: {e}")
     from .checks import summarise
 
-    return summarise("observer scenarios", report.rows, "core 0.59's steps, observer.md text 0.4, core 0.60")
+    return summarise("observer scenarios", report.rows, "core 0.59's steps, observer.md text 0.5, core 0.61")
 
 
 if __name__ == "__main__":
