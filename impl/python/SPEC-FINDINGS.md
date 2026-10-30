@@ -18885,6 +18885,35 @@ The counts are round 85's, check for check.
   both 11 s. The readings cover the other lengths.
 - **The presence steps above**, as in round 85.
 
+### After review-bot on PR #959
+
+Nothing was blocking. The bot's should-fixes and nits:
+- **§10's listening** (`alarms_scenarios`). A comment now says why
+  `need_ns` holds the reply timeout twice: once for the window's first
+  instant, the declaration plus the reply timeout, and once inside the
+  watch after it, as the old sum's two reply timeouts were. The loop is
+  bounded at its length plus 30 s, and a length not reached by then is a
+  harness failure, named `harness:`, never the reader's.
+- **A reader for a reading** (`alarms`). The reading of round 86 built an
+  `AlarmsReader` with `object.__new__` and set its attributes by hand, so
+  an attribute added to `__init__` could break it unseen.
+  `AlarmsReader.offline` now builds one through `__init__`. It takes the
+  values `window()` reads (the subscription's declaration and
+  completeness, the receive path's losses, each owner's instance at the
+  start and its token moves, the GETs asked) and stands in for the
+  session's watch and subscription. `window()` reads nothing else: the
+  watch's lengths and `qos` besides, and the clock when no instant is
+  given.
+- **Nits.** The watch's length is `bg.watch_after_s(*self.watch)` itself.
+  `lease_ns`, which nothing read, is gone. `budget` is imported at module
+  level: it imports only the standard library there, so there is no
+  cycle.
+- **`readings`: 664.** One more case: an offline reader's window under a
+  loss, a withdrawal, a complete GET after both (which heals them, the
+  window running from it) and an incomplete one (which heals nothing).
+  **`just py-conformance`: 3621 of 3621.** `alarms_scenarios --only 10`:
+  17 of 17 with zk2py's owners, and 17 of 17 with the owner example's.
+
 ### Counts at observer.md 0.6 and core 0.62, and five profiles without history
 
 335 entries.

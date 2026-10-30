@@ -3473,31 +3473,38 @@ def _observer_06_readings(root: Path) -> list[tuple[str, Any, Any]]:
         (f"{label} in AlarmsReader.window: declared at 0 s, judged at 100 s, nothing lost, the owner held "
          f"throughout: 88 s listened under zenoh's defaults, 93 s beside a 1 s lease (0.8's old words gave "
          f"97 s), 78 s beside a 20 s lease",
-         [_alarms_reader_window(alarms, watch, 100 * ns, ns) for watch in
+         [_alarms_reader_window(alarms, watch, 100 * ns) for watch in
           ((10.0, 5.0, 1.0), (1.0, 5.0, 1.0), (20.0, 5.0, 1.0))], [88.0, 93.0, 78.0]),
+        (f"{label} in AlarmsReader.window: an offline reader carries every input window() reads: a loss at 50 s "
+         f"and no GET since is not lossless; a withdrawal at 50 s is not present throughout; a complete GET asked "
+         f"at 60 s heals both, the window running from it to 89 s; an incomplete one heals nothing",
+         [_offline_window(alarms, ns, losses=[50 * ns]), _offline_window(alarms, ns, events=[(50 * ns, "delete")]),
+          _offline_window(alarms, ns, losses=[50 * ns], events=[(50 * ns, "delete")], gets=[(60 * ns, True)]),
+          _offline_window(alarms, ns, losses=[50 * ns], gets=[(60 * ns, False)])],
+         [(88.0, False, True), (88.0, True, False), (29.0, True, True), (88.0, False, True)]),
     ]
     return out
 
 
-def _alarms_reader_window(alarms: Any, watch: tuple[float, float, float], at_ns: int, ns: int) -> float:
-    """:meth:`zk2py.alarms.AlarmsReader.window` with no session: the
-    reader's state set by hand as a run would leave it, declared at 0, its
-    owner ``lab/a`` held from the start and never withdrawn, no loss, no
-    GET. Its listened seconds."""
-    import threading
+def _offline_window(alarms: Any, ns: int, *, losses: list[int] = (), events: list[tuple[int, str]] = (),
+                    gets: list[tuple[int, bool]] = ()) -> tuple[float, bool, bool]:
+    """An offline reader's window for ``lab/a`` at 100 s under zenoh's
+    defaults, declared at 0 and its owner held from the start: (listened
+    seconds, lossless, present throughout)."""
+    r = alarms.AlarmsReader.offline(0, {"lab/a": "1"}, losses=losses, token_events={"lab/a": list(events)},
+                                    seeds={"lab/a": [alarms.SeedGet(t, ok) for t, ok in gets]})
+    w = r.window("lab/a", at_ns=100 * ns)
+    return (w.listened_s, w.lossless, w.present_throughout)
 
-    class _Stall:
-        def losses(self) -> list[int]:
-            return []
 
-    class _Sub:
-        complete, declared_ns = True, 0
-
-    r = object.__new__(alarms.AlarmsReader)
-    r.lock, r.noted, r.token_events = threading.Lock(), [], {}
-    r.held_at_start, r.unknown_start, r.seeds = {"lab/a": "1"}, {}, {}
-    r.qos, r.reply_timeout_ns = ("reliable", "block"), int(watch[2] * ns)
-    r.subscriber, r.stall, r.watch = _Sub(), _Stall(), watch
+def _alarms_reader_window(alarms: Any, watch: tuple[float, float, float], at_ns: int) -> float:
+    """:meth:`zk2py.alarms.AlarmsReader.window` on a reader with no session
+    (:meth:`zk2py.alarms.AlarmsReader.offline`): declared at 0, its owner
+    ``lab/a`` held from the start and never withdrawn, no loss, no GET. Its
+    listened seconds."""
+    lease_s, wait_before_close_s, reply_timeout_s = watch
+    r = alarms.AlarmsReader.offline(0, {"lab/a": "1"}, lease_s=lease_s, reply_timeout_s=reply_timeout_s,
+                                    wait_before_close_s=wait_before_close_s)
     return r.window("lab/a", at_ns=at_ns).listened_s
 
 
