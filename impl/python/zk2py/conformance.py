@@ -3426,8 +3426,111 @@ def family_readings(root: Path) -> list[Result]:
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
-        + _observer_readings(root)
+        + _observer_readings(root) + _observer_02_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _observer_02_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``observer.md`` text 0.2 and core 0.59 (#609, round 83): §3.2's
+    transient half over three reads a grace apart (operations.md §8 step 6),
+    §7.2's two halves in the words operations.md §5 step 2 expects, §7.4's
+    report of a limit, §8.2's scope as zk2py's echo tool states it
+    (grammar.md §1 step 5), and F-291's reading: the three ways the profiles'
+    fixtures give "not this profile's". No session is opened."""
+    from . import echo_tool, live
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "observer 0.2"
+    shape = ("zk2/h4/tc/@zk/instance/0123456789abcdef", "no token", "zk2py_tc.v1")
+    for reads, want, why in (
+            ([{shape}, set(), set()], (set(), {shape}), "in the first of three reads alone, the token a second "
+                                                        "after the descriptor (operations.md §8 step 6): no fault"),
+            ([set(), {shape}, {shape}], ({shape}, set()), "in the last two: a fault"),
+            ([{shape}, {shape}, set()], ({shape}, set()), "in the first two: a fault, gone after"),
+            ([{shape}, set(), {shape}], (set(), {shape}), "in the first and the last, not between: it did not hold "
+                                                          "between two reads a grace apart, no fault"),
+            ([{shape}] * 3, ({shape}, set()), "in every read, the step's control: a fault"),
+            ([set()] * 3, (set(), set()), "in none")):
+        out.append((f"{label} §3.2: a shape {why}", live.shape_faults(reads), want))
+    silent = live.CallResult(replies=[live.CallReply("transport", None, "", b"")])
+    told = live.o3_verdict(silent, True, True)
+    untold = live.o3_verdict(silent, None, True)
+    out += [
+        (f"{label} §7.2: told, a present owner's silence is the O3 finding, an access-control refusal said to be "
+         f"silent too beside it (operations.md §5 step 2)",
+         [told[0], "the O3 finding" in told[1], "an access-control refusal is silent too" in told[1]],
+         ["finding", True, True]),
+        (f"{label} §7.2: not told, the silence is unobservable, never the finding, and the premise it lacked "
+         f"named: grants that let it call, which no tool can observe (core §11.3)",
+         [untold[0], "never the finding" in untold[1], "grants that let it call, which no tool can observe" in
+          untold[1]], ["unobservable", True, True]),
+        (f"{label} §7.2: told, but the owner's tokens not read: unobservable, absent rather than unanswered",
+         live.o3_verdict(silent, True, False)[0], "unobservable"),
+        (f"{label} §7.2: a silence is never no such operation, told or not",
+         any("no such" in v[1] for v in (told, untold)), False),
+    ]
+    mib = 1 << 20
+    out += [
+        (f"{label} §7.4: an unlimited limit admits any pool", "admits any SHM pool" in live.memlock_note(-1), True),
+        (f"{label} §7.4: below 2 MiB the limit admits none", "it admits no SHM pool" in live.memlock_note(mib), True),
+        (f"{label} §7.4: the limit less 2 MiB, the largest pool it covers",
+         f"at most {14 * mib} bytes" in live.memlock_note(16 * mib), True),
+        (f"{label} §7.4: a limit the tool cannot read leaves the check unobservable",
+         live.memlock_said(lambda: (_ for _ in ()).throw(PermissionError("no"))).startswith(
+             "the memlock check is unobservable"), True),
+    ]
+    every = ["@stream", "@state", "@op", "@adv", "@zk"]
+    for sel, watched, excluded in (
+            ("zk2/g/**", ["stream", "state", "events"], every),
+            ("**", ["stream", "state", "events"], every),
+            ("zk2/g/*/*/@stream/**", ["@stream"], [k for k in every if k != "@stream"]),
+            ("zk2/*/*/*/@state/**", ["@state"], [k for k in every if k != "@state"]),
+            ("zk2/*/*/*/state/**", ["state"], every),
+            ("zk2/g/svc/zk2py_guard.v1/events/**", ["events"], every),
+            ("zk2/g/*/@zk/**", ["@zk"], [k for k in every if k != "@zk"])):
+        sc = echo_tool.scope_of(sel)
+        out.append((f"{label} §8.2: zk2py's echo tool over {sel} watches {watched} and states {excluded} excluded "
+                    f"(grammar.md §1 step 5)", [sc["watched"], sc["excluded"], all(k in sc["says"] for k in excluded)],
+                    [watched, excluded, True]))
+    # The steps' two contracts: no finding, W107 included, and the
+    # fingerprint the reference's CLI computes (round 83, `zk2 contract
+    # fingerprint`, run as a black box)
+    from .contract import load_contract
+
+    interop = root.parent.parent / "impl" / "python" / "interop"
+    for rel, fp in (("grammar/zk2py_guard.v1.toml",
+                     "sha256:a02ba26600adf38f98091e13ae7427bc1bb3f2df44c8985ed3cf7d293297e285"),
+                    ("operations/zk2py_frozen.v1.toml",
+                     "sha256:2d12b9d627171afa8c161afd2b9a7ea0ec928a0b4b93ce1a5bb577b3db87ef79")):
+        c = load_contract(interop / rel, check_file_name=True)
+        out.append((f"{label}: {rel}, a step's contract, loads with no finding and the reference CLI's fingerprint",
+                    (c.codes, c.fingerprint), ([], fp)))
+    # F-291 (open): observer §1 keeps not this profile's apart from NotAsked
+    # in every medium, "The profiles' fixtures give it as the token
+    # `not_this_profiles`"; three profiles' fixtures give it as not asked.
+    spec = root.parent
+
+    def cases(path: str) -> list[dict[str, Any]]:
+        return json.loads((spec / path).read_text())["cases"]
+
+    out += [
+        ("F-291: timing.v1's conclusions give not this profile's as a token of its own",
+         any(c.get("expect", {}).get("answer") == "not_this_profiles"
+             for c in cases("profiles/timing/conformance/conclusions.json")), True),
+        ("F-291: freshness.v1's judgements give its not this profile's (an event, an operation) as not asked, "
+         "reason kind",
+         sorted({json.dumps(c["expect"], sort_keys=True) for c in cases("profiles/freshness/conformance/judgements.json")
+                 if "not this profile's" in (c.get("note") or "")}),
+         ['{"reason": "kind", "verdict": "not_asked"}']),
+        ("F-291: telemetry.v1's samples give its not this profile's (a composite state) as not asked, reason "
+         "not_this_profiles",
+         [(c["expect"]["conformance"], c["expect"]["reasons"]) for c in cases("profiles/telemetry/conformance/samples.json")
+          if "not this profile's" in (c.get("note") or "")], [("not_asked", ["not_this_profiles"])]),
+        ("F-291: desired.v1 §2.17's not this profile's is not asked, not_a_target, in its slices",
+         any(c.get("expect", {}).get("report", {}).get("found") == "not_a_target"
+             for c in cases("profiles/desired/conformance/slices.json")), True),
+    ]
+    return out
 
 
 def _observer_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -3524,11 +3627,13 @@ def _observer_readings(root: Path) -> list[tuple[str, Any, Any]]:
     def unreadable() -> str:
         raise OSError("getrlimit refused")
 
-    out.append((f"{label} §7.4: a limit that cannot be read is said so, and the tool goes on",
-                live.memlock_said(unreadable), "the memlock limit could not be read: OSError: getrlimit refused"))
+    out.append((f"{label} §7.4: a limit that cannot be read leaves the check unobservable, said so, and the tool "
+                f"goes on (text 0.2, F-290)",
+                live.memlock_said(unreadable),
+                "the memlock check is unobservable: the limit could not be read: OSError: getrlimit refused"))
     out.append((f"{label} §7.4: any failure, not only the ones expected",
-                live.memlock_said(lambda: live.memlock_note("8 MiB")).startswith("the memlock limit could not be "
-                                                                              "read: TypeError: "), True))
+                live.memlock_said(lambda: live.memlock_note("8 MiB")).startswith(
+                    "the memlock check is unobservable: the limit could not be read: TypeError: "), True))
     return out
 
 

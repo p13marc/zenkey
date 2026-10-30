@@ -1,0 +1,44 @@
+# zk2py's contract for grammar.md §1, "The guard" (core §1.3): an owner
+# `zk2/g/svc` with a plain `stream`, an `@stream`, a `state`, an `@state`,
+# an `events` resource and an `@op` operation. Both streams are timed
+# (timing.v1), so a timing tool over the ambient `zk2/g/**` watches the
+# plain one and names the explicit one out of its reach (grammar.md §1
+# step 5; observer.md §8.2, text 0.2). Raw payloads throughout. It must
+# load with no finding at all.
+[interface]
+name    = "zk2py_guard"
+major   = 1
+minor   = 0
+summary = "grammar.md §1's owner: every kind token"
+uses    = ["timing.v1"]
+
+[resources.cmd]
+kind        = "stream"
+type        = { raw = "text/plain" }
+annotations = { "timing.period_ms" = 200, "timing.deadline_ms" = 1000 }
+
+[resources.frame]
+kind        = "stream"
+explicit    = true
+type        = { raw = "text/plain" }
+annotations = { "timing.period_ms" = 200, "timing.deadline_ms" = 1000 }
+
+[resources.level]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.secret]
+kind     = "state"
+explicit = true
+type     = { raw = "text/plain" }
+
+[resources.alert]
+kind      = "event"
+type      = { raw = "text/plain" }
+rate      = "burst(1000/h)"
+retention = "1h"
+
+[resources.reset]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
