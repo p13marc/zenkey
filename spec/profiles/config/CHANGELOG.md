@@ -70,7 +70,7 @@ conditions and scope.
 
 **The figures.**
 - **This text:** tags from 19 to none, sentences over 50 words from 5 to
-  none, and a mean from 18.74 words to 18.07.
+  none, and a mean from 18.74 words to 18.08.
 - **`scenarios.md`:** a mean from 11.19 to 11.16.
 
 `spec/.prose-baseline.json` is lowered to them.
