@@ -4555,8 +4555,6 @@ fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
     )
 }
 
-/// §7.4, locally: below the floor, an `@stream` writer's shared memory
-/// falls back to TCP and nothing tells its sender.
 /// What a soft `RLIMIT_MEMLOCK` of `limit` bytes admits, in words
 /// (`spec/observer.md` §7.4, text 0.2, F-290): a pool is a publisher's,
 /// which this tool does not know, so the check says the largest pool the
@@ -4572,6 +4570,8 @@ fn pool_admitted(limit: u64) -> String {
     }
 }
 
+/// §7.4, locally: below the floor, an `@stream` writer's shared memory
+/// falls back to TCP and nothing tells its sender.
 fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
     const C: CheckId = CheckId::ShmMemlockLow;
     const MIB: u64 = 1024 * 1024;
