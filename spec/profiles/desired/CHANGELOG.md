@@ -88,7 +88,9 @@ and nothing else. This is #935's fourth part, beside `alarms.v1` and
 - **§2.13** is the cardinality, then the budget.
 - **§2.16:** "Fed through this profile" is three sentences. The report's
   mapping is a list of its three members. "What a delete reverts it to"
-  is three sentences, and its revert two.
+  is three sentences, and its revert two. Its "a refused document's
+  aside" is a sentence of its own, "A document it refused counts for
+  none", as `config.v1` 0.7 says it for zk2py round 86's F-331.
 - **§2.17:** steps 1 and 2 are lists of their answers. The author's
   contract is a list of its two sources. "The slice from the target
   alone" is five sentences. "A requirement unread" and the revision in
