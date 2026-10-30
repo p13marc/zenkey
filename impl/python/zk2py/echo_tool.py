@@ -1,13 +1,14 @@
 """A generic watcher: ``python -m zk2py.echo_tool -c ENDPOINT [--for SECS]
-[--count N] [SELECTOR]`` (#609, round 83).
+[--count N] [--format json|ndjson] [SELECTOR]`` (#609, rounds 83 and 84).
 
-Written from ``spec/observer.md`` §8.1 and §8.2 (text 0.2) and
-``spec/scenarios/grammar.md`` §1 step 5 (core 0.59, F-287), as a tool's
-implementer reads them. It subscribes to ``SELECTOR``, base-relative and in
-no namespace (``zk2/**`` by default), on a callback (observer §3.1's
-handlers bind no data subscriber, but a callback keeps nothing bounded),
-for ``--for`` seconds or until ``--count`` samples, and prints one JSON
-document:
+Written from ``spec/observer.md`` §8.1 and §8.2 (text 0.2; the medium, text
+0.3, F-292) and ``spec/scenarios/grammar.md`` §1 step 5 (core 0.59, F-287),
+as a tool's implementer reads them. It subscribes to ``SELECTOR``,
+base-relative and in no namespace (``zk2/**`` by default), on a callback
+(observer §3.1's handlers bind no data subscriber, but a callback keeps
+nothing bounded), for ``--for`` seconds or until ``--count`` samples.
+
+With ``--format json``, the default, it prints one JSON document:
 
 - ``samples``: each sample as it arrived, its key, its kind token where the
   key parses as zk2 (core §1.1), its byte count and its encoding. A key that
@@ -18,8 +19,15 @@ document:
   names), and the verbatim kinds it **excludes** (:func:`zk2py.live.blind_spots`),
   with the sentence observer §8.2 asks of it: "A tool that offers a
   wildcard scope either names the verbatim kinds it watches beside it, or
-  states that they are excluded." The same sentence goes to standard
-  error before it listens, so a person reading either medium has it.
+  states that they are excluded, in every medium it writes: a field of its
+  report, or, for a stream of rows that has no place for one (NDJSON), its
+  standard error." The same sentence goes to standard error before it
+  listens, so a person reading either medium has it.
+
+With ``--format ndjson`` it prints each sample as one JSON line as it
+arrives, the rows of ``samples`` and nothing else: a stream of rows has no
+place for the scope, so standard error states it (:func:`scope_line`),
+before the first row, whatever the format (observer §8.2, text 0.3).
 
 It judges nothing, so it exits 0 once it has watched, and 2 when it could
 not (the session did not open, or the selector is not a key expression).
@@ -64,28 +72,46 @@ def scope_of(selector: str) -> dict[str, Any]:
     return {"selector": selector, "watched": watched, "excluded": excluded, "says": says}
 
 
+def scope_line(scope: dict[str, Any]) -> str:
+    """What standard error says of a scope, in every format: what it
+    watches and what it excludes (observer §8.2). In NDJSON it is the only
+    medium that says it."""
+    return f"echo: watching {', '.join(scope['watched']) or 'no kind'}; {scope['says']}"
+
+
+def row_of(key: str, delete: bool, size: int, encoding: str) -> dict[str, Any]:
+    """One sample's row, the same in the JSON document's ``samples`` and as
+    an NDJSON line: its key, whether it is zk2, its kind token (``None``
+    for a key that is not zk2, a fact and not an error, observer §8.1)."""
+    from . import keys
+
+    parsed = keys.parse(key)
+    return {"key": key, "zk2": parsed is not None,
+            "kind": parsed.get("token") if parsed and parsed.get("form") == "data" else None,
+            "delete": delete, "bytes": size, "encoding": encoding}
+
+
 def watch(session: Any, selector: str, window_s: float, count: int = 0,
-          listening: Any = None) -> list[dict[str, Any]]:
+          listening: Any = None, each: Any = None) -> list[dict[str, Any]]:
     """Every sample the selector delivers within the window, or until
     ``count`` of them, in arrival order; ``listening`` is called once the
-    subscriber is declared, the window's start."""
+    subscriber is declared, the window's start, and ``each`` with every
+    row as it arrives, under the lock that orders them."""
     import zenoh
-
-    from . import keys
 
     got: list[dict[str, Any]] = []
     done = threading.Event()
     lock = threading.Lock()
 
     def received(s: Any) -> None:
-        key = str(s.key_expr)
-        parsed = keys.parse(key)
-        row = {"key": key, "zk2": parsed is not None,
-               "kind": parsed.get("token") if parsed and parsed.get("form") == "data" else None,
-               "delete": s.kind == zenoh.SampleKind.DELETE, "bytes": len(s.payload.to_bytes()),
-               "encoding": str(s.encoding)}
+        row = row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(s.payload.to_bytes()),
+                     str(s.encoding))
         with lock:
+            if count and len(got) >= count:
+                return
             got.append(row)
+            if each is not None:
+                each(row)
             if count and len(got) >= count:
                 done.set()
 
@@ -106,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-c", "--connect", required=True)
     ap.add_argument("--for", dest="window", type=float, default=5.0)
     ap.add_argument("--count", type=int, default=0)
+    ap.add_argument("--format", choices=("json", "ndjson"), default="json")
     args = ap.parse_args(argv)
     try:
         scope = scope_of(args.selector)
@@ -117,14 +144,21 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:  # noqa: BLE001 - no session, no watch
         print(f"echo: the session did not open: {e}", file=sys.stderr)
         return 2
-    print(f"echo: watching {', '.join(scope['watched']) or 'no kind'}; {scope['says']}", file=sys.stderr, flush=True)
+    print(scope_line(scope), file=sys.stderr, flush=True)
+
+    def line(row: dict[str, Any]) -> None:
+        print(json.dumps(row), flush=True)
+
     try:
         start = time.monotonic()
         samples = watch(session, args.selector, args.window, args.count,
-                        lambda: print("echo: listening", file=sys.stderr, flush=True))
+                        lambda: print("echo: listening", file=sys.stderr, flush=True),
+                        line if args.format == "ndjson" else None)
         watched_s = round(time.monotonic() - start, 3)
     finally:
         live.close(session)
+    if args.format == "ndjson":
+        return 0
     doc = {"report": "echo", "selector": args.selector, "scope": scope, "window_s": watched_s,
            "samples": samples, "notes": [scope["says"]], "exit": 0}
     print(json.dumps(doc, indent=2))
