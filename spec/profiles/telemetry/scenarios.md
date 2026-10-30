@@ -82,12 +82,16 @@ a real face (`zenctl/tests/live_zk2.rs`,
   - "R reads" a sample: v1.md §2.6, against the resource's declaration.
   - "R pairs": §2.9 to §2.11, over each two consecutive conforming samples
     of a member, in arrival order. Its presence is what R saw after its
-    complete read: alone throughout when exactly one instance token was
-    held at every instant from before the earlier arrival to after the
-    later one's, with no liveliness event lost; earlier and later the only
-    token held at each arrival. The read finds the tokens held when it is
-    made, and the subscription's moves are folded after it, the
-    subscription's word winning where the two disagree.
+    complete read, one of two:
+    - alone throughout: exactly one instance token was held at every
+      instant from before the earlier arrival to after the later one's,
+      with no liveliness event lost;
+    - earlier and later: the only token held at the earlier arrival, and
+      the only one held at the later.
+
+    The read finds the tokens held when it is made, and the
+    subscription's moves are folded after it, the subscription's word
+    winning where the two disagree.
 - **R0** subscribes to the same data keys, and reads no presence: it pairs
   with none (§2.9, 3), as a reader across a constrained face does
   (§2.14).

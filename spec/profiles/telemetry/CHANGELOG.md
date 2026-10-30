@@ -4,6 +4,53 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-30: editorial: round 87's F-339 and F-340, no rule changed (#935)
+
+zk2py round 87 (PR #961) read 0.6 cold, beside `alarms.v1` 0.9 and
+`desired.v1` 0.9. It found that 0.6 changed no rule, and filed two
+findings against this text, F-339 and F-340, both hard to read. This is
+#935's fifth part. Each rewrite is the finding's, and keeps its keyword,
+condition, scope and evidence.
+
+**Editorial: round 87's hard-to-read findings.**
+- **F-339, §2.9 step 2, presence.** "So that what it saw between two
+  arrivals is what it saw" restated itself, and the colon after it led
+  to the two established epochs, which are not what it saw. It is now
+  three sentences. The reader folds the tokens' moves and the samples
+  into one sequence, in the order it received them. "So the presence it
+  holds between two arrivals is the presence it received between them."
+  "From that view:" leads to the two items, unchanged.
+- **F-340, the scenarios' conventions, "R pairs".** A list ran into one
+  sentence, its second item with no verb: "earlier and later the only
+  token held at each arrival". R's presence for a pair is now "one of
+  two", a list:
+  - alone throughout: exactly one instance token held at every instant
+    from before the earlier arrival to after the later one's, with no
+    liveliness event lost;
+  - earlier and later: the only token held at the earlier arrival, and
+    the only one held at the later.
+
+  The sentence after it, how the read and the subscription's moves are
+  folded, follows as a paragraph of the same item.
+
+**How "no rule changed" was checked**, as for 0.6, with the tool of
+#935's third part. This text's 27 keyword sentences are unchanged, and
+so are the scenarios' 50 keyword sentences and Expected lines. Of every
+sentence and table row, the text's changed ones are the header and
+F-339's sentence, now three, and the scenarios' F-340's, now three. Each
+was read beside its old text. No fixture moved.
+
+**The figures.**
+- **This text:** a mean from 16.96 words to 16.88.
+- **`scenarios.md`:** a mean from 13.74 to 13.6.
+
+Neither has a sentence over 50 words or a tag. `spec/.prose-baseline.json`
+is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Written against core 0.35**, still.
+
 ## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60
