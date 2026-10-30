@@ -966,8 +966,9 @@ exits by:
 
 An owner is **known whole** by a complete GET it answered, or by a complete,
 empty one and a lossless window longer than 900 s, the owner present
-throughout: `--for 905` listens that long, then a lease and the timeout more
-while the owners are watched (core §2.7). The **owners in scope** are those
+throughout: `--for 905` listens that long, then the longer of `--lease` and
+`--wait-before-close`, and the timeout, more while the owners are watched
+(observer §5.2). The **owners in scope** are those
 presence finds, and those an archive's keys name — absent, so not asked, and
 never "nothing fires". A reply's stamp is aged against a trusted clock:
 `--clocks-synced` is the deployment's word, or the window measures one on a

@@ -4,6 +4,58 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it, as in
+"(0.2)". This changelog and the core's already hold that history, so the
+text now states each rule and cites its evidence, and nothing else. This
+is #935's third part, beside `freshness.v1`, `hostid.v1`, `config.v1`
+and `link.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions.** "(0.2)" is gone from three bullets of §2.5:
+  the fault's stamp, "An owner that sets the stamp itself", and "A
+  simulated offset is not a drift".
+- **The core's version.** §2.3's "the core keeps its SHOULD (core 0.23)"
+  is "the core keeps its SHOULD".
+- **An issue.** Appendix B's zenwatch row said that zenwatch implements
+  `zenwatch.v1` "since #614's FL3". It now says that zenwatch implements
+  it.
+- **The scenarios.** Their conventions' "T's clock (0.2)" and §4's
+  "Without root (0.2)" are run-in labels alone. §5 to §7 cite "the
+  conventions" without "0.2", and the opening paragraph names the
+  reference's tests without "#721, PE" and "#721, PF".
+
+**The long sentence, split.** §2.2's SHOULD, that a tool reports a
+status better than a check from two readings a grace apart, ended in its
+reason after a colon. The reason is a sentence of its own, "In one
+reading, a reader that pairs …". The SHOULD keeps its words.
+
+**Nothing moved to an appendix.** §2.5's measurement, a stamp 2 s ahead
+re-stamped on zenoh 1.10.1, carried no tag and states the ground of its
+bullet, which holds no keyword. This text has no appendix of
+measurements, so it stays where it is.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61. Every
+sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT, MAY or RECOMMENDED
+was extracted before and after, keyed by section, and the two sets
+diffed. Both hold 27. 24 are unchanged, two lost a tag only (§2.3's and
+§2.5's MAY), and §2.2's SHOULD lost its reason to a sentence of its own.
+The scenarios' 44 such sentences and Expected lines are unchanged. No
+fixture moved.
+
+**The figures.** This text's tags went from 5 to none, its sentences
+over 50 words from 1 to none, and its mean from 15.02 words to 14.95.
+`scenarios.md`'s tags went from 4 to none, and its mean from 13.75 to
+13.70. `spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, which is history.
+- **Written against core 0.23**, still, and the header's "uses
+  `freshness.v1`, text 0.2".
+
 ## 0.4 — 2026-10-10: zenwatch's row cites its v1 source and its zk2 home (#614)
 
 #614's FL3 made zenwatch a zk2 service: `zenwatch/src/publish.rs` on

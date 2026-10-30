@@ -154,8 +154,9 @@ run lost nothing, and the resource is reliable with block, which no
 router queue drops. A best-effort or drop resource's window never
 is, whatever its length, and its case names the QoS. A window's span
 counts from its subscription plus --timeout, and the owner is
-watched --lease and --timeout past its end, where a window could
-pass. Over the same span this run watches itself (0.27): a transport
+watched past its end, where a window could pass: the longer of
+--lease and --wait-before-close, and --timeout (observer §5.2).
+Over the same span this run watches itself (0.27): a transport
 of its own session that closed, or a stall of its process longer
 than --wait-before-close (or --lease less one keep-alive), means a
 router may have given up on it, and no window is lossless.
@@ -217,12 +218,12 @@ Options:
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a state reply's stamp is then aged against this clock (freshness.v1 §2.6). Without it, a stamp is aged only against a clock this run measured on a live put
 
       --lease <SECS>
-          The deployment's link lease, seconds (zenoh's `transport/link/tx/lease`): a path gone silent withdraws the owner's token only when it runs out, so a window that could pass is followed by this, and --timeout, of watching the owner (spec §2.7, 0.25)
+          The deployment's link lease, seconds (zenoh's `transport/link/tx/lease`): a path gone silent withdraws the owner's token only when it runs out, so a window that could pass is followed by this, or --wait-before-close when longer, and --timeout, of watching the owner (spec §2.7, 0.25; observer §5.2)
           
           [default: 10]
 
       --wait-before-close <SECS>
-          The routers' wait_before_close, seconds (zenoh's `transport/link/tx/queue/congestion_control/block/wait_before_close`): a router waits that long on this run's full queue, then closes the transport. A window is lossless only if this run never stalled longer than it, nor than --lease less one keep-alive (spec §2.7, 0.27)
+          The routers' wait_before_close, seconds (zenoh's `transport/link/tx/queue/congestion_control/block/wait_before_close`): a router waits that long on this run's full queue, then closes the transport. A window is lossless only if this run never stalled longer than it, nor than --lease less one keep-alive (spec §2.7, 0.27). A router that waits it tells a withdrawal that late, so where it is longer than --lease, a window's owner is watched for it (observer §5.2)
           
           [default: 5]
 

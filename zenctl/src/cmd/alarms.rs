@@ -73,12 +73,16 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     // The line comes once the window opens (#819 TE, as zk2py round 47's
     // F-154 found of `telemetry`): the subscriptions declared and the first
     // refresh read after them, so a put once it is read is heard.
-    let tail = (spec.lease + dep.timeout()).as_secs_f64();
+    // The watch after the window: the longer of --lease and
+    // --wait-before-close, and --timeout (observer §5.2, zk2py round 85's
+    // F-320).
+    let tail = spec.book().tail().as_secs_f64();
     let listening = move || {
         if let Some(w) = window {
             eprintln!(
                 "alarms: listening {}s to the alarms and the owners' tokens, then {tail}s more \
-                 while the owners are watched (--for, --lease and --timeout)",
+                 while the owners are watched (--for, the longer of --lease and \
+                 --wait-before-close, and --timeout)",
                 w.as_secs_f64(),
             );
         }

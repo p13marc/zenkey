@@ -4,6 +4,105 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it and the
+finding that caused it, as in "(0.4, F-120)", and some told their
+history as text: "0.2's block", "Under 0.4". This changelog and the
+core's already hold that history. So the text now states each rule and
+cites its evidence, and nothing else. This is #935's third part, beside
+`freshness.v1`, `health.v1`, `hostid.v1` and `config.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **Version and finding tags.** Every "(0.N, F-n)" and "(0.N)" is gone
+  from §2.1's table, §2.2 to §2.4, §2.7, §2.13, §2.15, §5's rows and
+  Appendix B. Most opened a run-in label, which now stands alone.
+- **The core's versions.** "(core 0.29)" is gone from §1's table and §4,
+  and "(core 0.30)" from §2.5. §2.8's "(core 0.29 removed the interim
+  `link.downsample_ms`)" says why the contract states no rate: a
+  contract that writes `link.downsample_ms` draws W105 (§4).
+- **History told as text,** now said as what it is:
+  - §2.4's measurement "under 0.2's block" is "under a block that
+    narrows no subject";
+  - §2.4's "That is F-87's mechanism (core §11.2), which kept 0.1 and 0.2
+    from defining a face subject at all" names the mechanism: the one for
+    which core §11.2 compiles "every principal" into each principal's own
+    policy;
+  - §2.4's MAY loses "(0.2 allowed it in both postures)";
+  - §2.14's "What 0.1 gives instead" is "What this text gives instead";
+  - §2.15's "Under 0.4 such a subject … made that policy one the face
+    subject could ride" is the reason a subject naming both kinds adds no
+    policy: counted as the far principal's, it would;
+  - §2.15's "(core §11.2, F-87)" cites the section alone;
+  - Appendix B loses "Its plan is unchanged by 0.3" and "(…, 0.2)", and
+    "0.7's among them" is "`block_disabled` among them".
+- **The scenarios.** The opening's list of chunks and versions is gone,
+  and so are the tags of the conventions, §1, §2, §7 to §13. §5 keeps its
+  tag's reason: a GET of each granted selector, never `state/**`, which
+  no grant includes. §7's "0.2's block" is "a block with no subject
+  narrowed", and its "0.3's" is "the generator's block". §11 opens with
+  the rule it tests, from v1.md §2.4 and §2.15, where it said what 0.4
+  read. Its steps lose "F-121 (i)" and "F-121 (ii)", and its Expected 9
+  loses what 0.4 reported: "The tool reports:" heads the same list.
+
+**The long sentences, split.** The nine over 50 words in this text:
+- **§2.4, "One principal per subject",** is three sentences: the rule,
+  zenoh's matching, and what the other's session gets.
+- **§2.4, "And no further",** is the rule, then its measurement.
+- **§2.4, a far principal of two faces.** The reason is three
+  sentences, and the measurement an item of four sentences.
+- **§2.5, the south region's grant,** is the reason, then the
+  requirement.
+- **§2.15, `block_disabled`'s measurement,** is two sentences.
+- **§2.15, "the far principal's" subject,** is the definition, then its
+  two forms.
+- **§2.15, `narrowed_too_far`'s "Why",** is the case, then its
+  measurement.
+- **§2.15, "A subject naming both kinds",** is the rule, then each
+  measured session.
+
+The scenarios' three: the opening, the conventions' generator, and §11
+Expected 7's second case, each now two or three sentences.
+
+**Sentence starts.** A sentence that began with "zenoh" now begins with
+"Zenoh", as the core writes it. The prose check reads a sentence only
+from a capital, so a lowercase start merged two sentences in its count.
+
+**Nothing moved to an appendix.** This text has no appendix of
+measurements. Each measurement stays beside its rule, as a sentence or
+an item of its own, without a tag.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY or RECOMMENDED was extracted before and after. Each was keyed
+  by section, and the two sets diffed. The scenarios' Expected lines were
+  diffed too, keyword or not.
+- **This text.** Both sets hold 23. 22 are unchanged, and §2.4's MAY lost
+  its history only.
+- **The scenarios.** Both hold 126 keyword sentences and Expected lines.
+  119 are unchanged, and three lost a tag only. §7's Expected 6 lost its
+  history, §11's Expected 7 is two sentences, and §11's Expected 9 lost
+  what 0.4 reported.
+- **The rest.** Every other sentence was diffed too, and each rewrite
+  read beside its old text. None moves a condition, an object or a
+  scope. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 47 to none, sentences over 50 words from 9 to
+  none, and a mean from 20.58 words to 19.52.
+- **`scenarios.md`:** tags from 18 to none, sentences over 50 words from
+  3 to none, and a mean from 15.04 to 14.60.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, which is history: its "(F-87)", "(F-118)" and "(§2.4,
+  0.3)" stay.
+- **Written against core 0.32**, still, and the header's `freshness.v1`
+  text 0.3.
+
 ## 0.8 — 2026-10-21: the counter is `telemetry.v1`'s (#819, TA)
 
 `telemetry.v1` text 0.1 defines the counter type and its epoch that §2.13

@@ -4,6 +4,26 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8, read against observer.md 0.6 (2026-10-30, #935): the watch after a window
+
+zk2py round 85 found observer §5.2's watch after a window ambiguous
+(F-320). It did not say how long a `wait_before_close` longer than the
+lease makes it. Observer 0.6 settles it: the longer of one lease and the
+routers' `wait_before_close`, plus the reply timeout. A router that
+waits `wait_before_close` before it closes a transport tells the
+withdrawal that late.
+- **§2.15's span** said the owner is watched "one lease and the reply
+  timeout past the end". It now says it is watched as observer §5.2
+  says, and spells that length.
+- **The scenarios' §10 step 2** said its owners are watched "a lease and
+  the reply timeout past it". It now cites observer §5.2.
+
+The text keeps its version, as it did for core 0.38's F-187. The rule is
+observer §5.2's, which this text restated. Under zenoh's defaults, a 10 s
+lease and a 5 s `wait_before_close`, the length is the same. The
+reference's book watches the same (`BookSpec::tail`), and so does
+`zenctl alarms --for`. No fixture moved.
+
 ## 0.8, read against core 0.38 (2026-10-24, #849): one wording fix
 
 The second implementation read core 0.37 cold (zk2py round 54) and found

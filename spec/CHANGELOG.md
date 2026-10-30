@@ -3,6 +3,40 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.62 — 2026-10-30: editorial: round 85's F-322 and F-323, no rule changed (#935)
+
+zk2py round 85 (PR #957) read 0.61 and `observer.md` 0.5 cold. It found
+that 0.61 changed no rule, and filed F-315 to F-323. This version answers
+the core's two, both hard to read. `observer.md` moves to text 0.6
+beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), written
+against this version. It answers the rest, F-320's watch after a window
+among them. This is #935's third part (epic #921 Track B), beside the
+texts of `freshness.v1`, `health.v1`, `hostid.v1`, `config.v1` and
+`link.v1`.
+
+**Editorial: round 85's hard-to-read findings, no rule changed.**
+- **F-322, §4.2's "Observing S1".** 0.61's split left "It checks the
+  check" after the owner, a router and a stamp. It is now "The tester
+  checks the check".
+- **F-323, §8.5.** "For a state GET that is the owner's state
+  queryables" read as a GET that is queryables. It is now "The
+  queryables the grant covers are:", then a list of three: a state
+  GET's, a call's and an archive's.
+
+**How "no rule changed" was checked**, as for 0.61. Every sentence
+holding MUST, MUST NOT, SHOULD, SHOULD NOT, MAY or RECOMMENDED was
+extracted before and after, keyed by section, and the two sets diffed.
+Both hold 152, and all 152 are unchanged. The two rewrites hold no
+keyword, and were read beside them. No fixture moved, and no scenario.
+
+**The figures.** This text's mean went from 16.51 words to 16.48, with
+no sentence over 50 words and no tag. `spec/.prose-baseline.json` is
+lowered to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, and this changelog's earlier entries.
+
 ## 0.61 — 2026-10-30: editorial: round 84's hard-to-read findings and the long sentences, no rule changed (#935)
 
 zk2py round 84 (PR #955) read 0.60 and `observer.md` 0.4 cold. It found

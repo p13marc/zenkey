@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the watch after a window: the longer of `--lease` and `--wait-before-close` (#935, F-320)
+
+Observer text 0.6 settles §5.2 (zk2py round 85's F-320): after a window,
+a tool watches the owner's instance tokens for the longer of one lease
+and the routers' `wait_before_close`, plus the reply timeout. A router
+that waits `wait_before_close` before it closes a transport tells the
+withdrawal that late. The reference watched the lease alone.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`'s window: the owner watched `--lease` + `--timeout` past its end | the longer of `--lease` and `--wait-before-close`, + `--timeout` | the same under zenoh's defaults (10 s and 5 s); `--lease 1` beside the default `--wait-before-close` watches 6 s, not 2 s |
+| `alarms --for`: then `--lease` + `--timeout` more | the same rule, and its "listening" line names both flags | |
+| a window watched too short: "short of the lease and the reply timeout (…)" | "short of the longer of the lease and wait_before_close, and the reply timeout (…)" | |
+
 ## Unreleased (`main`, zk2) — `--explicit`: a capture that opts into `@stream` and `@state` (#924)
 
 Core §1.3's guard keeps the explicit kinds off every wildcard, so a

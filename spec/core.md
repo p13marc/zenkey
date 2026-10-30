@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.61** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.62** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -908,9 +908,9 @@ owner's session's zid, against the router's (§4.1). Where the owner's
 session is itself the router, the two zids are one, and the check proves
 nothing. A tester therefore runs the owner as a client of a router with
 timestamping enabled, which keeps the stamp a put carries unless it is
-future-dated (§4.1). It checks the check against a control: a put without
-a timestamp, from a session whose HLC is not enabled (§4.1), through
-the same router, arrives with the router's zid.
+future-dated (§4.1). The tester checks the check against a control: a
+put without a timestamp, from a session whose HLC is not enabled (§4.1),
+through the same router, arrives with the router's zid.
 `[Sc: state.md §1]`
 - **A tool's S1 check**: [`observer.md`](observer.md) §4.4.
 
@@ -1809,11 +1809,14 @@ facts.
   `declare_queryable` on egress over every queryable its side may query,
   as the owner declares it. A declaration is checked by inclusion against
   the queryable's own key expression (§11.3), which the far side's
-  selectors need not include. For a state GET that is the
-  owner's state queryables over `state/**` and `@state/**` (S2); for a
-  call, the operation's queryable on its concrete key or over its template
-  (O1), `@op/set/*` for a call of `set/duty`; for an archive, its `@state`
-  forms (§4.4). Without that grant, its queries are never routed.
+  selectors need not include. The queryables the grant covers are:
+  - for a state GET, the owner's state queryables over `state/**` and
+    `@state/**` (S2);
+  - for a call, the operation's queryable on its concrete key or over its
+    template (O1): `@op/set/*` for a call of `set/duty`;
+  - for an archive, its `@state` forms (§4.4).
+
+  Without that grant, its queries are never routed.
   `[Sc: link.v1 scenarios §2]`
 - **Access control is per hop** (§11.3). The near router sees the far
   router as one principal, carrying the union of the grants the far side's

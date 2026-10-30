@@ -3,9 +3,9 @@
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §12 are the runtime's,
-and run as tests of `zenkey`, one test per section, named after it (#768,
-CB). §13 and §14 are a deployment's and a tool's, and run as tests of the
-tool that reads `config.v1` (#768, CC).
+and run as tests of `zenkey`, one test per section, named after it. §13
+and §14 are a deployment's and a tool's, and run as tests of the tool
+that reads `config.v1`.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.9) are v1.md's rules; core

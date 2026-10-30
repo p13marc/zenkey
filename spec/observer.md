@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.5 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.6 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.61 ([`core.md`](core.md)) |
+| **Written against** | core 0.62 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -87,9 +87,11 @@ Unestablished(NotAsked) | Unestablished(Unobservable { reason })
   Both poles are answers, and each claims evidence.
 - **NotAsked:** nobody put the question. No contract was retrieved, no
   window ran, the flag was not passed. The tool has learned nothing, and
-  renders nothing, never the negative answer. A profile can also spell
-  not this profile's as NotAsked (below): there the question was put, and
-  its premise does not hold.
+  renders no answer, never the negative one.
+  - A profile can also spell not this profile's as NotAsked (below).
+    There the question was put, and its premise does not hold. What this
+    bullet says of NotAsked does not hold of that spelling, and asking
+    again does not cure it.
 - **Unobservable:** the question was put, and the observation could not be
   had. The session did not open, the bundle did not verify, the bytes did
   not decode. The `reason` is part of the verdict: it names what stood in
@@ -228,7 +230,7 @@ re-minting and the caller's timeouts stay in core §8.1.
     reads can then be complete (core Appendix B).
     - A reader that asks each GET with its own timeout at or above the
       interests timeout (§3.7) bounds its own wait for the read apart
-      from that timeout.
+      from the GET's own timeout.
     - This rule measures that bound, never the GET's own timeout: such a
       reader meets it when the longest it waits is below the interests
       timeout.
@@ -387,13 +389,13 @@ re-minting and the caller's timeouts stay in core §8.1.
     subtree the subscribers read, so a grant that admits them admits it
     (core §11.1). `[Sc: presence.md §10]`
   - **The watch session's subscribers SHOULD have no history** when
-    their reader seeds by a read on its other session: the round trip's
-    final reply follows their history, so with history it waits for the
-    population, and without it is one round trip (core Appendix B). The
-    seed reads what is
-    held, and a token declared before the subscribers and withdrawn
-    after the round trip is still heard going: the router tells its
-    withdrawal by its key. `[Sc: presence.md §10]`
+    their reader seeds by a read on its other session. The round trip's
+    final reply follows their history. So with history the round trip
+    waits for the population, and without history it is one round trip
+    (core Appendix B). The seed reads what is held, and a token declared
+    before the subscribers and withdrawn after the round trip is still
+    heard going: the router tells its withdrawal by its key.
+    `[Sc: presence.md §10]`
   - **In a namespace, a watch session in no namespace, on the wire
     keys.** A router tells the withdrawal of a token declared before the
     subscribers, and withdrawn after the round trip, by the token's key
@@ -471,8 +473,9 @@ re-minting and the caller's timeouts stay in core §8.1.
       the first after each reopen of its transport, which waits for the
       reopening's telling; once that has been sent the next is one round
       trip again.
-      - A reader SHOULD wait for the round trip after a move, and run
-        its interests timeout, above that time at its population: about
+      - After a move, a reader SHOULD wait for the round trip longer
+        than the reopening's telling takes at its population. It SHOULD
+        run its interests timeout above that time too. That time is about
         what a session's first read of the population costs, every
         matching token sent once. A later read of it costs far less, and
         a read after a reopen is a later read (core Appendix B). So a
@@ -494,10 +497,10 @@ re-minting and the caller's timeouts stay in core §8.1.
         A reader SHOULD NOT ask a round trip while one it asked since
         its watch session's transport last moved is in flight. It SHOULD
         NOT ask a read while one it asked of the same scope is in flight.
-        The next that needs one takes up the one in flight, whichever
-        wait ended first, its caller's or the reader's own. A reader that
-        asks again instead can ask read after read and fold none (core
-        Appendix B).
+        When the reader next needs a round trip, or a read of that scope,
+        it takes up the one in flight. It does so whichever wait for that
+        one ended: its caller's, or its own. A reader that asks again
+        instead can ask read after read and fold none (core Appendix B).
         - **In flight is at the reader**: from the GET's
           ask until its final reply reaches the reader. A GET that its
           own timeout ends is over for the reader: zenoh hands the reader
@@ -765,7 +768,7 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
   queue dropped leaves no trace at a subscriber (core Appendix B). A window
   lost no delivery when both hold:
   1. **Its reader lost none.** Over the window and the watch after it
-     (one lease and the reply timeout, below):
+     (below):
      - its own queue neither overflowed nor fell behind, and no delivery
        was kept out of its count by a cap;
      - **no transport of its session closed.** A router that gives
@@ -838,11 +841,16 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
   that goes silent withdraws it only when its lease runs out, and the
   deliveries put meanwhile are lost (core Appendix B). So a failure in the
   window's last lease is seen after the window ends. After the window's
-  end, a tool watches the owner's instance tokens for one lease plus its
-  reply timeout. The lease is 10 s by default, and the reply timeout
-  allows for the withdrawal's transit. A deployment that sets a longer
-  lease, or a `wait_before_close` longer than its lease, lengthens it.
+  end, a tool watches the owner's instance tokens for the longer of one
+  lease and the routers' `wait_before_close`, plus its reply timeout.
   `[Sc: budget.md §2]`
+  - **The lease** is the deployment's, 10 s by default.
+  - **`wait_before_close`** is the deployment's too, 5 s by default. A
+    push that cannot queue within it closes its transport (core Appendix
+    B, "What a path drops"). So a router that waits it before closing a
+    transport tells the withdrawal that late, when it is longer than the
+    lease.
+  - **The reply timeout** allows for the withdrawal's transit.
 - **A window counts from its subscription reaching the owner.** A
   sample the owner put before its router knew of the subscription was
   never routed to it, and no reader can see that moment. A tool counts a
@@ -1040,10 +1048,11 @@ what it could not. `[F: keys.json]` `[Sc: state.md §11]`
 That guard is a gift, and a trap (core §1.3). A tool that offers a
 wildcard scope does one of two things, in every medium it writes:
 - it names, beside the scope, the verbatim kinds it watches;
-- or it states that they are excluded.
+- or it states that the verbatim kinds are excluded.
 
-A report carries it in a field. A stream of rows with no place for a
-field (NDJSON) carries it on the tool's standard error.
+A report carries the names or the statement in a field. A stream of rows
+with no place for a field (NDJSON) carries them on the tool's standard
+error.
 `[Sc: grammar.md §1]`
 
 **Everything is three selectors.** Positions 1–5 of a zk2 key have fixed

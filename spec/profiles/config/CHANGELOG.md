@@ -4,6 +4,83 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it and the
+finding that caused it, as in "(text 0.3, F-114)". This changelog and the
+core's already hold that history. So the text now states each rule and
+cites its evidence, and nothing else. This is #935's third part, beside
+`freshness.v1`, `health.v1`, `hostid.v1` and `link.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions.** "(text 0.3)" is gone from §2.3, §2.9, §2.12,
+  §2.14 and §2.18. So are "(text 0.3, F-115)" in §2.5, "(text 0.3,
+  F-114)" and "(text 0.4, F-171)" in §2.18, and "(text 0.5)" in §2.18
+  and §5's last row.
+- **A reason kept.** §2.18 opened with "(config.v1 text 0.4: an owner fed
+  through `desired.v1` acts as its §2.7 says, below; text 0.5, F-182:
+  …)". Its reason is a sentence of its own: "An owner fed through
+  `desired.v1` acts as its §2.7 says (below)." F-182's note was about the
+  tag itself, and went with it.
+- **Another tag in §2.18.** "(config.v1 text 0.4, F-172)" is gone from
+  the report's mapping, and "(its text 0.3)" from the citation of
+  `desired.v1` §2.16.
+- **The core's versions.** "(core §5.1, 0.28)" in §2.16 and "(core §2.7,
+  0.28)" in §2.17 cite the section alone. "(0.28)" is gone from §2.13's
+  sixth refusal.
+- **§0's references.** "(the binding, #623)" is "(the binding)". The
+  references to the architecture are listed in another order, "its §4.8
+  and §4.10, its §0.2 and its decisions D11 and D12". The check reads a
+  `0.N` before a comma as a version, and "§0.2," was one.
+- **Appendix B.** "(text 0.3; 0.2 said review)" is gone from the fourth
+  kind.
+- **The scenarios.** Their opening names the reference's tests without
+  "(#768, CB)" and "(#768, CC)".
+
+**The long sentences, split.** The five over 50 words:
+- **§2.5, the core's refusals,** are a list of four, each with its
+  refusal.
+- **§2.5, "Why this order",** is a list of five, in the same order.
+- **§2.18, "Fed through `desired.v1`",** is three sentences: whom it
+  binds, the act on each version, and the adoption.
+- **§2.18, "A delete",** is three sentences: the revert, what it puts
+  back, and how.
+- **Appendix B's fourth kind.** The parenthesised reason follows a colon,
+  and "So a fourth kind is a new major" is a sentence.
+
+The MUST that follows §2.5's list said "the first of these", which would now
+read as the list above it. It says "the first of the checks below", the
+table it always meant. The rest hold no keyword, and keep their
+conditions and scope.
+
+**Nothing moved to an appendix.** No rule held a measurement.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY or RECOMMENDED was extracted before and after. Each was keyed
+  by section, and the two sets diffed.
+- **This text.** Both sets hold 39. 38 are unchanged: every tag sat in
+  a sentence with no keyword, or in a run-in label. §2.5's MUST names
+  the checks below, as said above.
+- **The scenarios.** Their 76 such sentences and Expected lines are
+  unchanged.
+- **The rest.** The rewritten sentences hold no keyword. They were read
+  beside the others. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 19 to none, sentences over 50 words from 5 to
+  none, and a mean from 18.74 words to 18.08.
+- **`scenarios.md`:** a mean from 11.19 to 11.16.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, which is history.
+- **Written against core 0.28**, still, and the header's "uses
+  `freshness.v1`, text 0.3".
+
 ## 0.5 — 2026-10-24: a delete fed through `desired.v1` (#840, DC; #609)
 
 `desired.v1`'s runtime (#840, DC: `zenkey::desired`, whose
