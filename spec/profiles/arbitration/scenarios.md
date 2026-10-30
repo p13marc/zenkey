@@ -4,10 +4,10 @@ The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §9 and §11 are the
 runtime's: the reference runs them as tests of `zenkey`, one test per
-section, named after it (`zenkey/tests/profile_arbitration.rs`, #909's
-BB). §10 is a tool's, and the reference tool, `zenctl arbitration`, runs
+section, named after it (`zenkey/tests/profile_arbitration.rs`). §10
+is a tool's, and the reference tool, `zenctl arbitration`, runs
 it as a test of zenctl (`zenctl/tests/live_zk2.rs`'s
-`arbitration_s10_a_tools_questions`, #909's BC).
+`arbitration_s10_a_tools_questions`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -58,17 +58,18 @@ it as a test of zenctl (`zenctl/tests/live_zk2.rs`'s
 
   The deadline is 300 ms, and `timing.v1` §2.5's detection bound 306 ms
   (300 + max(300/50, 1)): a commander is missed once more than 300 ms has
-  passed since its last arrival, and the miss is seen by 306 ms. The numbers are a loaded runner's: a sample in
-  six lost before a miss, and a bound tens of times the scheduling jitter.
+  passed since its last arrival, and the miss is seen by 306 ms. The numbers
+  are a loaded runner's: a sample in six lost before a miss, and a bound
+  tens of times the scheduling jitter.
 - **The commanders.** `C_s`, `C_t` and `C_a` are owners of `steer.v1` at
   `lab/safety`, `lab/teleop` and `lab/autopilot`, each in a process of its
   own, its HLC on. Each puts `cmd` every 50 ms with the payload `<service>
-  <n>`, `n` counting from 0 at its start (`safety 0`, `safety 1`, …), its
-  first put **500 ms after its tokens** (text 0.2, F-269: an actuator hears
-  a token on its watch session and a sample on another, unordered, so a
-  first sample put at the token could be a withdrawn provider's arrival,
-  as §4's X avoids too), and holds its instance and interface tokens as
-  core §8.1 says. A commander **holds** when it stops putting, keeping its
+  <n>`, `n` counting from 0 at its start (`safety 0`, `safety 1`, …). Its
+  first put is **500 ms after its tokens** (an actuator hears a token on
+  its watch session and a sample on another, unordered, so a first sample
+  put at the token could be a withdrawn provider's arrival, as §4's X
+  avoids too). Each holds its instance and interface tokens as core §8.1
+  says. A commander **holds** when it stops putting, keeping its
   tokens and its session, and **resumes** when it starts putting again.
   The reference's commanders are `zenkey/examples/owner.rs` run with
   `--commander` (`--commander-lead-ms`, 500 by default; `owner --help`),
@@ -82,7 +83,7 @@ it as a test of zenctl (`zenctl/tests/live_zk2.rs`'s
   `["lab/safety", "lab/teleop", "lab/autopilot"]` unless a section says
   otherwise. Each runs three sessions: its service's, which holds its
   subscription; a watch session, which holds its liveliness subscriber
-  (v1.md §2.7; core §8.1, 0.37); and a reader, for its reads again. Each
+  (v1.md §2.7; core §8.1); and a reader, for its reads again. Each
   puts every command it delivers on `angle`, payload unchanged.
 - **What an actuator prints.** Each actuator under test prints, on its
   standard output, one JSON line per switch, as it tells its application
@@ -103,14 +104,14 @@ it as a test of zenctl (`zenctl/tests/live_zk2.rs`'s
   {"counts": {"providers": {"lab/safety": {"delivered": 40, "not_active": 0, "deleted": 0, "expired": 0, "not_incumbent": 0}}, "wild": 0, "unresolved": 0, "unbound": 0}}
   ```
 
-  Every provider known has its five counts, `deleted` among them (text
-  0.2, F-271), in rank order. The reference's actuators are
-  `zenkey/examples/owner.rs` run with `--arbitrate <entry>,…` (#909's BB),
+  Every provider known has its five counts, `deleted` among them, in rank
+  order. The reference's actuators are
+  `zenkey/examples/owner.rs` run with `--arbitrate <entry>,…`,
   which answers `arbitrate counts` so, and whose `owner --help` is the
   interface a black-box runner drives, as for `alarms.v1`; its watch
-  session connects to `--watch-connect`'s endpoint where §7 cuts it. Two implementations are
-  compared on these lines and on what S sees (§2.10; core `presence.md`
-  §10, 0.46).
+  session connects to `--watch-connect`'s endpoint where §7 cuts it. Two
+  implementations are compared on these lines and on what S sees (§2.10;
+  core `presence.md` §10).
 - **S** is a tool session that subscribes to `zk2/lab/**` and follows
   `zk2/lab/**/@zk/**` with a liveliness subscriber on a watch session,
   recording each delivery's arrival on its monotonic clock, its key and
@@ -119,8 +120,9 @@ it as a test of zenctl (`zenctl/tests/live_zk2.rs`'s
 - **Margins.** A switch's own instants (`at_ms − last_ms`) are the
   actuator's, so they hold on a loaded runner as far as its timer does:
   the test allows the runner 50 ms of scheduling beyond the detection
-  bound, and records the largest it saw, as `timing.v1`'s scenarios do. An instant the test takes itself
-  (a kill, a cut) is allowed 200 ms on loopback.
+  bound, and records the largest it saw, as `timing.v1`'s scenarios do. An
+  instant the test takes itself (a kill, a cut) is allowed 200 ms on
+  loopback.
 
 ## §1 The dead-man at start, and each higher priority taking over (§2.9–§2.11)
 
@@ -184,8 +186,8 @@ safety.
    teleop.
 2. When S sees the new instance's interface token, the actuators switch
    nothing; at the new instance's first arrival after the actuator's watch
-   heard its token, each switches to `lab/safety`, cause `sample` (text
-   0.2, F-269): with the commander's lead, its first, `safety 0`.
+   heard its token, each switches to `lab/safety`, cause `sample`: with
+   the commander's lead, its first, `safety 0`.
 
 ## §4 A clean stop that publishes after its withdrawal (§2.7; core §8.2)
 
@@ -255,7 +257,7 @@ session and its reader keep their own links. The control: a watch
 session `W` of the test's, a client of R1 through the same link, holding
 a liveliness subscriber without history on `zk2/lab/safety/@zk/alive/**`
 and listening to its own transport events, each recorded with its
-instant (text 0.2, F-268).
+instant.
 
 **Steps.**
 1. The test cuts each actuator's watch link for 1 s, then heals it. It
@@ -270,17 +272,17 @@ instant (text 0.2, F-268).
    which leaves safety held. An actuator that applied the cut's
    withdrawals as heard would switch to teleop, cause `withdrawn`, and
    fails. After each heal, each actuator asks one round trip on its watch
-   session (core §8.1, 0.44; the reference counts its own).
-   - **The control** (F-268): at a cut after the first, `W` hears safety's
+   session (core §8.1; the reference counts its own).
+   - **The control:** at a cut after the first, `W` hears safety's
      interface token withdrawn **before** its transport event tells it the
      close; at the first it hears nothing, having been told no token
-     (core §8.1, 0.41), and at the reopen it is told the token (0.44). So
+     (core §8.1), and at the reopen it is told the token. So
      the move begins at that withdrawal (v1.md §2.8): an actuator that
      began it at its transport event alone would apply the close's
      withdrawals as heard, switch `withdrawn`, and fail.
 2. Each actuator switches to `lab/teleop`, cause `deadline`, with
    `at_ms − last_ms` within §2's bounds: safety's withdrawal is never told
-   to a watch whose transport is down (core §8.1, 0.42), and its deadline
+   to a watch whose transport is down (core §8.1), and its deadline
    makes it ineligible. Nothing more is printed at the heal.
 
 ## §8 An invalid declaration, refused at start (§2.2; core §8.2)
@@ -314,7 +316,7 @@ to `["lab/safety", "lab/*"]`.
 
 **Expected.**
 1. `A_l`'s descriptor lists `cmd`'s bindings as `["lab/safety",
-   "lab/*"]`, in that order (core R3, 0.54). Within 1 s of its start `A_l`
+   "lab/*"]`, in that order (core R3). Within 1 s of its start `A_l`
    follows `lab/autopilot`: within the wildcard, autopilot ranks above
    teleop by byte order (§2.4), and if teleop's sample arrived first, the
    switch to autopilot came at autopilot's first, cause `sample`.
@@ -340,7 +342,7 @@ subscription and a watch of its own, as §2.14 says.
    and reads `A_l` of step 1.
 6. T listens to `A_l` of step 1 for 100 ms only, all three holding.
 
-**The reference tool** is `zenctl arbitration` (#909's BC), with
+**The reference tool** is `zenctl arbitration`, with
 `--contracts` holding the contracts T holds offline, `--for` its listen,
 and `--format json` its answers, each selection's `whose` "the tool's own
 view". `zenctl/tests/live_zk2.rs`'s `arbitration_s10_a_tools_questions`
@@ -356,14 +358,14 @@ and says each selection is its own view:
 3. The selection: yes, `selected`, `lab/autopilot`; the binding: yes,
    `wildcard`, naming entry 1.
 4. The declaration: no, `invalid`, `policy_unsupported`; the selection
-   and the binding: not asked, `no_descriptor` (text 0.2, F-272): with no
+   and the binding: not asked, `no_descriptor`: with no
    consumer, T read no descriptor, so no binding and no view.
 5. The declaration and the selection: unobservable, `revisions_disagree`.
 6. The selection: unobservable, `listening`.
 
 ## §11 A governed commander's standby (§2.5's `not_incumbent`; `redundancy.v1` §2.10)
 
-Text 0.2, F-270: a sample `redundancy.v1` §2.10 does not accept is no
+A sample `redundancy.v1` §2.10 does not accept is no
 arrival, so a standby's writes cannot keep its address eligible.
 
 **Setup.** R1 up. The commanders' contract is `steer.v1` minor 1, which
@@ -380,7 +382,7 @@ bound to `["lab/safety", "lab/teleop"]`.
 **Steps.**
 1. `X`, `C_s2`'s own session, puts `cmd` every 50 ms raw, round its
    runtime's writer, payload `standby <n>`, stamped by its own HLC (the
-   reference's `commander raw on`, text 0.3, F-276).
+   reference's `commander raw on`).
 2. 1 s later, `C_s1` holds; `X` goes on putting.
 3. 2 s later, `C_s1` resumes.
 
