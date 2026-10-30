@@ -1368,7 +1368,7 @@ def _budget_bounds(path: Path) -> list[Result]:
 
 
 def _budget_population(path: Path) -> list[Result]:
-    """Core §2.7 (0.24): a kind, a bound, a retention and one reading -> the
+    """Observer §5.3 (0.24): a kind, a bound, a retention and one reading -> the
     population verdict and its reason."""
     from . import budget
     from .freshness import seconds_to_ns
@@ -1388,7 +1388,7 @@ def _budget_population(path: Path) -> list[Result]:
 
 
 def _budget_rate(path: Path) -> list[Result]:
-    """Core §2.7 (0.24): an event's rate and a window's occurrences -> the
+    """Observer §5.3 (0.24): an event's rate and a window's occurrences -> the
     rate verdict and its reason."""
     from . import budget
     from .freshness import seconds_to_ns
@@ -1403,7 +1403,7 @@ def _budget_rate(path: Path) -> list[Result]:
 
 
 def _budget_lossless(path: Path) -> list[Result]:
-    """Core §2.7 (0.25): the declared QoS, the reader's own loss and miss
+    """Observer §5.2 (0.25): the declared QoS, the reader's own loss and miss
     detection -> whether a window is shown to have lost no delivery."""
     from . import budget
 
@@ -3425,8 +3425,171 @@ def family_readings(root: Path) -> list[Result]:
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
-        + _timing_readings(root) + _arbitration_readings(root)
+        + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
+        + _observer_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _observer_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``observer.md`` text 0.1 where zk2py meets what it asks beyond the
+    rules the core moved (#609, round 82): a wildcard scope's verbatim kinds
+    (§8.2), the timed streams a tool's selector misses, and the memlock
+    limit a tool checks at start (§7.4). No session is opened."""
+    from . import live
+    from . import timing_tool as tt
+    from .contract import load_contract
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "observer 0.1"
+    every = ["@stream", "@state", "@op", "@adv", "@zk"]
+
+    def but(*reached: str) -> list[str]:
+        return [k for k in every if k not in reached]
+
+    # §8.2 over live.VERBATIM_REACH, the key forms of core §1.1 and §2.5:
+    # for each kind a selector that reaches it, one shorter and one longer
+    # than its form, which do not, and selectors too short for any kind.
+    for sel, want, why in (
+            ("zk2/**", every, "an ambient selector"), ("**", every, "the bus root"),
+            ("zk2/lab/pace/**", every, "one owner's ambient selector"),
+            ("zk2/a/**", every, "a system's ambient selector"),
+            ("zk2", every, "too short for any form"), ("zk2/a/b", every, "too short for any form"),
+            ("zk2/*/*/*/*", every, "position 5's `*` matches no kind token"),
+            ("zk2/*/*/*/*/**", every, "position 5's `*` matches no kind token, at any length"),
+            # @stream, @state, @op: core §1.1's data form, the token at position 5
+            ("zk2/lab/pace/pace.v1/@stream/**", but("@stream"), "an explicit stream's subtree"),
+            ("zk2/a/b/i/@stream/x/y/z", but("@stream"), "longer than the form's one resource chunk"),
+            ("zk2/a/b/@stream/**", every, "@stream at position 4, where no form puts it"),
+            ("zk2/*/*/*/@state/**", but("@state"), "every explicit state"),
+            ("zk2/a/b/i/@state", every, "the kind token with no resource chunk: no key"),
+            ("zk2/a/b/i/@op/set", but("@op"), "one operation"),
+            ("zk2/a/b/i/@op", every, "the kind token with no resource chunk: no key"),
+            ("zk2/a/b/i/@op/interfaces/x/set", but("@op"), "a templated operation, longer"),
+            # @adv: core §2.5, under a plain stream's or state's data key
+            ("zk2/a/b/i/stream/x/@adv/**", but("@adv"), "a plain stream's sidecar"),
+            ("zk2/a/b/i/stream/x/@adv/y", but("@adv"), "one key under it"),
+            ("zk2/a/b/i/state/x/@adv/**", but("@adv"), "a plain state's sidecar"),
+            # the reach pattern's `**` before `@adv` spans chunks: fails if
+            # zenoh's intersection did not let it
+            ("zk2/a/b/i/stream/x/y/z/@adv/**", but("@adv"), "three resource chunks before @adv"),
+            # a selector's `**` never crosses `@adv`: fails if it did
+            ("zk2/a/b/i/stream/**", every, "a plain stream's subtree, whose ** crosses no @adv"),
+            ("zk2/a/b/i/stream/@adv/y", every, "no resource chunk before @adv: no data key"),
+            ("zk2/a/b/i/events/x/@adv/y", every, "an event has no advanced publication (core §2.5)"),
+            ("zk2/a/b/i/@stream/x/@adv/y", every, "@adv under a verbatim chunk, no form's"),
+            # @zk: core §1.1's four control forms
+            ("zk2/*/*/@zk/**", but("@zk"), "every service's control keys"),
+            ("zk2/a/b/@zk/instance/0123456789abcdef", but("@zk"), "an instance token"),
+            ("zk2/a/b/@zk/alive/**", but("@zk"), "the interface tokens"),
+            ("zk2/a/b/@zk/instance", every, "shorter than the instance form"),
+            ("zk2/a/b/@zk/instance/0123456789abcdef/x", every, "longer than the instance form"),
+            ("zk2/@zk/contract/**", but("@zk"), "the contract bundles"),
+            ("zk2/@zk", every, "shorter than the contract form"),
+            ("zk2/@zk/contract/nav.v2/ab/cd", every, "longer than the contract form")):
+        out.append((f"{label} §8.2: {sel} ({why}) never reaches {', '.join(want) or 'nothing'}",
+                    live.blind_spots(sel), want))
+    # A timed explicit stream beside a plain one: the ambient selector
+    # misses the first, and the tool names it unreached; listed from the
+    # contract, so a selector naming another address misses both.
+    text = ('[interface]\nname = "beat"\nmajor = 1\nminor = 0\nuses = ["timing.v1"]\n\n'
+            '[resources.cmd]\nkind = "stream"\ntype = { raw = "text/plain" }\n'
+            'annotations = { "timing.period_ms" = 100, "timing.deadline_ms" = 500 }\n\n'
+            '[resources.frame]\nkind = "stream"\nexplicit = true\ntype = { raw = "image/jpeg" }\n'
+            'annotations = { "timing.period_ms" = 40, "timing.deadline_ms" = 200 }\n\n'
+            '[resources.note]\nkind = "stream"\ntype = { raw = "text/plain" }\n')
+    c = load_contract(root / "contracts" / "beat.v1.toml", text=text, spec_dir=root.parent).canonical
+    out.append((f"{label} §8.2: every timed stream the contract declares at the address, in its canonical order, read from it alone, an untimed stream left out",
+                tt.timed_streams(c, "lab/beat"),
+                [("@stream/frame", "zk2/lab/beat/beat.v1/@stream/frame"),
+                 ("stream/cmd", "zk2/lab/beat/beat.v1/stream/cmd")]))
+    for sel, reached, missed in (("zk2/lab/beat/**", ["stream/cmd"], ["@stream/frame"]),
+                                 ("zk2/lab/beat/*/@stream/**", ["@stream/frame"], ["stream/cmd"]),
+                                 ("zk2/lab/beat/beat.v1/stream/cmd", ["stream/cmd"], ["@stream/frame"]),
+                                 ("zk2/lab/other/**", [], ["@stream/frame", "stream/cmd"]),
+                                 ("zk2/lab/other/*/@stream/**", [], ["@stream/frame", "stream/cmd"]),
+                                 ("zk2/lab/beat/beat.v1/*/**", ["stream/cmd"], ["@stream/frame"])):
+        out.append((f"{label} §8.2: a timing tool at lab/beat over {sel} watches {reached} and names {missed} "
+                    f"unreached", (tt.timed_rids(c, sel, "lab/beat"), tt.unreached_rids(c, sel, "lab/beat")),
+                    (reached, missed)))
+    # §7.4: the largest pool a soft limit admits, the pool plus 2 MiB, and
+    # core §7.4's words below a pool's need.
+    mib = 1 << 20
+    for limit, want in ((-1, "unlimited"), (8 * mib, f"at most {6 * mib} bytes"), (2 * mib, "at most 0 bytes"),
+                        (64 * 1024, "below 2 MiB"), (8 * mib, live.BELOW_NEED), (64 * 1024, live.BELOW_NEED)):
+        note = live.memlock_note(limit)
+        out.append((f"{label} §7.4: RLIMIT_MEMLOCK {limit}: the note says {want!r}", want in note, True))
+    out.append((f"{label} §7.4: this host's limit reads, and the note cites core §7.4",
+                "(core §7.4" in live.memlock_said(), True))
+
+    def unreadable() -> str:
+        raise OSError("getrlimit refused")
+
+    out.append((f"{label} §7.4: a limit that cannot be read is said so, and the tool goes on",
+                live.memlock_said(unreadable), "the memlock limit could not be read: OSError: getrlimit refused"))
+    out.append((f"{label} §7.4: any failure, not only the ones expected",
+                live.memlock_said(lambda: live.memlock_note("8 MiB")).startswith("the memlock limit could not be "
+                                                                              "read: TypeError: "), True))
+    return out
+
+
+def _unbounded_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.57's ``cardinality = "unbounded"`` beyond its two fixtures
+    (#609, round 82): "4294967295 from resolution on" (§9.1), so every
+    reader of the resolved resource, the bound (§2.7), D007 (§3.3) and the
+    compatibility check (§9.8), reads the name as the number. No session is
+    opened."""
+    from . import budget, compat
+    from .contract import NO_CEILING, load_contract
+    from .descriptor import _check_exposure
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "core 0.57 §2.2"
+    d = root / "contracts"
+
+    def load(name: str, body: str):
+        text = '[interface]\nname = "seed"\nmajor = 1\nminor = 0\n\n' + body
+        return load_contract(d / f"{name}.toml", text=text, spec_dir=root.parent)
+
+    def card(c, rid: str):
+        return next(r["cardinality"] for r in c.canonical["resources"] if f"{r['token']}/{r['template']}" == rid)
+
+    stream = load("s", '[resources."a/{x}"]\nkind = "stream"\ntype = { raw = "text/plain" }\n'
+                       'params = { x = "string" }\ncardinality = "unbounded"\n')
+    number = load("s", '[resources."a/{x}"]\nkind = "stream"\ntype = { raw = "text/plain" }\n'
+                       'params = { x = "string" }\ncardinality = 4294967295\n')
+    out.append((f"{label}: a templated stream writing \"unbounded\" lints clean, resolved to 4294967295",
+                ([x.code for x in stream.diagnostics], card(stream, "stream/a/{x}")), ([], NO_CEILING)))
+    out.append((f"{label}: \"unbounded\" and 4294967295 on a stream have one fingerprint",
+                stream.fingerprint == number.fingerprint and stream.fingerprint is not None, True))
+    op = load("o", '[resources."set/{k}"]\nkind = "operation"\nrequest = { raw = "text/plain" }\n'
+                   'response = { raw = "text/plain" }\nparams = { k = "string" }\ncardinality = "unbounded"\n')
+    out.append((f"{label}: an operation's template writing \"unbounded\" lints clean, resolved to 4294967295",
+                ([x.code for x in op.diagnostics], card(op, "@op/set/{k}")), ([], NO_CEILING)))
+    plain = load("p", '[resources.a]\nkind = "stream"\ntype = { raw = "text/plain" }\ncardinality = "unbounded"\n')
+    out.append((f"{label}: \"unbounded\" on a template without parameters is E014, as a number there is",
+                [x.code for x in plain.diagnostics], ["E014"]))
+    for spelled in ("UNBOUNDED", "4294967295", "", "unbounded "):
+        c = load("e", '[resources."a/{x}"]\nkind = "stream"\ntype = { raw = "text/plain" }\n'
+                      f'params = {{ x = "string" }}\ncardinality = "{spelled}"\n')
+        out.append((f"{label}: cardinality = {spelled!r}, any other string, is E000 (§9.1)",
+                    [x.code for x in c.diagnostics], ["E000"]))
+    # §2.7 "The bound": "the no-ceiling value, 4294967295, is no bound, from
+    # either source"; an instance that knows its population MAY lower it.
+    b = card(stream, "stream/a/{x}")
+    out.append((f"{label}: an \"unbounded\" contract's bound is no ceiling (§2.7)", budget.bound(b, [None]),
+                "no_ceiling"))
+    out.append((f"{label}: an \"unbounded\" contract lowered to 64 by an instance is 64 (§2.7, §3.3)",
+                budget.bound(b, [64]), 64))
+    # §3.3, D007: a stated value "from 1 to the contract's".
+    out.append((f"{label}: an instance stating 4294967295 of an \"unbounded\" template is within it (no D007)",
+                _check_exposure({"cardinality": {"stream/a/{x}": NO_CEILING}}, stream, set()), []))
+    out.append((f"{label}: an instance stating 4294967296 of an \"unbounded\" template raises it, D007",
+                _check_exposure({"cardinality": {"stream/a/{x}": NO_CEILING + 1}}, stream, set()), ["D007"]))
+    # §9.8: one canonical form, one revision.
+    rev = lambda c: compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})  # noqa: E731
+    out.append((f"{label}: \"unbounded\" against 4294967295 is the same revision (§9.8)",
+                compat.identical(rev(number), rev(stream)), True))
+    return out
 
 
 def _arbitration_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -4175,7 +4338,7 @@ BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_pop
 
 
 def family_budget(root: Path) -> list[Result]:
-    """``budget/`` (core §2.7, 0.24): every file, and an unknown one fails."""
+    """``budget/`` (core §2.7 and observer §5, 0.24): every file, and an unknown one fails."""
     out: list[Result] = []
     for path in sorted((root / "budget").iterdir()):
         run = BUDGET_FIXTURES.get(path.name)

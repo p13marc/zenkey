@@ -352,7 +352,7 @@ class PauseLink(SilentLink):
     way, so what is sent waits in the kernel's buffers, and on
     :meth:`resume` it flows again, nothing lost. Shorter than either
     side's lease, the transport survives it; a read made across it runs to
-    its timeout (core §8.1, possibly incomplete)."""
+    its timeout (observer §3.3, possibly incomplete)."""
 
     def __init__(self, upstream: str) -> None:
         self.go = threading.Event()
@@ -385,7 +385,7 @@ class PauseLink(SilentLink):
 
 class Watcher:
     """S (or S2): tokens, data and descriptors on one session, which makes
-    no presence read (core §8.1's watch session), so that S sees one
+    no presence read (observer §3.7's watch session), so that S sees one
     owner's descriptor put and token in the order its session sent them:
     zenoh orders one session's messages, never two sessions'."""
 
@@ -625,7 +625,7 @@ def _router(port: int, acl: bool = False) -> Any:
     conf.insert_json5("scouting/multicast/enabled", "false")
     conf.insert_json5("timestamping/enabled", "true")
     if acl:
-        # core §8.1 (0.8): a liveliness_query deny on the query's ingress
+        # observer §3.4 (0.8): a liveliness_query deny on the query's ingress
         conf.insert_json5("access_control", json.dumps({
             "enabled": True, "default_permission": "allow",
             "rules": [{"id": "no-presence-reads", "messages": ["liveliness_query"], "flows": ["ingress"],
@@ -949,7 +949,7 @@ def section5(rp: Report, runs: int) -> None:
             time.sleep(0.3)
             own = live.list_presence(holder, "zk2/lab/ledger/@zk/**")
             far = live.list_presence(other, "zk2/lab/ledger/@zk/**")
-            rp.check(sec, "3. the same read on a claim's own session returns the claim (core §8.1, 0.40), on another "
+            rp.check(sec, "3. the same read on a claim's own session returns the claim (observer §3.8, 0.40), on another "
                           "session nothing: why A reads on its reader",
                      own.kind == live.COMPLETE and len(own.instances) == 1 and far.kind == live.COMPLETE
                      and not far.instances, f"own {len(own.instances)}, other {len(far.instances)}")

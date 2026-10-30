@@ -271,7 +271,7 @@ def _deny_full(report, repo, gen, workdir) -> None:
                      and _codes(sets) == ["fanout_forbidden", "fanout_forbidden"], f"{_keys(diag)} {_codes(sets)}")
         # §3 step 3: S's queryable on R1's own key.
         _admin_spoof(report, run, w, "deny")
-        # §4.2 (0.16), a tool's S1 check, under the grants: the tool holds
+        # observer §4.4 (0.16), a tool's S1 check, under the grants: the tool holds
         # the admin read, the caller does not.
         st = live.get_state(w.sessions["tool"], "zk2/h1/tc/zk2py_echo.v1/state/health")
         stamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
@@ -279,10 +279,10 @@ def _deny_full(report, repo, gen, workdir) -> None:
         hdoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
         by_tool = live.s1_check(w.sessions["tool"], hdoc, stamp)
         by_caller = live.s1_check(w.sessions["caller"], hdoc, stamp)
-        report.check(run, "S1 from a tool (§4.2, 0.16): the Tool, with the admin read, judges h1 (a client of R1) "
-                          "clean; the caller, without it, verifies no router and reports S1 unobservable (§4.2, 0.17)",
+        report.check(run, "S1 from a tool (observer §4.4, 0.16): the Tool, with the admin read, judges h1 (a client of R1) "
+                          "clean; the caller, without it, verifies no router and reports S1 unobservable (observer §4.4, 0.17)",
                      by_tool[0] == "clean" and by_caller[0] == "unobservable", f"tool {by_tool}; caller {by_caller}")
-        # §5.1 O3 judged from outside (0.16, 0.17), under the grants: the
+        # observer §7.2, O3 judged from outside (0.16, 0.17), under the grants: the
         # tool is told its grants by the deployment's §11.1 input
         # (acl.may_call), and reads presence for the owner.
         key = "zk2/h1/tc/zk2py_echo.v1/@op/echo"
@@ -292,7 +292,7 @@ def _deny_full(report, repo, gen, workdir) -> None:
         v_ungranted = live.o3_verdict(ungranted, acl.may_call(gen, "consumer", key), h1_present)
         v_untold = live.o3_verdict(ungranted, None, h1_present)
         v_granted = live.o3_verdict(granted, acl.may_call(gen, "caller", key), h1_present)
-        report.check(run, "O3 from outside (§5.1, 0.17): the consumer, told by the deployment that its grants do "
+        report.check(run, "O3 from outside (observer §7.2, 0.17): the consumer, told by the deployment that its grants do "
                           "not let it call, gets silence, which is unobservable, as it is when not told; the caller, "
                           "whose grants let it call, is answered: clean",
                      ungranted.silent and v_ungranted[0] == "unobservable" and v_untold[0] == "unobservable"
@@ -437,7 +437,7 @@ def _admin_spoof(report, run, w: World, posture: str) -> None:
             # allow it gets everything, and only the replier id holds (0.15).
             report.check(run, f"§3 step 3 ({name}) under allow: it matches no subject and gets everything, so its "
                               "answer on R1's key arrives, under its own replier id, unverified, and S4 is not "
-                              "clean (§4.2)",
+                              "clean (observer §4.2)",
                          (own, zids[name]) in answers and s4.verdict == "unobservable"
                          and (own, zids[name], "a replier other than its key's router") in s4.unverified,
                          f"answers {answers}; {s4.verdict}: {s4.detail}")

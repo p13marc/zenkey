@@ -44,7 +44,7 @@ Admin      query                                           reply
   ``@/*/router``, ``@/*/router/status/plugins/storage_manager/storages/**``
   and ``@/*/*``, never namespaced. 0.15's ``@/*/router/**`` admitted a GET of
   every declaration record of a router's, which zenoh 1.10.1 answers under
-  its routing tables' read lock (§4.2, Appendix B).
+  its routing tables' read lock (observer §4.3, Appendix B).
 - **No allowed ingress query reaches a node's declaration records**
   (§11.1, 0.50; its posture and flow, 0.51, F-256): "Under deny, a
   generator MUST NOT compile an allow rule for an ingress query on a key
@@ -83,7 +83,7 @@ CONTRACTS = "zk2/@zk/contract/**"
 ADMIN = "@/**"
 #: §11.1 Tool (0.15, 0.50): the admin read, "query on @/*/router,
 #: @/*/router/status/plugins/storage_manager/storages/** and @/*/*, and their
-#: reply, never namespaced": S4's two reads (§4.2) and every node's root
+#: reply, never namespaced": S4's two reads (observer §4.2) and every node's root
 #: document, which a mesh view reads.
 ADMIN_READ = ["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**", "@/*/*"]
 #: 0.15's admin read, "@/*/router and @/*/router/**", which 0.50 narrowed: it
@@ -377,7 +377,7 @@ class HazardousGrant(ValueError):
 @dataclass(frozen=True)
 class AdminHazard:
     """One way a block admits a GET of a node's declaration records
-    (§11.1, 0.50, 0.51; §4.2; Appendix B):
+    (§11.1, 0.50, 0.51; observer §4.3; Appendix B):
     - ``allowed_query``: under ``deny``, an allow rule a policy lists names
       ``query`` on the ingress flow (named, or zenoh's default of both) and
       a key expression that intersects them (``reaches``, by zenoh 1.10.1's
@@ -456,7 +456,7 @@ def read_block_json5(text: str) -> dict[str, Any]:
 def may_call(g: Generated, principal: str, key: str) -> bool:
     """Whether the generated grants let ``principal`` call ``key``: its
     ingress ``query`` includes the key, and so does its egress ``reply``
-    (a value reply is checked against its own key, 0.14). §5.1 (0.16)
+    (a value reply is checked against its own key, 0.14). Observer §7.2 (0.16)
     judges O3 from outside only under such grants. A tool cannot observe
     its grants (§11.3), so this reads them from the deployment."""
     asked = g.grants.get((principal, "query", INGRESS), [])

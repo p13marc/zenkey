@@ -933,7 +933,7 @@ def section7(report: Report) -> None:
                      made == 10, f"{made} of 10 runs")
         report.note(sec, f"5. at the read's end, the session's links were gone in each of those runs, and "
                          f"Session.info.transports() still listed the closing transport in {listed} of 10 "
-                         "(core §8.1, 0.38, \"What the check reads\")")
+                         "(observer §3.5, 0.38, \"What the check reads\")")
     finally:
         bus.close()
 
@@ -1614,7 +1614,7 @@ def _s10_step_4(report: Report, sec: str, ep1: str) -> None:
                       "zenoh's thread, indirect=False), in every run",
                  all(ok and heard == n and toks == 0 for ok, heard, _, toks, _ in runs),
                  f"{[x[1] for x in runs]} heard by its end, {', '.join(f'{x[2] * 1000:.0f} ms' for x in runs)}")
-    # The interests timeout met by a population, with no stall (core §8.1,
+    # The interests timeout met by a population, with no stall (observer §3.3,
     # 0.41: "A reader MUST read a read whose time reached its session's
     # interests timeout as possibly incomplete"): a session in ns at 300 ms
     # reads the crowd with a 5 s timeout; zk2py's own sessions run with 120 s.
@@ -2031,7 +2031,7 @@ def _inst_key(i: dict[str, Any]) -> str:
 def _overlaps(spans: list[list[Any]], since: float = 0.0, selector: str | None = None) -> list[tuple[float, float]]:
     """GETs asked beside one of the same selector still in flight: (the
     later's ask, the earlier's end or inf), over the spans asked since
-    ``since`` (core §8.1, 0.44: "nor ask a read while one it asked of the
+    ``since`` (observer §3.7, 0.44: "nor ask a read while one it asked of the
     same scope is")."""
     out: list[tuple[float, float]] = []
     last: dict[str, list[Any]] = {}
@@ -2175,12 +2175,12 @@ def _s10_step_10(report: Report, sec: str, ep1: str, crowd: list[Any], ns_tool: 
                      f"taken up {barrier.taken_up}; the fourth {fourth.why or 'stood'} in "
                      f"{fourth.elapsed_s * 1000:.0f} ms, {(t_open or 0) and (fourth.asked_ns / 1e9 - t_open) * 1000:.1f} "
                      "ms after the reopen was heard")
-        # beyond Expected 10, §8.1 (0.45, F-241): "once that has been sent the
+        # beyond Expected 10, observer §3.7 (0.45, F-241): "once that has been sent the
         # next is one round trip again". zenoh's own GET, asked once the
         # reader's count has been checked, on the session itself (``inner``,
         # not the counting ``w``): it is in no count of the reader's
         nfin, ntoks, nerrs, nsecs = _round_trip_raw(inner, live.settle_key(wire), 5.0, direct=True)
-        report.note(sec, f"10. §8.1 (0.45, F-241), beyond Expected 10: the next round trip, zenoh's own, asked at once "
+        report.note(sec, f"10. observer §3.7 (0.45, F-241), beyond Expected 10: the next round trip, zenoh's own, asked at once "
                          f"after the one after the reopen: {nsecs * 1000:.2f} ms (final reply {nfin}, {ntoks} tokens, "
                          f"{nerrs} errors), against {fourth.elapsed_s * 1000:.0f} ms for the one after the reopen")
     finally:
@@ -2306,13 +2306,13 @@ def _s10_step_10_reader(report: Report, sec: str, ep1: str, ns_tool: Any, label:
                          f"{f.barrier.asked} and taken up {f.barrier.taken_up}; the round trip after the reopen "
                          f"{[round(r.elapsed_s * 1000) for r in f.round_trips if t_open_ns and r.asked_ns > t_open_ns]} "
                          f"ms; complete again {t_whole:.2f} s after the heal")
-        # beyond Expected 10, §8.1 (0.47, F-248): "Its seed, on a session
+        # beyond Expected 10, observer §3.7 (0.47, F-248): "Its seed, on a session
         # that has not read the population before, is a session's first
         # read, and the one it can time": the seed beside the round trip
         # after the reopen, in the same run
         with f.lock:
             took = [(p.kind, round(p.elapsed_s, 3)) for p in f.reads[:4]]
-        report.note(sec, f"{label}: §8.1 (0.47, F-248), beyond Expected 10: its seed, on a fresh reading session, "
+        report.note(sec, f"{label}: observer §3.7 (0.47, F-248), beyond Expected 10: its seed, on a fresh reading session, "
                          f"and the reads after it (kind, s): {took}")
     finally:
         stop.set()
@@ -2331,7 +2331,7 @@ LATE_TELLING_S = 30.0
 def _s10_reopen(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any]) -> None:
     """Beyond the text (round 68, F-239), run only with ``--reopen``: what a
     watch session's subscriber without history hears when its transport
-    opens again, beside the crowd. Core §8.1 (0.42) says a token declared
+    opens again, beside the crowd. Observer §3.7 (0.42) says a token declared
     while the transport was down is one "of which a subscriber without
     history is never told", and that on the wire keys the round trip is
     "one round trip at any population". Notes only: each measures a premise

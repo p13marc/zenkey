@@ -1380,7 +1380,7 @@ timestamp and no attachment.
 - it discards a reply on a key that is not concrete (R6);
 - it treats `application/json` as an expectation the spec does not state.
 
-### F-47 · gap (measured) · §8.1 "Reading presence" and `presence.md` §4
+### F-47 · gap (measured) · §8.1 "Reading presence" and `presence.md` §4 (now observer §3.1)
 
 **Status at 0.5: resolved by 0.5.** §8.1: every liveliness subscriber on the session MUST be callback-driven or drained; a GET that ended at its timeout SHOULD be read as possibly incomplete; presence.md §4 now states zenoh-python's measurement.
 
@@ -2142,7 +2142,7 @@ measured: `[]`), reading the unchecked item as covering `optional` too.
 zk2py's owner writes neither. Its runner checks both owners' descriptors
 against the rule as stated.
 
-### F-78 · gap · §3.3 `meta.zid` (0.10): a zid has no spelling
+### F-78 · gap · §3.3 `meta.zid` (0.10): a zid has no spelling (now observer §4.4, the comparison)
 
 **Status at 0.11: resolved by 0.11.** §3.3 "How a zid compares": a tool MUST compare two zids by value, never by text. An owner SHOULD write `meta.zid` as zenoh writes it, which Appendix B now records: lowercase hex without leading zeros. The reference's doctor compared text, a bug fixed with 0.11. zk2py already compared by value. It now treats a `meta.zid` that is not hex as stating no zid (unattributable), rather than comparing it as text. The runner checks that both owners write the zenoh form, and that the reference's real zid, respelled in capitals and padded to 32 digits, still attributes its stamp to it.
 
@@ -2162,7 +2162,7 @@ stamp `foreign`, which 0.10's "never foreign" wording is there to prevent.
 (`live.attribute_stamp`), so padding and case do not matter, and any other
 spelling as text.
 
-### F-79 · gap · §4.2 S4 (0.10): what "the routers' storage admin space" is
+### F-79 · gap · §4.2 S4 (0.10): what "the routers' storage admin space" is (now observer §4.2)
 
 **Status at 0.11: resolved by 0.11.** §4.2 "What the check reads": `@/*/router` for the routers that answer, and `@/*/router/**/storage_manager/storages/**`, one key per storage with its `key_expr`. A storage intersecting an owner's `state/**` or `@state/**` breaks S4. A router answering the first with nothing under the second runs no storage, and with no router answering the check is unobservable. zk2py now reads both selectors (`live.check_s4`) and keeps `plugins` beside them; the two agree on R1. A stand-in admin record shows the storages read: a storage on `telemetry/**` is clean, and one on `zk2/**` breaks S4. A gap remains in who may answer the first selector: F-80.
 
@@ -2206,7 +2206,7 @@ What changed in zk2py:
   and that a respelling of the reference's zid still attributes its stamp
   to it.
 
-### F-80 · gap · §4.2 S4 (0.11): who answers `@/*/router`
+### F-80 · gap · §4.2 S4 (0.11): who answers `@/*/router` (now observer §4.2)
 
 **Status at 0.12: resolved by 0.12, against zk2py's fix.** §4.2 "Who answered": an admin answer counts as a router's only when the reply's replier id is the zid its key names, and that zid is a router the session is connected to, or the session itself. Any other answer is unverified and never contributes to a clean verdict. A tool that cannot read the replier id holds every answer unverified. An operator MAY tell a tool to trust every answer. zk2py's 0.11 defence judged by the key's zid, which the reference showed a spoofer defeats by answering on the real router's own key. zk2py reproduced this: with R1's admin space off, a client's answer on `@/<R1>/router` is the only answer, and its replier id is the client's. zenoh-python 1.10.1 exposes `Reply.replier_id` (an `EntityGlobalId`, whose `zid` is the replying session's). Its stub marks it `@_unstable`, but the published wheel has it at run time. zk2py now verifies with it (`live.unverified_why`), and security.md §3 steps 1–2 pass.
 
@@ -2281,7 +2281,7 @@ What changed in zk2py:
   `zk2/**` leaves the check unobservable. Trusted, as the reference's own
   test now runs, `telemetry/**` is clean and `zk2/**` breaks S4.
 
-### F-81 · gap · §4.2 "Who answered" (0.12): a client tool verifies one router
+### F-81 · gap · §4.2 "Who answered" (0.12): a client tool verifies one router (now observer §4.2)
 
 **Status at 0.13: resolved by 0.13.** §4.2 "Verified routers, outward": the routers the session is connected to, and the session itself, are verified, and so is every zid a verified router's own answer lists among its `sessions` with `whatami` `router`, until nothing new is verified. Appendix B states the document's shape. zk2py implements it (`live.verified_routers`) and gives each unverified answer the reference doctor's reason. A client tool on R1 now verifies R2 through R1's document, and S4 reads clean (security.md §3 step 4). A client answering on its own key stays unverified, since R1 lists it as `client`. The peer tool, kept as a cross-check, reads the same verdict directly.
 
@@ -2474,7 +2474,7 @@ implementer, Own's egress aside.
 **Resolved:** zk2py's pairs, in `zk2py.acl`'s docstring. They are
 measured where the run exercises them, and every check passes on them.
 
-### F-84 · gap (measured) · §11.1 Tool and §4.2 S4 (0.14): reading the admin space
+### F-84 · gap (measured) · §11.1 Tool and §4.2 S4 (0.14): reading the admin space (now observer §4.2)
 
 **Status at 0.15: resolved by 0.15.** §11.1 Tool: "A tool that checks S4 or runs a doctor also holds the admin read: `query` on `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced." zk2py's grant was `@/**`, and is now those two keys. The run shows that under `deny` the tool reads `@/*/router` and runs S4, clean, while the caller, without the admin read, gets nothing.
 
@@ -2519,7 +2519,7 @@ includes is left open. One a grant only intersects is the R2-narrowed case
 (`complement_partial`, 0.14), and is left open too. Any other is denied.
 The run's `allow` checks pass on it.
 
-### F-86 · gap (measured) · §4.2 "What the check reads" (0.11): storage records that are not storages
+### F-86 · gap (measured) · §4.2 "What the check reads" (0.11): storage records that are not storages (now observer §4.2)
 
 **Status at 0.15: resolved by 0.15.** §4.2: "A storage is an answer to the second selector whose key the selector includes, ending …/storage_manager/storages/<name>. Other answers arrive too, and are not storages." zk2py's inclusion test was the rule. It now also requires the `storage_manager/storages/<name>` ending (`live.check_s4`).
 
@@ -2668,7 +2668,7 @@ cold. `just py-conformance` passes 519 of 519 (0.16 adds no fixture).
   - S4 is then unobservable, and so is S1 for an owner in client mode. The
     run simulates this (`live.READ_REPLIER = False`) and checks both.
 
-### F-89 · ambiguity · §4.2 "A tool's S1 check" (0.16): a tool that verifies no router
+### F-89 · ambiguity · §4.2 "A tool's S1 check" (0.16): a tool that verifies no router (now observer §4.4)
 
 **Status at 0.17: resolved by 0.17, partly against zk2py's guess.** §4.2 "A tool's S1 check": a foreign stamp is a finding whatever else the tool read. An owner's own stamp is clean only when the tool verified at least one router and `meta.zid` is none of the zids it knows to be routers. Otherwise S1 is unobservable. zk2py had held a foreign stamp unobservable when no router was verified, which 0.17 overturns: an owner that is its own router stamps with its own `meta.zid`. `live.s1_check` now judges the stamp first. The run shows a foreign stamp (an owner whose clock is another session's HLC) as a finding with routers verified, and again with none verified, by simulating a binding without the replier id.
 
@@ -2693,7 +2693,7 @@ admin answer is verified, whatever the cause ("the owner may be a router
 this tool cannot see"). Under `deny`, the caller, without the admin read,
 reports h1 unobservable, while the Tool reports it clean.
 
-### F-90 · gap · §5.1 (0.16) and §11.3: a tool's own grants
+### F-90 · gap · §5.1 (0.16) and §11.3: a tool's own grants (now observer §7.2)
 
 **Status at 0.17: resolved by 0.17.** §5.1: a tool learns its grants from its operator or from the deployment's §11.1 input. A deployment without access control lets everyone call. Told so, a silence from an owner whose tokens it reads is the finding. Not told, it is unobservable, naming the premise it lacked. This is what zk2py had built, with one change: its verdict word for the untold case is now `unobservable`, where it was `unjudged`, and the finding needs the owner's tokens read (`live.o3_verdict(…, present)`).
 
@@ -2798,7 +2798,7 @@ interface id and whose `contract` is a fingerprint, so after cascades 2
 and 3, and before the contract lookup, so with or without the contract. It
 reports D011 once per such entry, a repeated one included (cascade 4).
 
-### F-93 · ambiguity · §4.2 (0.17) against (0.13): what "verified" means
+### F-93 · ambiguity · §4.2 (0.17) against (0.13): what "verified" means (now observer §4.2, §4.4)
 
 **Status at 0.18: resolved by 0.18.** §4.2: an owner's stamp is clean only when the tool "counted at least one router's own answer", with "A counted answer, not a connection" stated. "Verified router" keeps 0.13's meaning. This is what zk2py built. `live.s1_check` now names its premise `counted` and quotes the new text.
 
@@ -3622,7 +3622,7 @@ it.
   listening, and the token at the end. The text says what to establish,
   not how; this follows from core §8.1, so it is no finding.
 
-### F-105 · ambiguity · core 0.24 §2.7, "What a tool reads" and its table: a window that "lost no delivery"
+### F-105 · ambiguity · core 0.24 §2.7, "What a tool reads" and its table: a window that "lost no delivery" (now observer §5.2, §5.3)
 
 > §2.7: "A complete reading of a stream or an event is a subscription
 > window … It is complete when all three hold: … it lost no delivery, as a
@@ -9532,7 +9532,7 @@ not made (F-187, F-191).
 text alone. But §8 and §9 observe zenoh more than the reader (F-188,
 F-189), and §7 cuts no read in flight (F-185).
 
-### F-185 · gap · core 0.37 §8.1 "A read through a session cut off": a transport that closes during the read
+### F-185 · gap · core 0.37 §8.1 "A read through a session cut off": a transport that closes during the read (now observer §3.5)
 
 > core §8.1: "A reader SHOULD NOT make it: before a read, it checks that its
 > session holds a transport to another node (in zenoh 1.10.1,
@@ -9573,7 +9573,7 @@ zk2py checks the links before and after (zenoh-python 1.10.1 has
 10 (the reference measured 4 of 10 still listed), so the two accessors
 agree here, and the links are what zk2py reads.
 
-### F-186 · contradiction · scenarios/presence.md §4 against core 0.37 §8.1 and Appendix B: a GET beside a subscriber, expected whole
+### F-186 · contradiction · scenarios/presence.md §4 against core 0.37 §8.1 and Appendix B: a GET beside a subscriber, expected whole (now observer §3.1, §3.7)
 
 > presence.md §4: "**Steps.** A session that holds a liveliness subscriber
 > issues a liveliness GET, under each pairing of the GET's handler and the
@@ -9617,7 +9617,7 @@ callback round trip beside a bounded subscriber nobody drains, ended at
 its timeout with an error reply. The bounded GET beside it is not run: it
 hangs, as both implementations found.
 
-### F-187 · ambiguity · desired.v1 0.2 §2.5 and alarms.v1 0.8 §2.7 against core 0.37 §8.1: "token gone"
+### F-187 · ambiguity · desired.v1 0.2 §2.5 and alarms.v1 0.8 §2.7 against core 0.37 §8.1: "token gone" (now observer §3.6)
 
 > desired.v1 §2.5: "**The author absent.** With its author's instance token
 > gone, or its GET silent within the timeout, the target MAY read an
@@ -9727,7 +9727,7 @@ withdrawn as the seed is answered: the follower heard it go and read the
 owner down in 10 of 10; the control, a follower that skips the round
 trip, in 0 of 10.
 
-### F-190 · ambiguity · core 0.37 §8.1 "The read that establishes absence": "holds no liveliness subscriber", and one undeclared
+### F-190 · ambiguity · core 0.37 §8.1 "The read that establishes absence": "holds no liveliness subscriber", and one undeclared (now observer §3.7)
 
 > core §8.1: "It happens with history or without, and by zenoh's code it
 > lasts after the subscriber is undeclared (Appendix B)."
@@ -9750,7 +9750,7 @@ a liveliness subscriber of any kind".
 held a liveliness subscriber of any kind", and §9 Expected 3 "a session
 that has held one". zk2py marked a session for its life already.
 
-### F-191 · gap · the profiles' presence premises against core 0.37: a read not made
+### F-191 · gap · the profiles' presence premises against core 0.37: a read not made (now observer §3.5)
 
 > core CHANGELOG 0.37: "**Possibly incomplete** reads (a timeout, an error
 > reply) keep their meaning. A read not made is a third kind, never folded
@@ -10452,7 +10452,7 @@ period at most 1 s", or "within the retry interval plus its reconnect".
 connect retry period at 1 s at most, and Expected 2's bound adds its
 reconnect. zk2py's 0.5 s is inside it.
 
-### F-206 · gap · core §8.1 "complete", and redundancy.v1 §0 "Read": a peer's read through a router
+### F-206 · gap · core §8.1 "complete", and redundancy.v1 §0 "Read": a peer's read through a router (now observer §3.9)
 
 > redundancy.v1 §0: "**Complete** is core §8.1's: it ran to the routers'
 > final reply with no error reply, on a session that has never held a
@@ -11812,7 +11812,7 @@ text's placement alone, and passes it in both zk2py-reader pairings.
 The count the step states, "two round trips have run out", is the
 reference's (F-236).
 
-### F-228 · gap · core 0.41 §8.1 "A round trip stands until the watch session's transport moves": a round trip through a watch session cut off
+### F-228 · gap · core 0.41 §8.1 "A round trip stands until the watch session's transport moves": a round trip through a watch session cut off (now observer §3.7)
 
 > §8.1: "A reader that follows presence live SHOULD make the round trip
 > again before its next read, and read again, when its watch session's
@@ -11865,7 +11865,7 @@ no GET through the session cut off. A round trip cut 150 ms into its wait
 came back at 151–154 ms (zenoh's with the final reply alone), and
 zk2py's did not stand.
 
-### F-229 · gap · core 0.41 §8.1 "A round trip stands …": what a move leaves of what the reader holds, and which reads are "a seed"
+### F-229 · gap · core 0.41 §8.1 "A round trip stands …": what a move leaves of what the reader holds, and which reads are "a seed" (now observer §3.7)
 
 > §8.1: "… and a subscriber without history hears no withdrawal, at its
 > link's drop, of a token it was never told of. A reader … SHOULD make the
@@ -11994,7 +11994,7 @@ close" or "reads `zk2/*/<owner's service>/@zk/instance/*`".
 zk2py's read was complete in 1.6 ms beside 2,000 tokens and beside 10,000,
 where 0.41's read of the crowd had run out.
 
-### F-232 · gap · core 0.41 §8.1 "A read that runs to its session's interests timeout is not complete": an interests timeout the reader cannot read
+### F-232 · gap · core 0.41 §8.1 "A read that runs to its session's interests timeout is not complete": an interests timeout the reader cannot read (now observer §3.3)
 
 > §8.1: "A reader MUST read a read whose time reached its session's
 > interests timeout as possibly incomplete, as it reads one that received
@@ -12034,7 +12034,7 @@ not open at 10 s, and opened its own with 120 s. It now says so:
 `Presence.interests_timeout_assumed` and `RoundTrip.interests_timeout_assumed`,
 and the read's `reading` names `INTERESTS_TIMEOUT_ASSUMED`.
 
-### F-233 · ambiguity · core 0.41 §8.1 "Except in a namespace": history's cost at a population
+### F-233 · ambiguity · core 0.41 §8.1 "Except in a namespace": history's cost at a population (now observer §3.7)
 
 > §8.1: "the round trip's final reply follows their history, so with
 > history it waits for the population (23 s beside 10,000 tokens, a debug
@@ -12401,7 +12401,7 @@ follower seeds after a round trip that ran out, so its run does not move:
 the stall lasted 303–306 ms until its first seed, and its one round trip
 before the seed ran out at 301 ms.
 
-### F-239 · contradiction · core §8.1 (0.42) "A move unconfirms what the reader holds" and "In a namespace, a watch session in no namespace": a transport that opens tells a subscriber without history every token
+### F-239 · contradiction · core §8.1 (0.42) "A move unconfirms what the reader holds" and "In a namespace, a watch session in no namespace": a transport that opens tells a subscriber without history every token (now observer §3.7)
 
 > §8.1 (0.42, F-229): "Its subscribers may not have heard what moved while
 > the transport was down: a token withdrawn then, or one declared then, of
@@ -12510,7 +12510,7 @@ s after the heal, in 3 of 3 runs. Its sentence "one round trip at any
 population only until its transport first moves" is new, and it says more
 than was measured (F-241).
 
-### F-240 · minor · core §8.1 (0.41) "A read that runs to its session's interests timeout is not complete": a round trip "as not made"
+### F-240 · minor · core §8.1 (0.41) "A read that runs to its session's interests timeout is not complete": a round trip "as not made" (now observer §3.3)
 
 > §8.1 (0.41): "A reader MUST read a read whose time reached its session's
 > interests timeout as possibly incomplete, as it reads one that received
@@ -12624,7 +12624,7 @@ it was still unobservable at 420 s.
 Asked in particular whether step 10's Expected and the two new SHOULDs can
 be observed from outside a reader: only in part (F-244).
 
-### F-241 · contradiction · core §8.1 (0.44) "The round trip after a move waits for the population": only the first after each reopen waits
+### F-241 · contradiction · core §8.1 (0.44) "The round trip after a move waits for the population": only the first after each reopen waits (now observer §3.7)
 
 > §8.1 (0.44): "So a watch session's round trip is one round trip at any
 > population only until its transport first moves."
@@ -12685,7 +12685,7 @@ first "waits for the population". That holds of a first asked while the
 telling is still being sent, which is what a reader that follows the
 SHOULD asks. It is not a finding.
 
-### F-242 · minor · core §8.1 (0.44): "makes the round trip again" beside "the next that needs one takes up the one in flight"
+### F-242 · minor · core §8.1 (0.44): "makes the round trip again" beside "the next that needs one takes up the one in flight" (now observer §3.7)
 
 > §8.1 (0.44): "A reader SHOULD wait for the round trip after a move …
 > One whose wait ends first reads possibly incomplete (below), as before,
@@ -12722,7 +12722,7 @@ GET; and the order the barrier reads the fake session's links in.
 Beside 10,000 tokens, step 10's stand-in follower, with every wait at 20
 ms, took up its round trip 16 times and asked one.
 
-### F-243 · gap · core §8.1 (0.44) "One round trip, and one read, at a time": a GET its own timeout ended cannot be taken up, and its router still answers it
+### F-243 · gap · core §8.1 (0.44) "One round trip, and one read, at a time": a GET its own timeout ended cannot be taken up, and its router still answers it (now observer §3.7)
 
 > §8.1 (0.44): "the next that needs one takes up the one in flight, its
 > caller's wait or its own having ended."
@@ -12979,7 +12979,7 @@ again 1.46–1.50 s after the heal beside 2,000 tokens. Beside 10,000, which
 the step does not ask, it took 24.6–30.9 s, once past the 30 s. What "from
 the cut" means for an output that comes once a period is F-249.
 
-### F-246 · minor · core §8.1 (0.44, 0.45): "about what a read of the population costs", and F-243's figure, are a later read's
+### F-246 · minor · core §8.1 (0.44, 0.45): "about what a read of the population costs", and F-243's figure, are a later read's (now observer §3.7)
 
 > §8.1 (0.44): "A reader SHOULD wait for the round trip after a move, and
 > run its interests timeout, above that time at its population: about
@@ -13054,7 +13054,7 @@ again, beside 10,000 tokens:
 it runs sees only later reads". A reader's seed is a session's first read
 (F-248).
 
-### F-247 · minor · core §8.1 (0.45, F-243): "zk2py does so for its round trips and reads"
+### F-247 · minor · core §8.1 (0.45, F-243): "zk2py does so for its round trips and reads" (now observer §3.7)
 
 > §8.1 (0.45): "A reader MAY ask each GET with its own timeout at or above
 > its session's interests timeout … zk2py does so for its round trips and
@@ -13157,7 +13157,7 @@ as §8.1 says. Beside 2,000, at the second cut the subscriber was told
 every token withdrawn, since the first reopen had told it them, as
 Appendix B says of a transport that closes.
 
-### F-248 · minor · core §8.1 (0.46, F-246): "a reader that times its own reads as it runs sees only later reads"
+### F-248 · minor · core §8.1 (0.46, F-246): "a reader that times its own reads as it runs sees only later reads" (now observer §3.7)
 
 > §8.1 (0.46): "A reader SHOULD wait for the round trip after a move, and
 > run its interests timeout, above that time at its population: about
@@ -13367,7 +13367,7 @@ CHANGELOG's 0.47–0.50 s for zenctl at `--every 0.5` is round 71's
 0.46–0.50 s. Nothing else was found ambiguous, contradictory or
 untestable.
 
-### F-250 · minor · core §8.1 (0.41, 0.45): "an interests timeout above their timeout" beside "its own timeout at or above its session's interests timeout"
+### F-250 · minor · core §8.1 (0.41, 0.45): "an interests timeout above their timeout" beside "its own timeout at or above its session's interests timeout" (now observer §3.3)
 
 > §8.1 (0.41): "A reader whose GETs may wait longer SHOULD run its session
 > with an interests timeout above their timeout: its long reads can then
@@ -13412,7 +13412,7 @@ timeout: the SHOULD is about the reader's wait, the MAY about a GET's own
 timeout. zk2py is unchanged, as it already read it, and its doc comments
 quote 0.49.
 
-### F-251 · minor · core §8.1 (0.42, F-233): "3.2–3.9 s (zk2py, a release build), past the scenarios' 5 s wait and zenoh's 10 s interests timeout"
+### F-251 · minor · core §8.1 (0.42, F-233): "3.2–3.9 s (zk2py, a release build), past the scenarios' 5 s wait and zenoh's 10 s interests timeout" (now observer §3.7)
 
 > §8.1 (0.42): "A history there brings the population back into every
 > round trip: 23 s beside 10,000 tokens (the reference, a debug build),
@@ -13636,7 +13636,7 @@ reader. F-255 is wording only.
   admin space nor the `@/**` queryable, measured, since `**` crosses no
   verbatim chunk.
 
-### F-253 · minor · core §4.2 (0.48) "What a tool does not ask" beside Appendix B: a router's records, or a node's
+### F-253 · minor · core §4.2 (0.48) "What a tool does not ask" beside Appendix B: a router's records, or a node's (now observer §4.3)
 
 > §4.2 (0.48): "A router answers its declaration records,
 > `@/<zid>/router/{subscriber,publisher,queryable,querier,token}/**`,
@@ -16418,3 +16418,413 @@ owners, 106 of 106.
   in all four pairings.
 - **`arbitration.v1` 0.3: none open,** its regression run as round 80's.
 - **Resolved:** every entry. `timing.v1` 0.5 resolved F-278 to F-280.
+
+## At core 0.58 and observer.md 0.1 (#925, #937)
+
+Round 82 read core 0.57 and 0.58 and `spec/observer.md` text 0.1 cold, on
+main 4fc62c69 (PR #948). It checked that the move of the reader's
+discipline lost nothing that zk2py implements, read every MUST and SHOULD
+of `observer.md` against its evidence, implemented core 0.57's
+`cardinality = "unbounded"` and what `observer.md` asks that zk2py did
+not yet do, and ran the live runners that exercise the reader's rules.
+The reference's parties and tool ran as black boxes (`owner`, `consume`,
+`zk2` and `zenctl` in `/srv/dev/targets/zenkey-tier/blackbox/`, built
+2026-10-29 23:36, their `--help` read, their source never). It read, as
+a newcomer would:
+- `spec/observer.md` 0.1 whole, and `observer-CHANGELOG.md`;
+- `spec/CHANGELOG.md`'s 0.57 and 0.58 entries, and every line core 0.58
+  changed, every pointer it left among them;
+- `profiles/README.md`'s new index and process, and the `experimental`
+  entries of `timing.v1` and `arbitration.v1`;
+- the two new contract fixtures, `contract.schema.json`'s `Cardinality`
+  and `examples/zk2/README.md`'s draft 2.
+
+Since round 81, `spec/` and `examples/zk2/` changed in ten commits,
+e98622ea, 4573f359, 03e69019, 7d474584, ff0d6959 (`contract.schema.json`),
+c7539263 (core 0.57), c2c61273 (draft 2), 09c5930a (core 0.58 and
+`observer.md`), 3436a6ae (the changelogs) and 0db0621b (a link). zk2py
+read their `spec/` and `examples/zk2/` files alone. No profile text's
+version moved.
+
+### What the move must not lose
+
+**Mechanically.** The 713 lines core 0.58 removed from 0.57 were split into
+sentences and normalized for the move's one licensed change, references
+(a `core ` prefix, a § number, a link, `Appendix B`). Every sentence of
+more than 25 characters stands in `observer.md` 0.1 or still in core
+0.58. The eighteen that matched neither were each read: hunks the diff
+spliced together (a line the move removed beside one it kept), and the
+subjects §0 says a bullet names where only a sentence moved ("comparing
+the stamp's id with it" became "with the owner's `meta.zid`"; §7.1's
+"Generic tools" column became §7.3's bullet). The other way, every
+sentence of observer §3 to §7 not in core 0.57 is a heading, a "Moved
+from … stay in core §n" line, one of those bullets, a reference
+rewritten, or one of the two restatements the changelog declares (§4.2's
+admin space off by default, §6.1's opening). No rule was lost, and none
+changed.
+
+**Evidence, citation by citation.** Each `[F:]` and `[Sc:]` core 0.58
+removed stands in `observer.md` or in a core line 0.58 rewrote, as often
+as it was removed, but for one change: observer §7.2, a tool judging O3
+from outside, cites `[Sc: operations.md §3, §5]`, where 0.57's block
+shared `[Sc: operations.md §2, §3, §6]` with the owner's half (F-284).
+
+**Against zk2py's own rules.** Every rule zk2py implemented from the
+blocks that moved, with its new home:
+
+| zk2py | The rule, in core 0.57 | Now | Evidence |
+|---|---|---|---|
+| `live.list_presence`, `live.settle`, `live.Flight`, `live.Barrier`, `presence.PresenceView` and `PresenceFollower` | §8.1, "Reading presence": handlers, possibly incomplete, a refused read, a session cut off, absence, the watch session, a token's own session, what a complete read covers | observer §3.1 to §3.9 | the same: presence.md §4, §6 to §10; arbitration's §3, §4, §7 |
+| `live.presence_shapes`, read twice by `live.presence_faults` | §8.1 (0.10), two reads a grace apart | observer §3.2 | none, as in 0.57 (F-282) |
+| `seed.LateJoiner`, a tool's seed (`consumer` False) | §4.2, "R6 and a tool's seed", "What a seed cannot know" | observer §4.1 | state.md §11 |
+| `live.check_s4`, `verified_routers` | §4.2, S4's check, "What the check reads", "Who answered" | observer §4.2 | security.md §3 |
+| `live.admin_guard`, `admin_records` | §4.2 (0.48, 0.50), "What a tool does not ask" | observer §4.3 | state.md §12 |
+| `live.attribute_stamp`, `live.s1_check`, every profile's zid by value | §3.3's `meta`, "How a zid compares"; §4.2, "A tool's S1 check" | observer §4.4 | none cited, as in 0.57 (F-281) |
+| `budget.population`, `rate`, `lossless`, `stall_bound`, `StallWatch`, `Window` | §2.4's and §2.7's readings and conclusions | observer §5.1 to §5.3 | the same: `budget/`, budget.md §1 to §3 |
+| `redundancy_live.split_findings`, `live.presence_shapes`' standby | §6, split-brain's diagnosis, "Reading the mark" | observer §6.1, §6.2 | operations.md §8; redundancy's §12 |
+| presence polled, never inferred (R7); `live_interop`'s detectors refusing `self.system` | §3.2's R3, R7 tool halves, "A tool has no system of its own" | observer §7.1 | constrained.md §3, bindings.md §3, §5 |
+| `live.o3_verdict` | §5.1, O3 judged from outside, "Told so" | observer §7.2 | changed (F-284) |
+| the type checks a tool runs (`schemas`, `envelope`); zk2py renders nothing | §7.1's "Generic tools", §7.2's decode order | observer §7.3 | types.md §2 |
+
+What stayed in the core and zk2py implements stayed with its evidence:
+tokens, the tokenless set, re-minting and the caller's timeouts (§8.1); the
+bound, a member, the owner's rule and the rate (§2.7); a late joiner's
+order and merge (§4.2, `seed/merge.json`); archives (§4.4); ownership,
+serving and the standby (§6); the descriptor's spelling of `meta.zid`
+(§3.3). **The move lost no rule zk2py implements.** It left two MUSTs
+without evidence, as 0.57 had (F-281, F-282), changed one block's
+citation (F-284), and left the core's conformance levels and preamble
+naming no text but the core (F-285).
+
+### Every MUST and SHOULD of observer.md 0.1, against its evidence
+
+| § | Rule | Evidence | Checks it |
+|---|---|---|---|
+| §1 | four states, the two Unestablished apart, not asked never no, an empty scope unobservable | `budget/population.json`, `rate.json`; presence.md §6; desired's §9 | yes, in a report field; the fifth answer the profiles give has no place (F-286) |
+| §2 | silence is never a verdict | operations.md §5, presence.md §6, `population.json` | yes |
+| §3.1 | MUST a callback or an unbounded handler; MUST callback subscribers | presence.md §4 | yes |
+| §3.2 | MUST two reads a grace apart, every fault shape | none | split-brain only, elsewhere (F-282) |
+| §3.3 | SHOULD a GET at its timeout possibly incomplete; MUST one at the interests timeout; two SHOULDs on the session's value | presence.md §6, §10 | yes |
+| §3.4 | SHOULD say a refusal is not ruled out | presence.md §6 | yes |
+| §3.5 | MUST NOT conclude absence or heal a loss from a cut-off read; SHOULD NOT make it | presence.md §7 | yes |
+| §3.6 | MUST NOT conclude absence from a withdrawal; SHOULD read again; MAY act on one | presence.md §8; arbitration's §3, §4, §7 | yes |
+| §3.7 | eleven SHOULDs and a MAY of the watch session | presence.md §9, §10; arbitration's §7 | yes |
+| §3.8 | an implementation note | none here (F-283) | redundancy's §5 step 3 |
+| §3.9 | SHOULD a client of a router, or a linked peer | none here (F-283) | redundancy's §5 |
+| §4.1 | a tool's seed keeps a key that is not concrete | state.md §11 | yes |
+| §4.2 | S4's check; an operator MAY trust every answer | security.md §3 | yes |
+| §4.3 | MUST NOT ask a node's declaration records unbidden | state.md §12 | yes |
+| §4.4 | MUST compare zids by value; the S1 check | none | `profiles/timing/conformance/lifespans.json` #16 (F-281) |
+| §5.2, §5.3 | a complete reading, lost no delivery, the stall, the verdicts | `budget/`, budget.md §1 to §3 | yes |
+| §6.1 | SHOULD a grace above the longest re-mint overlap | operations.md §8 | yes |
+| §6.2 | a standby by its mark | redundancy's §12 | yes |
+| §7.1 | MUST say unobservable across a face; MUST refuse `self.system` | constrained.md §3, bindings.md §5 | yes; link's §6 too (F-283) |
+| §7.2 | O3 from outside, told so or not | operations.md §3, §5 | the premise only (F-284) |
+| §7.3 | MUST decode protobuf and JSON Schema; MUST render honestly; MAY a plugin | types.md §2 | yes |
+| §7.4 | SHOULD check the memlock limit | none | a SHOULD; what it compares (F-290) |
+| §8.1 | a foreign key is a fact | `keys.json`, state.md §11 | the premise |
+| §8.2 | a wildcard scope names what it excludes | grammar.md §1, §2 | the premise only (F-287) |
+| §8.3 | a tool names who stamped a time | state.md §1, timing's §4, §5 | yes |
+
+### F-281 · gap (evidence) · observer 0.1 §4.4 "Two zids compare by value": a MUST that cites nothing, whose fixture exists
+
+> §4.4: "A tool MUST compare two zids by value, never by their text: case
+> and leading zeros carry no meaning."
+
+- **The text.** §0 says "Each MUST cites what checks it", and
+  `observer-CHANGELOG.md` names this MUST as one of two that cite none,
+  "since this text invents no fixture".
+- **The evidence exists.** `profiles/timing/conformance/lifespans.json`
+  #16, "ids compared by value: case and leading zeros carry no meaning
+  (core §3.3)": `meta.zid` `001f` against stamps `01f` and `1F`, each the
+  owner's. Core Appendix C's timing row cites the same scenarios for "§3.3
+  `meta.zid` attributing a stamp (0.53)", where observer Appendix B maps
+  them to §8.3 alone.
+- **Proposal.** Cite `[F: profiles/timing/conformance/lifespans.json]` on
+  §4.4's MUST, and add §4.4 to Appendix B's timing row.
+- **Changes:** wording and the index only. zk2py compares by value
+  everywhere it reads a zid, and passes #16.
+
+### F-282 · gap (evidence) · observer 0.1 §3.2: two reads a grace apart for every fault shape, evidenced for split-brain alone
+
+> §3.2: "A tool that decides a fault from the shape of presence (two
+> holders, §6.1; a token its descriptor does not list, or an exposed
+> interface with no token) MUST see it in two reads a grace apart … §6.1
+> states the rule for split-brain, and it holds for every such shape."
+
+- **What checks it.** operations.md §8: a re-mint's overlap, in one read,
+  is no finding. For the other shapes, scenarios read twice and find the
+  shape held through both: hostid's §6 (two instances of one address) and
+  redundancy's §12 steps 4 and 5 (an unmarked listing with no token, a
+  marked one holding a token). None shows a shape in one read only and
+  expects no finding, as an owner between core §8.2's steps 3 and 4 shows
+  one: its descriptor lists an interface whose token it has not declared.
+- **Proposal.** Cite `[Sc: operations.md §8; profiles/hostid/scenarios.md
+  §6; profiles/redundancy/scenarios.md §12]`, and add a step: an owner
+  whose interface token comes a second after its descriptor, read once
+  between, then twice a grace apart after: no `no token` finding.
+- **Changes:** a test (a scenario step), no verdict. zk2py's
+  `presence_faults` reads twice for every shape, and its own live run
+  checks the transient half for one: "a token the descriptor does not
+  list, gone within the grace: seen once, so it passes, never a fault"
+  (`live_interop`'s "tool rules (0.10 to 0.13)", 15 of 15).
+
+### F-283 · gap (index) · observer 0.1 Appendix B, §3.8, §3.9 and §7.1: evidence core Appendix C names for the moved rules
+
+> Core Appendix C (0.58): "Since 0.58 the evidence of the rules moved to
+> observer.md is indexed there too (its Appendix B)."
+
+- `profiles/redundancy/scenarios.md` §5: core's row gives "§8.1 a refused
+  read on the claim's own session, and peers that link (§5, 0.40)", now
+  observer §3.8 and §3.9, which cite nothing; Appendix B lists
+  redundancy's §12 alone.
+- `profiles/link/scenarios.md` §6, "The tool reports liveness unobservable,
+  never down (core R7)": core's row gives "R7 liveness across a face
+  (0.29)"; observer §7.1 cites constrained.md §3 alone.
+- `profiles/timing/scenarios.md` §4, §5 for §4.4 (F-281).
+- **Proposal.** Cite them where the rules are, and add the rows.
+- **Changes:** wording and the index only.
+
+### F-284 · gap (evidence changed) · observer 0.1 §7.2: O3 judged from outside, its citation changed and its rule unchecked
+
+> §7.2: "Told so, the tool holds a silence from an owner whose tokens it
+> reads as the finding. Not told, the silence is unobservable, and the
+> tool names the premise it lacked … `[Sc: operations.md §3, §5]`"
+
+- **Changed.** In core 0.57 the block shared `[Sc: operations.md §2, §3,
+  §6]` with the owner's half, which core §5.1 keeps with it. The
+  changelogs say each block moved "its `[F:]` and `[Sc:]` citations with
+  it"; this one moved with another.
+- **Unchecked.** operations.md §5 shows the premise (a refusal is silent),
+  §3 the owner's half (a handler's silence answered `internal`). No step
+  has a tool told its grants, or not, and judging a frozen owner.
+- **Proposal.** Record the citation in `observer-CHANGELOG.md`, and add
+  to operations.md §5: a tool told its grants let it call holds the frozen
+  server's silence a finding; not told, unobservable, naming the premise.
+- **Changes:** a test, no verdict. zk2py's `acl_interop` runs both halves
+  under generated grants ("O3 judged from outside, under the grants").
+
+### F-285 · gap · core 0.58 §12 and its preamble: conformance names no text but the core
+
+> §12: "**Full.** An implementation at the full level meets every rule
+> above."
+
+- In 0.57 "every rule above" held the reader's discipline. In 0.58 the
+  rules above are pointers to it, so a tool can claim full conformance
+  without `observer.md`. The preamble says an implementation "can be built
+  from it, plus the fixtures … and the scenarios", and does not name
+  `observer.md`, which observer §0 says is normative.
+- **Proposal.** §12: "meets every rule above, and every rule of
+  `observer.md` that binds a role it plays"; the preamble names
+  `observer.md` beside the fixtures.
+- **Changes:** what a conformance claim covers; no test, no
+  implementation.
+
+### F-286 · ambiguity · observer 0.1 §1 "Every verdict a tool presents fits one shape", against the profiles' "not this profile's"
+
+> §1: "`Established(yes) | Established(no)` `Unestablished(NotAsked) |
+> Unestablished(Unobservable { reason })`"
+>
+> `profiles/README.md` (the template's §5): "*unestablished*: **not
+> asked** … or **unobservable** … (… the judgement shape is
+> `../observer.md` §1's); **not this profile's**, where the question's
+> premise does not hold".
+
+- `arbitration.v1` §5 calls the three "different facts", and the
+  fixtures of `telemetry.v1`, `desired.v1`, `redundancy.v1`, `timing.v1`
+  and `arbitration.v1` give `not_this_profiles` as a token of its own. §1, now normative, has four states, so the fifth is
+  either a NotAsked with its reason, or outside the shape.
+- **Proposal.** §1 names it: a profile may answer "not this profile's", an
+  Unestablished answer kept apart from NotAsked and Unobservable, never
+  "no".
+- **Changes:** wording; no verdict. Both implementations keep the token.
+
+### F-287 · gap (evidence) · observer 0.1 §8.2: what a wildcard scope excludes, evidenced by the guard alone
+
+> §8.2: "A tool that offers a wildcard scope either names the verbatim
+> kinds it watches beside it, or states that they are excluded.
+> `[Sc: grammar.md §1]`"
+
+- grammar.md §1 and §2 check the guard (`**` crosses no verbatim chunk),
+  the premise. No step checks what a tool says of it, and the changelog
+  kept in the guide what has no evidence.
+- **Measured** (round 82, beside §6 of `timing.v1`'s scenarios, not a
+  scenario): both timing tools over zk2py's owner of a contract with a
+  plain and an explicit timed stream. Under `zk2/lab/beat/**` both watched
+  `stream/cmd` alone; zk2py's tool named `beat.v1 @stream/frame`
+  unreached and the five verbatim kinds excluded, and `zenctl timing`
+  said nothing of it, in its JSON or on stderr. Under
+  `zk2/lab/beat/*/@stream/**` both watched `@stream/frame` alone.
+- **Proposal.** A step in grammar.md §1 for a tool: a scope over
+  `zk2/g/**` reports `@stream`, `@state`, `@op`, `@adv` and `@zk`
+  excluded. Or back to guidance until one exists.
+- **Changes:** a test; the reference tool's report.
+
+### F-288 · minor · observer 0.1 §4.4 and §6.1: a rule stated twice, and a restatement short of its source
+
+> §4.4: "**A tool attributes a state stamp to its owner** by comparing the
+> stamp's id with the owner's `meta.zid` (core §3.3; …)" and, two bullets
+> on, "A tool attributes a state reply's stamp by comparing its id with the
+> owner's `meta.zid` (core §3.3), by value."
+
+- In the core the two sat in §3.3 and §4.2; moved, they are one rule in
+  one section, and §8.3 states it a third time by reference.
+- §6.1's restated opening, "A tool diagnoses it, and the runtime does not
+  fence (core §6)", leaves out core §6's "but for an interface whose
+  contract uses `redundancy.v1`: its holders step down".
+- **Proposal.** Merge the first bullet into the S1 check; restate §6's
+  sentence whole, or cite it alone.
+- **Changes:** wording only.
+
+### F-289 · minor · observer 0.1 §2: "(core R7, §7.1)" reads as the core's §7.1
+
+> §2: "**Constrained faces** (core R7, §7.1)", and "**State** (core S4–S6,
+> §4)".
+
+- By §0 a bare § is this text's, so these are observer §7.1 and §4. After
+  "core", they read as the core's: core §7.1 is type identity.
+- **Proposal.** "(core R7; §7.1)", "(core S4–S6; §4)".
+- **Changes:** wording only.
+
+### F-290 · minor · observer 0.1 §7.4: a check against a pool the tool does not know
+
+> §7.4: "A tool SHOULD check the limit at start: the `RLIMIT_MEMLOCK` that
+> core §7.4 asks a deployment to set to at least the pool plus 2 MiB."
+
+- The pool is a publisher's, so a tool at its start has nothing to
+  compare the limit with. zk2py's tools state the largest pool the soft
+  limit admits, the limit less 2 MiB (`live.memlock_note`), and below
+  2 MiB that none is.
+- **Proposal.** Say what the check reports.
+- **Changes:** wording; zk2py chose its reading.
+
+### Core 0.57 in zk2py
+
+- **`zk2py.contract`:** `cardinality = "unbounded"` resolves to
+  4294967295 (`resolve_cardinality`, core §9.1: "which is 4294967295 from
+  resolution on"), so the canonical form and the fingerprint are the
+  number's, and every reader of the resolved resource reads the spellings
+  alike. Any other string is E000 by `contract.schema.json`'s new
+  `Cardinality`. E013's message says what to write.
+- **The runner:** `contracts/ok-cardinality-unbounded` failed its
+  fingerprint and canonical bytes, holding the string, as the brief
+  expected; it passes now, and `e000-cardinality-string` passed already.
+  `contracts` 112 of 112.
+- **`readings`:** 13 of "unbounded": a stream's and an operation's
+  template lint clean and resolve to 4294967295, one fingerprint with the
+  number; on a template without parameters it is E014, as a number is;
+  `"UNBOUNDED"`, `"4294967295"`, `""` and `"unbounded "` are E000; the
+  bound is no ceiling, lowered to 64 by an instance; D007 admits a stated
+  4294967295 and refuses 4294967296; the two spellings are the same
+  revision (§9.8).
+- **"At scale."** Informative lines; nothing to implement.
+
+### observer.md 0.1 in zk2py
+
+- **Retargeted.** Every citation in zk2py's code of a rule that moved
+  names `observer §n` (229 lines in 27 modules), each version kept as the
+  core amendment that made the rule (observer §0); a quote whose reference
+  the move rewrote reads as `observer.md` writes it. What stayed keeps its
+  core citation. The split-brain row's rule label is `observer §6.1`.
+  This file's headers of the findings against a moved rule say where it is
+  now (32 headers); their quotes are history, as quoted.
+- **What it asked that zk2py did not do:**
+  - §8.2: `live.blind_spots`, the verbatim kinds a selector never reaches
+    (zenoh's own intersection), and `timing_tool`'s `scope`: the kinds
+    excluded and the timed streams of the revisions held its selector
+    misses, said on stderr too;
+  - §8.3: `timing_tool`'s `clocks`, whose clock its times and a lifespan's
+    age are on;
+  - §7.4: `live.memlock_note`, said at start by `timing_tool` and
+    `arbitration_tool` (F-290).
+- **What zk2py met already:** §1's shape in every tool's report (`yes`,
+  `no`, `not_asked`, `unobservable` with its reason, and the profiles'
+  `not_this_profiles`, F-286), §2's silence, and §8.1 (zk2py's readers
+  keep a foreign key under the key it arrived on, `state.md` §11).
+- **`readings`:** 550 (520 before), 13 of core 0.57 and 17 of observer
+  0.1: nine selectors' blind spots, three selectors over a plain and an
+  explicit timed stream, and four limits' notes with the host's own.
+- **`just py-conformance`: 3507 of 3507.**
+- **After review-bot on PR #949** (no blocking finding; its should-fixes):
+  - **The reach patterns are the text's.** `live.VERBATIM_REACH` gave
+    `@adv` as `zk2/*/*/*/*/**/@adv/**`, a guess that admitted an events
+    key. Each kind's patterns are now the key forms core §1.1 and §2.5
+    write, cited beside them: `@stream`, `@state` and `@op` at position 5
+    of the data form with one resource chunk or more (`…/@op/*/**`);
+    `@adv` under a plain stream's or state's data key alone
+    (`…/stream/*/**/@adv/**`, `…/state/*/**/@adv/**`); `@zk` as the four
+    control forms, exactly. 32 selectors check them, each kind reached by
+    its form and missed by one shorter and one longer: a kind token with
+    no resource chunk, an instance form with a chunk too many, `@stream`
+    at position 4, `@adv` under an event or a verbatim chunk. Two would
+    fail if zenoh's intersection did not do what the comment says: three
+    resource chunks before `@adv` (the pattern's `**` spanning them) and
+    `zk2/a/b/i/stream/**` (the selector's crossing no `@adv`).
+  - **The unreached streams come from the contracts in hand.**
+    `timing_tool.timed_streams` lists every timed stream a contract
+    declares at the address, and its key expression, from the contract
+    alone; `timed_rids` is that list filtered by zenoh's intersection and
+    nothing else; `unreached_rids` the rest. A selector naming another
+    address leaves both of the case's streams unreached.
+  - **The memlock note never stops a tool.** `live.memlock_said` wraps
+    `memlock_note`: any failure reads "the memlock limit could not be
+    read: …", and the tool goes on. The note quotes core §7.4 ("at least
+    the pool plus 2 MiB"; "Below the pool's need, SHM silently falls back
+    to TCP, and a metadata segment that cannot be locked panics") rather
+    than paraphrasing it.
+  - E013's message is zk2py's own: no fixture compares a diagnostic's
+    text (core Appendix E: codes and the fingerprint), as a comment there
+    now says.
+  - `readings` 581, `just py-conformance` 3538 of 3538, and
+    `timing_interop --only 6 --only face` 68 of 68 again. The scope probe
+    beside it gives the same reach and the same `scope` as before.
+
+### Live
+
+On in-process zenoh-python 1.10.1 routers, every listener on a free
+loopback port, under `taskset -c 0-1`. "zenctl" is the reference tool.
+
+`python -m zk2py.presence_scenarios`, checks passed:
+
+| Owner, reader | §1 | §2 | §3 | §4 | §5 | §6 | §7 | §8 | §9 | §10 | Not run |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| zk2py, zk2py | 6 | 3 | 2 | 3 | 2 | 5 | 8 | 11 | 9 | 46 | §3 step 2 |
+| Rust, zk2py | – | – | – | – | – | – | – | – | 9 | 40 | §10 step 7 |
+| zk2py, zenctl | – | – | – | – | – | – | – | – | – | 9 | §10 step 9 |
+| Rust, zenctl | – | – | – | – | – | – | – | – | – | 8 | §10 steps 7, 9 |
+
+No check failed: 95, 49, 9 and 8. After the citations' commit, §6 to §9
+ran again with zk2py's owner and reader: 33 of 33.
+
+`python -m zk2py.live_interop`, against the owner and consume examples
+and zenctl: **459 of 459**, no known deviation. Its tool runs (S4 through
+the admin space and the presence shapes, 15 of 15; S1 from a tool, 7 of
+7), its budget runs (16 of 16), the late joiner's seed (7 of 7) and
+the admin read under access control all pass.
+
+`python -m zk2py.state_scenarios`, §12 with each reader: **32 of 32**
+(§3 5, §10 10, §11 5; §12 4 each with zk2py's reader, `zenctl doctor` and
+`zenctl storage`).
+
+The regression runner, `python -m zk2py.budget_scenarios --owner
+<owner>`: **41 of 41** (§1 to §3 the reader's premises, observer §5.2;
+§4 to §7 with each owner).
+
+`python -m zk2py.timing_interop --only 6 --only face`, beside the tool's
+new fields: **68 of 68**, §6's steps with both tools beside each owner,
+the two tools agreeing.
+
+### Counts at core 0.58 and observer.md 0.1
+
+290 entries.
+- **Open: F-281 to F-290,** ten. None is a blocker, and none changes a
+  verdict either implementation gives.
+  - **F-281, F-283, F-288, F-289** are wording or the index.
+  - **F-282, F-284, F-287** are tests missing (F-287's measured against
+    the reference tool).
+  - **F-285** is what a conformance claim covers.
+  - **F-286** is the shape's fifth answer; **F-290** what a check
+    reports.
+- **What the move lost:** no rule. Two MUSTs still cite nothing, one
+  block's citation changed, and the conformance levels do not name
+  `observer.md`.

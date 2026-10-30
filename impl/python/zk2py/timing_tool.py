@@ -52,23 +52,55 @@ from . import live
 from . import timing as tm
 
 
-def timed_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
-    """The timed streams of a contract the selector reaches: a stream with a
-    ``timing.*`` key among its resolved annotations (§0's timed resource,
-    the invalid ones included, which §5 reads ``invalid``)."""
-    import zenoh
-
+def timed_streams(canonical: dict[str, Any], address: str) -> list[tuple[str, str]]:
+    """Every timed stream a contract in hand declares at ``address``: a
+    stream with a ``timing.*`` key among its resolved annotations (§0's
+    timed resource, the invalid ones included, which §5 reads
+    ``invalid``), plain or explicit, as ``(rid, key expression)``, the key
+    expression its keys' at the address (core §1.1's data form, its
+    template's parameters wildcards). Read from the contract alone: no
+    selector decides what is listed."""
     from .timing_live import _template_expr
 
-    sel = zenoh.KeyExpr(selector)
     out = []
     for r in canonical.get("resources") or []:
         if tm.kind_of(r["kind"]) != "stream" or not any(k.startswith("timing.") for k in r.get("annotations") or {}):
             continue
-        expr = zenoh.KeyExpr(f"zk2/{address}/{canonical['interface']}/{r['token']}/{_template_expr(r['template'])}")
-        if sel.intersects(expr):
-            out.append(f"{r['token']}/{r['template']}")
+        out.append((f"{r['token']}/{r['template']}",
+                    f"zk2/{address}/{canonical['interface']}/{r['token']}/{_template_expr(r['template'])}"))
     return out
+
+
+def timed_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
+    """The timed streams of a contract the selector reaches: of
+    :func:`timed_streams`, those whose keys' expression the selector
+    intersects, by zenoh's own intersection and nothing else."""
+    import zenoh
+
+    sel = zenoh.KeyExpr(selector)
+    return [rid for rid, expr in timed_streams(canonical, address) if sel.intersects(zenoh.KeyExpr(expr))]
+
+
+def unreached_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
+    """The timed streams of a contract the selector does not reach, in byte
+    order: every one :func:`timed_streams` lists at the address, less
+    :func:`timed_rids`'s. An explicit ``@stream`` under a selector ending
+    ``**`` is one (observer §8.2, "`*` and `**` never match a verbatim
+    chunk"), and so is every stream when the selector names another
+    address."""
+    reached = set(timed_rids(canonical, selector, address))
+    return sorted({rid for rid, _ in timed_streams(canonical, address) if rid not in reached}, key=str.encode)
+
+
+#: Observer §8.3: "A tool says whose clock a time, an age or a latency is
+#: on." The report's times, and a lifespan's age.
+CLOCKS = {
+    "window": "zk2py's monotonic clock: at_ms, due_ms, held_ms and span_ms count from the window's start, "
+              "listening counted from its last subscription (timing.v1 §2.5, §2.7)",
+    "lifespan": "a sample's age is this host's wall clock at its arrival less its stamp's time, the stamp the "
+                "owner's when its id is the owner's meta.zid by value, else foreign (a router's, or a reader's "
+                "own session's), or none (timing.v1 §2.6; observer §4.4, §8.3)",
+}
 
 
 def _rolled(question: str, members: list[tuple[str, tm.Answer]]) -> dict[str, Any]:
@@ -115,6 +147,11 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
                 if canon is not None and canon not in contracts:
                     contracts.append(canon)
     plans = [(c, rids) for c in contracts if (rids := timed_rids(c, selector, address))]
+    # observer §8.2: a wildcard scope names what it cannot reach, the
+    # verbatim kinds and the timed streams of the revisions held it misses
+    unreached = sorted({f"{c['interface']} {r}" for c in contracts for r in unreached_rids(c, selector, address)},
+                       key=str.encode)
+    scope = {"selector": selector, "excluded": live.blind_spots(selector), "unreached": unreached}
     windows = [Window(session, watch, address, c, rids, epsilon_ms=clock_bound_ms, across_face=across_face,
                       owner_zids=owner_zids) for c, rids in plans]
     if listening is not None:
@@ -179,7 +216,7 @@ def run(session: Any, watch: Any, selector: str, offline: list[Any], *, window_s
     held = any(r["row"] == "member" for r in rows)
     code = 2 if not held else 1 if finding else 0 if clean else 2
     return {"report": "timing", "selector": selector, "across_face": across_face, "clock_bound_ms": clock_bound_ms,
-            "window_s": window_s, "rows": rows, "run": runq, "exit": code}
+            "window_s": window_s, "scope": scope, "clocks": CLOCKS, "rows": rows, "run": runq, "exit": code}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -199,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
         print("timing: --owner-zid is the deployment's word across a face (§2.8): give --across-face",
               file=sys.stderr)
         return 2
+    # observer §7.4: a tool checks the limit at start, and says what it admits
+    print(f"timing: {live.memlock_said()}", file=sys.stderr, flush=True)
     offline = _load(args.contracts)
     session, watch = live.open_client(args.connect), live.open_client(args.connect)
 
@@ -212,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         live.close(session)
         live.close(watch)
+    if doc["scope"]["unreached"]:
+        print(f"timing: {args.selector} reaches no {', '.join(doc['scope']['excluded']) or 'verbatim kind'}: "
+              f"not watched {', '.join(doc['scope']['unreached'])} (observer §8.2)", file=sys.stderr, flush=True)
     print(json.dumps(doc, indent=2))
     return doc["exit"]
 

@@ -8,9 +8,9 @@ the machine its events one at a time and does each step:
 - ``claim``: the owner's start, core §8.2 steps 1 to 4 with nothing of the
   interface declared and its entry marked (§2.5 step 1), then the watch: a
   liveliness subscriber on ``zk2/<address>/@zk/**`` on a session of its own
-  (§2.7, core §8.1 0.37), with history, and its round trip;
+  (§2.7, observer §3.7, 0.37), with history, and its round trip;
 - ``read``: one liveliness read of ``zk2/<address>/@zk/**`` on a session of
-  its own that never holds a liveliness subscriber (core §8.1, 0.38) and
+  its own that never holds a liveliness subscriber (observer §3.7, 0.38) and
   never holds the claim, after one round trip on the claim's session
   (§2.5 step 1), and the descriptors of the instances below its own; a read
   not made is ``Read(False, ())``. Not the claim's session: zenoh answers a
@@ -133,7 +133,7 @@ def read_address(session: zenoh.Session, address: str, iface: str, *, below: str
     every instance's, or with ``below`` only those of the ids lower than
     it (§2.5 step 3: "A higher id cannot beat it"). ``own`` is (id, its
     mark): its own descriptor is not read ("own's own descriptor reading
-    plays no part"). Complete is core §8.1's (0.37, 0.38): a read not made
+    plays no part"). Complete is observer §3's (0.37, 0.38): a read not made
     is ``Read(False, ())``. Returns the read, the presence read, and the
     descriptors read by id."""
     p = live.list_presence(session, f"zk2/{address}/@zk/**", timeout)
@@ -312,7 +312,7 @@ def probe_findings(reading: rd.Reading, docs: dict[str, dict[str, Any]],
 class ToolReading:
     """What zk2py's tool read of one address and interface (§2.15): the
     reading §5 is concluded from, the two presence reads (their own kinds,
-    core §8.1, 0.38), the descriptors by instance, the governance's
+    observer §3.5, 0.38), the descriptors by instance, the governance's
     reasons when a declaration is invalid (0.3), and, probed, each probe
     key's repliers and the probe's findings."""
 
@@ -398,13 +398,13 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
 
 def split_findings(session: zenoh.Session, address: str, ifaces: Iterable[str], grace_s: float = 2.0,
                    contracts: Iterable[Any] = ()) -> list[tuple[str, list[str], str]]:
-    """Core §6's split-brain with §2.15's "One split, one finding" (0.3): of a
+    """Observer §6.1's split-brain with §2.15's "One split, one finding" (0.3): of a
     governed interface, its first question's split, two or more holders in
     both reads "whatever their marks and whatever they expose"; of one the
-    profile does not govern, core §6's own rule, two or more instances
+    profile does not govern, observer §6.1's own rule, two or more instances
     holding the interface's token and listing it unmarked, in both reads.
     One finding per interface, naming the second read's holders, and whose
-    rule it is: ``redundancy.v1`` or ``core §6``."""
+    rule it is: ``redundancy.v1`` or ``observer §6.1``."""
     out = []
     contracts = list(contracts)
     for iface in ifaces:
@@ -416,14 +416,14 @@ def split_findings(session: zenoh.Session, address: str, ifaces: Iterable[str], 
             def exposing(read: rd.Read) -> set[str]:
                 return {i.id for i in read.instances if i.token and i.descriptor == rd.SERVING}
             if len(exposing(r.first)) >= 2 and len(exposing(r.second)) >= 2:
-                out.append((iface, sorted(exposing(r.second), key=rd.id_key), "core §6"))
+                out.append((iface, sorted(exposing(r.second), key=rd.id_key), "observer §6.1"))
     return out
 
 
 def tool_reading(session: zenoh.Session, address: str, iface: str, grace_s: float = 2.0,
                  across_face: bool = False, contracts: Iterable[Any] = ()) -> tuple[rd.Reading, list[live.Presence]]:
     """:func:`read_tool`'s reading and its presence reads, so a tool reports a
-    read's own kind beside the profile's answer (core §8.1, 0.38)."""
+    read's own kind beside the profile's answer (observer §3.5, 0.38)."""
     t = read_tool(session, address, iface, grace_s, across_face, contracts)
     return t.reading, t.presence
 

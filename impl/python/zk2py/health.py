@@ -500,7 +500,7 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
               trust: fr.ClockTrust | None = None, get: bool = True,
               timeout: float = 1.0) -> tuple[Reading, dict[str, Any]]:
     """One reading of ``address`` (``<system>/<service>``) on the near side,
-    for §2.11: its presence (core §8.1), its descriptor (§2.7, the interface
+    for §2.11: its presence (observer §3), its descriptor (§2.7, the interface
     token playing no part), the status as ``subscriber`` saw it (a present,
     listed owner holds one, §2.3, so its silence ages it) and as a GET over
     ``health.v1/state/**`` answered it (core S2, aged against ``trust``),

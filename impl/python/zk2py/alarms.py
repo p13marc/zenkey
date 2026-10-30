@@ -556,7 +556,7 @@ def judge(r: Reading, question: str = Q_FIRING, horizon: fr.Horizon = HORIZON) -
     stale_q = question == Q_STALE
     across = r.presence == "across_face"
     obs = list(r.observations)
-    # 1. Presence (core §8.1).
+    # 1. Presence (observer §3).
     if r.presence == "absent":
         return Answer(NOT_ASKED, "absent", "a complete read without its instance token; an archive's is last-known")
     if r.presence == "incomplete":
@@ -1196,7 +1196,7 @@ def window_span(start_ns: int, end_ns: int, losses: Iterable[int], gaps: Iterabl
     followed" it: a GET asked strictly after the instant the break was
     seen. A stall is seen by the tick that ends it, so a GET asked inside
     it heals nothing. ``lossless_path``: the QoS and the reader's own queue
-    (core §2.7)."""
+    (observer §5.2)."""
     gets = sorted(complete_gets)
     start, lossless, present = start_ns, lossless_path, True
     for kind, instants in (("loss", losses), ("gap", gaps)):
@@ -1217,12 +1217,12 @@ class AlarmsReader:
     0.3): one subscription; its own receive path watched; each owner's
     instance tokens watched; its S4 GETs recorded. :meth:`read` gives one
     owner's reading at an instant, its window as §2.15 counts one:
-    - **its span** counts as core §2.7 counts a window's, "from the
+    - **its span** counts as observer §5.2 counts a window's, "from the
       declaration plus the reply timeout, or from that GET, to its end; the
       owner is watched one lease and the reply timeout past the end. So a
       reader judging at an instant ends its window that long before it";
     - **a loss** is a stall of the reader's receive path, or a transport of
-      its session closing (core §2.7, 0.27), "a loss at the instant the
+      its session closing (observer §5.2, 0.27), "a loss at the instant the
       reader sees it" (:class:`zk2py.budget.StallWatch`);
     - **a gap in the owner's presence** is "its instance token withdrawn,
       or a new instance's appearing", an owner joining included;
@@ -1231,7 +1231,7 @@ class AlarmsReader:
       ``owner_gap``. zk2py dates a GET by the instant it was asked
       (SPEC-FINDINGS, "At alarms.v1 0.3").
     - **lossless** also needs the resource's QoS, ``reliable`` with
-      ``block`` (core §2.7, 0.25), the standard contract's.
+      ``block`` (observer §5.2, 0.25), the standard contract's.
     The owners in scope are those :meth:`add_owner` was given: found by
     presence, or known before (§2.15, 0.2)."""
 
@@ -1285,7 +1285,7 @@ class AlarmsReader:
         # Without history: a token held before the subscription delivers no
         # put, so only a token that appears after it is an event. Then the
         # read of what is held, recorded under the lock gaps() reads it by.
-        # Core §8.1 (0.37): the subscriber on the reader's watch session, one
+        # Observer §3.7 (0.37): the subscriber on the reader's watch session, one
         # round trip there, and the read on its own session.
         sub, placed = live.watch_or_beside(self.session, f"zk2/{address}/@zk/instance/*",
                                            zenoh.handlers.Callback(got))
@@ -1328,7 +1328,7 @@ class AlarmsReader:
                 out.append(t)
             elif ev != held:
                 # a new instance, or an owner joining while the window
-                # listened: "a new instance or a gap" (core §2.7)
+                # listened: "a new instance or a gap" (observer §5.2)
                 out.append(t)
                 held = ev
         return out
@@ -1473,7 +1473,7 @@ def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: s
 
 
 def _zid(text: Any) -> int | None:
-    """Core §3.3 (0.11): a zid compares by value."""
+    """Observer §4.4 (0.11): a zid compares by value."""
     try:
         return int(str(text), 16)
     except (TypeError, ValueError):
@@ -1498,7 +1498,7 @@ class OwnerReading:
     documents: dict[str, Alarm | None] = field(default_factory=dict)
     stamps: dict[str, str | None] = field(default_factory=dict)
     #: §2.14 step 5 (0.2): GET replies whose stamp's id is not ``meta.zid``,
-    #: by value: core §4.2's foreign stamp, "a finding a tool reports
+    #: by value: observer §4.4's foreign stamp, "a finding a tool reports
     #: apart". After §2.9's re-put, no reply of the present instance carries
     #: an earlier one's stamp.
     foreign: list[str] = field(default_factory=list)
@@ -1520,7 +1520,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
                get: bool = True, horizon: fr.Horizon = HORIZON, keys_known: Iterable[str] = (),
                timeout: float = 1.0, lost_at: int | None = None) -> OwnerReading:
     """One reading of ``address`` (``<system>/<service>``):
-    - presence (core §8.1) by a liveliness GET of its instance tokens, the
+    - presence (observer §3) by a liveliness GET of its instance tokens, the
       descriptor through it (§2.13: never the interface token);
     - the S4 GET of ``…/alarms.v1/state/alarms/*``, aged against ``trust``;
     - ``seed``, a GET already made (:class:`AlarmsReader`'s), or, with

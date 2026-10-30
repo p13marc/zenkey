@@ -359,7 +359,7 @@ class Reader:
                 with self.lock:
                     self.tokens.append((t, kind, str(sample.key_expr).rsplit("/", 1)[1]))
 
-            # Core §8.1 (0.37): the subscriber on the reader's watch session
+            # Observer §3.7 (0.37): the subscriber on the reader's watch session
             # (never beside its read: a history subscriber's session reads
             # its tokens missing at once, Appendix B), one round trip there,
             # then the seed on its own session.
@@ -368,8 +368,8 @@ class Reader:
             self.entities.append(sub)
             if placed.settled is False:
                 # the round trip did not come back: no seed can be shown
-                # ordered against the subscriber (core §8.1, 0.37)
-                self.unseeded = ("the watch session's round trip did not come back (core §8.1, 0.37): presence is "
+                # ordered against the subscriber (observer §3.7, 0.37)
+                self.unseeded = ("the watch session's round trip did not come back (observer §3.7, 0.37): presence is "
                                  "unobservable for this reader")
             else:
                 self.seed_presence()
@@ -379,7 +379,7 @@ class Reader:
 
     def seed_presence(self) -> bool:
         """§2.9 (0.3): a complete liveliness read after the subscription
-        (core §8.1: ended at the routers' final reply, no error reply), made
+        (observer §3.3: ended at the routers' final reply, no error reply), made
         up to :data:`SEED_TRIES` times. Its tokens are folded in as of its
         end, and only for an instance the subscription has said nothing of:
         a token the subscription saw appear or withdrawn, before the read

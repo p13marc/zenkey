@@ -297,7 +297,7 @@ class Bus:
             if put and self.on_token is not None:
                 threading.Thread(target=self.on_token, args=(str(smp.key_expr),), daemon=True).start()
 
-        # Core §8.1 (0.37): S's token subscription on a watch session of its
+        # Observer §3.7 (0.37): S's token subscription on a watch session of its
         # own, never beside the presence reads made on s_session.
         self.token_sub, _ = live.watch_or_beside(self.s_session, "zk2/lab/*/@zk/instance/*",
                                                  zenoh.handlers.Callback(got), history=True)

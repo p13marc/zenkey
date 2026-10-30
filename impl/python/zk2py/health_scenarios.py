@@ -189,7 +189,7 @@ def section1(report: Report) -> None:
     try:
         s = bus.subscriber("lab/svc")
         seen: queue.Queue = queue.Queue()
-        # Core §8.1 (0.37): on T's watch session, never beside T's reads.
+        # Observer §3.7 (0.37): on T's watch session, never beside T's reads.
         lv, _ = live.watch_or_beside(bus.t_session, "zk2/lab/*/@zk/**", h_callback(seen), history=True)
         bus.extra.append(lv)
         answers: dict[str, list] = {}

@@ -1,4 +1,4 @@
-"""A router's admin space beside a router that is declaring (core §4.2 and
+"""A router's admin space beside a router that is declaring (observer §4.3 and core
 Appendix B, 0.48): the processes ``scenarios/state.md`` §12 runs, and a
 measurement of the hazard itself, never part of a suite.
 
@@ -11,7 +11,7 @@ router's own session plays the storage manager: a queryable on
 ``@/<zid>/router/status/plugins/storage_manager/storages/<name>`` per
 ``--storage NAME=KEY_EXPR``, answering the storage's configuration with its
 ``key_expr``. Its replies carry the router's own replier id, so "Who
-answered" (§4.2, 0.12) counts them. It prints one JSON line, ``{"endpoint",
+answered" (observer §4.2, 0.12) counts them. It prints one JSON line, ``{"endpoint",
 "zid"}``, then answers each stdin line (``drop NAME``, ``add NAME
 KEY_EXPR``) with ``ok …``, and closes at the end of its input.
 
@@ -621,7 +621,7 @@ CELLS: dict[str, tuple] = {
     # 0.48's two selectors beside the churn (the CHANGELOG's 0 of 5)
     "0.48+churn": (["@/*/router", "@/*/router/status/plugins/storage_manager/storages/**"], True, "router"),
     # Appendix B states the fact of a node: a peer's queryable records, read
-    # beside the churn of its clients, which §4.2's MUST NOT does not name
+    # beside the churn of its clients, which observer §4.3's MUST NOT does not name
     "peer-records+churn": (["@/*/peer/queryable/**"], True, "peer"),
 }
 #: core §11.1 (0.50): the same GETs from a tool principal under deny, with
