@@ -4,9 +4,8 @@ The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §5 are the runtime's, and
 the reference runs them as tests of `zenkey` (`zenkey/tests/profile_health.rs`,
-one test per section, named after it; #721, PE). §6 to §8 are a tool's,
-and the reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl
-health`; #721, PF).
+one test per section, named after it). §6 to §8 are a tool's, and the
+reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.3) are v1.md's rules; core
@@ -30,7 +29,7 @@ health`; #721, PF).
   core S4 says, and measures its clock from S's deliveries
   (`freshness.v1` §2.6, ground 2). "Judges" applies v1.md §2.11 to the
   reading at that instant, the descriptor read as core §3.3 says.
-- **T's clock** (0.2). T reads by presence and GET, and a GET reader ages
+- **T's clock.** T reads by presence and GET, and a GET reader ages
   a reply only with a trusted clock (`freshness.v1` §2.6). In §5 to §7, T
   takes the deployment's word, `freshness.v1` §2.6's ground 1: every
   session of a scenario runs on one host, whose one clock keeps the word.
@@ -125,7 +124,7 @@ implementing `health.v1`, its clock 2 s ahead of R1, watches a
 router-stamped heartbeat key as its clock reference (core §4.3). S
 subscribes to `zk2/lab/ahead/health.v1/**`, and G GETs as the
 conventions say.
-- **Without root** (0.2). Moving a host's clock needs root, and zenoh
+- **Without root.** Moving a host's clock needs root, and zenoh
   lets no program move its session's HLC (core §4.3, Appendix B). A runner
   without root offsets the owner's clock in its runtime, as the
   reference's `simulate_offset` does: the clock guard and the owner's
@@ -179,7 +178,7 @@ conventions say.
 100 services `p5/dev0` to `p5/dev99`, each implementing `health.v1`, in
 its tokenless set, and `nav.v2`, each with status `OK` put before it
 starts. The tool T takes the deployment's word for its clock (the
-conventions, 0.2).
+conventions).
 
 **Steps.** T lists `zk2/p5/*/@zk/**`, then `zk2/p5/*/@zk/alive/health.v1/**`,
 then GETs each instance's descriptor, and each listed service's
@@ -197,7 +196,7 @@ then GETs each instance's descriptor, and each listed service's
 **Setup.** The owner holds status `DEGRADED`, reason `"upstream lost"`.
 An archive, `lab/archive` (core §4.4), records
 `zk2/lab/svc/health.v1/state/**`. The tool T reads the deployment, and
-takes the deployment's word for its clock (the conventions, 0.2).
+takes the deployment's word for its clock (the conventions).
 
 **Steps.**
 1. T reads the owner, and judges.
@@ -217,7 +216,7 @@ takes the deployment's word for its clock (the conventions, 0.2).
 **Setup.** A test owner, `lab/liar`, breaks §2.2 on purpose: it holds
 status `OK` and check `disk` `FAILED`. A second test owner, `lab/frank`,
 holds status `FAILED` and check `disk` `OK`. T takes the deployment's
-word for its clock (the conventions, 0.2).
+word for its clock (the conventions).
 
 **Steps.** T reads both twice, 2 s apart.
 
