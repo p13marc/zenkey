@@ -10,9 +10,9 @@ name: Docs
 on:
   push:
     branches: [main, v1]
-    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh']
+    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json']
   pull_request:
-    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh']
+    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json']
   workflow_dispatch:
 
 concurrency:
@@ -30,3 +30,7 @@ jobs:
       # spec/README.md state neither version, and spec/profiles/README.md's
       # index lists every profile text there is.
       - run: ./scripts/check-spec-status.sh
+      # The spec's prose, held to a ratchet (#935): each text's mean words
+      # per sentence, its sentences over 50 words (35 under docs/guide/) and
+      # its inline history tags never rise above spec/.prose-baseline.json.
+      - run: python3 scripts/check-spec-prose.py

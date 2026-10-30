@@ -63,6 +63,11 @@ jobs:
       # (docs.yml, #420); it stays here too so a code push that also touches
       # the spec runs it in the same status set.
       - run: ./scripts/check-spec-status.sh
+      # The spec's prose, held to a ratchet (#935): each text's mean words
+      # per sentence, its sentences over 50 words and its inline history
+      # tags never rise above spec/.prose-baseline.json. Doc-only pushes run
+      # it on the Docs lane too (docs.yml).
+      - run: python3 scripts/check-spec-prose.py
       # No source or report fixture cites v1's RFC set (#925): it is on the
       # `v1` branch only, and a zk2 tool cites observer.md, the core, a
       # profile or the tooling guide.

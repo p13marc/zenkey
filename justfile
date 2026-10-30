@@ -184,6 +184,10 @@ ci:
     # runs it on both lanes: ci.yml for code pushes, docs.yml for doc-only
     # ones (#420).
     ./scripts/check-spec-status.sh
+    # The spec's prose, held to a ratchet (#935): no text's mean sentence,
+    # sentences over the limit or inline history tags rise above
+    # spec/.prose-baseline.json. Both CI lanes run it.
+    python3 scripts/check-spec-prose.py
     # No source or report fixture cites v1's RFC set (#925).
     ./scripts/check-v1-citations.sh
     # The type scale by role (#191), the interactive seam (#193), the
