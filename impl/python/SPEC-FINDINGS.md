@@ -18933,3 +18933,547 @@ Nothing was blocking. The bot's should-fixes and nits:
 - **#935's third pass changed no rule** in the five profiles, nor in
   core 0.62. Observer 0.6 changed the one it names, F-320's watch, and
   `alarms.v1` §2.15 with it, as observer 0.6's changelog says.
+
+## At alarms.v1 0.9, telemetry.v1 0.6, desired.v1 0.9, observer.md 0.7 and core 0.63 (#935)
+
+Round 87 read, cold and whole, the `v1.md` and `scenarios.md` of
+`alarms.v1` 0.9, `telemetry.v1` 0.6 and `desired.v1` 0.9, each with its
+new CHANGELOG entry. It read the sections round 86's answers changed:
+- `observer.md` 0.7's §1 NotAsked bullet and §5.2's watch after a window;
+- core 0.63's Appendix B, "What a path drops, and what a reader sees";
+- `health.v1` 0.6's scenarios' conventions, `hostid.v1` 0.9's §2.12;
+- `config.v1` 0.7's §2.3, §2.13 and §2.18, with §2.12 beside them;
+- `link.v1` 0.10's §2.4, §2.15 and scenarios §11;
+- `profiles/README.md`'s index.
+
+It did so on main e3d73224 (PR #960). It checked F-324 to F-335, checked
+each of the three profiles' claim that no rule changed, and ran the live
+runners. It read for **hard to read** throughout. The reference's parties
+and tool ran as black boxes (`owner`, `consume` and `zenctl` in
+`/srv/dev/targets/zenkey-tier/blackbox/`, built 2026-10-30 08:57). No
+commit since touches anything but `spec/` and a `CLAUDE.md`, so they are
+main's. Their source was never read.
+
+Since round 86 (PR #959, merged as 07f030ae), `spec/` changed in twelve
+commits:
+- ce44027e, c84418be and 22f5d792: `alarms.v1` 0.9, `telemetry.v1` 0.6
+  and `desired.v1` 0.9;
+- d866ed74, 85342c17, 5a33b593 and 67636466: `health.v1` 0.6,
+  `hostid.v1` 0.9, `config.v1` 0.7 and `link.v1` 0.10;
+- 1ed24ed7 (`desired.v1`'s changelog), a92c1764 (observer 0.7 and core
+  0.63), e3fd400a (the prose baseline), a1f083d7 and 4b46de97 (lines
+  rewrapped, no word changed).
+
+zk2py diffed every changed file against 07f030ae, word by word. No
+fixture, schema or `examples/zk2/` file changed. zk2py did not run
+`scripts/check-spec-prose.py`.
+
+### F-324 to F-335
+
+| | Status | Why |
+|---|---|---|
+| F-324 | **resolved** | Observer §5.2 takes the finding's rewrite: "A path that stays up while its queue is full keeps its lease. So its withdrawal can reach the reader up to `wait_before_close` after the failure." A sub-item, "A bound reasoned, not measured", says the half "rests on that behaviour of a push alone", and that "No run has shown one later than a lease". Core 0.63's Appendix B says the same in its "Not measured" line. The finding offered a scenario step or a statement, and this is the statement. The watch's length, its citation and zk2py's `budget.watch_after_s` are unchanged. |
+| F-325 | **resolved** | "What NotAsked's bullet says above (nobody put the question, the tool has learned nothing, and it renders no answer) does not hold of that spelling. Asking again does not cure it." |
+| F-326 | **resolved** | `alarms.v1` 0.9 holds §2.15's watch under a version of its own, and its changelog says why: "A reader holding "0.8" could not tell which §2.15 it held." The README's process gained no line, which the version made unneeded. |
+| F-327 | **resolved** | `health.v1` 0.6: "The status is re-put every 30 s. So such a tool's reading lasts 30 s, unless its subscription is declared before the owners start." |
+| F-328 | **resolved** | `hostid.v1` 0.9: "or lists `hostid.v1` while §5's first question is unobservable for it: a contract it implements lists `hostid.v1` in `uses`, or a contract it implements could not be read;" |
+| F-329 | **resolved** | `config.v1` 0.7 §2.3, the finding's rewrite: "never one version of the two documents. A reader that reads the view and the status takes them together only when the status it read is the projection of the view it read (§2.19)." |
+| F-330 | **resolved** | `config.v1` 0.7 §2.13: refusal 1 has two items, the core's refusal "before it checks the request's type ("No persisted layer", below)", and the handler's "before its other refusals and before the request's type". |
+| F-331 | **resolved** | `config.v1` 0.7 §2.18: "A document it refused counts for none: it applied nothing of it (above)." `desired.v1` 0.9 §2.16 says it the same way. Its sentence before, left without the phrase's commas, is F-345. |
+| F-332 | **resolved** | `link.v1` 0.10 §2.4: "Core §11.2 compiles "every principal" into each principal's own policy for the same reason: any allow wins across subjects. A face subject in the far principal's policy undoes nothing." |
+| F-333 | **resolved** | §2.4 names the principal P, "less those of every face whose far principal is not P". §2.15's `narrowed_too_far` is three sentences: the pair, which link protocol is meant, and when the pair is the finding. |
+| F-334 | **resolved** | §2.15: "If it counted as the far principal's, a near principal's policy that lists it would be one of the far principal's policies. `face_subject_misplaced` (below) would require the face subject listed in it." "That near principal's grants" names the principal. |
+| F-335 | **resolved** | Scenarios §11: "By itself, such a subject binds none of the names it lists." |
+
+### No rule changed: the check
+
+**Every RFC 2119 sentence, before and after.** zk2py split each text into
+sentences keyed by section, with a scratch splitter like round 86's. It
+reads a table cell as running text, and keeps a bold run-in label with the
+sentence after it. It kept each sentence holding MUST, MUST NOT, SHOULD,
+SHOULD NOT, MAY, RECOMMENDED, REQUIRED or SHALL.
+
+| Text | Before | After | Unchanged | The changed ones, each read against its old text | Moved |
+|---|---|---|---|---|---|
+| `alarms.v1` | 36 | 36 | 35 | §2.9's SHOULD: its label "What the record holds" lost "(0.2)", so the splitter joins them. | nothing |
+| `telemetry.v1` | 27 | 27 | 26 | §2.11's MUST NOT lost "§5; 0.2" for "§5". | nothing |
+| `desired.v1` | 60 | 62 | 48 | Five lost a tag of their own or of their label: §2.1's MUST, §2.5's MAY, and §2.11's three SHOULD sentences. Two that each held two MUSTs are two sentences each: §2.10's report and §2.11's restart. Five were split from the words after them, their keyword, condition and scope kept: §2.4's MAY, §2.6 step 4's MUST NOT, §2.7's restart MUST, §2.9's MAY and §2.17's MAY. | nothing |
+| observer | 44 | 44 | 44 | none: F-324's and F-325's sentences hold no keyword | nothing |
+| core | 161 | 161 | 161 | none | nothing |
+
+The `desired.v1` counts are its changelog's. The splitter's core count is
+not the changelog's 152, as in rounds 84 to 86. The three scenarios hold
+few keyword sentences by the splitter's count (4, 0 and 2), so zk2py read
+their word diffs line by line. Every changed Expected line lost a tag, or
+was split into two sentences (`desired.v1`'s §7 Expected 2), and none
+moved an observation.
+
+**The rest of what changed.** Most of the three profiles' rules hold no
+keyword: a step, a list of reasons, a table row. zk2py read each word diff
+whole, in its full context, which was also the cold read. In words added
+or removed by git's word diff, `v1.md` then `scenarios.md`: `alarms.v1`
+212 and 40, `telemetry.v1` 190 and 24, `desired.v1` 476 and 86. Each
+tag's removal left its sentence's words as they were. The rewrites that
+needed a second look:
+- **`alarms.v1` §2.15, "Established".** The three conditions both ways
+  need are a list, then "And either:" over `answered` and `window`. They
+  are 0.8's three, in 0.8's order, and the order of judgement below is
+  unchanged.
+- **`alarms.v1` §2.16, "The reader's own sight".** Its verdict, "no
+  answer to report", now comes first, and its reasons are a list, the five
+  of `freshness.v1` as items. They are 0.8's eight reasons.
+- **`alarms.v1` §2.14 step 4.** "Before 0.5, a key … read `incomplete`"
+  is "Otherwise a key … would read `incomplete`". The rule, step 5's
+  `not_held` for a key the establishing GET left out, is unchanged. The
+  new word is F-337.
+- **`telemetry.v1` §2.9.** Step 3's four that establish nothing are a list,
+  then "A loss between the two arrivals establishes neither", where 0.5
+  said "between them". The four are 0.5's. Step 2's two sentences are 0.5's
+  one, split at its semicolon (F-339).
+- **`desired.v1` §2.6 step 4.** "earlier is older …; equal is the same
+  version …; later is admitted" are three sentences, each with its
+  outcome. Their condition, "a stamp of an id the target acted on or
+  adopted a version of in this run", is 0.8's, whichever id is held.
+- **`desired.v1` §2.6, "Within one id".** The case the merge leaves to
+  core §4.3 is three sentences, its value's two conditions joined by
+  "and". It is 0.8's case (F-344).
+- **`desired.v1` §2.9.** 0.8's "a target MAY read … (core §4.4, S5); never
+  on a withdrawal heard live, nor through a session cut off" is the MAY,
+  then "It never reads it on a withdrawal heard live, nor through a
+  session cut off". The restriction holds no keyword, before or after.
+- **`desired.v1` §2.16.** 0.8's "reverts each parameter a document it
+  acted on in this run named, a refused document's aside, to its startup
+  value" is that sentence without the phrase, then "A document it refused
+  counts for none: it applied nothing of it", `config.v1` 0.7's sentence.
+  The set reverted is 0.8's (F-345). The report's mapping is a list of its
+  three members, as 0.8's sentence listed them.
+- **`desired.v1` §2.17.** Steps 1 and 2 are lists of their answers, the
+  author's contract a list of its two sources, and "How long behind" a
+  list of its two ways. "The slice from the target alone" is five
+  sentences, 0.8's parenthesis one of its own. Each answer and reason is
+  0.8's. "A requirement unread" lost a semicolon to a full stop (F-346).
+- **The schemas' revision tables** say "The first" and "The second" in
+  `desired.v1`, and "The profile's first" in `telemetry.v1`, where they
+  said "text 0.1" and "text 0.2". The ids are unchanged.
+
+**No rule zk2py implements changed** in `alarms.v1` 0.9, `telemetry.v1`
+0.6 or `desired.v1` 0.9, nor in observer 0.7 or core 0.63. `alarms.v1`
+0.9's one change of rule is the watch after a window, which 0.8 already
+held and zk2py's reader already watches (round 86). No section moved, so
+every citation in zk2py's modules still leads to its rule.
+
+**The long sentences.** By zk2py's splitter, no prose sentence of the
+three profiles is over 50 words. What it counts over 50 is table cells
+and bold run-in labels joined to the sentence after them, as in round 86.
+
+### F-336 · contradiction · `desired.v1` §2.7 and §2.16, against `config.v1` §2.12 and §2.18: a `config.v1` owner fed through `desired.v1` that re-mints
+
+> `desired.v1` §2.7: "**A re-mint is not a restart.** A target that mints a
+> new instance id in its own process (core §1.5, §8.1) keeps its run: it
+> still runs what it applied, and keeps what it acted on, the ids it
+> remembers and its report."
+>
+> `desired.v1` §2.16: "A `config.v1` owner whose document reaches it
+> through this profile's reading (a role bound to its author's slice,
+> §2.3) acts as §2.7 says. It acts on each version once in a run, whatever
+> the outcome."
+>
+> `config.v1` §2.12: "**A re-mint is a restart.** Core §1.5 lets a running
+> process mint a new instance, and a new instance starts from its startup
+> values, the revision from 0, nothing pending (above). So an owner
+> re-mints while `config.v1` runs only with its device running its startup
+> values: nothing pending, and every runtime change of the instance undone
+> or persisted, a persisted value being a startup value (§2.13)."
+>
+> `config.v1` §2.18: "It acts on each version of the document, its
+> author's stamp, once in an instance, whatever the outcome." And: "the
+> document's next revision is acted on, and so is the same revision by a
+> new instance (below)."
+
+- **The contradiction.** Take a `config.v1` owner fed through
+  `desired.v1`, converged on a version, that re-mints in its process.
+  - By `config.v1`, it first returns its device to its startup values, the
+    converged document's values among them, since they were runtime
+    changes. Its new instance then acts on the bound version again, once in
+    the new instance.
+  - By `desired.v1`, it keeps its run. It "still runs what it applied", and
+    a delivery of the version it acted on is the same version, never acted
+    on again (§2.6).
+  - So by `desired.v1` the owner runs its startup values for good, and its
+    view's `desired` says the document converged, until the author puts
+    another version.
+- **Since when.** `config.v1` 0.3 made a re-mint a restart. `desired.v1`
+  0.4 made the run its unit (F-192), and its §2.16 has read "once in a
+  run" since. `config.v1` §2.18 still reads "once in an instance".
+  `desired.v1` §2.16 also says that `config.v1` §2.18 "states this
+  profile's rules for one type", so its own sentence and the one it
+  delegates to disagree. #935's pass moved neither.
+- **Took:** `config.v1`'s rule: for a `config.v1` owner, a re-mint is a
+  restart, which begins a new run, so it acts again (`desired.v1` §2.7, "A
+  restart acts again"). That keeps the device and the view in step.
+- **Fix:** `desired.v1` §2.16, "**A re-mint is a restart** for a
+  `config.v1` owner (`config.v1` §2.12): it returns to its startup values
+  and begins a new run, so it acts again (§2.7)". Or `config.v1` §2.12
+  forbids the re-mint to an owner fed through `desired.v1`.
+- **Changes:** an implementation, a `config.v1` owner fed through
+  `desired.v1` that re-mints, and what a tool's `config.v1` §5 question
+  reads of it. No zk2py verdict: zk2py's config owner converges a document
+  bound to it directly, and is never fed through `desired.v1`. The
+  reference refuses the re-mint (`config.v1` §2.12), so no run meets
+  either reading. No fixture pins a target's re-mint.
+
+### F-337 · hard to read · `alarms.v1` §2.14 step 4, "The establishing GET heals the keys it leaves out": "Otherwise", and "as before"
+
+> "So a key it left out, with nothing of the key arriving after it was
+> asked, was neither live when the owner answered nor put since: step 5
+> reads it `not_held`. Otherwise a key whose resolve and delete a loss
+> took would read `incomplete` for as long as the reader held it. Past the
+> tombstone window no GET answers it again, and "is anything firing?" over
+> its owner could never read no. A key something of which arrived after
+> that GET was asked is not left out: a GET that answers it heals it, as
+> before."
+
+- **Hard:**
+  - "Otherwise" names no condition. It stands for "without this rule". Its
+    nearest condition is the sentence before's, a key left out with
+    nothing of it arriving, so it first reads "for any other key", which
+    the bullet's last sentence then contradicts. 0.9 wrote it for 0.8's
+    "Before 0.5,".
+  - "As before" was 0.8's too, beside "Before 0.5". Without that, it
+    points at nothing in particular.
+- **Took:** without this rule, such a key would read `incomplete` for as
+  long as the reader held it. "As before" is step 4's own heal: a GET that
+  answers the key heals the loss for it.
+- **Rewrite:** "Without this rule, a key whose resolve and delete a loss
+  took would read `incomplete` for as long as the reader held it." And:
+  "… a GET that answers it heals it, as step 4's first sentence says."
+- **Changes:** wording only. zk2py's `alarms.judge` reads it so
+  (`left_out`, F-136).
+
+### F-338 · hard to read · `alarms.v1` §2.16, "A key's first answer": "Neither splits by its reason"
+
+> "Yes is reported, as above. No is not: no report was made for it to
+> clear. Neither splits by its reason, in two closed lists:"
+
+- **Hard:** a name that reads as a pronoun. "Neither" is the name of the
+  third answer, unobservable or not asked, which "What is a change to
+  report" gives ("between yes, no and neither"). Right after "Yes" and
+  "No", it first reads as "neither of them", so the two lists would be of
+  yes and no.
+- **Took:** an answer that is neither yes nor no, unobservable or not
+  asked, splits by its reason.
+- **Rewrite:** "An answer of neither, unobservable or not asked, splits by
+  its reason, in two closed lists:"
+- **Changes:** wording only. zk2py's `alarms.first_neither_list` reads it
+  so: each reason of an answer unobservable or not asked is on one of the
+  two lists, which the readings family checks.
+
+### F-339 · hard to read · `telemetry.v1` §2.9 step 2, "what it saw between two arrivals is what it saw"
+
+> "A reader's view of them stands on a complete read of the tokens (core
+> §8.1, which a subscription's history alone is not), and on nothing lost
+> since it. It folds the tokens' moves and the samples in the one order it
+> received them, so that what it saw between two arrivals is what it saw:"
+
+- **Hard:** a clause that restates itself. "What it saw … is what it saw"
+  says nothing until the reader supplies what it means: the presence the
+  reader holds for the time between two arrivals is the presence it
+  received in that time, never a later read's. The colon then introduces
+  the two established epochs, which are not what "what it saw" is.
+- **Took:** token moves and samples are one sequence, ordered by receipt.
+  The presence between two arrivals is what the reader received between
+  them, and the two items say what that establishes.
+- **Rewrite:** "It folds the tokens' moves and the samples into one
+  sequence, in the order it received them. So the presence it holds
+  between two arrivals is the presence it received between them. From that
+  view:"
+- **Changes:** wording only. zk2py's R (`telemetry_scenarios.Reader`)
+  stamps the token moves and the samples on one monotonic clock, and reads
+  the presence between two arrivals from them (`presence_of`).
+
+### F-340 · hard to read · `telemetry.v1` scenarios, "Conventions", "R pairs": "earlier and later the only token held at each arrival"
+
+> "Its presence is what R saw after its complete read: alone throughout
+> when exactly one instance token was held at every instant from before
+> the earlier arrival to after the later one's, with no liveliness event
+> lost; earlier and later the only token held at each arrival."
+
+- **Hard:** a list run into one sentence, its second item with no verb.
+  "Earlier and later" are two presence values, the token held at each of
+  the pair's arrivals. They read first as adverbs of "held". The first
+  item's "alone throughout" is a label, as §1's Expected lines use it ("I1
+  alone throughout"), but nothing marks it as one.
+- **Took:** R records one of two presences for a pair. Alone throughout,
+  when exactly one instance token was held throughout and no event was
+  lost. Or earlier and later: the only token held at the earlier arrival,
+  and the only one at the later. v1.md §2.9 then reads them.
+- **Rewrite:** "Its presence is what R saw after its complete read, one of
+  two:
+  - alone throughout: exactly one instance token was held at every
+    instant from before the earlier arrival to after the later one's, with
+    no liveliness event lost;
+  - earlier and later: the only token held at the earlier arrival, and the
+    only one held at the later."
+- **Changes:** wording only. `telemetry_scenarios.Reader.presence_of`
+  records it so: `alone`, then the earlier and the later token.
+
+### F-341 · hard to read · `desired.v1` §2.3, `two_documents`: "each of them binds the one slice there is not"
+
+> "It sits after `required_unbound`, which reads only whether a binding
+> exists and so leaves the kill switch the deployment's whatever the
+> requirement names, and before every other problem, alone: each of them
+> binds the one slice there is not."
+
+- **Hard:**
+  - One sentence holds two placements and a reason for each. The second
+    placement, "and before every other problem", comes after a 22-word
+    relative clause.
+  - "Alone" is the rule that `two_documents` is reported with no other
+    problem, which `bindings.json` pins ("two_documents alone, the
+    binding's other checks not read"). In the sentence it reads as an
+    adverb of "sits".
+  - "Each of them binds the one slice there is not": "them" is the other
+    problems, and the phrase means each of them is about binding one
+    slice, which a role on two documents does not have.
+- **Took:** `two_documents` comes after `required_unbound`, so an unbound
+  optional role stays the kill switch. It comes before every other
+  problem, and is reported alone, since each other problem reads the
+  binding of one slice.
+- **Rewrite:** "It sits after `required_unbound`, which reads only whether
+  a binding exists. So the kill switch stays the deployment's, whatever the
+  requirement names. It sits before every other problem, and is reported
+  alone: each of the others reads the binding of one slice, and a role on
+  two documents has no one slice."
+- **Changes:** wording only. zk2py's `desired.bind` reports it alone.
+
+### F-342 · hard to read · `desired.v1` §2.5, "The reference": "which such a target would act on again"
+
+> "**The reference** reads an archive only after a complete read shows its
+> author absent, never on a silent GET while its author is present. An
+> archive can hold a document its author deleted past its tombstone window
+> (§2.8), which such a target would act on again. It can hold one its
+> author has since replaced, which it would act on as last-known."
+
+- **Hard:** a term with no antecedent. "Such a target" is one that does
+  read an archive on a silent GET while its author is present. The
+  sentence before names only the reference, which does not. 0.8 held the
+  three in one sentence, a colon making the last two the reason for the
+  "never". 0.9's full stop leaves the reader to rebuild both the target and
+  the reason. "It" in the third sentence is the archive, two sentences
+  after it was named.
+- **Took:** the reason the reference waits for absence: a target that
+  read an archive on a silent GET could act again on a document its author
+  deleted past the window, or act as last-known on one its author has
+  since replaced.
+- **Rewrite:** "The reference reads an archive only after a complete read
+  shows its author absent, never on a silent GET while its author is
+  present. An archive can hold a document its author deleted past its
+  tombstone window (§2.8), or one its author has since replaced. A target
+  that read the archive on a silent GET would act on the first again, and
+  on the second as last-known."
+- **Changes:** wording only. zk2py's target reads an archive only after a
+  complete read shows its author absent (scenarios §10 step 3).
+
+### F-343 · hard to read · `desired.v1` §2.6 step 3, "equal": "Only a version from an archive is confirmed"
+
+> "- equal: **the same version** (`same_version`), received again by
+>   another path or another seed, never acted on again; its author's own
+>   sample of a version the target holds from an archive, or holds waiting
+>   from an archive while an act runs, **confirms** it (`confirmed`, §2.9).
+>   Only a version from an archive is confirmed: any other delivery of a
+>   version held waiting, the author's own version included, is the same
+>   version;"
+
+- **Hard:**
+  - "Any other delivery": other than what? It means any delivery but the
+    author's own sample of an archive's version.
+  - "The author's own version included" names a version where the
+    sentence is about deliveries. It means a version held waiting that
+    came from the author, delivered again by the author. Read as written,
+    it says the author's own sample is the same version, against the
+    sentence before.
+  - "Only a version from an archive" is the version held, never the
+    delivery. Only "held waiting" is named, so a version held, not
+    waiting, that came from the author is left to "equal" at the top.
+  - The words are F-184's answer (0.3).
+- **Took:** an equal delivery is the same version, but for one: the
+  author's own sample of a version held, or held waiting, from an archive,
+  which confirms it. A version that came from the author is never
+  confirmed, whoever delivers it again.
+- **Rewrite:** "- equal: **the same version** (`same_version`), received
+  again by another path or another seed, never acted on again. One equal
+  delivery is not: the author's own sample of a version the target holds
+  from an archive, or holds waiting from an archive while an act runs,
+  **confirms** it (`confirmed`, §2.9). A version the target holds, or
+  holds waiting, that came from its author is never confirmed: every equal
+  delivery of it, its author's included, is the same version;"
+- **Changes:** wording only. zk2py's `TargetRole` reads it so, and a
+  reading pins the five cases (below).
+
+### F-344 · hard to read · `desired.v1` §2.6, "Within one id": "Such a case is a value … It is acted on as another id, and the new epoch's next value after it"
+
+> "Two ids for one key are the case the merge leaves to core §4.3. Such a
+> case is a value of the author's old epoch still in transit when its new
+> epoch's first value has been acted on, and later than every value of the
+> old epoch the target acted on. It is acted on as another id, and the new
+> epoch's next value after it."
+
+- **Hard:**
+  - "Such a case is a value": a case is said to be a value. 0.9 made it a
+    sentence of its own, where 0.8's colon introduced the value as what
+    the case holds.
+  - "It" has two antecedents, the case and the value.
+  - The last clause leaves its verb out: "and the new epoch's next value
+    [is acted on] after it".
+- **Took:** a value of the old epoch, still in transit after the new
+  epoch's first value was acted on, and later than every old-epoch value
+  the target acted on, is acted on, its id another than the one held. The
+  new epoch's next value is acted on after it.
+- **Rewrite:** "Two ids for one key are the case the merge leaves to core
+  §4.3. In it, a value of the author's old epoch is still in transit when
+  the new epoch's first value has been acted on, and it is later than
+  every value of the old epoch the target acted on. The target acts on
+  that value as another id, then on the new epoch's next value."
+- **Changes:** wording only. `order.json` pins the case, and zk2py meets
+  it.
+
+### F-345 · hard to read · `desired.v1` §2.16, "What a delete reverts it to": "named to its startup value"
+
+> "So a delete it acts on reverts each parameter a document it acted on in
+> this run named to its startup value: the persisted layer's, else the
+> startup file's or the default."
+
+- **Hard:** a garden path. The object of "reverts" holds a relative clause
+  with no "that", "a document it acted on in this run named", whose verb
+  lands beside "to its startup value". So it first reads "named to its
+  startup value". 0.8's commas, around "a refused document's aside", kept
+  "named" apart from "to". 0.9 moved that phrase out (F-331's rewrite) and
+  left the sentence with neither.
+- **Took:** each parameter that a document the owner acted on in this run
+  named goes back to its startup value.
+- **Rewrite:** "So when it acts on a delete, each parameter named by a
+  document it acted on in this run goes back to its startup value: the
+  persisted layer's, else the startup file's or the default." That is
+  `config.v1` 0.7's own wording ("Each parameter named by a document it
+  acted on in this instance goes back to its startup value"), "run" kept
+  (F-336).
+- **Changes:** wording only.
+
+### F-346 · hard to read · `desired.v1` §2.17, "A requirement unread": "One that declares any is no help"
+
+> "A revision of the author's in hand, named or held, that declares no
+> desired resource at all still shows the role no target's, **not
+> asked**, `not_a_target`, whatever the requirement names. One that
+> declares any is no help, one desired resource included: the requirement
+> may name a plain resource beside it, which makes the role no target's,
+> and only the requirement says."
+
+- **Hard:** four things left out of one sentence.
+  - "Any" is any desired resource.
+  - "One desired resource included" means "even when it declares only
+    one", and reads first as a member of the revision.
+  - "It" in "beside it" is that desired resource.
+  - "Only the requirement says" means only the requirement, which the tool
+    has not read, could say which resource it names.
+- **Took:** with the requirement unread, a revision declaring at least one
+  desired resource, even only one, does not settle the role. The
+  requirement might name a plain resource of the author's instead, which
+  would make the role no target's.
+- **Rewrite:** "A revision that declares a desired resource, even only
+  one, settles nothing. The requirement may name a plain resource of the
+  author's instead, which would make the role no target's. Only the
+  requirement, which the tool has not read, says which."
+- **Changes:** wording only. zk2py's `desired.take_slice` reads it so
+  (round 64's shapes).
+
+### The three texts in zk2py
+
+- **`readings`: 673, up from 664.** Nine cases, in
+  `_observer_07_readings`:
+  - observer 0.7 §5.2's two new sentences and its sub-item, as the text
+    states them, and its watch's length, word for word 0.6's;
+  - core 0.63's "Not measured" line;
+  - observer 0.7 §1's sentence for F-325;
+  - `alarms.v1` 0.9's header and §2.15's citation of §5.2 (F-326), and the
+    alarms reader's window end, unchanged: 89 s and 94 s for a reader
+    judging at 100 s;
+  - three of `desired.v1` 0.9's split rules, each read by zk2py's
+    `TargetRole` as the new sentences state it:
+    - §2.6 step 4's three sentences, on an id remembered while another is
+      held: older, the same version, admitted;
+    - §2.6 step 3, over five deliveries: an archive's version, held or
+      held waiting, confirmed by its author; an author's version, held or
+      held waiting, and an archive's delivered again by the archive, the
+      same version (F-343's reading);
+    - §2.7's restart: the same document under a new stamp adopted within a
+      run, and acted on after a restart.
+- **The modules' headers** (`alarms`, `telemetry`, `desired`,
+  `desired_live`, `desired_tool`; `config`, `health`, `hostid`, `link`)
+  say they were read again against the new texts, and that none of their
+  rules moved. `budget.watch_after_s` quotes observer 0.7's words for the
+  `wait_before_close` half. `observer_scenarios` names observer 0.7 and
+  core 0.63.
+- **Nothing else to implement.** The three texts ask nothing new, and
+  `alarms.v1` 0.9's §2.15 is the watch zk2py's reader has had since round
+  86. F-336's owner is one zk2py does not have.
+
+**`just py-conformance`: 3630 of 3630.**
+
+### Live
+
+Every run used in-process zenoh-python 1.10.1 routers, each listener on
+a free loopback port, under `taskset -c 0-1`, from 10:55 to 11:28, one
+after another. No check failed, and no run was repeated. "Rust" is the
+reference's owner example, and "zenctl" its tool, both black boxes.
+
+| Runner | Pairing | Result |
+|---|---|---|
+| `alarms_scenarios` | zk2py's owner | **80 of 80**, §1 to §10, §2, §4, §6 and §10 on the 4 s copy |
+| `alarms_scenarios --owner` | Rust (`--alarms`) | **80 of 80**, the same sections |
+| `telemetry_scenarios` | zk2py's owner | **57 of 57**, §1 to §9 |
+| `telemetry_scenarios --owner` | Rust (`--telemetry`) | **56 of 56**: §7's undecodable attachments run against zk2py's owner alone |
+| `telemetry_scenarios --tool` | zk2py's owner, `zenctl telemetry` judging beside zk2py's reader | **164 of 164**, §5's ten windows and the tool's three openings among them |
+| `telemetry_scenarios --owner --tool` | Rust, `zenctl telemetry` beside | **163 of 163** |
+| `desired_scenarios` | zk2py → zk2py, targets on a watch session | **175 of 175**: §1 to §8, §10 and §11 45, the edges 9, the re-mint 2, §9 29 and the thirty shapes 90, both tools |
+| | the same, polling | **175 of 175** |
+| | Rust → Rust, watch and polling | **85 of 85** each |
+| | zk2py → Rust, watch and polling | **85 of 85** each |
+| | Rust → zk2py, watch and polling | **85 of 85** each |
+| `config_scenarios`, the regression (round 86's five) | zk2py's owner | **51 of 51**, §1 to §14 |
+| `config_scenarios --owner` | Rust (`--config`) | **51 of 51** |
+
+The counts are each runner's last reported ones, check for check:
+`desired_scenarios`' at 0.8 (29 for §9, 90 for the shapes), and
+`config_scenarios`' at 0.6. The owner example beside `zenctl telemetry`,
+which no round reported before, is the 164 less §7's undecodable
+attachments, as without the tool.
+Both tools agree with zk2py's on every §9 step and every shape, and
+`zenctl telemetry` with zk2py's reader on every member of every section.
+`config_scenarios` was the regression run, since `config.v1` 0.7 is the
+most rewritten of round 86's five.
+
+**What did not run.**
+- **§6 and §10 of `alarms_scenarios` at 900 s,** about fifteen minutes
+  each, as in every round since 0.3. The 4 s copy runs both.
+- **`live_interop`, `observer_scenarios` and `presence_scenarios`,** whose
+  texts changed only in observer §1's and §5.2's wording this round.
+- **A `config.v1` owner fed through `desired.v1` that re-mints** (F-336):
+  zk2py has none, and the reference refuses the re-mint.
+
+### Counts at alarms.v1 0.9, telemetry.v1 0.6, desired.v1 0.9, observer.md 0.7 and core 0.63
+
+346 entries.
+- **Open: F-336 to F-346,** eleven. None is a blocker.
+  - **Contradiction, one: F-336.** A `config.v1` owner fed through
+    `desired.v1` that re-mints: a restart by `config.v1`, the same run by
+    `desired.v1`. It predates #935. It changes an implementation zk2py
+    does not have, and no verdict of zk2py's.
+  - **Hard to read, ten:** F-337 to F-346. Each has a rewrite that keeps
+    its keyword, condition, scope and evidence, so each is wording only.
+    Five are in sentences #935's fourth pass wrote or split: F-337,
+    F-342, F-344, F-345 and F-346. F-339's sentence was split from the
+    one before it, its words 0.5's. The other four were there before it.
+- **Resolved: F-324 to F-335,** twelve.
+- **#935's fourth pass changed no rule** in `alarms.v1`, `telemetry.v1` or
+  `desired.v1` but the one `alarms.v1` 0.9 names, §2.15's watch, which 0.8
+  held already. Observer 0.7 and core 0.63 changed none.
