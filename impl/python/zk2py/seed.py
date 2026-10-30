@@ -86,7 +86,7 @@ class Applied:
 
 @dataclass
 class Seed:
-    """What a seed's GET came to (§4.2, "What a seed cannot know")."""
+    """What a seed's GET came to (observer §4.1, "What a seed cannot know")."""
 
     complete: bool = False          # ran to its final reply with no error reply
     errors: list[str] = field(default_factory=list)

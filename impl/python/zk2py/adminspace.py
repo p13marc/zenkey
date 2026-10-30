@@ -11,7 +11,7 @@ router's own session plays the storage manager: a queryable on
 ``@/<zid>/router/status/plugins/storage_manager/storages/<name>`` per
 ``--storage NAME=KEY_EXPR``, answering the storage's configuration with its
 ``key_expr``. Its replies carry the router's own replier id, so "Who
-answered" (§4.2, 0.12) counts them. It prints one JSON line, ``{"endpoint",
+answered" (observer §4.2, 0.12) counts them. It prints one JSON line, ``{"endpoint",
 "zid"}``, then answers each stdin line (``drop NAME``, ``add NAME
 KEY_EXPR``) with ``ok …``, and closes at the end of its input.
 

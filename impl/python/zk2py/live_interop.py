@@ -308,7 +308,7 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
         first = live.get_state(session, f"zk2/{system}/{svc}/zk2py_echo.v1/state/health")
         report.check(run, "a state GET on first sight of the interface token finds the value (§8.2, F-68)",
                      [r.payload for r in first.replies] == [b"ok"], str([r.payload for r in first.replies]))
-    report.check(run, "presence GET complete: the routers' final reply, no error reply (§8.1, 0.8)",
+    report.check(run, "presence GET complete: the routers' final reply, no error reply (observer §3.3, 0.8)",
                  pres.complete, f"{pres.elapsed_s:.3f} s, {pres.reading}")
     if not report.check(run, "exactly one instance token", len(pres.instances) == 1,
                         str([i["instance"] for i in pres.instances])):
@@ -1504,7 +1504,7 @@ def run_python_fanout(report: Report) -> None:
 
 def run_python_tool_rules(report: Report) -> None:
     """The rules 0.10 to 0.13 state for a tool, where the bus shows them:
-    - S4 needs the admin space (§4.2): off, the check is unobservable; on,
+    - S4 needs the admin space (observer §4.2): off, the check is unobservable; on,
       read-only, it reads 0.11's two selectors, and a router with nothing
       under the storages selector runs no storage. An answer counts only
       when its replier id is the zid its key names, a verified router: one
@@ -1528,7 +1528,7 @@ def run_python_tool_rules(report: Report) -> None:
     from .owner import Owner as PyOwner
 
     run = "zk2py tool rules (0.10 to 0.13): S4's admin space, presence shapes, revisions on the bus"
-    # S4 (§4.2, 0.10 to 0.12; Appendix B), and security.md §3 steps 1-2.
+    # S4 (observer §4.2, 0.10 to 0.12; Appendix B), and security.md §3 steps 1-2.
     import zenoh
 
     def spoof(session, key: str, doc: dict[str, Any]):
@@ -1599,7 +1599,7 @@ def run_python_tool_rules(report: Report) -> None:
                         for h in held:
                             h.undeclare()
                     report.check(run, "a storage on zk2/** played from a client session: its answers are "
-                                      "unverified, so they never break S4 and never let it be clean (§4.2, 0.12)",
+                                      "unverified, so they never break S4 and never let it be clean (observer §4.2, 0.12)",
                                  loud.verdict == "unobservable" and not loud.storages
                                  and len(loud.unverified) == 3, f"{loud.verdict}: {loud.detail}")
                     report.check(run, "trusted by the operator (0.12): the storage on telemetry/** leaves S4 "
@@ -1617,7 +1617,7 @@ def run_python_tool_rules(report: Report) -> None:
 
     # security.md §3 step 4 (0.13): a far router. R2 links to R1, both admin
     # spaces on, read-only; the tool is still a client of R1. Routers are
-    # verified outward through R1's own document (§4.2), which lists R2 as
+    # verified outward through R1's own document (observer §4.2), which lists R2 as
     # a `router` session. Then S answers @/<S's zid>/router under its own
     # replier id: R1 lists S as a `client`, so S stays unverified. A peer
     # tool connected to both routers verifies them directly, a cross-check.
@@ -1649,7 +1649,7 @@ def run_python_tool_rules(report: Report) -> None:
                 far = live.check_s4(client)
             report.check(run, "security.md §3 step 4: a client tool on R1 verifies R2 through R1's own document, "
                               "which lists it as a router; R2's answer carries its own replier id: both "
-                              "verified, clean (§4.2, 0.13)",
+                              "verified, clean (observer §4.2, 0.13)",
                          sorted(far.routers) == sorted([za, zb]) and not far.unverified
                          and far.verdict == "clean", f"{far.verdict}: {far.detail}")
             s_zid = str(s.zid())
@@ -1708,7 +1708,7 @@ def run_python_tool_rules(report: Report) -> None:
             faults, passing = live.presence_faults(tool, sel)
             timer.join()
             report.check(run, "a token the descriptor does not list, gone within the grace: seen once, so it "
-                              "passes, never a fault (§8.1, 0.10)",
+                              "passes, never a fault (observer §3.2, 0.10)",
                          not faults and passing == {(owner.instance_key, "unlisted", "zk2py_probe.v1")},
                          f"faults {faults}, passing {passing}")
             token = helper.liveliness().declare_token(stray)
@@ -1799,7 +1799,7 @@ def run_python_016(report: Report) -> None:
                 stamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
                 readings[name] = (doc, stamp, live.s1_check(tool, doc, stamp))
             doc, stamp, (verdict, why) = readings["client"]
-            report.check(run, "S1 from a tool (§4.2, 0.16): an owner in client mode under R1, which the tool "
+            report.check(run, "S1 from a tool (observer §4.4, 0.16): an owner in client mode under R1, which the tool "
                               "verified, is judged by its stamp against meta.zid: clean",
                          verdict == "clean", f"{verdict}: {why}; stamp {stamp}, meta.zid {doc.get('meta')}")
             doc, stamp, (verdict, why) = readings["router"]
@@ -1838,11 +1838,11 @@ def run_python_016(report: Report) -> None:
             finally:
                 live.READ_REPLIER = True
             report.check(run, "Appendix B (0.16): without Reply.replier_id every admin answer is unverified (no "
-                              "replier id): S4 is unobservable, and so is S1 for an owner's own stamp (§4.2, 0.17)",
+                              "replier id): S4 is unobservable, and so is S1 for an owner's own stamp (observer §4.4, 0.17)",
                          s4.verdict == "unobservable" and s4.unverified
                          and all(u[2] == "no replier id" for u in s4.unverified) and s1[0] == "unobservable",
                          f"S4 {s4.verdict} ({len(s4.unverified)} unverified); S1 {s1[0]}: {s1[1]}")
-            report.check(run, "§4.2 (0.17): a foreign stamp is a finding whatever else the tool read: with routers "
+            report.check(run, "observer §4.4 (0.17): a foreign stamp is a finding whatever else the tool read: with routers "
                               "verified, and with none verified",
                          fstamp is not None and live._zid_value(fstamp) == live._zid_value(other_zid)
                          and f_admin[0] == "finding" and f_blind[0] == "finding",

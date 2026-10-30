@@ -2331,7 +2331,7 @@ LATE_TELLING_S = 30.0
 def _s10_reopen(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any]) -> None:
     """Beyond the text (round 68, F-239), run only with ``--reopen``: what a
     watch session's subscriber without history hears when its transport
-    opens again, beside the crowd. Core §8.1 (0.42) says a token declared
+    opens again, beside the crowd. Observer §3.7 (0.42) says a token declared
     while the transport was down is one "of which a subscriber without
     history is never told", and that on the wire keys the round trip is
     "one round trip at any population". Notes only: each measures a premise

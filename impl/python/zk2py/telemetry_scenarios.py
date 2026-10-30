@@ -359,7 +359,7 @@ class Reader:
                 with self.lock:
                     self.tokens.append((t, kind, str(sample.key_expr).rsplit("/", 1)[1]))
 
-            # Core §8.1 (0.37): the subscriber on the reader's watch session
+            # Observer §3.7 (0.37): the subscriber on the reader's watch session
             # (never beside its read: a history subscriber's session reads
             # its tokens missing at once, Appendix B), one round trip there,
             # then the seed on its own session.

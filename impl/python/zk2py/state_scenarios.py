@@ -72,7 +72,7 @@ from . import seed as sd
 REPO = Path(__file__).resolve().parents[3]
 PLANS = REPO / "impl" / "python" / "interop" / "zk2py_plans.v1.toml"
 MISSION_PLAN = REPO / "examples" / "zk2" / "walkthrough" / "mission_plan.v1.toml"
-#: §3 and §12's storage, as the storage manager states it (§4.2)
+#: §3 and §12's storage, as the storage manager states it (observer §4.2)
 STORAGE = ("plans", "zk2/ground/fleet-mgr/**")
 DEFAULT_ZENCTL = REPO / "target" / "debug" / "zenctl"
 

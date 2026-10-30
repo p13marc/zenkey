@@ -1285,7 +1285,7 @@ class AlarmsReader:
         # Without history: a token held before the subscription delivers no
         # put, so only a token that appears after it is an event. Then the
         # read of what is held, recorded under the lock gaps() reads it by.
-        # Core §8.1 (0.37): the subscriber on the reader's watch session, one
+        # Observer §3.7 (0.37): the subscriber on the reader's watch session, one
         # round trip there, and the read on its own session.
         sub, placed = live.watch_or_beside(self.session, f"zk2/{address}/@zk/instance/*",
                                            zenoh.handlers.Callback(got))
@@ -1473,7 +1473,7 @@ def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: s
 
 
 def _zid(text: Any) -> int | None:
-    """Core §3.3 (0.11): a zid compares by value."""
+    """Observer §4.4 (0.11): a zid compares by value."""
     try:
         return int(str(text), 16)
     except (TypeError, ValueError):

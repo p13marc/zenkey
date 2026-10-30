@@ -1368,7 +1368,7 @@ def _budget_bounds(path: Path) -> list[Result]:
 
 
 def _budget_population(path: Path) -> list[Result]:
-    """Core §2.7 (0.24): a kind, a bound, a retention and one reading -> the
+    """Observer §5.3 (0.24): a kind, a bound, a retention and one reading -> the
     population verdict and its reason."""
     from . import budget
     from .freshness import seconds_to_ns
@@ -1388,7 +1388,7 @@ def _budget_population(path: Path) -> list[Result]:
 
 
 def _budget_rate(path: Path) -> list[Result]:
-    """Core §2.7 (0.24): an event's rate and a window's occurrences -> the
+    """Observer §5.3 (0.24): an event's rate and a window's occurrences -> the
     rate verdict and its reason."""
     from . import budget
     from .freshness import seconds_to_ns
@@ -1403,7 +1403,7 @@ def _budget_rate(path: Path) -> list[Result]:
 
 
 def _budget_lossless(path: Path) -> list[Result]:
-    """Core §2.7 (0.25): the declared QoS, the reader's own loss and miss
+    """Observer §5.2 (0.25): the declared QoS, the reader's own loss and miss
     detection -> whether a window is shown to have lost no delivery."""
     from . import budget
 
