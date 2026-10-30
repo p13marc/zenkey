@@ -281,7 +281,9 @@ def measure(path: Path, limit: int):
             total += w
             if w > limit:
                 over.append((line + text.count("\n", 0, off), w, s.replace("\n", " ")))
-    mean = round(total / count, 1) if count else 0.0
+    # Two decimals: one let a rise of under 0.05 round away, and an
+    # unrelated edit round a mean up by 0.1 (review-bot on PR #954).
+    mean = round(total / count, 2) if count else 0.0
     return {"mean": mean, "over": len(over), "tags": len(found)}, over, found
 
 
@@ -311,6 +313,12 @@ def main(argv) -> int:
             print("spec-prose: --list takes a file", file=sys.stderr)
             return 2
         rel = argv[i + 1]
+        if not any(rel == tree or rel.startswith(tree + "/") for tree, _, _ in TREES):
+            print(
+                f"spec-prose: {rel} is in neither tree the check reads; "
+                f"measured against {TREES[0][0]}/'s limit",
+                file=sys.stderr,
+            )
         limit, _ = tree_of(rel)
         try:
             figures, over, found = measure(ROOT / rel, limit)
