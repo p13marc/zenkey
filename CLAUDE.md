@@ -1510,6 +1510,18 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   (`CHANGELOG.md`, `observer-CHANGELOG.md`), and
   `scripts/check-spec-status.sh` keeps each header naming its changelog's
   newest entry and README.md and spec/README.md stating neither number.
+  A rule states itself and cites its evidence, and nothing more (#935,
+  core 0.60, observer text 0.4): the amendment that made it and the
+  finding that caused it are its changelog's, and measurements and one
+  zenoh binding's facts are core Appendix B's, the rule keeping its
+  reason in words and a pointer. `scripts/check-spec-prose.py` (the fmt
+  job, the Docs lane and `just ci`) holds every `.md` under `spec/`, and
+  under `docs/guide/` once it exists, to `spec/.prose-baseline.json`: each
+  text's mean words per sentence, its sentences over 50 words (35 under
+  `docs/guide/`) and its inline history tags only go down. `--update`
+  lowers the baseline and records a new file; a rise is a hand edit of
+  the baseline, which a reviewer sees. `--list <file>` prints a text's
+  long sentences and tags with their lines.
   `observer.md` holds the reader's discipline core 0.58 moved out, word
   for word, no rule changed (§8.1's "Reading presence" its §3, §2.7's
   readings and conclusions its §5, §4.2's seed, admin-space and S1 checks
@@ -1715,7 +1727,10 @@ never a verdict. Scouting is opt-in.
 - Spec text is normative: when code and `spec/` disagree, either fix the code or
   amend the text explicitly (an entry in `spec/CHANGELOG.md`,
   `spec/observer-CHANGELOG.md` or the profile's CHANGELOG) — never silently
-  drift. Doc comments and report `cite` values cite zk2's texts (`core §1.4`,
+  drift. A new or changed rule in `spec/` carries no inline history, such
+  as `(0.44, F-240)`: the version and the finding go in its changelog
+  entry, and `scripts/check-spec-prose.py` fails on a tag that comes back
+  (#935). Doc comments and report `cite` values cite zk2's texts (`core §1.4`,
   `observer §8.2`, `alarms.v1 §2.5`, `tooling guide O6`) and issues, never
   v1's RFC set: `scripts/check-v1-citations.sh` (in `just ci` and ci.yml)
   fails on `RFC 01`–`RFC 13` in any `.rs`, `.trycmd` or `tests/{cmd,fixtures}`
