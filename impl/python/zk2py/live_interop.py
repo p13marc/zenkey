@@ -3092,8 +3092,9 @@ def run_python_budget(report: Report, exe: Path) -> None:
                      code2 == 0 and not r_e2.present and v_e2.pair() == {"verdict": "unobservable",
                                                                          "reason": "owner_absent"},
                      f"exit {code2}, present {r_e2.present}, {v_e2.pair()}")
-        report.info(run, "the owner example offers no lease setting, so the tool watches zenoh's default lease, 10 s, "
-                         "and the 1 s reply timeout, after each window's end")
+        report.info(run, "the owner example offers no lease setting, so the tool watches the longer of zenoh's default "
+                         "lease, 10 s, and its 5 s wait_before_close, plus the 1 s reply timeout, after each window's "
+                         "end (observer 0.6 §5.2)")
     finally:
         for w in windows:
             w.close()

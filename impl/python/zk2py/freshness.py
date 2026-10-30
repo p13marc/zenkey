@@ -1,5 +1,7 @@
 """``freshness.v1``: how long a value stays current (profile text 0.1,
 draft, written against core 0.21; ``spec/profiles/freshness/v1.md``).
+Read again against text 0.5 (#609, round 86; #935): its inline history
+taken out, no rule changed, and none of this module's rules moved.
 
 The session-free half:
 - :func:`horizon` reads a resolved resource's ``freshness.ttl_s`` (§2.1,

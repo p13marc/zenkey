@@ -208,14 +208,17 @@ def stall_bound(wait_before_close_ms: int = WAIT_BEFORE_CLOSE_MS, lease_ms: int 
 def watch_after_s(lease_s: float = LEASE_MS / 1000, wait_before_close_s: float = WAIT_BEFORE_CLOSE_MS / 1000,
                   reply_timeout_s: float = 1.0) -> float:
     """How long a tool watches the owner's instance tokens after a window's
-    end (observer §5.2, text 0.5): "for one lease plus its reply timeout …
-    A deployment that sets a longer lease, or a `wait_before_close` longer
-    than its lease, lengthens it." The text does not say by how much a
-    longer ``wait_before_close`` lengthens it (round 85, F-320): zk2py reads
-    the watch's first part as the longer of the two, since an owner whose
-    push waits on a full queue closes its transport only after
-    ``wait_before_close`` (core Appendix B, "What a path drops"). With
-    zenoh's defaults, 5 s against a 10 s lease, it is the lease."""
+    end (observer §5.2, text 0.6): "for the longer of one lease and the
+    routers' `wait_before_close`, plus its reply timeout". Text 0.5 said
+    "one lease plus its reply timeout", and that a `wait_before_close`
+    longer than the lease "lengthens it", not by how much (round 85, F-320,
+    ambiguous). zk2py read the longer of the two (reading A), and 0.6
+    settles it so: "A push that cannot queue within it closes its transport
+    (core Appendix B, "What a path drops"). So a router that waits it before
+    closing a transport tells the withdrawal that late, when it is longer
+    than the lease." With zenoh's defaults, 5 s against a 10 s lease, it is
+    the lease. ``alarms.v1`` §2.15 now cites this rule
+    (:func:`zk2py.alarms.window_end_ns`)."""
     return max(lease_s, wait_before_close_s) + reply_timeout_s
 
 

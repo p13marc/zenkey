@@ -3427,8 +3427,85 @@ def family_readings(root: Path) -> list[Result]:
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
-        + _observer_05_readings(root)
+        + _observer_05_readings(root) + _observer_06_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _observer_06_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``observer.md`` text 0.6 (#609, round 86): §5.2's watch after a
+    window, settled as round 85's reading A of F-320, "the longer of one
+    lease and the routers' `wait_before_close`, plus its reply timeout";
+    and ``alarms.v1`` §2.15, which restated 0.5's shorter length and now
+    cites §5.2 (its changelog's "0.8, read against observer.md 0.6"). Until
+    round 86 zk2py's alarms reader ended its window one lease and the reply
+    timeout before the instant it judged, as §2.15 said. It now ends it by
+    :func:`zk2py.alarms.window_end_ns`, the budget's length. No session is
+    opened."""
+    from . import alarms
+    from . import budget as bg
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    ns = 1_000_000_000
+    label = "observer 0.6 §5.2"
+    out: list[tuple[str, Any, Any]] = [
+        (f"{label}: the text states the watch after a window as the longer of one lease and wait_before_close, "
+         f"plus the reply timeout",
+         "a tool watches the owner's instance tokens for the longer of one lease and the routers' "
+         "`wait_before_close`, plus its reply timeout." in flat("observer.md"), True),
+        ("alarms.v1 §2.15 (read against observer 0.6): the owner is watched past the end as observer §5.2 says",
+         "The owner is watched past the end as observer §5.2 says: the longer of one lease and the routers' "
+         "`wait_before_close`, plus the reply timeout." in flat("profiles/alarms/v1.md"), True),
+        ("alarms.v1 scenarios §10 step 2 (read against observer 0.6): its owners are watched as observer §5.2 says",
+         "Its owners are watched past it as observer §5.2 says" in flat("profiles/alarms/scenarios.md"), True),
+        # (lease, wait_before_close, reply timeout) -> the window's end for a
+        # reader judging at 100 s, in seconds
+        (f"{label} in alarms.v1 §2.15: a reader judging at 100 s ends its window at 89 s under zenoh's defaults "
+         f"(10 s, 5 s, 1 s), at 94 s beside a 1 s lease, at 79 s beside a 20 s lease, at 83 s beside a 15 s "
+         f"wait_before_close and a 2 s reply timeout",
+         [alarms.window_end_ns(100 * ns) / ns, alarms.window_end_ns(100 * ns, 1.0, 5.0, 1.0) / ns,
+          alarms.window_end_ns(100 * ns, 20.0, 5.0, 1.0) / ns, alarms.window_end_ns(100 * ns, 10.0, 15.0, 2.0) / ns],
+         [89.0, 94.0, 79.0, 83.0]),
+        (f"{label}: the alarms reader's watch is the budget windows' watch, whatever the three lengths",
+         [100 * ns - alarms.window_end_ns(100 * ns, ls, ws, rs) == int(bg.watch_after_s(ls, ws, rs) * ns)
+          for ls, ws, rs in ((10.0, 5.0, 1.0), (1.0, 5.0, 1.0), (0.0, 5.0, 0.5), (30.0, 5.0, 1.0), (5.0, 5.0, 1.0))],
+         [True] * 5),
+        (f"{label} in AlarmsReader.window: declared at 0 s, judged at 100 s, nothing lost, the owner held "
+         f"throughout: 88 s listened under zenoh's defaults, 93 s beside a 1 s lease (0.8's old words gave "
+         f"97 s), 78 s beside a 20 s lease",
+         [_alarms_reader_window(alarms, watch, 100 * ns) for watch in
+          ((10.0, 5.0, 1.0), (1.0, 5.0, 1.0), (20.0, 5.0, 1.0))], [88.0, 93.0, 78.0]),
+        (f"{label} in AlarmsReader.window: an offline reader carries every input window() reads: a loss at 50 s "
+         f"and no GET since is not lossless; a withdrawal at 50 s is not present throughout; a complete GET asked "
+         f"at 60 s heals both, the window running from it to 89 s; an incomplete one heals nothing",
+         [_offline_window(alarms, ns, losses=[50 * ns]), _offline_window(alarms, ns, events=[(50 * ns, "delete")]),
+          _offline_window(alarms, ns, losses=[50 * ns], events=[(50 * ns, "delete")], gets=[(60 * ns, True)]),
+          _offline_window(alarms, ns, losses=[50 * ns], gets=[(60 * ns, False)])],
+         [(88.0, False, True), (88.0, True, False), (29.0, True, True), (88.0, False, True)]),
+    ]
+    return out
+
+
+def _offline_window(alarms: Any, ns: int, *, losses: list[int] = (), events: list[tuple[int, str]] = (),
+                    gets: list[tuple[int, bool]] = ()) -> tuple[float, bool, bool]:
+    """An offline reader's window for ``lab/a`` at 100 s under zenoh's
+    defaults, declared at 0 and its owner held from the start: (listened
+    seconds, lossless, present throughout)."""
+    r = alarms.AlarmsReader.offline(0, {"lab/a": "1"}, losses=losses, token_events={"lab/a": list(events)},
+                                    seeds={"lab/a": [alarms.SeedGet(t, ok) for t, ok in gets]})
+    w = r.window("lab/a", at_ns=100 * ns)
+    return (w.listened_s, w.lossless, w.present_throughout)
+
+
+def _alarms_reader_window(alarms: Any, watch: tuple[float, float, float], at_ns: int) -> float:
+    """:meth:`zk2py.alarms.AlarmsReader.window` on a reader with no session
+    (:meth:`zk2py.alarms.AlarmsReader.offline`): declared at 0, its owner
+    ``lab/a`` held from the start and never withdrawn, no loss, no GET. Its
+    listened seconds."""
+    lease_s, wait_before_close_s, reply_timeout_s = watch
+    r = alarms.AlarmsReader.offline(0, {"lab/a": "1"}, lease_s=lease_s, reply_timeout_s=reply_timeout_s,
+                                    wait_before_close_s=wait_before_close_s)
+    return r.window("lab/a", at_ns=at_ns).listened_s
 
 
 def _observer_05_readings(root: Path) -> list[tuple[str, Any, Any]]:

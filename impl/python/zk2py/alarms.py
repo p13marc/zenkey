@@ -38,6 +38,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import budget as bg
 from . import freshness as fr
 from . import jcs, keys, slug
 from .lexical import is_plain_chunk
@@ -1189,8 +1190,9 @@ def window_span(start_ns: int, end_ns: int, losses: Iterable[int], gaps: Iterabl
                 complete_gets: Iterable[int], lossless_path: bool = True) -> Window:
     """§2.15's window (0.3) from what a reader recorded, every instant on
     its monotonic clock: the window's first instant (the declaration plus
-    the reply timeout), its end (a lease and the reply timeout before the
-    instant judged), the instants each loss and each gap was seen, and the
+    the reply timeout), its end (the watch after it before the instant
+    judged: observer §5.2's longer of one lease and ``wait_before_close``,
+    plus the reply timeout), the instants each loss and each gap was seen, and the
     instants its complete GETs of the owner were asked. A loss or a gap
     "breaks the window", which "runs again from the first complete GET that
     followed" it: a GET asked strictly after the instant the break was
@@ -1212,15 +1214,58 @@ def window_span(start_ns: int, end_ns: int, losses: Iterable[int], gaps: Iterabl
     return Window(max(0, end_ns - start) / fr.NS, lossless, present)
 
 
+def window_end_ns(at_ns: int, lease_s: float = 10.0, wait_before_close_s: float = 5.0,
+                  reply_timeout_s: float = 1.0) -> int:
+    """Where §2.15's window ends for a reader judging at ``at_ns``: "The
+    owner is watched past the end as observer §5.2 says: the longer of one
+    lease and the routers' `wait_before_close`, plus the reply timeout. So a
+    reader judging at an instant ends its window that long before it" (§2.15
+    as read against observer.md 0.6). The length is
+    :func:`zk2py.budget.watch_after_s`. Under zenoh's defaults, a 10 s lease
+    and a 5 s ``wait_before_close``, it is 11 s, as before."""
+    return at_ns - int(bg.watch_after_s(lease_s, wait_before_close_s, reply_timeout_s) * fr.NS)
+
+
+class _FixedStall:
+    """A receive-path watch with no session (:meth:`AlarmsReader.offline`):
+    the losses it was handed, and nothing to close."""
+
+    def __init__(self, losses: Iterable[int] = ()) -> None:
+        self._losses = sorted(losses)
+
+    def losses(self) -> list[int]:
+        return list(self._losses)
+
+    def close(self) -> None:
+        pass
+
+
+class _FixedSubscription:
+    """A subscription with no session (:meth:`AlarmsReader.offline`): the
+    instant it was declared, and whether it lost nothing."""
+
+    def __init__(self, declared_ns: int, complete: bool = True) -> None:
+        self.declared_ns, self.complete = declared_ns, complete
+
+    def close(self) -> None:
+        pass
+
+
 class AlarmsReader:
     """A live reader of ``alarms.v1`` across owners (§2.13 to §2.15, text
     0.3): one subscription; its own receive path watched; each owner's
     instance tokens watched; its S4 GETs recorded. :meth:`read` gives one
     owner's reading at an instant, its window as §2.15 counts one:
     - **its span** counts as observer §5.2 counts a window's, "from the
-      declaration plus the reply timeout, or from that GET, to its end; the
-      owner is watched one lease and the reply timeout past the end. So a
-      reader judging at an instant ends its window that long before it";
+      declaration plus the reply timeout, or from that GET, to its end. The
+      owner is watched past the end as observer §5.2 says: the longer of one
+      lease and the routers' `wait_before_close`, plus the reply timeout. So
+      a reader judging at an instant ends its window that long before it"
+      (§2.15 as read against observer.md 0.6, #935). That length is
+      :func:`zk2py.budget.watch_after_s`, the one zk2py's budget windows
+      watch (F-320, reading A). Before round 86 this reader watched one
+      lease and the reply timeout, as 0.8's §2.15 then said, whatever
+      ``wait_before_close`` was;
     - **a loss** is a stall of the reader's receive path, or a transport of
       its session closing (observer §5.2, 0.27), "a loss at the instant the
       reader sees it" (:class:`zk2py.budget.StallWatch`);
@@ -1238,15 +1283,21 @@ class AlarmsReader:
     def __init__(self, session: Any, selector: str, addresses: Iterable[str] = (), *,
                  trust: fr.ClockTrust | None = None, lease_s: float = 10.0, reply_timeout_s: float = 1.0,
                  wait_before_close_s: float = 5.0, qos: tuple[str, str] = ("reliable", "block"),
-                 timeout: float = 1.0) -> None:
-        from . import budget as bg
-
+                 timeout: float = 1.0, stall: Any = None, subscriber: Any = None) -> None:
+        """``stall`` and ``subscriber``, when given, stand in for the
+        receive-path watch and the subscription built on ``session``
+        (:meth:`offline`)."""
         self.session, self.qos, self.timeout = session, qos, timeout
         self.trust = trust or fr.ClockTrust(word=True)
-        self.lease_ns = int(lease_s * fr.NS)
         self.reply_timeout_ns = int(reply_timeout_s * fr.NS)
-        self.stall = bg.StallWatch(session, bg.stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
-        self.subscriber = fr.Subscriber(session, selector, self.trust)
+        #: how long the owner is watched past a window's end (§2.15,
+        #: observer §5.2): the longer of the lease and wait_before_close,
+        #: plus the reply timeout (:func:`window_end_ns`)
+        self.watch = (lease_s, wait_before_close_s, reply_timeout_s)
+        self.watch_after_ns = int(bg.watch_after_s(*self.watch) * fr.NS)
+        self.stall = stall if stall is not None else \
+            bg.StallWatch(session, bg.stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
+        self.subscriber = subscriber if subscriber is not None else fr.Subscriber(session, selector, self.trust)
         self.lock = threading.Lock()
         #: per owner: [(instant, "delete" | instance id put)]
         self.token_events: dict[str, list[tuple[int, str]]] = {}
@@ -1261,6 +1312,34 @@ class AlarmsReader:
         self.noted: list[int] = []
         for a in addresses:
             self.add_owner(a)
+
+    @classmethod
+    def offline(cls, declared_ns: int, held_at_start: dict[str, str | None], *,
+                token_events: dict[str, list[tuple[int, str]]] | None = None,
+                seeds: dict[str, list[SeedGet]] | None = None, losses: Iterable[int] = (),
+                complete: bool = True, lease_s: float = 10.0, reply_timeout_s: float = 1.0,
+                wait_before_close_s: float = 5.0,
+                qos: tuple[str, str] = ("reliable", "block")) -> "AlarmsReader":
+        """A reader with no session, holding what a run would have recorded,
+        for a reading of :meth:`window` (``zk2py.conformance``). Every
+        attribute is :meth:`__init__`'s, so one added there is here too.
+        :meth:`window` reads, beside the watch's lengths and ``qos``:
+        - the subscription's declaration and whether it lost nothing
+          (``declared_ns``, ``complete``);
+        - the losses its receive path saw (``losses``);
+        - each owner's instance held at the window's start and its token
+          moves since (``held_at_start``, ``token_events``);
+        - the S4 GETs asked of each owner (``seeds``).
+
+        It opens nothing, so :meth:`add_owner`, :meth:`seed`, :meth:`read`
+        and the scope's reads, which need a session, are not for it."""
+        r = cls(None, "", (), lease_s=lease_s, reply_timeout_s=reply_timeout_s,
+                wait_before_close_s=wait_before_close_s, qos=qos, stall=_FixedStall(losses),
+                subscriber=_FixedSubscription(declared_ns, complete))
+        r.held_at_start = dict(held_at_start)
+        r.token_events = {a: list(e) for a, e in (token_events or {}).items()}
+        r.seeds = {a: list(g) for a, g in (seeds or {}).items()}
+        return r
 
     @property
     def declared_ns(self) -> int:
@@ -1340,11 +1419,9 @@ class AlarmsReader:
 
     def window(self, address: str, at_ns: int | None = None) -> Window:
         """§2.15's window for ``address``, judged at ``at_ns`` (now)."""
-        from . import budget as bg
-
         now = time.monotonic_ns() if at_ns is None else at_ns
         lossless_qos, _ = bg.lossless(*self.qos)
-        return window_span(self.declared_ns + self.reply_timeout_ns, now - self.lease_ns - self.reply_timeout_ns,
+        return window_span(self.declared_ns + self.reply_timeout_ns, window_end_ns(now, *self.watch),
                            [t for t in self.losses() if t <= now], [t for t in self.gaps(address) if t <= now],
                            [g.asked_ns for g in self.seeds.get(address, []) if g.complete and g.asked_ns <= now],
                            lossless_qos and self.subscriber.complete)

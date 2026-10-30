@@ -931,7 +931,8 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
     """T is :class:`zk2py.alarms.AlarmsReader`: one subscription, then a GET
     per owner at each re-read, its window as §2.15 (0.3) counts one. Step 2
     listens until the window, from the declaration plus the reply timeout to
-    a lease and the reply timeout before the instant T judges, is longer
+    the watch after it before the instant T judges (observer §5.2: the
+    longer of the lease and wait_before_close, plus the reply timeout), is longer
     than the horizon. Then, beyond scenarios.md, 0.3's two breaks of a
     window: a gap in lab/b's presence, and a loss."""
     from . import live
@@ -1000,11 +1001,26 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      and by.get("lab/b") is not None and by["lab/b"].verdict.expect() ==
                      {"reason": "window_short", "verdict": "unobservable"},
                      f"{[(r.address, r.verdict.expect()) for r in reads]}")
-        # 900 s of window after the declaration plus the reply timeout, and
-        # the lease and the reply timeout of watch after it (0.3).
-        need_ns = int((h.ttl_s + 1.0) * fr.NS) + 2 * t.reply_timeout_ns + t.lease_ns
-        while time.monotonic_ns() - t.declared_ns < need_ns:
+        # The horizon's window (plus a second's margin) after the
+        # declaration plus the reply timeout, and the watch after it, as
+        # observer §5.2 says: the longer of the lease and wait_before_close,
+        # plus the reply timeout (§2.15, 0.3; scenarios §10 step 2 as read
+        # against observer.md 0.6). The reply timeout is counted twice, as
+        # the old sum's two reply timeouts were: once explicitly, for the
+        # window's first instant (the declaration plus the reply timeout),
+        # and once inside watch_after_ns, for the withdrawal's transit.
+        need_ns = int((h.ttl_s + 1.0) * fr.NS) + t.reply_timeout_ns + t.watch_after_ns
+        # A bound on the wait: the length itself from now, plus 30 s. A
+        # declaration instant that leaves the length unreached by then (one
+        # in the future, or a clock that does not advance) is the harness's
+        # failure, never the reader's.
+        bound_ns = time.monotonic_ns() + need_ns + 30 * fr.NS
+        while time.monotonic_ns() - t.declared_ns < need_ns and time.monotonic_ns() < bound_ns:
             time.sleep(0.2)
+        if time.monotonic_ns() - t.declared_ns < need_ns:
+            report.check(sec, "harness: step 2's listening reached its length within its bound", False,
+                         f"declared at {t.declared_ns} ns, now {time.monotonic_ns()} ns, need {need_ns} ns")
+            return
         reads, _ = scope()
         by = {r.address: r for r in reads}
         c = al.any_firing("critical", [r.owner_read(h) for r in reads], scope_whole())
