@@ -6,8 +6,8 @@ a setup, steps, and expected observations. The reference runtime runs §1
 to §5 (`zenkey/tests/profile_hostid.rs`, one test per section, named after
 it). §6 is a tool's: the reference doctor's `hostid-duplicate` asks its
 question (`zenkey-fleet/tests/zk2_doctor.rs`,
-`hostid_s6_what_a_tool_concludes`; 0.4), and its step 6 (0.6) with the
-doctor that reads the standby mark (#841, RC).
+`hostid_s6_what_a_tool_concludes`), and its step 6 with the doctor that
+reads the standby mark.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v1.md's rules; core
@@ -19,7 +19,7 @@ doctor that reads the standby mark (#841, RC).
   below are relative to that root, and `var/lib` exists in it unless a
   step says otherwise. The paths a runtime names in its errors and logs
   are the absolute ones of v1.md §2.4.
-  - **Links resolve in the root** (0.2). A seam resolves every path under
+  - **Links resolve in the root.** A seam resolves every path under
     the root as a chroot would: a symbolic link whose target is absolute
     (`/etc/machine-id`) starts again at the root, never at the host's `/`,
     and `..` never climbs above the root (v1.md §2.4, "Under a root"). A
@@ -68,12 +68,12 @@ step starts one service on a fresh root, and stops it before the next.
    writable.
 5. **The control.** The root of step 1, and a service configured with the
    literal address `h-bbd1aa1db10b/sysinfo`.
-6. (0.2) There is no `etc/machine-id`, `var/lib/dbus/machine-id` is a
-   symbolic link to the absolute path `/etc/machine-id`, and
-   `var/lib/zk2/hostid` holds M3.
-7. (0.2) `etc/machine-id` holds `uninitialized`, and
-   `var/lib/dbus/machine-id` is a symbolic link to the absolute path
-   `/srv/machine-id`, which holds M2 in the root.
+6. There is no `etc/machine-id`, `var/lib/dbus/machine-id` is a symbolic
+   link to the absolute path `/etc/machine-id`, and `var/lib/zk2/hostid`
+   holds M3.
+7. `etc/machine-id` holds `uninitialized`, and `var/lib/dbus/machine-id`
+   is a symbolic link to the absolute path `/srv/machine-id`, which holds
+   M2 in the root.
 
 **Expected.**
 1. The system is `h-bbd1aa1db10b`, M1's, derived with `zk2-hostid-v1`.
@@ -165,7 +165,7 @@ calling the runtime's minting with nothing cached between the threads
    `hostid.ephemeral`.
 5. On the roots of §3 steps 2 and 3, start a service with
    `hostid.ephemeral`.
-6. (0.2) A root with neither machine-id file and a writable `var/lib/zk2`,
+6. A root with neither machine-id file and a writable `var/lib/zk2`,
    and a service with `hostid.ephemeral` whose `link(2)` fails with
    `EEXIST` while `var/lib/zk2/hostid` is absent when it is then read: a
    racer's file removed in between. A runner makes it through the
@@ -175,7 +175,7 @@ calling the runtime's minting with nothing cached between the threads
 1. Both runs start. Each system is in the minted shape, and the two
    differ. Each descriptor lists `hostid.v1`. Each start logs that the
    system is ephemeral, and names the three paths with their outcomes, in
-   the runtime's log as the process sees it (§2.6, 0.3): a log capture in
+   the runtime's log as the process sees it (§2.6): a log capture in
    process, or the process's own log output for a runner that drives it
    as a black box.
    Nothing is written under the root.
@@ -199,13 +199,13 @@ subscribed to the liveliness selector `zk2/*/*/@zk/**`.
 2. While it runs, `etc/machine-id` is changed to hold M2. The service
    re-mints again, and the process then starts a second service,
    `@hostid.v1/logger`, a consumer that binds `sysinfo.v1` to
-   `self.system/sysinfo` (core R1, 0.20).
+   `self.system/sysinfo` (core R1).
 3. The process is restarted.
 4. Steps 1 and 3 are repeated with an ephemeral service, on the root of §3
    step 1.
 5. A process whose only service is literal (`vehicle-01/sysinfo`) starts on
    the root of §3 step 3, where `etc/machine-id` cannot be read.
-6. (0.2) On the root of §3 step 1, one process starts `@hostid.v1/a`
+6. On the root of §3 step 1, one process starts `@hostid.v1/a`
    without `hostid.ephemeral`. Then `etc/machine-id` is made to hold M1,
    and the same process starts `@hostid.v1/b`, then `@hostid.v1/c` with
    `hostid.ephemeral`.
@@ -241,21 +241,20 @@ core §6 recommends (under 1 s).
 
 **Steps.**
 1. The tool reads the tokens of `h-bbd1aa1db10b/sysinfo` (its `@zk/**`,
-   v1.md §2.12, 0.7) twice, the grace apart, and reads both descriptors.
+   v1.md §2.12) twice, the grace apart, and reads both descriptors.
 2. **The control.** As step 1, with B's `etc/machine-id` holding M2.
 3. As step 1, with B's service stating no `meta.zid`.
 4. A third service is configured with the literal address
    `h-504c6767c349/logger`. The tool is asked whether its system is
    minted.
-5. (0.2; its id spelled right in 0.4) As step 1, with each service also an
-   owner of `sysinfo_x.v1`, an interface of plain streams whose contract
-   lists `hostid.v1` in `uses`, which the tool reads (core §8.4). Each holds
-   it in its tokenless set (core §8.1), so that core §6's split-brain still
-   does not apply.
-6. (0.6) As step 1, with each service implementing `ledger.v1` of
+5. As step 1, with each service also an owner of `sysinfo_x.v1`, an
+   interface of plain streams whose contract lists `hostid.v1` in `uses`,
+   which the tool reads (core §8.4). Each holds it in its tokenless set
+   (core §8.1), so that core §6's split-brain still does not apply.
+6. As step 1, with each service implementing `ledger.v1` of
    `redundancy.v1`'s scenarios, governed under `claim`, and nothing else:
    A's serving, B's standing by, its descriptor marking `ledger.v1`
-   `"standby": true` (core §3.3, 0.39). The tool reads both contracts
+   `"standby": true` (core §3.3). The tool reads both contracts
    (core §8.4).
 
 **Expected.**

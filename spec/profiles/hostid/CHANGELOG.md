@@ -4,6 +4,72 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it and the
+finding that caused it, as in "(0.7, F-208: …)". This changelog and the
+core's already hold that history. So the text now states each rule and
+cites its evidence, and nothing else. This is #935's third part, beside
+`freshness.v1`, `health.v1`, `config.v1` and `link.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions.** "(0.2)" is gone from §2.3, §2.4, §2.5 step
+  4, §2.6, §2.7, §2.12 and §5's last row. "(0.3)" is gone from §2.6's
+  log, and "(0.6)" from §2.12 and §5's last row.
+- **A finding with its reason.** §2.12 gave a reason in a tag, "(0.7,
+  F-208: …)". The reason is now a sentence of its own after the read: a
+  read of the instance tokens alone holds no interface token, and the
+  standby question turns on one.
+- **The core's versions beside a core citation.** "(core §10, 0.19)"
+  twice, "(core §3.3, 0.19)" in §2.8 and "core R1's (0.20)" in §2.3 now
+  cite the core section alone.
+- **The scenarios.** Six steps opened with a version: §1 steps 6 and 7,
+  §4 step 6, §5 step 6, and §6 steps 5 and 6. They open with their text
+  now. The conventions, §4's Expected, §5's step 2 and §6's steps 1 and 6
+  lose a version beside a citation. The opening loses "0.4", "(0.6)" and
+  "(#841, RC)".
+
+**The long sentences, split.** The three over 50 words were all §2.12's,
+the duplicate-address finding.
+- **The read.** What the tool reads, how often and why are three
+  sentences.
+- **The count** is two items. The first says which instances are
+  counted, and when §5's first question answers yes. The second says when
+  that is the finding. The instances need not be the same in both reads.
+- **Undecided** states the verdict first: the address is unobservable,
+  never clean. Then it lists the four descriptors that leave it so.
+
+None of the three holds a keyword. Each keeps its condition, its scope
+and its `[Sc: §6]`.
+
+**Nothing moved to an appendix.** No rule held a measurement.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY or RECOMMENDED was extracted before and after. Each was keyed
+  by section, and the two sets diffed.
+- **This text.** Both sets hold 22. 21 are unchanged, and §2.8's MUST
+  lost a tag only.
+- **The scenarios.** They hold 65 such sentences and Expected lines,
+  before and after. 64 are unchanged, and §4's log line lost a tag only.
+- **The rest.** §2.12's three rewritten sentences hold no keyword. They
+  were read beside the others. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 18 to none, sentences over 50 words from 3 to
+  none, and a mean from 16.54 words to 15.93.
+- **`scenarios.md`:** tags from 10 to none, and a mean from 13.87 to
+  13.73.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **The header.** It states what this text is written against: core
+  0.40, and the core versions of the standby mark and a complete read.
+- **Appendices A and B.** A is history, and B held no tag.
+
 ## After 0.7 — 2026-10-29: a link moved, no rule changed (#925)
 
 v1's RFC set left `main` for the `v1` branch, and Appendix B's row for
