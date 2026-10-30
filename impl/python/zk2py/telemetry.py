@@ -1,5 +1,8 @@
 """``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.5, core 0.35):
 what a metric resource carries, and what a reader may conclude from it.
+Read again against text 0.6 (#609, round 87; #935): its inline history
+taken out and its five long sentences split, no rule changed, and none of
+this module's rules moved.
 
 From the text alone:
 - **the standard schema** (§2.3, §3): its published artifact ids, and a type

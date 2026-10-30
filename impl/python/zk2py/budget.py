@@ -213,11 +213,14 @@ def watch_after_s(lease_s: float = LEASE_MS / 1000, wait_before_close_s: float =
     "one lease plus its reply timeout", and that a `wait_before_close`
     longer than the lease "lengthens it", not by how much (round 85, F-320,
     ambiguous). zk2py read the longer of the two (reading A), and 0.6
-    settles it so: "A push that cannot queue within it closes its transport
-    (core Appendix B, "What a path drops"). So a router that waits it before
-    closing a transport tells the withdrawal that late, when it is longer
-    than the lease." With zenoh's defaults, 5 s against a 10 s lease, it is
-    the lease. ``alarms.v1`` §2.15 now cites this rule
+    settles it so. Text 0.7 (round 86's F-324) gives the
+    ``wait_before_close`` half its reason in plain words, and says it is a
+    bound reasoned, not measured: "A path that stays up while its queue is
+    full keeps its lease. So its withdrawal can reach the reader up to
+    `wait_before_close` after the failure", and "No run has shown one later
+    than a lease (core Appendix B, "Not measured")". The length is
+    unchanged. With zenoh's defaults, 5 s against a 10 s lease, it is the
+    lease. ``alarms.v1`` §2.15 cites this rule, under its text 0.9
     (:func:`zk2py.alarms.window_end_ns`)."""
     return max(lease_s, wait_before_close_s) + reply_timeout_s
 

@@ -2,6 +2,8 @@
 core 0.32): what crosses a constrained face. Read again against text 0.9
 (#609, round 86; #935): its inline history taken out and nine long
 sentences split, no rule changed, and none of this module's rules moved.
+Text 0.10 (round 87) rewrites §2.4, §2.15 and the scenarios' §11 for
+round 86's F-332 to F-335, no rule changed.
 
 From the text alone:
 - **the face policy** (§2.1): :func:`parse_policy` reads the TOML file and
