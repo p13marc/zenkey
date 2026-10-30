@@ -3,6 +3,82 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.60 — 2026-10-30: editorial: inline history taken out of the rules, no rule changed (#935)
+
+The rules carried their own history (#935, epic #921 Track B). A rule
+named the amendment that made it and the finding that caused it, as in
+"(0.44, F-240: …)". Measurements and notes about one zenoh binding sat
+inside MUST bullets. This changelog already holds that history, so the
+text now states each rule and cites its evidence, and nothing else.
+`observer.md` moves to text 0.4 beside it
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), written against this
+version.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **Version and finding tags.** Every "(0.N)", "(0.N, F-n)", "(0.N, #n)",
+  "since 0.N" and "core 0.N" is gone from the rules, the tables, the
+  preamble and Appendices B to E. A reason a tag carried stays, in plain
+  words. §11.1's "(0.51, F-256: the GET that freezes a node is the
+  asker's …)" is now a sentence of its own after its MUST, and §4.2's
+  "spelled out in 0.27 (#752)" points to Appendix B.
+- **Issue numbers.** "(#607)", "(#618)" and "(zenkey #894)" are gone.
+  "(#613)" twice is now "a profile not yet written", for `archive.v1`
+  (§4.4) and `views.v1` (§9.6).
+- **The pointers' history.** 0.58 left a pointer in each old home,
+  "Moved to observer.md §n (core 0.58); no rule changed." Each now reads
+  "**Label**: observer.md §n." Every label and section number stays.
+- **History told as text.** §11.1's "0.15's admin read … admitted a GET"
+  now says what a wider admin read would admit. §9.6's "the bundle 0.5's
+  rule … E024 since 0.6" names the two identical files and E024 alone.
+  §8.5's batch bullet loses "0.1 said 1 KB". §13 says how each item was
+  settled, without "by amendment 0.2" or the date of acceptance.
+
+**Moved to Appendix B**, each rule keeping its reason in words and a
+pointer:
+- **Measurements**, under a new "Measured for the rules above":
+  - spike S5's 10,917 lost of 100,000, and spike S9's `express` losses
+    (§2.4);
+  - spike S6's 1 reply of 10 (O6);
+  - the 1 ms wait for presence (§8.1);
+  - spike S2's costs and discovery times (§8.3);
+  - the corrupt reply at 2 s (§8.4);
+  - spike S3's 506 B against 11.3 KB (§8.5, U23), and the 1,024 B
+    batches at 3.41 s (§8.5);
+  - round 74's admin GET under `allow` (§11.1).
+- **`observer.md`'s measurements**, under "Measured for observer.md's
+  reads": its §3.1, §3.3, §3.4, §3.5, §3.7, §3.8 and §3.9.
+- **One binding's facts**, a new group: zenoh-pico's missing namespaces
+  (§1.6), its fragment size and its 100 KB replies (§12), and zenoh-python's
+  1 ns step (§4.3). zenoh-python's missing unbounded handler and its
+  missing accessor for the interests timeout are `observer.md`'s.
+
+**How "no rule changed" was checked.** Every sentence holding MUST, MUST
+NOT, SHOULD, SHOULD NOT, MAY or RECOMMENDED was extracted before and
+after, keyed by section, and the two sets diffed. Both hold 152 such
+sentences. 134 are unchanged, and the rest differ only by a tag taken
+out, a pointer's history taken out, or a measurement moved with its
+reason kept. No keyword, condition or scope moved. No fixture moved, and
+no scenario.
+
+**A check keeps it so.** `scripts/check-spec-prose.py` measures each
+text under `spec/`: its mean words per sentence, its sentences over 50
+words, and its inline history tags. `spec/.prose-baseline.json` holds
+each text's figures, which may only go down. CI runs it in the fmt job
+and on the Docs lane, and `just ci` runs it too. This text's tags went
+from 271 to none, and its sentences over 50 words from 13 to 11.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor: profiles and code
+  cite them.
+- **Appendix A**, which is history, and this changelog's own tags.
+- **Long sentences.** Splitting them is #935's next part, and so are the
+  profiles' texts and the scenarios.
+- **What states a rule's ground without a count**: §7.4's 1,280 KiB of
+  locked metadata, §4.3's spike S12, §8.1's estimate for ZenSight, and
+  each "the reference does" note.
+- **Appendix B's citations of zenoh's code**, file and function, which
+  are evidence and not history.
+
 ## 0.59 — 2026-10-30: conformance names `observer.md`, and a scenario step for three of its rules (#950)
 
 zk2py round 82 (PR #949) read 0.57, 0.58 and `observer.md` text 0.1

@@ -13,6 +13,61 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.4 — 2026-10-30: editorial: inline history taken out of the rules, no rule changed (#935)
+
+Its rules carried their history, as the core's did (#935, epic #921
+Track B). Core 0.60 takes it out of both texts at once, and this text is
+written against it. **No rule changed.**
+
+**Taken out:**
+- **Version and finding tags**: every "(0.N, #n)", "(0.N, F-n)" and
+  "(text 0.N, F-n)" in the rules and in Appendix B's rows. A reason a tag
+  carried stays, in plain words: §3.3's round trip at the interests
+  timeout is "made, and what it establishes is nothing", and §3.7's
+  watch session needs a session that never held a subscriber, "one
+  undeclared leaves its session exposed".
+- **§0's convention for tags.** With no tag left, "A version in
+  parentheses …" now says where a rule's history is: this changelog, the
+  core's, and Appendix A.
+- **"Moved from core §n (core 0.58)"** at the head of §3, §3.10, §4, §5,
+  §6, §7.1 to §7.4: each now names the core section it is the tool half
+  of. §4.4's two "that sentence moved" clauses are gone; Appendix A keeps
+  where each block came from.
+- **History told as text.** §4.3's "0.11's second selector" is now "a
+  selector such as …", and §5.2's "0.25 read a stalled reader's loss from
+  the owner's token" says that the token does not show one. §4.5's
+  "(#613)" says that no profile defines an alignment status yet.
+- **Notes about one implementation**: §3.3's zk2py follower settings, and
+  §3.7's "zk2py's follower does so". The reference's own practice stays.
+
+**Moved to core Appendix B**, under "Measured for observer.md's reads",
+each rule keeping its reason in words and a pointer:
+- §3.1's hang from 996 tokens, and zenoh-python's 257 of 2,002;
+- §3.3's 6,121 of 10,000 at 10 s, and the whole read in 22 s;
+- §3.4's `liveliness_query` deny on ingress and on egress;
+- §3.5's `transports()` missing the cut in 4 of 10 runs;
+- §3.7's round-trip times: with and without history, on the wire keys,
+  after a reopen, and a session's first read against a later one;
+- §3.7's 450 reads folding none, and the GETs behind one its timeout
+  ended;
+- §3.8's five reads on a token's own session, and §3.9's two peers.
+
+zenoh-python's missing unbounded handler (§3.1) and its missing accessor
+for the interests timeout (§3.3) go to core Appendix B's "One binding's
+facts".
+
+**How "no rule changed" was checked**, as for core 0.60: the 39
+sentences holding an RFC 2119 keyword, before and after, keyed by
+section. 32 are unchanged, three lost a tag only, and four lost a tag
+and a measurement or an implementation note, their keyword and condition
+kept. This text's tags went from 109 to none, and its sentences over 50
+words from 24 to 14.
+
+**Deliberately not changed.**
+- **No rule**, section number or label.
+- **Appendix A**, which is history: where each block came from.
+- **Long sentences.** Splitting them is #935's next part.
+
 ## 0.3 — 2026-10-30: zk2py round 83's F-291 to F-294
 
 zk2py round 83 (PR #952) read text 0.2 and core 0.59 cold and found
