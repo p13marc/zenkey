@@ -3426,8 +3426,178 @@ def family_readings(root: Path) -> list[Result]:
         + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
-        + _observer_readings(root) + _observer_02_readings(root)
+        + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _observer_04_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``observer.md`` text 0.3, as text 0.4 states it (#609, round 84):
+    §1's two spellings of not this profile's, read over every answer the six
+    profiles' fixtures §1 cites give (``zk2py.judgement``), each kept apart
+    in the three media; and §8.2's medium, a stream of rows stating its
+    scope on standard error (``zk2py.echo_tool``'s NDJSON). No session is
+    opened."""
+    from . import echo_tool
+    from . import judgement as jd
+
+    out: list[tuple[str, Any, Any]] = []
+    label = "observer 0.4 §1"
+    spec = root.parent
+    every: dict[str, list[jd.Judgement]] = {}
+    for profile, rel in jd.FIXTURES.items():
+        doc = json.loads((spec / rel).read_text())
+        every[profile] = [jd.read(profile, a, rs) for a, rs in jd.answers(doc)]
+    # What each fixture holds, by shape, and by spelling for not this
+    # profile's: the counts the fixtures give today (round 84). They are
+    # pinned on purpose, a tripwire: a fixture that gains or loses a case
+    # of not this profile's fails here, so the reading is checked again
+    # against §1 rather than passing on whatever the fixture now holds
+    # (review-bot on PR #955)
+    want = {
+        "timing.v1": ("token", 11), "arbitration.v1": ("token", 9), "redundancy.v1": ("token", 5),
+        "freshness.v1": ("not_asked", 6), "telemetry.v1": ("not_asked", 1), "desired.v1": ("not_asked", 8),
+    }
+    for profile, (spelled, n) in want.items():
+        js = every[profile]
+        mine = [j for j in js if j.shape == jd.TOKEN]
+        out.append((f"{label}: {profile}'s fixture gives not this profile's {n} times, spelled {spelled}, and no "
+                    f"answer of another spelling reads as it",
+                    (len(mine), sorted({j.spelled for j in mine})), (n, [spelled])))
+        out.append((f"{label}: {profile}: not this profile's never read as Unobservable, nor as Established",
+                    [j.shape for j in mine if j.answer == jd.UNOBSERVABLE or j.shape != jd.TOKEN], []))
+    # Every other not_asked is NotAsked, and each profile's other reasons
+    # never read as not this profile's
+    others = {p: sorted({r for j in js if j.shape == jd.NOT_ASKED for r in j.reasons}) for p, js in every.items()}
+    out.append((f"{label}: every other not_asked the six fixtures give reads as NotAsked, its reason kept",
+                others, {"arbitration.v1": ["no_descriptor", "not_listened"],
+                         "desired.v1": ["author_absent", "not_acted", "target_absent", "unbound"],
+                         "freshness.v1": ["last_known", "no_horizon"], "redundancy.v1": [
+                             "absent", "no_candidate", "not_a_candidate"],
+                         "telemetry.v1": ["ignored"],
+                         "timing.v1": ["ended", "no_deadline", "no_lifespan", "no_period", "not_heard"]}))
+    # A premise reason binds only the profile that names it: timing.v1
+    # spells it as the token, so a not_asked "kind" there is NotAsked
+    for profile, answer, reasons, shape, why in (
+            ("timing.v1", "not_asked", "kind", jd.NOT_ASKED, "a token profile's not_asked, whatever its reason"),
+            ("freshness.v1", "not_asked", "no_horizon", jd.NOT_ASKED, "freshness.v1's other reason"),
+            ("freshness.v1", "not_asked", "deleted", jd.TOKEN, "freshness.v1's deleted"),
+            ("telemetry.v1", "not_asked", ["not_this_profiles"], jd.TOKEN, "telemetry.v1's reason, a list"),
+            ("desired.v1", "not_asked", "not_a_target", jd.TOKEN, "desired.v1's not_a_target"),
+            ("x.v1", "not_this_profiles", None, jd.TOKEN, "§1's token, from a profile §1 does not name"),
+            ("x.v1", "not_asked", "kind", jd.NOT_ASKED, "a not_asked from a profile §1 does not name"),
+            ("timing.v1", "unobservable", "not_this_profiles", jd.UNOBSERVABLE,
+             "an Unobservable is one whatever its reason says"),
+            ("desired.v1", "not_yet", None, jd.ESTABLISHED, "desired.v1's not_yet, an answer the bus gave")):
+        out.append((f"{label}: {why} reads as {shape}", jd.read(profile, answer, reasons).shape, shape))
+    # The three media keep it apart, whichever spelling: its cell, field and
+    # note never say Unobservable or a negative pole, never read as a
+    # NotAsked's, and a NotAsked that spells it keeps its reason in the cell
+    cells_na = {jd.cell(j) for js in every.values() for j in js if j.shape == jd.NOT_ASKED}
+    cells_un = {jd.cell(j) for js in every.values() for j in js if j.shape == jd.UNOBSERVABLE}
+    nt = [j for js in every.values() for j in js if j.shape == jd.TOKEN]
+    out += [
+        (f"{label}: every not this profile's cell says so, and none is a NotAsked's or an Unobservable's cell",
+         sorted({jd.cell(j) for j in nt} & (cells_na | cells_un)) + [jd.cell(j) for j in nt
+                                                                   if "not this profile's" not in jd.cell(j)], []),
+        (f"{label}: every not this profile's field keeps the profile's token and reasons beside shape "
+         f"not_this_profiles",
+         sorted({(f["answer"], f["shape"], f["established"], f["spelled"]) for f in map(jd.field, nt)}),
+         [("not_asked", "not_this_profiles", False, "not_asked"),
+          ("not_this_profiles", "not_this_profiles", False, "token")]),
+        (f"{label}: every not this profile's note says never no and never unobservable",
+         all("never no and never unobservable" in jd.note(j) for j in nt), True),
+        (f"{label}: a NotAsked that spells it keeps its reason in the cell (freshness.v1's kind)",
+         jd.cell(jd.read("freshness.v1", "not_asked", "kind")), "not this profile's (kind), spelled not asked"),
+        (f"{label}: a NotAsked nobody put, its cell and note",
+         [jd.cell(jd.read("freshness.v1", "not_asked", "no_horizon")),
+          "asking cures it" in jd.note(jd.read("freshness.v1", "not_asked", "no_horizon"))],
+         ["not asked: no_horizon", True]),
+        (f"{label}: Established poles are the profile's own, and an Unestablished cell never one",
+         [jd.cell(jd.read("telemetry.v1", "does_not", ["unit_invalid"])), jd.cell(jd.read("timing.v1", "no")),
+          sorted(c for c in cells_na | cells_un if c in ("no", "does not", "stale"))],
+         ["does not", "no", []]),
+    ]
+    # §1's two lists cover the six fixtures §1 cites, each profile once
+    out.append((f"{label}: the token-spelled and the NotAsked-spelled profiles are the six §1 cites, none twice",
+                (sorted(jd.TOKEN_SPELLED | set(jd.SPELLINGS)), jd.TOKEN_SPELLED & set(jd.SPELLINGS)),
+                (sorted(jd.FIXTURES), set())))
+    # The NDJSON rows' hand-off (review-bot on PR #955): zenoh's callback
+    # only queues a row, and the main thread writes it, so a reader slow to
+    # take standard output never stalls the session's delivery; a write
+    # that fails is the stream cut, never a clean end
+    import io
+    import threading
+    import time as _time
+
+    rows = echo_tool.Rows(count=3)
+    gate, handed = threading.Event(), []
+
+    def blocked(row: dict[str, Any]) -> None:
+        gate.wait(5.0)
+        handed.append(row["key"])
+
+    pumping = threading.Thread(target=rows.pump, args=(blocked, _time.monotonic() + 5.0), daemon=True)
+    pumping.start()
+    t0 = _time.monotonic()
+    for i in range(5):
+        rows.offer(echo_tool.row_of(f"zk2/g/svc/zk2py_guard.v1/stream/cmd{i}", False, 1, "zenoh/bytes"))
+    offered_s = _time.monotonic() - t0
+    gate.set()
+    pumping.join(5.0)
+    out += [
+        ("observer 0.4 §8.2: the callback's half returns at once while the writer is blocked, and keeps the first "
+         "--count rows",
+         [offered_s < 0.5, [r["key"][-4:] for r in rows.rows()]], [True, ["cmd0", "cmd1", "cmd2"]]),
+        ("observer 0.4 §8.2: the main thread's half hands them on in arrival order, then ends, the count reached",
+         [handed, pumping.is_alive()],
+         [[f"zk2/g/svc/zk2py_guard.v1/stream/cmd{i}" for i in range(3)], False]),
+    ]
+
+    class Refusing(io.StringIO):
+        def __init__(self, exc: OSError, on: str) -> None:
+            super().__init__()
+            self.exc, self.on = exc, on
+
+        def write(self, text: str) -> int:
+            if self.on == "write":
+                raise self.exc
+            return super().write(text)
+
+        def flush(self) -> None:
+            if self.on == "flush":
+                raise self.exc
+
+    def cut(out: io.StringIO) -> str:
+        r = echo_tool.Rows()
+        r.offer(echo_tool.row_of("zk2/g/svc/zk2py_guard.v1/stream/cmd", False, 1, "zenoh/bytes"))
+        try:
+            r.rest(echo_tool.writer(out))
+        except echo_tool.StreamCut as e:
+            return f"cut: {e}"
+        return "written"
+
+    ok = io.StringIO()
+    out += [
+        ("observer 0.4 §8.2: a row written is one NDJSON line", [cut(ok), ok.getvalue().count("\n")], ["written", 1]),
+        ("observer 0.4 §8.2: a closed pipe on write, or any OSError on flush, is the stream cut, never a clean end",
+         [cut(Refusing(BrokenPipeError(32, "Broken pipe"), "write")).startswith("cut: "),
+          cut(Refusing(OSError(5, "Input/output error"), "flush")).startswith("cut: ")], [True, True]),
+    ]
+    # §8.2's medium: a stream of rows has no place for the scope, so
+    # standard error states it; the rows are the samples alone
+    sc = echo_tool.scope_of("zk2/g/**")
+    row = echo_tool.row_of("zk2/g/svc/zk2py_guard.v1/stream/cmd", False, 4, "application/json")
+    out += [
+        ("observer 0.4 §8.2: zk2py's echo tool's NDJSON row is a sample's alone, no scope in it",
+         sorted(row), ["bytes", "delete", "encoding", "key", "kind", "zk2"]),
+        ("observer 0.4 §8.2: its standard error line states what it watched and every kind it excludes, "
+         "whatever the format",
+         [all(k in echo_tool.scope_line(sc) for k in ("@stream", "@state", "@op", "@adv", "@zk")),
+          "watching stream, state, events" in echo_tool.scope_line(sc)], [True, True]),
+        ("observer 0.4 §8.2: a key that is not zk2 is a row too, its kind null (§8.1)",
+         echo_tool.row_of("v1/a/b", False, 1, "zenoh/bytes")["kind"], None),
+    ]
+    return out
 
 
 def _observer_02_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -3517,9 +3687,11 @@ def _observer_02_readings(root: Path) -> list[tuple[str, Any, Any]]:
         c = load_contract(interop / rel, check_file_name=True)
         out.append((f"{label}: {rel}, a step's contract, loads with no finding and the reference CLI's fingerprint",
                     (c.codes, c.fingerprint), ([], fp)))
-    # F-291 (open): observer §1 keeps not this profile's apart from NotAsked
-    # in every medium, "The profiles' fixtures give it as the token
-    # `not_this_profiles`"; three profiles' fixtures give it as not asked.
+    # F-291 (resolved by text 0.3, which names both spellings; round 84's
+    # _observer_04_readings reads them): text 0.2 kept not this profile's
+    # apart from NotAsked in every medium, "The profiles' fixtures give it as
+    # the token `not_this_profiles`"; three profiles' fixtures give it as not
+    # asked.
     spec = root.parent
 
     def cases(path: str) -> list[dict[str, Any]]:
