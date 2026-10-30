@@ -4041,6 +4041,25 @@ async fn grammar_s1_a_tools_wildcard_scope_names_what_it_excludes() {
         !run.stdout.contains("@stream/frame") && !run.stdout.contains("@state/grid"),
         "a zk2/g/** watch shows no explicit sample: {run}"
     );
+    // NDJSON has no place for the note among its rows: standard error says
+    // it, and the rows stay rows (observer §8.2, text 0.3, F-292).
+    let run = bus
+        .until(
+            &["echo", "zk2/g/**", "--count", "12", "--format", "ndjson"],
+            |r| r.code == 0 && r.stdout.contains("stream/tick"),
+        )
+        .await;
+    exits(&run, 0);
+    assert!(
+        run.stderr
+            .contains(&format!("echoing zk2/g/** — {excluded}")),
+        "ndjson's scope note, on standard error: {run}"
+    );
+    assert!(
+        !run.stdout.trim().is_empty()
+            && run.stdout.lines().all(|l| l.trim_start().starts_with('{')),
+        "every stdout line an NDJSON row, the meta rows included: {run}"
+    );
 
     let timing = |selector: Option<&'static str>| {
         let mut args = vec!["timing"];

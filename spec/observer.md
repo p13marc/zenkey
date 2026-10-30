@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.2 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.3 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.59 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -103,12 +103,18 @@ Unestablished(NotAsked) | Unestablished(Unobservable { reason })
   [`profiles/README.md`](profiles/README.md)): a role that carries none of
   its policy (`arbitration.v1`), an interface it does not govern
   (`redundancy.v1`), a resource of a kind it does not read (`timing.v1`).
-  That answer is Unestablished, a kind of its own: kept
-  apart from NotAsked and from Unobservable in every medium, as they are
-  kept apart from each other, and never Established(no), since the
-  subject is not one the question is about. The profiles' fixtures give
-  it as the token `not_this_profiles`.
-  `[F: profiles/timing/conformance/conclusions.json, profiles/arbitration/conformance/conclusions.json, profiles/redundancy/conformance/conclusions.json]`
+  That answer is Unestablished, and never Established(no), since the
+  subject is not one the question is about. A profile spells it one of
+  two ways, and its fixtures say which (text 0.3, F-291):
+  - as a token of its own, `not_this_profiles`, kept apart from NotAsked
+    and from Unobservable in every medium: `timing.v1`, `arbitration.v1`
+    and `redundancy.v1`;
+  - as NotAsked with a reason that names the failed premise:
+    `freshness.v1` (`kind`, `deleted`), `telemetry.v1` (a reason
+    `not_this_profiles`) and `desired.v1` (`not_a_target`).
+
+  Either way it is never folded into Unobservable, nor into no.
+  `[F: profiles/timing/conformance/conclusions.json, profiles/arbitration/conformance/conclusions.json, profiles/redundancy/conformance/conclusions.json, profiles/freshness/conformance/judgements.json, profiles/telemetry/conformance/samples.json, profiles/desired/conformance/conclusions.json]`
 - **An empty scope is Unobservable.** When nothing in scope was observed
   (no token, no reply, no sample), the judgement is unobservable, never
   clean. A monitor pointed at the wrong namespace must not be green.
@@ -179,10 +185,12 @@ tokenless set, re-minting and the caller's timeouts stay in core §8.1.
   the deployment's longest re-mint overlap. Start-up, re-mint and
   teardown pass through such shapes briefly, by design. §6.1 states the
   rule for split-brain, and it holds for every such shape.
-  - **The transient half** (text 0.2, F-282). An owner between core
-    §8.2's steps 3 and 4 serves a descriptor that lists an interface
-    whose token it has not yet declared. Seen in one of two reads a
-    grace apart, that shape is no fault.
+  - **The transient half** (text 0.2, F-282). An owner within core
+    §8.2's step 4, after its instance token and before its interface
+    tokens, serves a descriptor that lists an interface whose token it
+    has not yet declared (text 0.3, F-293: before its instance token, a
+    tool finding instances by token sees no instance, and so no shape).
+    Seen in one of two reads a grace apart, that shape is no fault.
 
   `[Sc: operations.md §8; profiles/hostid/scenarios.md §6; profiles/redundancy/scenarios.md §12]`
 
@@ -880,7 +888,7 @@ period.
 | **Unobservable** | at most the bound in an incomplete reading: a GET that did not run to its final reply; a window not shown to have lost no delivery, shorter than one span, or over which the owner was not present throughout; no member at all (O5); a reading that does not count the kind | a window not shown to have lost no delivery; shorter than one period; the owner not present throughout; no occurrence heard (O5) |
 | **Not asked** | the no-ceiling bound; a template without parameters; an operation | a resource that declares no rate |
 
-`[F: budget/]` `[Sc: budget.md]`
+`[F: budget/]` `[Sc: budget.md §1–§3]`
 
 ---
 
@@ -1035,7 +1043,9 @@ what it could not. `[F: keys.json]` `[Sc: state.md §11]`
 
 That guard is a gift, and a trap (core §1.3). A tool that offers a
 wildcard scope either names the verbatim kinds it watches beside it, or
-states that they are excluded. `[Sc: grammar.md §1]`
+states that they are excluded, in every medium it writes (text 0.3,
+F-292): a field of its report, or, for a stream of rows that has no
+place for one (NDJSON), its standard error. `[Sc: grammar.md §1]`
 
 **Everything is three selectors.** Positions 1–5 of a zk2 key have fixed
 arity (core §1.3), so these three reach every data key of every service
@@ -1116,13 +1126,14 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
 | `scenarios/state.md` §1, §11, §12 | §4.1, §4.3, §8.1, §8.3 |
 | `scenarios/security.md` §3 | §4.2 |
-| `scenarios/budget.md` §1–§3 | §5.2 |
+| `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
 | `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6, text 0.2), §6.1, §7.2 (§5 step 2, text 0.2) |
 | `scenarios/bindings.md` §3, §5 | §7.1 |
 | `scenarios/constrained.md` §3 | §7.1 |
 | `scenarios/types.md` §2 | §7.3 |
 | `scenarios/grammar.md` §1, §2 | §8.2 (§1 step 5, text 0.2) |
 | `profiles/*/conformance/conclusions.json` (`arbitration`, `redundancy`, `timing`) | §1, not this profile's (text 0.2) |
+| `profiles/freshness/conformance/judgements.json`, `profiles/telemetry/conformance/samples.json`, `profiles/desired/conformance/conclusions.json` | §1, not this profile's spelled as not asked with a reason (text 0.3) |
 | `profiles/timing/conformance/lifespans.json` | §4.4, zids compared by value (text 0.2) |
 | `profiles/arbitration/scenarios.md` §3, §4, §7 | §3.6, §3.7 |
 | `profiles/hostid/scenarios.md` §6 | §3.2 (text 0.2) |

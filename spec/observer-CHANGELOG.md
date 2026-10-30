@@ -13,6 +13,42 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.3 — 2026-10-30: zk2py round 83's F-291 to F-294
+
+zk2py round 83 (PR #952) read text 0.2 and core 0.59 cold and found
+F-281 to F-290 resolved. Its four findings change no verdict either
+implementation gives.
+
+**Changed: rules and wording (round 83).**
+- **"Not this profile's" in two spellings** (§1; F-291). 0.2 kept it a
+  token of its own "in every medium", and three profiles spell it
+  otherwise: `freshness.v1`, `telemetry.v1` and `desired.v1` answer not
+  asked with a reason naming the failed premise. §1 now names both
+  spellings, each profile's fixtures saying which, and keeps what holds of
+  both: never folded into Unobservable, never no. No profile's verdict
+  moves, and Appendix B gains the three fixtures.
+- **Which medium states a scope's exclusions** (§8.2; F-292). 0.2 said a
+  tool states them, not where. Now: in every medium it writes, a field of
+  its report or, for a stream of rows with no place for one (NDJSON), its
+  standard error. `grammar.md` §1 step 5 says the same. The reference's
+  `zenctl echo` now states its scope on standard error in every format.
+- **The transient half's step** (§3.2; F-293). 0.2 placed the shape
+  "between core §8.2's steps 3 and 4"; the instance token is step 4's
+  first token, so the shape is within step 4, after the instance token
+  and before the interface tokens. `operations.md` §8 step 6 is reworded
+  alike. No verdict moves.
+- **§5.3's citation** (F-294): `budget.md` §1–§3, its owner-side §4–§7
+  left out, and Appendix B indexes it for §5.3 too.
+
+**Stated: the reference's practice.** The tooling guide's §8.5 records
+the reference doctor's 8 MiB memlock floor (spike S9), which round 83 saw
+no text state: practice, not a rule.
+
+**Deliberately not changed.**
+- **The three profiles' fixtures.** Moving them to the token would move
+  their verdict tokens for no reader's gain; §1 reads both.
+- **The core version.** Nothing here needs core 0.60.
+
 ## 0.2 — 2026-10-30: zk2py round 82's F-281 to F-290, evidence indexed, and three rules given a scenario step (#950)
 
 zk2py round 82 (PR #949) read core 0.57 and 0.58 and text 0.1 cold: the
