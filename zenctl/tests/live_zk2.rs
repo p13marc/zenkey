@@ -4056,8 +4056,9 @@ async fn grammar_s1_a_tools_wildcard_scope_names_what_it_excludes() {
         "ndjson's scope note, on standard error: {run}"
     );
     assert!(
-        run.stdout.lines().all(|l| l.trim_start().starts_with('{')),
-        "every stdout line an NDJSON row: {run}"
+        !run.stdout.trim().is_empty()
+            && run.stdout.lines().all(|l| l.trim_start().starts_with('{')),
+        "every stdout line an NDJSON row, the meta rows included: {run}"
     );
 
     let timing = |selector: Option<&'static str>| {

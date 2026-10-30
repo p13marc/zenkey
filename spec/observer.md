@@ -189,8 +189,8 @@ tokenless set, re-minting and the caller's timeouts stay in core §8.1.
     §8.2's step 4, after its instance token and before its interface
     tokens, serves a descriptor that lists an interface whose token it
     has not yet declared (text 0.3, F-293: before its instance token, a
-    tool finding instances by token sees no instance, and so no shape). Seen in one of two reads a
-    grace apart, that shape is no fault.
+    tool finding instances by token sees no instance, and so no shape).
+    Seen in one of two reads a grace apart, that shape is no fault.
 
   `[Sc: operations.md §8; profiles/hostid/scenarios.md §6; profiles/redundancy/scenarios.md §12]`
 
