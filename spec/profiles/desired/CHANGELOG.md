@@ -4,6 +4,121 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-10-30: a `config.v1` owner's re-mint is a restart (F-336), and round 87's F-341 to F-346, editorial (#935)
+
+zk2py round 87 (PR #961) read 0.9 cold, beside `alarms.v1` 0.9 and
+`telemetry.v1` 0.6. It found that 0.9 changed no rule, and filed seven
+findings against this text: F-336, a contradiction with `config.v1`,
+and F-341 to F-346, hard to read. This is #935's fifth part.
+
+**Changed: a `config.v1` owner's re-mint is a restart** (§0, §2.7,
+§2.16; F-336). This is the one rule this version changes.
+- **The contradiction.** Take a `config.v1` owner fed through this
+  profile, converged on a version, that re-mints in its process. By
+  `config.v1` §2.12 a re-mint is a restart from its startup values, and
+  by its §2.18 the new instance acts again. By §2.7 here, "A re-mint is
+  not a restart", it kept its run and did not act again. Its device
+  would then run its startup values while its view said the document
+  converged.
+- **Taken: `config.v1`'s rule.** For a `config.v1` owner a re-mint is a
+  restart. §2.16 says so in a bullet of its own, "A re-mint is a
+  restart", citing `config.v1` §2.12. It returns its device to its
+  startup values and begins a new run, so §2.7's restart holds of it: it
+  MUST act on the first version it reads, the one it acted on before the
+  re-mint included. `[Sc: §12]` An owner that refuses to re-mint while it
+  runs, as the reference does, acts again only at a restart.
+- **The words agree.** §2.16's "once in a run" says that for a
+  `config.v1` owner a run and an instance are the same thing, so it is
+  `config.v1` §2.18's "once in an instance". `config.v1` 0.8 says the
+  same from its side.
+- **The general rule stays.** §0's "Run" and §2.7's "A re-mint is not a
+  restart" each end with their one exception: "The one exception is a
+  `config.v1` owner, whose re-mint is a restart (§2.16)."
+- **Evidence: a scenario.** No fixture could state it: `order.json`'s
+  steps have a `restart` and no re-mint, and no target in them is a
+  `config.v1` owner. The scenarios gain §12, "A `config.v1` owner's
+  re-mint is a restart (§2.7, §2.16)", on `config.v1`'s scenarios' owner
+  `lab/rf0`, fed by `lab/author`'s `configs.v1`:
+  - step 1 asks the owner to re-mint while it runs. It refuses, as the
+    reference does, and nothing moves; or it re-mints as a restart, its
+    device back on its startup values first, and its new instance acts
+    on revision 1 again;
+  - step 2 restarts the owner's process. The new instance's first status
+    shows the startup value and no `desired`, then the new run acts on
+    revision 1 again, one `applied` event, and converges.
+
+  The reference runs it as `s12_a_config_v1_owners_re_mint_is_a_restart`
+  in `zenkey/tests/profile_desired.rs`. The scenarios' opening says §12 is
+  the runtime's.
+- **What it changes.** An implementation whose `config.v1` owner, fed
+  through this profile, re-mints and kept its run. Neither the reference
+  nor zk2py has one: the reference refuses the re-mint, and zk2py's
+  owner is never fed through this profile.
+
+**Editorial: round 87's hard-to-read findings, no rule changed.** Each
+rewrite is the finding's, and keeps its keyword, condition, scope and
+evidence.
+- **F-341, §2.3, `two_documents`.** One sentence held two placements and
+  a reason for each, and "alone" read as an adverb. It is three now. It
+  sits after `required_unbound`, which reads only whether a binding
+  exists, so the kill switch stays the deployment's. "It sits before
+  every other problem, and is reported alone: each of the others reads
+  the binding of one slice, and a role on two documents has no one
+  slice."
+- **F-342, §2.5, "The reference".** "Such a target" had no antecedent.
+  The archive's two documents are one sentence now, the one its author
+  deleted past its window and the one it has since replaced. "A target
+  that read the archive on a silent GET would act on the first again,
+  and on the second as last-known."
+- **F-343, §2.6 step 3, equal.** "Any other delivery" and "the author's
+  own version included" read against the sentence before. Equal is the
+  same version, then: "One equal delivery is not", the author's own
+  sample of a version held, or held waiting, from an archive, which
+  confirms it. "A version the target holds, or holds waiting, that came
+  from its author is never confirmed: every equal delivery of it, its
+  author's included, is the same version". `order.json` pins the five
+  cases, and zk2py's reading of them is round 87's.
+- **F-344, §2.6, "Within one id".** "Such a case is a value" made a case
+  a value. "In it, a value of the author's old epoch is still in
+  transit …, and it is later than every value of the old epoch the
+  target acted on. The target acts on that value as another id, then on
+  the new epoch's next value."
+- **F-345, §2.16, "What a delete reverts it to".** "A document it acted
+  on in this run named to its startup value" read as "named to". It is
+  now `config.v1` §2.18's wording, "run" kept: "each parameter named by a
+  document it acted on in this run goes back to its startup value".
+- **F-346, §2.17, "A requirement unread".** "One that declares any is no
+  help, one desired resource included" left four things out. It is
+  three sentences now. "A revision that declares a desired resource,
+  even only one, settles nothing. The requirement may name a plain
+  resource of the author's instead, which would make the role no
+  target's. Only the requirement, which the tool has not read, says
+  which."
+
+**How the rules were checked**, as for 0.9, with the tool of #935's
+third part.
+- **This text.** 62 keyword sentences before, and 63 after. All 62 are
+  unchanged, and the new one is §2.16's MUST above. Of every sentence
+  and table row, the changed ones are the header, the findings' rewrites
+  and the F-336 sentences, each read beside its old text.
+- **The scenarios.** All 88 keyword sentences and Expected lines are
+  unchanged. The new ones are §12's, and the opening names §10 to §12.
+- **No fixture moved.**
+
+**The figures.**
+- **This text:** a mean from 21.78 words to 21.59.
+- **`scenarios.md`:** a mean from 14.78 to 14.68.
+
+Neither has a sentence over 50 words or a tag. `spec/.prose-baseline.json`
+is lowered to them.
+
+**Deliberately not changed.**
+- **No other rule**, and no section number, label or anchor. §12 is a
+  new section after §11.
+- **A re-mint of any other target** keeps its run (§2.7).
+- **Written against core 0.39**, still, and the header's `freshness.v1`
+  text 0.3.
+
 ## 0.9 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60

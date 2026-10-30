@@ -2,8 +2,8 @@
 
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
-a setup, steps, and expected observations. §1 to §8, §10 and §11 are the
-runtime's: the reference runs them as tests of `zenkey`
+a setup, steps, and expected observations. §1 to §8 and §10 to §12 are
+the runtime's: the reference runs them as tests of `zenkey`
 (`zenkey/tests/profile_desired.rs`, one test per section, named after
 it). §9 is a tool's: the reference tool runs it as a test of zenctl
 (`zenctl/tests/live_zk2.rs`, `desired_s9_…`, T being `zenctl desired`,
@@ -482,3 +482,49 @@ declaration, which the target holds, the contract it is compiled against
    the target starts (§2.1). Its report on `Rp` is
    `{key: zk2/lab/author/tasking.v1/state/tasks/lab/worker, source:
    baseline}` (§2.10).
+
+## §12 A `config.v1` owner's re-mint is a restart (§2.7, §2.16)
+
+**Setup.** One router, R1. The target is `config.v1`'s scenarios' owner,
+`lab/rf0`, with its device, its startup values and the keys `V`, `St`
+and `Ev` that its scenarios name ([`../config/scenarios.md`](../config/scenarios.md),
+"Conventions"). It is fed through this profile (§2.16):
+- **Its role** `configs` is bound to `lab/author` with `{system} =
+  self.system` and `{service} = self.service` (§2.3).
+- **The author** implements `configs.v1`. Its one resource,
+  `configs/{system}/{service}`, is state of `config.v1`'s
+  `DesiredConfig` (`config.v1` §3), with `desired.target_param =
+  ["system", "service"]` and `freshness.ttl_s = 0`. The reference keeps
+  it as `zenkey/tests/contracts/configs.v1.toml`.
+- **Converged.** The author has put `{"revision": 1, "values": {"duty":
+  {"fraction_ppm": 20000}}}`, and the owner has converged on it: `St`'s
+  `desired` is `{observed_revision: 1, outcome: "converged"}`, and the
+  device holds `fraction_ppm` 20000.
+
+**Steps.**
+1. The owner is asked to mint a new instance in its own process (core
+   §1.5), its service running.
+2. The owner's process stops, and starts again.
+
+**Expected.**
+1. One of two:
+   - the owner refuses the re-mint, as the reference does (`config.v1`
+     §2.12). S sees no instance token of `lab/rf0` withdrawn or declared,
+     `St` still shows `desired` `{observed_revision: 1, outcome:
+     "converged"}`, and the device holds 20000;
+   - or it re-mints as a restart. Its device returns to `fraction_ppm`
+     10000 first, and S sees the old instance token withdrawn and a new
+     one declared. The new instance acts on revision 1 again: S receives
+     an `applied` event of it, and its `St` shows `fraction_ppm` 20000
+     and `desired` `{observed_revision: 1, outcome: "converged"}`.
+
+   A new instance whose `St` shows `desired` converged on revision 1
+   while its device holds 10000 fails this step.
+2. S sees the old instance token withdrawn and a new one declared (core
+   §8.1). The new instance's first `St`, put before its tokens, shows
+   `fraction_ppm` 10000 and no `desired` (`config.v1` §2.18): the restart
+   rolled the document's value back (`config.v1` §2.12). The new run then
+   acts on revision 1, the version the previous run acted on (§2.7). S
+   receives an `applied` event of the new instance, and its `St` shows
+   `fraction_ppm` 20000 and `desired` `{observed_revision: 1, outcome:
+   "converged"}`. The device holds 20000.

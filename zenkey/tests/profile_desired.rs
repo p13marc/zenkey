@@ -1,6 +1,7 @@
-//! `spec/profiles/desired/scenarios.md` §1–§8 and §10 (`desired.v1`, #840,
-//! DC), one test per section, named after it. §9 is a tool's (#840, DD).
-//! `config_v1_as_a_target` runs `desired.v1` §2.16 beside them.
+//! `spec/profiles/desired/scenarios.md` §1–§8 and §10–§12 (`desired.v1`,
+//! #840, DC; §12 #935), one test per section, named after it. §9 is a
+//! tool's (#840, DD). `config_v1_as_a_target` runs `desired.v1` §2.16
+//! beside them.
 //!
 //! Common setup, the text's: R1 is a router with timestamping on, a
 //! router's default. Where a section cuts a link, the author's side is R1
@@ -1414,13 +1415,35 @@ async fn config_up(
         .unwrap();
     let asvc = ab.start().await.unwrap();
     let owner = client(&bus.ep1).await;
+    let (svc, c, target) = config_owner(&owner, startup, device).await;
+    ConfigUp {
+        _sessions: (author_session, owner),
+        author,
+        asvc,
+        svc,
+        cfg: c,
+        target,
+    }
+}
+
+/// `lab/rf0` on `session`: `config.v1`'s owner from `startup` on `device`,
+/// fed through `desired.v1`, its role `configs` bound to `lab/author` with
+/// `{system} = self.system` and `{service} = self.service`; started, its
+/// first seed made.
+async fn config_owner(
+    session: &zenoh::Session,
+    startup: zenkey::config_v1::Startup,
+    device: Arc<dyn zenkey::config_v1::Device>,
+) -> (Service, zenkey::config_v1::Configuration, desired::Target) {
+    let configs = imp("configs.v1");
+    let ci = configs.iface().clone();
     let mut cfg = config(RF0).bind("configs", &[AUTHOR]);
     cfg.bindings.get_mut("configs").unwrap().params = [
         ("system".to_owned(), "self.system".to_owned()),
         ("service".to_owned(), "self.service".to_owned()),
     ]
     .into();
-    let mut b = ServiceBuilder::new(&owner, cfg);
+    let mut b = ServiceBuilder::new(session, cfg);
     b.require("configs", ci, true);
     let c = b.config_v1(startup, device).await.unwrap();
     let target = b
@@ -1433,14 +1456,7 @@ async fn config_up(
     })
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    ConfigUp {
-        _sessions: (author_session, owner),
-        author,
-        asvc,
-        svc,
-        cfg: c,
-        target,
-    }
+    (svc, c, target)
 }
 
 impl ConfigUp {
@@ -1630,6 +1646,133 @@ async fn config_v1_a_wait_that_cannot_end_gives_up() {
     .await;
     assert_eq!(up.target.acts(), 2);
     up.close().await;
+}
+
+/// `scenarios.md` §12: a `config.v1` owner fed through `desired.v1`,
+/// converged on revision 1. Its re-mint is refused while it runs, as
+/// `config.v1` §2.12 lets an owner keep its rule, and nothing moves; its
+/// restart begins a new run, which acts on revision 1 again (`desired.v1`
+/// §2.7, §2.16; zk2py round 87's F-336, #935).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s12_a_config_v1_owners_re_mint_is_a_restart() {
+    use zenkey::config_v1;
+    use zenkey::model::config::DesiredOutcome;
+
+    const ST: &str = "zk2/lab/rf0/config.v1/state/status";
+    const EV: &str = "zk2/lab/rf0/config.v1/events/change/";
+    const TOKENS: &str = "zk2/lab/rf0/@zk/instance/";
+    let converged = |d: Option<config_v1::DesiredReport>| {
+        d.is_some_and(|d| d.observed_revision == 1 && d.outcome == DesiredOutcome::Converged)
+    };
+    let bus = one_router().await;
+    let s = record(&bus.ep1).await;
+    let startup = sim::rf_startup(false, 10, Duration::from_secs(1), true);
+    let device = Arc::new(sim::SimDevice::new(&startup));
+    let mut up = config_up(
+        &bus,
+        startup.clone(),
+        Arc::clone(&device) as Arc<dyn config_v1::Device>,
+    )
+    .await;
+    let duty = || device.holds("duty", "fraction_ppm");
+
+    // Setup: converged on revision 1.
+    up.author
+        .put(
+            RF0,
+            bytes(&json!({"revision": 1, "values": {"duty": {"fraction_ppm": 20000}}})),
+        )
+        .await
+        .unwrap();
+    eventually("revision 1 converged", || async {
+        converged(up.cfg.desired().await)
+    })
+    .await;
+    assert_eq!(duty(), Some(config_v1::Value::Integer(20000)));
+
+    // 1. A re-mint while it runs: refused, and nothing moves.
+    let old = up.svc.instance().to_string();
+    let mark = s.mark();
+    let err = up.svc.new_epoch().await.expect_err("the re-mint refused");
+    assert!(err.to_string().contains("config.v1 §2.12"), "{err}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(up.svc.instance().to_string(), old);
+    assert!(
+        !s.all()
+            .iter()
+            .skip(mark)
+            .any(|r| r.token && r.key.starts_with(TOKENS)),
+        "no instance token of lab/rf0 withdrawn or declared"
+    );
+    assert!(converged(up.cfg.desired().await), "St still converged");
+    assert_eq!(duty(), Some(config_v1::Value::Integer(20000)));
+
+    // 2. The process stops, and starts again: a new run, from the startup
+    // values, which acts on revision 1 again.
+    let ConfigUp {
+        _sessions: sessions,
+        asvc,
+        svc,
+        ..
+    } = up;
+    let mark = s.mark();
+    svc.close().await.unwrap();
+    device.restart(&startup);
+    let (svc, cfg, _target) = config_owner(
+        &sessions.1,
+        startup,
+        Arc::clone(&device) as Arc<dyn config_v1::Device>,
+    )
+    .await;
+    let new = svc.instance().to_string();
+    assert_ne!(new, old);
+    eventually("revision 1 converged again", || async {
+        converged(cfg.desired().await)
+    })
+    .await;
+    assert_eq!(duty(), Some(config_v1::Value::Integer(20000)));
+    let since = s.all().into_iter().skip(mark).collect::<Vec<_>>();
+    assert!(
+        since
+            .iter()
+            .any(|r| r.token && r.delete && r.key == format!("{TOKENS}{old}")),
+        "the old instance token withdrawn"
+    );
+    assert!(
+        since
+            .iter()
+            .any(|r| r.token && !r.delete && r.key == format!("{TOKENS}{new}")),
+        "the new instance token declared"
+    );
+    let statuses: Vec<Value> = since
+        .iter()
+        .filter(|r| !r.token && !r.delete && r.key == ST)
+        .map(Rec::value)
+        .filter(|v| v["instance"] == json!(new))
+        .collect();
+    let first = statuses.first().expect("a status of the new instance");
+    assert_eq!(first["values"]["duty"]["fraction_ppm"], json!(10000));
+    assert!(
+        first.get("desired").is_none(),
+        "the new instance knows nothing of the old one's report: {first}"
+    );
+    let applied = since
+        .iter()
+        .filter(|r| !r.token && !r.delete && r.key.starts_with(EV))
+        .map(Rec::value)
+        .filter(|e| e["instance"] == json!(new) && e["outcome"] == json!("applied"))
+        .count();
+    assert_eq!(applied, 1, "the new run's act, one `set`, applied");
+    eventually("S's latest status converged", || async {
+        s.on(ST, mark).last().map(Rec::value).is_some_and(|v| {
+            v["instance"] == json!(new)
+                && v["values"]["duty"]["fraction_ppm"] == json!(20000)
+                && v["desired"] == json!({"observed_revision": 1, "outcome": "converged"})
+        })
+    })
+    .await;
+    svc.close().await.unwrap();
+    asvc.close().await.unwrap();
 }
 
 /// The two contracts the scenarios give load as the owner example embeds
