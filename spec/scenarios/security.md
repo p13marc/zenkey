@@ -14,19 +14,19 @@ contracts and bindings.
   token under its Own grant, and a consumer with history reads them.
 - A subscription the bindings do not name is blocked.
 - A frontend's fan-in GET over `zk2/*/tc/…` gets one reply per backend.
-- **Presence within the grants** (0.8). A principal with Call on a
+- **Presence within the grants.** A principal with Call on a
   backend's operation reads that backend's instance and interface tokens.
   With its liveliness reads removed from its grant, the same read is
   answered complete and empty (presence.md §6), which is why the grant
-  holds them (core §11.1). *Added in 0.8, after S14; not yet run against a
-  generator.*
+  holds them (core §11.1). *Not among spike S14's checks, and not yet run
+  against a generator.*
 - A contract fetch works for any principal.
-- **Inspection** (0.27). A tool that inspects `*/tc`, binding and calling
+- **Inspection.** A tool that inspects `*/tc`, binding and calling
   nothing, reads every backend's tokens and descriptor on the wildcard
   selectors a doctor sends (`zk2/*/tc/@zk/**`, `zk2/*/tc/@zk/instance/*`),
   complete. It reads none of their data, and no presence it does not
   inspect.
-- **One principal, both roles** (0.27). A principal that runs a service
+- **One principal, both roles.** A principal that runs a service
   and a tool holds Own on its service's prefix, and the tool's presence
   and admin read beside it, and no write beyond its own prefix.
 
@@ -43,7 +43,7 @@ complement.
 - Every unauthorized action is blocked, with two exceptions:
   - a put on a wildcard key, which R6 discards at the consumer;
   - where the generator leaves a principal's own keys out of its
-    complement (core §11.2, 0.31), that principal's reads and deliveries
+    complement (core §11.2), that principal's reads and deliveries
     of its own services' keys.
 - Allow rules alone, under `allow`, block nothing.
 
@@ -53,7 +53,7 @@ complement.
 provider's egress grant: the fan-in GET gets 0 replies. Restore it, and
 remove the matching ingress `reply` grant: a refusal never reaches the
 caller. Remove a wildcard presence selector from a provider's egress
-grant (0.27): an inspecting tool's wildcard descriptor read gets nothing
+grant: an inspecting tool's wildcard descriptor read gets nothing
 from it, while its liveliness read, which the router answers, still holds
 the provider's tokens.
 
@@ -70,7 +70,7 @@ router. The tool reads S4's two selectors (core §4.2).
 3. Under each posture, generate R1's grants (core §11.1) and repeat step 1
    twice: once with `S` an enrolled principal, and once with `S` an
    authenticated session that is no principal.
-4. **A far router** (0.13). A router R2 links to R1, both admin spaces on,
+4. **A far router.** A router R2 links to R1, both admin spaces on,
    the tool still a client of R1. Then `S` answers `@/<S's zid>/router`
    under its own replier id.
 
@@ -84,22 +84,21 @@ router. The tool reads S4's two selectors (core §4.2).
    session that is no principal is refused under `deny`. Under `allow` it
    matches no subject and gets everything (core §11.3), so its answer
    arrives, and only step 1's rule (the replier id) keeps the check from
-   clean. (0.12 wrote that R1 refuses `S` under each posture, which
-   `allow` cannot do: F-88, fixed in 0.15.)
+   clean.
 4. R1's answer lists R2 as a `router` session, so R2's answer, under its
    own replier id, is verified, and the check covers both routers. R1
    lists `S` as a `client`, so `S`'s answer stays unverified, and the
    check is not clean.
 
 *Measured on zenoh 1.10.1:
-- steps 1 and 2 (0.12) and step 4 (0.13), by the reference runtime's
+- steps 1, 2 and 4, by the reference runtime's
   `admin_spoof.rs` and the fleet's doctor tests;
 - step 3, for an enrolled principal under `allow`, by the reference
-  generator's live test (#612, FJ7);
+  generator's live test;
 - step 3, in both cases under both postures, by zk2py's generator, built
-  from §11 alone (0.15).*
+  from §11 alone.*
 
-## §4 The admin read admits no GET of a node's declaration records (core §11.1, §11.2, 0.50)
+## §4 The admin read admits no GET of a node's declaration records (core §11.1, §11.2)
 
 **Setup.** One router R1, its admin space on, read permitted (core §4.2),
 under `default_permission: deny`, with the block a generator compiles for
@@ -117,7 +116,8 @@ step 1.
 2. The tool GETs `@/*/router/queryable/**`, `@/*/router/**` and `@/**`.
 3. The service principal reads step 1's three selectors.
 4. **How a query is admitted.** Compile the block again with the tool's
-   admin read replaced by 0.15's, `@/*/router` and `@/*/router/**`, and
+   admin read replaced by a wider one, `@/*/router` and `@/*/router/**`,
+   and
    repeat step 1's `@/*/*`, then its `@/*/router`.
 
 **Expected.**
@@ -130,7 +130,8 @@ step 1.
    itself.
 3. Nothing answers, and the recorder hears none of them. Under `deny`, no
    grant but the admin read reaches the admin space.
-4. `@/*/*` is refused, although both of 0.15's keys intersect it, and the
+4. `@/*/*` is refused, although both of the wider read's keys intersect
+   it, and the
    recorder does not hear it; `@/*/router` is answered. A query is admitted
    by inclusion in an allowed key, never by intersection.
 
@@ -140,10 +141,11 @@ step 1.
   `a_query_is_admitted_by_inclusion_never_by_intersection`). The suite
   never asks a declaration record beside a writer;
 - beside one, with zenoh alone (`docs/zk2/upstream/adminspace-reply-repro/`,
-  "Under access control"): beside 500 records of each kind and a client
-  declaring flat out, the tool's GETs of a router's records, its
-  `linkstate/*`, `@/*/router/**` and 0.11's storages selector froze R1 in
-  45 of 45 trials under 0.15's admin read, 43 at the first GET, and in 0
-  of 70 under 0.50's, `@/**` and each kind of writer alone included,
-  where each of 6.9 million GETs was refused. The three reads of step 1
-  froze nothing under either (0 of 30), and 0.15's refused `@/*/*`.*
+  "Under access control"), beside 500 records of each kind and a client
+  declaring flat out. Under step 4's wider admin read, the tool's GETs of
+  a router's records, its `linkstate/*`, `@/*/router/**` and the storages
+  selector `@/*/router/**/storage_manager/storages/**` froze R1 in 45 of 45
+  trials, 43 at the first GET. Under the Setup's admin read, they froze it
+  in 0 of 70, `@/**` and each kind of writer alone included, where each of
+  6.9 million GETs was refused. The three reads of step 1 froze nothing
+  under either (0 of 30), and the wider read refused `@/*/*`.*

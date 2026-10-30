@@ -24,7 +24,7 @@ exposing `@op/interfaces/{if}/set` (exclusive, fanout forbidden) and
    both replies of each call; under `Latest`, one per key would vanish.
    This is the documented limit of O1, and §8 below detects it.
 
-**How a tester observes the query** (0.8). zenoh 1.10.1 does not give a
+**How a tester observes the query.** zenoh 1.10.1 does not give a
 queryable the target or the consolidation of a query, so a capture at the
 server cannot show them. Steps 1 and 2 show them by behaviour instead, and
 that is the evidence this scenario asks for. A tester that can capture the
@@ -127,7 +127,7 @@ last is called once: retrying is opt-in.
 **Steps.**
 1. Call an operation that the access control refuses, then one whose
    server is frozen.
-2. **O3 judged from outside** (observer.md §7.2; 0.59, F-284). A tool
+2. **O3 judged from outside** (observer.md §7.2). A tool
    judging O3 from outside, as a conformance suite does, calls the frozen
    server's operation twice: once told that its grants let it call it,
    which is true of that call (it reached the server in step 1), and once
@@ -179,22 +179,21 @@ any of them.
    for longer than the grace period.
 2. One instance re-mints (core §8.1).
 3. A standby holds its instance token only, and its descriptor marks
-   the interface `"standby": true` (core 0.39; the profile's scenarios,
+   the interface `"standby": true` (core §3.3; the profile's scenarios,
    `profiles/redundancy/scenarios.md` §12, run the mark's other shapes).
 4. Two instances of one service expose an interface whose only resources
    are replicated operations.
 5. One instance exposes an interface's exclusive resources and its
    replicated operation; a second exposes the replicated operation only,
    and lists the exclusive optional resources `unavailable`.
-6. **An interface token a second after the descriptor** (observer.md
-   §3.2; 0.59, F-282). An instance of `tc` on `h4` serves its descriptor,
-   which lists `tc.v1` outside its tokenless set with its resources
-   exposed, and holds its instance token (core §8.2, step 4), then
-   declares its `tc.v1` token one second later (the rest of step 4), as
-   an owner that pauses between its two tokens would (observer.md §3.2,
-   text 0.3, F-293). The tool reads presence three
-   times, `grace` apart, its grace longer than that second: the first
-   read within it, the next two after it.
+6. **An interface token a second after the descriptor** (observer.md §3.2).
+   An instance of `tc` on `h4` serves its descriptor, which lists `tc.v1`
+   outside its tokenless set with its resources exposed, and holds its
+   instance token (core §8.2, step 4). It declares its `tc.v1` token one
+   second later (the rest of step 4), as an owner that pauses between its
+   two tokens would (observer.md §3.2). The tool reads presence three times,
+   `grace` apart, its grace longer than that second: the first read within
+   it, the next two after it.
 
 **Expected.** A finding for 1. No finding for 2, whose overlap is shorter
 than the grace period. No finding for 3. No finding for 4 or 5, which the
@@ -208,5 +207,4 @@ The tool reads presence twice, `grace` apart; a holder seen in one read
 only is not part of a finding.
 
 *Spike S6: the token check found every split-brain and flagged no standby.
-Steps 4 and 5 are new in core 0.7: the reference's check, which compares
-tokens only, reports both, which is the runtime change 0.7 records.*
+A check that compares tokens only would report steps 4 and 5 both.*

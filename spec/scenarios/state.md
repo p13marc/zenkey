@@ -26,7 +26,7 @@ nothing (core §4.2, "Observing S1").
    unstamped, so the check in 1 can tell the two apart.
 3. v4's timestamp is greater than v3's.
 
-**What step 3 cannot show** (0.8, F-73). Two puts that fall within one
+**What step 3 cannot show.** Two puts that fall within one
 reading of the owner's clock are where the minting rule (core §4.3) earns
 its keep, by one tick. A tester can neither arrange that from outside nor
 tell from the stamps whether it happened, so the scenario asks only for
@@ -34,11 +34,11 @@ the order. An implementation checks the tick with a clock it controls: the
 reference does it in §7's catch-up, where its clock reads behind the
 record, and the next stamp is the record plus one NTP64 unit.
 
-*Measured (#609): the Rust owner example and zk2py's owner were each their
-own router, so their S1 check proved only that the stamp's id was the
-process's (F-69). zk2py's owner also runs as a client of a router, and
-steps by 1 ns, its smallest; the reference steps by one NTP64 unit
-(2^−32 s).*
+*Measured by the second implementation: the Rust owner example and
+zk2py's owner were each their own router, so their S1 check proved only
+that the stamp's id was the process's. zk2py's owner also runs as a client
+of a router, and steps by 1 ns, its smallest. The reference steps by one
+NTP64 unit (2^−32 s).*
 
 ## §2 Deletes inside the window, and the collection (S2, S3)
 
@@ -136,8 +136,8 @@ window": wrong without replication).*
    delta, and it holds a subscription to a router-stamped heartbeat. It
    detects the drift and stops writing state. Where it implements
    `health.v1`, it reports the drift as a `faults` sample with code
-   `clock_ahead`, not through its status, which is state (0.23;
-   `profiles/health/scenarios.md` §4).
+   `clock_ahead`, not through its status, which is state
+   (`profiles/health/scenarios.md` §4).
 
 *Spike S12: without the catch-up, rev 14 was rejected as stale and never
 converged; with a clock 2 s ahead, the next right-clocked write looked
@@ -168,7 +168,7 @@ older value.
 *Spike S5: the storage manager 1.10.1 accepted the older put and resurrected
 the key, which is why it cannot be an archive's store as released.*
 
-## §10 A late joiner's seed (§4.2, 0.26)
+## §10 A late joiner's seed (§4.2)
 
 **Setup.** As above. The owner holds `plans/a` (v1, stamp T1), and deleted
 `plans/b` at T2, within W. A tool, the late joiner, wants the plans and
@@ -208,7 +208,7 @@ whose puts, replies and `reply_del` carry the stamps it mints (§4.3).
 fleet's seeded subscription, the one zengui's tree seeds through, and the
 control on the bare session.*
 
-## §11 A late joiner's merge: unstamped samples, equal times, a key that is not concrete (§4.2, 0.27)
+## §11 A late joiner's merge: unstamped samples, equal times, a key that is not concrete (§4.2)
 
 **Setup.** No zk2 owner: foreign keys (§1.7), `foreign/*`, outside S4.
 Their writer W is a session with no HLC, so its puts and deletes arrive
@@ -257,7 +257,7 @@ plays W from one peer session, the late joiner a client of it.
 seeded subscription. `conformance/seed/merge.json` states the same order
 as a pure fixture.*
 
-## §12 The check's reads beside a router that is declaring (§4.2, 0.48, 0.50, 0.51)
+## §12 The check's reads beside a router that is declaring (§4.2)
 
 **Setup.** As above, on one router with its admin space on, read
 permitted, whose storage manager runs one storage, `plans`, with
@@ -287,17 +287,16 @@ and records the selector of every GET it receives.
    none intersects a node's declaration records, its `linkstate/*` or its
    `route/successor/**`. The queryable may never hear a read that freezes
    the router: a client's queryable never did, though one on the router's
-   own session under an access control block did (0.51, F-257). Expected
+   own session under an access control block did. Expected
    2 fails that reader either way. A runner that knows how many reads the
-   reader makes counts them heard: two a round for S4's check (0.50,
-   F-254).
+   reader makes counts them heard: two a round for S4's check.
 
 *Measured.* The hazard this section guards against was measured with
 zenoh alone, never in a suite: a reader that asks one of those keys
 beside a writer freezes the router for good, and every session through
 it (`docs/zk2/upstream/adminspace-reply-repro/`, zenoh 1.10.1, beside 500
-subscribers and queryables and a client churning declarations). 0.11's
-second selector, `@/*/router/**/storage_manager/storages/**`, froze the
+subscribers and queryables and a client churning declarations). A wider
+storages selector, `@/*/router/**/storage_manager/storages/**`, froze the
 router in 10 of 10 trials beside records ending in `**`, at the first
 GET; the declaration-record selectors and `linkstate/*`, with a record to
 send, in 135 of 135 across every cell. The two selectors above froze it
@@ -313,5 +312,5 @@ the writer per run.
 `routers` and `storages`, which the doctor and `zenctl storage list` read
 through. An in-process router loads no plugin, so a session of the test's
 plays the storage manager's document on the router's own key. It never
-asks 0.11's selector: that read freezes the router, and the suite with
-it.*
+asks that wider selector: that read freezes the router, and the suite
+with it.*

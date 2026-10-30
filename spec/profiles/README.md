@@ -58,7 +58,7 @@ profiles/
     scenarios.md          the rules a fixture cannot check
     conformance/          fixtures; each file states its format in its description
     <name>.v<major>.toml  the standard contract, for a profile that defines one
-    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1, 0.35: telemetry.v1, desired.v1)
+    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1)
 ```
 
 ## The template
@@ -80,7 +80,7 @@ thing in the same place.
     `[F: core descriptors/ok-derivation-profile]`.
 - **§1, the extension points it uses.** All four of core §10 are stated,
   each with how the profile uses it, or "none". A profile that uses point 4
-  alone is **derivation-only** (core §10, 0.19).
+  alone is **derivation-only** (core §10).
 - **§2, the rules,** numbered §2.1, §2.2 and so on, and cited that way
   (`hostid.v1 §2.4`). Every MUST and MUST NOT cites `[F:]` or `[Sc:]`, as
   in the core.
@@ -130,11 +130,11 @@ thing in the same place.
   it, and when a row's text version, status or core version is not its
   text's header's.
 - **No new tier before an adopter asks.** A new profile, among them the
-  tiers #613 still plans (media and views, blob and jobs, clock), is
-  written only once an adopter's mapping needs it, so that it enters the
-  index as `draft`, already used. `media.v1` is first in line:
-  ZenSight's mapping names it in `zs.parallax.v1`'s `uses`, for the
-  camera frames an explicit `@stream` carries meanwhile.
+  tiers still planned (media and views, blob and jobs, clock), is written
+  only once an adopter's mapping needs it, so that it enters the index as
+  `draft`, already used. `media.v1` is first in line: ZenSight's mapping
+  names it in `zs.parallax.v1`'s `uses`, for the camera frames an explicit
+  `@stream` carries meanwhile.
 - **The file name carries the wire major** (`v1.md`). A change that would
   change what a conforming participant puts on the wire, or the values it
   derives, is breaking. A breaking change is a new major, `v2.md` beside
@@ -151,9 +151,9 @@ thing in the same place.
   ```
 
   A contract that moves here from elsewhere keeps its published revisions
-  where they were, and is copied here byte for byte (core §9.7, 0.23), as
+  where they were, and is copied here byte for byte (core §9.7), as
   `health.v1` and `alarms.v1` were from `examples/zk2/.history`.
-- **A standard schema** (core §10 point 1, 0.35) goes in the profile's
+- **A standard schema** (core §10 point 1) goes in the profile's
   directory, and has no `.history` of its own: the text publishes each
   revision's artifact id (its §3), every one of them staying the
   profile's, and a fixture pins them (`telemetry.v1`'s `schema.json`).
@@ -163,53 +163,56 @@ thing in the same place.
   `examples/zk2/zensight/schemas/`, and the four ZenSight contracts list it
   from here.
 - **A profile that needs the core to change** says so, and the core
-  changes first, through [`../CHANGELOG.md`](../CHANGELOG.md).
-  `hostid.v1` needed 0.19, so that an instance can declare a profile no
-  contract uses, and its runtime 0.20, so that a binding can name a
-  provider on the service's own, minted, system. `freshness.v1` needed
-  0.21, so that W105 reads its published vocabulary and a re-put is a
-  mutation. `health.v1` needed 0.23, so that a clock ahead is reported by
-  a stream, which the guard does not hold, rather than by its status.
-  `config.v1` needed no change: core §7.3's `oneOf` expresses its
-  discriminated replies. `link.v1` needed 0.29, so that Appendix D
-  publishes its vocabulary, `exposure`, and drops the interim
-  `downsample_ms`, the rate being the face policy's; its text 0.2 needed
-  0.30, so that §8.5 says what a south region's declaration grant covers:
-  every queryable as its owner declares it. Its text 0.3 needed no change:
-  keeping every other credential off a face, and reading two revisions of
-  one interface together, rest on what core §11.2, §11.3 and §9.8 already
-  say. `alarms.v1` needed 0.34, so that Appendix D publishes its
-  vocabulary empty and drops the interim `severity_default`, every
-  document carrying its severity. `telemetry.v1` needed 0.35, so that a
-  profile's first point can be a standard schema, a file whose types are
-  the profile's by their artifact's id, and so that Appendix D publishes
-  its vocabulary. `desired.v1` needed 0.36, so that Appendix D publishes
-  its vocabulary, `target_param`, and retires the interim `target`. Its
-  author's restart needed no core change: it puts its documents again from
-  its new instance, as `alarms.v1`'s owner does, and its targets adopt
-  them without an act. Its text 0.2 needed none either: a stamp's id
-  that is never 0 is its own §2.4's. `redundancy.v1` needed 0.39, so that
-  a descriptor marks a standby (`"standby": true`, D012 when tokenless),
-  the core defines what a standby holds and exposes, a standby taking
-  over and an incumbent stepping down follow §8.2's steps and their
-  reverse, the tokenless set never names a governed interface, the
-  split-brain check reads the mark, and Appendix D publishes its
-  vocabulary, the interim `election` unchanged. Its text 0.2 needed 0.40,
-  so that §8.1 says what its runtime measured: a session's read answers its
-  own tokens itself, even through a router that refuses the read, and a
-  complete read covers only what its routers' clients and its linked peers
-  hold. `timing.v1` needed 0.53, so that Appendix D publishes its
-  vocabulary, the interim row unchanged, so that §4.1 says a session moves
-  its HLC to a later stamp it receives, which a lifespan's clock bound
-  must cover, and so that Appendix B says a stamp's time counts from the
-  Unix epoch. Its text 0.2 needed 0.55, so that §4.1 says a node with an
-  HLC also stamps an unstamped put it routes, its own subscriber's
-  included, which a reader with one never sees unstamped (round 76's
-  F-265). `arbitration.v1` needed 0.54, so that a binding is an
-  ordered list whose order a descriptor keeps and a profile may read, so
-  that a reader may act on a withdrawal heard live where acting concludes
-  no absence, and so that Appendix D publishes its vocabulary, the interim
-  `policy` unchanged.
+  changes first, through [`../CHANGELOG.md`](../CHANGELOG.md), which
+  records the version each change made. What each profile needed:
+  - `hostid.v1`: that an instance can declare a profile no contract
+    uses, and, for its runtime, that a binding can name a provider on the
+    service's own, minted, system;
+  - `freshness.v1`: that W105 reads its published vocabulary, and that a
+    re-put is a mutation;
+  - `health.v1`: that a clock ahead is reported by a stream, which the
+    guard does not hold, rather than by its status;
+  - `config.v1`: no change, since core §7.3's `oneOf` expresses its
+    discriminated replies;
+  - `link.v1`: that Appendix D publishes its vocabulary, `exposure`, and
+    drops the interim `downsample_ms`, the rate being the face policy's.
+    Then that §8.5 says what a south region's declaration grant covers:
+    every queryable as its owner declares it. Keeping every other
+    credential off a face, and reading two revisions of one interface
+    together, needed no change: they rest on what core §11.2, §11.3 and
+    §9.8 already say;
+  - `alarms.v1`: that Appendix D publishes its vocabulary empty and drops
+    the interim `severity_default`, every document carrying its severity;
+  - `telemetry.v1`: that a profile's first point can be a standard
+    schema, a file whose types are the profile's by their artifact's id,
+    and that Appendix D publishes its vocabulary;
+  - `desired.v1`: that Appendix D publishes its vocabulary,
+    `target_param`, and retires the interim `target`. Its author's restart
+    needed no core change: it puts its documents again from its new
+    instance, as `alarms.v1`'s owner does, and its targets adopt them
+    without an act. Nor did a stamp's id that is never 0, which is its own
+    §2.4's;
+  - `redundancy.v1`: that a descriptor marks a standby (`"standby":
+    true`, D012 when tokenless), and that the core defines what a standby
+    holds and exposes. Also that a standby taking over and an incumbent
+    stepping down follow §8.2's steps and their reverse, that the
+    tokenless set never names a governed interface, that the split-brain
+    check reads the mark, and that Appendix D publishes its vocabulary,
+    the interim `election` unchanged. Then that §8.1 says what its runtime
+    measured: a session's read answers its own tokens itself, even through
+    a router that refuses the read, and a complete read covers only what
+    its routers' clients and its linked peers hold;
+  - `timing.v1`: that Appendix D publishes its vocabulary, the interim
+    row unchanged, and that §4.1 says a session moves its HLC to a later
+    stamp it receives, which a lifespan's clock bound must cover. Also
+    that Appendix B says a stamp's time counts from the Unix epoch. Then
+    that §4.1 says a node with an HLC also stamps an unstamped put it
+    routes, its own subscriber's included, which a reader with one never
+    sees unstamped;
+  - `arbitration.v1`: that a binding is an ordered list whose order a
+    descriptor keeps and a profile may read, that a reader may act on a
+    withdrawal heard live where acting concludes no absence, and that
+    Appendix D publishes its vocabulary, the interim `policy` unchanged.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in

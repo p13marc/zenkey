@@ -24,7 +24,7 @@ to:
   field.
 - For the raw stream, it shows the declared type and each sample's size,
   neither garbage nor nothing.
-- **Bytes that do not decode** (0.8). A protobuf sample of three bytes
+- **Bytes that do not decode.** A protobuf sample of three bytes
   `ff ff ff`, and a JSON Schema sample `{` on a CBOR-declared state: each
   is shown as its declared type, named as a decoded one is
   (`detections.v1.Objects`, `json:Status`), its size and the reason. The

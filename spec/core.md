@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.63** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.64** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
