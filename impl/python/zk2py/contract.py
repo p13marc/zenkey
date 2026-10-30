@@ -426,7 +426,11 @@ class _Loader:
             elif (ptype == "path") != (p in rest):
                 self.diag("E012", f"{text}: parameter {p!r} of type {ptype}", text)
         # E013: cardinality on a template with parameters. "unbounded" (0.57)
-        # is the no-ceiling value, a positive integer like any other.
+        # is the no-ceiling value, a positive integer like any other. The
+        # message is zk2py's own: no fixture compares a diagnostic's text,
+        # since contracts/expect.json gives the sorted codes and a valid
+        # contract's fingerprint alone (core Appendix E), so only "E013"
+        # is checked. A fixture that compared it would have to quote this.
         if tparams and not spec.get("cardinality"):
             self.diag("E013", f"{text}: cardinality is required and positive: write a number, "
                               f"the most members one instance will hold, or \"unbounded\"", text)

@@ -262,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--timeout", type=float, default=1.0)
     args = ap.parse_args(argv)
     # observer §7.4: a tool checks the limit at start, and says what it admits
-    print(f"arbitration: {live.memlock_note()}", file=sys.stderr, flush=True)
+    print(f"arbitration: {live.memlock_said()}", file=sys.stderr, flush=True)
     offline = _load(args.contracts)
     session = watch = None
     if args.connect and args.consumer:

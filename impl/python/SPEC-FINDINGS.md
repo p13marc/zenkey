@@ -16745,6 +16745,39 @@ naming no text but the core (F-285).
   0.1: nine selectors' blind spots, three selectors over a plain and an
   explicit timed stream, and four limits' notes with the host's own.
 - **`just py-conformance`: 3507 of 3507.**
+- **After review-bot on PR #949** (no blocking finding; its should-fixes):
+  - **The reach patterns are the text's.** `live.VERBATIM_REACH` gave
+    `@adv` as `zk2/*/*/*/*/**/@adv/**`, a guess that admitted an events
+    key. Each kind's patterns are now the key forms core §1.1 and §2.5
+    write, cited beside them: `@stream`, `@state` and `@op` at position 5
+    of the data form with one resource chunk or more (`…/@op/*/**`);
+    `@adv` under a plain stream's or state's data key alone
+    (`…/stream/*/**/@adv/**`, `…/state/*/**/@adv/**`); `@zk` as the four
+    control forms, exactly. 32 selectors check them, each kind reached by
+    its form and missed by one shorter and one longer: a kind token with
+    no resource chunk, an instance form with a chunk too many, `@stream`
+    at position 4, `@adv` under an event or a verbatim chunk. Two would
+    fail if zenoh's intersection did not do what the comment says: three
+    resource chunks before `@adv` (the pattern's `**` spanning them) and
+    `zk2/a/b/i/stream/**` (the selector's crossing no `@adv`).
+  - **The unreached streams come from the contracts in hand.**
+    `timing_tool.timed_streams` lists every timed stream a contract
+    declares at the address, and its key expression, from the contract
+    alone; `timed_rids` is that list filtered by zenoh's intersection and
+    nothing else; `unreached_rids` the rest. A selector naming another
+    address leaves both of the case's streams unreached.
+  - **The memlock note never stops a tool.** `live.memlock_said` wraps
+    `memlock_note`: any failure reads "the memlock limit could not be
+    read: …", and the tool goes on. The note quotes core §7.4 ("at least
+    the pool plus 2 MiB"; "Below the pool's need, SHM silently falls back
+    to TCP, and a metadata segment that cannot be locked panics") rather
+    than paraphrasing it.
+  - E013's message is zk2py's own: no fixture compares a diagnostic's
+    text (core Appendix E: codes and the fingerprint), as a comment there
+    now says.
+  - `readings` 581, `just py-conformance` 3538 of 3538, and
+    `timing_interop --only 6 --only face` 68 of 68 again. The scope probe
+    beside it gives the same reach and the same `scope` as before.
 
 ### Live
 

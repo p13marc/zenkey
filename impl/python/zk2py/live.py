@@ -1274,16 +1274,30 @@ def _zid_value(text: Any) -> int | None:
 
 #: Observer §8.2 (text 0.1, the tooling guide's O5 promoted): "`*` and `**`
 #: never match a verbatim chunk. So an ambient selector … never delivers"
-#: these, each given with a selector that reaches every key of its kind.
-#: ``@zk`` is a service's control keys and the location-free bundles;
-#: ``@adv`` is advanced publication's subtree under a plain stream or state
-#: (core §2.5: under a verbatim chunk zenoh-ext's ``@adv`` parser fails).
+#: these. Each kind is given with the key forms the core says it sits in,
+#: written as selectors, so a selector reaches the kind when it intersects
+#: one of them. Every pattern is the text's, never a guess at a layout:
+#: - ``@stream``, ``@state``, ``@op``: core §1.1's data form,
+#:   ``zk2/<system>/<service>/<iface>.v<major>/<kind>/<resource…>``, the
+#:   kind token at position 5 (§1.1's table; §1.3's three verbatim kinds),
+#:   and positions 6+ the resource chunks, one or more (``*/**``);
+#: - ``@adv``: core §2.5, "advanced publication … MAY be used on plain
+#:   ``stream`` and ``state`` resources only", and "An advanced publisher
+#:   declares its own queryable and token under ``<key>/@adv/…``": a plain
+#:   stream's or state's data key, then ``@adv``. (Core §11.1's Own grant
+#:   spells the subtree ``…/*/stream/**/@adv/**``; ``*/**`` here keeps
+#:   §1.1's one resource chunk at least.) An events key has none (§2.5);
+#: - ``@zk``: core §1.1's four control forms: ``@zk/instance/<instance>``,
+#:   ``@zk/alive/<iface>/<instance>/<fp16>`` and
+#:   ``@zk/member/<iface>/<member>/<epoch>`` at position 4, and the contract
+#:   bundle ``zk2/@zk/contract/<iface>/<sha256>`` at position 2.
 VERBATIM_REACH = (
-    ("@stream", ("zk2/*/*/*/@stream/**",)),
-    ("@state", ("zk2/*/*/*/@state/**",)),
-    ("@op", ("zk2/*/*/*/@op/**",)),
-    ("@adv", ("zk2/*/*/*/*/**/@adv/**",)),
-    ("@zk", ("zk2/*/*/@zk/**", "zk2/@zk/**")),
+    ("@stream", ("zk2/*/*/*/@stream/*/**",)),
+    ("@state", ("zk2/*/*/*/@state/*/**",)),
+    ("@op", ("zk2/*/*/*/@op/*/**",)),
+    ("@adv", ("zk2/*/*/*/stream/*/**/@adv/**", "zk2/*/*/*/state/*/**/@adv/**")),
+    ("@zk", ("zk2/*/*/@zk/instance/*", "zk2/*/*/@zk/alive/*/*/*", "zk2/*/*/@zk/member/*/*/*",
+             "zk2/@zk/contract/*/*")),
 )
 
 
@@ -1301,28 +1315,45 @@ def blind_spots(selector: str) -> list[str]:
 MIB = 1 << 20
 
 
+#: Core §7.4's words for a limit below a pool's need.
+BELOW_NEED = ("Below the pool's need, SHM silently falls back to TCP, and a metadata segment that cannot be "
+              "locked panics")
+#: What a tool says when it cannot read the limit at all.
+UNREAD = "the memlock limit could not be read"
+
+
 def memlock_note(limit: int | None = None) -> str:
     """Observer §7.4 (core §7.4's until 0.58): "A tool SHOULD check the limit
     at start: the ``RLIMIT_MEMLOCK`` that core §7.4 asks a deployment to set
     to at least the pool plus 2 MiB". A tool does not know the pool, a
-    publisher's, so the note states the largest pool the soft limit admits.
+    publisher's, so the note states the largest pool the soft limit admits,
+    and what core §7.4 says of a limit below a pool's need, in its words.
     ``limit`` stands in for the process's soft limit (a reading's input);
-    ``None`` reads it, and a limit that cannot be read says so."""
+    ``None`` reads it. It raises when the limit cannot be read:
+    :func:`memlock_said` is what a tool calls."""
     if limit is None:
-        try:
-            import resource
+        import resource
 
-            soft = resource.getrlimit(resource.RLIMIT_MEMLOCK)[0]
-            limit = -1 if soft == resource.RLIM_INFINITY else soft
-        except (ImportError, OSError, ValueError, AttributeError) as e:
-            return f"RLIMIT_MEMLOCK could not be read ({e}): what SHM pool it admits is unknown (core §7.4)"
+        soft = resource.getrlimit(resource.RLIMIT_MEMLOCK)[0]
+        limit = -1 if soft == resource.RLIM_INFINITY else soft
     if limit < 0:
         return "RLIMIT_MEMLOCK is unlimited: it admits any SHM pool (core §7.4)"
     if limit < 2 * MIB:
-        return (f"RLIMIT_MEMLOCK is {limit} bytes, below 2 MiB: it admits no SHM pool, which falls back to TCP, "
-                f"and a metadata segment that cannot be locked panics (core §7.4)")
-    return (f"RLIMIT_MEMLOCK is {limit} bytes: it admits an SHM pool of at most {limit - 2 * MIB} bytes, "
-            f"above which SHM falls back to TCP (core §7.4)")
+        return (f"RLIMIT_MEMLOCK is {limit} bytes, below 2 MiB: it admits no SHM pool (core §7.4: \"at least the "
+                f"pool plus 2 MiB\"; \"{BELOW_NEED}\")")
+    return (f"RLIMIT_MEMLOCK is {limit} bytes: it admits an SHM pool of at most {limit - 2 * MIB} bytes (core §7.4: "
+            f"\"at least the pool plus 2 MiB\"; \"{BELOW_NEED}\")")
+
+
+def memlock_said(note: Any = memlock_note) -> str:
+    """The note a tool prints at start (observer §7.4), whatever went wrong
+    reading it: any failure reads "the memlock limit could not be read: …",
+    and the tool goes on (review-bot on PR #949). ``note`` stands in for
+    :func:`memlock_note` in a reading."""
+    try:
+        return note()
+    except Exception as e:  # noqa: BLE001 - a note, never a reason to stop
+        return f"{UNREAD}: {type(e).__name__}: {e}"
 
 
 # -- observer §4.2, S4 through the routers' admin space (0.10 to 0.12, 0.48) ----------

@@ -3442,35 +3442,93 @@ def _observer_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out: list[tuple[str, Any, Any]] = []
     label = "observer 0.1"
     every = ["@stream", "@state", "@op", "@adv", "@zk"]
-    for sel, want in (("zk2/**", every), ("zk2/lab/pace/**", every), ("**", every),
-                      ("zk2/lab/pace/pace.v1/@stream/**", ["@state", "@op", "@adv", "@zk"]),
-                      ("zk2/*/*/*/@state/**", ["@stream", "@op", "@adv", "@zk"]),
-                      ("zk2/*/*/@zk/**", ["@stream", "@state", "@op", "@adv"]),
-                      ("zk2/@zk/contract/**", ["@stream", "@state", "@op", "@adv"]),
-                      ("zk2/a/b/i/stream/x/@adv/**", ["@stream", "@state", "@op", "@zk"]),
-                      ("zk2/a/b/i/@op/set", ["@stream", "@state", "@adv", "@zk"])):
-        out.append((f"{label} §8.2: {sel} never reaches {', '.join(want)}", live.blind_spots(sel), want))
+
+    def but(*reached: str) -> list[str]:
+        return [k for k in every if k not in reached]
+
+    # §8.2 over live.VERBATIM_REACH, the key forms of core §1.1 and §2.5:
+    # for each kind a selector that reaches it, one shorter and one longer
+    # than its form, which do not, and selectors too short for any kind.
+    for sel, want, why in (
+            ("zk2/**", every, "an ambient selector"), ("**", every, "the bus root"),
+            ("zk2/lab/pace/**", every, "one owner's ambient selector"),
+            ("zk2/a/**", every, "a system's ambient selector"),
+            ("zk2", every, "too short for any form"), ("zk2/a/b", every, "too short for any form"),
+            ("zk2/*/*/*/*", every, "position 5's `*` matches no kind token"),
+            ("zk2/*/*/*/*/**", every, "position 5's `*` matches no kind token, at any length"),
+            # @stream, @state, @op: core §1.1's data form, the token at position 5
+            ("zk2/lab/pace/pace.v1/@stream/**", but("@stream"), "an explicit stream's subtree"),
+            ("zk2/a/b/i/@stream/x/y/z", but("@stream"), "longer than the form's one resource chunk"),
+            ("zk2/a/b/@stream/**", every, "@stream at position 4, where no form puts it"),
+            ("zk2/*/*/*/@state/**", but("@state"), "every explicit state"),
+            ("zk2/a/b/i/@state", every, "the kind token with no resource chunk: no key"),
+            ("zk2/a/b/i/@op/set", but("@op"), "one operation"),
+            ("zk2/a/b/i/@op", every, "the kind token with no resource chunk: no key"),
+            ("zk2/a/b/i/@op/interfaces/x/set", but("@op"), "a templated operation, longer"),
+            # @adv: core §2.5, under a plain stream's or state's data key
+            ("zk2/a/b/i/stream/x/@adv/**", but("@adv"), "a plain stream's sidecar"),
+            ("zk2/a/b/i/stream/x/@adv/y", but("@adv"), "one key under it"),
+            ("zk2/a/b/i/state/x/@adv/**", but("@adv"), "a plain state's sidecar"),
+            # the reach pattern's `**` before `@adv` spans chunks: fails if
+            # zenoh's intersection did not let it
+            ("zk2/a/b/i/stream/x/y/z/@adv/**", but("@adv"), "three resource chunks before @adv"),
+            # a selector's `**` never crosses `@adv`: fails if it did
+            ("zk2/a/b/i/stream/**", every, "a plain stream's subtree, whose ** crosses no @adv"),
+            ("zk2/a/b/i/stream/@adv/y", every, "no resource chunk before @adv: no data key"),
+            ("zk2/a/b/i/events/x/@adv/y", every, "an event has no advanced publication (core §2.5)"),
+            ("zk2/a/b/i/@stream/x/@adv/y", every, "@adv under a verbatim chunk, no form's"),
+            # @zk: core §1.1's four control forms
+            ("zk2/*/*/@zk/**", but("@zk"), "every service's control keys"),
+            ("zk2/a/b/@zk/instance/0123456789abcdef", but("@zk"), "an instance token"),
+            ("zk2/a/b/@zk/alive/**", but("@zk"), "the interface tokens"),
+            ("zk2/a/b/@zk/instance", every, "shorter than the instance form"),
+            ("zk2/a/b/@zk/instance/0123456789abcdef/x", every, "longer than the instance form"),
+            ("zk2/@zk/contract/**", but("@zk"), "the contract bundles"),
+            ("zk2/@zk", every, "shorter than the contract form"),
+            ("zk2/@zk/contract/nav.v2/ab/cd", every, "longer than the contract form")):
+        out.append((f"{label} §8.2: {sel} ({why}) never reaches {', '.join(want) or 'nothing'}",
+                    live.blind_spots(sel), want))
     # A timed explicit stream beside a plain one: the ambient selector
-    # misses the first, and the tool names it unreached.
+    # misses the first, and the tool names it unreached; listed from the
+    # contract, so a selector naming another address misses both.
     text = ('[interface]\nname = "beat"\nmajor = 1\nminor = 0\nuses = ["timing.v1"]\n\n'
             '[resources.cmd]\nkind = "stream"\ntype = { raw = "text/plain" }\n'
             'annotations = { "timing.period_ms" = 100, "timing.deadline_ms" = 500 }\n\n'
             '[resources.frame]\nkind = "stream"\nexplicit = true\ntype = { raw = "image/jpeg" }\n'
-            'annotations = { "timing.period_ms" = 40, "timing.deadline_ms" = 200 }\n')
+            'annotations = { "timing.period_ms" = 40, "timing.deadline_ms" = 200 }\n\n'
+            '[resources.note]\nkind = "stream"\ntype = { raw = "text/plain" }\n')
     c = load_contract(root / "contracts" / "beat.v1.toml", text=text, spec_dir=root.parent).canonical
+    out.append((f"{label} §8.2: every timed stream the contract declares at the address, in its canonical order, read from it alone, an untimed stream left out",
+                tt.timed_streams(c, "lab/beat"),
+                [("@stream/frame", "zk2/lab/beat/beat.v1/@stream/frame"),
+                 ("stream/cmd", "zk2/lab/beat/beat.v1/stream/cmd")]))
     for sel, reached, missed in (("zk2/lab/beat/**", ["stream/cmd"], ["@stream/frame"]),
                                  ("zk2/lab/beat/*/@stream/**", ["@stream/frame"], ["stream/cmd"]),
-                                 ("zk2/lab/beat/beat.v1/stream/cmd", ["stream/cmd"], ["@stream/frame"])):
-        out.append((f"{label} §8.2: a timing tool over {sel} watches {reached} and names {missed} unreached",
-                    (tt.timed_rids(c, sel, "lab/beat"), tt.unreached_rids(c, sel, "lab/beat")), (reached, missed)))
-    # §7.4: the largest pool a soft limit admits, the pool plus 2 MiB.
+                                 ("zk2/lab/beat/beat.v1/stream/cmd", ["stream/cmd"], ["@stream/frame"]),
+                                 ("zk2/lab/other/**", [], ["@stream/frame", "stream/cmd"]),
+                                 ("zk2/lab/other/*/@stream/**", [], ["@stream/frame", "stream/cmd"]),
+                                 ("zk2/lab/beat/beat.v1/*/**", ["stream/cmd"], ["@stream/frame"])):
+        out.append((f"{label} §8.2: a timing tool at lab/beat over {sel} watches {reached} and names {missed} "
+                    f"unreached", (tt.timed_rids(c, sel, "lab/beat"), tt.unreached_rids(c, sel, "lab/beat")),
+                    (reached, missed)))
+    # §7.4: the largest pool a soft limit admits, the pool plus 2 MiB, and
+    # core §7.4's words below a pool's need.
     mib = 1 << 20
     for limit, want in ((-1, "unlimited"), (8 * mib, f"at most {6 * mib} bytes"), (2 * mib, "at most 0 bytes"),
-                        (64 * 1024, "below 2 MiB")):
+                        (64 * 1024, "below 2 MiB"), (8 * mib, live.BELOW_NEED), (64 * 1024, live.BELOW_NEED)):
         note = live.memlock_note(limit)
         out.append((f"{label} §7.4: RLIMIT_MEMLOCK {limit}: the note says {want!r}", want in note, True))
-    out.append((f"{label} §7.4: this host's limit reads, and the note names core §7.4",
-                live.memlock_note().endswith("(core §7.4)"), True))
+    out.append((f"{label} §7.4: this host's limit reads, and the note cites core §7.4",
+                "(core §7.4" in live.memlock_said(), True))
+
+    def unreadable() -> str:
+        raise OSError("getrlimit refused")
+
+    out.append((f"{label} §7.4: a limit that cannot be read is said so, and the tool goes on",
+                live.memlock_said(unreadable), "the memlock limit could not be read: OSError: getrlimit refused"))
+    out.append((f"{label} §7.4: any failure, not only the ones expected",
+                live.memlock_said(lambda: live.memlock_note("8 MiB")).startswith("the memlock limit could not be "
+                                                                              "read: TypeError: "), True))
     return out
 
 

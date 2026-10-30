@@ -52,33 +52,44 @@ from . import live
 from . import timing as tm
 
 
-def timed_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
-    """The timed streams of a contract the selector reaches: a stream with a
-    ``timing.*`` key among its resolved annotations (§0's timed resource,
-    the invalid ones included, which §5 reads ``invalid``)."""
-    import zenoh
-
+def timed_streams(canonical: dict[str, Any], address: str) -> list[tuple[str, str]]:
+    """Every timed stream a contract in hand declares at ``address``: a
+    stream with a ``timing.*`` key among its resolved annotations (§0's
+    timed resource, the invalid ones included, which §5 reads
+    ``invalid``), plain or explicit, as ``(rid, key expression)``, the key
+    expression its keys' at the address (core §1.1's data form, its
+    template's parameters wildcards). Read from the contract alone: no
+    selector decides what is listed."""
     from .timing_live import _template_expr
 
-    sel = zenoh.KeyExpr(selector)
     out = []
     for r in canonical.get("resources") or []:
         if tm.kind_of(r["kind"]) != "stream" or not any(k.startswith("timing.") for k in r.get("annotations") or {}):
             continue
-        expr = zenoh.KeyExpr(f"zk2/{address}/{canonical['interface']}/{r['token']}/{_template_expr(r['template'])}")
-        if sel.intersects(expr):
-            out.append(f"{r['token']}/{r['template']}")
+        out.append((f"{r['token']}/{r['template']}",
+                    f"zk2/{address}/{canonical['interface']}/{r['token']}/{_template_expr(r['template'])}"))
     return out
 
 
+def timed_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
+    """The timed streams of a contract the selector reaches: of
+    :func:`timed_streams`, those whose keys' expression the selector
+    intersects, by zenoh's own intersection and nothing else."""
+    import zenoh
+
+    sel = zenoh.KeyExpr(selector)
+    return [rid for rid, expr in timed_streams(canonical, address) if sel.intersects(zenoh.KeyExpr(expr))]
+
+
 def unreached_rids(canonical: dict[str, Any], selector: str, address: str) -> list[str]:
-    """The timed streams of a contract the selector does not reach: an
-    explicit ``@stream`` under a selector ending ``**`` (observer §8.2,
-    "`*` and `**` never match a verbatim chunk"), or one outside it."""
-    every = timed_rids(canonical, f"zk2/{address}/*/@stream/**", address) \
-        + timed_rids(canonical, f"zk2/{address}/**", address)
+    """The timed streams of a contract the selector does not reach, in byte
+    order: every one :func:`timed_streams` lists at the address, less
+    :func:`timed_rids`'s. An explicit ``@stream`` under a selector ending
+    ``**`` is one (observer §8.2, "`*` and `**` never match a verbatim
+    chunk"), and so is every stream when the selector names another
+    address."""
     reached = set(timed_rids(canonical, selector, address))
-    return sorted({r for r in every if r not in reached}, key=str.encode)
+    return sorted({rid for rid, _ in timed_streams(canonical, address) if rid not in reached}, key=str.encode)
 
 
 #: Observer §8.3: "A tool says whose clock a time, an age or a latency is
@@ -226,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     # observer §7.4: a tool checks the limit at start, and says what it admits
-    print(f"timing: {live.memlock_note()}", file=sys.stderr, flush=True)
+    print(f"timing: {live.memlock_said()}", file=sys.stderr, flush=True)
     offline = _load(args.contracts)
     session, watch = live.open_client(args.connect), live.open_client(args.connect)
 
