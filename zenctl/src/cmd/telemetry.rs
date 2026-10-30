@@ -146,6 +146,15 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         false => Some(ASKING.ask(dep.watch_session().await)),
     };
     let store = zk2::store(&dep, &offline);
+    // What a wildcard scope cannot reach, said before it starts, as the raw
+    // observers say it (spec/observer.md §8.2; #950); the metric resources
+    // it misses follow the run, from the report.
+    if let Some(s) = &selector {
+        let note = zk2::scope_note(std::slice::from_ref(s));
+        if !note.is_empty() {
+            eprintln!("telemetry: under {s}{note}");
+        }
+    }
     // The line comes once the window opens (zk2py round 47's F-154): the
     // subscriptions declared and a round trip made after them that reaches
     // each owner — its descriptor GET after the presence seed, or across a
@@ -178,6 +187,12 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     )
     .await;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
+    if let Some(reach) = &report.scope {
+        let missed = reach.unreached_words("metric resource");
+        if !missed.is_empty() {
+            eprintln!("telemetry: {missed}");
+        }
+    }
     let judgement = report.judgement();
     if let Judgement::Unobservable { reason } = &judgement {
         eprintln!("telemetry: {reason} — exit 2, the reserved non-verdict");

@@ -132,6 +132,15 @@ pub async fn run(cli: TimingArgs) -> Result<()> {
         false => Some(ASKING.ask(dep.watch_session().await)),
     };
     let store = zk2::store(&dep, &offline);
+    // What a wildcard scope cannot reach, said before it starts, as the raw
+    // observers say it (spec/observer.md §8.2; zk2py round 82's F-287,
+    // #950); the timed streams it misses follow the run, from the report.
+    if let Some(s) = &selector {
+        let note = zk2::scope_note(std::slice::from_ref(s));
+        if !note.is_empty() {
+            eprintln!("timing: under {s}{note}");
+        }
+    }
     let listening = move |opening: &zenkey_fleet::report::TimingOpening| {
         eprintln!(
             "timing: listening {}s to the timed members in scope and their owners' tokens \
@@ -158,6 +167,12 @@ pub async fn run(cli: TimingArgs) -> Result<()> {
     )
     .await;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
+    if let Some(reach) = &report.scope {
+        let missed = reach.unreached_words("timed stream");
+        if !missed.is_empty() {
+            eprintln!("timing: {missed}");
+        }
+    }
     let judgement = report.judgement();
     if let Judgement::Unobservable { reason } = &judgement {
         eprintln!("timing: {reason} — exit 2, the reserved non-verdict");

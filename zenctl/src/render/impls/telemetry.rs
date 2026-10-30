@@ -313,6 +313,7 @@ impl Render for TelemetryReport {
         for s in &self.skipped {
             notes.push(Note::caveat(format!("not read: {s}")));
         }
+        notes.extend(super::reach_notes(self.scope.as_ref(), "metric resource"));
         if let Some(why) = &self.unobservable {
             notes.push(Note::silence(why.clone()));
         }
