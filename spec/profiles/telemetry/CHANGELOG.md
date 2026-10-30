@@ -4,6 +4,95 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it, as in
+"(0.3)" or "(core 0.35)", and some told their history as text: "0.1's
+revision adds". This changelog and the core's already hold that
+history. So the text now states each rule and cites its evidence, and
+nothing else. This is #935's fourth part, beside `alarms.v1` and
+`desired.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+- **This text's versions,** "(0.1)" to "(0.5)". Most opened a run-in
+  label, which now stands alone:
+  - §2.1's Point known by its id, and §2.3's `epoch` and
+    `telemetry.v1.Epoch`;
+  - §2.4's epoch carrier, after "(core §9.8; 0.2)";
+  - §2.6's "Strict JSON", "Finite", "Exact", "CBOR", "Depth", "A member
+    written `null` is present", the integer's "(…; 0.5)" and the
+    attachment read by check 2;
+  - §2.6's check 1, the two "(0.3)" and the "(0.2)" of check 2, and
+    check 11;
+  - §2.9's presence, its different epoch and its unobservable epoch;
+  - §2.10's pair for state, and §2.11's rate and elapsed time;
+  - §5's rate row, "Over many pairs", "Each counter or histogram read is
+    asked", "Over many samples" and the reference tool's exit.
+- **The core's versions.** "(core 0.35)" is gone from §1's table twice,
+  from §2.2's opening, and from §4's interim row of core Appendix D. §3
+  cites "(§2.3, core §10 point 1)".
+- **History told as text,** now said as what it is:
+  - §2.3's "0.1's revision adds" is "The profile's first revision adds
+    … to ZenSight's", which §3's table already says;
+  - §3's table names that revision "The profile's first", where it said
+    "text 0.1". Its first row reads an epoch "as in the profile's first
+    revision", and the note after it says the Epoch "exists only from the
+    profile's first revision on";
+  - Appendix B's "listed from this directory since 0.1, the four
+    contracts' revision 1.1" is "listed from this directory by the four
+    contracts' revision 1.1".
+- **The scenarios.** The opening names the reference's tests without
+  "#819, TB" and "#819, TC", and the conventions' presence loses "0.3"
+  and "(0.5)". §7's step 3 loses "(0.2)", and §8's setup "#819 TC".
+  §9's heading loses "0.2": nothing links its anchor, and its number
+  stays.
+
+**The long sentences, split.** The five over 50 words in this text:
+- **§2.6, check 1, `not_a_point`,** is a list of the five ways a value
+  is not a Point, then its two sentences.
+- **§2.9, presence,** is two sentences: what the view stands on, then
+  the one order it folds.
+- **§2.9, "Otherwise, unobservable",** is a list of the four that
+  establish nothing, then the loss between the two arrivals.
+- **§2.10, a pair for state,** is three sentences: the merge's order,
+  the two paths, and the sample the merge does not keep.
+- **§2.11, the elapsed time,** is a list of its three time bases'
+  nanoseconds, then its conversion.
+
+**Nothing moved to an appendix.** No rule held a measurement.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61, with
+the tool of #935's third part.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD
+  NOT, MAY, REQUIRED or RECOMMENDED was extracted before and after. Each
+  was keyed by section, and the two sets diffed. The scenarios' Expected
+  lines were diffed too, keyword or not.
+- **This text.** Both sets hold 27. 25 are unchanged, §2.11's MUST NOT
+  lost a tag only, and Appendix B's SHOULD lost "since 0.1".
+- **The scenarios.** Both hold 50 keyword sentences and Expected lines.
+  45 are unchanged, and five are §9's, unchanged under a heading that
+  lost its tag.
+- **The rest.** Every other sentence and table row was diffed too, and
+  each rewrite read beside its old text. None moves a condition, an
+  object or a scope. No fixture moved.
+
+**The figures.**
+- **This text:** tags from 40 to none, sentences over 50 words from 5 to
+  none, and a mean from 17.90 words to 16.96.
+- **`scenarios.md`:** tags from 3 to none, and a mean from 13.81 to
+  13.74.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor but §9's heading.
+- **Appendix A**, which is history: its "v1.39" stays.
+- **The scenarios' `meter.v1`**, whose comment "(0.2, §9)" is the
+  reference's file's, `zenkey/tests/contracts/meter.v1.toml`, as it
+  stands.
+- **Written against core 0.35**, still.
+
 ## 0.5 — 2026-10-22: an unreadable sample, a bignum's exactness, R's presence (#819, TF; #609)
 
 zk2py read 0.4 cold and through as a whole (round 48, PR #832), with
