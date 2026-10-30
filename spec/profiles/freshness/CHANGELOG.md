@@ -4,6 +4,48 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
+
+The rules carried their own history, as the core's did before core 0.60
+(#935, epic #921 Track B). A rule named the version that made it, as in
+"(0.2)" or "(core S1, 0.21)". This changelog and the core's already hold
+that history, so the text now states each rule and cites its evidence,
+and nothing else. This is #935's third part, beside `health.v1`,
+`hostid.v1`, `config.v1` and `link.v1`.
+
+**Editorial: inline history taken out of the rules, no rule changed.**
+Nine tags are gone, and none carried a reason that needed words:
+- **This text's versions:** "(0.2)" in §2.3's "No value, no verdict",
+  §2.5's "a member the reader knows", §2.6's measurement ("so (0.2):")
+  and §2.7's "With no observation at all".
+- **The core's versions beside a core citation:** "(core S1, 0.21)" in
+  §2.4, "(core §4.1, 0.23)" in §2.2's stream row and "(core R7, 0.21)"
+  in §2.9 now cite the core section alone.
+- **"(core 0.21)" after "the interim row of core Appendix D"**, in §1's
+  table and under §4's. The row is core Appendix D's, which says that a
+  profile's own table replaces it.
+
+**Nothing moved to an appendix.** No rule held a measurement.
+
+**No sentence to split.** None was over 50 words.
+
+**How "no rule changed" was checked**, as for core 0.60 and 0.61. Every
+sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT, MAY or RECOMMENDED
+was extracted before and after, keyed by section, and the two sets
+diffed. Both hold 16, and all 16 are unchanged: each tag sat in a
+sentence with no keyword, or in a run-in label. No fixture moved, and no
+scenario.
+
+**The figures.** This text's tags went from 9 to none, and its mean from
+16.45 words to 16.42. `spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Appendix A**, which is history: its "since 0.24" and "(core §4.2,
+  0.26)" stay.
+- **`scenarios.md`**, which held no tag and no sentence over 50 words.
+- **Written against core 0.22**, still.
+
 ## 0.4 — 2026-10-27: two sentences that had fallen behind, non-normative (#908)
 
 Writing `timing.v1` (#908, MA) found two sentences of this text that no
