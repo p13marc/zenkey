@@ -189,9 +189,10 @@ any of them.
 6. **An interface token a second after the descriptor** (observer.md
    §3.2; 0.59, F-282). An instance of `tc` on `h4` serves its descriptor,
    which lists `tc.v1` outside its tokenless set with its resources
-   exposed, and holds its instance token (core §8.2, step 3), then
-   declares its `tc.v1` token one second later (step 4), as an owner that
-   pauses between the two steps would. The tool reads presence three
+   exposed, and holds its instance token (core §8.2, step 4), then
+   declares its `tc.v1` token one second later (the rest of step 4), as
+   an owner that pauses between its two tokens would (observer.md §3.2,
+   text 0.3, F-293). The tool reads presence three
    times, `grace` apart, its grace longer than that second: the first
    read within it, the next two after it.
 

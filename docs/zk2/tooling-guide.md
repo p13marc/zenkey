@@ -429,3 +429,11 @@ manager, which the plan holds to:
 - **Overlaps.** Two storages whose selectors intersect both answer a GET
   under both, with duplicate and possibly divergent replies. Accept it, or
   carve one selector out of the other.
+
+### 8.5 The doctor's memlock floor
+
+`zenctl doctor`'s `shm-memlock-low` reports a finding below 8 MiB
+(`zenkey::shm::MEMLOCK_FLOOR`), the limit under which spike S9 saw shared
+memory fall back to TCP. That floor is the reference's practice, not a rule:
+`spec/observer.md` §7.4 asks only that a tool report the largest pool the
+limit admits, which no tool can compare with a pool it does not know.

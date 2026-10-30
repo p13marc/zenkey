@@ -26,8 +26,10 @@ and its instance token.
 4. Plain state only: no `stream`, `events` or `@state` sample or reply.
 5. The tool shows step 1's samples, and reports `@stream`, `@state`,
    `@op`, `@adv` and `@zk` excluded from its scope, beside what it
-   watched: the `@stream` and `@state` samples it does not show are not
-   absent, but out of its reach.
+   watched, in every medium it writes: a field of a report, or, for a
+   stream of rows (NDJSON), its standard error (observer.md §8.2, text
+   0.3, F-292). The `@stream` and `@state` samples it does not show are
+   not absent, but out of its reach.
 
 *Spike S1: passed, also under a namespace.*
 
