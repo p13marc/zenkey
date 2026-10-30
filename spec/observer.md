@@ -234,7 +234,7 @@ re-minting and the caller's timeouts stay in core §8.1.
       timeout.
     - For example, a reader whose session's interests timeout is 120 s,
       which asks each GET with 121 s and waits at most 30 s for a read,
-      meets it: its 30 s wait is what is measured, never its GETs' 121 s.
+      meets it. Its 30 s wait is what is measured, never its GETs' 121 s.
   - **Its time** is counted from before the GET is asked to its final
     reply, so it is never less than the time the runtime counted. The
     read itself carries no sign of the interests timeout, so the rule
