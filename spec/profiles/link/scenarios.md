@@ -473,9 +473,9 @@ another policy than the far principal's, or none, hands sessions what
 
 Zenoh matches one value of each property a subject names, so a subject
 naming user names and CNs matches only a session presenting one of each.
-Such a subject binds no name it lists alone, and is not the far
-principal's even when one of its lists names the far principal alone
-(v1.md §2.4, §2.15). Each step but step 4 is a hand edit of the
+By itself, such a subject binds none of the names it lists. It is not
+the far principal's even when one of its lists names the far principal
+alone (v1.md §2.4, §2.15). Each step but step 4 is a hand edit of the
 generator's block.
 
 **Setup.** As §9. For step 4, N also listens on

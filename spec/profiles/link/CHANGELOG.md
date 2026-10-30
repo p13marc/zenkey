@@ -4,6 +4,66 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-10-30: editorial: round 86's F-332 to F-335, no rule changed (#935)
+
+zk2py round 86 (PR #959) read 0.9 cold, beside core 0.62 and
+`observer.md` 0.6. It found that 0.9 changed no rule, and filed four
+findings against this text, F-332 to F-335, all hard to read. This is
+#935's fourth part. Each rewrite keeps its keyword, condition, scope and
+evidence, and takes its finding's words unless said.
+
+**Editorial: round 86's hard-to-read findings.**
+- **F-332, §2.4's "Not in a policy of its own".** "That is the
+  mechanism for which" pointed at the sentence before it, and the next
+  sentence's "it" was the face subject, three sentences back. Now: "Core
+  §11.2 compiles "every principal" into each principal's own policy for
+  the same reason: any allow wins across subjects. A face subject in the
+  far principal's policy undoes nothing."
+- **F-333, §2.4 and §2.15, "outside every face whose far principal it is
+  not".** A negative relative clause sat inside "outside", and "it" had
+  two antecedents.
+  - **§2.4:** "A subject bound to a principal P is selected by §2.1's
+    closed list of link protocols, in that list's order, less those of
+    every face whose far principal is not P."
+  - **§2.15, `narrowed_too_far`:** the pair is a name the block binds and
+    a link protocol that §2.4 does not keep that name off. Such a link
+    protocol is one of §2.1's list, less those of every face whose far
+    principal is not that name. The pair is the finding when no subject
+    answering for that name selects that link protocol. That is three
+    sentences where the finding wrote two: the second states the link
+    protocol as §2.4 now does, where the finding's "no face selects
+    whose far principal is not that name" put a clause after its noun.
+- **F-334, §2.15's "The far principal's policies".** "Counted as the far
+  principal's" led a participle whose subject came after it, "ride" is
+  not defined in this text, and "that principal" had two antecedents.
+  Now: if a subject naming both kinds counted as the far principal's, a
+  near principal's policy that lists it would be one of the far
+  principal's policies. `face_subject_misplaced` would require the face
+  subject listed in it. Every session over the face would then get that
+  near principal's grants. The finding's one sentence for the first two
+  is two, and its "the face subject would be listed in it" says why: the
+  check below would require it.
+- **F-335, the scenarios' §11.** "Binds no name it lists alone" could
+  read "alone" with "binds" or with "lists". Now: "By itself, such a
+  subject binds none of the names it lists. It is not the far
+  principal's even when one of its lists names the far principal alone."
+
+**How "no rule changed" was checked**, as for 0.9. This text's 23
+keyword sentences and the scenarios' 126 keyword sentences and Expected
+lines are unchanged. The rewrites hold no keyword. They were diffed
+sentence by sentence and read beside their old text: each names the
+same subjects, link protocols, policies and findings. No fixture moved.
+
+**The figures.**
+- **This text:** a mean from 19.52 words to 19.48.
+- **`scenarios.md`:** a mean from 14.60 to 14.56.
+
+`spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Written against core 0.32**, still.
+
 ## 0.9 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60
