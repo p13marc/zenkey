@@ -157,7 +157,7 @@ class Seen:
 
 @dataclass(frozen=True)
 class Read:
-    """One read of the address (§0): complete by core §8.1 (0.37, 0.38), and
+    """One read of the address (§0): complete by observer §3 (0.37, 0.38), and
     the instances it found. A read not made is ``Read(False, ())``."""
 
     complete: bool
@@ -536,7 +536,7 @@ def poll_read(last: set[str] | None, holders: Iterable[str], complete: bool) -> 
     "compare each read's holders with the last's …, where a read not
     complete removes no holder from the last's: a holder it shows that is
     new is an appearance, and only a complete read can show one gone, a
-    withdrawal (core §8.1: a read not complete can miss a token, never
+    withdrawal (observer §3.6: a read not complete can miss a token, never
     invent one)". ``last`` is the last's holders, None before the first
     read, which is compared with no holder. Returns the comparison and what
     is kept as the last's: a complete read's holders, or after a read not

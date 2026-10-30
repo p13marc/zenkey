@@ -6,7 +6,7 @@
   one-shot wait at the earliest instant a miss is due, §2.5), fed the
   owner's token as :class:`zk2py.presence.PresenceFollower` observes it (a
   liveliness subscriber on a watch session, reads on a session that never
-  held one, a read 100 ms after a withdrawal, core §8.1, 0.37), each
+  held one, a read 100 ms after a withdrawal, observer §3.6, 0.37), each
   member token of an epoch template seen (heard declared or withdrawn, or
   shown by a read: text 0.2, F-261), and each member's end at a complete
   read that shows no member token of it once one was seen; no tracker at

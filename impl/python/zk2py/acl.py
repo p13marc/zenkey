@@ -377,7 +377,7 @@ class HazardousGrant(ValueError):
 @dataclass(frozen=True)
 class AdminHazard:
     """One way a block admits a GET of a node's declaration records
-    (§11.1, 0.50, 0.51; §4.2; Appendix B):
+    (§11.1, 0.50, 0.51; observer §4.3; Appendix B):
     - ``allowed_query``: under ``deny``, an allow rule a policy lists names
       ``query`` on the ingress flow (named, or zenoh's default of both) and
       a key expression that intersects them (``reaches``, by zenoh 1.10.1's
@@ -456,7 +456,7 @@ def read_block_json5(text: str) -> dict[str, Any]:
 def may_call(g: Generated, principal: str, key: str) -> bool:
     """Whether the generated grants let ``principal`` call ``key``: its
     ingress ``query`` includes the key, and so does its egress ``reply``
-    (a value reply is checked against its own key, 0.14). §5.1 (0.16)
+    (a value reply is checked against its own key, 0.14). Observer §7.2 (0.16)
     judges O3 from outside only under such grants. A tool cannot observe
     its grants (§11.3), so this reads them from the deployment."""
     asked = g.grants.get((principal, "query", INGRESS), [])

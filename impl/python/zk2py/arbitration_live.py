@@ -13,7 +13,7 @@
     after it once it stands (§2.8): a move begins at the transport event or
     at a withdrawal heard while the watch session holds no link, whichever
     comes first (text 0.2, F-268), and the round trip after an open is
-    asked 100 ms after its event (core §8.1, 0.56);
+    asked 100 ms after its event (observer §3.7, 0.56);
   - each read again, 0.1 s after a withdrawal that leaves an address with
     no token known held, on a reader session that never held a liveliness
     subscriber (§2.7);
@@ -180,7 +180,7 @@ class Actuator:
         #: each holder's meta.zid, by (address, instance), from its descriptor
         self.zids: dict[tuple[str, str], str] = {}
         self._getting: set[tuple[str, str]] = set()
-        #: the margin after an open before its round trip (core §8.1, 0.56)
+        #: the margin after an open before its round trip (observer §3.7, 0.56)
         self.open_margin_s = 0.1
         assert decl.resource is not None and decl.deadline_ms is not None
         self.decl = decl
@@ -400,7 +400,7 @@ class Actuator:
             self.log.append((_ms(now, self.t0), f"moved ({kind})", ""))
             self._handle(self.arb.moved(now))
         if kind == "open":
-            # core §8.1 (0.56): "A reader SHOULD ask the round trip after an
+            # observer §3.7 (0.56): "A reader SHOULD ask the round trip after an
             # open a margin after its event (the reference: 100 ms)": zenoh
             # 1.10.1 tells the open before the router declares the watch's
             # interests again, and a round trip asked in between stands with
@@ -411,7 +411,7 @@ class Actuator:
             threading.Thread(target=later, daemon=True).start()
 
     def _round_trip(self, gen: int) -> None:
-        """The round trip asked after the last move (§2.8; core §8.1, 0.41 to
+        """The round trip asked after the last move (§2.8; observer §3.7, 0.41 to
         0.45): it stands for that move only, and applies what was kept.
 
         At the start (``gen`` 0) nothing is kept, so it is asked once. After a
@@ -723,7 +723,7 @@ class ToolView(Actuator):
     its watch's round trip and each holder's descriptor. It has listened
     from the declaration of its subscriptions to the role's stream, the last
     of them (:attr:`listen_ns`), never from its watch's round trip. A stall
-    of its receive path within the last deadline is ``lost`` (core §2.7)."""
+    of its receive path within the last deadline is ``lost`` (observer §5.2)."""
 
     def __init__(self, session: Any, watch: Any, interface: str, decl: ab.Declaration, bindings: list[str],
                  params: dict[str, str], *, reader: Any = None, governed: bool = False,
@@ -782,7 +782,7 @@ class ToolView(Actuator):
 
     def view(self) -> ab.View:
         """Now: how long it listened, whether its own path stalled within the
-        last deadline (core §2.7's watch), and what its view selects."""
+        last deadline (observer §5.2's watch), and what its view selects."""
         now = time.monotonic_ns()
         with self.lock:
             self._handle(self.arb.tick(now))

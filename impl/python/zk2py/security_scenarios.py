@@ -49,7 +49,7 @@ Beside the section, on the same blocks:
 - 0.51's "a router there is not protected": under the generator's
   ``allow`` block, the tool's GET of the queryable records is admitted, and
   answered with the service principal's record;
-- with ``--zenctl``, §4.2's "a tool its user asks reads nothing of them
+- with ``--zenctl``, observer §4.3's "a tool its user asks reads nothing of them
   through it, and says the admin space did not answer, never that nothing
   is declared": once step 3 is over, ``zenctl get`` logs in as the tool
   and asks ``@/*/router/queryable/**`` and ``@/*/router/**``
@@ -425,7 +425,7 @@ def _section4(report: Any, b: Blocks, workdir: str, zenctl: Path | None = None) 
     _under_allow(report, b, workdir)
 
 
-#: §4.2's records selectors zenctl get asks as the tool, beside the section
+#: observer §4.3's records selectors zenctl get asks as the tool, beside the section
 ZENCTL_REFUSED = ["@/*/router/queryable/**", "@/*/router/**"]
 
 
@@ -501,7 +501,7 @@ def _zenctl_get_refused(report: Any, run: str, r1: R1, user: str, zenctl: Path, 
                          f"nothing is declared: {said[:200]!r}")
         seen.append(f"{sel}: exit {code} in {ms} ms, {len(answers)} answer row(s), header answers "
                     f"{head.get('answers')}, heard {heard}")
-    report.check(run, "beside the section, §4.2: zenctl get, its user asking the records as the tool, exits 2 (no "
+    report.check(run, "beside the section, observer §4.3: zenctl get, its user asking the records as the tool, exits 2 (no "
                       "verdict) with no answer printed, for each selector; the recorder hears neither GET",
                  ok, " | ".join(seen))
 

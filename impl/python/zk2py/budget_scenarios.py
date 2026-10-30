@@ -1,7 +1,7 @@
-"""The budget scenarios (``spec/scenarios/budget.md``, core §2.7, 0.25):
+"""The budget scenarios (``spec/scenarios/budget.md``, core §2.7 and observer §5, 0.25):
 ``python -m zk2py.budget_scenarios [--only 1 …] [--owner <exe>]``.
 
-- **§1–§3** are measurements of zenoh, the premises §2.7's "lost no
+- **§1–§3** are measurements of zenoh, the premises observer §5.2's "lost no
   delivery" rests on, reproduced from Python on loopback:
   - §1's routers each run in a process of their own (``python -m zk2py.proc
     router``), as does its owner (``… publish``); the consumer is this

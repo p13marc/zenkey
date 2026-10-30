@@ -1,5 +1,8 @@
-"""What a complete presence read is (core §8.1, 0.37), for a reader that
-follows presence live.
+"""What a complete presence read is (observer §3.6, §3.7, 0.37), for a
+reader that follows presence live. Core 0.58 moved core §8.1's "Reading
+presence" to observer.md §3, word for word: the quotes below are its text,
+and a version in parentheses is the core amendment that made the rule
+(observer §0).
 
 - :class:`PresenceView` is the session-free half: tokens heard live and
   reads folded in the order the reader had them, each holder (an address's
@@ -112,20 +115,20 @@ WITHDRAWN = "withdrawn, unconfirmed until a read"
 NEVER_READ = "no complete read yet"
 READ_INCOMPLETE = "the last read was possibly incomplete"
 READ_NOT_MADE = "the last read was not made"
-#: core §8.1 (0.41): "A seed made while no round trip stands is possibly
+#: observer §3.7 (0.41): "A seed made while no round trip stands is possibly
 #: incomplete: an address it does not show is unobservable, never down."
-NO_ROUND_TRIP = "the last read was made while no round trip stood on the watch session (core §8.1, 0.41)"
-#: core §8.1 (0.41): "A round trip stands until the watch session's transport
+NO_ROUND_TRIP = "the last read was made while no round trip stood on the watch session (observer §3.7, 0.41)"
+#: observer §3.7 (0.41): "A round trip stands until the watch session's transport
 #: moves": a holder established before the move is not followed since (F-229).
-MOVED = "the watch session's transport moved since it was last read: no round trip stands (core §8.1, 0.41)"
+MOVED = "the watch session's transport moved since it was last read: no round trip stands (observer §3.7, 0.41)"
 
 #: The reference "reads 0.1 s after the first withdrawal of a burst" (core
-#: CHANGELOG 0.37); §8.1 says "soon".
+#: CHANGELOG 0.37); observer §3.6 says "soon".
 REREAD_DELAY_S = 0.1
 
 
 def holder_of(key: str) -> tuple[str, ...] | None:
-    """§8.1 (0.37): what a token holds for, "an address its instance tokens,
+    """observer §3.6 (0.37): what a token holds for, "an address its instance tokens,
     an interface its tokens, a member its epochs": ``("instance", system,
     service)``, ``("alive", system, service, iface)`` or ``("member",
     system, service, iface, member)``; None for a key that is no zk2 token."""
@@ -184,14 +187,14 @@ class Read:
     kind: str
     keys: tuple[str, ...] = ()
     #: False for a read made while no round trip stood on the watch session,
-    #: or across a move of its transport (core §8.1, 0.41): folded as a seed
+    #: or across a move of its transport (observer §3.7, 0.41): folded as a seed
     #: possibly incomplete, what it shows up and what it does not unobservable
     ordered: bool = True
 
 
 class PresenceView:
     """Tokens heard live and reads, folded in the order the reader had them
-    (core §8.1, 0.37). ``selector`` is what the reader follows."""
+    (observer §3.6, 0.37). ``selector`` is what the reader follows."""
 
     def __init__(self, selector: str = "zk2/*/*/@zk/**") -> None:
         self.selector = selector
@@ -202,7 +205,7 @@ class PresenceView:
         #: that left something with nothing held: a read is owed
         self.owed_since: int | None = None
         self.reads: list[Read] = []
-        #: the instants the watch session's transport moved (core §8.1, 0.41)
+        #: the instants the watch session's transport moved (observer §3.7, 0.41)
         self.moves: list[int] = []
 
     def _holder(self, h: tuple[str, ...]) -> Holder:
@@ -217,7 +220,7 @@ class PresenceView:
             return
         x = self._holder(h)
         if kind == "put":
-            # A token heard is positive evidence (§8.1: "present when it
+            # A token heard is positive evidence (observer §3.6: "present when it
             # shows one"), whatever came before.
             x.held.add(key)
             x.confirmed, x.why = True, ""
@@ -246,7 +249,7 @@ class PresenceView:
         return at
 
     def moved(self, at_ns: int | None = None) -> None:
-        """The watch session's transport closed or opened (core §8.1, 0.41):
+        """The watch session's transport closed or opened (observer §3.7, 0.41):
         no round trip stands, and a read is owed, "as after a withdrawal".
         Every holder the reader established, up or down, is unconfirmed
         until that read (:data:`MOVED`): "a subscriber without history hears
@@ -377,7 +380,7 @@ class PresenceView:
 
 
 class PresenceFollower:
-    """A reader that follows presence live (core §8.1, 0.37, 0.41): its
+    """A reader that follows presence live (observer §3.6, §3.7, 0.37, 0.41): its
     liveliness subscriber on ``watch``, a session it holds for no read; a
     round trip there (:func:`zk2py.live.settle`) before each read while none
     stands; every read on ``session``, which holds no liveliness subscriber;
@@ -445,7 +448,7 @@ class PresenceFollower:
                  round_trip_timeout: float | None = None, follow_moves: bool = True,
                  namespace: str | None = None, move_wait_s: float | None = None,
                  read_get_timeout: float | None = None) -> None:
-        """``round_trip`` False makes the reader core §8.1 warns of, a
+        """``round_trip`` False makes the reader observer §3.7 warns of, a
         scenario's control (presence.md §9 step 5, §10 step 2): no round trip
         on the watch session, and every read taken as ordered.
         ``follow_moves`` False hears no transport event: a round trip, once
@@ -567,7 +570,7 @@ class PresenceFollower:
     @property
     def standing(self) -> bool:
         """Whether a round trip stands: it stood, and the watch session's
-        transport has not moved since (core §8.1, 0.41)."""
+        transport has not moved since (observer §3.7, 0.41)."""
         with self.lock:
             return self._stands()
 
@@ -619,7 +622,7 @@ class PresenceFollower:
         the call. A caller may stop waiting whenever it likes (presence.md
         §10 step 10's loop, waking every 20 ms): the follower's reads and
         round trips run on its own timers, never on this call, so a wait that
-        ends drops nothing in flight (core §8.1, 0.44)."""
+        ends drops nothing in flight (observer §3.7, 0.44)."""
         with self._changed:
             v = self.version if since is None else since
             if self._closed:
@@ -657,7 +660,7 @@ class PresenceFollower:
     def _attempt(self) -> None:
         """A round trip unless one stands, one read, and the next one
         scheduled when it settled nothing. While the watch session holds no
-        link, neither (core §8.1, 0.42): a read not made, and a wait for the
+        link, neither (observer §3.7, 0.42): a read not made, and a wait for the
         transport to open (:meth:`_watch_cut_off`)."""
         from . import live
 
@@ -703,7 +706,7 @@ class PresenceFollower:
             self._schedule(again)
 
     def _watch_cut_off(self) -> bool:
-        """Core §8.1 (0.42, F-227, F-228): "A reader whose watch session is
+        """Observer §3.7 (0.42, F-227, F-228): "A reader whose watch session is
         cut off follows nothing … It SHOULD NOT make a read it would follow
         from it, whatever its reading session's links: it reports the read as
         not made, the reason its watch session's". Read by the watch
@@ -726,7 +729,7 @@ class PresenceFollower:
         """One read on the reading session, folded as of when it was asked;
         unordered (possibly incomplete, what it does not show unobservable)
         when ``unordered``, when no round trip stands, or when the watch
-        session's transport moved while it ran (core §8.1, 0.41), or its
+        session's transport moved while it ran (observer §3.7, 0.41), or its
         links were gone at its end; not made, asking no GET, while the watch
         session holds no link (0.42: :data:`zk2py.live.WATCH_CUT_OFF`).
 

@@ -719,7 +719,7 @@ class Core:
     def _rate_spent(self, now: int) -> bool:
         """§2.17: "while 600 change events were published within the last
         hour": an event exactly an hour old no longer counts, as
-        core §2.7's span (§2.17, 0.2)."""
+        observer §5.2's span (§2.17, 0.2)."""
         return sum(1 for t in self.events_at if now - RATE_PERIOD_NS < t <= now) >= RATE_N
 
     def _end(self, change: Change, outcome: str, step: Step, now: int) -> None:
@@ -1477,7 +1477,7 @@ class Reading:
 def read(session: Any, address: str, *, subscriber: Any = None, presence: bool = True,
          lists: bool | None = None, trust: Any = None, timeout: float = 1.0) -> Reading:
     """A reading of ``address`` (``<system>/<service>``) for §5. With
-    ``presence``, the premise is presence and the descriptor (core §8.1):
+    ``presence``, the premise is presence and the descriptor (observer §3):
     absent or not listing ``config.v1`` is not asked, incomplete or unread
     unobservable. Without (across a face, or a reader that does not read
     presence), ``lists`` is the deployment's word for the descriptor

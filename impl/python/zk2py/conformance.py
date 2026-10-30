@@ -4280,7 +4280,7 @@ BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_pop
 
 
 def family_budget(root: Path) -> list[Result]:
-    """``budget/`` (core §2.7, 0.24): every file, and an unknown one fails."""
+    """``budget/`` (core §2.7 and observer §5, 0.24): every file, and an unknown one fails."""
     out: list[Result] = []
     for path in sorted((root / "budget").iterdir()):
         run = BUDGET_FIXTURES.get(path.name)

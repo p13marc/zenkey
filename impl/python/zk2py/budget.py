@@ -1,5 +1,10 @@
 """Core §2.7, the population budget (0.24, 0.25): a templated resource's
 ``cardinality`` is a budget the owner keeps and a tool can see broken.
+What a tool reads of it and concludes moved to observer.md §5 in core 0.58,
+no rule changed: the bound, a member, the owner's rule and an event's rate
+stay core §2.7's; a reading, lost no delivery, the stall and the verdicts
+are observer §5.2's and §5.3's. A version in parentheses is still the core
+amendment that made the rule (observer §0).
 
 The session-free half, as ``spec/conformance/budget/`` reads it:
 - :func:`bound` (``bounds.json``): the descriptors' stated bounds and the
@@ -16,7 +21,7 @@ The session-free half, as ``spec/conformance/budget/`` reads it:
 Instants and spans are integers of nanoseconds, compared exactly.
 
 The bus half, holding a session:
-- :func:`get_population`: a complete S4 GET of a templated state (§2.7,
+- :func:`get_population`: a complete S4 GET of a templated state (observer §5.2,
   "What a tool reads");
 - :class:`Window`: a subscription window over a stream's or an event's
   members, its span counted from its declaration plus the reply timeout,
@@ -125,7 +130,7 @@ def _kind(kind: str) -> str:
 
 def population(kind: str, bnd: int | str, retention_ns: int | None,
                reading: GetReading | WindowReading) -> Verdict:
-    """§2.7 "What a tool concludes", for a population, with the reasons in
+    """Observer §5.3, "What a tool concludes", for a population, with the reasons in
     population.json's order: not asked (an operation; the no-ceiling bound;
     a template without parameters); a reading that does not count the kind;
     the finding, in any reading; an incomplete reading (a GET short of its
@@ -183,14 +188,14 @@ def parse_rate(text: str) -> tuple[int, int]:
     return int(m.group(1)), HOUR_NS
 
 
-#: zenoh's defaults (core §2.7, 0.27): wait_before_close 5 s, a 10 s lease,
+#: zenoh's defaults (observer §5.2, 0.27): wait_before_close 5 s, a 10 s lease,
 #: a keep-alive every quarter of it.
 WAIT_BEFORE_CLOSE_MS, LEASE_MS, KEEP_ALIVE = 5000, 10000, 4
 
 
 def stall_bound(wait_before_close_ms: int = WAIT_BEFORE_CLOSE_MS, lease_ms: int = LEASE_MS,
                 keep_alive: int = KEEP_ALIVE) -> int:
-    """§2.7 (0.27), the longest stall tolerated, as lossless.json's
+    """Observer §5.2 (0.27), the longest stall tolerated, as lossless.json's
     ``stall_bounds`` derive it: "the transport's wait_before_close, or its
     lease less one keep-alive interval when that is shorter". The interval
     is lease ÷ keep_alive rounded up to a whole millisecond, a keep-alive
@@ -204,7 +209,7 @@ def lossless(reliability: str, congestion: str, reader_lost: int = 0,
              miss_declared: bool = False, miss_used: bool = False, misses: int = 0,
              stall_gap_ms: int = 0, stall_bound_ms: int | None = None,
              transport_closed: bool = False) -> tuple[bool, str]:
-    """§2.7 (0.25, 0.27): "Lost no delivery is established, never assumed".
+    """Observer §5.2 (0.25, 0.27): "Lost no delivery is established, never assumed".
     Both must hold: the reader lost none, and the path could not drop one
     silently, the resource declaring ``reliable`` with ``block``. The reader
     lost none only when, over the window and the watch after it, its queue
@@ -256,7 +261,7 @@ def rate(text: str | None, members: dict[str, list[int]], listened_ns: int, loss
 # -- on a bus --------------------------------------------------------------------------
 
 def get_population(session: Any, selector: str, timeout: float = 1.0) -> tuple[GetReading, list[str]]:
-    """§2.7: "A complete reading of a state is an S4 GET to its owner …
+    """Observer §5.2: "A complete reading of a state is an S4 GET to its owner …
     that ran to its final reply, with no error reply … Its members are the
     keys answered with a value. A reply_del is not a member.\""""
     from . import live
@@ -267,7 +272,7 @@ def get_population(session: Any, selector: str, timeout: float = 1.0) -> tuple[G
 
 
 class StallWatch:
-    """§2.7 (0.27), "How a tool establishes it": a tool watches its own
+    """Observer §5.2 (0.27), "How a tool establishes it": a tool watches its own
     receive path from before the window opens until the watch after it
     ends:
     - its transports, from zenoh's transport events. zenoh-python 1.10.1
@@ -344,7 +349,7 @@ def event_member(key: str) -> str:
 
 class Window:
     """A subscription window over a templated stream's or event's members
-    (§2.7, "What a tool reads"), on the tool's receive clock.
+    (observer §5.2, "What a tool reads"), on the tool's receive clock.
     - **Its span** counts "from its subscription's declaration plus its
       reply timeout" (0.25), a convention the text states as one.
     - **Lost no delivery** is established, never assumed (0.25), by
@@ -379,7 +384,7 @@ class Window:
         self.stamps: dict[str, list[tuple[str | None, int | None, int]]] = {}
         self.token_events: list[tuple[str, int]] = []
         prefix = f"zk2/{owner_address}/@zk/instance/"
-        # Core §8.1 (0.37): the subscriber on the reader's watch session, one
+        # Observer §3.7 (0.37): the subscriber on the reader's watch session, one
         # round trip there, and the reads on its own session.
         self.lv, placed = live.watch_or_beside(session, f"{prefix}*", zenoh.handlers.Callback(
             lambda s: self.token_events.append((str(s.kind), time.monotonic_ns()))))
@@ -444,7 +449,7 @@ class Window:
         return self._lossless()[1]
 
     def rate_members(self) -> dict[str, list[int]]:
-        """§2.7 "Spans": a rate's spans between the occurrences' stamps when
+        """Observer §5.2, "Spans": a rate's spans between the occurrences' stamps when
         they carry one clock id, else on the receive clock; what was heard
         after the window's end does not count."""
         out: dict[str, list[int]] = {}

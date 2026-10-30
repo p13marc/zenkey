@@ -12,7 +12,7 @@ that the owner's puts land between the late joiner's steps. The late joiner
 is :class:`zk2py.seed.LateJoiner`, a tool's (it keeps a key that is not
 concrete), over ``plans/*``.
 
-Beside §10, two things §4.2 says a seed cannot know: a GET that ran to its
+Beside §10, two things observer §4.1 says a seed cannot know: a GET that ran to its
 timeout seeds possibly incompletely, and an owner absent at the GET seeds
 nothing, which is silence.
 
@@ -238,7 +238,7 @@ def section10(report: Report, run: Run | None = None) -> None:
         ljt.start()
         ljt.wait()
         report.check(sec, "a GET held past its timeout ends with an error reply: the seed is possibly incomplete "
-                          "(§4.2, §8.1's reading applied)",
+                          "(observer §4.1, §3.3's reading applied)",
                      ljt.seed.ended and not ljt.seed.complete and bool(ljt.seed.errors), str(ljt.seed.errors))
         for q in holdt.queries:
             q.drop()

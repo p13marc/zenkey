@@ -16,7 +16,7 @@ the scenarios' contracts (``scenarios.md``, "The contracts", transcribed in
   ``{system} = self.system`` and ``{service} = self.service`` (§2.3), or
   unbound, the kill switch (§2.12). It subscribes to its slice first, then
   seeds by S4's GET (§2.5); it follows its author's instance token live on a
-  watch session (core §8.1, 0.37) or by reading it on a period, seeds again
+  watch session (observer §3.7, 0.37) or by reading it on a period, seeds again
   at each appearance (and up to four times more when a seed then draws
   nothing), reads an archive only when a seed draws nothing and a complete
   presence read shows its author absent (§2.5, §2.9, 0.3), judges every
@@ -478,7 +478,7 @@ class Target:
             self._last_report = data
         owner.set_state(self.rp, data)
 
-    # -- presence (§2.5, core §8.1) ----------------------------------------
+    # -- presence (§2.5, observer §3) ----------------------------------------
     def _instance_selector(self) -> str:
         return f"zk2/{self.author}/@zk/instance/*"
 
@@ -512,7 +512,7 @@ class Target:
 
     def presence(self) -> live.Presence:
         """A presence read on the target's own session, which holds no
-        liveliness subscriber (core §8.1, 0.37)."""
+        liveliness subscriber (observer §3.7, 0.37)."""
         assert self.owner is not None and self.owner.session is not None
         return live.list_presence(self.owner.session, self._instance_selector(), self.timeout)
 
@@ -521,7 +521,7 @@ class Target:
         return self.author_presence()[0] == "absent"
 
     def author_presence(self) -> tuple[str, str]:
-        """The author's presence, by one read (core §8.1, 0.37, 0.38):
+        """The author's presence, by one read (observer §3, 0.37, 0.38):
         ``present``, ``absent`` (a complete read without its token),
         ``incomplete`` (possibly incomplete, a read cut off while it ran
         among them) or ``not-made``, each with why where there is one."""

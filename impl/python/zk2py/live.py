@@ -1,12 +1,16 @@
 """The live half, first slice: presence, descriptors and contract retrieval
-over Zenoh (core.md §3.3, §8.1–§8.4), on zenoh-python 1.10.1.
+over Zenoh (core.md §3.3, §8.1–§8.4; observer.md §3, §4), on zenoh-python
+1.10.1. Core 0.58 moved the reader's rules quoted here to observer.md, word
+for word: a bare § below is still the core's, a rule that moved is cited
+``observer §n``, and a version in parentheses is the core amendment that
+made the rule (observer §0).
 
 Everything here is a *tool*'s side of the rules: it reads the bus, it never
 owns keys. The static half supplies the checks: :mod:`zk2py.keys` parses
 token keys, :mod:`zk2py.descriptor` checks a descriptor, :mod:`zk2py.bundle`
 verifies a bundle.
 
-**Reading presence (§8.1, as amended by 0.5).** "A caller or tool's
+**Reading presence (observer §3.1, 0.5).** "A caller or tool's
 liveliness GET on a session that holds a liveliness subscriber MUST use a
 callback or an unbounded handler", and "every liveliness subscriber on that
 session MUST be callback-driven, or drained as its samples arrive".
@@ -23,11 +27,11 @@ zenoh-python has no unbounded channel: its default handler and
   read that received any error reply is possibly incomplete". So
   completeness is read from the error replies, not from elapsed time;
 - a complete read is what *this reader* could see: "A refused read is
-  complete, and empty" (§8.1, 0.8), so an empty one never rules out a
+  complete, and empty" (observer §3.4, 0.8), so an empty one never rules out a
   refusal by access control (:attr:`Presence.reading`);
-- presence is polled with GETs, never inferred from silence (§3.2 R7, O5).
+- presence is polled with GETs, never inferred from silence (R7, observer §7.1; O5).
 
-**What a complete presence read is (§8.1, 0.37).**
+**What a complete presence read is (observer §3.5 to §3.7, 0.37).**
 - **A read through a session cut off is not complete**, "whatever its
   replies say", and "a reader SHOULD NOT make it": :func:`list_presence`
   checks the session's **links** (0.38, "What the check reads":
@@ -49,7 +53,7 @@ zenoh-python has no unbounded channel: its default handler and
   :mod:`zk2py.presence` follows tokens live and keeps a withdrawal
   unconfirmed until a read.
 
-**A watch session's round trip at a population (§8.1, 0.41).**
+**A watch session's round trip at a population (observer §3.3, §3.7, 0.41).**
 - **A read that runs to its session's interests timeout is not
   complete.** zenoh 1.10.1 ends a liveliness GET its routers have not
   finished at ``routing/interests/timeout`` with the final reply alone and
@@ -76,7 +80,7 @@ zenoh-python has no unbounded channel: its default handler and
   through a session that held a link before it and at its end: a watch
   session cut off answers it at once, as it answers every liveliness GET.
 
-**A watch session on the wire keys (§8.1, 0.42).**
+**A watch session on the wire keys (observer §3.7, 0.42).**
 - **In a namespace, a watch session in no namespace.** "A reader that
   follows presence in a namespace SHOULD hold its watch session in **no**
   namespace, and declare its subscribers, without history, on the **wire
@@ -99,7 +103,7 @@ zenoh-python has no unbounded channel: its default handler and
   round trip on a session zk2py did not open, nor :func:`register`, says
   so (:attr:`Presence.interests_timeout_assumed`).
 
-**One round trip, and one read, at a time (§8.1, 0.44).** "zenoh 1.10.1
+**One round trip, and one read, at a time (observer §3.7, 0.44).** "zenoh 1.10.1
 tells a router nothing of a liveliness GET whose caller stops waiting for
 it … and the router answers it in full. A reader SHOULD NOT ask a round
 trip while one it asked since its watch session's transport last moved is
@@ -122,7 +126,7 @@ bound its own wait apart", which :func:`flight_timeout` is. zk2py does so
 for its follower's GETs and the runner's barrier; a profile reader's
 blocking GET keeps its own timeout as its wait.
 
-**Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
+**Timeouts are the caller's (core §8.1).** The defaults here are the 1 s that
 "the scenarios, and so a conformance run, use".
 """
 
@@ -146,9 +150,9 @@ PRESENCE_TIMEOUT_S = 1.0
 #: GET timeout for a descriptor or a bundle attempt: likewise (§3.3, §8.4).
 GET_TIMEOUT_S = 1.0
 #: zenoh 1.10.1's ``routing/interests/timeout`` when a session's configuration
-#: does not set it (core §8.1, 0.41; Appendix B).
+#: does not set it (observer §3.3, 0.41; core Appendix B).
 ZENOH_INTERESTS_TIMEOUT_S = 10.0
-#: The interests timeout zk2py opens its sessions with (core §8.1, 0.41, worded
+#: The interests timeout zk2py opens its sessions with (observer §3.3, 0.41, worded
 #: by 0.49, F-250: "A reader whose reads may wait longer SHOULD run its session
 #: with an interests timeout above the longest it waits for one"): the
 #: reference's tools run with 120 s.
@@ -165,7 +169,7 @@ _DONE = object()
 #: (:func:`_prune`), so a long-lived tool neither leaks nor hands back a
 #: closed watch session.
 _OPENED: dict[int, tuple[Any, str, tuple[str, str] | None]] = {}
-#: Sessions that hold a liveliness subscriber zk2py declared (§8.1, 0.37):
+#: Sessions that hold a liveliness subscriber zk2py declared (observer §3.7, 0.37):
 #: "marked for its life", since the router keeps the declarations after the
 #: subscriber is undeclared (Appendix B).
 _MARKED: dict[int, Any] = {}
@@ -176,7 +180,7 @@ _WATCHES: dict[int, tuple[Any, Any]] = {}
 #: What each session zk2py opened was opened with beyond its endpoint: (the
 #: session, its namespace or None, its ``routing/interests/timeout`` in
 #: seconds). zenoh-python reads no configuration back from a session, and
-#: core §8.1 (0.41) needs both: a read that reached the interests timeout is
+#: observer §3.3 (0.41) needs both: a read that reached the interests timeout is
 #: possibly incomplete, and a watch session in a namespace keeps history.
 _CONF: dict[int, tuple[Any, str | None, float]] = {}
 
@@ -248,7 +252,7 @@ def open_client(endpoint: str, auth: tuple[str, str] | None = None, *, namespace
     tool that sees exactly the router it is pointed at. ``auth`` is a
     usrpwd (user, password), the principal's binding (§11.3). ``namespace``
     is zenoh's session namespace (§1.6), and ``interests_timeout_s`` its
-    ``routing/interests/timeout``, 120 s unless asked (§8.1, 0.41); both are
+    ``routing/interests/timeout``, 120 s unless asked (observer §3.3, 0.41); both are
     recorded, since zenoh-python reads neither back."""
     _prune()
     s = _open_client(endpoint, auth, namespace=namespace, interests_timeout_s=interests_timeout_s)
@@ -282,7 +286,7 @@ def register(session: Any, *, namespace: str | None = None,
 
 
 def interests_timeout_of(session: Any) -> float:
-    """§8.1 (0.41): the session's ``routing/interests/timeout``, in seconds,
+    """observer §3.3 (0.41): the session's ``routing/interests/timeout``, in seconds,
     as recorded when zk2py opened it; zenoh's default, 10 s, for a session
     zk2py did not record (zenoh-python reads no configuration back)."""
     entry = _CONF.get(id(session))
@@ -290,7 +294,7 @@ def interests_timeout_of(session: Any) -> float:
 
 
 def interests_timeout_known(session: Any) -> bool:
-    """§8.1 (0.42, F-232): whether zk2py knows the session's interests
+    """observer §3.3 (0.42, F-232): whether zk2py knows the session's interests
     timeout, having opened the session itself (:func:`open_client`) or been
     told it (:func:`register`). When not, it is taken at zenoh's default,
     and a read's completeness rests on that: "That holds only of a session
@@ -301,9 +305,9 @@ def interests_timeout_known(session: Any) -> bool:
 
 
 #: What a read or a round trip on a session zk2py cannot read the interests
-#: timeout of says (§8.1, 0.42, F-232).
+#: timeout of says (observer §3.3, 0.42, F-232).
 INTERESTS_TIMEOUT_ASSUMED = ("its completeness rests on zenoh's default interests timeout, 10 s, taken for a "
-                             "session zk2py did not open and cannot read (core §8.1, 0.42)")
+                             "session zk2py did not open and cannot read (observer §3.3, 0.42)")
 
 
 def _namespace_chunks(namespace: str | None) -> str:
@@ -314,7 +318,7 @@ def _namespace_chunks(namespace: str | None) -> str:
 
 
 def wire_selector(namespace: str | None, selector: str) -> str:
-    """§8.1 (0.42): a base-relative selector as a session in no namespace
+    """observer §3.7 (0.42): a base-relative selector as a session in no namespace
     declares it to watch a deployment in ``namespace``, "the namespace in
     front, ``<ns>/zk2/…``"; unchanged for no namespace."""
     ns = _namespace_chunks(namespace)
@@ -322,7 +326,7 @@ def wire_selector(namespace: str | None, selector: str) -> str:
 
 
 def strip_namespace(namespace: str | None, key: str) -> str | None:
-    """§8.1 (0.42): "It strips the namespace from every key it hears. A key
+    """observer §3.7 (0.42): "It strips the namespace from every key it hears. A key
     outside the namespace is not the deployment's": the key without its
     ``<ns>/`` chunks, or None for one outside the namespace. A key heard
     with no namespace to strip is the key."""
@@ -346,7 +350,7 @@ class _StrippedSample:
 
 
 class Stripped:
-    """§8.1 (0.42): a subscriber's callback on a watch session in no
+    """observer §3.7 (0.42): a subscriber's callback on a watch session in no
     namespace watching ``namespace``'s wire keys. Each sample is handed on
     with the namespace stripped from its key; a key outside the namespace is
     counted (:attr:`outside`) and never handed on: "it is counted, never
@@ -375,32 +379,32 @@ def namespace_of(session: Any) -> str | None:
     return entry[1] if entry is not None and entry[0] is session else None
 
 
-# -- §8.1 presence -------------------------------------------------------------
+# -- observer §3, presence -------------------------------------------------------
 
-#: Why a read was not made (§8.1, 0.37; 0.38 reads the links).
-CUT_OFF = "cut off: the session holds no link to another zenoh node (core §8.1, 0.37, 0.38)"
+#: Why a read was not made (observer §3.5, 0.37; 0.38 reads the links).
+CUT_OFF = "cut off: the session holds no link to another zenoh node (observer §3.5, 0.37, 0.38)"
 #: Why a read made is possibly incomplete when its session's links were
-#: gone at its end (§8.1, 0.38, F-185).
+#: gone at its end (observer §3.5, 0.38, F-185).
 CUT_OFF_DURING = ("cut off while it ran: the session's links were gone when it ended, so it came back at the cut "
-                  "(core §8.1, 0.38)")
+                  "(observer §3.5, 0.38)")
 #: Why a reader that follows presence makes no read while its watch session is
-#: cut off, whatever its reading session's links (§8.1, 0.42, F-227, F-228):
+#: cut off, whatever its reading session's links (observer §3.7, 0.42, F-227, F-228):
 #: "its subscribers hear nothing … it reports the read as not made, the
 #: reason its watch session's".
 WATCH_CUT_OFF = ("its watch session is cut off: it holds no link to another zenoh node, so the reader follows "
-                 "nothing and makes no read it would follow (core §8.1, 0.42)")
+                 "nothing and makes no read it would follow (observer §3.7, 0.42)")
 BESIDE_SUBSCRIBER = ("beside a liveliness subscriber: the session holds one, and a read there can complete "
-                     "without the tokens it covers (core §8.1, 0.37; Appendix B)")
+                     "without the tokens it covers (observer §3.7, 0.37; core Appendix B)")
 #: Why a read cannot be shown complete: this binding's links accessor
-#: failed, so §8.1's check could not be made (never a pass).
+#: failed, so observer §3.5's check could not be made (never a pass).
 LINKS_UNREADABLE = ("the session's links could not be read (Session.info.links() failed), so the "
-                    "read cannot be shown complete (core §8.1, 0.37, 0.38)")
+                    "read cannot be shown complete (observer §3.5, 0.37, 0.38)")
 #: Why a read made is possibly incomplete, and a round trip not standing,
-#: when its time reached its session's interests timeout (§8.1, 0.41; 0.44,
+#: when its time reached its session's interests timeout (observer §3.3, 0.41; 0.44,
 #: F-240: "as not standing … it was asked, so it was made").
 AT_INTERESTS_TIMEOUT = ("it ran to its session's interests timeout (routing/interests/timeout), where zenoh ends a "
-                        "liveliness GET its routers have not finished with the final reply alone (core §8.1, 0.41)")
-#: The three kinds of a read (§8.1, 0.37: "A read not made is a third kind,
+                        "liveliness GET its routers have not finished with the final reply alone (observer §3.3, 0.41)")
+#: The three kinds of a read (core 0.37's §8.1, now observer §3.5: "A read not made is a third kind,
 #: never folded into either").
 COMPLETE, POSSIBLY_INCOMPLETE, NOT_MADE = "complete", "possibly incomplete", "not made"
 
@@ -410,7 +414,7 @@ def _info(session: Any) -> Any:
 
 
 def links_held(session: Any) -> bool | None:
-    """§8.1 (0.38, "What the check reads"): whether the session holds a link
+    """observer §3.5 (0.38, "What the check reads"): whether the session holds a link
     to another node, by ``Session.info.links()``. zenoh drops a closing
     transport's links first, then answers the reads in flight, then removes
     the transport, so ``transports()`` can still list it when a read is
@@ -424,7 +428,7 @@ def links_held(session: Any) -> bool | None:
 
 def transports_held(session: Any) -> bool | None:
     """Whether the session lists a transport (``Session.info.transports()``):
-    what a scenario waits on to see a cut settle, never §8.1's check, which
+    what a scenario waits on to see a cut settle, never observer §3.5's check, which
     reads the links (0.38)."""
     try:
         return bool(_info(session).transports())
@@ -438,8 +442,8 @@ def marked(session: Any) -> bool:
 
 
 def declare_liveliness_subscriber(session: Any, selector: str, callback: Any, *, history: bool = False) -> Any:
-    """A liveliness subscriber, callback-driven (§8.1's handler rule), that
-    marks its session (§8.1, 0.37): no presence read is made there after."""
+    """A liveliness subscriber, callback-driven (observer §3.1's handler rule), that
+    marks its session (observer §3.7, 0.37): no presence read is made there after."""
     _MARKED[id(session)] = session
     handler = callback if isinstance(callback, zenoh.handlers.Callback) else zenoh.handlers.Callback(callback)
     return session.liveliness().declare_subscriber(selector, handler, history=history)
@@ -450,12 +454,12 @@ class Placement:
     """Where :func:`watch_or_beside` put a reader's subscriber: on a watch
     session or beside the reads, and whether the round trip there came back
     (None beside the reads, where none is made). A reader whose round trip
-    did not come back cannot show its seed complete (§8.1, 0.37)."""
+    did not come back cannot show its seed complete (observer §3.7, 0.37)."""
 
     watch: bool
     settled: bool | None
     #: the subscriber's selector as declared: on a watch session in no
-    #: namespace watching a namespaced deployment, its wire key (§8.1, 0.42)
+    #: namespace watching a namespaced deployment, its wire key (observer §3.7, 0.42)
     selector: str = ""
     #: the namespace stripped from every key heard, or None
     namespace: str | None = None
@@ -468,7 +472,7 @@ class Placement:
     @property
     def outside(self) -> int:
         """Keys heard outside the namespace, counted and never handed on
-        (§8.1, 0.42)."""
+        (observer §3.7, 0.42)."""
         return self.stripped.outside if self.stripped is not None else 0
 
 
@@ -477,7 +481,7 @@ SETTLE_TRIES = 3
 
 
 def watch_or_beside(session: Any, selector: str, callback: Any, *, history: bool = False) -> tuple[Any, Placement]:
-    """A reader's liveliness subscriber on its watch session (§8.1, 0.37),
+    """A reader's liveliness subscriber on its watch session (observer §3.7, 0.37),
     then the round trip there (tried :data:`SETTLE_TRIES` times), so the
     reading session holds none. For a session :func:`open_client` did not
     open, no watch session can be had: the subscriber goes beside the
@@ -515,7 +519,7 @@ def watch_or_beside(session: Any, selector: str, callback: Any, *, history: bool
 
 
 def watch_session(session: Any) -> Any | None:
-    """§8.1 (0.37): the **watch session** of a reader whose reading session
+    """observer §3.7 (0.37): the **watch session** of a reader whose reading session
     :func:`open_client` opened, opened the same way on first use (its
     interests timeout too), else None (a session zk2py cannot open again).
 
@@ -542,7 +546,7 @@ SETTLE_KEY = "zk2/*/*/@zk/settle"
 
 
 def settle_key(selector: str | None = None) -> str:
-    """§8.1 (0.41): the round trip's key, "a key no token holds … under a key
+    """observer §3.7 (0.41): the round trip's key, "a key no token holds … under a key
     ``…/@zk/settle``, inside the presence subtree the subscribers read, so a
     grant that admits them admits it": the subscriber's selector up to its
     ``@zk`` chunk, then ``settle`` (``zk2/lab/*/@zk/instance/*`` →
@@ -557,7 +561,7 @@ def settle_key(selector: str | None = None) -> str:
 
 @dataclass(frozen=True)
 class RoundTrip:
-    """One round trip on a watch session (§8.1, 0.37, 0.41), and whether it
+    """One round trip on a watch session (observer §3.7, 0.37, 0.41), and whether it
     **stands**: it ended at its routers' final reply (``finished``), with no
     error reply, before the session's interests timeout, through a session
     holding a link when it was asked and when it ended. ``why`` says why not;
@@ -578,7 +582,7 @@ class RoundTrip:
     asked_ns: int = 0
     #: the watch session's interests timeout was not known, so zenoh's
     #: default was taken: a round trip judged "before the interests
-    #: timeout" rests on it (§8.1, 0.42, F-232)
+    #: timeout" rests on it (observer §3.3, 0.42, F-232)
     interests_timeout_assumed: bool = False
     #: monotonic ns when the GET was dropped (its drop callback ran),
     #: whatever ended it: its routers' final reply, an error reply (its own
@@ -598,7 +602,7 @@ class RoundTrip:
 
 
 def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | None = None) -> RoundTrip:
-    """§8.1 (0.37): "one round trip on the watch session after declaring its
+    """observer §3.7 (0.37): "one round trip on the watch session after declaring its
     subscribers, and before the seed: a liveliness GET there whose answer it
     discards serves, since its final reply follows the declarations".
     0.41: of :func:`settle_key` (``selector`` is the subscribers'), which
@@ -607,7 +611,7 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
     error reply, before the session's interests timeout ("a round trip …
     that ended there as not standing", 0.44), and
     the session held a link before it and at its end: a watch session cut
-    off answers it at once, as it answers every liveliness GET (§8.1, 0.37),
+    off answers it at once, as it answers every liveliness GET (observer §3.7, 0.37),
     so that answer orders nothing. Its answer is discarded, so a round trip
     that could not stand is not asked: none through a session cut off, nor
     through one whose links cannot be read (review of PR #876)."""
@@ -654,22 +658,22 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
 
 
 #: Why a round trip or a read came back to its caller without an answer:
-#: the caller's wait ended first, and its GET runs on (core §8.1, 0.44).
+#: the caller's wait ended first, and its GET runs on (observer §3.7, 0.44).
 WAIT_ENDED = ("the wait ended first: the GET runs on, answered in full, and the next that needs one takes it up "
-              "(core §8.1, 0.44)")
+              "(observer §3.7, 0.44)")
 #: Why a round trip that ended standing does not stand for its caller: the
-#: watch session's transport moved while it ran (core §8.1, 0.41).
-MOVED_DURING = "the watch session's transport moved while it ran: it stands for no read after the move (core §8.1, 0.41)"
+#: watch session's transport moved while it ran (observer §3.7, 0.41).
+MOVED_DURING = "the watch session's transport moved while it ran: it stands for no read after the move (observer §3.7, 0.41)"
 #: Why a round trip that ended standing, taken up later, does not stand: the
 #: watch session held no link when it was taken up, a cut its listener had
-#: not yet told (core §8.1, 0.41, 0.42; review-bot on PR #885).
+#: not yet told (observer §3.7, 0.41, 0.42; review-bot on PR #885).
 CUT_OFF_SINCE = ("cut off since it ended: the watch session held no link when it was taken up, so it stands for "
-                 "no read after (core §8.1, 0.42)")
+                 "no read after (observer §3.7, 0.42)")
 
 
 class Flight:
     """One liveliness GET in flight, asked once on a thread of its own and
-    shared by every caller that waits for it (core §8.1, 0.44: "One round
+    shared by every caller that waits for it (observer §3.7, 0.44: "One round
     trip, and one read, at a time … the next that needs one takes up the one
     in flight"; 0.45, F-243: "whichever wait ended first, its caller's or
     the reader's own", in flight "from the GET's ask until its final reply
@@ -722,7 +726,7 @@ class Flight:
 
 
 def flight_timeout(session: Any, at_least: float = 0.0) -> float:
-    """A flight's own GET timeout (core §8.1, 0.44; 0.45's MAY, F-243: "ask
+    """A flight's own GET timeout (observer §3.7, 0.44; 0.45's MAY, F-243: "ask
     each GET with its own timeout at or above its session's interests
     timeout, where zenoh's runtime ends it"): above its session's interests
     timeout, where zenoh's runtime ends a liveliness GET its routers have
@@ -732,7 +736,7 @@ def flight_timeout(session: Any, at_least: float = 0.0) -> float:
 
 
 class Barrier:
-    """A watch session's round trips, one at a time (core §8.1, 0.44): "A
+    """A watch session's round trips, one at a time (observer §3.7, 0.44): "A
     reader SHOULD NOT ask a round trip while one it asked since its watch
     session's transport last moved is in flight … the next that needs one
     takes up the one in flight".
@@ -854,31 +858,31 @@ class Presence:
     #: its error replies, "<encoding>: <payload>" (``zenoh/string: Timeout``)
     errors: list[str] = field(default_factory=list)
     elapsed_s: float = 0.0
-    #: §8.1 (0.37): why the read was not made (:data:`CUT_OFF`,
+    #: observer §3.5 (0.37): why the read was not made (:data:`CUT_OFF`,
     #: :data:`BESIDE_SUBSCRIBER`), else None
     not_made: str | None = None
     #: the session's links were gone when the read ended: it was cut off
-    #: while it ran, so it is possibly incomplete (§8.1, 0.38, F-185)
+    #: while it ran, so it is possibly incomplete (observer §3.5, 0.38, F-185)
     cut_off_during: bool = False
     #: whether the session's links could be read, before the read and at its
     #: end; when not, the read cannot be shown complete
     links_checked: bool = True
     #: what ``Session.info.transports()`` said at the read's end, beside the
-    #: links: informative only (core §8.1, 0.38: the check reads the links)
+    #: links: informative only (observer §3.5, 0.38: the check reads the links)
     transports_at_end: bool | None = None
     #: its time reached its session's interests timeout, where zenoh ends a
-    #: liveliness GET with the final reply alone: possibly incomplete (§8.1,
+    #: liveliness GET with the final reply alone: possibly incomplete (observer §3.3,
     #: 0.41)
     at_interests_timeout: bool = False
     #: the session's interests timeout the read was judged against, in s
     interests_timeout_s: float | None = None
     #: zk2py could not read the session's interests timeout and took
-    #: zenoh's default: its completeness rests on that (§8.1, 0.42, F-232)
+    #: zenoh's default: its completeness rests on that (observer §3.3, 0.42, F-232)
     interests_timeout_assumed: bool = False
 
     @property
     def kind(self) -> str:
-        """§8.1 (0.37): complete, possibly incomplete, or not made."""
+        """observer §3.5 (0.37): complete, possibly incomplete, or not made."""
         if self.not_made is not None:
             return NOT_MADE
         return COMPLETE if self.complete else POSSIBLY_INCOMPLETE
@@ -889,7 +893,7 @@ class Presence:
 
     @property
     def reading(self) -> str:
-        """How a tool states this read (§8.1, 0.8): "A tool reports absence
+        """How a tool states this read (observer §3.4, 0.8): "A tool reports absence
         as what its reader could see. Where it cannot rule out a refusal, it
         SHOULD say so, as it says a read is possibly incomplete." A reader
         can never rule one out from the read itself (the CHANGELOG's "No
@@ -915,7 +919,7 @@ class Presence:
 def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
                   timeout: float = PRESENCE_TIMEOUT_S) -> Presence:
     """Every liveliness token under ``selector``, by a liveliness GET through
-    a callback handler (§8.1).
+    a callback handler (observer §3.1).
 
     ``**`` never crosses a verbatim chunk (§1.3), so the selector names
     ``@zk`` literally: ``zk2/*/*/@zk/**`` is every service's control
@@ -950,17 +954,17 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
             p.members.append(parsed)
         else:
             p.other.append(key)
-    # §8.1 (0.8): ended by the routers' final reply, and no error reply. A
+    # observer §3.3 (0.8): ended by the routers' final reply, and no error reply. A
     # GET whose drop never came is incomplete too.
     p.complete = finished and not p.errors
-    # §8.1 (0.41): "A reader MUST read a read whose time reached its
+    # observer §3.3 (0.41): "A reader MUST read a read whose time reached its
     # session's interests timeout as possibly incomplete": zenoh ends such a
     # GET with the final reply alone, no error reply. Its time is counted
     # from before the GET was asked to its final reply, so it is never less
     # than the time zenoh's runtime counted.
     if finished and p.elapsed_s >= p.interests_timeout_s:
         p.at_interests_timeout, p.complete = True, False
-    # §8.1 (0.37, 0.38): a session that reaches no node answers at once,
+    # observer §3.5 (0.37, 0.38): a session that reaches no node answers at once,
     # complete and empty; a read in flight when its last link goes is
     # answered so too. Checked again at the read's end, by the links (0.38,
     # F-185). A check that cannot be made, before or after, leaves the read
@@ -1028,7 +1032,7 @@ def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
     reply can displace the valid one.
 
     A selector that reaches a node's declaration records is refused when
-    this is called, before anything is asked (:func:`admin_guard`, §4.2,
+    this is called, before anything is asked (:func:`admin_guard`, observer §4.3,
     0.48), unless ``user_asked``. The GET itself is made at the first
     ``next()``, as before the guard, so a malformed selector still raises
     zenoh's ``ZError`` there.
@@ -1163,31 +1167,31 @@ def retrieve_bundle(session: zenoh.Session, iface: str, fingerprint: str,
     return r
 
 
-# -- §8.1 presence shapes, read twice (0.10) --------------------------------------
+# -- observer §3.2, presence shapes, read twice (0.10) ---------------------------------
 
 #: The grace between the two reads of a presence shape: "longer than the
-#: deployment's longest re-mint overlap" (§8.1, 0.10). The caller's choice;
+#: deployment's longest re-mint overlap" (observer §3.2, 0.10). The caller's choice;
 #: 1 s here, as every other wait of a conformance run.
 SHAPE_GRACE_S = 1.0
 
 
 def presence_shapes(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
                     timeout: float = PRESENCE_TIMEOUT_S) -> set[tuple[str, str, str]]:
-    """The presence shapes §8.1 (0.10) names as faults, as read once:
+    """The presence shapes observer §3.2 (0.10) names as faults, as read once:
     ``(instance key, what, interface)`` for
     - ``unlisted``: an interface token its instance's descriptor does not
       list;
     - ``no token``: an interface the descriptor lists with ``token`` true,
       unmarked, and no interface token, in a complete read (a read not
-      complete can miss a token, never invent one: §8.1, 0.37);
+      complete can miss a token, never invent one: observer §3.6, 0.37);
     - ``standby holding`` (0.39): an interface token for an interface its
-      descriptor marks ``"standby": true``. Core §6: "its descriptor
+      descriptor marks ``"standby": true``. Observer §6.1: "its descriptor
       disagrees with its tokens besides: it holds a token for an interface
       its descriptor says it exposes nothing of".
 
-    Core §6 (0.39), "Reading the mark": "An instance listing the interface
+    Observer §6.2 (0.39), "Reading the mark": "An instance listing the interface
     marked standby, and holding no token of it in a complete read … is a
-    standby: no finding of this check, nor of §8.1's fault shapes, since
+    standby: no finding of this check, nor of §3.2's fault shapes, since
     its listing claims nothing exposed." An instance whose descriptor GET
     gets no reply has no shape here: that silence is not a verdict (O5).
     "Exposed" is read from the descriptor alone, as listed with ``token``
@@ -1224,7 +1228,7 @@ def presence_shapes(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
 
 def presence_faults(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
                     grace_s: float = SHAPE_GRACE_S) -> tuple[set, set]:
-    """§8.1 (0.10): "A tool that decides a fault from the shape of presence
+    """observer §3.2 (0.10): "A tool that decides a fault from the shape of presence
     … MUST see it in two reads a grace apart … Start-up, re-mint and
     teardown pass through such shapes briefly, by design."
 
@@ -1236,16 +1240,16 @@ def presence_faults(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     return first & second, first - second
 
 
-# -- §3.3 meta.zid: whose stamp (0.10) -------------------------------------------
+# -- observer §4.4, meta.zid: whose stamp (0.10) --------------------------------------
 
 def attribute_stamp(stamp_id: str | None, descriptor: dict[str, Any]) -> str:
-    """S1's attribution by a tool (§3.3 ``meta``, 0.10): ``owner`` when a
+    """S1's attribution by a tool (observer §4.4, 0.10): ``owner`` when a
     state stamp's id is the owner's ``meta.zid``, ``foreign`` when it is
     another, ``unattributable`` when the descriptor states no zid ("Without
     it, a stamp's clock is unattributable, never foreign"), and
     ``unstamped`` for a reply with no timestamp.
 
-    §3.3 (0.11) "How a zid compares": "A tool MUST compare two zids by
+    observer §4.4 (0.11) "Two zids compare by value": "A tool MUST compare two zids by
     value, never by their text: case and leading zeros carry no meaning."
     A zid is hexadecimal (Appendix B), so its value is that number. A
     ``meta.zid`` that is not hexadecimal states no zid: unattributable."""
@@ -1321,9 +1325,9 @@ def memlock_note(limit: int | None = None) -> str:
             f"above which SHM falls back to TCP (core §7.4)")
 
 
-# -- §4.2 S4, through the routers' admin space (0.10 to 0.12, 0.48) ---------------
+# -- observer §4.2, S4 through the routers' admin space (0.10 to 0.12, 0.48) ----------
 
-#: §4.2 (0.11; the second selector since 0.48) "What the check reads".
+#: observer §4.2 (0.11; the second selector since 0.48) "What the check reads".
 S4_ROUTERS = "@/*/router"
 S4_STORAGES = "@/*/router/status/plugins/storage_manager/storages/**"
 #: 0.11's second selector, which 0.48 retired: its ``**`` intersects a
@@ -1331,7 +1335,7 @@ S4_STORAGES = "@/*/router/status/plugins/storage_manager/storages/**"
 #: that zk2py's readings can show it reaches them; never asked.
 S4_STORAGES_011 = "@/*/router/**/storage_manager/storages/**"
 
-#: §4.2 (0.48; any node's, 0.50, F-253) "What a tool does not ask": a node's
+#: observer §4.3 (0.48; any node's, 0.50, F-253) "What a tool does not ask": a node's
 #: declaration records, its ``linkstate/*`` and its ``route/successor/**``,
 #: which zenoh 1.10.1 answers while it holds its routing tables' read lock
 #: (Appendix B), from :mod:`zk2py.admin_records`, which the generator's
@@ -1341,7 +1345,7 @@ ADMIN_RECORDS = admin_records.ADMIN_RECORDS
 
 class AdminRecordsRefused(Exception):
     """A selector that intersects a node's declaration records, its
-    ``linkstate/*`` or its ``route/successor/**`` (§4.2, 0.48, 0.50): "A
+    ``linkstate/*`` or its ``route/successor/**`` (observer §4.3, 0.48, 0.50): "A
     tool MUST NOT ask a selector that intersects one of these keys of any
     node unless its user asks for that read". Not a ``ValueError``: the ``except ValueError``
     around a payload's JSON in zk2py's readers never swallows it."""
@@ -1363,7 +1367,7 @@ def admin_records_reached(selector: str) -> list[str]:
 
 def admin_guard(selector: str, *, user_asked: bool = False) -> None:
     """Refuse, before anything is sent, a selector that reaches a node's
-    declaration records (§4.2, 0.48), unless the user asked for that read.
+    declaration records (observer §4.3, 0.48), unless the user asked for that read.
     Every GET zk2py makes through :func:`_answers` passes here; no zk2py
     reader asks one, and none takes a user's selector. A malformed selector
     passes, and fails where it failed before the guard: at the GET, with
@@ -1372,14 +1376,14 @@ def admin_guard(selector: str, *, user_asked: bool = False) -> None:
     if reached and not user_asked:
         raise AdminRecordsRefused(f"{selector} intersects {reached}: a router answers those records under its "
                                   f"routing tables' read lock, and a declaration between two replies freezes it "
-                                  f"for good (§4.2, 0.48; Appendix B)")
+                                  f"for good (observer §4.3, 0.48; core Appendix B)")
 #: "an owner's state/** or @state/**", for every owner.
 S4_STATE = ("zk2/*/*/*/state/**", "zk2/*/*/*/@state/**")
 
 
 @dataclass
 class S4Reading:
-    """A tool's S4 check (§4.2): ``clean``, ``broken`` (a verified storage
+    """A tool's S4 check (observer §4.2): ``clean``, ``broken`` (a verified storage
     answers on owners' state) or ``unobservable`` ("Without it, a tool
     reports the check unobservable, never clean"; and an unverified answer
     "never contributes to a clean verdict", 0.12)."""
@@ -1400,7 +1404,7 @@ class S4Reading:
 
 
 def _self_consistent(a: Answer) -> bool:
-    """The reply's replier id is the zid its key names (§4.2, 0.12), by
+    """The reply's replier id is the zid its key names (observer §4.2, 0.12), by
     value (0.11)."""
     if a.key is None or a.replier is None:
         return False
@@ -1409,7 +1413,7 @@ def _self_consistent(a: Answer) -> bool:
 
 
 def verified_routers(session: zenoh.Session, records: list[Answer]) -> set[int]:
-    """§4.2 (0.13) "Verified routers, outward": "the routers the tool's
+    """observer §4.2 (0.13) "Verified routers, outward": "the routers the tool's
     session is connected to, and the session itself, are verified; so is
     every zid a verified router's own answer lists among its sessions with
     whatami router; and so on, until no new router is verified."
@@ -1440,7 +1444,7 @@ def verified_routers(session: zenoh.Session, records: list[Answer]) -> set[int]:
 
 
 def unverified_why(a: Answer, verified: set[int], storage: bool = False) -> str | None:
-    """§4.2 (0.12, 0.13) "Who answered": "A tool counts an answer as a
+    """observer §4.2 (0.12, 0.13) "Who answered": "A tool counts an answer as a
     router's only when the reply's replier id is the zid the key names, and
     that zid is a verified router." None when the answer counts, else why
     not, in the reference doctor's terms (0.13):
@@ -1461,7 +1465,7 @@ def unverified_why(a: Answer, verified: set[int], storage: bool = False) -> str 
 
 
 def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool = False) -> S4Reading:
-    """§4.2 (0.11; the second selector since 0.48): "The reference reads two
+    """observer §4.2 (0.11; the second selector since 0.48): "The reference reads two
     selectors: @/*/router, the routers that answer;
     @/*/router/status/plugins/storage_manager/storages/**, one key per
     storage a router's storage manager runs, its value the storage's
@@ -1518,7 +1522,7 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     for a in _answers(session, S4_STORAGES, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
             continue
-        # §4.2 (0.15): "A storage is an answer to the second selector whose
+        # observer §4.2 (0.15): "A storage is an answer to the second selector whose
         # key the selector includes, ending …/storage_manager/storages/<name>.
         # Any other answer is not a storage." Under 0.11's selector a
         # router's `router/queryable/<key expr>` record of a `**` queryable
@@ -1560,12 +1564,12 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     return out
 
 
-# -- §4.2 a tool's S1 check (0.16 to 0.18) -------------------------------------
+# -- observer §4.4, a tool's S1 check (0.16 to 0.18) --------------------------------
 
 def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str | None,
              timeout: float = GET_TIMEOUT_S, trust: bool = False) -> tuple[str, str]:
-    """§4.2 "A tool's S1 check" (0.16 to 0.18). "A tool attributes a state
-    reply's stamp by comparing its id with the owner's meta.zid (§3.3), by
+    """Observer §4.4, "A tool's S1 check" (0.16 to 0.18). "A tool attributes a state
+    reply's stamp by comparing its id with the owner's meta.zid (core §3.3), by
     value":
     - "A foreign stamp is a finding whatever else the tool read: an owner
       that is its own router stamps with that router's id, which is its own
@@ -1580,13 +1584,13 @@ def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str |
       owner".
     - "Otherwise S1 is unobservable for that owner, never clean."
 
-    Without ``meta.zid`` the stamp is ``unattributable`` (§3.3). The counted
+    Without ``meta.zid`` the stamp is ``unattributable`` (observer §4.4). The counted
     answers are the ``@/*/router`` answers that "Who answered" verifies.
     ``trust`` is 0.12's operator alternative. Returns (verdict, why)."""
     meta = descriptor.get("meta")
     zid = _zid_value(meta.get("zid") if isinstance(meta, dict) else None)
     if zid is None:
-        return "unattributable", "the descriptor states no meta.zid (§3.3)"
+        return "unattributable", "the descriptor states no meta.zid (observer §4.4)"
     who = attribute_stamp(stamp_id, descriptor)
     if who != "owner":
         return "finding", f"the stamp is {who}: an owner that is its own router stamps with its own meta.zid"
@@ -1760,10 +1764,10 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
                             "stands by is unobservable, or a read timed out"), reads
 
 
-# -- §5.1 O3 judged from outside (0.16, 0.17)--------------------------------------
+# -- observer §7.2, O3 judged from outside (0.16, 0.17) ---------------------------------
 
 def o3_verdict(result: CallResult, may_call: bool | None, present: bool | None = None) -> tuple[str, str]:
-    """§5.1 O3 judged from outside (0.16, 0.17). "No tool can observe its
+    """Observer §7.2, O3 judged from outside (0.16, 0.17). "No tool can observe its
     grants (§11.3). It learns that they let it call from its operator, or
     from the deployment's §11.1 input when it holds one; a deployment that
     runs no access control lets every principal call. Told so, the tool

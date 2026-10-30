@@ -34,7 +34,7 @@ access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
 generated grants; ``security4``, ``zk2py.security_scenarios``: §4 on
 zk2py's block and on ``zenctl acl gen``'s, core 0.50), ``hostid.v1`` with core R1's ``self.system``
 providers (0.20), ``freshness.v1``'s re-puts and judgements (0.21), and
-``health.v1`` (text 0.2), the population budget (core §2.7, 0.24), and a
+``health.v1`` (text 0.2), the population budget (core §2.7 and observer §5, 0.24), and a
 late joiner's seed (core §4.2, 0.26), across both implementations.
 ``--only`` picks some of them.
 
@@ -551,7 +551,7 @@ def run_rust_behind_r1(report: Report, exe: Path) -> None:
                               "by meta.zid (§3.3, 0.10), and that zid is not R1's",
                          [r.payload for r in st.replies] == [b"ok"] and who == ["owner"] and zid != r1_zid,
                          f"{[(r.payload, r.stamp_id) for r in st.replies]} {who}, meta.zid {zid}, R1 {r1_zid}")
-            # §3.3 (0.11): "A tool MUST compare two zids by value". The same
+            # observer §4.4 (0.11): "A tool MUST compare two zids by value". The same
             # zid in capitals, padded to 32 digits, is another text.
             respelled = str(zid).upper().rjust(32, "0")
             again = [live.attribute_stamp(r.stamp_id, {"meta": {"zid": respelled}}) for r in st.replies]
@@ -955,7 +955,7 @@ def run_python_s1(report: Report) -> None:
             cid = [None if x.timestamp is None else str(x.timestamp).split("/", 1)[1] for x in control]
             report.check(run, "the control: an unstamped put through R1 arrives with R1's zid",
                          cid == [r1_zid], f"{cid} vs {r1_zid}")
-            # §3.3 (0.10): a tool attributes a stamp by the descriptor's
+            # observer §4.4 (0.10): a tool attributes a stamp by the descriptor's
             # meta.zid, read from the bus.
             d = live.get_descriptor(consumer, owner.instance_key)
             doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
@@ -1761,7 +1761,7 @@ def run_python_tool_rules(report: Report) -> None:
 def run_python_016(report: Report) -> None:
     """The rules 0.16 states, where zk2py's bus shows them (no access
     control; R1's admin space on, read-only):
-    - §4.2 "A tool's S1 check": an owner in client mode under R1 is judged
+    - observer §4.4, "A tool's S1 check": an owner in client mode under R1 is judged
       by its stamp against meta.zid (clean); an owner whose own session is
       a router, linked to R1, is unobservable, neither clean nor a finding;
     - Appendix B: without the replier id, every admin answer is unverified,
@@ -1808,7 +1808,7 @@ def run_python_016(report: Report) -> None:
                          verdict == "unobservable" and "own router" in why
                          and live.attribute_stamp(stamp, doc) == "owner",
                          f"{verdict}: {why}; the stamp alone reads {live.attribute_stamp(stamp, doc)!r}")
-            # §4.2 (0.17): a foreign stamp. The owner's clock is another
+            # observer §4.4 (0.17): a foreign stamp. The owner's clock is another
             # session's HLC, so its state carries that session's id.
             other = live.open_client(r1_endpoint)
             try:
@@ -2957,7 +2957,7 @@ def run_python_budget(report: Report, exe: Path) -> None:
                      v.pair() == {"verdict": "exceeds", "reason": "over_bound"}, f"{reading}; {v.pair()}")
 
         # -- a stream: best effort is unobservable at any length (0.25) ---------
-        run = "core 0.25 §2.7: a best-effort templated stream of cardinality 2, read by a window"
+        run = "core 0.25 §2.7 (observer §5.2): a best-effort templated stream of cardinality 2, read by a window"
         qos_of = {f"{r['token']}/{r['template']}": (r["reliability"], r["congestion"])
                   for r in contract.canonical["resources"]}
         w_good = bg.Window(tool, f"{base}/stream/samples/*", "lab/budget", qos=qos_of["stream/samples/{id}"])
@@ -2985,7 +2985,7 @@ def run_python_budget(report: Report, exe: Path) -> None:
                      f"refused {refused!r}; good {vg.pair()} ({w_good.lossless_reason()}), over {vo.pair()}")
 
         # -- an event: a window of one retention ---------------------------------
-        run = "core 0.25 §2.7: a templated event, cardinality 2, rate low, retention 60 s, reliable and block"
+        run = "core 0.25 §2.7 (observer §5.2): a templated event, cardinality 2, rate low, retention 60 s, reliable and block"
         w_ov_ev = bg.Window(tool, f"{obase}/events/alarms/*/*", "lab/over", event=True,
                             qos=qos_of["events/alarms/{id}"])
         windows.append(w_ov_ev)
