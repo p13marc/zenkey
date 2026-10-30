@@ -4557,6 +4557,21 @@ fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
 
 /// §7.4, locally: below the floor, an `@stream` writer's shared memory
 /// falls back to TCP and nothing tells its sender.
+/// What a soft `RLIMIT_MEMLOCK` of `limit` bytes admits, in words
+/// (`spec/observer.md` §7.4, text 0.2, F-290): a pool is a publisher's,
+/// which this tool does not know, so the check says the largest pool the
+/// limit covers, the limit less 2 MiB (core §7.4), or that it covers none.
+fn pool_admitted(limit: u64) -> String {
+    const SLACK: u64 = 2 * 1024 * 1024;
+    match limit.checked_sub(SLACK) {
+        Some(pool) if pool > 0 => format!(
+            "it admits a shared-memory pool of at most {} KiB, the limit less 2 MiB",
+            pool / 1024
+        ),
+        _ => "it admits no shared-memory pool: every pool needs its own size plus 2 MiB".to_owned(),
+    }
+}
+
 fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
     const C: CheckId = CheckId::ShmMemlockLow;
     const MIB: u64 = 1024 * 1024;
@@ -4570,12 +4585,13 @@ fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
                 DoctorSeverity::Info,
                 "this host",
                 format!(
-                    "RLIMIT_MEMLOCK is {} KiB, below the {} MiB floor: a shared-memory pool of \
-                     a service started under it falls back to TCP silently (a deployment \
-                     SHOULD allow the pool plus 2 MiB). This is zenctl's own limit, as \
-                     inherited where it runs",
+                    "RLIMIT_MEMLOCK is {} KiB, below the {} MiB floor: {}, and a shared-memory \
+                     pool of a service started under it that needs more falls back to TCP \
+                     silently (a deployment SHOULD allow the pool plus 2 MiB). This is zenctl's \
+                     own limit, as inherited where it runs",
                     l / 1024,
-                    floor / MIB
+                    floor / MIB,
+                    pool_admitted(l)
                 ),
             )],
             vec![],
@@ -4586,14 +4602,18 @@ fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
             vec![],
             vec![],
             format!(
-                "RLIMIT_MEMLOCK is {} KiB, at or above the {} MiB floor",
+                "RLIMIT_MEMLOCK is {} KiB, at or above the {} MiB floor: {}",
                 l / 1024,
-                floor / MIB
+                floor / MIB,
+                pool_admitted(l)
             ),
         ),
-        Some(Memlock::Unlimited) => {
-            CheckReport::of(C, vec![], vec![], "RLIMIT_MEMLOCK is unlimited")
-        }
+        Some(Memlock::Unlimited) => CheckReport::of(
+            C,
+            vec![],
+            vec![],
+            "RLIMIT_MEMLOCK is unlimited: it admits a shared-memory pool of any size",
+        ),
         Some(Memlock::Unknown) => CheckReport::unobservable(
             C,
             "RLIMIT_MEMLOCK could not be read on this host (getrlimit failed)",
@@ -5500,8 +5520,22 @@ mod tests {
         let f = found(&at(Memlock::Limited(64 * 1024))).clone();
         assert_eq!(f.severity, DoctorSeverity::Info);
         assert!(f.evidence.contains("64 KiB"), "{f:?}");
-        clean(&at(Memlock::Limited(zenkey::shm::MEMLOCK_FLOOR)));
-        clean(&at(Memlock::Unlimited));
+        // observer.md §7.4 (text 0.2, F-290): what the limit admits, since
+        // the pool is a publisher's: none below 2 MiB, else the limit less
+        // 2 MiB.
+        assert!(
+            f.evidence.contains("it admits no shared-memory pool"),
+            "{f:?}"
+        );
+        let f = found(&at(Memlock::Limited(4 * 1024 * 1024))).clone();
+        assert!(
+            f.evidence
+                .contains("a shared-memory pool of at most 2048 KiB"),
+            "{f:?}"
+        );
+        let at_floor = clean(&at(Memlock::Limited(zenkey::shm::MEMLOCK_FLOOR)));
+        assert!(at_floor.contains("at most 6144 KiB"), "{at_floor}");
+        assert!(clean(&at(Memlock::Unlimited)).contains("any size"));
         // An unreadable limit is not an unlimited one (#677).
         assert!(unseen(&at(Memlock::Unknown)).contains("could not be read"));
     }
