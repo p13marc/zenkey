@@ -40,7 +40,8 @@ that exists. Per file it reports three figures.
       item or a parenthesis (`0.37,`, `0.37)`, `0.37;`, `0.37:`, `0.37's`,
       `0.37 (`).
     - A number with a unit (`0.5 s`), a range (`0.6–4 %`), a dependency's
-      version (`uhlc 0.8's`) and anything in inline code are not versions.
+      version (`uhlc 0.8's`), a section number (`§0.2,`) and anything in
+      inline code are not versions.
     - Tags are counted in prose, tables and headings alike.
 
 What is history, where tags are not counted (its sentences still are):
@@ -113,7 +114,7 @@ END = re.compile(r"[.!?][\"'”’)\]*_]*\s+(?=[A-Z0-9§*\"“‘(\[`_])")
 FINDING = re.compile(r"\bF-\d+\b")
 ISSUE = re.compile(r"(?<![\w&/])#\d+\b")
 ROUND = re.compile(r"\b[Rr]ound \d+\b")
-VERSION = re.compile(r"(?<![\w./\-–])0\.\d+(?!\d)")
+VERSION = re.compile(r"(?<![\w./\-–§])0\.\d+(?!\d)")
 # The word before a number that makes it a version whatever follows it.
 VERSION_WORDS = {"core", "text", "observer", "since", "amendment"}
 # The word before a number that makes it something else: a dependency's
