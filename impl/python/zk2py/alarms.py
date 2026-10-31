@@ -1585,6 +1585,12 @@ class OwnerReading:
     #: apart". After §2.9's re-put, no reply of the present instance carries
     #: an earlier one's stamp.
     foreign: list[str] = field(default_factory=list)
+    #: observer §4.1 (0.11): "A tool that bounds what it holds counts the
+    #: keys the bound forgot, and reports the count": the keys the
+    #: subscription's recording forgot, and its note (round 92). zk2py marks
+    #: neither a forgotten key nor its next value.
+    forgotten: int = 0
+    bound: str = ""
 
     def answers(self, horizon: fr.Horizon = HORIZON) -> dict[str, tuple[Answer, Answer]]:
         return {k: (judge(r, Q_FIRING, horizon), judge(r, Q_STALE, horizon)) for k, r in self.readings.items()}
@@ -1649,6 +1655,8 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
     if subscriber is not None:
         with subscriber.lock:
             known |= {k for k in subscriber.deliveries if k.startswith(prefix)}
+        # observer §4.1 (0.11): the bound's count, reported with what it holds
+        out.forgotten, out.bound = subscriber.forgotten, subscriber.note()
     trust = trust or fr.ClockTrust(word=True)
     for key in sorted(known):
         obs: list[Any] = []

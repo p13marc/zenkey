@@ -436,6 +436,8 @@ class Subscriber:
     (:data:`zk2py.seed.MAX_KEYS` unless told otherwise), the least recently
     arrived forgotten first, whole, and counted in ``forgotten``. A
     forgotten key then holds nothing: no delivery, as before its first.
+    Since observer 0.11 the count is reported: :meth:`note`, and each
+    reader's reading carries ``forgotten`` (round 92).
 
     **What it then says of a key it holds nothing of** (round 91, review-bot
     on PR #971): it cannot tell a forgotten key from one never heard, so
@@ -499,6 +501,14 @@ class Subscriber:
         with self.lock:
             return list(self.deliveries)
 
+    def note(self) -> str:
+        """The bound's count, reported (observer §4.1, 0.11: "counts the keys
+        the bound forgot, and reports the count"; :func:`zk2py.seed.bound_note`)."""
+        from . import seed
+
+        with self.lock:
+            return seed.bound_note(self.forgotten, self.max_keys)
+
     def of(self, key: str) -> list[Received]:
         with self.lock:
             return list(self.deliveries.get(key, []))
@@ -561,6 +571,16 @@ def get_reading(session: Any, key: str, timeout: float = 1.0) -> GetReading:
 
 # -- a tool's verdict on a service's resources (§5, scenarios §6) ------------------
 
+class ServiceRead(dict):
+    """:func:`read_service`'s answer: ``{"<token>/<template>": (verdict,
+    members)}``, and ``forgotten``, the count of keys its recording's bound
+    forgot over the window, with its ``note`` (observer §4.1, 0.11: "counts
+    the keys the bound forgot, and reports the count"; round 92)."""
+
+    forgotten: int = 0
+    note: str = ""
+
+
 def read_service(session: Any, address: str, contracts: list[dict[str, Any]], window_s: float,
                  trust: ClockTrust, on_subscribed: Any = None,
                  get_timeout: float = 1.0) -> dict[str, tuple[Verdict, dict[str, dict[str, str]]]]:
@@ -576,7 +596,8 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
     ``{"<token>/<template>": (verdict, {member key: {"verdict", "reason"}})}``:
     each member's reason is kept beside its token (:func:`member_fields`,
     observer §1, text 0.5), so a deleted member reads not asked, ``deleted``,
-    never a bare not asked."""
+    never a bare not asked. The answer is a :class:`ServiceRead`, which also
+    reports how many keys the recording's bound forgot (observer §4.1, 0.11)."""
     from .owner import _template_key
 
     plain = []
@@ -604,7 +625,8 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
         now_mono, now_utc = time.monotonic_ns(), time.time_ns()
         import zenoh
 
-        out: dict[str, tuple[Verdict, dict[str, dict[str, str]]]] = {}
+        out = ServiceRead()
+        out.forgotten, out.note = sub.forgotten, sub.note()
         for _, r, key in plain:
             rid = f"{r['token']}/{r['template']}"
             h = horizon(r["kind"], r["annotations"])

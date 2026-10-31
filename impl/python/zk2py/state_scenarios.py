@@ -212,7 +212,7 @@ def section10(report: Report, run: Run | None = None) -> None:
                      f"{_show(entry('d'))}; arrivals {[(x.via, x.outcome) for x in d_all]}")
         report.check(sec, "expected 5: the seed ran to its final reply, with no error reply: complete",
                      ended and lj.seed.complete and not lj.seed.errors,
-                     f"ended {ended}, complete {lj.seed.complete}, errors {lj.seed.errors}")
+                     f"ended {ended}, complete {lj.seed.complete}, errors {lj.seed.errors}; {lj.bound_note()}")
         lj.close()
 
         # Step 6, the control: the other order.
@@ -346,7 +346,7 @@ def section7(report: Report, run: Run | None = None) -> None:
         held = lt.view().get(f"{base}/r")
         report.check(sec, "expected 2: the tool's late joiner keeps §4.2's merge for as long as it follows "
                           "(observer §4.1): rev 10's later time over the new epoch's values",
-                     held is not None and held.payload == b"rev10", _show(held))
+                     held is not None and held.payload == b"rev10", f"{_show(held)}; {lt.bound_note()}")
     finally:
         for j in joiners:
             j.close()
@@ -466,7 +466,8 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
             want = b"rev10" if offset_s else b"rev11"
             report.check(sec, f"observer §4.1 (0.10): the tool keeps the merge across ids: the later time, "
                               f"{want.decode()}",
-                         heldt is not None and heldt.payload == want, f"{_show(heldt)}; {order[1]}")
+                         heldt is not None and heldt.payload == want,
+                         f"{_show(heldt)}; {order[1]}; {lt.bound_note()}")
             try:
                 q.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway

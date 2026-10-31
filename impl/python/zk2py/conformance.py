@@ -3429,7 +3429,7 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
-        + _round91_readings(root)
+        + _round91_readings(root) + _round92_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -3492,12 +3492,15 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "It MUST accept a value under an id other than the one its held value carries, and order by time "
                  "within that id from then on.",
                  "A profile MAY order a consumer's values more strictly.",
-                 "or, for a consumer across two timestamp ids, by §4.3's consumer rule.",
-                 "So a consumer's merge has no end to state")
+                 # Re-read under core 0.69 and observer 0.11 (round 92): F-401
+                 # split the merge's MUST, F-403 reworded "no end to state" and
+                 # F-398 the bound, each the same rule as 0.68 stated it.
+                 "Across two timestamp ids, a consumer MUST instead keep what §4.3's consumer rule accepts.",
+                 "So a consumer has no instant at which its merge ends")
          + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows, "
                    "across two timestamp ids too.",
-                   "A tool that bounds what it holds counts what the bound forgot, and treats a forgotten key as "
-                   "holding nothing.")
+                   "A tool that bounds what it holds counts the keys the bound forgot, and reports the count. A "
+                   "forgotten key holds nothing")
          + present(core, "merges as §4.2 says, and the consumer rule", "It MUST accept the first value under a new id",
                    "A consumer MUST order an owner's values"), []),
         ("F-379, F-380, F-381 and F-387: §7.3 by each payload's declared type, §2.4's opt-in, §2.5's places, and "
@@ -3624,6 +3627,82 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  sd.merged([(st(5, "a1"), False, b"x"), (st(6, "a1"), True, b"")])[1],
                  sd.merged([(st(5, "a1"), False, b"x"), (None, False, b"u")])[2], sd.merged([])],
                 [b"old", b"x", True, b"x", None]))
+    return out
+
+
+def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.69 and ``observer.md`` 0.11, round 91's answers (#609, round 92;
+    #926 part 4). What zk2py implements of them: observer §4.1's bound, "A
+    tool that bounds what it holds counts the keys the bound forgot, and
+    reports the count" (F-398). Round 91 counted and showed nothing. Now
+    every reading of a bounded merge or recording carries the count:
+    :func:`zk2py.seed.bound_note`, a tool's :meth:`zk2py.seed.LateJoiner.bound_note`,
+    :meth:`zk2py.freshness.Subscriber.note`, and ``forgotten`` on the
+    alarms, health and config readings and on
+    :func:`zk2py.freshness.read_service`'s answer. Read with no session: a
+    fake one stands in, whose GETs end at once with no reply."""
+    from . import alarms as al
+    from . import config as cf
+    from . import freshness as fr
+    from . import health as hl
+    from . import seed as sd
+
+    out: list[tuple[str, Any, Any]] = []
+
+    class Fake:
+        """A session that declares nothing and whose GETs, liveliness ones
+        included, end at once with no reply."""
+
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+        def get(self, selector: str, handler: Any, **kw: Any) -> None:
+            handler.drop()
+
+        def liveliness(self) -> "Fake":
+            return self
+
+    sel = "zk2/g/s/zk2py_plans.v1/state/plans/*"
+
+    def joiner() -> list[Any]:
+        lj = sd.LateJoiner(Fake(), sel, consumer=False, max_keys=2)
+        for key in ("a", "b", "c", "d", "a"):
+            lj._merge(f"zk2/g/s/zk2py_plans.v1/state/plans/{key}", "live", False, key.encode(), "", "200/a1")
+        return [lj.forgotten, lj.bound_note()]
+
+    out.append(("observer §4.1 (0.11): a tool's late joiner reports the count of keys its bound forgot (bounded at "
+                "two, five arrivals on four keys, a forgotten again after it came back: three forgettings), and what "
+                "the count costs; a consumer's says it has no bound",
+                [joiner(), sd.LateJoiner(Fake(), sel, consumer=True).bound_note(),
+                 sd.bound_note(0, sd.MAX_KEYS)],
+                [[3, "3 keys forgotten by the merge's bound of 2 keys (observer §4.1): a forgotten key's next value "
+                     "was kept whatever its stamp, so the merge did not order every key"],
+                 "the merge holds every key it heard: it has no bound (observer §4.1)",
+                 f"0 keys forgotten by the merge's bound of {sd.MAX_KEYS} keys (observer §4.1)"]))
+
+    def recorded(address: str, keys: list[str]) -> fr.Subscriber:
+        sub = fr.Subscriber(Fake(), f"zk2/{address}/**", max_keys=1)
+        for i, key in enumerate(keys):
+            sub._record(key, fr.Received("put", sub.declared_ns + i, 0, b"{}", "application/json", None, None,
+                                         None))
+        return sub
+
+    hk = "zk2/lab/svc/health.v1/state/status"
+    h = hl.read_across(recorded("lab/svc", ["zk2/lab/svc/health.v1/state/checks/x", hk]), "lab/svc", True)
+    ck = "zk2/lab/rf0/config.v1/state/view"
+    c = cf.read(Fake(), "lab/rf0", subscriber=recorded("lab/rf0", ["zk2/lab/rf0/config.v1/state/status", ck]),
+                presence=False, lists=True)
+    ak = f"zk2/lab/al/{al.PROFILE}/{al.TOKEN}/{al.PREFIX}/k1"
+    a = al.read_owner(Fake(), "lab/al", subscriber=recorded("lab/al", [ak[:-1] + "0", ak]), get=False)
+    srv = fr.read_service(Fake(), "lab/svc", [], 0.0, fr.ClockTrust(word=True))
+    out.append(("observer §4.1 (0.11): each reader's reading reports the count its recording's bound forgot "
+                "(health.v1's §2.11 reader, config.v1's §5 reader, alarms.v1's reader, freshness.v1's tool), "
+                "beside what it holds: the key heard last",
+                [[h.forgotten, h.level is not None], [c.forgotten, c.bound.startswith("1 key forgotten"),
+                                                      c.view is not None],
+                 [a.forgotten, a.bound.startswith("1 key forgotten"), sorted(a.readings) == [ak]],
+                 [isinstance(srv, dict), srv.forgotten, srv.note.startswith("0 keys forgotten")]],
+                [[1, True], [1, True, True], [1, True, True], [True, 0, True]]))
     return out
 
 
