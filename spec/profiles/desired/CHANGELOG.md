@@ -20,9 +20,8 @@ its startup values for good: the state §2.16 exists to avoid.
 a restart (§2.16), and at each appearance of its author's instance token.
 The evidence is scenarios §12, now cited beside §1 and §5: Expected 1's
 second branch, the re-minted owner acting on revision 1 again, needs the
-seed. zk2py's owner
-seeds at its re-mint and runs that branch. The reference refuses the
-re-mint, so it runs the first branch.
+seed. zk2py's owner seeds at its re-mint and runs that branch. The
+reference refuses the re-mint, so it runs the first branch.
 
 **Deliberately not changed:** §2.7's general rule, that a re-mint keeps
 the run, and every other target's seeds. No fixture moved.
