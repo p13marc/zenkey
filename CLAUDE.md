@@ -1227,7 +1227,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   carries, no ε and governance from every revision held, and that it has
   listened from its stream subscriptions' declaration; text 0.4, #935:
   inline history out, no rule changed; text 0.5: round 88's F-349
-  rewritten).
+  rewritten), and `wire` (#976 A1): core §7.5's zk2c envelope, `Header`/`Form`/`Tag`/`Run`/`Seq`/`Stamp`, `Envelope::parse`/`write` for a put's mutation and `DeleteStamp::parse`/`write` for a delete's attachment, `Refusal::token` the fixtures' tokens; nothing else uses it yet.
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1635,9 +1635,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   the rule its tags when it has none of its own, as the header now
   says; S7's MUST to accept another id shows §4.3's MAY for a profile's
   stricter order after it (0.69, F-394), and a bracket may also give a
-  verb the sentence omits. 171 rules, 20 citing none, 9 of
+  verb the sentence omits. 173 rules, 20 citing none, 9 of
   them MUSTs (#965's; S7's two consumer MUSTs cite `state.md` §7 since
-  0.68). The glossary holds 52 terms. Core 0.68 and observer
+  0.68). The glossary holds 53 terms. Core 0.72 (#976's A1, epic #975) defines §7.5's zk2c envelope ahead of its use, adopted by no rule: CH (form bits 7–5, run width bit 4, tag bits 3–0), a 16- or 32-bit run and a 24-bit seq, big-endian, then the record; a mutation (code 0) is a put's payload, a delete (code 1) a delete's attachment, codes 2–7 reserved; its refusals (short, form, sample_kind, tag, short, trailing, first match) and its round trip are static, §12 listing §7.5 beside §1 and §9; `spec/conformance/envelope/vectors.json` is its evidence. Core 0.68 and observer
   text 0.10 (#926 part 3, zk2py round 90's F-379 to F-392) changed five
   rules: a late joiner keeps the newer by the owner's stamp, but across
   two ids a consumer orders by S7 from its first value on, its seed's
