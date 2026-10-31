@@ -934,11 +934,13 @@ def render(rules: list, ids: list) -> str:
          "Those, such as `observer.md` §1, §2, §5 and §8, are not listed.")
     para(w, "A long sentence is shortened, never reworded, and its link leads to the "
          "rest. A sentence after its paragraph's run-in label shows the label first. "
-         "A pronoun's noun, where not shown, follows it in brackets. A lead-in to a "
-         "list ends with its length, \"(3 items)\". Nothing else is added.")
+         "A pronoun's noun, where not shown, follows it in brackets. A lead-in ends "
+         "with its list's length, \"(3 items)\", or its table's. Nothing else is "
+         "added.")
     para(w, "**Evidence** is what the text cites beside a rule. That is the tags "
-         "after its sentence, else those after it in its paragraph. A tag that "
-         "closes a list cites each rule of the list. Where the text cites none, the "
+         "after its sentence, else in its paragraph. A tag that "
+         "closes a list cites each rule of it that cites none. Where the text cites "
+         "none, the "
          "entry says \"none cited\". A rule's id is its row's, its section's, or the "
          "code that checks it. MAY grants a permission, and is not listed.")
     para(w, "**Conformance by role.** An implementation claims one class for each "
