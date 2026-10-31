@@ -21807,7 +21807,13 @@ each against its section:
   `merged`, the merge for a reader that records and merges when it reads.
   `ordered`, round 90's seed-then-S7, is gone.
 - **`zk2py/freshness.py`:** `Subscriber` bounded at `MAX_KEYS` keys,
-  counting `forgotten`, its keys read under its lock (`keys()`).
+  counting `forgotten`, its keys read under its lock (`keys()`). A key it
+  holds nothing of, forgotten or never heard, has been listened to only
+  since the last forgetting (`forgot_ns`), so a judge never reads a
+  forgotten silence as heard (F-398; review-bot on PR #971).
+- **A consumer refuses a bound:** `seed.Merge("S7", n)` and
+  `LateJoiner(consumer=True, max_keys=n)` raise. Observer §4.1's bound is a
+  tool's, and a key S7 forgot would take any stamp as its first again.
 - **`zk2py/alarms.py`, `health.py`, `config.py`:** each reader's subscription
   and GET merged through `seed.merged`.
 - **`zk2py/classes.py`:** the six re-keyed verdicts, §8.4's two under
@@ -21815,14 +21821,15 @@ each against its section:
   index. 168 rows walked, 0 without a verdict, 11 beyond the index.
 - **`zk2py/state_scenarios.py` §7 and `live_interop`'s `s7`:** `state.md`
   §7 step 2 inside the seed, live (F-393).
-- **`readings`: 726, up from 717.** Nine, in `_round91_readings`: each text
-  at its version, F-379 to F-392's answers as they read and the old forms
-  gone, a consumer and a tool inside a seed on a fake session, S7 within one
-  id, a tool's bound in `LateJoiner` and in `Subscriber`, and the readers'
-  merge. Round 90's late joiner readings are re-read under 0.68: the
+- **`readings`: 728, up from 717.** Eleven, in `_round91_readings`: each
+  text at its version, F-379 to F-392's answers as they read and the old
+  forms gone, a consumer and a tool inside a seed on a fake session, S7
+  within one id, a tool's bound in `LateJoiner` and in `Subscriber`, the
+  readers' merge, a consumer's bound refused, and a forgotten key's
+  listening dated from the forgetting. Round 90's late joiner readings are re-read under 0.68: the
   consumer's seed by S7, and no switch at the GET's end.
 
-**`just py-conformance`: 3683 of 3683.**
+**`just py-conformance`: 3685 of 3685.**
 
 **Live, round 91**, against the black boxes, by (owner, readers):
 - **`state.md` §7 step 2:** zk2py, zk2py (`state_scenarios` §7) **15 of 15**:

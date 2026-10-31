@@ -4523,7 +4523,14 @@ The profiles' classes, by role, are round 89's table above.
   `seed.MAX_KEYS` (65,536) keys, the least recently arrived forgotten
   first and counted in `forgotten`, a forgotten key holding nothing.
   `freshness.Subscriber`, the recording the alarms, health and config
-  readers merge from, is bounded and counted the same way.
+  readers merge from, is bounded and counted the same way. A consumer's
+  late joiner refuses a bound: observer §4.1's is a tool's, and a key S7
+  forgot would take any stamp as its first again.
+- **A key the bound forgot reads as heard of since the forgetting.** The
+  subscriber cannot tell it from a key never heard, so it dates its
+  listening to every key it holds nothing of from its last forgetting. A
+  freshness judge then says less, never more: "no delivery" only for a
+  silence it held (F-398; review-bot on PR #971).
 - **The readers' merge.** The alarms, health and config readers merge
   through `seed.merged`: by time, then by id as `Latest` compares, a delete
   kept by its stamp. Round 90's health and config readers took the
@@ -4536,7 +4543,7 @@ The profiles' classes, by role, are round 89's table above.
   the consumer keeps it, the old epoch's, whichever clock is ahead
   (F-393). The tool keeps the later time.
 
-**`readings`: 726, up from 717.** **`just py-conformance`: 3683 of 3683.**
+**`readings`: 728, up from 717.** **`just py-conformance`: 3685 of 3685.**
 
 **Live, round 91**, by (owner, readers):
 - `state_scenarios` §7: zk2py, zk2py **15 of 15**, §7's first run and the
