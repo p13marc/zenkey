@@ -3452,6 +3452,13 @@ def run_python_s7(report: Report, exe: Path) -> None:
         r1.close()
 
 
+def run_python_s7_both(report: Report, exe: Path) -> None:
+    """``live_interop --only s7``: :func:`run_python_s7`, then
+    :func:`run_python_s7_inside`."""
+    run_python_s7(report, exe)
+    run_python_s7_inside(report, exe)
+
+
 def run_python_s7_inside(report: Report, exe: Path) -> None:
     """``state.md`` §7 step 2's new epoch *inside* a late joiner's seed
     (core 0.68, F-382; round 91's F-393), over the owner example: it puts
@@ -3581,7 +3588,7 @@ def main(argv: list[str] | None = None) -> int:
         "health": lambda r: run_python_health(r, args.owner, args.consume),
         "budget": lambda r: run_python_budget(r, args.owner),
         "seed": lambda r: run_python_seed(r, args.owner),
-        "s7": lambda r: (run_python_s7(r, args.owner), run_python_s7_inside(r, args.owner)),
+        "s7": lambda r: run_python_s7_both(r, args.owner),
         "config": lambda r: run_python_config(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
         "security4": lambda r: _run_security4(r, args.zenctl),

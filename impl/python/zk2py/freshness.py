@@ -435,7 +435,15 @@ class Subscriber:
     keys are a tool's merge state. It holds at most ``max_keys`` keys
     (:data:`zk2py.seed.MAX_KEYS` unless told otherwise), the least recently
     arrived forgotten first, whole, and counted in ``forgotten``. A
-    forgotten key then holds nothing: no delivery, as before its first."""
+    forgotten key then holds nothing: no delivery, as before its first.
+
+    **What it then says of a key it holds nothing of** (round 91, review-bot
+    on PR #971): it cannot tell a forgotten key from one never heard, so
+    :meth:`observation` dates the listening of every such key from the last
+    forgetting (``forgot_ns``), never from the declaration. "No delivery in
+    the window" then stays true of what it held, and a silence it forgot
+    never reads as one it heard: a judge can only say less, never more
+    (observer §4.1, F-398)."""
 
     def __init__(self, session: Any, selectors: str | list[str], trust: ClockTrust | None = None,
                  max_keys: int | None = None):
@@ -449,6 +457,8 @@ class Subscriber:
         self.max_keys = seed.MAX_KEYS if max_keys is None else max_keys
         #: how many times the bound forgot a key (observer §4.1)
         self.forgotten = 0
+        #: the monotonic instant the bound last forgot a key, or None
+        self.forgot_ns: int | None = None
         self.discarded: list[str] = []
         self.complete = True
         self.declared_ns = time.monotonic_ns()
@@ -483,6 +493,7 @@ class Subscriber:
         while len(self.deliveries) > self.max_keys:
             self.deliveries.popitem(last=False)
             self.forgotten += 1
+            self.forgot_ns = rec.arrival_ns
 
     def keys(self) -> list[str]:
         with self.lock:
@@ -495,9 +506,14 @@ class Subscriber:
     def observation(self, key: str, now_ns: int | None = None) -> Subscription:
         """§2.5 at ``now_ns`` (its monotonic clock; now by default)."""
         now = time.monotonic_ns() if now_ns is None else now_ns
-        got = self.of(key)
+        with self.lock:
+            got = list(self.deliveries.get(key, []))
+            forgot = self.forgot_ns
         last = None if not got else Delivery(got[-1].kind, now - got[-1].arrival_ns)
-        return Subscription(now - self.declared_ns, self.complete, last)
+        # A key it holds nothing of may be one the bound forgot: it has
+        # listened for it, knowing nothing, only since the last forgetting.
+        since = self.declared_ns if got or forgot is None else max(self.declared_ns, forgot)
+        return Subscription(now - since, self.complete, last)
 
     def close(self) -> None:
         for s in self.subs:

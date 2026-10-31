@@ -3581,6 +3581,41 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "nothing; bounded by default",
                 [recording(), fr.Subscriber(Fake(), "zk2/g/s/x.v1/state/*").max_keys],
                 [[1, ["a", "c"], 2, []], sd.MAX_KEYS]))
+    # Review-bot on PR #971: a consumer refuses a bound, and a reader's
+    # observation of a key it holds nothing of is dated from the last
+    # forgetting, never from the declaration.
+    def refused(make: Any) -> str:
+        try:
+            make()
+        except ValueError as e:
+            return "refused" if "a tool's" in str(e) else str(e)
+        return "accepted"
+
+    def forgotten_view() -> list[Any]:
+        sub = fr.Subscriber(Fake(), "zk2/g/s/x.v1/state/*", max_keys=2)
+        d = sub.declared_ns
+        s_ = fr.NS
+        for key, at in (("a", 1), ("b", 2), ("c", 3)):
+            sub._record(key, fr.Received("put", d + at * s_, 0, key.encode(), "", None, None, None))
+        now = d + 10 * s_
+        h = fr.Horizon("within", 5)
+        return [(sub.forgot_ns - d) // s_, sub.observation("a", now).listened_ns // s_,
+                sub.observation("z", now).listened_ns // s_, sub.observation("c", now).listened_ns // s_,
+                fr.judge_subscription(h, sub.observation("a", d + 7 * s_)).reason,
+                fr.judge_subscription(h, sub.observation("a", now)).reason]
+
+    out.append(("observer §4.1 (0.10), review-bot on PR #971: a consumer's late joiner and S7's merge refuse a bound, "
+                "a tool's take one",
+                [refused(lambda: sd.LateJoiner(Fake(), sel, consumer=True, max_keys=2)),
+                 refused(lambda: sd.Merge("S7", 2)), refused(lambda: sd.LateJoiner(Fake(), sel, consumer=False,
+                                                                                    max_keys=2)),
+                 refused(lambda: sd.Merge("merge", 2))],
+                ["refused", "refused", "accepted", "accepted"]))
+    out.append(("observer §4.1 (0.10), F-398, review-bot on PR #971: a Subscriber dates its listening to a key it "
+                "holds nothing of, forgotten or never heard, from its last forgetting: a's silence before it is never "
+                "read as heard (ttl 5 s: listened_too_short 4 s after it, no_delivery only 7 s after it); a held key "
+                "from the declaration",
+                forgotten_view(), [3, 7, 7, 10, "listened_too_short", "no_delivery"]))
     out.append(("core §4.2 and observer §4.1 (0.10): the readers' merge (seed.merged), across two ids the later "
                 "time, at one time the id Latest ranks higher (2 over 100), a delete kept by its stamp, an "
                 "unstamped value never over a stamped one",

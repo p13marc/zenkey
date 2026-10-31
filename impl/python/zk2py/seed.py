@@ -31,7 +31,10 @@ follows a subscription.
   recently arrived forgotten first, each counted (``forgotten``); the next
   arrival on a forgotten key is kept, as on a key that holds nothing. A
   tool's :class:`LateJoiner` is bounded at :data:`MAX_KEYS` unless told
-  otherwise; a consumer's is not, since observer §4.1 speaks of a tool's.
+  otherwise. A consumer's is never bounded, and refuses a bound: observer
+  §4.1's is a tool's, and S7 orders a consumer's values from the first it
+  receives, so a key it forgot would accept any stamp again (round 91,
+  review-bot on PR #971).
 - **R6** binds a consumer, whose seed discards a key that is not concrete
   on either path; a tool's seed keeps it under the key it arrived on,
   merged with that key alone (0.27).
@@ -243,6 +246,11 @@ class Merge:
             raise ValueError(f"no such rule: {rule!r}")
         if max_keys is not None and max_keys < 1:
             raise ValueError("a bound holds at least one key")
+        if rule == "S7" and max_keys is not None:
+            # observer §4.1's bound is a tool's. A consumer orders by S7 from
+            # the first value it receives (core §4.3): a key it forgot would
+            # take any stamp as its first again.
+            raise ValueError("a consumer's merge is not bounded: observer §4.1's bound is a tool's")
         self.rule, self.max_keys = rule, max_keys
         self.held: "OrderedDict[str, Entry]" = OrderedDict()
         #: how many times the bound forgot a key (observer §4.1)
@@ -303,6 +311,8 @@ class LateJoiner:
         self.lock = threading.Lock()
         if max_keys == -1:
             max_keys = None if consumer else MAX_KEYS
+        elif consumer and max_keys is not None:
+            raise ValueError("a consumer's late joiner is not bounded: observer §4.1's bound is a tool's")
         #: the per-key merge: S7's for a consumer, §4.2's for a tool
         self.merge = Merge("S7" if consumer else "merge", max_keys)
         self.applied: list[Applied] = []
