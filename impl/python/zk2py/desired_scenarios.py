@@ -1753,6 +1753,8 @@ def section12(ctx: Ctx) -> None:
                      and ("put", f"zk2/{RF0}/@zk/instance/{o2.instance}") in toks
                      and first is not None and _duty(first) == 10000 and "desired" not in first,
                      f"tokens {toks}; first St {first}")
+            rp.check(sec, "the feed raised nothing: no read, seed or act of the owners failed",
+                     o.fed_errors == 0 and o2.fed_errors == 0, f"{o.fed_last_error}; {o2.fed_last_error}")
             rp.check(sec, "step 2: the new run acts on revision 1, the version the previous run acted on: an "
                           "applied event of the new instance, St shows fraction_ppm 20000 and desired "
                           "{1, converged}, and the device holds 20000",
@@ -1819,6 +1821,10 @@ def section_config_fed(ctx: Ctx) -> None:
         ok = _wait(lambda: (bus.get_json(ST12)[0] or {}).get("desired") == refused, 5.0, 0.1)
         rp.check(sec, "3. a document naming a reach group is refused whole: {reach, radio}, the device unchanged",
                  ok and o.device.values["duty"]["fraction_ppm"] == 20000, f"St {bus.get_json(ST12)[0]}")
+        rp.check(sec, "3. the refusal leaves the role free for the next version: no act running, nothing failed "
+                      "in the feed (review-bot on PR #963)",
+                 not o._fed_running and not o.role.running and o.fed_errors == 0,
+                 f"running {o._fed_running}/{o.role.running}; errors {o.fed_errors} {o.fed_last_error}")
         t = time.monotonic()
         author.delete_state(key)
         ok = _wait(lambda: "desired" not in (bus.get_json(ST12)[0] or {"desired": 1})

@@ -1061,7 +1061,8 @@ def section7(rp: Report, runs: int) -> None:
         if w_b is not None:
             before = [t for t, m in bus.s.descriptors(LEDGER, B_ID, h) if m and t < w_b]
             if before:
-                rp.note(sec, f"B's marked descriptor reached S {round((w_b - before[0]) * 1000, 1)} ms before its "
+                # the marked put nearest the withdrawal: how far the two crossed
+                rp.note(sec, f"B's marked descriptor reached S {round((w_b - max(before)) * 1000, 1)} ms before its "
                              "token's withdrawal: noted, never judged (the conventions)")
         refused = b.put()
         rp.check(sec, "4. in §2.9's order: every write stamped with B's zid dated before its token's withdrawal; "

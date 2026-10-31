@@ -1362,6 +1362,10 @@ class ConfigOwner:
         #: what each seed found, and the acts the feed started (a test's)
         self.seeds: list[int] = []
         self.fed_acts: list[tuple[str, Any]] = []
+        #: the feed's own failures, counted and kept, never fatal: a read or
+        #: a seed that raised, and the act that raised (``fed_errors``)
+        self.fed_errors = 0
+        self.fed_last_error: str | None = None
         self.cv = threading.Condition(threading.RLock())
         self._stop = threading.Event()
         self._timer: threading.Thread | None = None
@@ -1432,16 +1436,20 @@ class ConfigOwner:
         changed (§2.3), the view first; one revision may name several such
         pairs (§2.3, 0.2: "An owner SHOULD put the view first"). The timer is told of a new due
         instant."""
-        for ev in step.events:
-            self.owner.occur(self.event_member, encode_json(ev))
-            self.events.append(ev)
-        now = (encode_json(self.core.view()), encode_json(self.core.status()))
-        if now != self._last_put and self.owner.session is not None:
-            self.owner.set_state(self.view_key, now[0])
-            self.owner.set_state(self.status_key, now[1])
-            self._last_put = now
-        self._fed_check()
-        self.cv.notify_all()
+        try:
+            for ev in step.events:
+                self.owner.occur(self.event_member, encode_json(ev))
+                self.events.append(ev)
+            now = (encode_json(self.core.view()), encode_json(self.core.status()))
+            if now != self._last_put and self.owner.session is not None:
+                self.owner.set_state(self.view_key, now[0])
+                self.owner.set_state(self.status_key, now[1])
+                self._last_put = now
+        finally:
+            # An act's end reaches the feed even when a put raises (a
+            # session closing under it): the role is never left running.
+            self._fed_check()
+            self.cv.notify_all()
 
     def _send(self, call: Any, reply: Any) -> None:
         from .owner import MemberRefused
@@ -1557,28 +1565,59 @@ class ConfigOwner:
         self.seeds.append(len(st.replies))
         return len(st.replies)
 
+    def _fed_failed(self, what: str, e: BaseException) -> None:
+        """The feed's own failure: counted and kept, never fatal (review-bot
+        on PR #963)."""
+        self.fed_errors += 1
+        self.fed_last_error = f"{what}: {e!r}"
+
+    def _fed_seed_retry(self, tries: int = 5) -> int:
+        """A seed made again, up to ``tries`` times, 100 ms more apart each
+        time, while it draws nothing or raises (desired.v1 §2.5, "A seed that
+        draws nothing at an appearance MAY be made again"; the reference's
+        four more). A seed that raises is counted, never fatal. Ends at once
+        when the owner closes. Returns the replies the last seed drew."""
+        got = 0
+        for n in range(tries):
+            if self._stop.is_set():
+                return got
+            try:
+                got = self._fed_seed()
+            except Exception as e:  # noqa: BLE001 - a GET that raises is retried, and counted
+                self._fed_failed("seed", e)
+                got = 0
+            if got or self._stop.wait(0.1 * (n + 1)):
+                return got
+        return got
+
     def _fed_poll(self) -> None:
         """desired.v1 §2.5 "When it seeds": at its start, and each time its
         author's instance token appears, read on a period (500 ms, the
         reference's) on the owner's session, which holds no liveliness
         subscriber. A seed that draws nothing at an appearance is made again
-        up to four times, 100 ms more apart each time (the reference's)."""
+        up to four times, 100 ms more apart each time (the reference's). A
+        read or a seed that raises is counted (``fed_errors``) and the loop
+        goes on; it ends when the owner closes."""
         from . import live
 
-        self._fed_seed()
+        self._fed_seed_retry(1)
         seen: set[str] | None = None
         while not self._stop.wait(0.5):
             s = self.owner.session
             if s is None:
                 return
-            p = live.list_presence(s, f"zk2/{self.fed[1]}/@zk/instance/*", 1.0)
+            try:
+                p = live.list_presence(s, f"zk2/{self.fed[1]}/@zk/instance/*", 1.0)
+            except Exception as e:  # noqa: BLE001 - one read that raises ends nothing
+                if self._stop.is_set():
+                    return
+                self._fed_failed("presence", e)
+                continue
             if p.kind != live.COMPLETE and not p.instances:
                 continue
             now = {i["instance"] for i in p.instances}
             if seen is not None and now - seen:
-                for n in range(5):
-                    if self._fed_seed() or self._stop.wait(0.1 * (n + 1)):
-                        break
+                self._fed_seed_retry()
             seen = now if p.kind == live.COMPLETE else (seen | now if seen is not None else now)
 
     def _fed_act(self) -> None:
@@ -1599,7 +1638,7 @@ class ConfigOwner:
                     if start is not UNKNOWN:
                         values.setdefault(g, {})[p] = start
             self.fed_acts.append(("revert", values))
-            self._after(self.core.revert(values, time.time_ns()))
+            self._fed_step(lambda: self.core.revert(values, time.time_ns()))
             return
         doc = None
         if v.payload is not None and v.payload.value is not None:
@@ -1616,7 +1655,24 @@ class ConfigOwner:
             return
         self.fed_acts.append(("desire", doc))
         self.core.desired_end = None
-        self._after(self.core.desire(doc, time.time_ns()))
+        self._fed_step(lambda: self.core.desire(doc, time.time_ns()))
+
+    def _fed_step(self, act: Callable[[], Step]) -> None:
+        """Run the core's act, then :meth:`_after`, which hands its end to
+        :meth:`_fed_check`. An act that raises has an end the owner cannot
+        tell: desired.v1 §2.7, "``failed``, code ``apply``", counted, and the
+        role is free for the next version."""
+        try:
+            step = act()
+        except Exception as e:  # noqa: BLE001 - the act's end is unknown: failed, apply
+            self._fed_failed("act", e)
+            self.core._desired_waiting = self.core._reverting = False
+            self.core.desired_end = ("failed", {"code": "apply", "detail": f"the act was lost: {e!r}"})
+            step = Step()
+        try:
+            self._after(step)
+        except Exception as e:  # noqa: BLE001 - a put that raised; the act's end was handed on (finally)
+            self._fed_failed("put", e)
 
     def _fed_check(self) -> None:
         """After every step (under ``cv``): the running act ended when the
@@ -1678,7 +1734,9 @@ class ConfigOwner:
             self.owner.new_epoch(new)
             self.cv.notify_all()
         if self.fed is not None:
-            threading.Thread(target=self._fed_seed, daemon=True).start()
+            # A seed that raises, or a close racing the re-mint, never ends
+            # the new run silently: counted, made again, and ended by close.
+            threading.Thread(target=self._fed_seed_retry, daemon=True).start()
         return new
 
     def _run_timer(self) -> None:

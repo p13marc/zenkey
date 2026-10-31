@@ -3660,7 +3660,7 @@ def _round88_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # reference CLI's fingerprints (zk2 contract lint, round 88).
     fps = {"configs.v1.toml": "sha256:daee2c9d7434152c15adef1c3fae78dbf5697c8db28e1e39fb0aa9f4e17166eb",
            "zk2py_configured.v1.toml": "sha256:89872483fa68bcd829b1e814d120dd799ef6a7b0145561d6e814b0cda0e87890"}
-    here = root.parent.parent / "impl" / "python" / "interop" / "desired"
+    here = Path(__file__).resolve().parents[1] / "interop" / "desired"
     got = {}
     for name in fps:
         c = load_contract(here / name, spec_dir=spec, check_file_name=True)
@@ -3688,6 +3688,36 @@ def _round88_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [first, second],
                 [(("converged", None), 20000, {"observed_revision": 1, "outcome": "converged"}),
                  (("reverted", None), 10000, False, ["applied"])]))
+
+    # §2.16 through ConfigOwner's feed, with no session (review-bot on PR
+    # #963): a refused document leaves the role free for the next version,
+    # and so does an act that raises, failed with code apply and counted.
+    # The owner's event publisher is a list here, and the owner is never
+    # started, so its device holds nothing until an apply.
+    owner = cf.ConfigOwner("lab", "rf0", schema=rf, startup=startup, fed=("k", "lab/author"))
+    published: list[str] = []
+    owner.owner.occur = lambda member, payload: published.append(_json.loads(payload)["outcome"])  # type: ignore
+
+    def fed(t: int, doc: dict[str, Any]) -> tuple[Any, ...]:
+        owner._fed_receive(False, ds.Stamp(t, 0xA).text, cf.encode_json(doc))
+        rep = owner.role.report()
+        return (owner._fed_running or owner.role.running, rep.get("outcome"),
+                (rep.get("refusal") or {}).get("code"), owner.device.values.get("duty", {}).get("fraction_ppm"))
+
+    def boom(act: Any) -> Any:
+        raise RuntimeError("the device fell off")
+
+    rows = [fed(10, {"revision": 2, "values": {"radio": {"frequency_hz": 869525000}}}),
+            fed(11, {"revision": 3, "values": {"duty": {"fraction_ppm": 20000}}})]
+    device, owner.core.device = owner.core.device, boom
+    rows.append(fed(12, {"revision": 4, "values": {"duty": {"fraction_ppm": 30000}}}))
+    owner.core.device = device
+    rows.append(fed(13, {"revision": 5, "values": {"duty": {"fraction_ppm": 40000}}}))
+    out.append(("desired.v1 §2.16 in zk2py's fed config.v1 owner: a refused document, and an act that raises, each "
+                "leave the role free for the next version, which is acted on",
+                [rows, owner.fed_errors, published],
+                [[(False, "refused", "reach", None), (False, "converged", None, 20000),
+                  (False, "failed", "apply", 20000), (False, "converged", None, 40000)], 1, ["applied", "applied"]]))
 
     # §2.16 (0.10) through §2.7's restart: the version acted on, delivered
     # again under its own stamp, is the same version within a run, and acted

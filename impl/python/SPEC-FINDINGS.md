@@ -19986,7 +19986,7 @@ the Rust pair, and one with zk2py's, passed, none noting the order.
   own (an equal document adopted, a reach document refused whole, a
   delete's revert).
 - **`redundancy_scenarios` §7:** the order check, above.
-- **`readings`: 685, up from 673.** Twelve, in `_round88_readings`:
+- **`readings`: 686, up from 673.** Thirteen, in `_round88_readings`:
   - each text at its version or later, and #935's three changelogs and
     core 0.64's entry saying no rule changed;
   - `desired.v1` 0.10's §2.16 bullet, its §0 and §2.7 exceptions,
@@ -20000,11 +20000,23 @@ the Rust pair, and one with zk2py's, passed, none noting the order.
     version within a run, acted on after a restart;
   - the reference's figures `arbitration.v1` 0.4 gave sentences of their
     own (a read 0.1 s after a withdrawal, a first put 500 ms after the
-    tokens), held by zk2py's actuator and commander.
+    tokens), held by zk2py's actuator and commander;
+  - after review-bot on PR #963, the fed owner, with no session: a refused
+    document, then an act that raises (failed, code `apply`, counted), each
+    leaving the role free for the next version, which is acted on.
+- **After review-bot on PR #963,** the feed never ends silently. A read or
+  a seed that raises is counted (`fed_errors`) and the loop goes on, the
+  re-mint's seed is made again as the poll's is, an act that raises is
+  `failed`, code `apply`, and an act's end reaches the role even when a put
+  raises (`_after` hands it on in a `finally`). A refused document never
+  left the role running: `Core.desire` sets `desired_end` and clears its
+  wait before `_after` calls `_fed_check`. `config-fed` now checks it, and
+  §12 that neither owner's feed raised: zk2py → zk2py 16 of 16 (§12 11,
+  `config-fed` 5).
 - **The modules' headers** (`config`, `desired`, `desired_scenarios`,
   `redundancy`, `timing`, `arbitration`) say they were read again.
 
-**`just py-conformance`: 3642 of 3642.**
+**`just py-conformance`: 3643 of 3643.**
 
 ### Counts at redundancy.v1 0.6, timing.v1 0.6, arbitration.v1 0.4, desired.v1 0.10 and core 0.64
 
