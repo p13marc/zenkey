@@ -1045,7 +1045,11 @@ def section7(rp: Report, runs: int) -> None:
                      and bus.s2.first_token("put", _alive_of(A_ID), h) is not None, 20.0, 0.05)
         down = _wait(lambda: bus.s.first_token("delete", _alive_of(B_ID), h) is not None, 2 * 2.0 + 2.0 + 8.0, 0.05)
         w_b = bus.s.first_token("delete", _alive_of(B_ID), h)
-        _wait(lambda: any(m for t, m in bus.s.descriptors(LEDGER, B_ID, w_b or h) if m), 3.0, 0.02)
+        # B's descriptor put marked is read since the heal, never against the
+        # token's withdrawal: "S's arrival order of a put and a token is noted,
+        # never judged" (the conventions; round 88, a Rust B's marked put once
+        # reached S before its token's withdrawal did).
+        _wait(lambda: any(m for t, m in bus.s.descriptors(LEDGER, B_ID, h) if m), 3.0, 0.02)
         rp.check(sec, "4. after H, S and S2 each see both interface tokens", both)
         rp.check(sec, "4. B, the higher, steps down within two graces plus 2 s of the heal's arrival",
                  down and w_b is not None, f"{None if w_b is None else round(w_b - h, 2)} s after H")
@@ -1053,7 +1057,12 @@ def section7(rp: Report, runs: int) -> None:
                 if stamp_zid(w[4]) == zb and w_b is not None and w[0] > w_b]
         st = live.get_state(bus.g, "zk2/lab/ledger/ledger.v1/**")
         ids = {stamp_zid(r.stamp) for r in st.replies}
-        marked = [m for t, m in bus.s.descriptors(LEDGER, B_ID, w_b or h)]
+        marked = [m for t, m in bus.s.descriptors(LEDGER, B_ID, h)]
+        if w_b is not None:
+            before = [t for t, m in bus.s.descriptors(LEDGER, B_ID, h) if m and t < w_b]
+            if before:
+                rp.note(sec, f"B's marked descriptor reached S {round((w_b - before[0]) * 1000, 1)} ms before its "
+                             "token's withdrawal: noted, never judged (the conventions)")
         refused = b.put()
         rp.check(sec, "4. in §2.9's order: every write stamped with B's zid dated before its token's withdrawal; "
                       "then an All GET answered by A alone, B's descriptor marked, and a write by B refused (§2.4)",

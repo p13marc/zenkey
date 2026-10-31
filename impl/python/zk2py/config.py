@@ -4,7 +4,11 @@ against text 0.6 (#609, round 86; #935): its inline history taken out and
 five long sentences split, §2.5's MUST now naming "the checks below", no
 rule changed, and none of this module's rules moved. Read again against
 text 0.7 (round 87): §2.3, §2.13 and §2.18 rewritten for round 86's F-329
-to F-331, no rule changed.
+to F-331, no rule changed. Read again against text 0.8 (round 88): §2.18's
+instance is ``desired.v1``'s run, and a re-mint is a restart, as
+``desired.v1`` 0.10's §2.16 says (F-336); :class:`ConfigOwner` can now be
+fed through ``desired.v1`` (``fed``), and re-mint (:meth:`ConfigOwner.remint`)
+as a restart or refuse to, as the reference does.
 
 The session-free half, from the text alone:
 - **time on the wire** (§2.8): :func:`parse_time`, :func:`write_time`, and
@@ -596,6 +600,14 @@ class Core:
         self.held_step: Step | None = None
         self.desired: dict[str, Any] | None = None
         self._desired_waiting = False
+        #: desired.v1 §2.16: a revert of what this instance's documents set,
+        #: under way (:meth:`revert`)
+        self._reverting = False
+        #: how the last desired act ended, for an owner fed through
+        #: desired.v1 (:class:`ConfigOwner`): ``(outcome, refusal)``, outcome
+        #: ``converged``, ``refused``, ``failed`` or ``reverted``; None until one
+        #: ends, and taken by its reader
+        self.desired_end: tuple[str, dict[str, Any] | None] | None = None
         self.running: dict[tuple[str, str], Param] = {}
         for g in self.schema:
             for p in g["parameters"]:
@@ -1092,13 +1104,31 @@ class Core:
         window per group that differs, in bytewise order, each its own
         change; while a change is pending, it waits."""
         self.desired_doc = document
+        self._reverting = False
         step = Step()
         refusal = check_desired(self.schema, document)
         if refusal is not None:
             self.desired = {"observed_revision": document["revision"], "outcome": "refused", "refusal": refusal}
             self._desired_waiting = False
+            self.desired_end = ("refused", dict(refusal))
             return step
         self._desired_waiting = True
+        self._converge(now, step)
+        return step
+
+    def revert(self, values: dict[str, dict[str, Any]], now: int) -> Step:
+        """``desired.v1`` §2.16 "What a delete reverts it to" (text 0.10), for
+        an owner fed through ``desired.v1``: ``values`` are the startup values
+        of the parameters the documents it acted on in this run named. They go
+        back as it converges (§2.18): one ``set`` without a window per group
+        whose running values differ, in the bytewise order of the group names.
+        It ends ``reverted``, or ``failed`` with the refusing ``set``'s code,
+        the groups before it restored; and its view carries no ``desired``
+        after it, either way: no document is bound."""
+        self.desired_doc = {"revision": None, "values": values}
+        self._reverting = True
+        self._desired_waiting = True
+        step = Step()
         self._converge(now, step)
         return step
 
@@ -1120,14 +1150,23 @@ class Core:
             step.events += sub.events
             if isinstance(sub.reply, Refusal):
                 code = sub.reply.app if sub.reply.code == "app" else sub.reply.code
-                self.desired = {"observed_revision": doc["revision"], "outcome": "failed",
-                                "refusal": {"code": code, "group": gname}}
-                self._desired_waiting = False
+                refusal = {"code": code, "group": gname}
+                if self._reverting:
+                    self.desired, self.desired_doc = None, None
+                else:
+                    self.desired = {"observed_revision": doc["revision"], "outcome": "failed", "refusal": refusal}
+                self.desired_end = ("failed", refusal)
+                self._desired_waiting = self._reverting = False
                 return
             if sub.reply is None:
                 return  # held: the convergence goes on when it completes
-        self.desired = {"observed_revision": doc["revision"], "outcome": "converged"}
-        self._desired_waiting = False
+        if self._reverting:
+            self.desired, self.desired_doc = None, None
+            self.desired_end = ("reverted", None)
+        else:
+            self.desired = {"observed_revision": doc["revision"], "outcome": "converged"}
+            self.desired_end = ("converged", None)
+        self._desired_waiting = self._reverting = False
 
 
 def _same_request(a: dict[str, Any], b: dict[str, Any]) -> bool:
@@ -1254,6 +1293,22 @@ class ConfigOwner:
       a GET at start.
     - ``overlay`` and ``events_at`` are shared with a later instance of the
       same service: what survives a restart (§2.12, §2.17).
+    - ``fed``: fed through ``desired.v1`` instead (``desired.v1`` §2.16,
+      text 0.10; #609, round 88): the slice's key and its author's address,
+      ``(slice, author)``. The owner reads its slice as ``desired.v1`` §2.5's
+      late joiner does (subscribe, then seed; again at each appearance of its
+      author's instance token, read every 500 ms on its own session, which
+      holds no liveliness subscriber), judges every version with
+      :class:`zk2py.desired.TargetRole` (§2.6, §2.7: once per version in a
+      run, a document equal to the last one acted on adopted), acts through
+      :meth:`Core.desire`, and on a delete reverts what the documents it
+      acted on in this run named (:meth:`Core.revert`). Its report is its
+      own, the view's and the status's ``desired`` (§2.16).
+    - ``remint``: what :meth:`remint` does (core §1.5): ``"restart"``, a new
+      instance from its startup values, its device returned to them first,
+      and, fed through ``desired.v1``, a new run that seeds and acts on the
+      bound version again (``desired.v1`` §2.16, config.v1 §2.12); or
+      ``"refuse"``, as the reference does.
 
     The calls are serialized: the owner answers one act's call at a time
     (§2.7)."""
@@ -1262,7 +1317,8 @@ class ConfigOwner:
                  startup: dict[str, dict[str, dict[str, Any]]], overlay: dict[str, dict[str, Any]] | None = None,
                  floor_s: int = 10, apply_after_s: float = 1.0, persist: bool = True,
                  device: SimDevice | None = None, events_at: list[int] | None = None,
-                 desired_key: str | None = None, contracts: list[Any] | None = None, **owner_kw: Any):
+                 desired_key: str | None = None, contracts: list[Any] | None = None,
+                 fed: tuple[str, str] | None = None, remint: str = "restart", **owner_kw: Any):
         from .contract import load_contract
         from .owner import Owner
 
@@ -1289,6 +1345,23 @@ class ConfigOwner:
         self.owner.initial[f"{IFACE}/state/view"] = self._last_put[0]
         self.owner.initial[f"{IFACE}/state/status"] = self._last_put[1]
         self.desired_key = desired_key
+        if remint not in ("restart", "refuse"):
+            raise ValueError(f"remint is restart or refuse, not {remint!r}")
+        self.remint_policy = remint
+        #: desired.v1 §2.16's feed: the slice, its author, the target's state
+        #: machine, the act running, and the parameters the documents it acted
+        #: on in this run named (a refused one counts for none)
+        self.fed = fed
+        self.role: Any = None
+        if fed is not None:
+            from . import desired
+
+            self.role = desired.TargetRole(fed[0])
+        self._fed_running = False
+        self._named: dict[str, set[str]] = {}
+        #: what each seed found, and the acts the feed started (a test's)
+        self.seeds: list[int] = []
+        self.fed_acts: list[tuple[str, Any]] = []
         self.cv = threading.Condition(threading.RLock())
         self._stop = threading.Event()
         self._timer: threading.Thread | None = None
@@ -1305,12 +1378,15 @@ class ConfigOwner:
     def instance(self) -> str:
         return self.owner.instance
 
-    def start(self) -> None:
+    def _startup_values(self) -> dict[str, dict[str, Any]]:
         values: dict[str, dict[str, Any]] = {}
         for (g, p), prm in self.core.running.items():
             if prm.value is not UNKNOWN:
                 values.setdefault(g, {})[p] = prm.value
-        self.device.boot(values)
+        return values
+
+    def start(self) -> None:
+        self.device.boot(self._startup_values())
         self.owner.start()
         self._timer = threading.Thread(target=self._run_timer, daemon=True)
         self._timer.start()
@@ -1326,6 +1402,15 @@ class ConfigOwner:
             for r in live.get_state(s, self.desired_key).replies:
                 if not r.deleted:
                     self._on_desired(r.payload)
+        if self.fed is not None:
+            import zenoh
+
+            s = self.owner.session
+            assert s is not None
+            # desired.v1 §2.5: "declare its subscription to its slice's key
+            # first, then make S4's GET of it"
+            self._entities.append(s.declare_subscriber(self.fed[0], zenoh.handlers.Callback(self._fed_live)))
+            threading.Thread(target=self._fed_poll, daemon=True).start()
 
     def close(self) -> None:
         self._stop.set()
@@ -1355,6 +1440,7 @@ class ConfigOwner:
             self.owner.set_state(self.view_key, now[0])
             self.owner.set_state(self.status_key, now[1])
             self._last_put = now
+        self._fed_check()
         self.cv.notify_all()
 
     def _send(self, call: Any, reply: Any) -> None:
@@ -1433,6 +1519,167 @@ class ConfigOwner:
             if current is not None and current.get("revision") == doc["revision"]:
                 return  # §2.18: "It tries a failed document again when its revision changes."
             self._after(self.core.desire(doc, time.time_ns()))
+
+    # -- desired.v1 §2.16: fed through desired.v1 ----------------------------------------
+
+    def _fed_live(self, sample: Any) -> None:
+        import zenoh
+
+        key = str(sample.key_expr)
+        if "*" in key or "$" in key:
+            return  # desired.v1 §2.5, core R6
+        ts = sample.timestamp
+        self._fed_receive(sample.kind == zenoh.SampleKind.DELETE, None if ts is None else str(ts),
+                          sample.payload.to_bytes())
+
+    def _fed_receive(self, deleted: bool, stamp: str | None, payload: bytes) -> None:
+        from . import desired
+        from .desired_live import _sample
+
+        with self.cv:
+            if self._stop.is_set():
+                return
+            word = self.role.receive(_sample(desired.OWNER, deleted, stamp, payload))
+            if word in (desired.ACT, desired.REVERT):
+                self._fed_act()
+
+    def _fed_seed(self) -> int:
+        """S4's GET of the slice (desired.v1 §2.5), each reply judged in the
+        order received. Returns how many replies it drew."""
+        from . import live
+
+        s = self.owner.session
+        if s is None or self._stop.is_set():
+            return 0
+        st = live.get_state(s, self.fed[0])
+        for r in st.replies:
+            self._fed_receive(r.deleted, r.stamp, r.payload)
+        self.seeds.append(len(st.replies))
+        return len(st.replies)
+
+    def _fed_poll(self) -> None:
+        """desired.v1 §2.5 "When it seeds": at its start, and each time its
+        author's instance token appears, read on a period (500 ms, the
+        reference's) on the owner's session, which holds no liveliness
+        subscriber. A seed that draws nothing at an appearance is made again
+        up to four times, 100 ms more apart each time (the reference's)."""
+        from . import live
+
+        self._fed_seed()
+        seen: set[str] | None = None
+        while not self._stop.wait(0.5):
+            s = self.owner.session
+            if s is None:
+                return
+            p = live.list_presence(s, f"zk2/{self.fed[1]}/@zk/instance/*", 1.0)
+            if p.kind != live.COMPLETE and not p.instances:
+                continue
+            now = {i["instance"] for i in p.instances}
+            if seen is not None and now - seen:
+                for n in range(5):
+                    if self._fed_seed() or self._stop.wait(0.1 * (n + 1)):
+                        break
+            seen = now if p.kind == live.COMPLETE else (seen | now if seen is not None else now)
+
+    def _fed_act(self) -> None:
+        """Start the act on the role's current version (under ``cv``): a
+        document through :meth:`Core.desire`, a delete through
+        :meth:`Core.revert`. A payload that does not read as a
+        ``DesiredConfig`` is refused ``invalid_request`` and moves nothing."""
+        from . import desired, jcs
+
+        v = self.role.current
+        assert v is not None
+        self._fed_running = True
+        if v.delete:
+            values: dict[str, dict[str, Any]] = {}
+            for g, ps in sorted(self._named.items()):
+                for p in sorted(ps):
+                    start, _ = self.core.startup_value(g, p)
+                    if start is not UNKNOWN:
+                        values.setdefault(g, {})[p] = start
+            self.fed_acts.append(("revert", values))
+            self._after(self.core.revert(values, time.time_ns()))
+            return
+        doc = None
+        if v.payload is not None and v.payload.value is not None:
+            try:
+                doc = jcs.loads(desired.canonical_json(v.payload.value))
+            except Exception:  # noqa: BLE001 - read as not a document below
+                doc = None
+        if not isinstance(doc, dict) or not is_integer(doc.get("revision")) or not isinstance(doc.get("values"), dict):
+            self.fed_acts.append(("invalid", None))
+            self._fed_running = False
+            word = self.role.finish(desired.Finish(desired.REFUSED, {"code": "invalid_request"}))
+            if word in (desired.ACT, desired.REVERT):
+                self._fed_act()
+            return
+        self.fed_acts.append(("desire", doc))
+        self.core.desired_end = None
+        self._after(self.core.desire(doc, time.time_ns()))
+
+    def _fed_check(self) -> None:
+        """After every step (under ``cv``): the running act ended when the
+        core says how; the role is told (§2.7 "Two phases"), and acts on, or
+        adopts, the version held waiting."""
+        from . import desired
+
+        if not self._fed_running or self.core._desired_waiting or self.core.desired_end is None:
+            return
+        outcome, refusal = self.core.desired_end
+        self.core.desired_end = None
+        self._fed_running = False
+        v = self.role.current
+        if v is not None and not v.delete and outcome in ("converged", "failed") and self.fed_acts:
+            # §2.16: "each parameter named by a document it acted on in this
+            # run"; "A document it refused counts for none".
+            kind, doc = self.fed_acts[-1]
+            if kind == "desire" and isinstance(doc, dict):
+                for g, ps in doc["values"].items():
+                    if isinstance(ps, dict):
+                        self._named.setdefault(g, set()).update(ps)
+        if v is not None and v.delete and outcome == "reverted":
+            self._named = {}
+        how = {"converged": desired.DONE, "reverted": desired.DONE, "refused": desired.REFUSED,
+               "failed": desired.FAILED}[outcome]
+        word = self.role.finish(desired.Finish(how, refusal))
+        if word in (desired.ACT, desired.REVERT):
+            self._fed_act()
+
+    def remint(self) -> str:
+        """Core §1.5's re-mint while running. ``config.v1`` §2.12: "A re-mint
+        is a restart": the new instance starts from its startup values, the
+        revision from 0, nothing pending, its device returned to them first.
+        Fed through ``desired.v1``, §2.16 (text 0.10): it "begins a new run,
+        so §2.7's restart holds of it: it MUST act on the first version it
+        reads, the one it acted on before the re-mint included". zk2py's new
+        run reads its slice as at a start (§2.5 "When it seeds"). The new
+        instance's view and status are put before its tokens (§2.3), then the
+        tokens make before the old ones break (core §8.1). With
+        ``remint="refuse"`` it raises :class:`zk2py.owner.OwnerRefused`,
+        nothing moved, as the reference does. Returns the new instance id."""
+        import secrets
+
+        from .owner import OwnerRefused
+
+        if self.remint_policy == "refuse":
+            raise OwnerRefused("config.v1 §2.12: a re-mint is a restart, and this owner refuses one while it runs")
+        with self.cv:
+            new = secrets.token_hex(8)
+            self.core.restart(new)
+            self.device.boot(self._startup_values())
+            if self.role is not None:
+                self.role.restart()
+                self._fed_running, self._named = False, {}
+            now = (encode_json(self.core.view()), encode_json(self.core.status()))
+            self.owner.set_state(self.view_key, now[0])
+            self.owner.set_state(self.status_key, now[1])
+            self._last_put = now
+            self.owner.new_epoch(new)
+            self.cv.notify_all()
+        if self.fed is not None:
+            threading.Thread(target=self._fed_seed, daemon=True).start()
+        return new
 
     def _run_timer(self) -> None:
         with self.cv:
