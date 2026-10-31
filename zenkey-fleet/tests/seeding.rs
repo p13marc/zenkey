@@ -345,7 +345,8 @@ async fn a_seeded_watch_shows_pre_existing_state() {
     // …and the seeded key is already in the tree at the boundary tick.
     assert_eq!(monitor.tree().keys, 1);
 
-    // Live samples keep flowing after the boundary (the merge is gone).
+    // Live samples keep flowing after the boundary: newer than what the
+    // key holds, so the merge, kept for the watch's life, keeps it.
     publisher.put("live-after").await.expect("live put");
     loop {
         let item = tokio::time::timeout(util::SETTLE, events.recv())
@@ -1220,5 +1221,179 @@ async fn s11_a_tools_seed_keeps_a_key_that_is_not_concrete() {
             ("g".into(), "g-2".into()),
         ],
         "kept under its own key, never merged with g"
+    );
+}
+
+/// A stamp of a new epoch whose clock is 5 s behind the writer's: the id
+/// `b2`, and `n` ticks past five seconds (core Appendix B: an NTP64 unit is
+/// 2^-32 s) before the writer's clock.
+fn behind(w: &Foreign, n: u64) -> Timestamp {
+    Timestamp::new(NTP64(w.base - (5 << 32) + n), "b2".parse().expect("an id"))
+}
+
+/// The payloads of a monitor's samples until `until` arrives, `until`
+/// included, or until its seeded watch `seeded`'s boundary when `until` is
+/// `None`.
+async fn monitor_samples(
+    events: &mut zenkey_fleet::EventStream,
+    until: Option<&str>,
+    seeded: Option<zenkey_fleet::WatchId>,
+) -> Vec<String> {
+    let mut seen = Vec::new();
+    loop {
+        let item = tokio::time::timeout(util::SETTLE, events.recv())
+            .await
+            .expect("an event within the settle")
+            .expect("stream alive");
+        match item {
+            zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) => {
+                let value = String::from_utf8_lossy(&s.payload.to_bytes()).into_owned();
+                let done = until == Some(value.as_str());
+                seen.push(value);
+                if done {
+                    return seen;
+                }
+            }
+            zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::WatchSeeded {
+                id, ..
+            }) if until.is_none() && Some(id) == seeded => return seen,
+            zenkey_fleet::StreamItem::Dropped(n) => {
+                panic!("this fixture never outruns the broadcast ({n})")
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `spec/scenarios/state.md` §7, step 2's tool (observer §4.1): a tool's
+/// late joiner keeps core §4.2's merge for as long as it follows, through
+/// the fleet's two seeded subscriptions. The owner, played by a writer
+/// that sets its stamps (as §10's reference does), answers the seed with
+/// rev 10 under id `a1`. After the boundary it starts a new epoch, a fresh
+/// id `b2` with its clock 5 s behind, and puts rev 11, then rev 12. The
+/// tool keeps rev 10: both live puts are older by the merge's order, and
+/// each is counted superseded. A consumer, by core §4.3's consumer rule,
+/// accepts both (`zenkey/tests/state.rs`, `s7_a_late_joiner_across_a_new_epoch`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s7_a_tools_late_joiner_keeps_the_merge_after_its_seed() {
+    let policy = SeedPolicy {
+        history: false,
+        state: true,
+        timeout: util::SETTLE,
+    };
+    // The fleet's seeded subscription.
+    {
+        let (writer, joiner) = util::peer_pair().await;
+        let mut w = Foreign::new(&writer, &joiner).await;
+        let mut sub = seed_subscribe(&joiner, "foreign/**", policy)
+            .await
+            .expect("seed subscribe");
+        let q = w.next_query().await;
+        w.matched().await;
+        q.reply("foreign/plan", "rev10")
+            .timestamp(w.stamp(0, "a1"))
+            .await
+            .expect("reply");
+        drop(q);
+        let (seeded, _) = drain_seed(&mut sub).await;
+        assert_eq!(seeded, ["rev10"], "the seed");
+        w.put("plan", "rev11", Some(behind(&w, 0))).await;
+        w.put("plan", "rev12", Some(behind(&w, 1))).await;
+        w.put("z", "sentinel", None).await;
+        assert_eq!(
+            next_admitted(&mut sub).await.2,
+            "sentinel",
+            "rev 11 and rev 12 are not kept after the boundary"
+        );
+        assert_eq!((sub.superseded(), sub.evicted()), (2, 0));
+    }
+    // A monitor's seeded watch, zengui's tree.
+    let (writer, joiner) = util::peer_pair().await;
+    let mut w = Foreign::new(&writer, &joiner).await;
+    let monitor = zenkey_fleet::Monitor::start(&joiner, zenkey_fleet::MonitorSpec::default())
+        .await
+        .expect("monitor");
+    let mut events = monitor.events();
+    let id = monitor
+        .watch_seeded("foreign/**", policy)
+        .await
+        .expect("seeded watch");
+    let q = w.next_query().await;
+    w.matched().await;
+    q.reply("foreign/plan", "rev10")
+        .timestamp(w.stamp(0, "a1"))
+        .await
+        .expect("reply");
+    drop(q);
+    assert_eq!(
+        monitor_samples(&mut events, None, Some(id)).await,
+        ["rev10"],
+        "the seed, before its boundary"
+    );
+    w.put("plan", "rev11", Some(behind(&w, 0))).await;
+    w.put("plan", "rev12", Some(behind(&w, 1))).await;
+    w.put("z", "sentinel", None).await;
+    assert_eq!(
+        monitor_samples(&mut events, Some("sentinel"), None).await,
+        ["sentinel"],
+        "rev 11 and rev 12 are not kept after the boundary"
+    );
+    assert_eq!(
+        (monitor.merge_superseded(), monitor.merge_evicted()),
+        (2, 0)
+    );
+}
+
+/// A seeded watch's merge is bounded (observer §4.1, tooling guide O6): at
+/// [`zenkey_fleet::MonitorSpec::max_keys`], the key admitted least
+/// recently is forgotten and counted, apart from what the merge
+/// superseded. A forgotten key holds nothing, so its next sample is kept
+/// whatever its stamp. A key the bound kept still refuses an older stamp.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_seeded_watchs_merge_counts_what_its_bound_forgot() {
+    let (writer, joiner) = util::peer_pair().await;
+    let w = Foreign::new(&writer, &joiner).await;
+    let monitor = zenkey_fleet::Monitor::start(
+        &joiner,
+        zenkey_fleet::MonitorSpec {
+            max_keys: 2,
+            ..zenkey_fleet::MonitorSpec::default()
+        },
+    )
+    .await
+    .expect("monitor");
+    let mut events = monitor.events();
+    let id = monitor
+        .watch_seeded(
+            "foreign/**",
+            SeedPolicy {
+                history: false,
+                state: false,
+                timeout: util::SETTLE,
+            },
+        )
+        .await
+        .expect("seeded watch");
+    assert!(
+        monitor_samples(&mut events, None, Some(id))
+            .await
+            .is_empty()
+    );
+    w.matched().await;
+    w.put("a", "a-5", Some(w.stamp(5, "a1"))).await;
+    w.put("b", "b-5", Some(w.stamp(5, "a1"))).await;
+    // A third key: `a`, admitted least recently, is forgotten.
+    w.put("c", "c-5", Some(w.stamp(5, "a1"))).await;
+    w.put("c", "c-4", Some(w.stamp(4, "a1"))).await;
+    w.put("a", "a-1", Some(w.stamp(1, "a1"))).await;
+    assert_eq!(
+        monitor_samples(&mut events, Some("a-1"), None).await,
+        ["a-5", "b-5", "c-5", "a-1"],
+        "c-4 is older than what c holds; a, forgotten, holds nothing"
+    );
+    assert_eq!(
+        (monitor.merge_superseded(), monitor.merge_evicted()),
+        (1, 2),
+        "a, then b, forgotten to admit c and a"
     );
 }

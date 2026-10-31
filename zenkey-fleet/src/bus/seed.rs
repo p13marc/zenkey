@@ -21,9 +21,14 @@
 //!   verbatim chunk a late *publisher* is never found (§2.5), and a
 //!   publisher that is gone took its cache with it;
 //! - **replies and live samples merge per key by the owner's stamp**
-//!   (one merge for both phases): the newer wins whichever path brought it, a `reply_del` is
-//!   a deletion with its stamp, and one mutation both paths carried is kept
-//!   once.
+//!   (one merge for both phases, kept for as long as the subscription
+//!   follows: observer §4.1): the newer wins whichever path brought it, a
+//!   `reply_del` is a deletion with its stamp, and one mutation both paths
+//!   carried is kept once. The merge holds one entry per key, bounded at
+//!   [`crate::DEFAULT_MAX_KEYS`] by last admission; a key it forgets holds
+//!   nothing, so its next sample is kept whatever its stamp, and every key
+//!   forgotten is counted ([`SeededSubscriber::evicted`]), never silent
+//!   (tooling guide O6).
 //!
 //! Both legs are queries **this module issues itself**, rather than
 //! zenoh-ext's `history()` replay: the boundary ([`SeedItem::SeedComplete`])
@@ -37,7 +42,6 @@
 //! No events leg: an occurrence is replayed from union storages, bounded by
 //! its retention (§2.6), and a seed of state does not reach it.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -45,6 +49,7 @@ use crate::Result;
 use zenoh::Session;
 
 use crate::bus::monitor::SampleView;
+use crate::model::bounded::{BoundedLru, DEFAULT_MAX_KEYS};
 use crate::report::{Asked, SeedCoverage, SeedLeg};
 
 /// Which seed legs to run. Default: both — a per-leg opt-out exists because
@@ -167,6 +172,7 @@ pub struct SeededSubscriber {
     // Held for lifetime: dropping undeclares.
     _subscriber: zenoh::pubsub::Subscriber<()>,
     task: tokio::task::JoinHandle<()>,
+    merge: Arc<Merge>,
 }
 
 impl std::fmt::Debug for SeededSubscriber {
@@ -187,6 +193,20 @@ impl SeededSubscriber {
     /// samples it missed before the stream resumes (O6).
     pub async fn recv(&mut self) -> Option<SeedItem> {
         self.rx.recv().await
+    }
+
+    /// Samples the merge did not keep, over the subscription's whole life:
+    /// the seed's, which the boundary's [`SeedCoverage::superseded`] counts,
+    /// and every live one after it older than what its key held.
+    pub fn superseded(&self) -> u64 {
+        self.merge.superseded()
+    }
+
+    /// Keys the merge forgot to stay within its bound
+    /// ([`crate::DEFAULT_MAX_KEYS`]), each one's next sample then kept
+    /// whatever its stamp (observer §4.1, tooling guide O6).
+    pub fn evicted(&self) -> u64 {
+        self.merge.evicted()
     }
 }
 
@@ -242,13 +262,52 @@ impl futures_core::Stream for SeededSubscriber {
 ///   foreign key's, from a session with no HLC through no router that
 ///   stamps, ranked below every stamp as `Latest` ranks an unstamped reply.
 ///
-/// Every suppression is counted ([`SeedCoverage::superseded`]).
+/// Every suppression is counted ([`SeedCoverage::superseded`] at the
+/// boundary, [`Merge::superseded`] for the merge's life).
 ///
-/// `pub(crate)`: [`crate::Monitor::watch_seeded`] runs the same merge over
-/// its seed phase (issue #92) — one discipline, not two.
+/// **Kept for as long as the reading follows** (observer §4.1): a tool's
+/// merge spans the seed and every live sample after it, so a live sample
+/// older than what its key holds, a new epoch's on a clock behind among
+/// them, is not kept after the boundary either.
+///
+/// **Bounded** (tooling guide O6): one entry per key, at most `max_keys`,
+/// the least recently admitted forgotten first, in batches
+/// ([`BoundedLru`]). A forgotten key holds nothing, so its next sample is
+/// kept whatever its stamp, and every key forgotten is counted
+/// ([`Merge::evicted`]), apart from `superseded` and from a channel's
+/// `Dropped(n)`.
+///
+/// `pub(crate)`: [`crate::Monitor::watch_seeded`] runs the same merge
+/// (issue #92) — one discipline, not two.
 pub(crate) struct Merge {
-    latest: Mutex<HashMap<String, zenkey_model::seed::Held>>,
+    latest: Mutex<MergeTable>,
     superseded: std::sync::atomic::AtomicU64,
+    evicted: std::sync::atomic::AtomicU64,
+    /// A monitor's totals across its seeded watches, bumped beside this
+    /// merge's own.
+    ledger: Option<Arc<MergeLedger>>,
+}
+
+/// One merge's keys and the count of its admissions, which orders them
+/// for the bound.
+struct MergeTable {
+    keys: BoundedLru<String, Entry>,
+    admitted: u64,
+}
+
+/// What one key holds, and when it was last admitted.
+#[derive(Debug, Clone, Copy)]
+struct Entry {
+    held: zenkey_model::seed::Held,
+    admitted: u64,
+}
+
+/// What every merge of a monitor's seeded watches did not keep and forgot
+/// ([`crate::Monitor::merge_superseded`], [`crate::Monitor::merge_evicted`]).
+#[derive(Debug, Default)]
+pub(crate) struct MergeLedger {
+    pub(crate) superseded: std::sync::atomic::AtomicU64,
+    pub(crate) evicted: std::sync::atomic::AtomicU64,
 }
 
 /// A zenoh timestamp as the merge compares it: its NTP64 time, and its id's
@@ -261,10 +320,17 @@ pub(crate) fn stamp_of(ts: &zenoh::time::Timestamp) -> zenkey_model::seed::Stamp
 }
 
 impl Merge {
-    pub(crate) fn new() -> Merge {
+    /// A merge bounded at `max_keys` keys, its counts also added to
+    /// `ledger` when one is given.
+    pub(crate) fn new(max_keys: usize, ledger: Option<Arc<MergeLedger>>) -> Merge {
         Merge {
-            latest: Mutex::new(HashMap::new()),
+            latest: Mutex::new(MergeTable {
+                keys: BoundedLru::with_capacity(max_keys),
+                admitted: 0,
+            }),
             superseded: std::sync::atomic::AtomicU64::new(0),
+            evicted: std::sync::atomic::AtomicU64::new(0),
+            ledger,
         }
     }
 
@@ -272,18 +338,39 @@ impl Merge {
         self.superseded.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    pub(crate) fn evicted(&self) -> u64 {
+        self.evicted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub(crate) fn admit(&self, view: &SampleView) -> bool {
-        let mut latest = self.latest.lock().expect("merge lock");
-        let held = latest.entry(view.key.clone()).or_default();
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut table = self.latest.lock().expect("merge lock");
+        let held = table.keys.get(view.key.as_str()).map(|e| e.held);
         let incoming = view.timestamp.as_ref().map(stamp_of);
-        let admit = zenkey_model::seed::admits(*held, incoming);
-        if admit {
-            *held = held.after(incoming);
-        } else {
-            self.superseded
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let admit = zenkey_model::seed::admits(held.unwrap_or_default(), incoming);
+        if !admit {
+            self.superseded.fetch_add(1, Relaxed);
+            if let Some(l) = &self.ledger {
+                l.superseded.fetch_add(1, Relaxed);
+            }
+            return false;
         }
-        admit
+        if held.is_none() {
+            let forgot = table.keys.admit(|e| e.admitted) as u64;
+            if forgot > 0 {
+                self.evicted.fetch_add(forgot, Relaxed);
+                if let Some(l) = &self.ledger {
+                    l.evicted.fetch_add(forgot, Relaxed);
+                }
+            }
+        }
+        table.admitted += 1;
+        let entry = Entry {
+            held: held.unwrap_or_default().after(incoming),
+            admitted: table.admitted,
+        };
+        table.keys.insert(view.key.clone(), entry);
+        true
     }
 }
 
@@ -402,7 +489,7 @@ pub async fn seed_subscribe(
 ) -> Result<SeededSubscriber> {
     let (tx, rx) = seed_channel(SEED_CAPACITY);
 
-    let merge = Arc::new(Merge::new());
+    let merge = Arc::new(Merge::new(DEFAULT_MAX_KEYS, None));
 
     // 1) The subscriber, FIRST — anything published from here on is caught.
     let subscriber = crate::bus::teardown::declared(
@@ -440,6 +527,7 @@ pub async fn seed_subscribe(
         rx,
         _subscriber: subscriber,
         task,
+        merge,
     })
 }
 
@@ -502,6 +590,48 @@ mod tests {
         }
         let low = |id: &str| Timestamp::new(NTP64(5), id.parse::<TimestampId>().unwrap());
         assert!(low("100") < low("2"), "zenoh: the low byte decides");
+    }
+
+    /// The merge is bounded and says what the bound cost (observer §4.1,
+    /// tooling guide O6): past `max_keys`, the least recently admitted key
+    /// is forgotten and counted, apart from `superseded`, and a forgotten
+    /// key holds nothing, so its next sample is kept whatever its stamp. A
+    /// key the bound kept still refuses an older stamp, after any number of
+    /// admissions: the merge has no end.
+    #[test]
+    fn the_merge_forgets_past_its_bound_and_counts_it() {
+        use zenoh::time::{NTP64, Timestamp, TimestampId};
+        let ledger = Arc::new(MergeLedger::default());
+        let merge = Merge::new(2, Some(Arc::clone(&ledger)));
+        let at = |key: &str, t: u64| {
+            let mut v = view(key);
+            v.timestamp = Some(Timestamp::new(
+                NTP64(t),
+                "a1".parse::<TimestampId>().expect("an id"),
+            ));
+            v
+        };
+        assert!(merge.admit(&at("k/a", 5)));
+        assert!(merge.admit(&at("k/b", 5)));
+        assert!(!merge.admit(&at("k/a", 4)), "a is held, and 4 is older");
+        assert_eq!((merge.superseded(), merge.evicted()), (1, 0));
+        // A third key: `a`, admitted least recently, is forgotten.
+        assert!(merge.admit(&at("k/c", 5)));
+        assert_eq!(merge.evicted(), 1, "one key forgotten, and counted");
+        assert!(!merge.admit(&at("k/c", 4)), "c is held");
+        assert!(
+            merge.admit(&at("k/a", 1)),
+            "a forgotten holds nothing: kept whatever its stamp"
+        );
+        assert_eq!((merge.superseded(), merge.evicted()), (2, 2));
+        assert_eq!(
+            (
+                ledger.superseded.load(std::sync::atomic::Ordering::Relaxed),
+                ledger.evicted.load(std::sync::atomic::Ordering::Relaxed)
+            ),
+            (2, 2),
+            "a monitor's totals move with the merge's own"
+        );
     }
 
     /// Deep-review D5: the seed channel is bounded, and what the bound

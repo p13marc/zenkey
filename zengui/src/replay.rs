@@ -546,6 +546,8 @@ impl ReplayState {
             // (O5) — not a claim about the live bus.
             watched: Arc::clone(&self.watched),
             seeded: Vec::new(),
+            // A replay runs no seeded watch, so no merge.
+            merge_evicted: 0,
             totals,
         })
     }

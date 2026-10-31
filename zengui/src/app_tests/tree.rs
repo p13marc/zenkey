@@ -390,6 +390,7 @@ fn tick_with(keys: &[&str], watched: &Arc<[String]>) -> BusTick {
         keys_unwatched: 0,
         watched: Arc::clone(watched),
         seeded: Vec::new(),
+        merge_evicted: 0,
         totals: Default::default(),
     }
 }

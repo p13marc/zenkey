@@ -123,6 +123,7 @@ pub fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         keys_unwatched,
                         watched: std::sync::Arc::clone(&watched),
                         seeded: std::mem::take(&mut seeded),
+                        merge_evicted: monitor.merge_evicted(),
                         totals,
                     })));
                 }

@@ -1577,6 +1577,7 @@ impl World {
             keys_unwatched: 0,
             watched: Arc::from(vec!["**".to_string()]),
             seeded: Vec::new(),
+            merge_evicted: 0,
             totals,
         };
         self.ticks += 1;

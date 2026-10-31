@@ -294,7 +294,9 @@ pub struct MonitorSpec {
     /// How many distinct keys to keep statistics for. Least-recently-seen keys
     /// are dropped past this, and the drops are counted
     /// ([`MonitorCore::keys_evicted`]) — a long-running observer is bounded,
-    /// and says so (tooling guide O6).
+    /// and says so (tooling guide O6). Each seeded watch's merge is bounded
+    /// at as many keys, its drops counted apart
+    /// ([`Monitor::merge_evicted`]).
     pub max_keys: usize,
 }
 
@@ -734,6 +736,13 @@ pub struct Monitor {
     barrier: Option<zenkey::presence::Barrier>,
     watches: tokio::sync::Mutex<std::collections::HashMap<WatchId, WatchEntry>>,
     next_watch: AtomicU64,
+    /// Each seeded watch's merge is bounded at this many keys, the
+    /// statistics table's bound ([`MonitorSpec::max_keys`]).
+    max_keys: usize,
+    /// What the seeded watches' merges did not keep and forgot, across
+    /// every one of them ([`Monitor::merge_superseded`],
+    /// [`Monitor::merge_evicted`]).
+    merges: Arc<crate::bus::seed::MergeLedger>,
     /// The liveliness subscribers, by selector: callbacks, so they need no
     /// task (spec §8.1, zenoh#2678). Undeclared, acknowledged, by
     /// [`Monitor::shutdown`]; dropped with the monitor otherwise.
@@ -856,6 +865,8 @@ impl Monitor {
             barrier,
             watches: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             next_watch: AtomicU64::new(0),
+            max_keys: spec.max_keys,
+            merges: Arc::default(),
             liveliness,
             tasks,
         };
@@ -941,16 +952,27 @@ impl Monitor {
     ///   key), and the `@adv` caches of the advanced publishers present
     ///   (spec §2.5);
     /// - one per-key merge by the owner's stamp spans seed *and* live
-    ///   samples until the boundary, so a mutation in the seed window lands
-    ///   exactly once and a stale reply cannot regress a key. Suppressions
-    ///   are counted in the coverage, never silently absorbed (O6) — and
-    ///   they are *not* part of `Dropped(n)`, which counts only broadcast
-    ///   lag;
+    ///   samples for the watch's whole life (observer §4.1: a tool keeps
+    ///   core §4.2's merge for as long as it follows), so a mutation in the
+    ///   seed window lands exactly once, a stale reply cannot regress a
+    ///   key, and neither can a live sample older than what its key holds,
+    ///   a new epoch's on a clock behind among them. Suppressions are
+    ///   counted, in the coverage up to the boundary and in
+    ///   [`Monitor::merge_superseded`] for the watch's life, never silently
+    ///   absorbed (O6) — and they are *not* part of `Dropped(n)`, which
+    ///   counts only broadcast lag;
+    /// - the merge is **bounded** at [`MonitorSpec::max_keys`] keys, the
+    ///   least recently admitted forgotten first. A forgotten key holds
+    ///   nothing, so its next sample is kept whatever its stamp, and every
+    ///   key forgotten is counted ([`Monitor::merge_evicted`]), apart from
+    ///   both. The merge is dropped with the watch, at [`Monitor::unwatch`].
+    ///   Before #926 it was dropped at the boundary, "a seed-phase
+    ///   structure, not a per-watch leak", which left live samples after
+    ///   the boundary ordered by nothing; the bound now keeps a long-lived
+    ///   watch's map from growing without end;
     /// - [`FleetEvent::WatchSeeded`] fires once **every** leg resolves,
     ///   carrying this id and the [`crate::SeedCoverage`] (a leg that ran to
-    ///   its timeout says so: it seeded possibly incompletely). After it,
-    ///   the merge is dropped and live samples flow untouched (the merge map
-    ///   is a seed-phase structure, not a per-watch leak).
+    ///   its timeout says so: it seeded possibly incompletely).
     pub async fn watch_seeded(
         &self,
         selector: &str,
@@ -958,14 +980,14 @@ impl Monitor {
     ) -> Result<WatchId> {
         use crate::bus::seed::{Merge, run_legs, view_of};
 
-        // The merge gate: `Some` while seeding (both live callback and seed
-        // replies pass `admit`), swapped to `None` at the boundary.
-        let gate: Arc<arc_swap::ArcSwapOption<Merge>> =
-            Arc::new(arc_swap::ArcSwapOption::from_pointee(Merge::new()));
+        // The merge: both the live callback and the seed replies pass
+        // `admit`, for the watch's life (observer §4.1). The subscriber's
+        // callback holds it, so it goes with the watch at `unwatch`.
+        let merge = Arc::new(Merge::new(self.max_keys, Some(Arc::clone(&self.merges))));
 
         // 1) The subscriber, FIRST (core §4.2, 0.26).
         let core = Arc::clone(&self.core);
-        let cb_gate = Arc::clone(&gate);
+        let cb_merge = Arc::clone(&merge);
         let subscriber = crate::bus::teardown::declared(
             "seeded subscribe",
             selector,
@@ -974,12 +996,9 @@ impl Monitor {
                 .callback(move |sample| {
                     let sn = sample.source_info().map(|si| si.source_sn());
                     let view = view_of(&sample);
-                    if let Some(merge) = cb_gate.load_full()
-                        && !merge.admit(&view)
-                    {
-                        return;
+                    if cb_merge.admit(&view) {
+                        core.ingest(view, sn);
                     }
-                    core.ingest(view, sn);
                 }),
         )
         .await?;
@@ -1007,14 +1026,10 @@ impl Monitor {
             let core = Arc::clone(&self.core);
             let selector = selector.to_string();
             tokio::spawn(async move {
-                let merge = gate
-                    .load_full()
-                    .expect("gate holds the merge while seeding");
                 let coverage = run_legs(&session, &selector, policy, &merge, |view| {
                     core.ingest(view, None);
                 })
                 .await;
-                gate.store(None);
                 // Seeded keys should be visible on the very tick that
                 // announces the boundary, not one tick later.
                 core.tick();
@@ -1126,6 +1141,23 @@ impl Monitor {
 
     pub fn tree(&self) -> Arc<KeyTreeSnapshot> {
         self.core.tree()
+    }
+
+    /// Samples the merges of this monitor's seeded watches did not keep,
+    /// over each watch's life: not newer, by the owner's stamp, than what
+    /// their key held ([`Monitor::watch_seeded`]). Each boundary's
+    /// [`crate::SeedCoverage::superseded`] counts its watch's up to the
+    /// boundary; this counts those and every live one after.
+    pub fn merge_superseded(&self) -> u64 {
+        self.merges.superseded.load(Ordering::Relaxed)
+    }
+
+    /// Keys the merges of this monitor's seeded watches forgot to stay
+    /// within their bound ([`MonitorSpec::max_keys`]). Each such key's next
+    /// sample was kept whatever its stamp, so a non-zero count says the
+    /// merge did not order every key (observer §4.1, tooling guide O6).
+    pub fn merge_evicted(&self) -> u64 {
+        self.merges.evicted.load(Ordering::Relaxed)
     }
 
     /// Stop watching. Equivalent to dropping the monitor — kept as an explicit

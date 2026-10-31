@@ -58,6 +58,7 @@ fn tick(keys: usize, evicted: u64, unwatched: u64, watched: &Arc<[String]>) -> B
         keys_unwatched: unwatched,
         watched: Arc::clone(watched),
         seeded: Vec::new(),
+        merge_evicted: 0,
         totals: Default::default(),
     }
 }
