@@ -108,6 +108,8 @@ def main():
     ap.add_argument("--cut-s", type=float, default=15)
     ap.add_argument("--after-s", type=float, default=90)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--loss-at-steady", type=float,
+                    help="tell the relay this loss 60 s before the steady window")
     ap.add_argument("--config-timeout-s", type=int, default=30,
                     help="zenctl's reply wait for a config change: its default 5 s draws silence on RF")
     a = ap.parse_args()
@@ -164,6 +166,14 @@ def main():
         time.sleep(max(0.0, t - time.time()))
 
     steady_start = next_tick(time.time() + a.settle_s, 5)
+    ctl = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    host, port = a.control.rsplit(":", 1)
+    if a.loss_at_steady is not None:
+        # The setup was made lossless (LOSS_START=0): every declaration
+        # crossed. The medium's loss from the settle on.
+        at(steady_start - 60)
+        ctl.sendto(f"loss {a.loss_at_steady}".encode(), (host, int(port)))
+        mark("loss_on", loss=a.loss_at_steady)
     at(steady_start)
     mark("steady_start")
     at(steady_start + a.steady_s)
@@ -210,8 +220,6 @@ def main():
     run_acts([p for p in plan if p[0] != "config"], 0)
     mark("acts_end")
 
-    ctl = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    host, port = a.control.rsplit(":", 1)
     t = next_tick(time.time(), 4)
     at(t)
     ctl.sendto(b"cut", (host, int(port)))

@@ -18,7 +18,8 @@
 #   BASE  (default 17400) its ports: routers BASE+1 and +2, drivers +10 and
 #         +11, the relay +12, +13 and its control port +14;
 #   LOGS  where this run's logs go (default WORK/logs/INST);
-#   DICT  the compress dictionary (default rf.zdict here).
+#   DICT  the compress dictionary (default rf.zdict here);
+#   LOSS_START  the relay's loss until told otherwise (default the medium's).
 #
 # Every process runs on cores 0-1 under `timeout`, and its PID (timeout's)
 # goes to WORK/run/INST/pids, which `down` signals and nothing else.
@@ -85,7 +86,7 @@ up() {
     --a-side "127.0.0.1:$((BASE + 12))" --b-side "127.0.0.1:$((BASE + 13))" \
     --driver-a "127.0.0.1:$((BASE + 10))" --driver-b "127.0.0.1:$((BASE + 11))" \
     --control "127.0.0.1:$((BASE + 14))" \
-    --loss "$(param loss)" --latency-ms "$(param latency_ms)" --jitter-ms "$(param jitter_ms)" \
+    --loss "${LOSS_START:-$(param loss)}" --latency-ms "$(param latency_ms)" --jitter-ms "$(param jitter_ms)" \
     --seed 0 --capture "$LOGS/air.jsonl" --summary "$LOGS/relay-summary.json"
   sleep 0.5
   start driver-a env RUST_LOG="${DRIVER_LOG:-info}" "$BIN/modem-driver" --config "$CFG/driver-a.toml"

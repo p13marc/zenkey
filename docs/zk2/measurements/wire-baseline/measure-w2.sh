@@ -13,8 +13,10 @@
 #    steady window, the acts, the reconnect. Its marks.json bounds each.
 # 4. Bring everything down.
 #
-# Environment: wire.sh's (WORK, INST, BASE, DICT), and SETTLE_S (120),
-# STEADY_S (2100), CUT_S (the lease + 5 s), AFTER_S (90).
+# Environment: wire.sh's (WORK, INST, BASE, DICT, LOSS_START), SETTLE_S
+# (120), STEADY_S (2100), CUT_S (the lease + 5 s), AFTER_S (90), and
+# LOSS_AT_STEADY: with LOSS_START=0, the loss the relay takes 60 s before the
+# steady window, so the setup's declarations all cross.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -47,7 +49,8 @@ out=$($W start drive python3 -I -u "$HERE/w2-drive.py" --owner "$BIN/owner" --ze
   --device-connect "tcp/127.0.0.1:$((BASE + 1))" --host-connect "tcp/127.0.0.1:$((BASE + 2))" \
   --control "127.0.0.1:$((BASE + 14))" --logs "$LOGS" \
   --settle-s "${SETTLE_S:-120}" --steady-s "${STEADY_S:-2100}" \
-  --cut-s "${CUT_S:-$((LEASE_S + 5))}" --after-s "${AFTER_S:-90}")
+  --cut-s "${CUT_S:-$((LEASE_S + 5))}" --after-s "${AFTER_S:-90}" \
+  ${LOSS_AT_STEADY:+--loss-at-steady "$LOSS_AT_STEADY"})
 echo "$out"
 pid=${out##* }
 while kill -0 "$pid" 2>/dev/null; do sleep 5; done

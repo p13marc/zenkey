@@ -20,9 +20,10 @@ byte, the SDU's length, whether it was dropped, the SDU in hex), and prints a
 per-direction summary on SIGTERM or SIGINT. Standard library only.
 
 With --control, a datagram "cut" on that port drops every datagram both ways
-until a datagram "restore": the radio out of reach, for a reconnect. Each is
-recorded as {"t": ..., "event": "cut"|"restore"}, and a datagram dropped
-while cut is recorded with "cut": true.
+until a datagram "restore": the radio out of reach, for a reconnect; and
+"loss <p>" sets the loss both ways from then on. Each is recorded as
+{"t": ..., "event": ...}, and a datagram dropped while cut is recorded with
+"cut": true.
 """
 import argparse
 import asyncio
@@ -105,8 +106,14 @@ class Relay:
         word = data.decode(errors="replace").strip()
         if word in ("cut", "restore"):
             self.cut = word == "cut"
-            if self.log:
-                self.log.write(json.dumps({"t": round(time.time(), 6), "event": word}) + "\n")
+        elif word.startswith("loss "):
+            p = float(word.split()[1])
+            for d in self.dirs.values():
+                d.loss = p
+        else:
+            return
+        if self.log:
+            self.log.write(json.dumps({"t": round(time.time(), 6), "event": word}) + "\n")
 
     def received(self, side, data, addr):
         if side == "control":

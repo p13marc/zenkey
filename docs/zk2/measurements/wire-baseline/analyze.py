@@ -15,6 +15,10 @@ A window's counter delta is the reading last published at or before its end,
 less the one last published at or before its start (published every second).
 The relay's figures count exactly the datagrams inside the window.
 
+W1's SDUs other than keep-alives are split into data (from each of gen's
+ticks to its burst's end) and the rest; links_opened counts the InitSyns A
+sent, each a transport opened again.
+
 A->B is driver A's transmit side (the owner's router toward the reader's), and
 B->A driver B's. Airtime is each medium's, per SDU, as fake-medium's
 SimMedium charges a frame with no ARQ (sim.rs `airtime`): on RF 8 bits a byte
@@ -151,6 +155,30 @@ def classify(params, r):
     return "keep-alive" if r["n"] == ka else "other"
 
 
+def initsyn_size(params):
+    """An InitSyn (27 bytes, the first of a link's handshake) under the run's layers."""
+    n = 27 + (14 if params.get("stack") == "lean" else 0)
+    if "fragment" in params:
+        n += 6
+    return n + (2 if params.get("stack") == "lean" else 0)
+
+
+def split_w1(run, d, rows):
+    """W1's SDUs that are not keep-alives, as data and the rest (re-opened
+    links, their declarations). Data is what A sent in the 2 s (5 s in
+    tiles) before a reading reached the far side, or a period of 60 s from
+    one (a reading lost on the air reaches nothing)."""
+    span = 5 if "fragment" in run["params"] else 2
+    if "_ticks" not in run:
+        far = sorted(r["t"] for r in run["far"] if r.get("key"))
+        run["_ticks"] = sorted({round(f + 60 * k, 3) for f in far for k in (-1, 0, 1)})
+    data, rest = [], []
+    for r in rows:
+        hit = d == "ab" and any(f - span <= r["t"] <= f + 0.5 for f in run["_ticks"])
+        (data if hit else rest).append(r)
+    return data, rest
+
+
 def in_window(run, d, t0, t1):
     return [r for r in run["air"] if r.get("dir") == d and t0 <= r["t"] < t1]
 
@@ -184,6 +212,16 @@ def window(run, name, t0, t1):
             if v is not None:
                 layer[key.split("/", 1)[1]] = v
         airtime = sum(air_s(r["n"]) for r in air)
+        reopened = sum(1 for r in air if r["n"] == initsyn_size(params)
+                       and classify(params, r) == "other") if d == "ab" else None
+        if name == "w1":
+            data, rest = split_w1(run, d, [r for r in air if classify(params, r) == "other"])
+            kinds.pop("other", None), kbytes.pop("other", None), kair.pop("other", None)
+            for label, rows in (("data", data), ("other", rest)):
+                if rows:
+                    kinds[label] = len(rows)
+                    kbytes[label] = sum(r["n"] for r in rows)
+                    kair[label] = sum(air_s(r["n"]) for r in rows)
         rel = {
             "tx_sdus": sdus, "tx_bytes": byts, "rx_sdus_far": rsdus, "rx_bytes_far": rbyts,
             "relay_sdus": len(air), "relay_bytes": sum(r["n"] for r in air),
@@ -194,6 +232,8 @@ def window(run, name, t0, t1):
             "tx_layers": layer,
             "airtime_s": round(airtime, 3),
         }
+        if reopened is not None:
+            rel["links_opened"] = reopened
         if sdus is not None and byts is not None:
             rel["per_day"] = {
                 "sdus": round(sdus * scale), "bytes": round(byts * scale),
