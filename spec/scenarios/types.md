@@ -28,7 +28,8 @@ to:
   `ff ff ff`, and a JSON Schema sample `{` on a CBOR-declared state: each
   is shown as its declared type, named as a decoded one is
   (`detections.v1.Objects`, `json:Status`), its size and the reason. The
-  reason for the second says it was read as CBOR.
+  second carries CBOR's `Encoding` or zenoh's default. Its reason says it
+  was read as CBOR.
 
 ## §3 QoS applied
 

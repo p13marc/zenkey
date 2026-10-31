@@ -65,6 +65,8 @@ declare a queryable. `[Sc: retrieval.md §1]`
 - **Ahead.** When an owner's clock is ahead, it MUST stop writing state,
   and SHOULD report it.
 - **Consumer rule.** A consumer MUST order an owner's values by time.
+  - **A profile's order.** A profile MAY order a consumer's values more
+    strictly.
 
 ## 3. Events
 

@@ -15,26 +15,28 @@ class also holds the rules its texts state without a keyword. Those, such as
 
 A long sentence is shortened, never reworded, and its link leads to the
 rest. A sentence after its paragraph's run-in label shows the label first. A
-pronoun's noun, where not shown, follows it in brackets. A lead-in ends with
-its list's length, "(3 items)", or its table's. A MAY that excepts a rule
-follows it, after *Except:*. Nothing else is added.
+pronoun's noun, where not shown, follows it in brackets. So does a verb the
+sentence omits. A lead-in ends with its list's length, "(3 items)", or its
+table's. A MAY that excepts a rule follows it, after *Except:*. Nothing else
+is added.
 
 **Evidence** is what the text cites beside a rule. That is the tags after
 its sentence, else in its paragraph. Else, a list item under it that states
 no rule gives it its tags. A tag that closes a list cites each rule of it
 that cites none. Where the text cites none, the entry says "none cited". A
 rule's id is its row's, its section's, or the code that checks it. MAY
-grants a permission. It is listed only beside a rule it excepts.
+grants a permission. It is listed beside a rule it excepts. A row's MAY is
+in the rule ids.
 
 **Conformance by role.** An implementation claims one class for each role it
 plays ([core §12](core.md#12-conformance-classes)). A class holds its role's
 rules and the static rules, listed here under implementation. Those are
 §1's, §9's, the contract rules of the sections §12 lists, and any rule
 naming its lint code. §3.3's descriptor checker is static too. A rule of
-those sections that names a role is listed under it. So is one of §1 or §9.
-A static rule binds an implementation where it does what the rule governs. A
-class is claimed at the full level or the constrained one. A profile is a
-class of its own, and its rules are in its text.
+those sections, §1 and §9 included, that names a role is listed under that
+role. A static rule binds an implementation where it does what the rule
+governs. A class is claimed at the full level or the constrained one. A
+profile is a class of its own, and its rules are in its text.
 
 **A stream-only owner's minimum path** is this index filtered to two roles:
 [owner](#owner) and [implementation](#implementation-the-static-rules). A
@@ -50,12 +52,12 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 56 |
-| [Consumer](#consumer) | 13 |
+| [Consumer](#consumer) | 15 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 15 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 52, 24 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 53, 24 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 34 |
-| Every rule, once | 169 |
+| Every rule, once | 171 |
 | [Rule ids](#rule-ids) | 71 |
 
 ## Owner
@@ -245,14 +247,16 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [S5](core.md#42-rules-for-owners-and-consumers) | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. | `[Sc: state.md §4–§6, §9]` |
 | [S6](core.md#42-rules-for-owners-and-consumers) | The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one, and keep the newer by the owner's stamp (S1, S2), or, for a consumer across two timestamp ids, by §4.3's consumer rule. | `[Sc: state.md §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by the owner's stamp (S1, S2). | `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … Across two timestamp ids, a consumer MUST instead keep what §4.3's consumer rule accepts. | `[Sc: state.md §7, §10]` |
 
 ### [core §4.3 Clocks (S7)](core.md#43-clocks-s7)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [S7](core.md#43-clocks-s7) | A consumer MUST order each key's values by time within one timestamp id, from the first value it receives, a late joiner's seed replies included (§4.2). | `[Sc: state.md §7]` |
-| [S7](core.md#43-clocks-s7) | **Consumer rule.** … It [a consumer] MUST accept a value under an id other than the one its held value carries, and order by time within that id from then on. | `[Sc: state.md §7]` |
+| [S7](core.md#43-clocks-s7) | **Consumer rule.** … It [a consumer] MUST accept a value under an id other than the one its held value carries, and order by time within that id from then on. *Except:* A profile MAY order a consumer's values more strictly. | `[Sc: state.md §7]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -384,7 +388,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one, and keep the newer by the owner's stamp (S1, S2), or, for a consumer across two timestamp ids, by §4.3's consumer rule. | `[Sc: state.md §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by the owner's stamp (S1, S2). | `[Sc: state.md §7, §10]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 

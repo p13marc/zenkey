@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.68** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.69** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -42,10 +42,11 @@ RFC 2119 and RFC 8174, when written in capitals.
 - **tool**: a generic program that reads the bus or contracts without
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
-  bind it, whichever of the roles above it plays. They are §1's, §9's, and
-  the others §12 lists: those on what a contract states, those naming
-  their lint code, and §3.3's rule for a descriptor checker. Each binds it
-  where it does what the rule governs (§12).
+  bind it, whichever of the roles above it plays. They are the rules of §1
+  and §9 that name no role, and the others §12 lists: those on what a
+  contract states, those naming their lint code, and §3.3's rule for a
+  descriptor checker. Each binds it where it does what the rule governs
+  (§12).
 
 An archive (§4.4) is an owner of its own keys. Conformance is claimed by
 role (§12). [`RULES.md`](RULES.md) lists each class's rules stated with
@@ -871,9 +872,10 @@ from S4's GET and follows a subscription.
   answers the GET and before the subscription reaches it is lost, and a
   lost delete leaves a deleted key standing. `[Sc: state.md §10]`
 - **The merge.** A late joiner MUST merge the GET's replies and the
-  subscription's samples per key, whichever path brought each one, and
-  keep the newer by the owner's stamp (S1, S2), or, for a consumer across
-  two timestamp ids, by §4.3's consumer rule. `[Sc: state.md §10]`
+  subscription's samples per key, whichever path brought each one. It
+  MUST keep the newer by the owner's stamp (S1, S2). Across two timestamp
+  ids, a consumer MUST instead keep what §4.3's consumer rule accepts.
+  `[Sc: state.md §7, §10]`
   - A live put or delete newer than a reply replaces it, and a reply newer
     than a live sample replaces that.
   - A `reply_del` is a deletion with its stamp (S3), merged as a live
@@ -889,7 +891,7 @@ from S4's GET and follows a subscription.
     `[F: seed/merge.json]` `[Sc: state.md §11]`
     - Within one timestamp id, that is by time, as §4.3's consumer rule
       orders. Two ids for one key mean that the owner started a new epoch
-      (§4.3), and there a consumer and a tool part (below).
+      (§4.3). Across them a consumer and a tool order differently (below).
   - **An unstamped sample** ranks below every stamped one, as
     `Latest` ranks an unstamped reply lowest (§4.1). It is no owner's
     (S1): it is a foreign key's (§1.7), put by a session with no HLC
@@ -906,8 +908,8 @@ from S4's GET and follows a subscription.
     rule from its first value on, its seed's replies included. It keeps a
     value under an id other than its held value's. That is the case the
     merge leaves to §4.3, for a consumer. Within one id the two orders are
-    one. So a consumer's merge has no end to state: §4.3's rule orders
-    every value it receives.
+    one. So a consumer has no instant at which its merge ends: §4.3's rule
+    orders every value the consumer receives.
     - **A tool** keeps the merge across ids too, for as long as it
       follows ([`observer.md`](observer.md) §4.1).
     - **Either way**, a value of the old epoch that arrives after one of
@@ -977,11 +979,17 @@ through the same router, arrives with the router's zid.
     can arrive after the new epoch's first value. Its id is not the held
     value's, so a consumer accepts it. The key steps back to the old epoch
     until the new one's next value. That is accepted at this version.
-    - **A late joiner** is no exception. Across two ids, a consumer keeps
-      the one whose value arrived last, its seed's replies included. A
-      tool keeps the later time (§4.2), the old epoch's when the new
-      epoch's clock is behind. Either is this residual risk.
-      `[F: seed/merge.json]` `[Sc: state.md §7]`
+    - **A late joiner** is no exception. Across two ids, a consumer holds
+      a value under the id of the last value it received, its seed's
+      replies included. A tool keeps the later time (§4.2), the old
+      epoch's when the new epoch's clock is behind. Either is this residual
+      risk. `[F: seed/merge.json]` `[Sc: state.md §7]`
+      - **Inside a seed** the risk lasts the GET. `Latest` delivers every
+        reply after the samples heard during the GET (§4.1). So a consumer
+        holds the id of the instance that answered, whatever the two
+        times, until the key's next value. Where two instances answer,
+        it receives only the reply `Latest` kept, the one with the greater
+        stamp. `[Sc: state.md §7]`
 - **Ahead.** An owner SHOULD NOT stamp beyond its router's HLC delta: it
   cannot know its own offset without a reference. `[Sc: state.md §7]`
   - The owner SHOULD detect drift against a reference it holds for the
@@ -1760,8 +1768,8 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
 
 1. GET with target `BestMatching` and consolidation `None`. That reaches
    the nearest holder on each router the query visits. A holder on the
-   caller's own session answers too, so a caller can get its own reply and
-   the nearest remote one: it assumes nothing about the count.
+   retrieving session answers too, so a caller or tool can get its own
+   reply and the nearest remote one: it assumes nothing about the count.
 2. Verify each reply **as it arrives** (§9.6), and accept the first valid
    one, without waiting for the GET to complete.
 3. If none was valid, retry once with target `All`, consolidation `None`.
@@ -1773,15 +1781,15 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
 - **Consolidation `None` is a MUST.** zenoh's default consolidation on a
   concrete key holds every reply until the query finalizes (`Latest`,
   §4.1), so step 2 cannot happen, and a slow corrupt reply can displace the
-  valid one, so that a caller following the steps would report the
-  contract unavailable (Appendix B). A caller or tool MUST set
+  valid one, so that a caller or tool following the steps would report
+  the contract unavailable (Appendix B). A caller or tool MUST set
   consolidation `None` on both attempts.
   `[Sc: retrieval.md §2]`
 - **The reply.** A holder answers with one reply, the bundle's bytes, with
   `Encoding` `application/json`. A caller or tool MUST NOT depend on the
   encoding: the hash is the check. `[Sc: retrieval.md §1]`
-- **An attempt ends** when its GET completes, or at the caller's timeout
-  (§8.1).
+- **An attempt ends** when its GET completes, or at the timeout the
+  caller or tool gave it (§8.1).
 - **From a token to a fingerprint.** An interface token carries
   `fp16`, the first 16 hex digits of the fingerprint (§1.2), which is not
   enough to retrieve by. A tool reads the full fingerprint from the
@@ -3461,7 +3469,7 @@ section each was written against, whose pointer leads on.
 | `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order, unstamped samples, and a tool's across two ids |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §7 step 2 a consumer's and a tool's late joiner across a new epoch; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node |
+| `scenarios/state.md` | §4; §7 step 2 a consumer's and a tool's late joiner across a new epoch, after their seed and inside it; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |

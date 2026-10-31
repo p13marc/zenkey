@@ -138,6 +138,20 @@ window": wrong without replication).*
      included. It accepts rev 11, then rev 12. The tool keeps §4.2's merge
      for as long as it follows (observer §4.1). It keeps rev 10: rev 11 and
      rev 12 come under a new id, at earlier times.
+   - **Inside the seed.** The owner writes rev 10. A second session holds
+     a queryable on the plans that is not `complete`, and keeps each query
+     it takes. A consumer and a tool each subscribe, then make S4's GET,
+     which the owner answers and the second queryable holds open. While it
+     is open, the owner restarts with no record and a fresh zid, and
+     writes rev 11, which both hear live. Then the second queryable lets
+     the GET end, and the owner writes rev 12. Run it with the new clock
+     5 s behind, and on the host's clock.
+     - `Latest` delivers the owner's reply of rev 10 at the GET's end,
+       after rev 11's live sample (core §4.1).
+     - The consumer accepts rev 11, then the reply, under the old id. It
+       holds rev 10 both times, until rev 12, which it accepts.
+     - The tool keeps the later time: rev 10 with the clock behind, and
+       rev 11, then rev 12, on the host's clock.
 3. **Ahead.** The owner's clock runs 2 s ahead, beyond the router's HLC
    delta, and it holds a subscription to a router-stamped heartbeat. It
    detects the drift and stops writing state. Where it implements
@@ -154,7 +168,8 @@ Step 2's late joiners are `s7_a_late_joiner_across_a_new_epoch`: the
 consumer through `ValueOrder`, the tool's merge the control. The fleet's
 two seeded subscriptions run the tool's on the bus
 (`zenkey-fleet/tests/seeding.rs`,
-`s7_a_tools_late_joiner_keeps_the_merge_after_its_seed`).*
+`s7_a_tools_late_joiner_keeps_the_merge_after_its_seed`). The new epoch
+inside the seed is `s7_a_new_epoch_inside_a_late_joiners_seed`.*
 
 ## §8 Events replay
 

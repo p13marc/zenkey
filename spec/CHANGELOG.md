@@ -3,6 +3,145 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.69 — 2026-10-31: round 91's answers: a consumer inside its seed, §0's static rules, and five rewrites (#926)
+
+zk2py round 91 (PR #971) read 0.68's §0, §2.4, §2.5, §4.2, §4.3, §7.1,
+§8.4 and §12, `observer.md` 0.10's §4.1 and §7.3, [`RULES.md`](RULES.md)
+and the glossary cold. Its findings are F-393 to F-405. This version
+answers them (#926's fourth part, epic #921 Track B). `observer.md` moves
+to text 0.11 beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)),
+for F-397 and F-398.
+
+**The reference, read first.** F-393 asks what a consumer holds when a
+new epoch starts inside its seed. The reference answers so:
+- **The runtime's GET returns at its end.** `zenkey::consumer::Consumer::get`
+  asks `Latest`, which delivers at the GET's end (§4.1), and returns every
+  reply once the GET has ended. An application that subscribes first
+  hands `zenkey::state::ValueOrder` the replies after the samples its
+  subscription heard during the GET.
+- **`ValueOrder` accepts a value under another id**, whatever its time.
+  So a consumer holds the id of the instance that answered, until the
+  key's next value.
+- **`desired.v1`'s target**, the runtime's one seeding consumer, sends
+  each reply to the task that judges its samples once its GET has ended.
+  It judges both in arrival order.
+- **Neither buffers the live samples**, and neither dates a reply at its
+  GET's ask.
+- **The fleet's seeded subscriptions** merge by the owner's stamp, so the
+  order of arrival does not move what a tool keeps.
+
+That is the finding's fix (b). Its fix (a) would move the other case the
+other way: a consumer would keep an old value in transit over the new
+epoch's reply.
+
+**Said: inside a seed (F-393, a gap).** §4.3's residual risk for a late
+joiner gains a bullet. Inside a seed the risk lasts the GET. `Latest`
+delivers every reply after the samples heard during the GET, so a
+consumer holds the id of the instance that answered, whatever the two
+times, until the key's next value. Where two instances answer, it
+receives only the reply `Latest` kept.
+- **This corrects 0.68's "What moves".** It named one case. There are
+  two, each inside a seed:
+  - **the old instance answers, and the new one puts during the GET.** A
+    GET can stay open after its owner answered, on a selector over several
+    owners. With the new clock ahead, 0.67 kept the new epoch's put, and
+    0.68 keeps the old epoch's reply until the new epoch's next value.
+    With the new clock behind, both keep the reply;
+  - **the new instance answers, while an old value is in transit.** 0.68
+    keeps the new epoch's reply. With the new clock behind, 0.67 kept the
+    old value. This is the case 0.68's entry named.
+- **No rule changed.** S7's two consumer MUSTs read so already. The text
+  held the case as residual risk, which it called a value "still in
+  transit". It now says the risk lasts the GET.
+- **The evidence** is `scenarios/state.md` §7 step 2's new "Inside the
+  seed". A second queryable, not `complete`, holds the late joiners' GET
+  open after the owner answered it. The owner restarts with no record and
+  a fresh zid, and writes rev 11, heard live. The consumer holds rev 10,
+  the reply, until rev 12. The tool keeps the later time.
+- **The reference runs it** in `zenkey/tests/state.rs`,
+  `s7_a_new_epoch_inside_a_late_joiners_seed`, with the new clock 5 s
+  behind and on the host's clock. It passed 20 runs of 20.
+- **What moves:** no verdict. zk2py's consumer keeps the reply, as round
+  91 ran it live.
+
+**§0, the static rules (F-395, a conflict).** §0 said "They are §1's,
+§9's", and §12 that a rule of those sections that names a role is that
+role's. §0 now says "the rules of §1 and §9 that name no role". §12 and
+`RULES.md` read so already, so nothing moves.
+
+**Wording, no rule changed.**
+- **§4.2's merge (F-401).** Its MUST is three sentences, each obligation
+  with its MUST. A late joiner merges per key, whichever path brought each
+  sample. It keeps the newer by the owner's stamp. Across two timestamp
+  ids, a consumer instead keeps what §4.3's consumer rule accepts. Each
+  cites the old sentence's `state.md` §10, and §7 beside it, whose step 2
+  runs a consumer across two ids.
+- **§4.2, two ids (F-402):** "Across them a consumer and a tool order
+  differently (below)."
+- **§4.2, a consumer's merge (F-403):** "So a consumer has no instant at
+  which its merge ends: §4.3's rule orders every value the consumer
+  receives."
+- **§4.3, a late joiner (F-404):** "Across two ids, a consumer holds a
+  value under the id of the last value it received". That is the
+  finding's reading, in place of its rewrite, "the id that arrived last":
+  an id does not arrive.
+- **§8.4, the retriever (F-396).** Step 1 says "the retrieving session"
+  and "a caller or tool". So does the MUST's reason. An attempt ends "at
+  the timeout the caller or tool gave it".
+
+**`RULES.md` (F-394, F-400, F-405),** from `scripts/gen-rules-index.py`.
+- **S7's MUST to accept another id (F-394)** shows §4.3's MAY after it,
+  "*Except:* A profile MAY order a consumer's values more strictly", from
+  `EXCEPTED_BY`.
+- **The header (F-400).** A MAY "is listed beside a rule it excepts. A
+  row's MAY is in the rule ids." A bracket gives a pronoun's noun, and
+  "So does a verb the sentence omits". The rows are unchanged.
+- **The header (F-405):** "A rule of those sections, §1 and §9 included,
+  that names a role is listed under that role."
+- **The self-test** gains a MAY under a run-in label, in a list item
+  below the rule it excepts. The entry shows it without the label.
+- **The counts.** 169 rules before, 171 after: F-401's two new sentences.
+  By role: owner 56 and 56; consumer 13 and 15; caller 13 and 13;
+  deployment 15 and 15; observer 52 and 53, 24 of them a reader's both
+  times; implementation 34 and 34. There are 71 rule ids before and
+  after. 20 rules cite none before and after, 9 of them MUSTs.
+
+**`spec/README.md`'s glossary (F-399).**
+- **Epoch** names §4.3's two sources of the last stamp, its own record and
+  an archive on its own side. With neither, §4.3 requires a new instance
+  whose session has a fresh, unpinned zid.
+- **Static rule:** "A rule of any of those sections, §1 and §9 included,
+  that names a role is that role's".
+
+**How the rules were diffed.** Every sentence holding MUST, MUST NOT,
+SHOULD, SHOULD NOT, MAY, REQUIRED or RECOMMENDED was extracted before and
+after, keyed by section, and diffed.
+- **This text:** 156 before, 158 after; 154 unchanged.
+  - **Rewritten:** §4.2's merge MUST (F-401), and §8.4's "Consolidation
+    `None` is a MUST", whose keyword is a noun (F-396).
+  - **Only after:** the merge's two new sentences (F-401).
+- **Without a keyword:** §0 (F-395), §4.2's two (F-402, F-403), §4.3's
+  late joiner and its new bullet (F-404, F-393), §8.4's step 1 and its
+  attempt (F-396), Appendix C's row for `scenarios/state.md` and the
+  header moved. No other sentence did.
+- **Two scenarios moved.** `scenarios/state.md` §7 step 2 gains its step
+  inside the seed, and its line on the reference names the test.
+  `scenarios/types.md` §2 says which `Encoding` its `{` sample carries,
+  for `observer.md`'s F-397.
+
+**The figures.** This text's mean went from 16.39 words to 16.37, with no
+sentence over 50 and no tag. `spec/README.md` stays at 12.09, `RULES.md`
+went from 12.39 to 12.38, `scenarios/state.md` from 15.35 to 15.34 and
+`scenarios/types.md` from 13.38 to 12.79. `spec/.prose-baseline.json` is
+lowered to them.
+
+**Deliberately not changed.**
+- **S7's rules and §4.2's,** but F-401's split.
+- **`desired.v1`.** Its §2.6 orders more strictly, by §4.3's MAY, and
+  reads true against this version.
+- **F-365's MUSTs** are #965's, as before.
+- **The 0.68 entry,** which this one corrects.
+
 ## 0.68 — 2026-10-31: round 90's answers: a late joiner across two ids, S7's new id, a tool's retrieval, and 0.67 corrected (#926)
 
 zk2py round 90 (PR #969) read 0.67's §0, §1.3, §2.2, §2.4, S7, §11.2, §12

@@ -13,6 +13,87 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.11 — 2026-10-31: round 91's F-397 and F-398, the decode order and a merge's bound (#926)
+
+zk2py round 91 (PR #971) read 0.10 cold beside core 0.68. Core 0.69
+answers its findings on the core, the index and the glossary. This text
+answers F-397 and F-398, and is written against core 0.69.
+
+**The reference, read first.**
+- **F-397, the decode order.** `zenkey_model::decode::decode`, which
+  `zenkey-fleet`'s `model::render` and `Lens::check_sample` call, picks
+  the decoder by the declared type's kind: protobuf, JSON Schema or raw.
+  - **The sample's `Encoding`** picks only the type's wire: JSON or CBOR
+    for a JSON Schema type, and the concrete subtype for a raw family.
+  - **An `Encoding` that names neither JSON nor CBOR**, zenoh's default
+    `zenoh/bytes` among them, leaves a JSON Schema type to its contract's
+    `encoding`. A protobuf type is decoded as protobuf whatever its
+    sample's `Encoding` says.
+  - **So a JSON `Encoding` on a CBOR-declared state is read as JSON.**
+    The reference's own test says "the sample's Encoding comes first".
+    Both of the finding's readings read that case so. Where they differ,
+    an `Encoding` naming another type's wire, the declared type decides:
+    the finding's reading (a).
+  - **A payload with no declared type**, a foreign key's or one whose
+    contract is not in hand, is sniffed by `model::structural`: JSON if
+    it parses, then CBOR, then text, else its size. Its `Encoding` is not
+    read.
+- **F-398, a merge's bound.** `zenkey-fleet`'s seeded merge forgets the
+  least recently admitted key past its bound, and
+  `Monitor::merge_evicted` counts each key forgotten.
+  - **zengui reports the count** in its seed strip, "n keys forgotten by
+    the merge's bound", as a caution chip.
+  - **It marks neither the key nor its next value.** The tree and the
+    Inspector show that value as the key's latest. zenctl's observers
+    hold no seeded merge.
+
+**Changed: §7.3's decode order (F-397, ambiguous).** It said "the
+sample's `Encoding`, then the contract's type, then sniffing".
+- **Now:** the MUST to decode by the declared type stands. Beside it,
+  "The sample's `Encoding` says which of the type's wires it travels on",
+  and "A payload with no declared type, a foreign key's, is sniffed".
+  The decode order is the declared type, then the sample's `Encoding` for
+  the type's wire, then sniffing where there is no declared type. Two
+  bullets say a type's wires, and what an `Encoding` that names neither
+  JSON nor CBOR leaves to the contract.
+- **Not the finding's last sentence.** It asked that a payload with no
+  declared type be "decoded by its `Encoding`, then by sniffing". The
+  reference sniffs alone, as §8.1's "structural rendering of the payload
+  (§7.3's last rung)" says.
+- **The evidence** is `scenarios/types.md` §2. Its `{` sample on a
+  CBOR-declared state now says that it carries CBOR's `Encoding` or
+  zenoh's default, so that its reason says CBOR under either reading.
+- **What moves:** no zk2py verdict. Round 91 took reading (a), for an
+  echo tool that decodes neither family yet.
+
+**Said: what a merge's bound costs (F-398, a gap).** §4.1's bound is a
+bullet of its own, with no keyword, as before.
+- **Now:** "A tool that bounds what it holds counts the keys the bound
+  forgot, and reports the count. A forgotten key holds nothing, so the
+  merge keeps the key's next value whatever its stamp." That is the
+  bound's cost. A tool that marks neither the key nor that value shows
+  the value as the key's latest. Only the count tells a person that the
+  merge did not order every key.
+- **No SHOULD.** The finding asked that a tool show a forgotten key as
+  not held, and its next value as held since the bound forgot it. The
+  reference does neither, so the text names it as the bound's cost.
+- **What moves:** "reports the count" is new. zk2py counts each key
+  forgotten and shows nothing of it (round 91), so its verdict on the
+  bound, beyond the index, may move.
+
+**How the rules were diffed.** 44 sentences holding an RFC 2119 keyword
+before and after, all unchanged. Every other sentence was diffed too: the
+others that moved are §4.1's bound (F-398), §7.3's decode order and the
+two sentences beside its MUST (F-397), and the header.
+
+**The figures.** This text's mean went from 18.24 words to 18.21, with no
+sentence over 50 and no tag.
+
+**Deliberately not changed.**
+- **§7.3's two MUSTs and honest rendering**, and §8.1.
+- **No other rule**, and no section number, label or anchor.
+- **Appendix A**, which is history.
+
 ## 0.10 — 2026-10-31: round 90's F-379, and a tool's merge after its seed (#926)
 
 zk2py round 90 (PR #969) read 0.9 cold beside core 0.67. Core 0.68
