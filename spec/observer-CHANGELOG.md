@@ -13,6 +13,28 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.13 — 2026-10-31: §3.8's note restated: a read on a token's own session can answer it (#992)
+
+Core 0.71 (#992) found that a session's read through a refusing router
+does not always return the session's own token. The router's final reply
+can reach the session first and end the read. This text restates §3.8's
+note, and is written against core 0.71.
+
+**Changed: §3.8's run-in label and its note.**
+- **The label:** "A read on a token's own session can answer that token
+  itself."
+- **The note:** a session's GET "can return" its own tokens. A router
+  that refuses the read "is no exception". "The router's final reply can
+  also come first and end the read without them (core Appendix B)."
+- **The same conclusion.** A read on a token's own session says nothing
+  about the bus for that token. A reader that must see its own token
+  reads on a session that does not hold it.
+
+**Deliberately not changed.**
+- **No rule, no keyword and no section number.**
+- **Appendix A's table,** which names the note's title in core 0.57,
+  where it came from.
+
 ## 0.12 — 2026-10-31: round 92's F-406, F-407, F-409 and F-412: a type not in hand, the bound's count, a profile's reader (#926)
 
 zk2py round 92 (PR #973) read 0.11 cold beside core 0.69. Core 0.70

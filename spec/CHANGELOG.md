@@ -3,6 +3,61 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.71 — 2026-10-31: a read on a token's own session can answer that token, not always (#992)
+
+The reference's test of observer §3.8's note failed about one run in
+seven (#992). Its read on the token's own session came back complete and
+empty. So the fact Appendix B stated was too strong. This version
+restates it, and changes no rule. `observer.md` moves to text 0.13 beside
+it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), and
+`redundancy.v1` to text 0.8.
+
+**Why the read can miss it,** read in zenoh 1.10.1's source.
+- **The session asks its router first.** `Face::interest`
+  (`dispatcher/interests.rs`) sends the GET's interest to the router.
+  Only then does the local hat answer with the session's own tokens. That
+  answer is queued, and `Face::send_interest` (`dispatcher/face.rs`)
+  hands it to the session once it drops its lock.
+- **The router answers at ingress.** Its access control drops the
+  interest and sends the final reply at once (`net/primitives/demux.rs`,
+  `DeMux::handle_message`).
+- **The final reply ends the GET.** `WeakSession::send_declare`
+  (`api/session.rs`) removes the query at `DeclareFinal`. A token
+  answered after that finds no query, and the read never holds it.
+- **So it is a race.** The session's own answer wins it unless its
+  thread is held up for the router's round trip. Busy cores make that
+  more likely, as the figures show.
+
+**Changed: Appendix B.**
+- **The fact.** The session's own tokens can be in a refused GET. A final
+  reply that arrives first ends the GET without them. The files above
+  are cited.
+- **The measurement.** The holder's read was always complete, holding
+  its token or nothing. Another session's was complete and empty every
+  time. Over 40 runs of 20 reads, the holder's read held its token in
+  799 of 800 on an idle host. It held it in 733 of 800 with two busy
+  loops on the test's two cores.
+- **§8.1's pointer** names observer §3.8's part by its new name, "A read
+  on a token's own session can answer that token itself".
+
+**The reference.**
+- **`zenkey/tests/presence.rs`:** the test is now
+  `a_refused_read_on_a_tokens_own_session_can_return_it`. Each of its 20
+  reads is complete. The holder's holds nothing but its token, and the
+  other session's nothing at all. It counts the reads that held the
+  token, and fails only when none did.
+- **`zenkey/tests/profile_redundancy.rs`:** `s5_an_unreadable_claim_set`
+  read the claim's own session once and asserted the claim. It now reads
+  five times. Each read is complete and holds nothing but the claim, and
+  one at least holds it.
+
+**Deliberately not changed.**
+- **No rule.** The rule resting on the fact stands. A candidate reads on
+  a session that holds neither its claim nor a liveliness subscriber
+  (`redundancy.v1` §2.5 step 1). A read that can find the claim whatever
+  the bus holds fails that check as surely as one that always does.
+- **The 0.40 entry,** which recorded five reads of five.
+
 ## 0.70 — 2026-10-31: round 92's answers: §4.3's seed reworded, `state.md` §7's premise, and the index's header (#926)
 
 zk2py round 92 (PR #973) read 0.69 and `observer.md` 0.11 cold. Its

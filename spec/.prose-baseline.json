@@ -1,6 +1,6 @@
 {
   "spec/CHANGELOG.md": {
-    "mean": 17.42,
+    "mean": 17.35,
     "over": 30,
     "tags": 0
   },
@@ -30,22 +30,22 @@
     "tags": 0
   },
   "spec/core.md": {
-    "mean": 16.37,
+    "mean": 16.36,
     "over": 0,
     "tags": 0
   },
   "spec/observer-CHANGELOG.md": {
-    "mean": 15.84,
+    "mean": 15.8,
     "over": 5,
     "tags": 0
   },
   "spec/observer.md": {
-    "mean": 18.19,
+    "mean": 18.15,
     "over": 0,
     "tags": 0
   },
   "spec/profiles/README.md": {
-    "mean": 17.42,
+    "mean": 17.25,
     "over": 0,
     "tags": 0
   },
@@ -170,17 +170,17 @@
     "tags": 0
   },
   "spec/profiles/redundancy/CHANGELOG.md": {
-    "mean": 21.65,
+    "mean": 21.31,
     "over": 12,
     "tags": 0
   },
   "spec/profiles/redundancy/scenarios.md": {
-    "mean": 16.79,
+    "mean": 16.7,
     "over": 0,
     "tags": 0
   },
   "spec/profiles/redundancy/v1.md": {
-    "mean": 19.73,
+    "mean": 19.68,
     "over": 0,
     "tags": 0
   },

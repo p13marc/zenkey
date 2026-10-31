@@ -1051,15 +1051,28 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
     assert!(read.complete && read.keys.contains(&key), "{read:?}");
 }
 
-/// Core §8.1's implementation note (0.40; `redundancy.v1` text 0.2,
-/// F-204), measured: a session's liveliness read returns the session's own
-/// tokens even when its router's access control refuses the read, since
-/// the session answers its own tokens itself. On another session the same
-/// read through the same router is complete and empty (0.8's refusal), and
-/// a read on the token's own session says nothing about the bus for that
-/// token.
+/// The reads [`a_refused_read_on_a_tokens_own_session_can_return_it`] makes
+/// on each of its two sessions.
+const OWN_READS: usize = 20;
+
+/// Observer §3.8's implementation note (core Appendix B; `redundancy.v1`
+/// §2.5 step 1), measured: a session's liveliness read can return the
+/// session's own tokens even when its router's access control refuses the
+/// read, since the session answers its own tokens itself. It does not
+/// always (#992): zenoh 1.10.1 sends the GET's interest to the router
+/// before the session's own answer is delivered
+/// (`dispatcher/interests.rs`, `Face::interest`; `dispatcher/face.rs`,
+/// `send_interest`), the router's access control answers it at ingress
+/// with the final reply alone (`net/primitives/demux.rs`), and a final
+/// reply that reaches the session first ends the GET
+/// (`api/session.rs`, `WeakSession::send_declare`), its own token then
+/// lost. So the
+/// read is complete and holds its own token or nothing, and the test
+/// counts how often it held it. On another session the same read through
+/// the same router is complete and empty every time, and a read on the
+/// token's own session says nothing about the bus for that token.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_refused_read_on_a_tokens_own_session_still_returns_it() {
+async fn a_refused_read_on_a_tokens_own_session_can_return_it() {
     let acl = r#"{
         enabled: true,
         default_permission: "allow",
@@ -1082,10 +1095,15 @@ async fn a_refused_read_on_a_tokens_own_session_still_returns_it() {
     })
     .await;
     let sel = "zk2/lab/ledger/@zk/**";
-    for _ in 0..5 {
+    let mut returned = 0;
+    for _ in 0..OWN_READS {
         let own = presence::liveliness_read(&owner, sel, T).await.unwrap();
-        assert!(own.complete, "{own:?}");
-        assert_eq!(own.keys, [key], "its own token, from the session itself");
+        assert!(own.complete && own.errors.is_empty(), "{own:?}");
+        assert!(
+            own.keys.iter().all(|k| k == key),
+            "nothing but its own token, from the session itself: {own:?}"
+        );
+        returned += usize::from(!own.keys.is_empty());
         let refused = presence::liveliness_read(&other, sel, T).await.unwrap();
         assert!(refused.complete && refused.errors.is_empty(), "{refused:?}");
         assert!(
@@ -1093,6 +1111,15 @@ async fn a_refused_read_on_a_tokens_own_session_still_returns_it() {
             "refused at the router: {refused:?}"
         );
     }
+    eprintln!(
+        "a refused read on the token's own session returned its token in {returned} of \
+         {OWN_READS}"
+    );
+    assert!(
+        returned > 0,
+        "the own session's read held its token in none of {OWN_READS}: zenoh no longer answers \
+         a session's own tokens itself, so revisit observer §3.8 and core Appendix B"
+    );
 }
 
 /// Core §8.1 (0.40; `redundancy.v1` text 0.2, F-206), measured against

@@ -1319,13 +1319,26 @@ async fn s5_an_unreadable_claim_set() {
     assert_eq!(reads.made, reads.complete, "every read complete: {reads:?}");
     assert_eq!(a.why(), Some(Why::OwnClaimMissing), "its own claim missing");
     assert!(s.alive_events(&ledger(), &a.id).is_empty());
-    // F-204: its claim's own session would have read its claim.
-    let own = presence::liveliness_read(&a.sessions[0], &format!("zk2/{LEDGER}/@zk/**"), T)
-        .await
-        .unwrap();
+    // F-204: its claim's own session can read its claim. Not every time:
+    // the router's final reply can end the read before the session's own
+    // answer (observer §3.8, #992), so five reads, each complete, and one
+    // at least holding the claim.
+    let claim = a.svc.instance_key().unwrap().to_string();
+    let mut held = 0;
+    for _ in 0..5 {
+        let own = presence::liveliness_read(&a.sessions[0], &format!("zk2/{LEDGER}/@zk/**"), T)
+            .await
+            .unwrap();
+        assert!(own.complete, "the claim's session answers itself: {own:?}");
+        assert!(
+            own.keys.iter().all(|k| *k == claim),
+            "nothing but its claim, from the session itself: {own:?}"
+        );
+        held += usize::from(!own.keys.is_empty());
+    }
     assert!(
-        own.complete && !own.keys.is_empty(),
-        "the claim's session answers itself: {own:?}"
+        held > 0,
+        "the claim's session held its claim in none of 5 reads"
     );
     a.close().await;
 

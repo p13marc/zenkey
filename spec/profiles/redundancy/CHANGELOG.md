@@ -4,6 +4,27 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-10-31: §2.5 step 1's reason restated: a session can answer its own tokens (#992)
+
+Core 0.71 (#992) found that a session's read through a refusing router
+does not always return the session's own tokens. The router's final reply
+can reach the session first and end the read.
+- **§2.5 step 1, "Its read goes on a session of its own":** a session
+  "can answer" a read with its own tokens. So a read on the claim's
+  session "can find" the claim, and step 3's check "would then miss a
+  refusal". It said "would never see" one.
+- **`scenarios.md` §5 Expected 3:** the claim's own session "can return"
+  the claim.
+- **The reference:** `zenkey/tests/profile_redundancy.rs`'s
+  `s5_an_unreadable_claim_set` reads the claim's own session five times.
+  Each read is complete and holds nothing but the claim, and one at least
+  holds it.
+
+**Deliberately not changed:** the rule. A candidate's read still goes on
+a session holding neither its claim nor a liveliness subscriber, under
+§2.5's MUST. No fixture case, step, Expected outcome's verdict or section
+number changed.
+
 ## 0.7 — 2026-10-31: editorial: round 88's F-352 and F-353 rewritten in the scenarios, no rule changed (#935)
 
 zk2py round 88 (#609) read 0.6 cold and found that it changed no rule. Its
