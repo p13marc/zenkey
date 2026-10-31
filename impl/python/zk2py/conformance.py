@@ -3428,7 +3428,7 @@ def family_readings(root: Path) -> list[Result]:
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
-        + _round88_readings(root) + _round89_readings(root)
+        + _round88_readings(root) + _round89_readings(root) + _round90_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4117,6 +4117,143 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "their standard error before they listen",
                 ["memlock_said" in inspect.getsource(echo_tool.main)],
                 [True]))
+    return out
+
+
+def _round90_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.67 and ``observer.md`` 0.9, round 89's answers (#609, round 90;
+    #926 part 2). Each text at its version or later; F-358 to F-378's
+    answers as they read, and the forms they replaced gone; and S7's
+    consumer rule after a late joiner's seed, which 0.67 states and zk2py's
+    :class:`zk2py.seed.LateJoiner` keeps since this round: its seed by §4.2's
+    merge, then each value a consumer receives by time within one id, the
+    first under a new id kept (:func:`zk2py.seed.follows`), a tool's by the
+    merge still. Read with no session: a fake one stands in."""
+    import re
+
+    from . import seed as sd
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules, readme = flat("core.md"), flat("observer.md"), flat("RULES.md"), flat("README.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Written against\*\* \| core (\d+)\.(\d+) ", obs)
+    against = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("#926 part 2: core 0.67 or later, observer.md 0.9 or later written against core 0.67 or later, each "
+         "with its entry",
+         [core_v >= (0, 67), obs_v >= (0, 9), against >= (0, 67)]
+         + entry("CHANGELOG.md", "0.67", "round 89's answers")
+         + entry("observer-CHANGELOG.md", "0.9", "F-370 and F-376"),
+         [True, True, True]),
+        ("F-358, F-359, F-360, F-362, F-377 and F-378, resolved by core 0.67's §12 and §0",
+         missing(core,
+                 "**Full** is the level of a class claimed without the constrained modifier.",
+                 "A rule of these sections that names a role is that role's.",
+                 "and so is §3.3's rule for a descriptor checker.",
+                 "**How a static rule binds.** A static rule binds an implementation where it does what the rule "
+                 "governs.",
+                 "§9.8's publication rules bind whoever publishes a revision: its CI, and the person who accepts it.",
+                 "A class also holds the rules its texts state without one, such as `observer.md` §1, §2, §5 and §8.",
+                 "Of the static rules, it meets those that govern what it does (above).",
+                 "A profile's rules name the roles they bind, in core §0's words, as each profile's §0 says.",
+                 "whichever of the roles above it plays, where it does what they govern (§12)")
+         + present(core, "**Full** is every class, their union", "as this text's do (its §0)", "full included,"),
+         []),
+        ("F-363, restated by core 0.67: §2.2's MUST NOT (E010, which §9.2's table makes \"a rest parameter that is "
+         "not last\") and §11.2's SHOULD, the old forms gone",
+         missing(core, "A rest parameter MUST NOT appear except as the last segment (E010)",
+                 "A deployment SHOULD run `deny` where the router can afford the enumeration.",
+                 "or a rest parameter that is not last |")
+         + present(core, "It MAY appear only as the last segment", "This is RECOMMENDED where"), []),
+        ("F-368, F-369 and F-374, the three rules core 0.67 changed, as they read",
+         missing(core,
+                 "**A late joiner's seed** merges as §4.2 says, and the consumer rule orders what a consumer "
+                 "receives after its seed.",
+                 "- **Three of its fields**, `congestion`, `priority` and `express`, map one-to-one onto Zenoh's "
+                 "stable QoS.",
+                 "An owner sets it through §0's opt-in. One that cannot set it MAY publish reliable, zenoh's "
+                 "default.",
+                 "zenoh-python 1.10.1 marks `Reliability` unstable too, and `Session.put` takes none.",
+                 "or any selector without a verbatim chunk) never delivers")
+         + present(core, "The fields map one-to-one onto Zenoh's stable QoS", "without a verbatim chunk at position 5"),
+         []),
+        ("F-370 and F-376, observer.md 0.9's two sentences, and §0's rules without a keyword (F-362)",
+         missing(obs, "A tool that shows or judges a payload MUST decode `protobuf`",
+                 "**The subscribers of a reader's watch session SHOULD have no history** when the reader seeds by a "
+                 "read on its other session.",
+                 "lists both texts' rules stated with a keyword, by role. This text states many without one, in §1, "
+                 "§2, §5 and §8. A class holds those too.")
+         + present(obs, "A generic tool MUST decode", "SHOULD have no history** when it seeds"), []),
+        ("F-361, F-364 and F-366 in RULES.md: S7 binds owner and consumer, a late joiner's MUSTs under observer, §9.4's "
+         "file part E032, a pronoun's noun and a list's length shown",
+         missing(rules, "| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer |",
+                 "| [E032](core.md#94-schema-artifacts-and-type-references) | Otherwise it resolves",
+                 "Every instance MUST hold one [an instance token]",
+                 "An owner MUST bring itself up in this order, so that alive ⇒ callable: (4 items)",
+                 "A tag that closes a list cites each rule of it that cites none."),
+         []),
+        ("F-371 to F-375, spec/README.md's glossary as 0.67 corrected it",
+         missing(readme, "- **Reader**: any participant that reads presence, state or the admin space",
+                 "with no error reply, before its session's interests timeout",
+                 "- **Presence**: the liveliness tokens that say which instances run",
+                 "- **Late joiner**: a consumer or a tool",
+                 "- **Ambient selector**: a selector with no verbatim chunk, such as `zk2/**`. It reaches no"),
+         []),
+    ]
+
+    # S7 after the seed: the pure rule, then a late joiner over a fake session.
+    st = lambda t, i: sd.Stamp(t, i)  # noqa: E731
+    out.append(("core §4.3 S7's consumer rule (seed.follows): within one id by time; a new id's first value kept "
+                "though its time be lower; equal stamps not kept twice; an unstamped sample over a stamped one not "
+                "kept; a value back under the old id kept, other than the held one's (F-383's reading (a))",
+                [sd.follows(st(150, "b2"), st(200, "a1")), sd.follows(st(199, "a1"), st(200, "a1")),
+                 sd.follows(st(201, "a1"), st(200, "a1")), sd.follows(st(200, "a1"), st(200, "a1")),
+                 sd.follows(None, st(200, "a1")), sd.follows(st(1, "a1"), None),
+                 sd.follows(st(210, "a1"), st(160, "b2"))],
+                [True, False, True, False, False, True, True]))
+    out.append(("core §4.3 (0.67): a seed by §4.2's merge (merge.json's two ids, the new one's time behind, not "
+                "kept), then S7 for what follows it (seed.ordered)",
+                [sd.ordered([(st(200, "a1"), False), (st(150, "b2"), False)]),
+                 sd.ordered([(st(200, "a1"), False), (st(150, "b2"), True), (st(149, "b2"), True),
+                             (st(151, "b2"), True)])],
+                [[True, False], [True, True, False, True]]))
+
+    class Fake:
+        pass
+
+    def joiner(consumer: bool) -> list[tuple[str, str, str]]:
+        k = "zk2/g/s/zk2py_plans.v1/state/plans/r"
+        lj = sd.LateJoiner(Fake(), "zk2/g/s/zk2py_plans.v1/state/plans/*", consumer=consumer)
+        lj._merge(k, "reply", False, b"rev10", "application/json", "200/a1")
+        lj._merge(k, "live", False, b"in-seed", "application/json", "150/b2")
+        lj._ended()
+        lj._merge(k, "live", False, b"rev11", "application/json", "160/b2")
+        lj._merge(k, "live", False, b"late", "application/json", "155/b2")
+        return [(a.outcome, a.rule, str(a.stamp)) for a in lj.applied] + [("held", lj.view()[k].payload.decode(), "")]
+
+    out.append(("seed.LateJoiner: a consumer's seed by the merge, then S7 once its GET ended (state.md §7 step 2's "
+                "rev 11 kept); a tool's by the merge throughout, S7 binding a consumer (F-382)",
+                [joiner(True), joiner(False)],
+                [[("kept", "merge", "200/a1"), ("dropped", "merge", "150/b2"), ("kept", "S7", "160/b2"),
+                  ("dropped", "S7", "155/b2"), ("held", "rev11", "")],
+                 [("kept", "merge", "200/a1"), ("dropped", "merge", "150/b2"), ("dropped", "merge", "160/b2"),
+                  ("dropped", "merge", "155/b2"), ("held", "rev10", "")]]))
     return out
 
 

@@ -12,6 +12,12 @@ that the owner's puts land between the late joiner's steps. The late joiner
 is :class:`zk2py.seed.LateJoiner`, a tool's (it keeps a key that is not
 concrete), over ``plans/*``.
 
+§7 step 2 (S7, core §4.3, 0.67) on the same router: a consumer's
+:class:`~zk2py.seed.LateJoiner` seeds rev 10, the owner restarts as a new
+instance on a new session with its clock 5 s behind (``Owner.clock``) and
+writes rev 11, and the consumer accepts it by S7's consumer rule after its
+seed; a tool's late joiner, §4.2's merge, is the control.
+
 Beside §10, two things observer §4.1 says a seed cannot know: a GET that ran to its
 timeout seeds possibly incompletely, and an owner absent at the GET seeds
 nothing, which is silence.
@@ -250,6 +256,91 @@ def section10(report: Report, run: Run | None = None) -> None:
                      lja.seed.silent and not lja.view(), f"replies {lja.seed.replies}, errors {lja.seed.errors}")
         lja.close()
     finally:
+        for x in owners:
+            x.close()
+        tool.close()
+        r1.close()
+
+
+def section7(report: Report, run: Run | None = None) -> None:
+    """§7 step 2, a new epoch, after a consumer's seed (core §4.3, S7's
+    consumer rule; 0.67, F-368). The owner writes rev 10; a consumer's late
+    joiner and a tool's seed from it. The owner then restarts with no
+    record and no owner-side archive, a new instance on a new session (a
+    fresh zid), its clock 5 s behind, and writes rev 11: "The consumer sees
+    a new timestamp id, accepts rev 11, and restarts its ordering." The
+    tool's late joiner is the control: §4.2's merge, which still orders a
+    tool's after its seed, keeps rev 10's later time."""
+    import zenoh
+
+    from . import live
+    from .contract import load_contract
+    from .live_interop import _r1
+    from .owner import Owner
+
+    sec = "§7 clocks (S7)"
+    r1, ep, _ = _r1()
+    tool = live.open_client(ep)
+    owners: list[Any] = []
+    joiners: list[sd.LateJoiner] = []
+    try:
+        c = load_contract(PLANS)
+        o1 = Owner("ground", "fleet-mgr-s7", [c], connect=ep)
+        o1.start()
+        owners.append(o1)
+        base = f"{o1.prefix(c)}/state/plans"
+        t10 = o1.set_state(f"{base}/r", b"rev10")
+        time.sleep(0.3)
+        lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
+        lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=5.0)
+        joiners += [lc, lt]
+        for j in joiners:
+            j.start()
+        seeded = all(j.wait() for j in joiners)
+        report.check(sec, "both late joiners seed rev 10 from the owner's GET",
+                     seeded and all(j.view().get(f"{base}/r") is not None
+                                    and j.view()[f"{base}/r"].payload == b"rev10" for j in joiners),
+                     ", ".join(_show(j.view().get(f"{base}/r")) for j in joiners))
+        # Step 2: a restart with no record: a new instance on a new session,
+        # its clock 5 s behind.
+        o1.close()
+        owners.remove(o1)
+        o2 = Owner("ground", "fleet-mgr-s7", [c], connect=ep)
+
+        def behind() -> Any:
+            ts = o2.session.new_timestamp()  # type: ignore[union-attr]
+            n = ts.get_time_as_ntp64().as_nanos() - 5_000_000_000
+            return zenoh.Timestamp(zenoh.NTP64(n // 1_000_000_000, n % 1_000_000_000), ts.get_id())
+
+        o2.clock = behind
+        o2.start()
+        owners.append(o2)
+        t11 = o2.set_state(f"{base}/r", b"rev11")
+        time.sleep(0.5)
+        s10, s11 = sd.Stamp.of(t10), sd.Stamp.of(t11)
+        report.check(sec, "rev 11 carries a new timestamp id, its time below rev 10's",
+                     s10 is not None and s11 is not None and s11.id != s10.id and s11.time < s10.time,
+                     f"rev 10 {s10}, rev 11 {s11}")
+        got = lc.view().get(f"{base}/r")
+        arrival = [x for x in lc.applied if x.key == f"{base}/r" and x.via == "live" and str(x.stamp) == str(s11)]
+        report.check(sec, "expected 2: the consumer sees a new timestamp id and accepts rev 11, by S7's consumer "
+                          "rule after its seed",
+                     got is not None and got.payload == b"rev11" and [(x.outcome, x.rule) for x in arrival]
+                     == [("kept", "S7")], f"{_show(got)}; {[(x.outcome, x.rule) for x in arrival]}")
+        t12 = o2.set_state(f"{base}/r", b"rev12")
+        time.sleep(0.5)
+        got = lc.view().get(f"{base}/r")
+        report.check(sec, "expected 2: the consumer restarts its ordering under the new id: rev 12, later than "
+                          "rev 11 and still below rev 10's time, replaces it",
+                     got is not None and got.payload == b"rev12" and str(got.stamp) == str(sd.Stamp.of(t12)),
+                     _show(got))
+        held = lt.view().get(f"{base}/r")
+        report.check(sec, "the control: a tool's late joiner, §4.2's merge after its seed, keeps rev 10's later "
+                          "time over the new epoch's values",
+                     held is not None and held.payload == b"rev10", _show(held))
+    finally:
+        for j in joiners:
+            j.close()
         for x in owners:
             x.close()
         tool.close()
@@ -644,7 +735,7 @@ def _t(ts: Any) -> str:
     return str(sd.Stamp.of(ts))
 
 
-SECTIONS = {"3": section3, "10": section10, "11": section11, "12": section12}
+SECTIONS = {"3": section3, "7": section7, "10": section10, "11": section11, "12": section12}
 
 
 def main(argv: list[str] | None = None) -> int:

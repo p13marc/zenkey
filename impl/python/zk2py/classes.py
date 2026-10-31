@@ -44,8 +44,11 @@ antecedent in brackets, cut or evidence the row shows around it.
 - A row of a claimed class with no verdict is **reported**, named, by
   :func:`report`, never failed: the next round gives it its verdict.
 - A verdict that walks no row is **beyond the index**: a rule the texts bind
-  the class to and ``RULES.md`` lists under another class, or not at all
-  (round 89's F-361 to F-363).
+  the class to and ``RULES.md`` does not list under it. Since core 0.67 and
+  ``observer.md`` 0.9 those are the rules the texts state without a
+  keyword, which a class holds and the index does not list (core §0, §12;
+  round 89's F-362). Round 89's other rules beyond the index (F-361, F-363)
+  are listed rows since 0.67.
 - The one failure (:func:`check`) is a verdict whose rule its text no
   longer states, named.
 """
@@ -93,9 +96,9 @@ PROFILES = {
 #: :func:`norm` does. A verdict walks the ``RULES.md`` row of its class and
 #: section whose sentence holds its key, whatever brackets, cuts or evidence
 #: the index shows around it. A rule listed under two claimed classes has a
-#: verdict in each. The last rows are rules the index does not list under
-#: their class (round 89's findings): they walk no row, and are reported as
-#: beyond the index.
+#: verdict in each. The last rows are rules a class holds that the texts state
+#: without a keyword, which the index does not list (core §0, §12, 0.67):
+#: they walk no row, and are reported as beyond the index.
 WALK: list[tuple[str, str, str, str, str]] = [
     # -- owner ---------------------------------------------------------------------------
     ("owner", "core §1.4", "A value with several textual forms SHOULD be", NOT_MET,
@@ -227,10 +230,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "seed.LateJoiner (state_scenarios §10)"),
     ("consumer", "core §4.2", "A late joiner MUST merge the GET's replies", MET,
      "seed.kept and seed.compare (seed family)"),
-    ("consumer", "core §4.3", "A consumer MUST order an owner's values by", NOT_MET,
-     "seed.LateJoiner orders by Latest's order, time then id, as core §4.2 says, never by time within one id (a finding); desired.TargetRole keeps desired.v1 §2.4's own order"),
-    ("consumer", "core §4.3", "It MUST accept the first value under a", NOT_MET,
-     "seed.LateJoiner keeps an older epoch's later stamp over a new id's first value (a finding)"),
+    ("consumer", "core §4.3", "A consumer MUST order an owner's values by", MET,
+     "seed.LateJoiner: its seed by core §4.2's merge, as 0.67's S7 says, and what it receives after the seed's GET "
+     "ended by time within one id (seed.follows; state_scenarios §7; round 90); desired.TargetRole keeps "
+     "desired.v1 §2.4's own order"),
+    ("consumer", "core §4.3", "It MUST accept the first value under a", MET,
+     "seed.LateJoiner after its seed: a value under an id other than the held one's is kept, though its time be "
+     "lower (seed.follows; state_scenarios §7 step 2, a new epoch 5 s behind; round 90, F-382, F-383)"),
     ("consumer", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "every zk2py service is an owner.Owner, which holds one (presence_scenarios §1)"),
     ("consumer", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,

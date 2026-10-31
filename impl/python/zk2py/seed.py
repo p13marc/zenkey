@@ -15,6 +15,16 @@ follows a subscription.
   stamped one, and two unstamped samples have no order but their arrival
   (0.27). :func:`compare` and :func:`kept` are the pure rule
   (``conformance/seed/merge.json``).
+- **After the seed** (core §4.3, 0.67, F-368): "A late joiner's seed
+  merges as §4.2 says, and the consumer rule orders what a consumer
+  receives after its seed." Once its GET has ended, a consumer's
+  :class:`LateJoiner` orders each live sample by S7's consumer rule
+  (:func:`follows`): by time within one timestamp id, and the first value
+  under a new id accepted, its ordering restarted there, though its time be
+  lower. zk2py reads "after its seed" as after the GET's final reply, and a
+  new id as one other than the held value's, per key (round 90, F-382 and
+  F-383). A tool's late joiner keeps §4.2's merge after its seed: S7's
+  consumer rule binds a consumer, and nothing else orders a tool's.
 - **R6** binds a consumer, whose seed discards a key that is not concrete
   on either path; a tool's seed keeps it under the key it arrived on,
   merged with that key alone (0.27).
@@ -82,6 +92,10 @@ class Applied:
     deleted: bool
     stamp: Stamp | None
     outcome: str
+    #: which rule decided it: §4.2's merge (the seed, and a tool's
+    #: subscription after it), or S7's consumer rule (a consumer's samples
+    #: after its seed, core §4.3, 0.67)
+    rule: str = "merge"
 
 
 @dataclass
@@ -138,10 +152,41 @@ def newer(a: Stamp | None, b: Stamp | None) -> bool:
     return a.key() > b.key()
 
 
+def follows(a: Stamp | None, b: Stamp | None) -> bool:
+    """Whether ``a``, a value a consumer receives after its seed, replaces a
+    held ``b`` by S7's consumer rule (core §4.3): "A consumer MUST order an
+    owner's values by time within one timestamp id. It MUST accept the first
+    value under a new id, and restart its ordering there." An id other than
+    the held value's is new, whatever its time (round 90, F-383's reading
+    (a)); an unstamped sample, no owner's (S1), keeps §4.2's rule."""
+    if a is None or b is None:
+        return newer(a, b)
+    if a.id != b.id:
+        return True
+    return a.time > b.time
+
+
+def ordered(arrivals: list[tuple[Stamp | None, bool]]) -> list[bool]:
+    """One key's arrivals in arrival order, each (stamp or None, whether it
+    came after the seed): whether each replaces what the key holds, §4.2's
+    merge deciding the seed's and S7's consumer rule each after it."""
+    held: Stamp | None = None
+    holding = False
+    out = []
+    for stamp, after in arrivals:
+        k = (not holding) or (follows(stamp, held) if after else newer(stamp, held))
+        out.append(k)
+        if k:
+            held, holding = stamp, True
+    return out
+
+
 class LateJoiner:
     """A late joiner over ``selector`` (§4.2, 0.26). ``consumer`` discards
     a sample or a reply on a key that is not concrete (R6); a tool keeps it,
-    as the text leaves to the tool."""
+    as the text leaves to the tool. After its seed's GET has ended, a
+    consumer orders what it receives by S7's consumer rule (core §4.3, 0.67;
+    :func:`follows`), and a tool by §4.2's merge."""
 
     def __init__(self, session: Any, selector: str, *, timeout: float = GET_TIMEOUT_S, consumer: bool = True,
                  order: str = "subscribe-first"):
@@ -162,15 +207,20 @@ class LateJoiner:
             return  # R6
         stamp = Stamp.of(ts)
         with self.lock:
+            # S7 orders what a consumer receives after its seed, its GET
+            # ended (core §4.3, 0.67); §4.2's merge decides the seed's, and
+            # a tool's after it.
+            rule = "S7" if self.consumer and via == "live" and self.seed.ended else "merge"
             held = self.state.get(key)
-            if held is None or newer(stamp, held.stamp):
+            replaces = held is None or (follows(stamp, held.stamp) if rule == "S7" else newer(stamp, held.stamp))
+            if replaces:
                 outcome = "kept"
                 self.state[key] = Entry(deleted, payload, encoding, stamp, via)
             elif stamp is not None and held.stamp is not None and stamp.key() == held.stamp.key():
                 outcome = "same"
             else:
                 outcome = "dropped"
-            self.applied.append(Applied(key, via, deleted, stamp, outcome))
+            self.applied.append(Applied(key, via, deleted, stamp, outcome, rule))
 
     def _sample(self, sample: Any) -> None:
         import zenoh
