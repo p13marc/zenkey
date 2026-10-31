@@ -1758,6 +1758,11 @@ class ConfigOwner:
 NOT_ASKED, UNOBSERVABLE = "not_asked", "unobservable"
 HORIZON = {"freshness.ttl_s": 60}
 
+#: The ``encoding`` ``config.v1.toml`` declares for its view, status and
+#: change events: none, so JSON, core §7.2's default. A sample whose
+#: ``Encoding`` names neither JSON nor CBOR is read on it (observer §7.3).
+DECLARED_ENCODING = "json"
+
 
 @dataclass
 class Reading:
@@ -1777,6 +1782,10 @@ class Reading:
     #: forgot, and its note, reported with what it holds (round 92)
     forgotten: int = 0
     bound: str = ""
+    #: observer §7.3 (0.12): each document or event that did not decode as
+    #: its type on the wire its sample's ``Encoding`` names, its key and why
+    #: (the mend after #926 part 5)
+    undecodable: list[str] = field(default_factory=list)
 
     def fresh_doc(self) -> dict[str, Any] | None:
         """A fresh view, else a fresh status: what the questions that a
@@ -1797,7 +1806,16 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
     presence), ``lists`` is the deployment's word for the descriptor
     (§2.19). The view and the status come from a GET (core S4) and from
     ``subscriber`` (a :class:`zk2py.freshness.Subscriber`), each judged by
-    ``freshness.v1`` at 60 s; the events from ``subscriber``."""
+    ``freshness.v1`` at 60 s; the events from ``subscriber``.
+
+    Each is decoded as observer §7.3's decode order says (0.12; the mend
+    after #926 part 5): config.v1 does not say how its reader reads a
+    sample's bytes, so its JSON Schema types are read on the wire their
+    sample's ``Encoding`` names, JSON or CBOR, and on the contract's
+    ``encoding`` (JSON: ``config.v1.toml`` declares none) when it names
+    neither (:func:`zk2py.decoding.decode_json_type`). One that does not
+    decode is no document, its key and reason in ``undecodable``."""
+    from . import decoding as dc
     from . import freshness as fr
     from . import live
     from . import seed as sd
@@ -1829,18 +1847,22 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
         # stamp, across two ids too (observer §4.1, 0.10; round 91). Round
         # 90 took the subscription's last put by arrival against the GET's
         # by time alone.
-        arrivals: list[tuple[Any, bool, bytes]] = []
+        arrivals: list[tuple[Any, bool, bytes, str]] = []
         if subscriber is not None:
             observations.append(subscriber.observation(key))
-            arrivals += [(sd.Stamp.of(x.stamp), x.kind == "delete", x.payload) for x in subscriber.of(key)]
+            arrivals += [(sd.Stamp.of(x.stamp), x.kind == "delete", x.payload, x.encoding) for x in subscriber.of(key)]
         g = fr.get_reading(session, key, timeout=timeout)
         observations.append(g.observation(trust))
         if g.reply in ("put", "delete"):
-            arrivals.append((sd.Stamp.of(g.stamp), g.reply == "delete", g.payload))
+            arrivals.append((sd.Stamp.of(g.stamp), g.reply == "delete", g.payload, g.encoding))
         held = sd.merged(arrivals)
-        latest = None if held is None or held[1] else held[2]
         fresh = fr.judge("state", HORIZON, observations).verdict == fr.FRESH
-        docv = json.loads(latest) if latest is not None else None
+        docv = None
+        if held is not None and not held[1]:
+            try:
+                docv = dc.decode_json_type(held[2], held[3], DECLARED_ENCODING)
+            except dc.Undecodable as e:
+                out.undecodable.append(f"{key}: {e}")
         setattr(out, which, docv)
         setattr(out, f"{which}_fresh", fresh and docv is not None)
     if subscriber is not None:
@@ -1850,7 +1872,10 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
         for k in sorted(keys):
             for x in subscriber.of(k):
                 if x.kind == "put":
-                    out.events.append(json.loads(x.payload))
+                    try:
+                        out.events.append(dc.decode_json_type(x.payload, x.encoding, DECLARED_ENCODING))
+                    except dc.Undecodable as e:
+                        out.undecodable.append(f"{k}: {e}")
     return out
 
 

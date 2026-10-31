@@ -3400,9 +3400,13 @@ def run_python_s7(report: Report, exe: Path) -> None:
     timestamp id, accepts rev 11, and restarts its ordering": zk2py's
     consumer orders by S7 from its first value (:func:`zk2py.seed.follows`),
     and its tool's late joiner, by §4.2's merge for as long as it follows
-    (observer §4.1), is the control. Then :func:`run_python_s7_inside`."""
+    (observer §4.1), is the control. After it the new instance puts a third
+    time, "rev 12", within 5 s of the first, the premise core 0.70 states
+    (F-408): the consumer accepts it, and the tool keeps the old epoch's.
+    Then :func:`run_python_s7_inside`."""
     from . import live
     from . import seed as sd
+    from .checks import premise
 
     r1, ep, _ = _r1()
     tool = live.open_client(ep)
@@ -3417,6 +3421,7 @@ def run_python_s7(report: Report, exe: Path) -> None:
             return
         base = "zk2/lab/s7/budget.v1/state/items"
         put10 = first.command("put budget.v1 state/items/{item} a")
+        w10 = time.monotonic()  # the first put's answer, on the runner's clock (state.md §7's premise, 0.70)
         time.sleep(0.3)
         lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
         lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=5.0)
@@ -3447,11 +3452,31 @@ def run_python_s7(report: Report, exe: Path) -> None:
                      bool(news) and got is not None and got.stamp == news[0].stamp
                      and [(x.outcome, x.rule) for x in news] == [("kept", "S7")],
                      f"held {got.stamp if got else None}; {[(x.outcome, x.rule) for x in news]}")
+        # "After rev 11 the owner writes rev 12. Rev 11 and rev 12 come within
+        # 5 s of rev 10" (state.md §7, its late joiners; core 0.70, F-408):
+        # the new instance's second put.
+        put12 = second.command("put budget.v1 state/items/{item} a")
+        elapsed = time.monotonic() - w10
+        time.sleep(0.6)
+        third = [x for x in lc.applied if x.key == f"{base}/a" and x.via == "live"
+                 and news and x.stamp is not None and x.stamp.id == news[0].stamp.id][1:]
+        s12 = third[0].stamp if third else None
+        met, why = premise(-5.0, s10.stamp if s10 else None, news[0].stamp if news else None, s12, elapsed)
+        report.check(run, "state.md §7 (0.70): its late joiners' premise, the second and third puts come within 5 s "
+                          "of the first", met, why)
+        got = lc.view().get(f"{base}/a")
+        report.check(run, "expected 2: the consumer restarts its ordering under the new id: it accepts the third put",
+                     bool(put12) and s12 is not None and got is not None and got.stamp == s12
+                     and [(x.outcome, x.rule) for x in third] == [("kept", "S7")],
+                     f"{put12!r}; held {got.stamp if got else None}; {[(x.outcome, x.rule) for x in third]}")
         held = lt.view().get(f"{base}/a")
-        report.check(run, "expected 2: the tool's late joiner, §4.2's merge for as long as it follows (observer "
-                          "§4.1), keeps the old epoch's later time",
-                     s10 is not None and held is not None and held.stamp == s10.stamp,
-                     f"held {held.stamp if held else None}")
+        name = ("expected 2: the tool's late joiner, §4.2's merge for as long as it follows (observer §4.1), keeps "
+                "the old epoch's later time over both of the new instance's puts")
+        if met:
+            report.check(run, name, s10 is not None and held is not None and held.stamp == s10.stamp,
+                         f"held {held.stamp if held else None}; {[(x.via, x.outcome) for x in lt.applied]}")
+        else:
+            report.inconclusive(run, name, f"its premise failed above: {why}; held {held.stamp if held else None}")
     finally:
         for j in joiners:
             j.close()
@@ -3493,7 +3518,7 @@ def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
 
     from . import live
     from . import seed as sd
-    from .checks import F408_MARGIN_S, HeldQueries, within_offset
+    from .checks import HeldQueries, premise
 
     r1, ep, _ = _r1()
     tool, helper = live.open_client(ep), live.open_client(ep)
@@ -3570,8 +3595,8 @@ def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
         third = [a for a in lc.applied if a.via == "live"][1:]
         s12 = third[0].stamp if third else None
         got = lc.view().get(f"{base}/a")
-        report.check(run, "state.md §7 (0.69): the consumer holds the old epoch's value until the new instance's "
-                          "next put, which it accepts",
+        report.check(run, "state.md §7 (0.70): in both runs the consumer then holds the old epoch's value, until the "
+                          "new instance's next put, which it accepts",
                      bool(put12) and s12 is not None and new is not None and s12.id == new.id
                      and s12.time > new.time and got is not None and got.stamp == s12
                      and [(a.outcome, a.rule) for a in third] == [("kept", "S7")],
@@ -3588,21 +3613,23 @@ def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
                      held is not None and (s12 if later else old) is not None
                      and held.stamp == (s12 if later else old)
                      and lastt == [("live", "kept" if later else "dropped")], detail)
-        # The step's stated outcome, its premise judged on the runner's clock,
-        # not from the stamps (round 92's F-408; review-bot on PR #973).
-        step = "state.md §7 (0.69): the tool keeps the later time: "
+        # The step's premise, stated since core 0.70 (F-408): a run past it
+        # fails on it, and its clock-behind outcome is not asserted.
+        met, why = premise(offset_ms / 1000, old, new, s12, elapsed)
+        report.check(run, "state.md §7 (0.70): its premise, the second and third puts come within 5 s of the first",
+                     met, why)
+        step = "state.md §7 (0.70): the tool keeps the later time: "
         if not offset_ms:
             report.check(run, step + "the new instance's two puts on the host's clock",
                          held is not None and s12 is not None and held.stamp == s12
                          and lastt == [("live", "kept")], detail)
-        elif within_offset(elapsed, offset_ms / 1000):
+        elif met:
             report.check(run, step + "the old epoch's with the clock behind, the third put dropped",
                          held is not None and old is not None and held.stamp == old
                          and lastt == [("live", "dropped")], detail)
         else:
             report.inconclusive(run, step + "the old epoch's with the clock behind",
-                                f"F-408's premise not met: the third put came {elapsed:.3f} s after the first, not "
-                                f"within the {abs(offset_ms) / 1000:g} s offset less {F408_MARGIN_S:g} s; {detail}")
+                                f"its premise failed above: {why}; {detail}")
     finally:
         # Released and undeclared whatever happened above, so that an early
         # return leaves no GET open (review-bot on PR #973).

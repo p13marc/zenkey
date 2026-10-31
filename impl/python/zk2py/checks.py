@@ -1,7 +1,8 @@
 """A live runner's checks and its exit, shared by ``zk2py.timing_interop`` and
 ``zk2py.arbitration_scenarios`` (#609, round 79; review-bot on PR #919), and
 what ``zk2py.state_scenarios`` and ``zk2py.live_interop`` share to hold a
-GET open (:class:`HeldQueries`; round 92, review-bot on PR #973).
+GET open (:class:`HeldQueries`; round 92, review-bot on PR #973) and to judge
+``state.md`` §7 step 2's premise (:func:`premise`; core 0.70).
 
 A runner keeps each check as ``(section, name, ok, detail, known)``, where
 ``known`` is the open finding the check is known to fail by, looked up by
@@ -18,20 +19,38 @@ from typing import Any
 
 Row = tuple[str, str, bool, str, "str | None"]
 
-#: How far inside the offset the runner's own clock must place rev 12's write
-#: for ``state.md`` §7's clock-behind outcome to be asserted (F-408): the
-#: owner's write and the runner's reading of the time are not one instant.
-F408_MARGIN_S = 0.5
+#: ``state.md`` §7 step 2's premise, stated since core 0.70 (F-408): "Rev 11
+#: and rev 12 come within 5 s of rev 10."
+PREMISE_S = 5.0
 
 
-def within_offset(elapsed_s: float, offset_s: float, margin_s: float = F408_MARGIN_S) -> bool:
-    """``state.md`` §7 step 2 with the new clock behind by ``offset_s``
-    (round 92's F-408): whether rev 12 was written within the offset of
-    rev 10, by the runner's monotonic clock, ``elapsed_s`` after it and with
-    ``margin_s`` to spare. Only then is the step's "rev 10 with the clock
-    behind" its premise's outcome, which a run asserts. Past it, or within
-    the margin of it, the run is inconclusive, never a pass."""
-    return elapsed_s < abs(offset_s) - margin_s
+def premise(offset_s: float, t10: Any, t11: Any, t12: Any, elapsed_s: float) -> tuple[bool, str]:
+    """Whether a run of ``state.md`` §7 step 2 met its premise, "Rev 11 and
+    rev 12 come within 5 s of rev 10" (core 0.70, F-408), and the words that
+    say why. ``t10``, ``t11`` and ``t12`` are the three values' stamps
+    (:class:`zk2py.seed.Stamp`, or None when one was not heard), and
+    ``elapsed_s`` rev 12's write after rev 10's on the runner's monotonic
+    clock.
+
+    - **With the new clock behind** by ``offset_s`` (5 s), the premise is
+      that rev 11's and rev 12's times fall below rev 10's: a clock 5 s
+      behind stamps them so only while they come within 5 s of rev 10, as
+      the step says. That is what the reference asserts before the tool's
+      outcome ("A run past the premise then fails on the premise", core
+      0.70's entry). The stamps measure it exactly, so no margin is needed.
+    - **On the host's clock**, the stamps cannot say it, so it is rev 12's
+      write within 5 s of rev 10's, on the runner's clock.
+
+    Round 92 read a run past it as inconclusive, the step then stating no
+    premise. Since 0.70 states one, a run that misses it fails on it."""
+    if t10 is None or t11 is None or t12 is None:
+        return False, f"a value not heard: rev 10 {t10}, rev 11 {t11}, rev 12 {t12}"
+    gap = round((t12.time - t10.time) / 2**32, 3)
+    said = f"rev 12 written {elapsed_s:.3f} s after rev 10 by the runner's clock, its time {gap} s from rev 10's"
+    if offset_s:
+        ok = t11.time < t10.time and t12.time < t10.time
+        return ok, f"{said}; rev 11's and rev 12's times {'below' if ok else 'not both below'} rev 10's"
+    return elapsed_s < PREMISE_S, said
 
 
 class HeldQueries:

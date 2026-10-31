@@ -406,6 +406,20 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -
     sc = doc.get("scope", {})
     report.check(sec, "step 5, zk2py's echo tool: shows step 1's samples, the stream, state and events ones",
                  code == 0 and kinds == ["events", "state", "stream"] and len(keys) == 3, f"exit {code}, {keys}")
+    # observer §7.3 (0.12, F-406): it holds no contract, so it sniffs each
+    # payload and says which case it is and where it stopped resolving the
+    # key (the mend after #926 part 5)
+    samples = doc.get("samples", [])
+    report.check(sec, "observer §7.3 (0.12), zk2py's echo tool: each payload sniffed, its row saying a zk2 key whose "
+                      "contract is not in hand, resolution stopped at the contract",
+                 bool(samples) and all(
+                     (x.get("declared_type") or {}).get("which") == "contract_not_in_hand"
+                     and (x.get("declared_type") or {}).get("stopped") == "contract"
+                     and (x.get("declared_type") or {}).get("iface") == "zk2py_guard.v1"
+                     and (x.get("sniffed") or {}).get("as") in ("empty", "json", "cbor", "text", "hex")
+                     for x in samples)
+                 and any("sniffed" in note for note in doc.get("notes", [])),
+                 f"{[(x.get('declared_type', {}).get('which'), x.get('sniffed')) for x in samples]}")
     report.check(sec, "step 5, zk2py's echo tool: reports @stream, @state, @op, @adv and @zk excluded beside what it "
                       "watched, in its report and on stderr",
                  sorted(sc.get("excluded", [])) == sorted(EVERY) and sc.get("watched") == ["stream", "state", "events"]
@@ -428,7 +442,8 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -
     report.check(sec, "step 5, zk2py's echo tool --format ndjson: one row per sample, step 1's three, and no row "
                       "but a sample's",
                  ncode == 0 and sorted({_kind(k) for k in nkeys}) == ["events", "state", "stream"] and len(rows) == 3
-                 and all(set(x) == {"key", "zk2", "kind", "delete", "bytes", "encoding"} for x in rows)
+                 and all(set(x) == {"key", "zk2", "kind", "delete", "bytes", "encoding", "declared_type", "sniffed"}
+                         for x in rows)
                  and len(rows) == len(n.lines()), f"exit {ncode}, {nkeys}, {len(n.lines())} lines")
     report.check(sec, "step 5, zk2py's echo tool --format ndjson: the scope's exclusion stated on stderr, a stream "
                       "of rows having no place for it",

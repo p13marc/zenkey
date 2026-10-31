@@ -503,8 +503,8 @@ class Subscriber:
 
     def bound(self) -> tuple[int, str]:
         """The bound's count and its note, read under one lock (observer
-        §4.1, 0.11: "counts the keys the bound forgot, and reports the
-        count"; :func:`zk2py.seed.bound_note`)."""
+        §4.1, 0.12: "counts each time the bound forgets a key, and reports
+        the count"; :func:`zk2py.seed.bound_note`)."""
         from . import seed
 
         with self.lock:
@@ -548,6 +548,9 @@ class GetReading:
     stamp_id: str | None = None
     stamp: str | None = None
     payload: bytes = b""
+    #: the reply's ``Encoding``, which picks a held JSON Schema type's wire
+    #: (observer §7.3; :func:`zk2py.decoding.wire_of`)
+    encoding: str = ""
 
     def observation(self, trust: ClockTrust, now_utc_ns: int | None = None) -> Get:
         if self.reply is None:
@@ -571,16 +574,17 @@ def get_reading(session: Any, key: str, timeout: float = 1.0) -> GetReading:
     r = mine[-1]
     if r.deleted:
         return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp)
-    return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload)
+    return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload, r.encoding)
 
 
 # -- a tool's verdict on a service's resources (§5, scenarios §6) ------------------
 
 class ServiceRead(dict):
     """:func:`read_service`'s answer: ``{"<token>/<template>": (verdict,
-    members)}``, and ``forgotten``, the count of keys its recording's bound
-    forgot over the window, with its ``note`` (observer §4.1, 0.11: "counts
-    the keys the bound forgot, and reports the count"; round 92)."""
+    members)}``, and ``forgotten``, the count of the times its recording's
+    bound forgot a key over the window, with its ``note`` (observer §4.1,
+    0.12: "counts each time the bound forgets a key, and reports the
+    count"; round 92)."""
 
     forgotten: int = 0
     note: str = ""

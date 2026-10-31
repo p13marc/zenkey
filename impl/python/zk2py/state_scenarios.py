@@ -288,6 +288,7 @@ def section7(report: Report, run: Run | None = None) -> None:
     import zenoh
 
     from . import live
+    from .checks import premise
     from .contract import load_contract
     from .live_interop import _r1
     from .owner import Owner
@@ -304,6 +305,7 @@ def section7(report: Report, run: Run | None = None) -> None:
         owners.append(o1)
         base = f"{o1.prefix(c)}/state/plans"
         t10 = o1.set_state(f"{base}/r", b"rev10")
+        w10 = time.monotonic()  # rev 10's write, on the runner's clock (state.md §7's premise, 0.70)
         time.sleep(0.3)
         lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
         lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=5.0)
@@ -346,16 +348,26 @@ def section7(report: Report, run: Run | None = None) -> None:
                      got is not None and got.payload == b"rev11" and [(x.outcome, x.rule) for x in arrival]
                      == [("kept", "S7")], f"{_show(got)}; {[(x.outcome, x.rule) for x in arrival]}")
         t12 = o2.set_state(f"{base}/r", b"rev12")
+        elapsed = time.monotonic() - w10
         time.sleep(0.5)
+        # "Rev 11 and rev 12 come within 5 s of rev 10" (state.md §7, core
+        # 0.70, F-408): a run past it fails on it, and the outcomes that rest
+        # on it are not asserted.
+        met, why = premise(-5.0, s10, s11, sd.Stamp.of(t12), elapsed)
+        report.check(sec, "state.md §7 (0.70): its late joiners' premise, rev 11 and rev 12 come within 5 s of "
+                          "rev 10", met, why)
         got = lc.view().get(f"{base}/r")
         report.check(sec, "expected 2: the consumer restarts its ordering under the new id: rev 12, later than "
-                          "rev 11 and still below rev 10's time, replaces it",
+                          "rev 11, replaces it",
                      got is not None and got.payload == b"rev12" and str(got.stamp) == str(sd.Stamp.of(t12)),
                      _show(got))
         held = lt.view().get(f"{base}/r")
-        report.check(sec, "expected 2: the tool's late joiner keeps §4.2's merge for as long as it follows "
-                          "(observer §4.1): rev 10's later time over the new epoch's values",
-                     held is not None and held.payload == b"rev10", f"{_show(held)}; {lt.bound_note()}")
+        name = ("expected 2: the tool's late joiner keeps §4.2's merge for as long as it follows (observer §4.1): "
+                "rev 10's later time over the new epoch's values")
+        if met:
+            report.check(sec, name, held is not None and held.payload == b"rev10", f"{_show(held)}; {lt.bound_note()}")
+        else:
+            report.inconclusive(sec, name, f"its premise failed above: {why}; {_show(held)}")
     finally:
         for j in joiners:
             j.close()
@@ -399,7 +411,7 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
     import zenoh
 
     from . import live
-    from .checks import F408_MARGIN_S, HeldQueries, within_offset
+    from .checks import HeldQueries, premise
     from .contract import load_contract
     from .live_interop import _r1
     from .owner import Owner
@@ -494,8 +506,8 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
             s12 = sd.Stamp.of(t12)
             got = lc.view().get(f"{base}/r")
             last = [(a.via, a.outcome, a.rule) for a in lc.applied][2:]
-            report.check(sec, "state.md §7 (0.69): the consumer holds rev 10 until rev 12, which it accepts, under "
-                              "the new id again",
+            report.check(sec, "state.md §7 (0.70): in both runs the consumer then holds rev 10, until rev 12, which "
+                              "it accepts, under the new id again",
                          got is not None and got.payload == b"rev12" and str(got.stamp) == str(s12)
                          and last == [("live", "kept", "S7")], f"{_show(got)}; {last}")
             heldt = lt.view().get(f"{base}/r")
@@ -509,20 +521,22 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
             report.check(sec, "observer §4.1: the tool keeps the later time by the stamps after rev 12",
                          heldt is not None and heldt.payload == (b"rev12" if later else b"rev10")
                          and lastt == [("live", "kept" if later else "dropped")], detail)
-            # The step's stated outcome, its premise judged on the runner's
-            # clock, not from the stamps (round 92's F-408; review-bot on PR #973).
-            step = "state.md §7 (0.69): the tool keeps the later time: "
+            # The step's premise, stated since core 0.70 (F-408): a run past
+            # it fails on it, and its clock-behind outcome is not asserted.
+            met, why = premise(offset_s, s10, s11, s12, elapsed)
+            report.check(sec, "state.md §7 (0.70): its premise, rev 11 and rev 12 come within 5 s of rev 10", met,
+                         why)
+            step = "state.md §7 (0.70): the tool keeps the later time: "
             if not offset_s:
                 report.check(sec, step + "rev 11, then rev 12, on the host's clock",
                              heldt is not None and heldt.payload == b"rev12" and lastt == [("live", "kept")], detail)
-            elif within_offset(elapsed, offset_s):
+            elif met:
                 report.check(sec, step + "rev 10 with the clock behind, rev 12 dropped",
                              heldt is not None and heldt.payload == b"rev10" and lastt == [("live", "dropped")],
                              detail)
             else:
                 report.inconclusive(sec, step + "rev 10 with the clock behind",
-                                    f"F-408's premise not met: rev 12 came {elapsed:.3f} s after rev 10, not within "
-                                    f"the {abs(offset_s):g} s offset less {F408_MARGIN_S:g} s; {detail}")
+                                    f"its premise failed above: {why}; {detail}")
         finally:
             # Released and undeclared whatever happened above, so that an
             # early return leaves no GET open (review-bot on PR #973).
