@@ -994,6 +994,14 @@ async fn new_epoch_inside_the_seed(behind: bool) {
 
     // Until the key's next value: rev 12, under the new id.
     let t12 = w["vehicle-01"].put("rev12").await.unwrap();
+    if behind {
+        // The step's premise: rev 12 comes within 5 s of rev 10, so the
+        // clock behind stamps it below rev 10's time.
+        assert!(
+            t12.get_time() < t10.get_time(),
+            "{clock}: rev 12 comes within 5 s of rev 10, older by the clock"
+        );
+    }
     eventually("rev 12 arrives", || async {
         got.lock().unwrap().iter().any(|(_, ts)| *ts == t12)
     })

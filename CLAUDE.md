@@ -1664,7 +1664,20 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `zenkey_model::decode` and `model::structural` read it (F-397, reading
   (a)). Observer §4.1's bound counts the keys it forgot and reports the
   count, as zengui's seed strip does; that it marks neither the key nor
-  its next value is named as the bound's cost (F-398). Core 0.61 and
+  its next value is named as the bound's cost (F-398). Core 0.70 and
+  observer text 0.12 (#926 part 5, zk2py round 92's F-406 to F-413)
+  changed no core rule: §4.3's "Inside a seed" is reworded (F-410), and
+  `state.md` §7 step 2 states its premise, rev 11 and rev 12 within 5 s
+  of rev 10, which `s7_a_new_epoch_inside_a_late_joiners_seed` now
+  asserts (F-408). Observer §7.3 sniffs a payload whose declared type the
+  tool does not hold, a foreign key's or one whose contract is not in
+  hand or is unavailable, and the tool names where resolution stopped,
+  as the fleet's `Unresolved` does (F-406); its decode order has no
+  "then", a payload with a held type decoded by it and any other sniffed
+  (F-412); and a profile that says how its reader reads a sample's bytes
+  decides for that reader, as the fleet's telemetry, alarms and desired
+  readers do (F-409). §4.1's bound counts each time it forgets a key, as
+  `Monitor::merge_evicted` does (F-407). Core 0.61 and
   observer text
   0.5 (#935 part 2, zk2py round 84's F-295 to F-314) split every sentence
   over 50 words in the two texts, so their baseline holds none, and

@@ -15,10 +15,10 @@ class also holds the rules its texts state without a keyword. Those, such as
 
 A long sentence is shortened, never reworded, and its link leads to the
 rest. A sentence after its paragraph's run-in label shows the label first. A
-pronoun's noun, where not shown, follows it in brackets. So does a verb the
-sentence omits. A lead-in ends with its list's length, "(3 items)", or its
-table's. A MAY that excepts a rule follows it, after *Except:*. Nothing else
-is added.
+pronoun's noun, where not shown, follows it in brackets. A verb the sentence
+leaves out is shown in brackets. They sit where it is left out. A lead-in
+ends with its list's length, "(3 items)", or its table's. A MAY that excepts
+a rule follows it, after *Except:*. Nothing else is added.
 
 **Evidence** is what the text cites beside a rule. That is the tags after
 its sentence, else in its paragraph. Else, a list item under it that states

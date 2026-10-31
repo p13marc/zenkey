@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.11 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.12 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.69 ([`core.md`](core.md)) |
+| **Written against** | core 0.70 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -609,8 +609,8 @@ and merge, a selector over several owners and "Observing S1" stay in core
   older than what its key holds is not kept after the seed either. A
   consumer orders by core §4.3's consumer rule instead (core §4.2).
   `[Sc: state.md §7]`
-  - **A bound on the merge.** A tool that bounds what it holds counts the
-    keys the bound forgot, and reports the count. A forgotten key holds
+  - **A bound on the merge.** A tool that bounds what it holds counts each
+    time the bound forgets a key, and reports the count. A forgotten key holds
     nothing, so the merge keeps the key's next value whatever its stamp.
     That is the bound's cost. A tool that marks neither the key nor that
     value shows the value as the key's latest, and only the count tells a
@@ -1020,19 +1020,28 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema
   2020-12, core §7.3), and a `raw` type by its media type only. The
   sample's `Encoding` says which of the type's wires it travels on. A
-  payload with no declared type, a foreign key's, is sniffed (§8.1). A
-  reserved kind (`flatbuffer`, `ros2msg`, `cdr`), which a contract
-  declares as `raw` with a media type, tools MAY decode through a plugin.
+  payload whose declared type the tool does not hold is sniffed (§8.1).
+  That is a foreign key's, or a zk2 key's whose contract is not in hand
+  or is unavailable (§2). The tool says which, naming where it stopped
+  resolving the key. A reserved kind (`flatbuffer`, `ros2msg`, `cdr`),
+  which a contract declares as `raw` with a media type, tools MAY decode
+  through a plugin.
   `[Sc: types.md §2]`
-- **Decode order** for a tool is: the declared type, then the sample's
-  `Encoding` for the type's wire, then sniffing where there is no declared
-  type.
+- **Decode order** for a tool: a payload whose declared type the tool
+  holds is decoded by that type, on the wire its sample's `Encoding`
+  names (below). Any other payload is sniffed.
   - **A type's wires.** A JSON Schema type travels as JSON or CBOR, and a
     raw family as one of its subtypes (core §7.1, §7.2). So a state
     declared `cbor` whose sample's `Encoding` is JSON is read as JSON.
   - **An `Encoding` that names neither JSON nor CBOR**, zenoh's default
     `zenoh/bytes` or another type's, does not pick a JSON Schema type's
     wire. The type is then read on its contract's `encoding` (core §7.2).
+  - **A profile's reader.** A profile that says how its reader reads a
+    sample's bytes decides for that reader. So a
+    [`telemetry.v1`](profiles/telemetry/v1.md) reader reads a sample on
+    its resource's `encoding` (its §2.6), and an
+    [`alarms.v1`](profiles/alarms/v1.md) reader reads strict JSON (its
+    §2.4), whatever the sample's `Encoding`.
 - **Honest rendering.** A tool that shows a payload it cannot decode MUST
   render it as its declared type and size, or through a plugin. It MUST
   NOT show garbage, and MUST NOT drop the sample silently.
@@ -1070,7 +1079,7 @@ spell these.
 The bus is shared (core §1.7): v1 keys, rmw_zenoh keys and other
 applications coexist. A tool never hides or refuses a foreign key. It
 shows what it can still establish: the chunks, the traffic, and a
-structural rendering of the payload (§7.3's last rung). Then it states
+structural rendering of the payload (§7.3's sniffing). Then it states
 what it could not. `[F: keys.json]` `[Sc: state.md §11]`
 
 ### 8.2 A wildcard scope is not total coverage

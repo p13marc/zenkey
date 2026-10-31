@@ -963,8 +963,8 @@ impl Monitor {
     ///   counts only broadcast lag;
     /// - the merge is **bounded** at [`MonitorSpec::max_keys`] keys, the
     ///   least recently admitted forgotten first. A forgotten key holds
-    ///   nothing, so its next sample is kept whatever its stamp, and every
-    ///   key forgotten is counted ([`Monitor::merge_evicted`]), apart from
+    ///   nothing, so its next sample is kept whatever its stamp, and each time
+    ///   a key is forgotten is counted ([`Monitor::merge_evicted`]), apart from
     ///   both. The merge is dropped with the watch, at [`Monitor::unwatch`].
     ///   Before #926 it was dropped at the boundary, "a seed-phase
     ///   structure, not a per-watch leak", which left live samples after
@@ -1152,8 +1152,8 @@ impl Monitor {
         self.merges.superseded.load(Ordering::Relaxed)
     }
 
-    /// Keys the merges of this monitor's seeded watches forgot to stay
-    /// within their bound ([`MonitorSpec::max_keys`]). Each such key's next
+    /// Times the merges of this monitor's seeded watches forgot a key to
+    /// stay within their bound ([`MonitorSpec::max_keys`]). Each such key's next
     /// sample was kept whatever its stamp, so a non-zero count says the
     /// merge did not order every key (observer §4.1, tooling guide O6).
     pub fn merge_evicted(&self) -> u64 {

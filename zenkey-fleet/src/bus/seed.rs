@@ -202,7 +202,7 @@ impl SeededSubscriber {
         self.merge.superseded()
     }
 
-    /// Keys the merge forgot to stay within its bound
+    /// Times the merge forgot a key to stay within its bound
     /// ([`crate::DEFAULT_MAX_KEYS`]), each one's next sample then kept
     /// whatever its stamp (observer §4.1, tooling guide O6).
     pub fn evicted(&self) -> u64 {
@@ -273,7 +273,7 @@ impl futures_core::Stream for SeededSubscriber {
 /// **Bounded** (tooling guide O6): one entry per key, at most `max_keys`,
 /// the least recently admitted forgotten first, in batches
 /// ([`BoundedLru`]). A forgotten key holds nothing, so its next sample is
-/// kept whatever its stamp, and every key forgotten is counted
+/// kept whatever its stamp, and each time it forgets a key is counted
 /// ([`Merge::evicted`]), apart from `superseded` and from a channel's
 /// `Dropped(n)`.
 ///

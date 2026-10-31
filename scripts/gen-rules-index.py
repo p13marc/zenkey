@@ -998,8 +998,9 @@ def render(rules: list, ids: list) -> str:
          "Those, such as `observer.md` §1, §2, §5 and §8, are not listed.")
     para(w, "A long sentence is shortened, never reworded, and its link leads to the "
          "rest. A sentence after its paragraph's run-in label shows the label first. "
-         "A pronoun's noun, where not shown, follows it in brackets. So does a verb "
-         "the sentence omits. A lead-in ends "
+         "A pronoun's noun, where not shown, follows it in brackets. A verb the "
+         "sentence leaves out is shown in brackets. They sit where it is left out. "
+         "A lead-in ends "
          "with its list's length, \"(3 items)\", or its table's. A MAY that excepts "
          "a rule follows it, after *Except:*. Nothing else is added.")
     para(w, "**Evidence** is what the text cites beside a rule. That is the tags "
