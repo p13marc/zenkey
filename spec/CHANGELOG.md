@@ -3,6 +3,75 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.70 — 2026-10-31: round 92's answers: §4.3's seed reworded, `state.md` §7's premise, and the index's header (#926)
+
+zk2py round 92 (PR #973) read 0.69 and `observer.md` 0.11 cold. Its
+findings are F-406 to F-413. This version answers F-408, F-410, F-411 and
+F-413 (#926's fifth and last part, epic #921 Track B). `observer.md` moves
+to text 0.12 beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)),
+for F-406, F-407, F-409 and F-412. No rule of this text changed.
+
+**§4.3, inside a seed (F-410, hard to read).** "The risk lasts the GET"
+read as how long the step back lasts, which is until the key's next value.
+"The two times" named nothing before it.
+- **Now:** the bullet opens with a run-in label. An old epoch's value can
+  arrive after the new epoch's for as long as the GET is open, not only in
+  transit. So a consumer holds the reply's value, whether its time or the
+  live samples' is later. It holds it until the key's next value.
+- **The finding's rewrite,** with "the reply's value" for "the value of
+  the instance that answered". The reply is that instance's, and the
+  shorter words keep this text's mean at its baseline.
+- **The same rule,** with no keyword, and the same `[Sc: state.md §7]`.
+
+**`scenarios/state.md` §7 step 2.**
+- **Its premise (F-408, a gap).** A clock 5 s behind stamps rev 12 below
+  rev 10 only while rev 12 is written within 5 s of rev 10. The step
+  bounded neither the restart nor the GET held open. So a slow run made
+  its "the tool keeps rev 10" wrong. zk2py measured one: a GET held 25 s
+  put rev 12 20.5 s after rev 10, and the tool kept rev 12.
+- **Now:** "Its late joiners" and "Inside the seed" each say "Rev 11 and
+  rev 12 come within 5 s of rev 10".
+- **The reference meets it.**
+  - `s7_a_late_joiner_across_a_new_epoch` already asserted rev 12's time
+    below rev 10's.
+  - `s7_a_new_epoch_inside_a_late_joiners_seed` asserted rev 11's alone.
+    With the clock behind, it now asserts rev 12's too, before the tool's
+    outcome. A run past the premise then fails on the premise.
+  - Both passed 10 runs of 10, each run of the two under 2 s.
+  - The fleet's `s7_a_tools_late_joiner_keeps_the_merge_after_its_seed`
+    stamps rev 11 and rev 12 by hand, 5 s below rev 10, so it meets the
+    premise by construction.
+- **"Both times" (F-411, hard to read).** It had two antecedents, and
+  "under the old id" read as rev 11's too. Now: "The consumer accepts rev
+  11, then the reply, which carries the old id. In both runs it then holds
+  rev 10, until rev 12, which it accepts."
+
+**`RULES.md`'s header (F-413),** from `scripts/gen-rules-index.py`. "So
+does a verb the sentence omits" was an ellipsis, which put the verb after
+the pronoun. It now reads "A verb the sentence leaves out is shown in
+brackets. They sit where it is left out." That is the finding's rewrite in
+two sentences, which keeps the file's mean under its baseline. The rows are
+unchanged: 171 rules and 71 rule ids.
+
+**How the rules were diffed.** Every sentence holding MUST, MUST NOT,
+SHOULD, SHOULD NOT, MAY, REQUIRED or RECOMMENDED was extracted before and
+after, keyed by section, and diffed.
+- **This text:** 158 before and after, all unchanged.
+- **Without a keyword:** §4.3's bullet (F-410) and the header moved. No
+  other sentence did.
+- **`scenarios/state.md`:** §7 step 2's two premises (F-408) and F-411's
+  two sentences moved, and no other.
+
+**The figures.** This text's mean stays at 16.37 words, with no sentence
+over 50 and no tag. `RULES.md` went from 12.38 to 12.33 and
+`scenarios/state.md` from 15.34 to 15.32. `spec/.prose-baseline.json` is
+lowered to them.
+
+**Deliberately not changed.**
+- **S7's two consumer MUSTs** and §4.3's residual risk, which F-410's
+  bullet only rewords.
+- **The 0.69 entry.**
+
 ## 0.69 — 2026-10-31: round 91's answers: a consumer inside its seed, §0's static rules, and five rewrites (#926)
 
 zk2py round 91 (PR #971) read 0.68's §0, §2.4, §2.5, §4.2, §4.3, §7.1,

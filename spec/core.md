@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.69** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.70** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -984,12 +984,14 @@ through the same router, arrives with the router's zid.
       replies included. A tool keeps the later time (§4.2), the old
       epoch's when the new epoch's clock is behind. Either is this residual
       risk. `[F: seed/merge.json]` `[Sc: state.md §7]`
-      - **Inside a seed** the risk lasts the GET. `Latest` delivers every
-        reply after the samples heard during the GET (§4.1). So a consumer
-        holds the id of the instance that answered, whatever the two
-        times, until the key's next value. Where two instances answer,
-        it receives only the reply `Latest` kept, the one with the greater
-        stamp. `[Sc: state.md §7]`
+      - **Inside a seed.** An old epoch's value can arrive after the new
+        epoch's for as long as the GET is open, not only in transit.
+        `Latest` delivers every reply after the samples heard during the
+        GET (§4.1). So a consumer holds the reply's value, whether its
+        time or the live samples' is later. It holds it until the key's
+        next value. Where two instances answer, it receives only the
+        reply `Latest` kept, the one with the greater stamp.
+        `[Sc: state.md §7]`
 - **Ahead.** An owner SHOULD NOT stamp beyond its router's HLC delta: it
   cannot know its own offset without a reference. `[Sc: state.md §7]`
   - The owner SHOULD detect drift against a reference it holds for the
