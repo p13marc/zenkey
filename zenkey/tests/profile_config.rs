@@ -228,6 +228,14 @@ impl Rf {
 
 /// Waits until `tool` sees an instance token of `address`; returns its id.
 async fn present(tool: &zenoh::Session, address: &str) -> String {
+    present_as(tool, address, None).await
+}
+
+/// Waits until `tool` sees the instance token `instance` of `address`, or
+/// any instance's with `None`; returns its id. After a restart the router
+/// can still hold the old instance's token, so a step that needs the new
+/// instance's resources waits for its token (#1001).
+async fn present_as(tool: &zenoh::Session, address: &str, instance: Option<&str>) -> String {
     let deadline = Instant::now() + SETTLE;
     loop {
         let rx = tool
@@ -239,9 +247,10 @@ async fn present(tool: &zenoh::Session, address: &str) -> String {
             .unwrap();
         while let Ok(r) = rx.recv_async().await {
             if let Ok(s) = r.into_result()
-                && let Ok(ZkKey::Instance { instance, .. }) = parse(s.key_expr().as_str())
+                && let Ok(ZkKey::Instance { instance: seen, .. }) = parse(s.key_expr().as_str())
+                && instance.is_none_or(|want| seen.to_string() == want)
             {
-                return instance.to_string();
+                return seen.to_string();
             }
         }
         assert!(Instant::now() < deadline, "never: {address} present");
@@ -1266,7 +1275,7 @@ async fn s8_persist_granted_and_not() {
 
     // 4. A restart: step 1's change survived, step 2's did not.
     let rf0 = rf0.restart(&owner).await;
-    present(&tool, RF0).await;
+    present_as(&tool, RF0, Some(&rf0.instance())).await;
     let v = get_view(&admin, RF0).await;
     let duty = param(&v, "duty", "fraction_ppm");
     assert_eq!(
