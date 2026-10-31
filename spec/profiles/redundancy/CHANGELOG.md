@@ -4,6 +4,26 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-31: editorial: round 88's F-352 and F-353 rewritten in the scenarios, no rule changed (#935)
+
+zk2py round 88 (#609) read 0.6 cold and found that it changed no rule. Its
+two hard-to-read findings are in `scenarios.md`, which this text's version
+covers.
+- **F-352, the conventions' "A crash":** "The silence is a proxy" made a
+  silence a device. "Killed as it runs, its host's kernel closes its
+  links" dangled. The two ways a test kills a process are now a list: a
+  proxy that stops forwarding and closes nothing, seen at the lease, or a
+  kill, its links closed by the kernel and seen at once.
+- **F-353, §1 and §3's Expected 1:** "unless A took over before that GET
+  was answered: its interface token at S within a round trip of the
+  answer" had no verb after its colon. It now names the one exception, a
+  takeover before the GET was answered, and how S tells it: the interface
+  token arriving within a round trip of the answer, the two riding two
+  priorities.
+
+**Deliberately not changed:** no rule, no step, no Expected outcome, and
+no section number or anchor.
+
 ## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60

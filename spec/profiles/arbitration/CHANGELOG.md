@@ -3,6 +3,18 @@
 Amendments to [`v1.md`](v1.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.5 — 2026-10-31: editorial: round 88's F-349 rewritten, no rule changed (#935)
+
+zk2py round 88 (#609) read 0.4 cold and found that it changed no rule.
+- **F-349, §2.8 "As one change":** "An address withdrawn before the move
+  ends re-admitted" read first as a clause, "before the move ends", with no
+  verb after it. The three ways an address ends a move are now a list:
+  withdrawn (forgetting its arrivals), re-admitted, or as it was, each with
+  its condition unchanged. `arbitrations.json` pins them, unchanged.
+
+**Deliberately not changed:** no rule, section number, label or anchor;
+no fixture.
+
 ## 0.4 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60

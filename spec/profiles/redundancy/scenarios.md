@@ -88,12 +88,13 @@ a test of zenctl and of the doctor (`zenctl/tests/live_zk2.rs`,
   judged: zenoh carries a token's declaration and a put on two priorities.
   **G** GETs as core S4 says, and reads presence as core §8.1 says, on a
   session that has never held a liveliness subscriber.
-- **A crash.** Where a section kills an instance's process, the test either
-  makes the instance's links silent first, or kills it as it runs. The
-  silence is a proxy between it and its router that stops forwarding and
-  closes nothing: a lost host, seen at the lease, which the instance's
-  configuration sets short. Killed as it runs, its host's kernel closes its
-  links: seen at once. §1 and §10 run both.
+- **A crash.** Where a section kills an instance's process, the test does
+  it one of two ways, and §1 and §10 run both:
+  - it makes the instance's links silent first, through a proxy between it
+    and its router that stops forwarding and closes nothing. That is a lost
+    host, seen at the lease, which the instance's configuration sets short;
+  - or it kills the process as it runs. The host's kernel closes its links,
+    and the crash is seen at once.
 - **"A serves"** means: A holds `zk2/lab/ledger/@zk/alive/ledger.v1/<A>/<fp16>`,
   its descriptor lists `ledger.v1` without the mark, and its `append`
   queryable answers. **"A stands by"** means: A holds its instance token
@@ -137,9 +138,10 @@ a test of zenctl and of the doctor (`zenctl/tests/live_zk2.rs`,
 
 **Expected.**
 1. A claims before it reads. S's GET at A's instance token answers A's
-   descriptor marked standby, unless A took over before that GET was
-   answered: its interface token at S within a round trip of the answer, the
-   two riding two priorities (§2.5 step 1, core §8.2 step 3). Its GET at A's
+   descriptor marked standby. The one exception is a takeover before that
+   GET was answered, which S tells by A's interface token arriving within a
+   round trip of the answer: the token and the answer ride two priorities
+   (§2.5 step 1, core §8.2 step 3). Its GET at A's
    interface token answers it unmarked, the token last (§2.6, core §8.2). A
    serves within 3 s of its start.
 2. B stands by (§2.4), and stays so: S's GET at B's instance token answers
@@ -181,9 +183,10 @@ a test of zenctl and of the doctor (`zenctl/tests/live_zk2.rs`,
 1. In every run, one serves and the other stands by within 5 s of the later
    start plus two graces: A, unless B took over before A's read, A then
    standing by on B's token, as §2.5 step 2 says. S's GET at each instance's
-   instance token answers its descriptor marked standby, unless it took over
-   before that GET was answered: its interface token at S within a round
-   trip of the answer, the two riding two priorities. Each instance's first
+   instance token answers its descriptor marked standby. The one exception
+   is a takeover before that GET was answered, which S tells by its
+   interface token arriving within a round trip of the answer: the token
+   and the answer ride two priorities. Each instance's first
    read follows its own claim (§2.5 step 1). In a run where both read before
    either claim reached the other, both take over; then B, the higher, steps
    down as §7 expects, within two graces of seeing A's token. The test

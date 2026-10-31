@@ -4,6 +4,26 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-31: editorial: round 88's F-348, F-350 and F-351 rewritten, no rule changed (#935)
+
+zk2py round 88 (#609) read 0.6 cold and found that it changed no rule. It
+filed three sentences as hard to read, each rewritten as the finding
+proposed, its keyword, condition, scope and evidence kept.
+- **F-348, §2.6 "How a reader holds `meta.zid`":** "So a reader can read a
+  new instance's first samples so" now says what "so" stood for: it can
+  handle them before its descriptor, and read them `unattributed` or
+  `foreign_stamp`.
+- **F-350, §5's roll-up:** "which is never a window that could not answer
+  it" had no noun to attach to. It now reads: not asked, "nobody put the
+  question of any of them. That is never unobservable, the answer of a
+  window that could not answer it."
+- **F-351, §2.7 "Its start":** the two things that must stand are a list:
+  the presence read made after the watch session's round trip, and the
+  descriptor of every instance that read shows.
+
+**Deliberately not changed:** no rule, section number, label or anchor;
+no fixture.
+
 ## 0.6 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 
 The rules carried their own history, as the core's did before core 0.60
