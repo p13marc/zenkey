@@ -45,11 +45,12 @@
 //! is the service's session's: its descriptor and instance token. The
 //! watch, [`RedundancyStartup::watch`], holds the liveliness subscriber.
 //! The reader, [`RedundancyStartup::reader`], makes every read: zenoh
-//! answers a session's liveliness GET with that session's own tokens
-//! itself, so a read on the claim's session would find its own claim even
-//! when its router refuses the read, and §2.5 step 3's own-claim check
-//! would never see a refusal. The reader may be shared with the
-//! application's other reads, which meet core §8.1 the same way.
+//! can answer a session's liveliness GET with that session's own tokens
+//! itself (observer §3.8; not always, since the router's final reply can
+//! end the GET first, #992), so a read on the claim's session could find
+//! its own claim even when its router refuses the read, and §2.5 step 3's
+//! own-claim check would then miss a refusal. The reader may be shared
+//! with the application's other reads, which meet core §8.1 the same way.
 //!
 //! **The poll** (no watch session): a read of the address on the reader
 //! every [`RedundancyStartup::poll`] (500 ms by default), its holders
@@ -482,7 +483,7 @@ impl Redundancy {
         if startup.reader.zid() == claim {
             return Err(Error::Contract(
                 "redundancy.v1 §2.5 step 1: the reader is the service's own session, which \
-                 answers its own claim itself, even through a router that refuses the read: \
+                 can answer its own claim itself, even through a router that refuses the read: \
                  give a reader of its own (F-204)"
                     .to_owned(),
             ));

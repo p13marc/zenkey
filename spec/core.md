@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.70** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.71** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1641,7 +1641,7 @@ Liveliness tokens carry no payload; everything is in the key.
   - **The read that establishes absence goes on a session with no
     liveliness subscriber**, the watch session and its round trip:
     observer §3.7;
-  - **A read on a token's own session answers that token itself**:
+  - **A read on a token's own session can answer that token itself**:
     observer §3.8;
   - **What a complete read covers**: observer §3.9.
 - **Timeouts are the caller's.** How long a liveliness GET, a descriptor
@@ -3204,8 +3204,12 @@ Appendix B. These are the ones the rules above cite:
   A session in no namespace subscribed to the wire key, the namespace in
   front, hears it (§8.1).
 - A liveliness GET that access control refuses is answered with the final
-  reply alone: no token and no error reply. The session's own tokens are
-  in it all the same, answered by the session itself (§8.1).
+  reply alone: no token and no error reply. The session's own tokens can
+  be in it all the same, answered by the session itself (§8.1). The
+  session sends the GET to its router before it hands itself that answer
+  (`dispatcher/interests.rs`, `Face::interest`; `dispatcher/face.rs`,
+  `send_interest`). A final reply that arrives first ends the GET without
+  them (`api/session.rs`, `WeakSession::send_declare`).
 - A router propagates no liveliness token from one of its peers to
   another: under the `auto` gateway its peers are one region, expected to
   be linked to each other (`hat/peer/token.rs`).
@@ -3292,10 +3296,13 @@ Appendix B. These are the ones the rules above cite:
   session's first read, against 6–10 ms on a quiet session (zk2py).
 - **A read on a token's own session** (observer §3.8): through a router
   whose access control refuses `liveliness_query` on ingress, the
-  holder's own read was complete and held its token, and the same read
-  on another session of the same router was complete and empty, in each
-  of five reads (the reference, `zenkey/tests/presence.rs`,
-  `a_refused_read_on_a_tokens_own_session_still_returns_it`).
+  holder's own read was always complete, holding its token or nothing.
+  The same read on another session of the same router was complete and
+  empty every time (the reference, `zenkey/tests/presence.rs`,
+  `a_refused_read_on_a_tokens_own_session_can_return_it`). Over 40 runs
+  of 20 reads, the holder's read held its token in 799 of 800 on an idle
+  host. It held it in 733 of 800 with two busy loops on the test's two
+  cores.
 - **Peers behind one router** (observer §3.9): two peers behind one
   router, neither listening, one holding a token. The other's read was
   complete and empty in every one of six reads over 3 s, with gossip on

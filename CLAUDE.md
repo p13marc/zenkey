@@ -1433,8 +1433,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   in (else a poll every 500 ms) with its round trip, and a round trip on
   the claim's session; every read goes on `RedundancyStartup::reader`, a
   session holding neither a liveliness subscriber nor the claim (text
-  0.2, F-204: a session answers its own tokens even through a refusing
-  router). A governed interface's publishers, state, operation and
+  0.2, F-204: a session can answer its own tokens even through a refusing
+  router, not always, #992). A governed interface's publishers, state,
+  operation and
   `unavailable` queryables and member tokens are slots of a crate-private
   gate, declared only while it serves; a write while it stands by is
   `Error::Standby`, nothing published, and raw `declare_publisher`/

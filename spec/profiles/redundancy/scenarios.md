@@ -231,8 +231,8 @@ control denies A's principal `liveliness_query` on the query's ingress (core
    claim, and A serves.
 3. Every read A makes is complete and empty, its own claim missing, so A
    stands by and campaigns again at each retry interval, and never serves
-   within the 10 s. The same read on A's claim's own session returns the
-   claim (core §8.1), which is why A reads on its reader (§2.5 step 1). A
+   within the 10 s. The same read on A's claim's own session can return
+   the claim (core §8.1). That is why A reads on its reader (§2.5 step 1). A
    control, the same instance as a client of a router with no access
    control, serves within 3 s.
 

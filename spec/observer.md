@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.12 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.13 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.70 ([`core.md`](core.md)) |
+| **Written against** | core 0.71 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -554,16 +554,17 @@ re-minting and the caller's timeouts stay in core §8.1.
 
 ### 3.8 A read on a token's own session
 
-- **A read on a token's own session answers that token itself.** An
-  implementation note. In zenoh 1.10.1 a session's liveliness GET returns
-  the tokens that session declared from the session itself, whatever its
-  router answers, a router that refuses the read included (core
-  Appendix B). So a read
-  on a token's own session says nothing about the bus for that token. A
-  reader that must see its own token as the bus holds it reads on a
-  session that does not hold it: `redundancy.v1`'s candidate, whose
-  check of its own claim is what tells a refused read from a lone
-  candidate's (its §2.5). `[Sc: profiles/redundancy/scenarios.md §5]`
+- **A read on a token's own session can answer that token itself.** An
+  implementation note. In zenoh 1.10.1 a session's liveliness GET can
+  return the tokens that session declared from the session itself,
+  whatever its router answers. A router that refuses the read is no
+  exception. The router's final reply can also come first and end the
+  read without them (core Appendix B). So a read on a token's own session
+  says nothing about the bus for that token. A reader that must see its
+  own token as the bus holds it reads on a session that does not hold
+  it: `redundancy.v1`'s candidate, whose check of its own claim is what
+  tells a refused read from a lone candidate's (its §2.5).
+  `[Sc: profiles/redundancy/scenarios.md §5]`
 
 ### 3.9 What a complete read covers
 

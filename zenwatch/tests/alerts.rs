@@ -205,7 +205,27 @@ async fn a_raise_fires_once_per_sink_a_refresh_is_nothing_an_escalation_is_news_
     let n = &got[2];
     assert_eq!(n.kind, NoticeKind::Resolved, "firing → ok, said as such");
     assert_eq!((n.state, n.prior), (CondState::Ok, Some(CondState::Firing)));
-    assert!(n.evidence.contains(" resolved — "), "{}", n.evidence);
+    // Its reason is one of two, and both are honest (#995). With the
+    // reader's sight whole when the resolved put arrives, §2.14 step 5
+    // answers "no, resolved" from that document, and the delete after it
+    // is retired. When the sight is not yet whole (a presence read without
+    // the owner's descriptor, a loss), the put and the delete each read as
+    // the reader's own sight, which moves nothing (§2.16). The read that
+    // settles it then answers from the latest sample, the delete: "no,
+    // deleted", which reads as resolved (§2.6, §2.14 step 5). Any other
+    // reason is a failure.
+    let by_document = n.evidence.contains(" resolved — ") && n.evidence.contains("(no, resolved;");
+    let by_delete = n
+        .evidence
+        .contains(" deleted, which reads as resolved (§2.6) — ")
+        && n.evidence.contains("(no, deleted;");
+    assert!(by_document || by_delete, "{}", n.evidence);
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(
+        of_a(&ops.lock().unwrap(), "fleet-alerts").len(),
+        3,
+        "the delete says nothing more"
+    );
 
     // 5. A re-raise fires again.
     alarms
