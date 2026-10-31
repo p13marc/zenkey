@@ -47,8 +47,8 @@ after its seed. The reference answers so:
     not the runtime's consumers. The sub-bullet is rewritten, and 0.67's
     entry points here.
   - **What moves:** after a new epoch on a clock behind, inside a seed, a
-    consumer kept the old value under 0.67 and keeps the new one now. The
-    runtime meets 0.68 unchanged. zk2py's round-90 late joiner, which
+    consumer kept the later time under 0.67, the old epoch's. Now it keeps
+    the value that arrived last. The runtime meets 0.68 unchanged. zk2py's round-90 late joiner, which
     turns to S7 at its GET's final reply, does not, inside a seed.
   - **The tool's half moved the reference.** `Monitor::watch_seeded`
     dropped its merge at the boundary, so live samples after it were

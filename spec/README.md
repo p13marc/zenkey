@@ -22,8 +22,8 @@ section number alone is the core's.
 - **Epoch**: a span of continuity, which an instance id names. An owner
   starts a new one whenever its counters reset or its state's ordering
   restarts ([§1.5](core.md#15-identity)). §1.5 asks for a new session, so
-  that its stamps' id changes too. §4.3 requires one when the owner has no
-  record of its last stamp ([§4.3](core.md#43-clocks-s7)).
+  that its stamps' id changes too. With no record of its last stamp, §4.3
+  requires a fresh zid ([§4.3](core.md#43-clocks-s7)).
 - **Resource**: what an interface provides: a stream, a state, an event or
   an operation ([§2.1](core.md#21-patterns)).
 - **Kind**: which of the four a resource is, and the key token that says
