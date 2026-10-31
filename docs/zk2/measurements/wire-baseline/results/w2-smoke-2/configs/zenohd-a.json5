@@ -1,0 +1,42 @@
+{
+  // #989's router A (RF, rf()'s profile, bare stack), rendered by
+  // render.py from configs/zenohd.json5.in. A copy of zenoh-modem's
+  // configs/zenohd-rf0.json5 (d8c62df), edited for a measurement of today's
+  // zk2 wire:
+  // - the TCP face and the lane socket are this run's;
+  // - NO lane-face access_control and no downsampling: "today" is everything
+  //   zk2's rules make travel (constrained-overhead-review.md §2.2);
+  // - batch_size is the driver's zenoh_batch_size; lease and keep_alive are
+  //   as zenohd-rf0.json5 ships them;
+  // - wait_before_close is at least the lease, as rf0's comment requires.
+  // zk2 clients attach to the TCP face.
+  mode: "peer",
+
+  listen: { endpoints: ["tcp/127.0.0.1:17601"] },
+  // the lane: rel=0, every priority, the fork's so_sndbuf at the floor.
+  connect: { endpoints: ["unixsock-stream//srv/dev/targets/zenkey-989/run/smoke/a/rfa/b/air?rel=0;prio=0-7#so_sndbuf=1"] },
+
+  scouting: {
+    multicast: { enabled: false },
+    gossip: { enabled: false },
+  },
+
+  transport: {
+    unicast: {
+      open_timeout: 10000,
+      accept_timeout: 10000,
+    },
+    link: {
+      tx: {
+        batch_size: 222,
+        lease: 10000,
+        keep_alive: 4,
+        queue: {
+          congestion_control: {
+            block: { wait_before_close: 10000000 },
+          },
+        },
+      },
+    },
+  },
+}

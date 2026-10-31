@@ -1,0 +1,238 @@
+{
+ "run": "w2-rf-bare-3",
+ "medium": "rf",
+ "stack": "bare",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "steady",
+   "seconds": 1860.0,
+   "ab": {
+    "tx_sdus": 2568,
+    "tx_bytes": 300286,
+    "rx_sdus_far": 2439,
+    "rx_bytes_far": 283582,
+    "relay_sdus": 2568,
+    "relay_bytes": 300286,
+    "relay_dropped": 129,
+    "kinds": {
+     "keep-alive": 494,
+     "other": 2074
+    },
+    "kind_bytes": {
+     "keep-alive": 494,
+     "other": 299792
+    },
+    "kind_airtime_s": {
+     "keep-alive": 1.647,
+     "other": 999.307
+    },
+    "other_sizes": {
+     "17": 5,
+     "52": 65,
+     "66": 54,
+     "82": 45,
+     "83": 51,
+     "86": 79,
+     "87": 94,
+     "88": 59,
+     "90": 96,
+     "94": 65,
+     "113": 221,
+     "116": 230,
+     "130": 1,
+     "156": 11,
+     "160": 48,
+     "163": 57,
+     "164": 61,
+     "168": 50,
+     "169": 56,
+     "170": 50,
+     "172": 78,
+     "175": 4,
+     "178": 4,
+     "198": 70,
+     "220": 520
+    },
+    "tx_layers": {},
+    "airtime_s": 1000.953,
+    "links_opened": 0,
+    "keepalives_lost": 18,
+    "per_day": {
+     "sdus": 119288,
+     "bytes": 13948769,
+     "airtime_s": 46495.9,
+     "airtime_pct": 53.815,
+     "keepalives": 22947,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 22947,
+       "bytes": 22947,
+       "airtime_s": 76.5
+      },
+      "other": {
+       "sdus": 96341,
+       "bytes": 13925822,
+       "airtime_s": 46419.4
+      }
+     }
+    }
+   },
+   "ba": {
+    "tx_sdus": 748,
+    "tx_bytes": 1754,
+    "rx_sdus_far": 713,
+    "rx_bytes_far": 1719,
+    "relay_sdus": 748,
+    "relay_bytes": 1754,
+    "relay_dropped": 35,
+    "kinds": {
+     "keep-alive": 741,
+     "other": 7
+    },
+    "kind_bytes": {
+     "keep-alive": 741,
+     "other": 1013
+    },
+    "kind_airtime_s": {
+     "keep-alive": 2.47,
+     "other": 3.377
+    },
+    "other_sizes": {
+     "9": 1,
+     "164": 1,
+     "168": 5
+    },
+    "tx_layers": {},
+    "airtime_s": 5.847,
+    "keepalives_lost": 35,
+    "per_day": {
+     "sdus": 34746,
+     "bytes": 81476,
+     "airtime_s": 271.6,
+     "airtime_pct": 0.314,
+     "keepalives": 34421,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34421,
+       "bytes": 34421,
+       "airtime_s": 114.7
+      },
+      "other": {
+       "sdus": 325,
+       "bytes": 47055,
+       "airtime_s": 156.9
+      }
+     }
+    }
+   },
+   "far_samples": {
+    "state/alarms/0f248ad3321738dc": 4,
+    "state/alarms/48d08ce92f831220": 4,
+    "state/alarms/a0ab92ecd3df0fd3": 4,
+    "state/status": 121,
+    "state/view": 38,
+    "stream/battery": 150,
+    "stream/cpu_load": 144,
+    "stream/errors_total": 118,
+    "stream/humidity": 173,
+    "stream/mem_free": 147,
+    "stream/pressure": 152,
+    "stream/resets_total": 95,
+    "stream/rssi": 143,
+    "stream/rx_frames_total": 140,
+    "stream/snr": 140,
+    "stream/temperature": 177,
+    "stream/tx_frames_total": 146
+   },
+   "elements_per_day": {
+    "ab": {
+     "telemetry": {
+      "bytes": 7864537,
+      "sdus": 62627.0
+     },
+     "config": {
+      "bytes": 5754890,
+      "sdus": 30193.5
+     },
+     "health": {
+      "bytes": 199277,
+      "sdus": 2724.4
+     },
+     "alarms": {
+      "bytes": 102379,
+      "sdus": 557.4
+     },
+     "keep-alive": {
+      "bytes": 22947,
+      "sdus": 22947.1
+     },
+     "desired": {
+      "bytes": 4738,
+      "sdus": 238.3
+     }
+    },
+    "ba": {
+     "desired": {
+      "bytes": 47055,
+      "sdus": 325.2
+     },
+     "keep-alive": {
+      "bytes": 34421,
+      "sdus": 34420.6
+     }
+    }
+   },
+   "decode_errors": {}
+  }
+ ],
+ "link_failed_at_s": 1875.9,
+ "steady_window_s": {
+  "made": 2100.0,
+  "used": 1860.0
+ },
+ "w2": {
+  "daily_counts": {
+   "health": 4,
+   "event": 15,
+   "alarm_raise": 5,
+   "alarm_resolve": 5,
+   "config": 5
+  },
+  "reconnects_per_day": 4,
+  "decoded": true,
+  "not_measured": "the link failed 1875.9 s into the steady window and never came back: the acts, the reconnect and the config changes ran on a link that carried nothing",
+  "act_slots": [],
+  "acts": {},
+  "per_day": {
+   "ab": {
+    "steady": {
+     "sdus": 119288,
+     "bytes": 13948769
+    },
+    "acts": {
+     "sdus": 0,
+     "bytes": 0
+    },
+    "total": {
+     "sdus": 119288,
+     "bytes": 13948769
+    }
+   },
+   "ba": {
+    "steady": {
+     "sdus": 34746,
+     "bytes": 81476
+    },
+    "acts": {
+     "sdus": 0,
+     "bytes": 0
+    },
+    "total": {
+     "sdus": 34746,
+     "bytes": 81476
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,24 @@
+{
+ "medium": "rf",
+ "stack": "bare",
+ "inst": "rf",
+ "batch_size": 222,
+ "ports": {
+  "router_a": 17401,
+  "router_b": 17402,
+  "driver_a": 17410,
+  "driver_b": 17411,
+  "relay_a": 17412,
+  "relay_b": 17413
+ },
+ "run": "/srv/dev/targets/zenkey-989/run/rf",
+ "max_sdu": 220,
+ "rate": 2400,
+ "latency_ms": 150,
+ "jitter_ms": 30,
+ "loss": 0.05,
+ "lease": 10000,
+ "keep_alive": 4,
+ "open": 10000,
+ "timers": "as zenohd-rf0.json5 ships them"
+}

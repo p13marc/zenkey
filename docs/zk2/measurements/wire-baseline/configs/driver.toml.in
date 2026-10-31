@@ -1,0 +1,36 @@
+# Driver @SIDE@ of #989's wire baseline (@MEDIUM_WORDS@, @STACK@ stack).
+# A udp-medium bearer (lab-air) paced to @RATE@ bit/s with a @MAX_SDU@-byte
+# frame; loss and latency come from the relay between the two drivers.
+# Rendered by render.py from configs/driver.toml.in.
+socket_dir = "@RUN@/@side@"
+# The aead layer's nonce counters (--init-layer-state).
+state_dir = "@STATE@/@side@"
+
+[[device]]
+name = "rf@side@"
+# @BATCH_WHY@
+zenoh_batch_size = @BATCH@
+
+[device.medium]
+kind = "udp"
+bind = "127.0.0.1:@P_DRIVER@"
+max_sdu = @MAX_SDU@
+rate_bps = @RATE@
+
+[device.medium.peers]
+@peer@ = "127.0.0.1:@P_RELAY@"
+
+[[device.endpoints]]
+name = "@peer@"
+role = "@ROLE@"
+
+[[device.endpoints.lanes]]
+name = "air"
+reliable = false
+priorities = [0, 7]
+@LAYERS@
+# The management plane on a unix socket of its own, never on the data
+# routers, so none of it crosses the air.
+[management]
+listen = ["unixsock-stream/@RUN@/@side@/mgmt.sock"]
+telemetry_interval_ms = 1000

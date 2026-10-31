@@ -1,0 +1,29 @@
+{
+ "medium": "sf12",
+ "stack": "lean",
+ "inst": "lora12",
+ "batch_size": 210,
+ "ports": {
+  "router_a": 17701,
+  "router_b": 17702,
+  "driver_a": 17710,
+  "driver_b": 17711,
+  "relay_a": 17712,
+  "relay_b": 17713
+ },
+ "run": "/srv/dev/targets/zenkey-989/run/lora12",
+ "max_sdu": 51,
+ "rate": 293,
+ "latency_ms": 10,
+ "jitter_ms": 5,
+ "loss": 0.05,
+ "lease": 540000,
+ "keep_alive": 2,
+ "open": 40000,
+ "interests": 40000,
+ "fragment": {
+  "mtu": 222,
+  "timeout_ms": 13000
+ },
+ "timers": "deploy/README.md's for SF12 (540 s, 2, open and accept 40 s)"
+}
