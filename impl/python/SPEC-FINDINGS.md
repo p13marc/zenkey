@@ -20035,3 +20035,726 @@ the Rust pair, and one with zk2py's, passed, none noting the order.
 - **#935's fifth pass changed no rule** in `redundancy.v1`, `timing.v1`,
   `arbitration.v1` or the core's scenarios. Round 87's answers changed one,
   `desired.v1` 0.10's §2.16, which says what F-336 asked.
+
+## At core 0.66, observer.md 0.8 and spec/RULES.md (#926)
+
+Round 89 read, cold, core 0.66's §0 and §12 whole, `observer.md` 0.8's §0
+whole, `spec/RULES.md` whole and `spec/README.md`'s glossary. It read every
+sentence core 0.66's and `observer.md` 0.8's entries say was made to name
+its role, against its old text, and the rewrites #935's sixth part made of
+round 88's F-347 to F-357: `desired.v1` 0.11's §2.5, `timing.v1` 0.7's §2.6,
+§2.7 and §5, `arbitration.v1` 0.5's §2.8, `redundancy.v1` 0.7's scenarios'
+conventions, §1 and §3, core 0.65's `scenarios/presence.md` §10 and
+`profiles/README.md`. It did so on main f07f2287 (PR #966), and read
+`RULES.md` as a reader would, against the texts, never its generator.
+
+Since round 88 (PR #963, read at 954d6905), `spec/` changed in seven
+commits: e02e44b5 and 093ab8f1 (#935 part 6), then 318ae377, bac434ba,
+cacb52ca, 40a4add7 and 2204377e (#926). zk2py diffed every changed file
+against 954d6905, and core.md and observer.md against e02e44b5, word by
+word. No fixture, schema, scenario step or `examples/zk2/` file changed.
+The commits since the black boxes were built (2026-10-30 08:57) touch only
+`spec/`, `scripts/` and `CLAUDE.md`, so they are main's runtime. Their
+source was never read.
+
+### F-347 to F-357
+
+| | Status | Why |
+|---|---|---|
+| F-347 | **resolved** | `desired.v1` 0.11 §2.5 takes the finding's first fix: "A target MUST seed at its start, at a re-mint that is a restart (§2.16), and again each time its author's instance token appears", citing `[Sc: §1, §5, §12]`. zk2py's `ConfigOwner.remint` seeded already (F-347's reading), and §12's second branch is the evidence. |
+| F-348 | **resolved** | `timing.v1` 0.7 §2.6: "So a reader can handle a new instance's first samples before its descriptor, and read them `unattributed` or `foreign_stamp`." |
+| F-349 | **resolved** | `arbitration.v1` 0.5 §2.8: "each address ends the move one of three ways:", withdrawn, re-admitted or as it was, each with its condition, as the finding's list. |
+| F-350 | **resolved** | `timing.v1` 0.7 §5: "else **not asked**: nobody put the question of any of them. That is never unobservable, the answer of a window that could not answer it." |
+| F-351 | **resolved** | `timing.v1` 0.7 §2.7: "The window's start is the first instant both stand:", then the presence read and the descriptors as a list. |
+| F-352 | **resolved** | `redundancy.v1` 0.7, the scenarios' "A crash": the two ways as a list, the proxy's and the kill's, "§1 and §10 run both" before them. |
+| F-353 | **resolved** | §1's and §3's Expected 1: "The one exception is a takeover before that GET was answered, which S tells by A's interface token arriving within a round trip of the answer: the token and the answer ride two priorities". |
+| F-354 | **resolved** | `presence.md` §10 Expected 6: "It owes a read at once, and makes none. While its watch session is cut off it asks no round trip and makes no read, though its reading session holds its link: a read not made." |
+| F-355 | **resolved** | Step 10: "has no call for it to drop. Its own waits, each given up after 20 ms, stand in for the dropped calls." |
+| F-356 | **resolved** | Step 6: "has run out under the 300 ms interests timeout. How many that is depends on the reader:". |
+| F-357 | **resolved** | `profiles/README.md`: "A stamp's id that is never 0 needed none either. That rule is `desired.v1`'s own, in its §2.4;". |
+
+Each rewrite is the finding's, and keeps its keyword, condition and scope.
+F-347's is the one rule part 6 changed, and zk2py's owner keeps it.
+
+### No rule changed in core 0.66 or observer.md 0.8
+
+zk2py extracted every sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT,
+MAY, REQUIRED or RECOMMENDED from e02e44b5 and f07f2287, by section, and
+diffed the two sets. Its sentence split differs from the changelog's: core
+161 before and after (the changelog counts 152), `observer.md` 44 and 44.
+The pairs that differ are core's nineteen and the observer's three, exactly
+those the entries list. zk2py read each against its old text:
+
+- **Core §1.5**, "It SHOULD" → "The owner SHOULD", and "A counter" → "An
+  owner's counter": "It" was the owner of the MUST above, and only an owner
+  publishes a counter.
+- **§2.4**, "**State and events**" → "**A contract's state and events**":
+  the contract that declares the QoS. It is static now (§12), where before
+  it named no role. Its obligation did not move, but see F-360.
+- **§3.2 R7**, "**Consumer:** a binding MUST NOT require presence": R5's
+  wait and the rest of R7 are the consumer's. **"A consumer's runtime MUST
+  resolve"** for "A runtime": a provider is a binding's, a binding a
+  requirement's, and a requirement is how "data reaches a component" (§3.1),
+  so the runtime is the consumer's. R3's descriptor, the owner's, lists the
+  resolved provider as before.
+- **§3.3**, "The owner's descriptor MUST NOT raise it" (D007's subject),
+  and "An owner's descriptor SHOULD stay within 1 KB".
+- **§4.3**, "The owner SHOULD detect drift" and "the owner MUST stop
+  writing state": the "it" of the owner's SHOULD NOT above.
+- **§4.4**, "**An archive's backend**" for "**Its backend**", the archive's.
+- **§5.1**, "(W102)", and **§7.1**, "(E024)": the lint codes that check
+  them, so both are static, as §12 says.
+- **§5.2**, "The `Encoding` of the owner's reply" and "MUST NOT be sent by
+  an owner": only an owner sends an envelope.
+- **§8.5**, "A deployment's batch", "A deployment SHOULD deny `@stream`
+  keys" and "a deployment MUST grant": the face is the deployment's.
+- **§11.3**, "For a deployment under `allow`": the section's title said so.
+  The rule still holds two ways out, the contract's `fanout` or `deny`.
+- **§12's table**, "An owner's descriptor MUST fit one fragment".
+- **Observer §3.1**, "Every liveliness subscriber the caller or tool holds
+  on that session": the item before names the caller or tool whose session
+  it is. **§3.7**, "The subscribers of a reader's watch session": the
+  reader's own (but see F-376). **§6.1**, "A tool's grace period".
+
+Each keeps its keyword, its condition and its scope, and binds the role it
+bound. No rule moved. §0's implementation role now names the static rules as
+§12 does, wider than 0.65's "(§1, §9)". The rules it adds, on what a
+contract states and those naming a lint code, were the lints' already
+(§9.2), so no implementation's obligation moved, but for §2.4's two
+SHOULDs, which have no lint (F-360). Full is the union of the classes, so a
+full implementation's obligations did not move either. zk2py's readings pin
+each new form, and each old form's absence.
+
+### The classes zk2py claims
+
+zk2py claims the **owner**, **consumer**, **caller** and **observer**
+classes at the full level (not the constrained modifier), and not the
+deployment class: zk2py configures no deployment, and its generators are
+tools (core §0, §11.1). Its profiles' classes are claimed by role in
+`README.md`. `zk2py/classes.py` walks every `RULES.md` entry of the four
+classes and of the static rules, each with what shows it, and a reading
+keeps the walk in step with `RULES.md`.
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 56 | 45 | 3 | 8 |
+| consumer | 12 | 7 | 2 | 3 |
+| caller | 11 | 11 | 0 | 0 |
+| observer | 46 | 44 | 2 | 0 |
+| static, in every class | 33 | 31 | 0 | 2 |
+
+- **Not met, owner:** §1.4's canonical form before a slug (SHOULD), §1.5's
+  new session at a re-mint (SHOULD, kept on purpose for `telemetry.v1`
+  scenarios §2's "the process unchanged"), §3.3's descriptor within 1 KB
+  (SHOULD, unchecked). Each is a gap of zk2py's.
+- **Not met, consumer:** S7's two consumer MUSTs. zk2py's late joiner
+  orders by core §4.2's merge, which disagrees with them (F-368).
+- **Not met, observer:** §7.3's two decoding MUSTs. zk2py's echo tool
+  shows a sample's size and encoding, never a decoded value or its
+  declared type (types.md §2 is not run). A gap, and F-370.
+- **Not applicable:** an archive's five (zk2py runs none), the constrained
+  level's two, §7.4's generated SHM publisher, S5 and S6 (no last-known
+  read), §11.1's advanced subscriber (none in zk2py's consumers), and §9.8's
+  "a contract's CI" and "a human" (zk2py publishes no revision).
+- **Met since this round:** the walk found five owner rules zk2py's owner
+  did not keep, and it keeps them now (below): §2.4's QoS, every field and
+  an event's; §3.3's cardinality never raised; O6's one summary; §5.2's
+  detail; §5.1's "Beside replicas". And observer §7.4's check at the echo
+  tool's start.
+- **Beyond the index:** `classes.BEYOND` walks ten rules of the texts that
+  bind a claimed class and that `RULES.md` does not list under it (F-361 to
+  F-363). zk2py meets nine; the tenth binds a bundle holder, which no zk2py
+  tool is.
+
+### F-358 · ambiguous · core §12, "Full": a level, or every class claimed
+
+> "**Full** is every class, their union: it holds every rule of both texts,
+> and no rule that a class does not. A rule binds only the role it names.
+> So at the full level an implementation meets the rules of the roles it
+> plays."
+>
+> "**Constrained** is a modifier on a class. A class claimed at the
+> constrained level holds every rule of the class, with these relaxations
+> and additions:"
+
+- **Hard:** the first sentence defines full as a set of rules, "every
+  class, their union". The third speaks of "the full level", which an
+  implementation is at, and which binds it to the roles it plays. The
+  constrained level is a modifier on one class, and nothing names a class
+  claimed without it. "And no rule that a class does not" leaves out its
+  verb.
+- **The readings:**
+  - **(a) Full is a level,** the one without the modifier. An
+    implementation claims its roles' classes, each full or constrained. A
+    service that plays the owner role alone is a full owner.
+  - **(b) Full is a claim of every class,** all five. Only an
+    implementation that plays every role, the deployment's included, can
+    claim it, and an owner-only service is "at the owner class", never full.
+  - The third sentence fits (a), and the first fits (b). The changelog says
+    "Full is every class", then "full holds what the full level held".
+- **Took (a).** zk2py states its claim as four classes at the full level.
+- **Fix:** "**Full** is the level of a class claimed without the
+  constrained modifier. The union of the five classes is every rule of both
+  texts. A rule binds only the role it names, so an implementation at the
+  full level meets the rules of the classes it claims." Or, for (b), name
+  the unmodified level of one class.
+- **Changes:** how a claim is worded, zk2py's README among them. No verdict.
+
+### F-359 · gap · core §12 and `RULES.md`: where a static section's rule that names a role goes
+
+> §12: "The static rules are §1's and §9's, and those on what a contract
+> states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule elsewhere
+> that names the lint code checking it (§9.2) is static too."
+>
+> `RULES.md`'s header: "A class holds its role's rules and the static rules,
+> listed here under implementation. Those are §1's, §9's, the contract rules
+> of the sections §12 lists, and any rule naming its lint code."
+
+- **The gap.** By §12 every rule of §1 is static. `RULES.md` lists §1.4's
+  "SHOULD be canonicalized by the owner" and §1.5's three owner rules
+  ("An owner MUST mint a new instance id …", "The owner SHOULD do so in a
+  new session", "An owner's counter … SHOULD carry its epoch") under owner,
+  and not under implementation. The changelog states the rule the index
+  follows, "A rule there that names a role is that role's", and §12 does
+  not state it.
+- **The other way.** `RULES.md` lists §3.3's "a checker MUST report exactly
+  the `D…` codes" under implementation. §3.3 is not among §12's sections,
+  and a D code is not one of §9.2's lint codes. So by §12 it is not static,
+  and by §0 "a checker" names no role.
+- **Took:** a rule of a static section that names a role is that role's, as
+  the changelog says, and §3.3's checker rule is static, as the index
+  lists it. Neither changes what zk2py does: the five rules bind what they
+  say either way.
+- **Fix:** §12, after its list: "A rule of these sections that names a role
+  is that role's. §3.3's descriptor checker is static too." The index's
+  header then says the same.
+- **Changes:** five rules' class. No obligation moves: an owner rule binds
+  only an owner, wherever it is listed.
+
+### F-360 · gap · static rules that bind no role of §0, and a contract rule with no lint
+
+> §0: "**implementation**: any software claiming conformance. The static
+> rules bind it, whichever of the roles above it plays: §1's, §9's, and
+> those §12 lists on what a contract states."
+>
+> §9.8: "**Breaking:** a contract's CI MUST NOT publish the revision." /
+> "**Review:** a human MUST accept it before publication."
+>
+> §2.4: "**A contract's state and events** SHOULD keep `reliable` and
+> `block`." / "A contract's author SHOULD set it only on measurement".
+
+- **The gap.** These four are static by their section, so "every
+  implementation" meets them, in every class. But each binds someone §0
+  does not name: a contract's CI, a human, a contract's author.
+  Implementation software cannot meet "a human MUST accept it".
+- **Meeting a contract rule.** A rule on what a contract states that has a
+  lint code is met by the lint (§9.2). §2.4's two SHOULDs have none, and
+  §12 does not say how an implementation meets them: by the contracts it
+  writes, or by warning on a contract that does not keep them.
+- **Took:** §9.8's two bind whoever publishes a revision, which zk2py does
+  not (not applicable). §2.4's two are met by the contracts an
+  implementation writes, and every contract zk2py wrote keeps them.
+- **Fix:** §12: "A static rule on what a contract states binds an
+  implementation through the contracts it writes and the lints it runs.
+  §9.8's publication rules bind a contract's CI, a deployment's process."
+- **Changes:** a class's walk, two rules not applicable or met. No
+  verdict.
+
+### F-361 · index · rules listed under fewer roles than they bind
+
+- **Core §4.2's late joiner.** "A **consumer or a tool** that wants an
+  owner's current state and every change after it, a **late joiner**, seeds
+  from S4's GET and follows a subscription." Then: "A late joiner MUST
+  declare its subscription first, then make S4's GET" and "A late joiner
+  MUST merge …". `RULES.md` lists both under consumer alone, so the
+  observer class misses two MUSTs that bind every seeding tool.
+- **Core §8.4.** "Every holder MUST declare a `complete` queryable on it.
+  An owner holds the bundles of the interfaces it implements (§8.2), and
+  any other participant MAY hold bundles too". Listed under owner alone,
+  though a tool or a gateway holder (§12's constrained table) may hold.
+  "Holder" is no role of §0.
+- **Core §8.1.** "Every instance MUST hold one, including pure consumers".
+  Listed under owner and consumer. A service that only calls, or a tool
+  that is a service, is an instance too, so the caller and observer classes
+  miss it.
+- **The rule ids' table.** S7 "binds" owner, the role of §4.2's row. The
+  consumer section lists §4.3's two consumer rules as S7. A reader of the
+  table filtering by role misses them.
+- **Fix:** list each under every role its subject names: the late joiner's
+  under consumer and observer, the holder's as static or under every role,
+  the instance's under every role a service plays. The ids table gives S7
+  "owner, consumer".
+- **Changes:** the index, and what a class's reader of it finds. zk2py
+  walks the four in `classes.BEYOND`, and meets those that bind it.
+
+### F-362 · index · the observer class's rules stated without a keyword
+
+> Core §0: "Conformance is claimed by role (§12), and `RULES.md` lists the
+> rules of each role's class."
+>
+> §12: "`RULES.md` lists each class's rules, generated from both texts."
+>
+> `RULES.md`: "It lists every sentence of the two texts that states a rule
+> with MUST, MUST NOT, SHOULD or SHOULD NOT."
+
+- **The gap.** `observer.md` states most of the observer class's
+  normative text without a capital keyword, each with its evidence:
+  - §1's judgement shape: "Every verdict a tool presents fits one shape";
+    "The two Unestablished kinds stay apart in every medium"; "Not asked is
+    not answered no"; "An empty scope is Unobservable … A monitor pointed at
+    the wrong namespace must not be green", in lower case;
+  - §2: "Unattributable silence is Unestablished, never Established(no)";
+  - §5.2's watch after a window, which the 0.7 changelog calls "§5.2's
+    rule, which holds no keyword";
+  - §7.1's "The data-flow graph is read from descriptors, never inferred",
+    and §8's three.
+
+  `RULES.md` lists none of them: §1, §2, §5 and §8 have no entry at all. So
+  §0's and §12's "lists the rules of each role's class" says more than the
+  index does, and a tool's minimum path by the index skips its judgement
+  shape.
+- **Fix:** §0 and §12: "`RULES.md` lists the rules stated with MUST, MUST
+  NOT, SHOULD or SHOULD NOT. A class also holds the rules its texts state
+  without one, such as `observer.md` §1, §2, §5 and §8." Or state those
+  rules with their keyword.
+- **Changes:** the index's coverage of the observer class. No verdict:
+  zk2py meets them (`judgement`, `budget`, `echo_tool`, `live`).
+
+### F-363 · index · a RECOMMENDED, and a restriction stated with MAY
+
+> Core §11.2: "**Under `default_permission: deny`**, a grant compiles to
+> allow rules. This is RECOMMENDED where the router can afford the
+> enumeration."
+>
+> Core §2.2: "**`{name...}`** is a **rest** parameter: one or more chunks,
+> each slugged. It MAY appear only as the last segment".
+
+- **RECOMMENDED** is RFC 2119's synonym of SHOULD. Core §0 declares only
+  "MUST, MUST NOT, SHOULD, SHOULD NOT and MAY", and `RULES.md` lists no
+  RECOMMENDED, so a deployment's one SHOULD-like rule of §11.2 is in no
+  class's list.
+- **"MAY appear only as the last segment"** forbids it anywhere else (E012
+  checks it). `RULES.md` says "MAY grants a permission, and is not listed",
+  and so leaves out a static restriction.
+- **Fix:** "A deployment SHOULD run `deny` where the router can afford the
+  enumeration"; "A rest parameter MUST NOT appear but as the last segment".
+- **Changes:** the index; wording only.
+
+### F-364 · index · evidence a list's closing tag gives, read as "none cited"
+
+> `RULES.md`: "A rule's evidence is what the text cites beside it. Where it
+> cites none, the entry says "none cited"."
+
+- **The gap.** Where a list of rules ends with one tag that cites all of
+  them, the index gives the tag to the last rule alone, or to the parent,
+  and "none cited" to the others. Twenty entries say "none cited" where the
+  text cites:
+  - **nine MUSTs:** §4.4's backend (the section closes with `[Sc: state.md
+    §4–§6, §9]`, and §9 is "An archive's backend refuses an outdated put")
+    and its unconfirmed key; §5.1's "Beside replicas" (`[Sc: operations.md
+    §3, §8]`, given to the SHOULD after it); §6's owner MUST NOT (`[Sc:
+    security.md §1]`, given to the deployment's beside it); §9.4's file
+    part (`[F: contracts/e032-ref-dangling, e032-ref-outside, …]`); and
+    observer §3.3's two, §3.5's and §3.6's;
+  - **eleven SHOULDs:** core §1.5's new session; observer §3.3's interests
+    timeout; §3.6's read again; and eight of §3.7's, under `[Sc: presence.md
+    §9]` and the two `[Sc: presence.md §10]` that close their lists.
+- **The other way.** §1.5's counter SHOULD shows `[Sc: presence.md §3]`,
+  the instance id's evidence, which tests re-minting, never a counter
+  across a face. §10's "MUST list the profile in `uses`" shows seven tags,
+  `e002-two-majors` among them.
+- **A rule id.** §9.4's "MUST name a listed file that is loaded: one E024
+  did not refuse" is listed as **E024**. Its item opens "Each failure below
+  is E032": E024 is what it is not refused by.
+- **Fix:** a closing tag cites every rule of the list it closes; a rule's
+  id is the code that checks it.
+- **Changes:** the index's evidence column; no verdict.
+
+### F-365 · gap · thirteen MUSTs cite no evidence
+
+> Core §0: "**Evidence.** Each MUST cites what checks it". `spec/README.md`:
+> "Every MUST cites a fixture or a scenario."
+
+`RULES.md` makes it visible: with F-364's nine set aside, thirteen MUSTs
+cite nothing, in the text or at the close of their list:
+- §4.3's catch-up, "An owner MUST NOT stamp at or below the last timestamp
+  it issued", and "With neither source, the owner MUST start a new epoch",
+  and the consumer rule's two MUSTs (state.md §7 is "Clocks (S7)");
+- §5.2's three owner MUSTs (operations.md §3 is "Replies and errors (O3,
+  §5.2)");
+- §11.2's two generator MUSTs (security.md §2 runs both, by removing them);
+- §11.3's two deployment MUSTs;
+- §9.8's "Breaking" and "Review" (no fixture can check either; F-360).
+
+- **Fix:** cite the scenario that checks each, `[F: pending]` where none
+  does, or state §9.8's two as process rather than MUSTs.
+- **Changes:** evidence; no verdict. Pre-existing, made visible by the
+  index.
+
+### F-366 · index · entries cut from the noun their pronoun stands for
+
+> `RULES.md`: "A long sentence is shortened, never reworded, and its link
+> leads to the rest."
+
+- **Hard:** an entry whose subject or object is a pronoun cut from its
+  antecedent names no subject or no object:
+  - "Every instance MUST hold one" (an instance token);
+  - "An owner MUST publish with it" (its contract's QoS);
+  - "The owner's descriptor MUST NOT raise it" (a template's bound);
+  - "**Size.** … it MUST fit one fragment" (an owner's descriptor);
+  - "It MUST answer a selector over them" (the owner's state queryables);
+  - "A deployment's access control MUST NOT grant it" (writing under
+    another's prefix);
+  - "These SHOULD be the interfaces every service … implements" (the
+    tokenless set's);
+  - "Every holder MUST declare a `complete` queryable on it" (the contract
+    key);
+  - "It MUST refuse:" (a tool decoding an envelope);
+  - "Both MUST be implemented exactly as follows." (the slug and its
+    decoder).
+- **Lists cut.** "a bundle as follows:", "in this order,", "MUST verify:",
+  "check the following in order", "It MUST refuse:" and "an implementation
+  MUST NOT break either:" each end where the rule's content starts.
+- **A stray space.** "two templates under the same kind token MUST NOT have
+  the same shape ." keeps the space its removed tag left.
+- **Fix:** where a sentence opens with a pronoun, show its antecedent in
+  brackets ("Every instance MUST hold one [an instance token]"), as the
+  label is shown, and end a list's entry with "(n items)".
+- **Changes:** wording only.
+
+### F-367 · wording · core 0.66's changelog: "eighteen", and 26 readers
+
+> "**Editorial: eighteen rules that name their role, no rule changed.**"
+> (then nineteen items, and "the other 19 are the nineteen above")
+>
+> "46 the tool role or a reader (26 of them a reader's)"
+
+The entry's eighteen items change nineteen sentences, §4.3's item holding
+two rules, and its method says "the other 19 are the nineteen above". Its
+commit, 318ae377, says "twelve". `RULES.md` marks 24 entries *reader*, and
+its table says "46, 24 of them a reader's".
+- **Fix:** "nineteen rules"; "24 of them a reader's".
+- **Changes:** wording only.
+
+### F-368 · conflict · S7's consumer rule and §4.2's merge disagree after a new epoch on a clock behind
+
+> §4.3: "**Consumer rule.** A consumer MUST order an owner's values by time
+> within one timestamp id. It MUST accept the first value under a new id,
+> and restart its ordering there."
+>
+> §4.2: "**Stamps compare as `Latest` compares replies** (§4.1) … First by
+> time … On equal times, by id" … "Within one timestamp id, that is by time
+> (§4.3). Two ids for one key within one seed mean the owner started a new
+> epoch inside the seed's window: a value of the old epoch that arrives
+> after one of the new is §4.3's residual risk."
+
+- **The conflict.** §4.3's new epoch is the case of an owner with no
+  record of its last stamp, so its new session's clock may be behind the
+  old one's. Its first value then has a lower time under a new id. S7
+  accepts it. §4.2's merge keeps the old epoch's later stamp, whichever
+  arrived last. §4.2's sentence on two ids covers an old value arriving
+  after a new one, not a new one with a lower time.
+- **Found by the walk:** zk2py's late joiner (`seed.LateJoiner`) merges as
+  §4.2 says, so it does not meet S7's two consumer MUSTs.
+- **Fix:** §4.2: "Across two ids, a late joiner keeps S7's order: the
+  first value under a new id replaces the old id's." Or S7: "A consumer
+  that seeds merges as §4.2 says."
+- **Changes:** which value a consumer holds after a new epoch on a clock
+  behind, so a verdict; an implementation.
+
+### F-369 · gap · core §2.4: a publisher's reliability is not stable QoS in zenoh 1.10.1
+
+> §2.4: "An owner MUST publish with it. The fields map one-to-one onto
+> Zenoh's stable QoS."
+>
+> §0: "A participant uses only stable Zenoh API in the core; unstable
+> features are opt-in and never change a key's shape."
+
+- **The gap.** zenoh-python 1.10.1 marks `Reliability` unstable
+  (`@_unstable`, the binding's marker of zenoh's unstable API). A publisher
+  declared without it is reliable, measured: `declare_publisher(key)` reads
+  back `Reliability.RELIABLE`, congestion `DROP`, priority `DATA`. And
+  `Session.put` takes no reliability. So an owner on stable API alone
+  publishes every resource reliable, and breaks §2.4's MUST for every
+  `best_effort` resource, a plain stream's default among them.
+  `types.md` §3 checks priority, congestion and express, never
+  reliability.
+- **Found by the walk:** zk2py's owner set congestion, priority and
+  express, never reliability, and its events went out on `Session.put`
+  with zenoh's defaults, congestion `drop` where the contract says
+  `block`.
+- **Took:** reliability is the one opt-in §0 allows here. zk2py's owner now
+  sets it on every publisher (`owner.qos_of`), and puts each event on a
+  publisher of its own declared with all four fields.
+- **Fix:** §2.4: "Three fields map onto zenoh's stable QoS. `reliability`
+  is unstable API in zenoh 1.10.1: an owner sets it through that opt-in
+  (§0), and one that cannot publishes reliable, which a reader can only
+  gain from." And Appendix B states the default.
+- **Changes:** an implementation. A best-effort stream published reliable
+  loses less, so no verdict a tool reaches from declared QoS moves.
+
+### F-370 · ambiguous · observer §7.3: which tool must decode
+
+> "**What a generic tool decodes** (core §7.1). A generic tool MUST decode
+> `protobuf` (proto2 and proto3) and `jsonschema` …"
+>
+> Core §0: "**tool**: a generic program that reads the bus or contracts
+> without application source".
+
+- **The readings:**
+  - **(a)** every tool, since §0 makes every tool generic: a presence
+    monitor, a timing tool or a grant generator must hold both decoders;
+  - **(b)** a tool that shows or judges a payload: "Decoding and rendering"
+    is the section's title.
+- Under class claims the difference is the observer class's cost: (a)
+  asks a protobuf decoder of a tool that never reads a payload.
+- **Took (b).** zk2py's echo tool shows samples, and does not meet §7.3
+  under either reading: it shows a sample's size and encoding, never its
+  value or its declared type. A gap, recorded as not met.
+- **Fix:** "A tool that shows or judges a payload MUST decode …".
+- **Changes:** what the observer class requires; no verdict.
+
+### F-371 · glossary · "Complete read" says less than observer §3
+
+> "**Complete read**: a presence read that ended at its routers' final
+> reply, with no error reply. Only a complete read shows absence"
+
+- **The gap.** Observer §3 makes a read with that ending not complete in
+  four more cases:
+  - §3.3: "a liveliness GET its routers have not finished at
+    `routing/interests/timeout` … with the final reply alone and no error
+    reply" is possibly incomplete;
+  - §3.5: a read through a session cut off is answered "at once with the
+    final reply alone, no token and no error reply … Such a read is **not
+    complete, whatever its replies say**";
+  - §3.5: a read cut off while it runs;
+  - §3.7: "A read made while no round trip stands … is possibly
+    incomplete", and a read beside a liveliness subscriber.
+- A newcomer who takes the glossary's definition concludes absence from a
+  cut-off read, which §3.5 forbids.
+- **Fix:** "a presence read that ended at its routers' final reply, with no
+  error reply, before its session's interests timeout, through a session
+  that held a link throughout, on a session that never held a liveliness
+  subscriber, and after a round trip that stands (observer §3.3–§3.7)".
+- **Changes:** a verdict, for a reader built from the glossary.
+
+### F-372 · glossary · "Presence" says more: descriptors are not presence
+
+> "**Presence**: the tokens and descriptors that say which instances run,
+> and what they implement (§8)"
+
+- **The gap.** The texts read presence from tokens alone. A presence read
+  is a liveliness GET (observer §3). Observer §3.7 puts a descriptor's GET
+  apart: "Ordinary GETs (S4's, a descriptor's, a bundle's) are not
+  affected". §8's title, "Presence, descriptors, contract retrieval", lists
+  them apart too. A newcomer would apply §3's completeness to a descriptor
+  GET, or read an instance present from its descriptor alone.
+- **Fix:** "**Presence**: the liveliness tokens that say which instances
+  run, and what they expose (§8.1). An instance's descriptor says what it
+  implements (§3.3)."
+- **Changes:** wording; a reader built from the glossary.
+
+### F-373 · glossary · eleven definitions that say less or more than their section
+
+- **Late joiner:** "a consumer that subscribes …". §4.2: "A consumer **or a
+  tool**". (F-361's index entry has the same cut.)
+- **Re-mint:** "an owner taking a new instance id while running". §2.7:
+  "**Across a restart.** A restart is a re-mint (§1.5)". `desired.v1` §2.16
+  needs both senses apart.
+- **Epoch:** "An owner starts a new one whenever its counters reset". §1.5:
+  "whenever its counters reset or its state's ordering restarts". §4.3's
+  new epoch is a fresh zid too, the stamps' id, which is how a consumer
+  sees it (S7).
+- **Member:** "which is one key for a stream or a state". §2.7 adds "for an
+  event, its key without the ULID chunk".
+- **Bundle:** "a canonical contract with its schema artifacts". §9.6: "and
+  the extra documents it references".
+- **Revision:** "one published contract within its major". §9.8's candidate
+  is a revision that "a contract's CI MUST NOT publish" when breaking.
+- **Round trip:** "a GET on the watch session". Observer §3.7: "a
+  liveliness GET there whose answer it discards". A plain GET would not
+  follow the subscribers' declarations.
+- **Stamp:** "from Zenoh's HLC". §4.3: the greater of
+  `Session::new_timestamp()` and the last plus one tick, and at the
+  constrained level a wall clock with a per-session bump.
+- **Face:** "A constrained one carries little". §8.5: "A deployment marks a
+  face constrained, and gives its maximum outage".
+- **Class:** "the rules of one role, with the static rules". §12: a
+  profile is "one class each" too.
+- **Instance:** "named by a random 64-bit id (§1.5)". §1.5 says no such
+  thing; §1.2 does ("64 random bits").
+
+- **Fix:** each as its section says.
+- **Changes:** wording only.
+
+### F-374 · glossary and core §1.3 · an ambient selector: no verbatim chunk, or none at position 5
+
+> Glossary: "**Ambient selector**: a selector with no verbatim chunk, such
+> as `zk2/**`"
+>
+> §1.3: "**The guard.** An ambient selector (`zk2/**`, `zk2/<system>/**`, or
+> any selector without a verbatim chunk at position 5) never delivers an
+> `@stream` or `@state` sample, and a GET on it never reaches an `@op`
+> queryable or a control key."
+
+- **The disagreement.** By §1.3's parenthesis, `zk2/*/*/@zk/**` and
+  `zk2/@zk/contract/**` are ambient: their verbatim chunk is at position 4
+  or 2, not 5. A GET on either reaches control keys, so §1.3's guard is
+  false of them. The glossary's definition is the one the guard holds of.
+- **Took** the glossary's. zk2py decides no kind by position:
+  `live.blind_spots` reads what a selector reaches by zenoh's own
+  intersection, so `zk2/*/*/@zk/**` reaches `@zk`.
+- **Fix:** §1.3: "any selector without a verbatim chunk".
+- **Changes:** wording; an implementation reading §1.3's letter.
+
+### F-375 · glossary · terms the index and the texts lean on, missing
+
+`RULES.md` marks 24 entries *reader* and names "reader" 62 times, and the
+glossary has no **reader** (observer §0). Also missing, by how often the
+index's sentences use them:
+- **static rule** (§0, §12), the index's whole implementation section;
+- **expose** and **active** (§2.3, §5.1, §8.1), which decide a token;
+- **possibly incomplete** and **interests timeout** (observer §3.3);
+- **move**, a watch session's transport closing or opening (§3.7);
+- **seed** (§4.2, observer §4.1);
+- **history**, in two senses: §2.5's advanced publication, and §9.7's
+  history root;
+- **envelope** (§5.2), **holder** (§8.4), **address** (`<system>/<service>`,
+  R1, observer §3.6);
+- **verbatim chunk** and **plain chunk** (§1.2), which **Explicit** and
+  **Ambient selector** lean on;
+- the judgement shape's **Established**, **NotAsked** and **Unobservable**
+  (observer §1).
+
+- **Changes:** wording only.
+
+### F-376 · hard to read · observer §3.7 (0.8): "when it seeds"
+
+> "**The subscribers of a reader's watch session SHOULD have no history**
+> when it seeds by a read on its other session."
+
+- **Hard:** a pronoun with two antecedents. "It" first reads as the
+  sentence's nearest noun, the watch session, and "its other session" then
+  names a session's other session. It is the reader. 0.7's "when their
+  reader seeds" named it; 0.8's rewrite, made so the index reads the role
+  from "a reader's", lost it.
+- **Took:** the reader seeds by a read on its other session.
+- **Rewrite:** "**The subscribers of a reader's watch session SHOULD have
+  no history** when the reader seeds by a read on its other session."
+- **Changes:** wording only.
+
+### F-377 · hard to read · core §12, Profiles: "as this text's do (its §0)"
+
+> "A profile's rules name the roles they bind, as this text's do (its §0).
+> So its class holds its rules for each role the implementation plays."
+
+- **Hard:** "its §0" has two antecedents, a profile and "this text", and
+  each has a §0. Then "its class holds its rules" is two more "its", one a
+  profile's class and one its rules. The changelog says the profile's §0
+  is meant: "A profile's rules name their roles by core §0's words already,
+  as the template's §0 asks".
+- **Took:** a profile's §0 takes its roles from core §0, so its rules name
+  them; a profile's class holds the profile's rules for each role played.
+- **Rewrite:** "A profile's rules name the roles they bind, in core §0's
+  words, as each profile's §0 says. So a profile's class holds the
+  profile's rules for each role the implementation plays."
+- **Changes:** wording only.
+
+### F-378 · gap · a stream-only owner's minimum path holds the whole of §9
+
+> `RULES.md`: "**A stream-only owner's minimum path** is this index filtered
+> to two roles: owner and implementation. A service that only publishes a
+> stream needs no other role's rules."
+>
+> §12: "A service that only publishes a stream plays the owner role alone.
+> Its class is the owner's rules and the static rules".
+
+- **The gap.** The static rules include §9.2's "An implementation MUST
+  report, for each fixture, exactly the codes `contracts/expect.json`
+  lists", §9.5's canonical bytes, §9.6's twelve verification steps, §9.7's
+  history check and §9.8's classifier of every `compat/` case. A service
+  that publishes one stream from a contract it did not write runs none of
+  them. The 0.66 changelog opens with that team, which "read that it must
+  meet every rule". It still must meet every static rule.
+- **The readings:**
+  - **(a)** every implementation implements all of §9, as the text says;
+  - **(b)** a static rule binds an implementation where it does what the
+    rule governs: one that builds a bundle builds it so, one that lints
+    reports those codes.
+- **Took (a)** for zk2py, which meets every static rule.
+- **Fix:** for (b), §12: "A static rule binds an implementation where it
+  does what the rule governs: parses a key, slugs a value, lints, builds or
+  verifies a bundle, checks a history, classifies a revision."
+- **Changes:** what a class claim costs; no verdict.
+
+### The texts in zk2py
+
+- **`zk2py/classes.py`** holds the claim: four classes at the full level,
+  the profiles by role, the walk of `RULES.md` (158 rows: 56 owner, 12
+  consumer, 11 caller, 46 observer and 33 static, every entry but the
+  deployment's 14), and `BEYOND`, ten rules the index misses. `python -m
+  zk2py.classes` prints the walk as a table, and exits 1 when it is out of
+  step with `RULES.md`.
+- **The owner rules the walk found unkept**, kept now in `owner.py`:
+  - **§2.4:** `qos_of` gives every publisher its resource's four fields,
+    reliability through zenoh's unstable setting (F-369); an event goes on
+    a publisher of its own with the four, where it went on `Session.put`
+    with zenoh's defaults;
+  - **§3.3:** a stated cardinality above the contract's, below 1, or of no
+    templated resource is refused at §8.2's step 2, nothing declared;
+  - **O6:** `OpCall.summary` refuses a second summary, a value after one,
+    and a summary for an operation that declares none;
+  - **§5.2:** `OpCall.refuse` refuses a detail for an operation with no
+    `error` type, nothing sent;
+  - **§5.1, "Beside replicas":** an instance whose exposed resources of an
+    interface are all replicated operations declares no `unavailable`
+    queryable on an exclusive one (`replica_only`).
+- **Observer §7.4:** the echo tool says what its `RLIMIT_MEMLOCK` admits at
+  its start, as the timing and arbitration tools did.
+- **`interop/classes/zk2py_replica.v1.toml`**, a contract of three
+  operations for the readings: lint-clean, its fingerprint the reference
+  CLI's (`sha256:3ab773bd…`).
+- **`readings`: 706, up from 686.** Twenty, in `_round89_readings`: each
+  text at its version; F-347 to F-357's answers as they read; the 22
+  sentences that name their role, the old forms gone; §12's and observer
+  §0's new text; `RULES.md`'s table against its entries (56, 12, 11, 14,
+  33, 46, 24 readers, 167 once, 71 ids); the walk in step, and its counts;
+  the glossary's 36 terms, each linked; and seven of the owner's kept
+  rules, on a session that records what is declared.
+
+**`just py-conformance`: 3663 of 3663.**
+
+**Live, round 89**, `presence_scenarios` against the black boxes, by
+(owner, reader): zk2py, zk2py **95 of 95**; Rust, zk2py **89 of 89**; zk2py,
+zenctl **33 of 33**; Rust, zenctl **32 of 32**. After the owner's changes,
+zk2py, zk2py and zk2py, zenctl again: 95 of 95 and 33 of 33. A step a
+tool's command line cannot show is NOT RUN, as before (1, 2, 6 and 7).
+
+**What did not run:** `types.md` §1 to §3 (no renderer, F-370), so §2.4's
+reliability and §7.2's encodings rest on readings, not on a scenario;
+`desired_scenarios` (the brief asked one of two runners); the deployment
+class's walk, which zk2py does not claim.
+
+### Counts at core 0.66, observer.md 0.8 and spec/RULES.md
+
+378 entries.
+- **Open: F-358 to F-378,** twenty-one. None is a blocker.
+  - **Ambiguous, two:** F-358 (full, a level or every class) and F-370
+    (which tool decodes).
+  - **Hard to read, two:** F-376 (0.8's "when it seeds") and F-377 (§12's
+    "its §0").
+  - **The index, six:** F-361 (roles left out), F-362 (rules without a
+    keyword), F-363 (RECOMMENDED, MAY only), F-364 (evidence and an id),
+    F-366 (pronouns cut), and F-359's half.
+  - **The glossary, five:** F-371 (complete read, a verdict), F-372
+    (presence), F-373 (eleven definitions), F-374 (ambient selector, with
+    §1.3), F-375 (missing terms).
+  - **The texts, six:** F-359 and F-360 (the static rules), F-365
+    (thirteen MUSTs uncited), F-367 (the changelog's counts), F-368 (S7
+    against §4.2, a verdict), F-369 (reliability is unstable), F-378 (the
+    minimum path).
+- **Resolved: F-347 to F-357,** eleven.
+- **No rule changed** in core 0.66 or `observer.md` 0.8. Every one of the
+  22 sentences keeps its keyword, condition and scope, and binds the role it
+  bound. Full is the union, so a full implementation's obligations did not
+  move.

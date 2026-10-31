@@ -48,6 +48,10 @@ while running, make-before-break: the new descriptor's queryable and first
 put, then its tokens, and only then the old ones undeclared. Each instance's
 descriptor queryable answers with its own record, so the overlap reads true.
 
+**QoS (§2.4).** Every publisher, an event's included, carries its
+resource's four fields (:func:`qos_of`), ``reliability`` through zenoh's
+unstable setting, the one opt-in of §0 this owner takes (round 89, F-369).
+
 The session is a zenoh *router* listening on a loopback port, or, with
 ``connect``, a client of a router: the second is what ``state.md §1`` and
 ``presence.md §1–§2`` need. Timestamping (the HLC) is enabled, as §4.3
