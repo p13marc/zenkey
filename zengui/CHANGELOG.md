@@ -4,6 +4,13 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a seeded watch's merge lasts, and says what its bound forgot (#926)
+
+| Before | Now | Notes |
+|---|---|---|
+| a seeded watch merged by the owner's stamp until its boundary, then showed each live sample as it arrived | the merge lasts for the watch's life: a live sample older than what its key holds is not shown, a new epoch's on a clock behind among them | observer §4.1 (text 0.10, core 0.68): a tool keeps core §4.2's merge for as long as it follows; through the fleet's `Monitor::watch_seeded`, bounded at its `max_keys` |
+| the seed strip: "seeded N watches: h history · s state · k superseded" | the same, and once the merge's bound has forgotten a key, "· n keys forgotten by the merge's bound", as a caution | `Monitor::merge_evicted`, on each tick; a forgotten key's next sample is kept whatever its stamp, so the strip says the merge did not order every key (O6) |
+
 ## Unreleased (`main`, zk2) — the Workbench reads an arbitrated consumer (#909, BC)
 
 | Before | Now | Notes |
