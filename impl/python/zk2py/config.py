@@ -1814,8 +1814,9 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
     sample's ``Encoding`` names, JSON or CBOR, and on the contract's
     ``encoding`` (JSON: ``config.v1.toml`` declares none) when it names
     neither (:func:`zk2py.decoding.decode_json_type`). One that does not
-    decode is no document, its key and reason in ``undecodable``."""
-    from . import decoding as dc
+    decode, or decodes to anything but an object, is no document, its key
+    and reason in ``undecodable``, which every answer below names where it
+    found no document (review-bot on PR #994)."""
     from . import freshness as fr
     from . import live
     from . import seed as sd
@@ -1859,10 +1860,7 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
         fresh = fr.judge("state", HORIZON, observations).verdict == fr.FRESH
         docv = None
         if held is not None and not held[1]:
-            try:
-                docv = dc.decode_json_type(held[2], held[3], DECLARED_ENCODING)
-            except dc.Undecodable as e:
-                out.undecodable.append(f"{key}: {e}")
+            docv = _document(key, held[2], held[3], out)
         setattr(out, which, docv)
         setattr(out, f"{which}_fresh", fresh and docv is not None)
     if subscriber is not None:
@@ -1872,15 +1870,52 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
         for k in sorted(keys):
             for x in subscriber.of(k):
                 if x.kind == "put":
-                    try:
-                        out.events.append(dc.decode_json_type(x.payload, x.encoding, DECLARED_ENCODING))
-                    except dc.Undecodable as e:
-                        out.undecodable.append(f"{k}: {e}")
+                    ev = _document(k, x.payload, x.encoding, out)
+                    if ev is not None:
+                        out.events.append(ev)
     return out
+
+
+def _document(key: str, payload: bytes, encoding: str, out: Reading) -> dict[str, Any] | None:
+    """One view, status or change event decoded by observer §7.3's decode
+    order (:func:`zk2py.decoding.decode_json_type`). Each of the three types
+    is a JSON object (``schemas/config.json``), so a payload that decodes to
+    anything else, a list or a number, is undecodable too (review-bot on PR
+    #994). An undecodable one is named in ``out.undecodable``, with its key
+    and why, and gives None."""
+    from . import decoding as dc
+
+    try:
+        doc = dc.decode_json_type(payload, encoding, DECLARED_ENCODING)
+    except dc.Undecodable as e:
+        out.undecodable.append(f"{key}: {e}")
+        return None
+    if not isinstance(doc, dict):
+        kind = ("a boolean" if isinstance(doc, bool) else "a number" if isinstance(doc, (int, float))
+                else "an array" if isinstance(doc, list) else "a string" if isinstance(doc, str)
+                else "null" if doc is None else "bytes")
+        out.undecodable.append(f"{key}: read as {dc.wire_of(encoding, DECLARED_ENCODING).upper()}: "
+                               f"{kind}, not an object")
+        return None
+    return doc
 
 
 def _premise(r: Reading) -> tuple[str, str] | None:
     return None if r.premise == "ok" else (r.premise, r.why)
+
+
+#: The resources :func:`_unread` names, by the part of their key after the
+#: interface.
+VIEW, STATUS, EVENTS = "state/view", "state/status", "events/change/"
+
+
+def _unread(r: Reading, *parts: str) -> str:
+    """What an answer that found no document says of the ones it could not
+    decode (``Reading.undecodable``), so that an undecodable view, status
+    or event is never reported as merely absent (observer §7.3; review-bot
+    on PR #994): empty when none of ``parts`` failed to decode."""
+    bad = [u for u in r.undecodable if any(f"/{IFACE}/{p}" in u.split(": ", 1)[0] for p in parts)]
+    return "" if not bad else "; undecodable, not absent (observer §7.3): " + "; ".join(bad)
 
 
 def answer_pending(r: Reading) -> tuple[str, Any]:
@@ -1890,7 +1925,7 @@ def answer_pending(r: Reading) -> tuple[str, Any]:
         return p
     doc = r.fresh_doc()
     if doc is None:
-        return UNOBSERVABLE, "neither the view nor the status is fresh"
+        return UNOBSERVABLE, "neither the view nor the status is fresh" + _unread(r, VIEW, STATUS)
     return ("yes", doc["pending"]) if "pending" in doc else ("no", None)
 
 
@@ -1907,14 +1942,14 @@ def answer_landed(r: Reading, token: str | None, instance: str | None) -> tuple[
             return ("yes", ev["outcome"]) if ev["outcome"] in ("applied", "confirmed") else ("no", ev["outcome"])
     doc = r.fresh_doc()
     if doc is None:
-        return UNOBSERVABLE, "no fresh view or status"
+        return UNOBSERVABLE, "no fresh view or status" + _unread(r, VIEW, STATUS, EVENTS)
     if instance is not None and doc.get("instance") != instance:
         return "no", "the instance that held it is gone: the restart rolled it back (§2.12)"
     if doc.get("last_change", {}).get("token") == token:
         return "yes", "its token is the last change"
     if doc.get("pending", {}).get("token") == token:
         return "not_yet", "its token is still pending"
-    return UNOBSERVABLE, "the last change is another token, and no event of this one was read"
+    return UNOBSERVABLE, "the last change is another token, and no event of this one was read" + _unread(r, EVENTS)
 
 
 def answer_undo_clean(r: Reading, token: str) -> tuple[str, str]:
@@ -1928,7 +1963,7 @@ def answer_undo_clean(r: Reading, token: str) -> tuple[str, str]:
                 return "yes", "rolled-back"
             if ev["outcome"] == "partial":
                 return "no", "partial: the read-back is the truth"
-    return UNOBSERVABLE, "no event of it read"
+    return UNOBSERVABLE, "no event of it read" + _unread(r, EVENTS)
 
 
 def answer_writable(r: Reading, group: str) -> tuple[str, str]:
@@ -1938,7 +1973,7 @@ def answer_writable(r: Reading, group: str) -> tuple[str, str]:
     if p:
         return p
     if not r.view_fresh or r.view is None:
-        return UNOBSERVABLE, "no fresh view: the status carries no class and no writable"
+        return UNOBSERVABLE, "no fresh view: the status carries no class and no writable" + _unread(r, VIEW)
     g = find_group(r.view["groups"], group)
     if g is None:
         return NOT_ASKED, "the schema declares no such group"
@@ -1953,7 +1988,7 @@ def answer_survives(r: Reading, group: str, param: str) -> tuple[str, Any]:
     if p:
         return p
     if not r.view_fresh or r.view is None:
-        return UNOBSERVABLE, "no fresh view"
+        return UNOBSERVABLE, "no fresh view" + _unread(r, VIEW)
     g = find_group(r.view["groups"], group)
     prm = None if g is None else find_param(g, param)
     if prm is None or prm.get("sensitive") or "value" not in prm:
@@ -1970,7 +2005,7 @@ def answer_converged(r: Reading, revision: int) -> tuple[str, Any]:
         return p
     doc = r.fresh_doc()
     if doc is None:
-        return UNOBSERVABLE, "no fresh view or status"
+        return UNOBSERVABLE, "no fresh view or status" + _unread(r, VIEW, STATUS)
     d = doc.get("desired")
     if d is None:
         return NOT_ASKED, "the owner converges no desired state"

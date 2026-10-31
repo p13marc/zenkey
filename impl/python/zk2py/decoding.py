@@ -144,11 +144,16 @@ def sniff(payload: bytes, encoding: str | None = None) -> dict[str, Any]:
         return got
     text = _text(b)
     if text is not None:
-        out = {"as": "text", "value": text if len(b) <= SHOWN_BYTES else b[:SHOWN_BYTES].decode("utf-8", "ignore")}
+        # Cut at a character, never inside one: ``shown`` is the bytes the
+        # text shows, at most SHOWN_BYTES (review-bot on PR #994).
+        value = text if len(b) <= SHOWN_BYTES else b[:SHOWN_BYTES].decode("utf-8", "ignore")
+        out: dict[str, Any] = {"as": "text", "value": value}
+        shown = len(value.encode("utf-8"))
     else:
         out = {"as": "hex", "value": b[:SHOWN_BYTES].hex()}
+        shown = min(len(b), SHOWN_BYTES)
     if len(b) > SHOWN_BYTES:
-        out["shown"] = SHOWN_BYTES
+        out["shown"] = shown
     return out
 
 

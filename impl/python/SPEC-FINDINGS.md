@@ -22410,7 +22410,9 @@ count (F-407) and a profile's reader (F-409). The rest is wording.
   not decode says the wire it was read from, never sniffed. `config.v1`'s
   reader, whose profile says nothing of how it reads bytes, read its view,
   status and events with `json.loads` whatever their `Encoding`. It now
-  reads them so, and names an undecodable one in `Reading.undecodable`.
+  reads them so. One that does not decode, or decodes to anything but an
+  object, is named in `Reading.undecodable`, and every §5 answer that
+  found no document names it.
 - **F-409.** The readers already read as their profiles say:
   `telemetry.decode` on the resource's `encoding`, `alarms.decode` strict
   JSON, taking no `Encoding` at all. Readings show both.
@@ -22419,11 +22421,11 @@ count (F-407) and a profile's reader (F-409). The rest is wording.
   forgotten", which read as reading (b).
 - **F-408.** `checks.premise` judges the premise in each run of
   `state_scenarios` §7 and `live_interop --only s7`, after the seed and
-  inside it. With the clock 5 s behind it is rev 11's and rev 12's times
-  below rev 10's, which the stamps measure exactly. On the host's clock it
-  is rev 12 written within 5 s of rev 10 by the runner's clock. A run past
-  it fails on it, and the clock-behind outcome resting on it is not
-  asserted. Round 92's margin (`checks.within_offset`), which called such a
+  inside it, as it is stated: rev 12 written within 5 s of rev 10 by the
+  runner's clock, whatever the new clock's offset (rev 11, written before
+  it, then comes within it too). The stamps are said beside it, never
+  judged. A run past it fails on it, and the clock-behind outcome resting
+  on it is not asserted. Round 92's margin (`checks.within_offset`), which called such a
   run inconclusive, is gone. `live_interop`'s run after the seed now writes
   rev 12, which "Its late joiners" names and it had not.
 
@@ -22483,3 +22485,19 @@ contradicts another.
 - **Resolved: F-406 to F-413,** eight.
 - **F-365** stays open as #965's.
 - **Open from round 92:** none.
+
+### After review-bot on PR #994
+
+Two should-fixes and two nits, taken on the same branch:
+- **`checks.premise`** judges the premise as it is stated, rev 12 within
+  5 s of rev 10 by the runner's clock, whatever the offset. It had read it
+  from the stamps, which holds only at an offset of exactly 5 s.
+- **`config.read`**: a view, status or event that decodes to anything but
+  an object is undecodable too, and every §5 answer that finds no document
+  names what did not decode, never reading it as merely absent.
+- **Nits:** the echo tool's docstring on §7.3's two MUSTs, and a sniffed
+  text's `shown` counting the bytes it shows, cut at a character.
+
+**`just py-conformance`: 3709 of 3709** (`readings` 752). **Live:**
+`config_scenarios` zk2py, zk2py and Rust, zk2py **51 of 51** each;
+`state.md` §7 step 2 zk2py, zk2py **24 of 24** and Rust, zk2py **30 of 30**.

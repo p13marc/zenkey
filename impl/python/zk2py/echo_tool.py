@@ -47,8 +47,10 @@ exits 2, never 0 on a truncated stream (review-bot on PR #955).
 At its start it says on standard error what its ``RLIMIT_MEMLOCK`` admits
 (observer §7.4, :func:`zk2py.live.memlock_said`; round 89).
 
-It decodes no payload by its declared type and holds none, so observer
-§7.3's decoding and honest rendering are not met here (zk2py's README).
+It holds no contract, so every payload is one whose declared type it does
+not hold, which it sniffs as observer §7.3 says. Decoding by the declared
+type and honest rendering, §7.3's two MUSTs, need a tool that holds a
+contract per key, which zk2py has not (README, "What it does not cover").
 
 It judges nothing, so it exits 0 once it has watched, and 2 when it could
 not (the session did not open, the selector is not a key expression, or

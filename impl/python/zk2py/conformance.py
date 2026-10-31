@@ -3553,10 +3553,13 @@ def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "CBOR scalar only on CBOR's Encoding, printable text, else hexadecimal, at most 256 bytes shown",
                 [dc.sniff(b""), dc.sniff(b' {"a": [1, 2]} '), dc.sniff(b"\xa1\x61a\x42\x01\x02", "zenoh/bytes"),
                  dc.sniff(b"\x01", "application/cbor"), dc.sniff(b"\x01"), dc.sniff(b"hello\n"),
-                 dc.sniff(b'{"a":1,"a":2}'), {k: (len(v) if k == "value" else v) for k, v in dc.sniff(long).items()}],
+                 dc.sniff(b'{"a":1,"a":2}'), {k: (len(v) if k == "value" else v) for k, v in dc.sniff(long).items()},
+                 # review-bot on PR #994: text cut at a character, shown counting the bytes it shows
+                 {k: (len(v) if k == "value" else v) for k, v in dc.sniff(b"a" + "é".encode() * 200).items()}],
                 [{"as": "empty"}, {"as": "json", "value": {"a": [1, 2]}}, {"as": "cbor", "value": {"a": "h'0102'"}},
                  {"as": "cbor", "value": 1}, {"as": "hex", "value": "01"}, {"as": "text", "value": "hello\n"},
-                 {"as": "text", "value": '{"a":1,"a":2}'}, {"as": "hex", "value": 512, "shown": 256}]))
+                 {"as": "text", "value": '{"a":1,"a":2}'}, {"as": "hex", "value": 512, "shown": 256},
+                 {"as": "text", "value": 128, "shown": 255}]))
 
     # -- F-412: the decode order, a held type on its Encoding's wire ----------
     def undecodable(payload: bytes, encoding: str, declared: str = "json") -> str:
@@ -3595,11 +3598,14 @@ def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
         def liveliness(self) -> "Fake":
             return self
 
-    def config_view(payload: bytes, encoding: str) -> list[Any]:
+    def config_reading(payload: bytes, encoding: str, key: str = "state/view") -> Any:
         sub = fr.Subscriber(Fake(), "zk2/lab/rf0/**")
-        sub._record("zk2/lab/rf0/config.v1/state/view",
+        sub._record(f"zk2/lab/rf0/config.v1/{key}",
                     fr.Received("put", sub.declared_ns, 0, payload, encoding, None, None, None))
-        r = cf.read(Fake(), "lab/rf0", subscriber=sub, presence=False, lists=True)
+        return cf.read(Fake(), "lab/rf0", subscriber=sub, presence=False, lists=True)
+
+    def config_view(payload: bytes, encoding: str) -> list[Any]:
+        r = config_reading(payload, encoding)
         return [r.view, [": ".join(u.split(": ")[1:3]) for u in r.undecodable]]
 
     out.append(("observer §7.3 (0.12, F-412): config.v1's reader, its profile silent on how it reads bytes, reads "
@@ -3610,6 +3616,24 @@ def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  config_view(b"\xa1\x68revision\x03", "zenoh/bytes")],
                 [[{"revision": 3}, []], [{"revision": 3}, []], [{"revision": 3}, []],
                  [None, ["read as JSON: not UTF-8"]]]))
+    # Review-bot on PR #994: a document that decodes to anything but an
+    # object is undecodable too, and every answer that found no document
+    # names what did not decode, never reading it as merely absent.
+    bad_view = config_reading(b"[1, 2]", "application/json")
+    bad_event = config_reading(b"7", "application/json", "events/change/01jc0000000000000000000000")
+    answers = [cf.answer_pending(bad_view), cf.answer_writable(bad_view, "radio"),
+               cf.answer_survives(bad_view, "radio", "frequency_hz"), cf.answer_converged(bad_view, 1),
+               cf.answer_landed(bad_view, "t1", None), cf.answer_undo_clean(bad_event, "t1")]
+    out.append(("config.v1's reader (review-bot on PR #994): a view or an event that decodes to a list or a number "
+                "is no document, named undecodable with its wire; each §5 answer that found none says so, "
+                "unobservable, never as if it were absent; an answer with nothing undecodable says nothing of it",
+                [config_view(b"[1, 2]", "application/json"), bad_event.events,
+                 [": ".join(u.split(": ")[1:3]) for u in bad_event.undecodable],
+                 [(a[0], "undecodable, not absent" in a[1]) for a in answers],
+                 "undecodable" in cf.answer_pending(config_reading(b'{"revision": 3}', "zenoh/bytes",
+                                                                   "state/x"))[1]],
+                [[None, ["read as JSON: an array, not an object"]], [], ["read as JSON: a number, not an object"],
+                 [(cf.UNOBSERVABLE, True)] * 6, False]))
 
     # -- F-409: a profile's reader decides --------------------------------------
     import inspect
@@ -3646,13 +3670,17 @@ def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # -- F-408: state.md §7 step 2's premise ------------------------------------
     S = sd.Stamp
     t10, behind, late = S(200 << 32, "a1"), S(196 << 32, "b2"), S(201 << 32, "b2")
-    out.append(("state.md §7 step 2 (core 0.70, F-408): its premise, rev 11 and rev 12 within 5 s of rev 10: with "
-                "the clock behind, both stamps below rev 10's, whatever the runner's clock; on the host's clock, "
-                "rev 12 within 5 s by the runner's clock; a value not heard fails it",
-                [ck.premise(-5.0, t10, behind, behind, 4.9)[0], ck.premise(-5.0, t10, behind, late, 4.9)[0],
-                 ck.premise(-5.0, t10, behind, behind, 20.5)[0], ck.premise(0.0, t10, late, late, 1.2)[0],
-                 ck.premise(0.0, t10, late, late, 5.1)[0], ck.premise(-5.0, t10, behind, None, 1.0)[0]],
-                [True, False, True, True, False, False]))
+    # Review-bot on PR #994: judged on the runner's clock for any offset,
+    # never read from the stamps, which hold it only at an offset of 5 s.
+    out.append(("state.md §7 step 2 (core 0.70, F-408): its premise, rev 11 and rev 12 within 5 s of rev 10, "
+                "judged on the runner's clock whatever the offset and whatever the stamps say; a value not heard "
+                "fails it",
+                [ck.premise(-5.0, t10, behind, behind, 4.9)[0], ck.premise(-5.0, t10, behind, behind, 20.5)[0],
+                 ck.premise(-5.0, t10, behind, late, 4.9)[0], ck.premise(-2.0, t10, late, late, 1.0)[0],
+                 ck.premise(-10.0, t10, behind, behind, 7.0)[0], ck.premise(0.0, t10, late, late, 1.2)[0],
+                 ck.premise(0.0, t10, late, late, 5.1)[0], ck.premise(-5.0, t10, behind, None, 1.0)[0],
+                 "within 5 s" in ck.premise(-5.0, t10, behind, behind, 4.9)[1]],
+                [True, False, True, True, False, True, False, False, True]))
     return out
 
 

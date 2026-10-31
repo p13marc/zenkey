@@ -32,25 +32,25 @@ def premise(offset_s: float, t10: Any, t11: Any, t12: Any, elapsed_s: float) -> 
     ``elapsed_s`` rev 12's write after rev 10's on the runner's monotonic
     clock.
 
-    - **With the new clock behind** by ``offset_s`` (5 s), the premise is
-      that rev 11's and rev 12's times fall below rev 10's: a clock 5 s
-      behind stamps them so only while they come within 5 s of rev 10, as
-      the step says. That is what the reference asserts before the tool's
-      outcome ("A run past the premise then fails on the premise", core
-      0.70's entry). The stamps measure it exactly, so no margin is needed.
-    - **On the host's clock**, the stamps cannot say it, so it is rev 12's
-      write within 5 s of rev 10's, on the runner's clock.
+    The premise is judged as it is stated, on the runner's clock, whatever
+    the new clock's offset ``offset_s``: rev 12 written within
+    :data:`PREMISE_S` of rev 10. The step writes rev 11 before rev 12, so
+    rev 11 then comes within it too. The stamps are said beside it, never
+    judged: with the clock behind by 5 s, a run within the premise gives
+    rev 11 and rev 12 times below rev 10's, and the tool's outcome, asserted
+    after it, rests on that (review-bot on PR #994: the premise had been
+    read from the stamps, which holds only at an offset of exactly 5 s).
 
     Round 92 read a run past it as inconclusive, the step then stating no
     premise. Since 0.70 states one, a run that misses it fails on it."""
     if t10 is None or t11 is None or t12 is None:
         return False, f"a value not heard: rev 10 {t10}, rev 11 {t11}, rev 12 {t12}"
-    gap = round((t12.time - t10.time) / 2**32, 3)
-    said = f"rev 12 written {elapsed_s:.3f} s after rev 10 by the runner's clock, its time {gap} s from rev 10's"
-    if offset_s:
-        ok = t11.time < t10.time and t12.time < t10.time
-        return ok, f"{said}; rev 11's and rev 12's times {'below' if ok else 'not both below'} rev 10's"
-    return elapsed_s < PREMISE_S, said
+    ok = elapsed_s < PREMISE_S
+    gap11 = round((t11.time - t10.time) / 2**32, 3)
+    gap12 = round((t12.time - t10.time) / 2**32, 3)
+    return ok, (f"rev 12 written {elapsed_s:.3f} s after rev 10 by the runner's clock, "
+                f"{'within' if ok else 'not within'} {PREMISE_S:g} s; rev 11's time {gap11} s and rev 12's "
+                f"{gap12} s from rev 10's, the new clock {offset_s:+g} s")
 
 
 class HeldQueries:
