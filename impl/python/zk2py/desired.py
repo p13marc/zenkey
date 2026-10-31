@@ -3,7 +3,10 @@ Read again against text 0.9 (#609, round 87; #935): its inline history
 taken out and its 25 long sentences split, no rule changed, and none of
 this module's rules moved. Where 0.9 reads "in a run", this module's older
 comments still say "in this instance": the unit is the run (§0), as since
-0.4 (F-192).
+0.4 (F-192). Read again against text 0.10 (round 88): §0, §2.7 and §2.16
+make a ``config.v1`` owner's re-mint a restart, a new run (F-336), which
+:meth:`TargetRole.restart` already is; round 87's F-341 to F-346
+rewritten, no other rule changed.
 
 A desired document is state of its **author**, keyed by its **target**: the
 author writes it under its own address, and the target binds its own slice of

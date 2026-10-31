@@ -3427,7 +3427,8 @@ def family_readings(root: Path) -> list[Result]:
         + _watch_wire_readings() + _one_at_a_time_readings() + _admin_records_readings() + _admin_read_readings() \
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
-        + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root)
+        + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
+        + _round88_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -3557,6 +3558,193 @@ def _observer_07_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out.append(("desired.v1 0.9 §2.7: the same document under a new stamp is adopted within a run, and acted on "
                 "after a restart", restart(), [ds.ADOPTED, ds.ACT]))
+    return out
+
+
+def _round88_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``redundancy.v1`` 0.6, ``timing.v1`` 0.6, ``arbitration.v1`` 0.4 and
+    the core's scenarios without history (core 0.64), and round 87's answers:
+    ``desired.v1`` 0.10, ``config.v1`` 0.8, ``alarms.v1`` 0.10 and
+    ``telemetry.v1`` 0.7 (#609, round 88; #935's fifth part). Each text at
+    its version or later; F-336's one rule changed, as the texts state it;
+    F-337 to F-346's rewrites as they read; §12's two contracts, lint-clean
+    with the reference CLI's fingerprints; the core's half of a ``config.v1``
+    owner fed through ``desired.v1`` (:meth:`zk2py.config.Core.revert`, how
+    an act ends); a re-mint that is a restart acting on the same version
+    again (:class:`zk2py.desired.TargetRole`); and the reference's figures
+    the 0.4 and 0.6 rewrites moved into sentences of their own, held by
+    zk2py's runtimes. No session is opened."""
+    import inspect
+    import json as _json
+    import re
+
+    from . import arbitration_live as al
+    from . import config as cf
+    from . import desired as ds
+    from . import presence as pr
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def at_least(rel: str, want: tuple[int, int]) -> list[str]:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", flat(rel))
+        if m is None:
+            return [f"{rel} names no text version"]
+        got = (int(m.group(1)), int(m.group(2)))
+        return [] if got >= want else [f"{rel} at {got[0]}.{got[1]}, below {want[0]}.{want[1]}"]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    desired_text, config_text = flat("profiles/desired/v1.md"), flat("profiles/config/v1.md")
+    out: list[tuple[str, Any, Any]] = [
+        ("#935 part 5: redundancy.v1 0.6, timing.v1 0.6 and arbitration.v1 0.4 or later, each 0.N entry saying no "
+         "rule changed",
+         at_least("profiles/redundancy/v1.md", (0, 6)) + at_least("profiles/timing/v1.md", (0, 6))
+         + at_least("profiles/arbitration/v1.md", (0, 4))
+         + entry("profiles/redundancy/CHANGELOG.md", "0.6", "no rule changed")
+         + entry("profiles/timing/CHANGELOG.md", "0.6", "no rule changed")
+         + entry("profiles/arbitration/CHANGELOG.md", "0.4", "no rule changed")
+         + entry("CHANGELOG.md", "0.64", "no rule changed"), []),
+        ("round 87's answers: desired.v1 0.10, config.v1 0.8, alarms.v1 0.10 and telemetry.v1 0.7 or later",
+         at_least("profiles/desired/v1.md", (0, 10)) + at_least("profiles/config/v1.md", (0, 8))
+         + at_least("profiles/alarms/v1.md", (0, 10)) + at_least("profiles/telemetry/v1.md", (0, 7)), []),
+        ("desired.v1 0.10 §2.16 (F-336): a config.v1 owner's re-mint is a restart, a new run that MUST act again",
+         missing(desired_text,
+                 "**A re-mint is a restart** for a `config.v1` owner (`config.v1` §2.12). It returns its device to "
+                 "its startup values and begins a new run, so §2.7's restart holds of it: it MUST act on the first "
+                 "version it reads, the one it acted on before the re-mint included. `[Sc: §12]`",
+                 "For a `config.v1` owner a run and an instance are the same thing, so this is `config.v1` §2.18's "
+                 "once in an instance."), []),
+        ("desired.v1 0.10 §0 and §2.7: the general rule stays, each with its one exception",
+         missing(desired_text, "a target's instance changes at a re-mint, its run does not. The one exception is a "
+                 "`config.v1` owner, whose re-mint is a restart (§2.16).",
+                 "keeps what it acted on, the ids it remembers and its report. The one exception is a `config.v1` "
+                 "owner, whose re-mint is a restart (§2.16)."), []),
+        ("config.v1 0.8 §2.18 (F-336): its instance is desired.v1's run, and a re-mint begins a new one",
+         missing(config_text, "Its instance and desired.v1's run are the same thing. A re-mint is a restart "
+                 "(§2.12), which begins a new run, as desired.v1 §2.16 says."), []),
+        ("desired.v1 0.10's scenarios: §12, a config.v1 owner's re-mint is a restart",
+         missing(flat("profiles/desired/scenarios.md"),
+                 "## §12 A `config.v1` owner's re-mint is a restart (§2.7, §2.16)",
+                 "A new instance whose `St` shows `desired` converged on revision 1 while its device holds 10000 "
+                 "fails this step."), []),
+        ("round 87's F-337 to F-340, as alarms.v1 0.10 and telemetry.v1 0.7 read",
+         missing(flat("profiles/alarms/v1.md"), "Without this rule, a key whose resolve and delete a loss took",
+                 "A GET that answers it heals it, as step 4's first sentence says.",
+                 "An answer of neither, unobservable or not asked, splits by its reason, in two closed lists:")
+         + missing(flat("profiles/telemetry/v1.md"), "It folds the tokens' moves and the samples into one sequence, "
+                   "in the order it received them. So the presence it holds between two arrivals is the presence it "
+                   "received between them.")
+         + missing(flat("profiles/telemetry/scenarios.md"), "complete read, one of two:"), []),
+        ("round 87's F-341 to F-346, as desired.v1 0.10 reads",
+         missing(desired_text,
+                 "and is reported alone: each of the others reads the binding of one slice, and a role on two "
+                 "documents has no one slice.",
+                 "A target that read the archive on a silent GET would act on the first again, and on the second "
+                 "as last-known.",
+                 "One equal delivery is not:",
+                 "A version the target holds, or holds waiting, that came from its author is never confirmed:",
+                 "The target acts on that value as another id, then on the new epoch's next value.",
+                 "each parameter named by a document it acted on in this run goes back to its startup value",
+                 "A revision that declares a desired resource, even only one, settles nothing."), []),
+    ]
+
+    # §12's contracts, written from its setup: no finding at all, and the
+    # reference CLI's fingerprints (zk2 contract lint, round 88).
+    fps = {"configs.v1.toml": "sha256:daee2c9d7434152c15adef1c3fae78dbf5697c8db28e1e39fb0aa9f4e17166eb",
+           "zk2py_configured.v1.toml": "sha256:89872483fa68bcd829b1e814d120dd799ef6a7b0145561d6e814b0cda0e87890"}
+    here = Path(__file__).resolve().parents[1] / "interop" / "desired"
+    got = {}
+    for name in fps:
+        c = load_contract(here / name, spec_dir=spec, check_file_name=True)
+        got[name] = (c.valid, list(c.codes), c.fingerprint)
+    out.append(("desired.v1 scenarios §12: configs.v1 and zk2py_configured.v1 load with no finding, with the "
+                "reference CLI's fingerprints", got, {n: (True, [], fp) for n, fp in fps.items()}))
+
+    # The core's half of a config.v1 owner fed through desired.v1: an act's
+    # end said (converged, then a delete's revert), the revert one set back
+    # to the startup value and the view with no `desired` after it.
+    rf = _json.loads((spec / "profiles/config/conformance/lifecycle.json").read_text())["schemas"]["rf"]
+    startup = {"duty": {"fraction_ppm": {"value": 10000, "source": "file"}},
+               "radio": {"frequency_hz": {"value": 868100000, "source": "file"}}}
+    core = cf.Core(service="lab/rf0", instance="00000000000000a1", schema=rf, startup=startup, floor_s=10,
+                   apply_after_ns=10**9, persist=True)
+    t = 1_800_000_000 * 10**9
+    core.desire({"revision": 1, "values": {"duty": {"fraction_ppm": 20000}}}, t)
+    first = (core.desired_end, core.running[("duty", "fraction_ppm")].value, core.view().get("desired"))
+    core.desired_end = None
+    step = core.revert({"duty": {"fraction_ppm": 10000}}, t + 10**9)
+    second = (core.desired_end, core.running[("duty", "fraction_ppm")].value, "desired" in core.view(),
+              [e["outcome"] for e in step.events])
+    out.append(("desired.v1 0.10 §2.16 in zk2py's config.v1 core: an act's end said, and a delete's revert one set "
+                "back to the startup value, the view with no desired after it",
+                [first, second],
+                [(("converged", None), 20000, {"observed_revision": 1, "outcome": "converged"}),
+                 (("reverted", None), 10000, False, ["applied"])]))
+
+    # §2.16 through ConfigOwner's feed, with no session (review-bot on PR
+    # #963): a refused document leaves the role free for the next version,
+    # and so does an act that raises, failed with code apply and counted.
+    # The owner's event publisher is a list here, and the owner is never
+    # started, so its device holds nothing until an apply.
+    owner = cf.ConfigOwner("lab", "rf0", schema=rf, startup=startup, fed=("k", "lab/author"))
+    published: list[str] = []
+    owner.owner.occur = lambda member, payload: published.append(_json.loads(payload)["outcome"])  # type: ignore
+
+    def fed(t: int, doc: dict[str, Any]) -> tuple[Any, ...]:
+        owner._fed_receive(False, ds.Stamp(t, 0xA).text, cf.encode_json(doc))
+        rep = owner.role.report()
+        return (owner._fed_running or owner.role.running, rep.get("outcome"),
+                (rep.get("refusal") or {}).get("code"), owner.device.values.get("duty", {}).get("fraction_ppm"))
+
+    def boom(act: Any) -> Any:
+        raise RuntimeError("the device fell off")
+
+    rows = [fed(10, {"revision": 2, "values": {"radio": {"frequency_hz": 869525000}}}),
+            fed(11, {"revision": 3, "values": {"duty": {"fraction_ppm": 20000}}})]
+    device, owner.core.device = owner.core.device, boom
+    rows.append(fed(12, {"revision": 4, "values": {"duty": {"fraction_ppm": 30000}}}))
+    owner.core.device = device
+    rows.append(fed(13, {"revision": 5, "values": {"duty": {"fraction_ppm": 40000}}}))
+    out.append(("desired.v1 §2.16 in zk2py's fed config.v1 owner: a refused document, and an act that raises, each "
+                "leave the role free for the next version, which is acted on",
+                [rows, owner.fed_errors, published],
+                [[(False, "refused", "reach", None), (False, "converged", None, 20000),
+                  (False, "failed", "apply", 20000), (False, "converged", None, 40000)], 1, ["applied", "applied"]]))
+
+    # §2.16 (0.10) through §2.7's restart: the version acted on, delivered
+    # again under its own stamp, is the same version within a run, and acted
+    # on in the run a re-mint that is a restart begins.
+    def again(restart: bool) -> str:
+        role = ds.TargetRole("k")
+        s = ds.Sample(ds.OWNER, False, ds.Stamp(10, 0xA), ds.Payload(value={"revision": 1, "values": {}}), 1)
+        role.receive(s)
+        role.finish(ds.Finish(ds.DONE))
+        if restart:
+            role.restart()
+        return role.receive(s)
+
+    out.append(("desired.v1 0.10 §2.16: the bound version delivered again is the same version in a run, and acted "
+                "on after a config.v1 owner's re-mint begins a new one", [again(False), again(True)],
+                [ds.SAME_VERSION, ds.ACT]))
+
+    # The figures 0.4 and 0.6 gave sentences of their own, kept by zk2py.
+    arb, arb_sc = flat("profiles/arbitration/v1.md"), flat("profiles/arbitration/scenarios.md")
+    actuator = inspect.signature(al.Actuator.__init__).parameters["reread_delay_s"].default
+    commander = inspect.signature(al.Commander.__init__).parameters["lead_s"].default
+    out.append(("arbitration.v1 0.4 §2.7 and the scenarios' commanders: the reference's read again 0.1 s after a "
+                "withdrawal and its first put 500 ms after the tokens, each a sentence of its own, are zk2py's "
+                "actuator's and commander's",
+                [missing(arb, "The reference makes one read 0.1 s after the first withdrawal of a burst."),
+                 missing(arb_sc, "first put is **500 ms after its tokens**"), actuator, commander, pr.REREAD_DELAY_S],
+                [[], [], 0.1, 0.5, 0.1]))
     return out
 
 

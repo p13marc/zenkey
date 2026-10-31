@@ -19482,3 +19482,556 @@ most rewritten of round 86's five.
 - **#935's fourth pass changed no rule** in `alarms.v1`, `telemetry.v1` or
   `desired.v1` but the one `alarms.v1` 0.9 names, §2.15's watch, which 0.8
   held already. Observer 0.7 and core 0.63 changed none.
+
+## At redundancy.v1 0.6, timing.v1 0.6, arbitration.v1 0.4, desired.v1 0.10 and core 0.64 (#935)
+
+Round 88 read, cold and whole, the `v1.md` and `scenarios.md` of
+`redundancy.v1` 0.6, `timing.v1` 0.6 and `arbitration.v1` 0.4, each with
+its new CHANGELOG entry, every `spec/scenarios/*.md` at core 0.64, and
+`spec/profiles/README.md`. It read the sections round 87's answers
+changed:
+- `desired.v1` 0.10's §0, §2.3, §2.5, §2.6, §2.7, §2.16 and §2.17, and
+  its scenarios' new §12;
+- `config.v1` 0.8's §2.18, with §2.12 beside it;
+- `alarms.v1` 0.10's §2.14 step 4 and §2.16, and `telemetry.v1` 0.7's
+  §2.9 and its scenarios' conventions;
+- core 0.64's entry, `core.md`'s header, and the two fixtures' READMEs.
+
+It did so on main 954d6905 (PR #962). It checked F-336 to F-346, checked
+each text's claim that no rule changed, implemented `desired.v1` §2.16's
+new rule, and ran the live runners. It read for **hard to read**
+throughout. The reference's parties and tool ran as black boxes (`owner`,
+`consume`, `zk2` and `zenctl` in `/srv/dev/targets/zenkey-tier/blackbox/`,
+built 2026-10-30 08:57). The commits since touch only `spec/`, a
+`CLAUDE.md` and one Rust test (ec6cf00c, `zenkey/tests/`, not read), so
+the binaries are main's runtime. Their source was never read.
+
+Since round 87 (PR #961, merged as 54f772f4), `spec/` changed in seven
+commits (26bdf6c0, the prose check, touched only `scripts/`): 870be561,
+c7b5a53d and 1b67c4f2
+(`timing.v1` 0.6, `arbitration.v1` 0.4, `redundancy.v1` 0.6), 79548677
+(`alarms.v1` 0.10, `telemetry.v1` 0.7), 67c56ab6 (`desired.v1` 0.10,
+`config.v1` 0.8), 931ef08f and b922d63b (core 0.64). zk2py diffed every
+changed file against 54f772f4, word by word, and read each word diff
+whole, in full context, as its cold read. No fixture, schema or
+`examples/zk2/` file changed.
+
+### F-336 to F-346
+
+| | Status | Why |
+|---|---|---|
+| F-336 | **resolved** | `desired.v1` 0.10 takes `config.v1`'s rule, as the finding's first fix: §2.16, "**A re-mint is a restart** for a `config.v1` owner (`config.v1` §2.12). It returns its device to its startup values and begins a new run, so §2.7's restart holds of it: it MUST act on the first version it reads, the one it acted on before the re-mint included." §0 and §2.7 keep the general rule, each ending "The one exception is a `config.v1` owner, whose re-mint is a restart (§2.16)." `config.v1` 0.8 §2.18 says the same from its side: "Its instance and desired.v1's run are the same thing." The scenarios gain §12. It says what F-336 asked, and nothing more: the new MUST is §2.7's restart MUST, applied; the rest is its reason and the reference's refusal, which `config.v1` §2.12 already stated. What a re-minted run reads first is F-347. |
+| F-337 | **resolved** | `alarms.v1` 0.10 §2.14 step 4: "Without this rule, a key whose resolve and delete a loss took would read `incomplete` …", and "A GET that answers it heals it, as step 4's first sentence says." |
+| F-338 | **resolved** | §2.16: "An answer of neither, unobservable or not asked, splits by its reason, in two closed lists:" |
+| F-339 | **resolved** | `telemetry.v1` 0.7 §2.9: "It folds the tokens' moves and the samples into one sequence, in the order it received them. So the presence it holds between two arrivals is the presence it received between them. From that view:" |
+| F-340 | **resolved** | The scenarios' "R pairs": "Its presence is what R saw after its complete read, one of two:", then the two as items, "alone throughout:" and "earlier and later:". |
+| F-341 | **resolved** | `desired.v1` 0.10 §2.3: "It sits before every other problem, and is reported alone: each of the others reads the binding of one slice, and a role on two documents has no one slice." |
+| F-342 | **resolved** | §2.5: "An archive can hold a document its author deleted past its tombstone window (§2.8), or one its author has since replaced. A target that read the archive on a silent GET would act on the first again, and on the second as last-known." |
+| F-343 | **resolved** | §2.6 step 3: "One equal delivery is not: its author's own sample of a version …", and "A version the target holds, or holds waiting, that came from its author is never confirmed: every equal delivery of it, its author's included, is the same version". |
+| F-344 | **resolved** | §2.6: "In it, a value of the author's old epoch is still in transit …, and it is later than every value of the old epoch the target acted on. The target acts on that value as another id, then on the new epoch's next value." |
+| F-345 | **resolved** | §2.16: "So when it acts on a delete, each parameter named by a document it acted on in this run goes back to its startup value". |
+| F-346 | **resolved** | §2.17: "A revision that declares a desired resource, even only one, settles nothing. The requirement may name a plain resource of the author's instead, which would make the role no target's. Only the requirement, which the tool has not read, says which." |
+
+Each rewrite is the finding's, and keeps its keyword, condition and scope.
+
+### No rule changed: the check
+
+**Every RFC 2119 sentence, before and after**, with a scratch splitter
+like round 87's: each text split into sentences keyed by section, a table cell
+read as running text, a bold run-in label kept with the sentence after
+it, and each sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT, MAY,
+RECOMMENDED, REQUIRED or SHALL kept.
+
+| Text | Before | After | Unchanged | The changed ones, each read against its old text | Moved |
+|---|---|---|---|---|---|
+| `redundancy.v1` | 40 | 40 | 30 | Four lost a tag: §2.4's refused write, §2.6's earlier incumbency, §2.14's tokenless refusal, §2.15's "Never a call that would run". §2.7's watch SHOULD lost "(0.2; a MUST at 0.1)", whose MUST the splitter counts. §2.6's and §2.9's MUSTs cite "core §8.2, "Serving later, and stopping"" for "core 0.39". Three were split from the words after them, their keyword, condition and scope kept: §2.5's sessions MUST, §2.7's poll MUST, §2.15's probe MAY. | nothing |
+| `timing.v1` | 23 | 23 | 23 | none: every tag sat in a sentence with no keyword | nothing |
+| `arbitration.v1` | 22 | 23 | 19 | §2.8's rule, two MUSTs in one sentence, is two. §2.5 outcome 6's SHOULD and §2.7's read-again SHOULD were split from the words before them; the reference's "one read 0.1 s after the first withdrawal of a burst" is a sentence of its own, no keyword. | nothing |
+| `desired.v1` | 62 | 63 | 62 | the new one, §2.16's MUST (F-336) | F-336's rule, the intended one |
+| `config.v1` | 39 | 39 | 39 | none | nothing |
+| `alarms.v1`, `telemetry.v1` | 36, 27 | 36, 27 | 36, 27 | none | nothing |
+| core | 161 | 161 | 161 | none: 0.64 changed only its header | nothing |
+
+The counts are the changelogs', but core's, which the splitter counts
+differently, as in rounds 84 to 87.
+
+**The scenarios' Expected lines.** The scenarios hold few keyword
+sentences (0, 1 and 1 in the three profiles' scenarios, 2 in
+`operations.md`, none in the other core scenarios), so zk2py also
+extracted every Expected item, before and after, and compared them with
+their tags and punctuation taken out:
+
+| Scenarios | Items | Identical | The rest |
+|---|---|---|---|
+| `redundancy.v1` | 40, 40 | 24 | a tag out, or split at a semicolon (§1, §3, §4, §5, §10, §11, §12's) |
+| `timing.v1` | 25, 25 | 25 | |
+| `arbitration.v1` | 30, 30 | 25 | a tag out (§3, §7, §9, §10's) |
+| `presence.md` | 51, 51 | 42 | a tag out, or a reason in a parenthesis made a sentence (§2, §4, §9, §10's) |
+| `security.md` | 19, 19 | 13 | a label's tag out; "0.15's" is "the wider read's" |
+| the other core scenarios | 98, 98 | 94 | a tag out, or a label's |
+| `desired.v1` | 36, 38 | 36 | §12's two, new |
+| `telemetry.v1` | 35, 35 | 35 | the conventions' "R pairs" (F-340) is not an Expected line |
+
+Each changed item was read in its word diff. None moved an observation,
+a step, a condition or a scope. Of the steps and setups, the rewrites
+that needed a second look:
+- **`presence.md` §6 step 3.** "(0.8 read `zk2/**` here, … F-75, fixed in
+  0.9.)" is "(Not `zk2/**`, which by core §1.3's guard selects no control
+  token, so the "no token" below could never fail.)". The selector
+  zk2py's runner reads, `zk2/*/*/@zk/instance/*`, is the step's.
+- **`presence.md` §10 step 5** is three sentences, its timeouts and link
+  states 0.63's. Step 7 is a list of its three watch sessions, in 0.63's
+  order.
+- **`security.md` §4 step 4.** "0.15's" admin read is "a wider one,
+  `@/*/router` and `@/*/router/**`", the same two keys, which zk2py's
+  `security_scenarios` step 4 compiles.
+- **`state.md` §12's Measured.** "0.11's second selector" is named by its
+  key, `@/*/router/**/storage_manager/storages/**`, which zk2py's
+  `live.admin_guard` already refuses: it intersects six of
+  `admin_records`' declaration-record patterns.
+- **`operations.md` §8's Measured.** "the reference's check … reports both"
+  is "A check that compares tokens only would report steps 4 and 5
+  both": a measurement's note, no rule.
+- **`timing.v1` §2.6, "What ε bounds".** "ε bounds …, so a deployment
+  states it …" is "Since ε bounds …, a deployment states it …", the same
+  consequence.
+- **`arbitration.v1` §2.8 and `redundancy.v1` §2.5's kept events.** Each
+  list keeps its items and their order. The MUST after the kept events is
+  a paragraph of its own, its scope the three items.
+
+**No rule zk2py implements changed** in `redundancy.v1` 0.6, `timing.v1`
+0.6, `arbitration.v1` 0.4, the core's scenarios at 0.64, `alarms.v1`
+0.10, `telemetry.v1` 0.7 or `config.v1` 0.8. `desired.v1` 0.10's §2.16 is
+the one rule #935's pass changed, F-336's. No section moved, so every
+citation in zk2py's modules still leads to its rule. By the splitter, no
+prose sentence of the three profiles is over 50 words; what it counts over
+50 is table cells and bold labels joined to the sentence after them.
+
+### Live
+
+Every run used in-process zenoh-python 1.10.1 routers, each listener on a
+free loopback port, under `taskset -c 0-1`, one after another: the first
+batch on 2026-10-30 from 12:56 to 13:34, the second on 2026-10-31 from
+02:03 to 02:23. "Rust" is the reference's owner example, "zenctl" its
+tool, both black boxes.
+
+| Runner | Pairing | Result |
+|---|---|---|
+| `redundancy_scenarios` (A, B) | zk2py, zk2py | **105 of 105**, §1 to §12 and zk2py's own; §12 33, both tools |
+| | zk2py, Rust | **104 of 104** |
+| | Rust, zk2py | **103 of 103** |
+| | Rust, Rust | **101 of 102**: §7 Expected 4, the runner's order check (below); then `--only 7` **7 of 7** in each of three runs |
+| `timing_interop` | owner:reader py:py, rs:py, py:rs, rs:rs | **182 of 182**: §1 to §5, 19 a pairing; §6 beside each owner, zk2py's tool and `zenctl timing`, 7 each; face, gone, again, waits, missed and stray beside each owner, both tools, 39 each; every miss within the 10 ms bound |
+| `arbitration_scenarios` | commanders:actuators py:py, rs:py, py:rs, rs:rs | **329 of 329**: §1 to §9 and §11, 70 a pairing; §10 with zk2py's tool and `zenctl arbitration` beside both actuators, token by token |
+| `presence_scenarios` (owner, reader) | zk2py, zk2py | **95 of 95**, 1 not run (§3 step 2: neither owner offers a member's broken continuity from outside) |
+| | Rust, zk2py | **89 of 89**, 2 not run (§3 step 2; §10 step 7, the owner example takes no namespace) |
+| | zk2py, zenctl | **33 of 33**, 6 not run (what zenctl's command line cannot show: §1, §4, §6 step 2, §9 steps 4 and 5, §10 step 9; and §3 step 2) |
+| | Rust, zenctl | **32 of 32**, 7 not run (the same, and §10 step 7) |
+| `desired_scenarios` (author → target), watch and polling | zk2py → zk2py | **188 of 188** each: §1 to §8, §10 and §11 45, the edges 9, the re-mint 2, §9 29, the thirty shapes 90, **§12 9** and **`config-fed` 4** |
+| | Rust → Rust, zk2py → Rust, Rust → zk2py | **85 of 85** each, §12 and `config-fed` not run: the owner example authors `tasking.v1` and has no `config.v1` owner fed through `desired.v1` |
+| `config_scenarios`, the regression for `ConfigOwner`'s change | zk2py's owner | **51 of 51**, §1 to §14 |
+| | Rust (`--config`) | **51 of 51** |
+
+**§12, zk2py's owner.** Both branches of step 1 pass:
+- refusing, the owner raises, S sees no instance token of `lab/rf0` move,
+  `St` stays `{1, converged}`, and the device holds 20000;
+- re-minting, the device boots to its startup values and then applies
+  20000 again, S sees the new instance token declared and the old one
+  withdrawn, the new instance publishes one `applied` event, and its `St`
+  ends at 20000, `{1, converged}`. No `St` of the new instance says
+  converged while it shows 10000.
+
+Step 2 passes after either: the new instance's first `St` shows 10000 and
+no `desired`, then one `applied` event, then 20000 converged.
+
+**The one failure, a runner's.** `redundancy_scenarios` §7 Expected 4
+filtered S's deliveries of B's descriptor to those after B's interface
+token's withdrawal reached S. Once, a Rust B's marked put reached S
+first: zenoh carries the two on two priorities, and the conventions say
+"S's arrival order of a put and a token is noted, never judged". The
+runner now reads B's descriptor puts since the heal, the last one marked,
+and notes an order it sees without judging it. Three `--only 7` runs with
+the Rust pair, and one with zk2py's, passed, none noting the order.
+
+**What did not run.**
+- **§12 beside the reference.** It is the runtime's, and the reference
+  runs it as a `zenkey` test, which zk2py does not read. The owner example
+  has no `config.v1` owner fed through `desired.v1`.
+- **`timing_scenarios`,** zk2py alone, and `live_interop`: `timing_interop`
+  runs §1 to §6 in every pairing, and `live_interop`'s texts did not
+  change.
+- **`presence_scenarios --reopen`,** notes only, and §4 at 10,000 tokens.
+
+### F-347 · gap · `desired.v1` §2.16 and §2.5: a `config.v1` owner's re-mint begins a new run, and nothing says that run reads its slice
+
+> §2.16: "**A re-mint is a restart** for a `config.v1` owner (`config.v1`
+> §2.12). It returns its device to its startup values and begins a new
+> run, so §2.7's restart holds of it: it MUST act on the first version it
+> reads, the one it acted on before the re-mint included. `[Sc: §12]`"
+>
+> §2.5: "**When it seeds.** A target MUST seed at its start, and again
+> each time its author's instance token appears: a new instance, or one
+> coming back after an absence (core §8.1)."
+>
+> Scenarios §12, Expected 1, the second branch: "The new instance acts on
+> revision 1 again: S receives an `applied` event of it, and its `St`
+> shows `fraction_ppm` 20000 and `desired` `{observed_revision: 1,
+> outcome: "converged"}`."
+
+- **The gap.** A process restart reads its slice, since §2.5 seeds "at its
+  start". A re-mint is not a start, and its author's instance token does
+  not appear, so §2.5 asks no seed of it. Its subscription was declared
+  by the run before, and the version that run acted on is not delivered
+  again. So "the first version it reads" may never come.
+  - Under §12's setup, `freshness.ttl_s = 0` and the author puts once. An
+    owner that re-mints as a restart and does not seed reads nothing until
+    its author puts again. Its device runs its startup values, and its view
+    carries no `desired`, for good: the state §2.16 says the rule exists to
+    avoid. Expected 1's second branch fails.
+  - Acting on the version the run before held is no way out either: the
+    new run "holds nothing of the previous run's acts" (§2.7), and the text
+    does not say whether it keeps the version the run before held.
+- **Took:** a re-mint that is a restart is a start, for §2.5. zk2py's owner
+  seeds its slice again at the re-mint, and acts on what that seed draws
+  (`ConfigOwner.remint`).
+- **Fix:** §2.5, "A target MUST seed at its start, at a re-mint that is a
+  restart (§2.16), and again each time its author's instance token
+  appears". Or §2.16, "… begins a new run, which seeds as a start does
+  (§2.5), so §2.7's restart holds of it".
+- **Changes:** an implementation, a `config.v1` owner fed through this
+  profile that re-mints as a restart. Not the reference, which refuses the
+  re-mint, and no verdict. zk2py's §12 checks that branch.
+
+### F-348 · hard to read · `timing.v1` §2.6, "How a reader holds `meta.zid`": "So a reader can read a new instance's first samples so"
+
+> "A descriptor's put and a sample travel on two keys, and two keys'
+> samples are not ordered at a reader (measured by the second
+> implementation: a new instance's first sample handled before its
+> descriptor in a few starts in twenty). So a reader can read a new
+> instance's first samples so. A runner that checks them waits until its
+> reader holds the descriptor."
+
+- **Hard:** the closing "so" points two sentences back, past a
+  parenthesis, to "reads `unattributed` or `foreign_stamp`". Right after
+  the parenthesis it first reads as "handled before its descriptor". 0.5
+  had the same two "so"s after a comma; 0.6 made the sentence one of its
+  own, and the first "So" now opens it.
+- **Took:** since the two keys are not ordered, a reader can handle a new
+  instance's first samples before its descriptor, and read them
+  `unattributed` or `foreign_stamp`.
+- **Rewrite:** "So a reader can handle a new instance's first samples
+  before its descriptor, and read them `unattributed` or
+  `foreign_stamp`."
+- **Changes:** wording only. zk2py's `timing_live.Reader` reads them so,
+  and its runners wait for the descriptor, as the text's runner does.
+
+### F-349 · hard to read · `arbitration.v1` §2.8, "As one change": "An address withdrawn before the move ends re-admitted"
+
+> "**As one change:** an address ends withdrawn when what was kept leaves
+> it with no token known held and holds a withdrawal of it, and forgets
+> its arrivals then. An address withdrawn before the move ends re-admitted
+> when what was kept leaves a token known held there. Any other address is
+> as it was."
+
+- **Hard:**
+  - A garden path. "An address withdrawn before the move ends" reads as a
+    clause, "before the move ends", and then "re-admitted" has no verb.
+    "Ends" is the verb, "ends re-admitted", as "ends withdrawn" is in the
+    sentence before. 0.4 made the sentence one of its own, where 0.3's
+    semicolon kept it beside "ends withdrawn".
+  - "And holds a withdrawal of it": its subject is "what was kept", two
+    clauses back. It first reads as the address holding something.
+- **Took:** when the round trip stands, each address ends the move one of
+  three ways. Withdrawn, forgetting its arrivals, when what was kept leaves
+  it with no token known held and includes a withdrawal of it. Re-admitted,
+  when it was withdrawn before the move and what was kept leaves a token
+  known held there. As it was, otherwise. zk2py's `Arbiter` applies a move
+  so, and `arbitrations.json` pins it.
+- **Rewrite:** "**As one change:** each address ends the move one of three
+  ways:
+  - withdrawn, when what was kept leaves it with no token known held, and
+    what was kept holds a withdrawal of it. It forgets its arrivals then;
+  - re-admitted, when it was withdrawn before the move, and what was kept
+    leaves a token known held there;
+  - otherwise, as it was."
+- **Changes:** wording only.
+
+### F-350 · hard to read · `timing.v1` §5, the roll-up over members all set aside: "which is never a window that could not answer it"
+
+> "- when every member is set aside, and there is at least one, **not
+>   this profile's** when every one is, else **not asked**. Nobody put the
+>   question of any of them, which is never a window that could not
+>   answer it. So a run whose streams declare no lifespan leaves the
+>   lifespan's question not asked;"
+
+- **Hard:** a relative clause with no noun to attach to. "Which" stands for
+  the fact that nobody put the question, and "is never a window" equates
+  that fact with a window. The sentence means that this answer is never
+  unobservable, the answer of a window that could not answer, but it names
+  neither answer. 0.6 made it a sentence of its own, where 0.5's colon tied
+  it to "**not asked**".
+- **Took:** nobody put the question of any member, so the roll-up is not
+  asked, and never unobservable, which is what a window that could not
+  answer the question gives.
+- **Rewrite:** "… else **not asked**: nobody put the question of any of
+  them. That is never unobservable, the answer of a window that could not
+  answer it. So a run whose streams declare no lifespan leaves the
+  lifespan's question not asked;"
+- **Changes:** wording only. zk2py's `timing.rollup` answers it so (F-277),
+  and `conclusions.json` pins it.
+
+### F-351 · hard to read · `timing.v1` §2.7, "Its start": "the descriptor of every instance that read shows held"
+
+> "A tool follows the provider's presence, and holds its instances'
+> descriptors, before its window starts: the window's start is the first
+> instant both stand, its presence read after its watch session's round
+> trip (core §8.1) and the descriptor of every instance that read shows
+> held."
+
+- **Hard:**
+  - A garden path. "Every instance that read shows held" first reads with
+    "that" as a relative pronoun, "every instance that [it] read". "That
+    read" is a demonstrative, the presence read just named, and "held"
+    belongs to "the descriptor", seven words back.
+  - "Both" comes before the two things it counts, which follow as an
+    apposition with no verb.
+  - It is 0.5's sentence: 0.6 took only its label's tag out.
+- **Took:** the window starts at the first instant both stand: the tool's
+  presence read, made after its watch session's round trip; and, held by
+  the tool, the descriptor of every instance that read shows.
+- **Rewrite:** "… before its window starts. The window's start is the
+  first instant both stand:
+  - its presence read, made after its watch session's round trip (core
+    §8.1);
+  - the descriptor of every instance that read shows, which it holds."
+- **Changes:** wording only. zk2py's `timing_live.Window` opens so (F-263).
+
+### F-352 · hard to read · `redundancy.v1` scenarios, conventions, "A crash": "The silence is a proxy"
+
+> "**A crash.** Where a section kills an instance's process, the test
+> either makes the instance's links silent first, or kills it as it
+> runs. The silence is a proxy between it and its router that stops
+> forwarding and closes nothing: a lost host, seen at the lease, which
+> the instance's configuration sets short. Killed as it runs, its host's
+> kernel closes its links: seen at once. §1 and §10 run both."
+
+- **Hard:**
+  - "The silence is a proxy" makes a silence a device. It means the silence
+    is made by a proxy.
+  - "Which the instance's configuration sets short" has two antecedents in
+    reach, the host and the lease. It is the lease.
+  - "Killed as it runs, its host's kernel closes its links" dangles: the
+    kernel is not what is killed.
+  - 0.6 made three sentences of one, whose parentheses kept each way's
+    meaning beside its name.
+- **Took:** a crash is made one of two ways. A proxy between the instance
+  and its router stops forwarding and closes nothing, as a lost host does,
+  and the crash is seen at the lease, which the instance's configuration
+  sets short. Or the process is killed as it runs, its host's kernel closes
+  its links, and the crash is seen at once.
+- **Rewrite:** "**A crash.** Where a section kills an instance's process,
+  the test does it one of two ways, and §1 and §10 run both:
+  - it makes the instance's links silent first, through a proxy between it
+    and its router that stops forwarding and closes nothing. That is a lost
+    host, seen at the lease, which the instance's configuration sets short;
+  - or it kills the process as it runs. The host's kernel closes its links,
+    and the crash is seen at once."
+- **Changes:** wording only. zk2py's runner makes both (§1, §10).
+
+### F-353 · hard to read · `redundancy.v1` scenarios §1, Expected 1: "unless A took over before that GET was answered: its interface token at S within a round trip of the answer"
+
+> "S's GET at A's instance token answers A's descriptor marked standby,
+> unless A took over before that GET was answered: its interface token
+> at S within a round trip of the answer, the two riding two priorities
+> (§2.5 step 1, core §8.2 step 3)."
+
+- **Hard:**
+  - After the colon there is no verb. "Its interface token at S within a
+    round trip of the answer" is how S tells the exception, but it reads as
+    a second claim, or as what the exception causes.
+  - "The two" are the interface token and the GET's answer, a noun phrase
+    and a noun never named as a pair.
+  - §3's Expected 1 says the same of "each instance", in the same words.
+- **Took:** the GET answers the descriptor marked, but for one case: A took
+  over before the GET was answered. S tells that case by A's interface
+  token arriving within a round trip of the GET's answer. The token and the
+  answer ride two priorities, so either can arrive first.
+- **Rewrite:** "S's GET at A's instance token answers A's descriptor marked
+  standby. The one exception is a takeover before that GET was answered,
+  which S tells by A's interface token arriving within a round trip of the
+  answer: the token and the answer ride two priorities (§2.5 step 1, core
+  §8.2 step 3)." §3's Expected 1 the same, of each instance.
+- **Changes:** wording only. zk2py's runner reads it so (F-223).
+
+### F-354 · hard to read · `presence.md` §10, Expected 6: "It reads again at once and makes no read"
+
+> "When the link is cut, every address the reader followed is
+> unobservable at once, the owner's among them, from the move itself and
+> before any read, since its subscribers may not hear what moved. It
+> reads again at once and makes no read and no round trip through its
+> watch session cut off, though its reading session holds its link (a
+> read not made): the owner unobservable, never down."
+
+- **Hard:**
+  - "It reads again at once and makes no read" contradicts itself. "Reads
+    again" means a read is owed, and "makes no read" that it is not made.
+  - "Through its watch session cut off" governs both "no read" and "no
+    round trip", though a read goes through the reading session. The
+    reason, that no read is made while the watch session is cut off, is
+    left to the reader.
+  - A condition and its exception, "though its reading session holds its
+    link", sit in one clause, then a parenthesis, then a colon.
+- **Took:** at the cut, the reader owes a read at once. While its watch
+  session is cut off it asks no round trip and makes no read, though its
+  reading session still holds its link: the read is not made. The owner
+  reads unobservable, never down.
+- **Rewrite:** "It owes a read at once, and makes none. While its watch
+  session is cut off it asks no round trip and makes no read, though its
+  reading session holds its link: a read not made. The owner is
+  unobservable, never down."
+- **Changes:** wording only. zk2py's follower does so (§10 step 6).
+
+### F-355 · hard to read · `presence.md` §10, step 10: "and its own waits, each ended after 20 ms, stand in"
+
+> "Its caller asks it for its next move from a loop that also wakes every
+> 20 ms, which may drop the call in flight. A reader whose reads do not
+> run on its caller's call has none to drop, and its own waits, each
+> ended after 20 ms, stand in."
+
+- **Hard:**
+  - "Stand in" has no object. It means "stand in for the dropped calls".
+  - "Has none to drop" leaves "call" to the sentence before, and "none"
+    reads first as "no read".
+  - "Ended" means given up on by the reader, what the step's first half
+    calls "giving up on".
+- **Took:** a reader whose reads run on tasks of their own has no call in
+  flight for its caller to drop. For it, its own waits, each given up after
+  20 ms, play the part of the dropped calls.
+- **Rewrite:** "A reader whose reads do not run on its caller's call has no
+  call for it to drop. Its own waits, each given up after 20 ms, stand in
+  for the dropped calls."
+- **Changes:** wording only. zk2py's reader is of that kind
+  (`presence.PresenceFollower`).
+
+### F-356 · hard to read · `presence.md` §10, step 6: "has run out under it. How many is the reader's own"
+
+> "By then every round trip the reader asked before that seed has run out
+> under it. How many is the reader's own: two for one that makes a round
+> trip at its start and another before its seed, one for one whose
+> start's round trip is its seed's."
+
+- **Hard:**
+  - "Under it" is the 300 ms interests timeout, named at the end of the
+    sentence before, past "its first round trip".
+  - "How many is the reader's own" has a question word for its subject,
+    and "own" for "its choice". 0.64 made it a sentence of its own, where
+    0.63 held it in a parenthesis after a tag.
+  - "One whose start's round trip is its seed's": one round trip that
+    serves both.
+- **Took:** by then every round trip the reader asked before that seed has
+  run out under the 300 ms interests timeout. How many it asked is up to
+  the reader: two, if it asks one at its start and another before its seed;
+  one, if its start's round trip is also its seed's.
+- **Rewrite:** "By then every round trip the reader asked before that seed
+  has run out under the 300 ms interests timeout. How many that is depends
+  on the reader: two for one that asks a round trip at its start and
+  another before its seed, and one for one whose start's round trip serves
+  its seed too."
+- **Changes:** wording only.
+
+### F-357 · hard to read · `profiles/README.md`, "A profile that needs the core to change", `desired.v1`: "Nor did a stamp's id that is never 0, which is its own §2.4's"
+
+> "- `desired.v1`: that Appendix D publishes its vocabulary,
+>   `target_param`, and retires the interim `target`. Its author's restart
+>   needed no core change: it puts its documents again from its new
+>   instance, as `alarms.v1`'s owner does, and its targets adopt them
+>   without an act. Nor did a stamp's id that is never 0, which is its own
+>   §2.4's;"
+
+- **Hard:** a verb left out and a possessive with no noun. "Nor did" stands
+  for "nor did … need a core change", from the sentence before. "Which is
+  its own §2.4's" stands for "a rule that is `desired.v1`'s own, its
+  §2.4's", and "its" has two antecedents, the stamp's id and the profile.
+  0.64 wrote it, for 0.63's "Its text 0.2 needed none either: a stamp's id
+  that is never 0 is its own §2.4's."
+- **Took:** `desired.v1`'s rule that a stamp's id is never 0 needed no core
+  change: it is `desired.v1`'s own rule, in its §2.4.
+- **Rewrite:** "A stamp's id that is never 0 needed none either: that rule
+  is `desired.v1`'s own, in its §2.4;"
+- **Changes:** wording only. The index has no version, so its line is the
+  core's.
+
+### The texts in zk2py
+
+- **`desired.v1` §2.16, implemented** (`config.py`). `ConfigOwner(fed=(slice,
+  author))` is a `config.v1` owner fed through `desired.v1`: it subscribes
+  to its slice, then seeds by S4's GET, and seeds again at each appearance
+  of its author's instance token, read every 500 ms on its own session. It
+  judges every version with `desired.TargetRole`: once per version in a
+  run, a document equal to the last one acted on adopted. It acts through
+  `Core.desire`, and on a delete through `Core.revert`, which sets back the
+  parameters named by the documents it acted on in this run, one `set` per
+  group in bytewise order, a refused document counting for none, and puts
+  no `desired` after it. `Core.desired_end` says how each act ended, and
+  the role is told. `ConfigOwner.remint()` re-mints as a restart, or with
+  `remint="refuse"` refuses, as the reference does. A re-mint returns the
+  device to its startup values, puts the new instance's view and status
+  before its tokens, makes before it breaks (core §8.1), and begins a new
+  run that seeds (F-347's reading).
+- **Not implemented** of §2.16 and of its owner: a watch session (the
+  owner polls), an archive's last-known, and the reference's "wait that
+  cannot end" (zk2py's owner waits on a pending change until it ends, which
+  its deadline bounds).
+- **`desired_scenarios`:** §12, both branches, and `config-fed`, zk2py's
+  own (an equal document adopted, a reach document refused whole, a
+  delete's revert).
+- **`redundancy_scenarios` §7:** the order check, above.
+- **`readings`: 686, up from 673.** Thirteen, in `_round88_readings`:
+  - each text at its version or later, and #935's three changelogs and
+    core 0.64's entry saying no rule changed;
+  - `desired.v1` 0.10's §2.16 bullet, its §0 and §2.7 exceptions,
+    `config.v1` 0.8's §2.18 sentences and §12, as the texts state them;
+  - F-337 to F-346's rewrites as they read;
+  - §12's contracts, `interop/desired/configs.v1` and `zk2py_configured.v1`,
+    with no finding and the reference CLI's fingerprints;
+  - `Core.desire` and `Core.revert`: converged, then reverted, the
+    parameter back to 10000 by one applied `set`, no `desired` after it;
+  - the bound version delivered again under its own stamp: the same
+    version within a run, acted on after a restart;
+  - the reference's figures `arbitration.v1` 0.4 gave sentences of their
+    own (a read 0.1 s after a withdrawal, a first put 500 ms after the
+    tokens), held by zk2py's actuator and commander;
+  - after review-bot on PR #963, the fed owner, with no session: a refused
+    document, then an act that raises (failed, code `apply`, counted), each
+    leaving the role free for the next version, which is acted on.
+- **After review-bot on PR #963,** the feed never ends silently. A read or
+  a seed that raises is counted (`fed_errors`) and the loop goes on, the
+  re-mint's seed is made again as the poll's is, an act that raises is
+  `failed`, code `apply`, and an act's end reaches the role even when a put
+  raises (`_after` hands it on in a `finally`). A refused document never
+  left the role running: `Core.desire` sets `desired_end` and clears its
+  wait before `_after` calls `_fed_check`. `config-fed` now checks it, and
+  §12 that neither owner's feed raised: zk2py → zk2py 16 of 16 (§12 11,
+  `config-fed` 5).
+- **The modules' headers** (`config`, `desired`, `desired_scenarios`,
+  `redundancy`, `timing`, `arbitration`) say they were read again.
+
+**`just py-conformance`: 3643 of 3643.**
+
+### Counts at redundancy.v1 0.6, timing.v1 0.6, arbitration.v1 0.4, desired.v1 0.10 and core 0.64
+
+357 entries.
+- **Open: F-347 to F-357,** eleven. None is a blocker.
+  - **Gap, one: F-347.** A `config.v1` owner's re-mint begins a new run,
+    and nothing says that run reads its slice. It changes an
+    implementation that re-mints as a restart, not the reference, and no
+    verdict.
+  - **Hard to read, ten:** F-348 to F-357. Each has a rewrite that keeps
+    its keyword, condition, scope and evidence, so each is wording only.
+    Six are in sentences #935's fifth pass wrote or split: F-348, F-349,
+    F-350, F-352, F-356 and F-357. The other four were there before it,
+    the pass taking only a tag out (F-351, F-353, F-354, F-355).
+- **Resolved: F-336 to F-346,** eleven.
+- **#935's fifth pass changed no rule** in `redundancy.v1`, `timing.v1`,
+  `arbitration.v1` or the core's scenarios. Round 87's answers changed one,
+  `desired.v1` 0.10's §2.16, which says what F-336 asked.

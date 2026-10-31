@@ -2,7 +2,7 @@
 (#609, round 55)::
 
     python -m zk2py.desired_scenarios [--author zk2py|<owner exe>] [--target zk2py|<owner exe>]
-        [--only 1|2|…|11|edges|remint|tool-shapes]... [--poll] [--zenctl PATH | --no-zenctl]
+        [--only 1|2|…|12|edges|config-fed|remint|tool-shapes]... [--poll] [--zenctl PATH | --no-zenctl]
 
 Each party is a process driven as a black box through the owner example's
 interface (``owner --help``: its ``--desired-*`` options and ``desired …``
@@ -15,6 +15,13 @@ timestamp it sets), and a stand-in archive (core §4.4) for §7 and §10.
 
 Targets follow their author on a watch session (``--desired-watch``, core
 §8.1, 0.37) unless ``--poll``. Exit 0 when every check passes.
+
+§12 (text 0.10, F-336) is the runtime's, and runs in process with zk2py's
+own parties: a :class:`zk2py.config.ConfigOwner` fed through this profile,
+once refusing the re-mint and once re-minting as a restart. With the owner
+example as either party it is not run, and says so: the example has no
+``config.v1`` owner fed through ``desired.v1``. ``config-fed`` is zk2py's
+own, the rest of v1.md §2.16 that owner does.
 """
 
 from __future__ import annotations
@@ -1583,9 +1590,265 @@ def section11(ctx: Ctx) -> None:
         bus.close()
 
 
+# -- §12: a config.v1 owner's re-mint is a restart (text 0.10, F-336) -----------------------
+
+RF0 = "lab/rf0"
+ST12 = "zk2/lab/rf0/config.v1/state/status"
+EV12 = "zk2/lab/rf0/config.v1/events/change/"
+DESIRED12 = {"revision": 1, "values": {"duty": {"fraction_ppm": 20000}}}
+
+
+def _configs_key() -> str:
+    """§12's slice: ``configs/{system}/{service}`` of ``lab/author``'s
+    ``configs.v1``, ``{system} = self.system`` and ``{service} =
+    self.service`` (v1.md §2.3)."""
+    from . import desired
+
+    return desired.slice_key(AUTHOR, "configs.v1", False, "configs/{system}/{service}",
+                             {"system": "lab", "service": "rf0"})
+
+
+def _rf0(bus: Bus, remint: str, device: Any = None, overlay: Any = None, events_at: Any = None) -> Any:
+    """``config.v1``'s scenarios' owner ``lab/rf0`` (its schema, startup
+    values, floor and apply delay: ``config_scenarios``'), fed through this
+    profile (v1.md §2.16): its role ``configs`` bound to ``lab/author``,
+    declared by ``interop/desired/zk2py_configured.v1``."""
+    from . import config as cf
+    from .config_scenarios import STARTUP, rf_schema
+    from .contract import load_contract
+
+    configured = load_contract(REPO / "impl/python/interop/desired/zk2py_configured.v1.toml", spec_dir=REPO / "spec")
+    o = cf.ConfigOwner("lab", "rf0", schema=rf_schema(), startup=STARTUP, floor_s=10, apply_after_s=1.0,
+                       connect=bus.ep1, overlay=overlay, device=device, events_at=events_at,
+                       contracts=[configured], fed=(_configs_key(), AUTHOR), remint=remint,
+                       bindings={"configs": [AUTHOR]},
+                       params={"configs": {"system": "self.system", "service": "self.service"}})
+    o.start()
+    return o
+
+
+def _st12(bus: Bus, t: float) -> list[dict[str, Any]]:
+    return [json.loads(g[3]) for g in bus.since(t, ST12) if g[2] == "put"]
+
+
+def _applied12(bus: Bus, t: float, instance: str) -> list[dict[str, Any]]:
+    out = []
+    for g in bus.since(t):
+        if g[1].startswith(EV12) and g[2] == "put":
+            ev = json.loads(g[3])
+            if ev.get("instance") == instance and ev.get("outcome") == "applied":
+                out.append(ev)
+    return out
+
+
+def _duty(doc: Any) -> Any:
+    return ((doc or {}).get("values") or {}).get("duty", {}).get("fraction_ppm")
+
+
+def _tokens12(bus: Bus, t: float) -> list[tuple[str, str]]:
+    with bus.lock:
+        return [(kind, key) for at, kind, key in bus.tokens
+                if at >= t and key.startswith(f"zk2/{RF0}/@zk/instance/")]
+
+
+def section12(ctx: Ctx) -> None:
+    """scenarios.md §12 (text 0.10, F-336), "A ``config.v1`` owner's re-mint
+    is a restart": the runtime's, so zk2py's own owner, in process, a
+    :class:`zk2py.config.ConfigOwner` fed through this profile (the owner
+    example has no such mode: the reference runs §12 as a ``zenkey`` test).
+    Step 1 runs twice, once for each branch of its Expected: an owner that
+    refuses the re-mint, as the reference does, and one that re-mints as a
+    restart. The author is a zk2py owner of ``interop/desired/configs.v1``,
+    its document put once, stamped. S is the Bus's: every delivery under
+    ``zk2/lab/**`` and the instance tokens."""
+    rp = ctx.report
+    if ctx.target_impl != "zk2py" or ctx.author_impl != "zk2py":
+        rp.cannot(ctx.name("§12 a config.v1 owner's re-mint is a restart"),
+                  "the runtime's, run with zk2py's config.v1 owner alone: the owner example has no config.v1 "
+                  "owner fed through desired.v1")
+        return
+    from . import config as cf
+    from .contract import load_contract
+    from .owner import Owner, OwnerRefused
+
+    for branch in ("refuse", "restart"):
+        sec = ctx.name(f"§12 a config.v1 owner's re-mint is a restart ({branch})")
+        bus = Bus()
+        author = None
+        owners: list[Any] = []
+        try:
+            configs = load_contract(REPO / "impl/python/interop/desired/configs.v1.toml", spec_dir=REPO / "spec")
+            author = Owner("lab", "author", [configs], connect=bus.ep1)
+            author.start()
+            author.set_state(_configs_key(), cf.encode_json(DESIRED12))
+            o = _rf0(bus, branch)
+            owners.append(o)
+            converged = {"observed_revision": 1, "outcome": "converged"}
+
+            def settled(own: Any) -> bool:
+                st = bus.get_json(ST12)[0]
+                return (st or {}).get("instance") == own.instance and (st or {}).get("desired") == converged \
+                    and _duty(st) == 20000 and own.device.values.get("duty", {}).get("fraction_ppm") == 20000
+
+            ok = _wait(lambda: settled(o), 10.0, 0.1)
+            rp.check(sec, "setup: converged: St's desired is {observed_revision 1, converged}, and the device "
+                          "holds fraction_ppm 20000", ok, f"St {bus.get_json(ST12)[0]}")
+            if not ok:
+                continue
+            old = o.instance
+            t1 = time.monotonic()
+            n0 = len(o.device.log)
+            applies = len(o.device.acts("apply"))
+            if branch == "refuse":
+                try:
+                    o.remint()
+                    refused = ""
+                except OwnerRefused as e:
+                    refused = str(e)
+                time.sleep(2.0)
+                st = bus.get_json(ST12)[0]
+                rp.check(sec, "step 1: the owner refuses the re-mint (config.v1 §2.12): S sees no instance token of "
+                              "lab/rf0 withdrawn or declared, St still shows desired {1, converged}, and the "
+                              "device holds 20000",
+                         bool(refused) and not _tokens12(bus, t1) and (st or {}).get("instance") == old
+                         and (st or {}).get("desired") == converged
+                         and o.device.values["duty"]["fraction_ppm"] == 20000
+                         and len(o.device.acts("apply")) == applies,
+                         f"refused {refused!r}; tokens {_tokens12(bus, t1)}; St {st}")
+            else:
+                new = o.remint()
+                ok = _wait(lambda: settled(o) and bool(_applied12(bus, t1, new)), 10.0, 0.1)
+                order = [x[1] for x in o.device.log[n0:]]
+                toks = _tokens12(bus, t1)
+                sts = [d for d in _st12(bus, t1) if d.get("instance") == new]
+                wrong = [d for d in sts if d.get("desired") == converged and _duty(d) != 20000]
+                rp.check(sec, "step 1: it re-mints as a restart: its device returns to fraction_ppm 10000 first "
+                              "(a boot, then the apply); S sees the old instance token withdrawn and a new one "
+                              "declared; the new instance acts on revision 1 again: an applied event of it, and "
+                              "St shows fraction_ppm 20000 and desired {1, converged}",
+                         ok and order[:1] == ["boot"] and "apply" in order
+                         and ("delete", f"zk2/{RF0}/@zk/instance/{old}") in toks
+                         and ("put", f"zk2/{RF0}/@zk/instance/{new}") in toks,
+                         f"device acts {order}; tokens {toks}; events {len(_applied12(bus, t1, new))}; "
+                         f"St {bus.get_json(ST12)[0]}")
+                rp.check(sec, "step 1: no St of the new instance shows desired converged on revision 1 while it "
+                              "says fraction_ppm 10000, and the device never held 10000 under a converged report",
+                         bool(sts) and not wrong, f"{len(sts)} St of the new instance; wrong {wrong}")
+            # Step 2: the owner's process stops, and starts again.
+            last = o.instance
+            t2 = time.monotonic()
+            o.close()
+            owners.remove(o)
+            time.sleep(0.5)
+            o2 = _rf0(bus, branch, device=o.device, overlay=o.core.overlay, events_at=o.core.events_at)
+            owners.append(o2)
+            ok = _wait(lambda: settled(o2) and bool(_applied12(bus, t2, o2.instance)), 10.0, 0.1)
+            toks = _tokens12(bus, t2)
+            sts = [d for d in _st12(bus, t2) if d.get("instance") == o2.instance]
+            first = sts[0] if sts else None
+            rp.check(sec, "step 2: S sees the old instance token withdrawn and a new one declared; the new "
+                          "instance's first St shows fraction_ppm 10000 and no desired (the restart rolled the "
+                          "document's value back)",
+                     ("delete", f"zk2/{RF0}/@zk/instance/{last}") in toks
+                     and ("put", f"zk2/{RF0}/@zk/instance/{o2.instance}") in toks
+                     and first is not None and _duty(first) == 10000 and "desired" not in first,
+                     f"tokens {toks}; first St {first}")
+            rp.check(sec, "the feed raised nothing: no read, seed or act of the owners failed",
+                     o.fed_errors == 0 and o2.fed_errors == 0, f"{o.fed_last_error}; {o2.fed_last_error}")
+            rp.check(sec, "step 2: the new run acts on revision 1, the version the previous run acted on: an "
+                          "applied event of the new instance, St shows fraction_ppm 20000 and desired "
+                          "{1, converged}, and the device holds 20000",
+                     ok and len(_applied12(bus, t2, o2.instance)) == 1,
+                     f"events {_applied12(bus, t2, o2.instance)}; St {bus.get_json(ST12)[0]}; "
+                     f"device {o2.device.values.get('duty')}")
+        finally:
+            for x in owners:
+                try:
+                    x.close()
+                except Exception:  # noqa: BLE001 - closing anyway
+                    pass
+            if author is not None:
+                author.close()
+            bus.close()
+
+
+def section_config_fed(ctx: Ctx) -> None:
+    """zk2py's own, beyond scenarios.md: the rest of v1.md §2.16 that zk2py's
+    config.v1 owner fed through this profile does, on §12's bus and parties.
+    1. revision 1 put: acted on, converged;
+    2. the same document put again under a new stamp: adopted, no act, no
+       event (§2.7, §2.16);
+    3. a document naming a reach group: refused whole, `{reach, radio}`, the
+       device unchanged;
+    4. a delete: "each parameter named by a document it acted on in this run
+       goes back to its startup value", the refused document counting for
+       none: `fraction_ppm` back to 10000 by one `set`, `frequency_hz`
+       untouched, and the view and status with no `desired`."""
+    rp = ctx.report
+    sec = ctx.name("config.v1 fed through desired.v1 (§2.16)")
+    if ctx.target_impl != "zk2py" or ctx.author_impl != "zk2py":
+        rp.cannot(sec, "zk2py's config.v1 owner alone, as §12")
+        return
+    from . import config as cf
+    from .contract import load_contract
+    from .owner import Owner
+
+    bus = Bus()
+    author = None
+    o = None
+    try:
+        configs = load_contract(REPO / "impl/python/interop/desired/configs.v1.toml", spec_dir=REPO / "spec")
+        author = Owner("lab", "author", [configs], connect=bus.ep1)
+        author.start()
+        key = _configs_key()
+        author.set_state(key, cf.encode_json(DESIRED12))
+        o = _rf0(bus, "restart")
+        conv = {"observed_revision": 1, "outcome": "converged"}
+        ok = _wait(lambda: (bus.get_json(ST12)[0] or {}).get("desired") == conv, 10.0, 0.1)
+        acts = len(o.fed_acts)
+        t = time.monotonic()
+        rp.check(sec, "1. revision 1 acted on and converged",
+                 ok and acts == 1 and _duty(bus.get_json(ST12)[0]) == 20000,
+                 f"acts {o.fed_acts}; St {bus.get_json(ST12)[0]}")
+        author.set_state(key, cf.encode_json(DESIRED12))
+        time.sleep(1.5)
+        rp.check(sec, "2. the same document under a new stamp is adopted: no act and no event",
+                 len(o.fed_acts) == acts and not [g for g in bus.since(t) if g[1].startswith(EV12)]
+                 and (bus.get_json(ST12)[0] or {}).get("desired") == conv, f"acts {o.fed_acts}")
+        refused = {"observed_revision": 2, "outcome": "refused", "refusal": {"code": "reach", "group": "radio"}}
+        author.set_state(key, cf.encode_json({"revision": 2, "values": {"duty": {"fraction_ppm": 30000},
+                                                                         "radio": {"frequency_hz": 869525000}}}))
+        ok = _wait(lambda: (bus.get_json(ST12)[0] or {}).get("desired") == refused, 5.0, 0.1)
+        rp.check(sec, "3. a document naming a reach group is refused whole: {reach, radio}, the device unchanged",
+                 ok and o.device.values["duty"]["fraction_ppm"] == 20000, f"St {bus.get_json(ST12)[0]}")
+        rp.check(sec, "3. the refusal leaves the role free for the next version: no act running, nothing failed "
+                      "in the feed (review-bot on PR #963)",
+                 not o._fed_running and not o.role.running and o.fed_errors == 0,
+                 f"running {o._fed_running}/{o.role.running}; errors {o.fed_errors} {o.fed_last_error}")
+        t = time.monotonic()
+        author.delete_state(key)
+        ok = _wait(lambda: "desired" not in (bus.get_json(ST12)[0] or {"desired": 1})
+                   and o.device.values["duty"]["fraction_ppm"] == 10000, 5.0, 0.1)
+        st = bus.get_json(ST12)[0]
+        evs = [json.loads(g[3]) for g in bus.since(t) if g[1].startswith(EV12) and g[2] == "put"]
+        rp.check(sec, "4. a delete reverts what revision 1 named: fraction_ppm back to 10000 by one applied set, "
+                      "frequency_hz untouched (the refused revision 2 counts for none), and St with no desired",
+                 ok and _duty(st) == 10000 and (st or {}).get("values", {}).get("radio", {}).get("frequency_hz")
+                 == 868100000 and len(evs) == 1 and evs[0]["edits"] == [{"group": "duty", "parameter": "fraction_ppm",
+                                                                         "old": 20000, "new": 10000}],
+                 f"St {st}; events {evs}; acts {o.fed_acts[-1:]}")
+    finally:
+        if o is not None:
+            o.close()
+        if author is not None:
+            author.close()
+        bus.close()
+
+
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
             "7": section7, "8": section8, "9": section9, "10": section10, "edges": section_edges,
-            "11": section11, "remint": section_remint, "tool-shapes": section_tool_shapes}
+            "11": section11, "12": section12, "config-fed": section_config_fed, "remint": section_remint,
+            "tool-shapes": section_tool_shapes}
 
 
 def main(argv: list[str] | None = None) -> int:

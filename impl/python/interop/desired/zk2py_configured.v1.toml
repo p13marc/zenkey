@@ -1,0 +1,14 @@
+# zk2py_configured.v1.toml: desired.v1 scenarios.md section 12 (#609, round
+# 88). zk2py's config.v1 owner lab/rf0 implements it beside config.v1, so
+# that its descriptor carries the role configs, bound to lab/author with
+# {system} = self.system and {service} = self.service (desired.v1 section
+# 2.3, 2.16). It exposes nothing. It must load with no finding at all.
+[interface]
+name    = "zk2py_configured"
+major   = 1
+minor   = 0
+summary = "a config.v1 owner's role on its author's desired configuration"
+
+[requires.configs]
+interface = "configs.v1"
+resources = ["configs/{system}/{service}"]

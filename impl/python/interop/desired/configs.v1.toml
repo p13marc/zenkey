@@ -1,0 +1,23 @@
+# configs.v1.toml: desired.v1 scenarios.md section 12 (#609, round 88), the
+# author lab/author's one resource, a config.v1 DesiredConfig per target,
+# keyed by its target (desired.v1 section 2.16). Written from the section's
+# setup: configs/{system}/{service}, state of config.v1's DesiredConfig
+# (config.v1 section 3, copied into ../config/schemas/desired.json, as
+# zk2py_author.v1 copies it), desired.target_param = ["system", "service"]
+# and freshness.ttl_s = 0. It must load with no finding at all.
+[interface]
+name    = "configs"
+major   = 1
+minor   = 0
+uses    = ["desired.v1", "freshness.v1"]
+summary = "a config.v1 server's desired configuration, one document per target"
+
+[schemas]
+jsonschema = ["../config/schemas/desired.json"]
+
+[resources."configs/{system}/{service}"]
+kind        = "state"
+type        = "json:DesiredConfig"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

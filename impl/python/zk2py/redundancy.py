@@ -6,6 +6,11 @@ entry's mark (§2.4, §2.14), one read's election (§2.5, §2.11), a heal
 (§2.9), the state machine a runtime drives (§2.5 to §2.11, the fixture
 ``lifecycle.json``), and a tool's four questions (§2.15, §5).
 :mod:`zk2py.redundancy_live` drives :class:`Machine` on a bus.
+
+Read again against text 0.6 (#609, round 88; #935's fifth part): its
+inline history taken out and nine long sentences split, no rule changed,
+and none of this module's rules moved. §2.6's and §2.9's orders now cite
+core §8.2, "Serving later, and stopping", for core 0.39.
 """
 
 from __future__ import annotations

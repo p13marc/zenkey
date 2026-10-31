@@ -3,7 +3,9 @@
 0.3; ``spec/profiles/arbitration/v1.md``).
 
 Read cold from the text, its fixtures and its scenarios alone (#609, round
-77; text 0.2 in round 78, text 0.3 in round 79). The session-free half:
+77; text 0.2 in round 78, text 0.3 in round 79; text 0.4 in round 88, its
+inline history taken out and fifteen long sentences split, no rule
+changed, and none of this module's rules moved). The session-free half:
 - :func:`declaration` reads one role against the revision of its required
   interface held (§2.2, §2.3), as ``conformance/declarations.json`` does:
   not arbitrated, arbitrated (its policy, its stream, its deadline and
