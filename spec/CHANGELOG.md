@@ -146,6 +146,9 @@ after its seed. The reference answers so:
   and 52, 24 of them a reader's both times; implementation 34 and 34. The
   two §8.4 MUSTs are the observer's two. There are 71 rule ids before and
   after.
+- **Rules citing none:** 23 before, 20 after. Of the MUSTs, 11 and 9: S7's
+  two consumer MUSTs, which #965 lists, cite `scenarios/state.md` §7 now.
+  The drift SHOULD is the third.
 
 **`spec/README.md`'s glossary (F-388),** eight definitions.
 - **The finding's seven:** epoch, complete read, seed, history, envelope,
