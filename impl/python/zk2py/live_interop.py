@@ -3382,15 +3382,16 @@ def run_python_seed(report: Report, exe: Path) -> None:
 
 
 def run_python_s7(report: Report, exe: Path) -> None:
-    """``state.md`` §7 step 2 (S7, core §4.3; 0.67, F-368) with the owner
+    """``state.md`` §7 step 2 (S7, core §4.3; 0.68, F-382, F-383) with the owner
     example as the owner and zk2py's late joiners as the consumer and the
     tool: the owner example puts ``items/a`` of ``budget.v1``, both seed it,
     and it restarts with no record, a new instance on a new session, its
     clock 5 s behind (``--clock-offset-ms -5000``, its documented "clock's
     simulated offset"), and puts ``items/a`` again. "The consumer sees a new
     timestamp id, accepts rev 11, and restarts its ordering": zk2py's
-    consumer orders by S7 once its seed's GET ended (:func:`zk2py.seed.follows`),
-    and its tool's late joiner, by §4.2's merge, is the control."""
+    consumer orders by S7 from its first value (:func:`zk2py.seed.follows`),
+    and its tool's late joiner, by §4.2's merge for as long as it follows
+    (observer §4.1), is the control. Then :func:`run_python_s7_inside`."""
     from . import live
     from . import seed as sd
 
@@ -3399,7 +3400,7 @@ def run_python_s7(report: Report, exe: Path) -> None:
     rusts: list[Owner] = []
     joiners: list[Any] = []
     try:
-        run = "core 0.67 S7: state.md §7 step 2, a new epoch behind, after a late joiner's seed (budget.v1 items/a)"
+        run = "core 0.68 S7: state.md §7 step 2, a new epoch behind, after a late joiner's seed (budget.v1 items/a)"
         first = Owner(exe, "lab/s7", [REPO / BUDGET_V1], connect=ep)
         rusts.append(first)
         if not report.check(run, "the owner example starts behind R1", first.wait_for("ready ", 120) is not None,
@@ -3433,12 +3434,13 @@ def run_python_s7(report: Report, exe: Path) -> None:
                      bool(news) and s10 is not None and news[0].stamp.time < s10.stamp.time,
                      f"{put11!r}; old {s10.stamp if s10 else None}, new {[str(x.stamp) for x in news]}")
         got = lc.view().get(f"{base}/a")
-        report.check(run, "expected 2: the consumer accepts it, by S7's consumer rule after its seed",
+        report.check(run, "expected 2: the consumer accepts it, by S7's consumer rule from its first value",
                      bool(news) and got is not None and got.stamp == news[0].stamp
                      and [(x.outcome, x.rule) for x in news] == [("kept", "S7")],
                      f"held {got.stamp if got else None}; {[(x.outcome, x.rule) for x in news]}")
         held = lt.view().get(f"{base}/a")
-        report.check(run, "the control: a tool's late joiner, §4.2's merge, keeps the old epoch's later time",
+        report.check(run, "expected 2: the tool's late joiner, §4.2's merge for as long as it follows (observer "
+                          "§4.1), keeps the old epoch's later time",
                      s10 is not None and held is not None and held.stamp == s10.stamp,
                      f"held {held.stamp if held else None}")
     finally:
@@ -3446,6 +3448,97 @@ def run_python_s7(report: Report, exe: Path) -> None:
             j.close()
         for o in rusts:
             o.close()
+        tool.close()
+        r1.close()
+
+
+def run_python_s7_inside(report: Report, exe: Path) -> None:
+    """``state.md`` §7 step 2's new epoch *inside* a late joiner's seed
+    (core 0.68, F-382; round 91's F-393), over the owner example: it puts
+    ``items/a``, a second zk2py session holds a non-complete queryable on
+    the items so that each late joiner's GET stays open after the owner
+    example has answered, and the owner example restarts with no record on
+    the host's clock and puts ``items/a`` again. "`Latest` consolidation …
+    delivers at query completion" (core §4.1), so the first instance's reply
+    reaches each late joiner after the new instance's live put. The
+    consumer, by S7 from its first value, keeps the reply, the old epoch's;
+    the tool, by the merge, the later time, the new epoch's."""
+    import zenoh
+
+    from . import live
+    from . import seed as sd
+
+    r1, ep, _ = _r1()
+    tool, helper = live.open_client(ep), live.open_client(ep)
+    rusts: list[Owner] = []
+    joiners: list[Any] = []
+    try:
+        run = "core 0.68 S7: state.md §7 step 2, a new epoch on the host's clock inside a late joiner's seed"
+        first = Owner(exe, "lab/s7i", [REPO / BUDGET_V1], connect=ep)
+        rusts.append(first)
+        if not report.check(run, "the owner example starts behind R1", first.wait_for("ready ", 120) is not None,
+                            str(first.stderr[-1:])):
+            return
+        base = "zk2/lab/s7i/budget.v1/state/items"
+        put10 = first.command("put budget.v1 state/items/{item} a")
+
+        def hold(query: Any) -> None:  # answers nothing; its drop is the GET's final reply
+            threading.Timer(25.0, query.drop).start()
+
+        q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(hold), complete=False)
+        time.sleep(0.5)
+        lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=30.0)
+        lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=30.0)
+        joiners += [lc, lt]
+        for j in joiners:
+            j.start()
+        time.sleep(1.0)  # the owner example answers both GETs
+        report.check(run, "both GETs stay open on the second queryable, nothing delivered yet",
+                     bool(put10) and not any(j.seed.ended or j.applied for j in joiners),
+                     f"{put10!r}; {[(j.seed.ended, len(j.applied)) for j in joiners]}")
+        first.close()
+        rusts.remove(first)
+        second = Owner(exe, "lab/s7i", [REPO / BUDGET_V1], connect=ep)
+        rusts.append(second)
+        if not report.check(run, "it restarts with no record, on the host's clock",
+                            second.wait_for("ready ", 120) is not None, str(second.stderr[-1:])):
+            return
+        put11 = second.command("put budget.v1 state/items/{item} a")
+        time.sleep(0.6)
+        lives = [[a for a in j.applied if a.via == "live"] for j in joiners]
+        report.check(run, "the new instance's put arrives live inside both seeds, before any reply",
+                     bool(put11) and all(len(x) == 1 for x in lives) and not any(j.seed.ended for j in joiners)
+                     and not any(a.via == "reply" for j in joiners for a in j.applied),
+                     f"{put11!r}; {[[str(a.stamp) for a in x] for x in lives]}")
+        ended = all(j.wait(40.0) for j in joiners)
+        replies = [[a for a in j.applied if a.via == "reply"] for j in joiners]
+        new = lives[0][0].stamp if lives[0] else None
+        old = replies[0][0].stamp if replies[0] else None
+        report.check(run, "the GET ends and the first instance's reply arrives last, under the old id, its time "
+                          "below the new put's",
+                     ended and all(len(x) == 1 for x in replies) and new is not None and old is not None
+                     and old.id != new.id and old.time < new.time,
+                     f"ended {ended}; old {old}, new {new}")
+        got = lc.view().get(f"{base}/a")
+        report.check(run, "core §4.2, §4.3 (0.68): the consumer accepts the reply under the old id, which arrived "
+                          "last: the old epoch's value, though the new epoch's time is later (F-393)",
+                     got is not None and old is not None and got.stamp == old
+                     and [(a.via, a.outcome) for a in lc.applied] == [("live", "kept"), ("reply", "kept")],
+                     f"held {got.stamp if got else None}; {[(a.via, a.outcome) for a in lc.applied]}")
+        held = lt.view().get(f"{base}/a")
+        report.check(run, "observer §4.1 (0.10): the tool keeps the merge: the new epoch's later time",
+                     held is not None and new is not None and held.stamp == new,
+                     f"held {held.stamp if held else None}; {[(a.via, a.outcome) for a in lt.applied]}")
+        try:
+            q.undeclare()
+        except Exception:  # noqa: BLE001 - closing anyway
+            pass
+    finally:
+        for j in joiners:
+            j.close()
+        for o in rusts:
+            o.close()
+        helper.close()
         tool.close()
         r1.close()
 
@@ -3488,7 +3581,7 @@ def main(argv: list[str] | None = None) -> int:
         "health": lambda r: run_python_health(r, args.owner, args.consume),
         "budget": lambda r: run_python_budget(r, args.owner),
         "seed": lambda r: run_python_seed(r, args.owner),
-        "s7": lambda r: run_python_s7(r, args.owner),
+        "s7": lambda r: (run_python_s7(r, args.owner), run_python_s7_inside(r, args.owner)),
         "config": lambda r: run_python_config(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
         "security4": lambda r: _run_security4(r, args.zenctl),
