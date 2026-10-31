@@ -1,0 +1,34 @@
+# zk2py's own contract for round 89's walk of RULES.md (#609, #926): the
+# owner rules zk2py's owner now keeps, read with no session.
+# - core §5.1 "Beside replicas": `sync` is a replicated operation, `admin`
+#   an exclusive optional one, which an instance exposing `sync` alone
+#   declares no `unavailable` queryable for;
+# - core O6: `scan` declares a summary, sent once per replier;
+# - core §5.2: no operation here declares an `error` type, so no envelope
+#   carries a detail.
+# It must load with no finding at all.
+[interface]
+name  = "zk2py_replica"
+major = 1
+minor = 0
+
+[resources.sync]
+kind       = "operation"
+request    = { raw = "application/octet-stream" }
+response   = { raw = "application/octet-stream" }
+idempotent = true
+serving    = "replicated"
+
+[resources.admin]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
+optional = true
+
+[resources.scan]
+kind       = "operation"
+request    = { raw = "application/octet-stream" }
+response   = { raw = "text/plain" }
+replies    = "many"
+summary    = { raw = "text/plain" }
+optional   = true

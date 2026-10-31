@@ -35,6 +35,9 @@ session's delivery. A write that fails (a closed pipe, any ``OSError``)
 ends the run: the tool says on standard error that the stream was cut and
 exits 2, never 0 on a truncated stream (review-bot on PR #955).
 
+At its start it says on standard error what its ``RLIMIT_MEMLOCK`` admits
+(observer §7.4, :func:`zk2py.live.memlock_said`; round 89).
+
 It judges nothing, so it exits 0 once it has watched, and 2 when it could
 not (the session did not open, the selector is not a key expression, or
 its standard output refused a write).
@@ -220,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"echo: the session did not open: {e}", file=sys.stderr)
         return 2
     print(scope_line(scope), file=sys.stderr, flush=True)
+    # observer §7.4: "A tool SHOULD check the limit at start" (round 89).
+    print(f"echo: {live.memlock_said()}", file=sys.stderr, flush=True)
     try:
         start = time.monotonic()
         samples = watch(session, args.selector, args.window, args.count,
