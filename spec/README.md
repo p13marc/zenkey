@@ -120,10 +120,11 @@ section number alone is the core's.
   caller or an owner where it reads
   ([observer §0](observer.md#0-conventions)).
 - **Static rule**: a rule that binds every implementation where it does
-  what the rule governs. Those are §1's, §9's, the contract rules of the
-  sections §12 lists, any naming its lint code, and §3.3's checker's. A
-  rule of any of those sections, §1 and §9 included, that names a role is
-  that role's ([§12](core.md#12-conformance-classes)).
+  what the rule governs. Those are §1's, §7.5's, §9's, the contract rules
+  of the sections §12 lists, any naming its lint code, and §3.3's
+  checker's. A rule of any of those sections, §1, §7.5 and §9 included,
+  that names a role is that role's
+  ([§12](core.md#12-conformance-classes)).
 - **Expose**: an instance exposes a resource when it serves it, as its
   descriptor says ([§8.2](core.md#82-start-up-order)). It is **active** on
   an interface when it exposes one of its resources
@@ -152,6 +153,10 @@ section number alone is the core's.
 - **Envelope**: what a failed call's `reply_err` carries: a code and a
   message. `unavailable` adds a cause, and `app` may add a detail
   ([§5.2](core.md#52-the-error-envelope)).
+- **zk2c envelope**: a header byte, a run and a seq, then the record. A
+  put carries one as its payload, and a delete as its attachment. It is
+  defined, and no rule adopts it yet
+  ([§7.5](core.md#75-the-zk2c-envelope)).
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it
@@ -179,7 +184,7 @@ section number alone is the core's.
 | [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 2. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
-| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge. | `zenkey-model/tests/conformance.rs` |
+| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope. | `zenkey-model/tests/conformance.rs` |
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
 | [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. They are listed, each with its text version, status, who uses it and the core version it is written against, in [the index](profiles/README.md#index), those nobody uses yet (`experimental`) in a table of their own, beside the template and the process. | `zenkey-model/tests/profiles.rs` |
 | [`CHANGELOG.md`](CHANGELOG.md) | The amendments to `core.md` since its first accepted version, newest first | |

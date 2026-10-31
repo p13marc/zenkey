@@ -1007,3 +1007,73 @@ fn seed_merge() {
         );
     }
 }
+
+/// Bytes from lowercase hexadecimal, two digits a byte.
+fn unhex(h: &str) -> Vec<u8> {
+    assert!(h.len().is_multiple_of(2), "{h:?}: odd length");
+    (0..h.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap_or_else(|e| panic!("{h:?}: {e}")))
+        .collect()
+}
+
+/// `spec/conformance/envelope/vectors.json` (core §7.5, 0.72; #976): CH's
+/// three fields from one byte, and an envelope's bytes with its sample's
+/// kind → the parse or the refusal's token, the first in §7.5's order.
+/// Every header and every accepted envelope writes back to its bytes.
+/// Written by hand from the text, checked, never blessed.
+#[test]
+fn envelope_vectors() {
+    use zenkey_model::wire::{DeleteStamp, Envelope, Header, Stamp};
+    let doc = read_json(&spec().join("conformance/envelope/vectors.json"));
+    let width = |h: Header| if h.wide { 32 } else { 16 };
+    let parsed = |h: Header, s: Stamp, record: Value| {
+        json!({
+            "form": h.form.as_str(),
+            "run_width": width(h),
+            "run": s.run.value(),
+            "seq": s.seq.get(),
+            "tag": h.tag.get(),
+            "record": record,
+        })
+    };
+    let headers = doc["headers"].as_array().expect("headers");
+    assert!(!headers.is_empty());
+    for case in headers {
+        let note = &case["note"];
+        let byte = unhex(case["byte"].as_str().expect("byte"));
+        assert_eq!(byte.len(), 1, "{note}");
+        let h = Header::from_byte(byte[0]);
+        assert_eq!(
+            case["expect"],
+            json!({"form": h.form.as_str(), "run_width": width(h), "tag": h.tag.get()}),
+            "{note}"
+        );
+        assert_eq!(h.byte(), byte[0], "{note}: writes back");
+    }
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let note = &case["note"];
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match case["sample"].as_str() {
+            Some("put") => match Envelope::parse(&bytes) {
+                Ok(e) => {
+                    assert_eq!(e.write(), bytes, "{note}: writes back");
+                    let record: String = e.record.iter().map(|b| format!("{b:02x}")).collect();
+                    parsed(e.header(), e.stamp, json!(record))
+                }
+                Err(r) => json!({"refused": r.token()}),
+            },
+            Some("delete") => match DeleteStamp::parse(&bytes) {
+                Ok(d) => {
+                    assert_eq!(d.write(), bytes, "{note}: writes back");
+                    parsed(d.header(), d.stamp, Value::Null)
+                }
+                Err(r) => json!({"refused": r.token()}),
+            },
+            other => panic!("{note}: sample {other:?}"),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+}
