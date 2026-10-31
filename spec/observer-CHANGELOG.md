@@ -13,6 +13,51 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.9 — 2026-10-31: round 89's F-370 and F-376, one rule narrowed (#926)
+
+zk2py round 89 (PR #967) read 0.8's §0 cold beside core 0.66's classes and
+[`RULES.md`](RULES.md). Core 0.67 answers its findings on the classes, the
+index and the glossary. This text answers the two on its own sentences,
+and is written against core 0.67.
+
+**Changed: §7.3, which tool decodes (F-370, its reading (b)).** "A generic
+tool MUST decode `protobuf` … and `jsonschema`" is "A tool that shows or
+judges a payload MUST decode …".
+- **Why:** core §0 makes every tool generic, so the old subject asked a
+  protobuf and a JSON Schema decoder of a presence monitor, a timing tool
+  or a grant generator. None of them reads a payload, and the section's
+  title is "Decoding and rendering". Under the classes of core §12 that was
+  the observer class's cost.
+- **What moves:** the observer class's obligation narrows to the tools
+  that show or judge a payload. A tool that does so decodes as before. Its
+  evidence, `[Sc: types.md §2]`, is kept.
+
+**Editorial: §3.7, "when it seeds" (F-376), no rule changed.** "**The
+subscribers of a reader's watch session SHOULD have no history** when it
+seeds by a read on its other session" is "… when the reader seeds by a
+read on its other session". "It" read as the watch session, whose "other
+session" names nothing. 0.7's "when their reader seeds" meant the reader,
+and so does this.
+
+**§0's "Its classes" (F-362).** `RULES.md` lists both texts' rules stated
+with a keyword, by role. This text states many without one, in §1, §2, §5
+and §8, and a class holds those too. No rule gains a keyword.
+
+**How the rules were diffed**, as for 0.8: 44 sentences holding an RFC
+2119 keyword before and after, 42 unchanged. The other two are §7.3's
+(F-370) and §3.7's (F-376), each read pair by pair. Every other sentence
+was diffed too: the other changes are §0's paragraph and the header.
+
+**The figures.** This text's mean went from 18.26 words to 18.24, with no
+sentence over 50 and no tag. `spec/.prose-baseline.json` is lowered to it.
+
+**Deliberately not changed.**
+- **§7.3's honest rendering**, "A tool MUST render a kind it cannot decode
+  as its declared type and size": it binds a tool that renders a payload,
+  as it says.
+- **No other rule**, and no section number, label or anchor.
+- **Appendix A**, which is history.
+
 ## 0.8 — 2026-10-31: where its rules belong, and three rules that name their role, no rule changed (#926)
 
 Core 0.66 claims conformance by role (#926, epic #921 Track B): each role

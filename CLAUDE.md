@@ -990,7 +990,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   form, fingerprints,
   bundles and `.history`, the compatibility classifier (`compat`,
   #618), a late joiner's merge (`seed`, core 0.27: zenoh's timestamp
-  order spelled out, an unstamped sample below every stamp), which the
+  order spelled out, an unstamped sample below every stamp; core 0.67,
+  F-368: a seed merges by stamp across ids too, and S7's consumer rule
+  orders what a consumer receives after its seed), which the
   fleet's seeded subscription decides by, `config.v1`'s session-free
   half (`config`, #768 CA: the validators in the profile's order of
   refusals, the window, redaction, and `Owner`, a pure state machine whose
@@ -1235,7 +1237,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   (capabilities, make-before-break `new_epoch`, member tokens). `presence`
   reads liveliness on an unbounded flume handler (zenoh#2678), and
   `retrieval` is §8.4. `writer` puts with the contract's QoS and `Encoding`
-  (advanced publication for `history`; events on fresh ULID keys), and
+  (advanced publication for `history`; events on fresh ULID keys;
+  `reliability` through zenoh's `unstable` feature, which the workspace's
+  `Cargo.toml` turns on: core 0.67's §2.4 names it the one QoS field that
+  is unstable API in zenoh 1.10.1, an owner that cannot set it MAY publish
+  reliable, zenoh's default, and Appendix B says so, read from zenoh 1.10.1's source), and
   `consumer` reads through a role's bindings: R2 parameter binding, R6's
   wildcard-key discard, R5's presence wait, R7's *unobservable*; tools
   consume with `Consumer::for_tool` and read presence with
@@ -1552,8 +1558,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   on what a contract states in the sections §12 lists, §2.2, §2.4, §2.5,
   §2.6, §3.1, §7.1 and §10, and any rule naming the lint code checking
   it). An implementation claims one
-  class per role it plays; full is every class, their union, so what
-  conformed still does; constrained modifies a class, its table kept; a
+  class per role it plays; full is the level of a class claimed without
+  the constrained modifier, the five classes' union being every rule of
+  both texts, so what conformed still does; constrained modifies a class,
+  its table kept; a
   profile is a class of its own, claimed by following it. A reader's rules
   (observer.md §0) belong to the class of the role the reader plays.
   `spec/RULES.md` lists every MUST, MUST NOT, SHOULD and SHOULD NOT of
@@ -1577,8 +1585,35 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   ci`) fails when it is stale, and `--self-test` reads
   `scripts/fixtures/rules-index/`. A stream-only owner's minimum path is
   the index's owner and implementation entries. `spec/README.md` opens
-  with a glossary, 36 terms each linked to its defining section; its
-  baseline only goes down too. Core 0.61 and observer text
+  with a glossary, each term linked to its defining section; its
+  baseline only goes down too. Core 0.67 and observer text 0.9 (#926
+  part 2, zk2py round 89's F-358 to F-378) say the classes exactly: a
+  static section's rule that names a role is that role's, and §3.3's
+  descriptor checker is static; a static rule binds an implementation
+  where it does what the rule governs (a stream-only owner meets the
+  static rules on what it does), one on what a contract states through
+  the contracts it writes and the lints it runs, and §9.8's publication
+  rules whoever publishes; `RULES.md` lists the rules stated with a
+  keyword, and a class also holds those stated without one (observer
+  §1, §2, §5, §8). Four rules changed: §2.4's `reliability` is unstable
+  API in zenoh 1.10.1, set through §0's opt-in, an owner that cannot set
+  it MAY publish reliable; S7 says a late joiner's seed merges as §4.2
+  says and its consumer rule orders what follows the seed; §1.3's guard
+  holds of any selector without a verbatim chunk, as
+  `grammar::blind_spots` reads it; observer §7.3's decoding binds a tool
+  that shows or judges a payload. §2.2's rest parameter is a MUST NOT
+  (E010) and §11.2's `deny` a deployment's SHOULD, restated from MAY and
+  RECOMMENDED. The index lists a rule under every role its subject names
+  (a late joiner under consumer and observer, every instance and every
+  holder under the four roles a service plays), an id under the roles of
+  every rule carrying it (S7: owner, consumer), a tag that closes a list
+  for each rule of the list that cites none, a tag right after a
+  sentence as its own, and a rule's code as the one that checks it (§9.4's
+  file part is E032). An entry whose opening word or subject is a
+  pronoun shows its noun in brackets, from the script's `ANTECEDENTS`,
+  without which it fails naming the line; a lead-in ends with its list's
+  length, "(2 items)" or "(12 rows)". 169 rules, 23 citing none, 11 of
+  them MUSTs (#965's). The glossary holds 52 terms. Core 0.61 and observer text
   0.5 (#935 part 2, zk2py round 84's F-295 to F-314) split every sentence
   over 50 words in the two texts, so their baseline holds none, and
   changed no rule but one wording: observer §1's not this profile's,

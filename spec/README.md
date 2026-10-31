@@ -16,11 +16,13 @@ section number alone is the core's.
   chunk ([§1.5](core.md#15-identity)).
 - **Interface**: a contract's name and major, such as `nav.v2`, a key's
   fourth chunk ([§1.5](core.md#15-identity)).
-- **Instance**: one run of a service, named by a random 64-bit id
-  ([§1.5](core.md#15-identity)).
+- **Instance**: one run of a service ([§1.5](core.md#15-identity)),
+  named by an instance id of 64 random bits
+  ([§1.2](core.md#12-lexical-rules)).
 - **Epoch**: a span of continuity, which an instance id names. An owner
-  starts a new one whenever its counters reset ([§1.5](core.md#15-identity),
-  [§4.3](core.md#43-clocks-s7)).
+  starts a new one whenever its counters reset or its state's ordering
+  restarts ([§1.5](core.md#15-identity)). A new epoch's session has a fresh
+  zid, the id of its stamps ([§4.3](core.md#43-clocks-s7)).
 - **Resource**: what an interface provides: a stream, a state, an event or
   an operation ([§2.1](core.md#21-patterns)).
 - **Kind**: which of the four a resource is, and the key token that says
@@ -28,23 +30,27 @@ section number alone is the core's.
 - **Explicit**: a stream or state under a verbatim token, `@stream` or
   `@state`, which no ambient selector reaches ([§1.3](core.md#13-kind-tokens)).
 - **Ambient selector**: a selector with no verbatim chunk, such as
-  `zk2/**` ([§1.3](core.md#13-kind-tokens)).
+  `zk2/**`. It reaches no `@stream`, `@state` or `@op` key, and no control
+  key ([§1.3](core.md#13-kind-tokens)).
 - **Template**: a resource's path below its kind chunk, with parameters
   such as `{axis}` ([§2.2](core.md#22-templates)).
-- **Member**: one value of a template's parameters, which is one key for a
-  stream or a state ([§2.7](core.md#27-the-population-budget)).
+- **Member**: one value of a template's parameters. That is a key, for a
+  stream or a state; for an event, its key without the ULID chunk
+  ([§2.7](core.md#27-the-population-budget)).
 - **Cardinality**: a template's bound on its members in one instance, or
   `"unbounded"` ([§2.2](core.md#22-templates)).
 - **Contract**: a TOML file declaring one interface major: its resources,
   types and requirements ([§9.1](core.md#91-the-authoring-format)).
 - **Fingerprint**: `sha256:` and the hash of a contract's canonical form
   ([§9.5](core.md#95-the-canonical-form-and-the-fingerprint)).
-- **Revision**: one published contract within its major, named by its
-  fingerprint ([§9.7](core.md#97-history-and-retention),
+- **Revision**: one version of a contract within its major, named by its
+  fingerprint. A breaking one is never published
+  ([§9.7](core.md#97-history-and-retention),
   [§9.8](core.md#98-compatibility)).
-- **Bundle**: a canonical contract with its schema artifacts. A tool
-  retrieves it from the bus and checks its fingerprint
-  ([§9.6](core.md#96-bundles), [§8.4](core.md#84-contract-retrieval)).
+- **Bundle**: a canonical contract with its schema artifacts and the extra
+  documents it references. A tool retrieves it from the bus and checks its
+  fingerprint ([§9.6](core.md#96-bundles),
+  [§8.4](core.md#84-contract-retrieval)).
 - **Descriptor**: the JSON record every instance serves at its instance key
   ([§3.3](core.md#33-the-descriptor-record)).
 - **Requirement**: a named role, typed by an interface, through which data
@@ -58,42 +64,97 @@ section number alone is the core's.
   interface ([§3.2](core.md#32-binding-rules)).
 - **Token**: a liveliness token, which carries no payload. Its key says who
   is alive ([§8.1](core.md#81-tokens)).
-- **Presence**: the tokens and descriptors that say which instances run,
-  and what they implement
-  ([§8](core.md#8-presence-descriptors-contract-retrieval)).
+- **Presence**: the liveliness tokens that say which instances run, and
+  what they expose ([§8.1](core.md#81-tokens)). An instance's descriptor
+  says what it implements ([§3.3](core.md#33-the-descriptor-record)).
 - **Re-mint**: an owner taking a new instance id while running, new tokens
-  before the old go ([§8.1](core.md#81-tokens)).
+  before the old go ([§8.1](core.md#81-tokens)). A restart is a re-mint
+  too ([§2.7](core.md#27-the-population-budget)).
 - **Tokenless**: an interface in the deployment's tokenless set, for which
   an owner holds no interface token ([§8.1](core.md#81-tokens)).
 - **Standby**: an instance that implements an interface and exposes none of
   it, its descriptor saying so ([§6](core.md#6-ownership-and-serving)).
-- **Stamp**: the timestamp an owner sets on every state mutation, from
-  Zenoh's HLC ([§4.3](core.md#43-clocks-s7)).
-- **Late joiner**: a consumer that subscribes to a state, then asks its
-  owner, and merges both by stamp
+- **Stamp**: the timestamp an owner sets on every state mutation. It is
+  the greater of `Session::new_timestamp()` and its last stamp plus one
+  tick. At the constrained level, a wall clock with a per-session bump
+  replaces the HLC ([§4.3](core.md#43-clocks-s7)).
+- **Late joiner**: a consumer or a tool that subscribes to a state, then
+  asks its owner, and merges both by stamp
   ([§4.2](core.md#42-rules-for-owners-and-consumers)).
 - **Tombstone window**: how long an owner answers a GET of a key it deleted
   with the delete, 60 s by default
   ([§4.2](core.md#42-rules-for-owners-and-consumers)).
 - **Archive**: a service that records owners' state and serves it as
   last-known, never as current ([§4.4](core.md#44-archives)).
-- **Face**: a router's link to a part of the network. A constrained one
-  carries little ([§8.5](core.md#85-constrained-faces)).
+- **Face**: a router's link to a part of the network. A deployment marks
+  one constrained, and gives its maximum outage
+  ([§8.5](core.md#85-constrained-faces)).
 - **Watch session**: a reader's session that holds its liveliness
   subscribers and makes no read
   ([observer §3.7](observer.md#37-the-watch-session)).
-- **Round trip**: a GET on the watch session whose answer is discarded. It
-  follows the subscribers' declarations
+- **Round trip**: a liveliness GET on the watch session whose answer is
+  discarded. It follows the subscribers' declarations
   ([observer §3.7](observer.md#37-the-watch-session)).
 - **Complete read**: a presence read that ended at its routers' final reply,
-  with no error reply. Only a complete read shows absence
-  ([observer §3.3](observer.md#33-possibly-incomplete),
-  [§3.6](observer.md#36-absence)).
+  with no error reply, before its session's interests timeout
+  ([observer §3.3](observer.md#33-possibly-incomplete)). Its session held a
+  link throughout ([§3.5](observer.md#35-a-session-cut-off)), and never held
+  a liveliness subscriber. A reader with a watch session made it while a
+  round trip stood ([§3.7](observer.md#37-the-watch-session)). It covers the
+  tokens of its routers' clients and its linked peers
+  ([§3.9](observer.md#39-what-a-complete-read-covers)). Only a complete read
+  shows absence ([§3.6](observer.md#36-absence)).
 - **Profile**: a specification versioned on its own that extends the core,
   such as `timing.v1` ([§10](core.md#10-extension-points-for-profiles)).
 - **Class**: the rules of one role, with the static rules. An
-  implementation claims one per role it plays
+  implementation claims one per role it plays. A profile is a class too
   ([§12](core.md#12-conformance-classes)).
+- **Reader**: any participant that reads presence, state or the admin
+  space, and concludes from it. A tool is one, and so is a consumer, a
+  caller or an owner where it reads
+  ([observer §0](observer.md#0-conventions)).
+- **Static rule**: a rule that binds every implementation where it does
+  what the rule governs. Those are §1's, §9's, those on what a contract
+  states, any naming its lint code, and §3.3's checker's
+  ([§12](core.md#12-conformance-classes)).
+- **Expose**: an instance exposes a resource when it serves it, as its
+  descriptor says ([§8.2](core.md#82-start-up-order)). It is **active** on
+  an interface when it exposes one of its resources
+  ([§5.1](core.md#51-rules)). An active instance holds the interface's
+  token, unless the interface is tokenless ([§8.1](core.md#81-tokens)).
+- **Possibly incomplete**: a read that may have missed a token. It had an
+  error reply, or ran to its timeout or its session's interests timeout
+  ([observer §3.3](observer.md#33-possibly-incomplete)). So is one
+  cut off while it ran ([§3.5](observer.md#35-a-session-cut-off)), and one
+  made while no round trip stood ([§3.7](observer.md#37-the-watch-session)).
+- **Interests timeout**: a session's `routing/interests/timeout`, 10 s by
+  default. zenoh ends an unfinished liveliness GET there, with no error
+  reply ([observer §3.3](observer.md#33-possibly-incomplete)).
+- **Move**: a watch session's transport closing or opening. It unconfirms
+  what the reader holds ([observer §3.7](observer.md#37-the-watch-session)).
+- **Seed**: a late joiner's S4 GET, made after its subscription is declared
+  ([§4.2](core.md#42-rules-for-owners-and-consumers),
+  [observer §4.1](observer.md#41-a-seed)).
+- **History**: two senses. Advanced publication's cache of a stream or a
+  state ([§2.5](core.md#25-advanced-publication)), and the history root of
+  published bundles ([§9.7](core.md#97-history-and-retention)).
+- **Envelope**: what a failed call's `reply_err` carries: a code, a
+  message, and a cause or a detail ([§5.2](core.md#52-the-error-envelope)).
+- **Holder**: any participant that holds a bundle and serves it on its key
+  ([§8.4](core.md#84-contract-retrieval)).
+- **Address**: a service's `<system>/<service>`, as a binding names it
+  ([§3.2](core.md#32-binding-rules),
+  [observer §3.6](observer.md#36-absence)).
+- **Plain chunk**: `[a-z0-9]([a-z0-9._-]*[a-z0-9])?`
+  ([§1.2](core.md#12-lexical-rules)).
+- **Verbatim chunk**: a chunk that starts with `@`. In zk2, only the
+  reserved tokens use one ([§1.2](core.md#12-lexical-rules)).
+- **Established**: the question was put, and the bus answered, yes or no
+  ([observer §1](observer.md#1-the-judgement-shape)).
+- **NotAsked**: nobody put the question, so the tool renders no answer
+  ([observer §1](observer.md#1-the-judgement-shape)).
+- **Unobservable**: the question was put, and the observation could not be
+  had. Its reason names why ([observer §1](observer.md#1-the-judgement-shape)).
 
 ## What is here
 

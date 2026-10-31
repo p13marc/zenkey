@@ -1,27 +1,45 @@
 {
-  "description": "What scripts/gen-rules-index.py reads from text.md: each rule's line, the roles it binds, how its role was read, whether it is a reader's, its rule ids and its evidence, in the text's order; the rule ids of its tables, each with the roles its row binds; and the lines of unreadable.md whose rule names no role the script can read, each refused. text.md holds a rule of each reading: a section §12 lists as static (§1 and §3.1), a subject, a pronoun after it in its paragraph, a passive's agent, two roles and a lead-in's list, a continuation's evidence, a MAY's subject before a pronoun, role labels in a table row, a pronoun whose antecedent leads the sentence before it, a reader, a section's id and a lint code. unreadable.md holds what must fail: a subject with no role, a pronoun with no antecedent, one whose antecedent is a paragraph back, a role label's role past the sentence it opens, a section §12 does not list, and a section's title, which names no rule's role.",
+  "description": "What scripts/gen-rules-index.py reads from text.md: each rule's line, the roles it binds, how its role was read, whether it is a reader's, its rule ids and its evidence, in the text's order; the rule ids of its tables, each with the roles its row binds; how some entries are shown; and the lines of unreadable.md whose rule names no role the script can read, or a pronoun whose noun ANTECEDENTS does not give, each refused. text.md holds a rule of each reading: a section §12 lists as static (§1, §3.1 and §9), a subject, a pronoun after it in its paragraph, a passive's agent, two roles and a lead-in's list, a continuation's evidence given to every rule of the list it closes, a MAY's subject before a pronoun, role labels in a table row, a pronoun whose antecedent leads the sentence before it, a reader, a late joiner (a consumer and a tool), every instance and every holder (each role a service plays), a section's id that two roles' rules carry, a tag after its sentence that is its own, a lint code, and a code a list item says each failure below it is, where its rule names another. What is shown: a tag's blank gone, a pronoun's noun in brackets, a lead-in's list length. unreadable.md holds what must fail: a subject with no role, a pronoun with no antecedent, one whose antecedent is a paragraph back, a role label's role past the sentence it opens, a section §12 does not list, a section's title, which names no rule's role, and a pronoun whose noun no entry gives.",
   "rules": [
     {"line": 15, "roles": ["implementation"], "how": "static-section", "reader": false, "ids": [], "evidence": ["[F: keys.json]"]},
-    {"line": 19, "roles": ["owner"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: types.md §3]"]},
-    {"line": 19, "roles": ["owner"], "how": "pronoun", "reader": false, "ids": [], "evidence": ["[Sc: types.md §3]"]},
-    {"line": 22, "roles": ["owner"], "how": "passive", "reader": false, "ids": [], "evidence": []},
-    {"line": 24, "roles": ["caller", "observer"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: retrieval.md §1]", "[Sc: retrieval.md §2]", "[Sc: retrieval.md §1–§3]"]},
-    {"line": 30, "roles": ["owner"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: presence.md §3]"]},
+    {"line": 17, "roles": ["implementation"], "how": "static-section", "reader": false, "ids": [], "evidence": ["[F: contracts/e021-shape]"]},
+    {"line": 21, "roles": ["owner"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: types.md §3]"]},
+    {"line": 21, "roles": ["owner"], "how": "pronoun", "reader": false, "ids": [], "evidence": ["[Sc: types.md §3]"]},
+    {"line": 24, "roles": ["owner"], "how": "passive", "reader": false, "ids": [], "evidence": []},
+    {"line": 26, "roles": ["caller", "observer"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: retrieval.md §1]", "[Sc: retrieval.md §2]", "[Sc: retrieval.md §1–§3]"]},
     {"line": 32, "roles": ["owner"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: presence.md §3]"]},
-    {"line": 36, "roles": ["deployment"], "how": "pronoun", "reader": false, "ids": [], "evidence": []},
-    {"line": 40, "roles": ["owner"], "how": "label", "reader": false, "ids": ["S1"], "evidence": ["[Sc: state.md §1]"]},
-    {"line": 40, "roles": ["consumer"], "how": "label", "reader": false, "ids": ["S1"], "evidence": ["[Sc: state.md §1]"]},
-    {"line": 41, "roles": ["owner"], "how": "label", "reader": false, "ids": ["S2"], "evidence": ["[Sc: state.md §2]"]},
-    {"line": 41, "roles": ["owner"], "how": "pronoun", "reader": false, "ids": ["S2"], "evidence": ["[Sc: state.md §2]"]},
-    {"line": 44, "roles": ["observer"], "how": "subject", "reader": true, "ids": [], "evidence": ["[Sc: presence.md §9]"]},
-    {"line": 49, "roles": ["owner"], "how": "subject", "reader": false, "ids": ["S7"], "evidence": []},
-    {"line": 56, "roles": ["implementation"], "how": "static-section", "reader": false, "ids": [], "evidence": ["[F: contracts/e030-requirement]"]},
-    {"line": 60, "roles": ["implementation"], "how": "static-lint", "reader": false, "ids": ["E026"], "evidence": ["[F: contracts/e026-retention]"]}
+    {"line": 34, "roles": ["owner"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: presence.md §3]"]},
+    {"line": 35, "roles": ["owner"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: presence.md §3]"]},
+    {"line": 39, "roles": ["deployment"], "how": "pronoun", "reader": false, "ids": [], "evidence": []},
+    {"line": 43, "roles": ["owner"], "how": "label", "reader": false, "ids": ["S1"], "evidence": ["[Sc: state.md §1]"]},
+    {"line": 43, "roles": ["consumer"], "how": "label", "reader": false, "ids": ["S1"], "evidence": ["[Sc: state.md §1]"]},
+    {"line": 44, "roles": ["owner"], "how": "label", "reader": false, "ids": ["S2"], "evidence": ["[Sc: state.md §2]"]},
+    {"line": 44, "roles": ["owner"], "how": "pronoun", "reader": false, "ids": ["S2"], "evidence": ["[Sc: state.md §2]"]},
+    {"line": 48, "roles": ["observer"], "how": "subject", "reader": true, "ids": [], "evidence": ["[Sc: presence.md §9]"]},
+    {"line": 51, "roles": ["consumer", "observer"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: state.md §10]"]},
+    {"line": 54, "roles": ["owner", "consumer", "caller", "observer"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: retrieval.md §1]"]},
+    {"line": 54, "roles": ["owner", "consumer", "caller", "observer"], "how": "subject", "reader": false, "ids": [], "evidence": ["[Sc: retrieval.md §1]"]},
+    {"line": 59, "roles": ["owner"], "how": "subject", "reader": false, "ids": ["S7"], "evidence": []},
+    {"line": 61, "roles": ["consumer"], "how": "subject", "reader": false, "ids": ["S7"], "evidence": []},
+    {"line": 67, "roles": ["implementation"], "how": "static-section", "reader": false, "ids": [], "evidence": ["[F: contracts/e030-requirement]"]},
+    {"line": 72, "roles": ["implementation"], "how": "static-lint", "reader": false, "ids": ["E026"], "evidence": ["[F: contracts/e026-retention]"]},
+    {"line": 78, "roles": ["implementation"], "how": "static-section", "reader": false, "ids": ["E032"], "evidence": ["[F: contracts/e032-ref]"]},
+    {"line": 79, "roles": ["implementation"], "how": "static-section", "reader": false, "ids": ["E032"], "evidence": ["[F: contracts/e032-ref]"]}
   ],
   "ids": [
     {"id": "S1", "roles": ["owner", "consumer"]},
     {"id": "S2", "roles": ["owner"]},
-    {"id": "R5", "roles": ["consumer"]}
+    {"id": "R5", "roles": ["consumer"]},
+    {"id": "S7", "roles": ["owner", "consumer"]}
   ],
-  "unreadable": [8, 10, 14, 18, 22, 26]
+  "shown": [
+    {"line": 17, "sentence": "Two templates MUST NOT have the same shape."},
+    {"line": 21, "sentence": "It [an owner] SHOULD do so in a new session."},
+    {"line": 26, "sentence": "A caller or tool MUST retrieve a bundle as follows: (2 items)"},
+    {"line": 39, "sentence": "**The tokenless set.** … These [the tokenless set's interfaces] SHOULD be the framework's interfaces."},
+    {"line": 44, "sentence": "It [the owner's queryables] MUST answer a selector over them."},
+    {"line": 54, "sentence": "Every instance MUST hold one [an instance token], including pure consumers."},
+    {"line": 59, "sentence": "When an owner's clock is ahead, it [an owner] MUST stop writing state, and SHOULD report it."}
+  ],
+  "unreadable": [8, 10, 14, 18, 22, 26, 31]
 }
