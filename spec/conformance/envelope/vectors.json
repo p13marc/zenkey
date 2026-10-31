@@ -1,0 +1,553 @@
+{
+  "description": "core §7.5, the zk2c envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's bytes in hex, and `sample`, the kind of the sample that carries them (`put`: they are its payload; `delete`: they are its attachment) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex, or `null` for a delete. A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form), `sample_kind` (a delete on a put, or a mutation as a delete's attachment), `tag` (a delete whose tag is not 0), `short` (fewer bytes than CH, the run and the seq need), `trailing` (a byte after a delete's seq). The parse reads no contract, so a mutation's tag is reported, never checked against a type. Every accepted case writes back to its bytes.",
+  "headers": [
+    {
+      "note": "a mutation with a 16-bit run",
+      "byte": "00",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "tag": 0
+      }
+    },
+    {
+      "note": "bit 4 set: a 32-bit run",
+      "byte": "10",
+      "expect": {
+        "form": "mutation",
+        "run_width": 32,
+        "tag": 0
+      }
+    },
+    {
+      "note": "form 1 in bits 7–5",
+      "byte": "20",
+      "expect": {
+        "form": "delete",
+        "run_width": 16,
+        "tag": 0
+      }
+    },
+    {
+      "note": "a delete with a 32-bit run",
+      "byte": "30",
+      "expect": {
+        "form": "delete",
+        "run_width": 32,
+        "tag": 0
+      }
+    },
+    {
+      "note": "000 1 1011: form 0, a 32-bit run, tag 11",
+      "byte": "1b",
+      "expect": {
+        "form": "mutation",
+        "run_width": 32,
+        "tag": 11
+      }
+    },
+    {
+      "note": "the tag is the low four bits",
+      "byte": "0f",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "tag": 15
+      }
+    },
+    {
+      "note": "form 2, reserved",
+      "byte": "40",
+      "expect": {
+        "form": "value",
+        "run_width": 16,
+        "tag": 0
+      }
+    },
+    {
+      "note": "form 3, reserved",
+      "byte": "60",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "tag": 0
+      }
+    },
+    {
+      "note": "`{`, 011 1 1011: form 3, reserved",
+      "byte": "7b",
+      "expect": {
+        "form": "error",
+        "run_width": 32,
+        "tag": 11
+      }
+    },
+    {
+      "note": "form 4, reserved",
+      "byte": "80",
+      "expect": {
+        "form": "event",
+        "run_width": 16,
+        "tag": 0
+      }
+    },
+    {
+      "note": "101 0 0101: form 5, reserved",
+      "byte": "a5",
+      "expect": {
+        "form": "frame",
+        "run_width": 16,
+        "tag": 5
+      }
+    },
+    {
+      "note": "form 6, reserved",
+      "byte": "c0",
+      "expect": {
+        "form": "heartbeat",
+        "run_width": 16,
+        "tag": 0
+      }
+    },
+    {
+      "note": "form 7, reserved",
+      "byte": "e0",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 16,
+        "tag": 0
+      }
+    },
+    {
+      "note": "every bit set",
+      "byte": "ff",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 32,
+        "tag": 15
+      }
+    }
+  ],
+  "cases": [
+    {
+      "note": "a mutation with a 16-bit run and the record `{}`: 6 bytes over the record",
+      "sample": "put",
+      "hex": "0000010000077b7d",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "the same with a 32-bit run: 8 bytes over the record",
+      "sample": "put",
+      "hex": "10000123450000077b7d",
+      "expect": {
+        "form": "mutation",
+        "run_width": 32,
+        "run": 74565,
+        "seq": 7,
+        "tag": 0,
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "big-endian: run 0x0102, seq 0x030405",
+      "sample": "put",
+      "hex": "00010203040506",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "run": 258,
+        "seq": 197637,
+        "tag": 0,
+        "record": "06"
+      }
+    },
+    {
+      "note": "an empty record, the run and the seq at their 16-bit and 24-bit maxima",
+      "sample": "put",
+      "hex": "00ffffffffff",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "run": 65535,
+        "seq": 16777215,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "an empty record, the run at its 32-bit maximum",
+      "sample": "put",
+      "hex": "10ffffffffffffff",
+      "expect": {
+        "form": "mutation",
+        "run_width": 32,
+        "run": 4294967295,
+        "seq": 16777215,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "run 0 and seq 0, tag 15: the parse reports a mutation's tag",
+      "sample": "put",
+      "hex": "0f0000000000",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "run": 0,
+        "seq": 0,
+        "tag": 15,
+        "record": ""
+      }
+    },
+    {
+      "note": "CH 0x1b: a 32-bit run and tag 11",
+      "sample": "put",
+      "hex": "1b0a0b0c0d0000012a",
+      "expect": {
+        "form": "mutation",
+        "run_width": 32,
+        "run": 168496141,
+        "seq": 1,
+        "tag": 11,
+        "record": "2a"
+      }
+    },
+    {
+      "note": "the record is not read: one that looks like a delete's attachment is a record",
+      "sample": "put",
+      "hex": "000001000002200001000008",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "run": 1,
+        "seq": 2,
+        "tag": 0,
+        "record": "200001000008"
+      }
+    },
+    {
+      "note": "a delete with a 16-bit run: 6 bytes",
+      "sample": "delete",
+      "hex": "200001000008",
+      "expect": {
+        "form": "delete",
+        "run_width": 16,
+        "run": 1,
+        "seq": 8,
+        "tag": 0,
+        "record": null
+      }
+    },
+    {
+      "note": "a delete with a 32-bit run: 8 bytes",
+      "sample": "delete",
+      "hex": "3000012345000008",
+      "expect": {
+        "form": "delete",
+        "run_width": 32,
+        "run": 74565,
+        "seq": 8,
+        "tag": 0,
+        "record": null
+      }
+    },
+    {
+      "note": "a delete at the 32-bit run's and the seq's maxima",
+      "sample": "delete",
+      "hex": "30ffffffffffffff",
+      "expect": {
+        "form": "delete",
+        "run_width": 32,
+        "run": 4294967295,
+        "seq": 16777215,
+        "tag": 0,
+        "record": null
+      }
+    },
+    {
+      "note": "a delete with run 0 and seq 0",
+      "sample": "delete",
+      "hex": "200000000000",
+      "expect": {
+        "form": "delete",
+        "run_width": 16,
+        "run": 0,
+        "seq": 0,
+        "tag": 0,
+        "record": null
+      }
+    },
+    {
+      "note": "an empty payload has no CH",
+      "sample": "put",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "CH alone",
+      "sample": "put",
+      "hex": "00",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 16-bit run's stamp one byte short",
+      "sample": "put",
+      "hex": "0000010000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 32-bit run's stamp one byte short",
+      "sample": "put",
+      "hex": "10000123450000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "the width bit decides: 6 bytes are short of a 32-bit run's stamp",
+      "sample": "put",
+      "hex": "100001000007",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "value, reserved",
+      "sample": "put",
+      "hex": "4000010000077b7d",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "error, reserved",
+      "sample": "put",
+      "hex": "600001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "event, reserved",
+      "sample": "put",
+      "hex": "800001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "frame, reserved",
+      "sample": "put",
+      "hex": "a00001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "heartbeat, reserved",
+      "sample": "put",
+      "hex": "c00001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "snapshot, reserved",
+      "sample": "put",
+      "hex": "e00001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "every bit set: snapshot, reserved",
+      "sample": "put",
+      "hex": "ffffffffffffffff",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a reserved form is refused before a short stamp",
+      "sample": "put",
+      "hex": "c0",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a JSON object with no envelope: `{` is 0x7b, form 3",
+      "sample": "put",
+      "hex": "7b7d",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a delete on a put",
+      "sample": "put",
+      "hex": "200001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a delete's CH alone on a put: the wrong kind before a short stamp",
+      "sample": "put",
+      "hex": "20",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a JSON string with no envelope: `\"` is 0x22, a delete",
+      "sample": "put",
+      "hex": "226122",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "an empty attachment has no CH",
+      "sample": "delete",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a delete's CH alone",
+      "sample": "delete",
+      "hex": "20",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 16-bit run's stamp one byte short",
+      "sample": "delete",
+      "hex": "2000010000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 32-bit run's stamp one byte short",
+      "sample": "delete",
+      "hex": "30000123450000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "the width bit decides: 6 bytes are short of a 32-bit run's stamp",
+      "sample": "delete",
+      "hex": "300001000008",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a mutation as a delete's attachment",
+      "sample": "delete",
+      "hex": "000001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a mutation with a record as a delete's attachment",
+      "sample": "delete",
+      "hex": "0000010000087b7d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a mutation's tag on a delete's attachment: the wrong kind first",
+      "sample": "delete",
+      "hex": "050001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a reserved form",
+      "sample": "delete",
+      "hex": "c00001000008",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a foreign attachment, a JSON Epoch: `{` is form 3",
+      "sample": "delete",
+      "hex": "7b2265706f6368223a2231227d",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a delete whose tag is 5",
+      "sample": "delete",
+      "hex": "250001000008",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a delete whose tag is 1, with a 32-bit run",
+      "sample": "delete",
+      "hex": "3100012345000008",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a delete's tag is refused before a short stamp",
+      "sample": "delete",
+      "hex": "2f",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a byte after the seq",
+      "sample": "delete",
+      "hex": "20000100000800",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a byte after a 32-bit run's seq",
+      "sample": "delete",
+      "hex": "3000012345000008ff",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a 16-bit run's CH over a 32-bit run's bytes: two bytes after the seq",
+      "sample": "delete",
+      "hex": "2000012345000008",
+      "expect": {
+        "refused": "trailing"
+      }
+    }
+  ]
+}

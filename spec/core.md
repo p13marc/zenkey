@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.71** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.72** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -42,8 +42,8 @@ RFC 2119 and RFC 8174, when written in capitals.
 - **tool**: a generic program that reads the bus or contracts without
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
-  bind it, whichever of the roles above it plays. They are the rules of §1
-  and §9 that name no role, and the others §12 lists: those on what a
+  bind it, whichever of the roles above it plays. They are the rules of §1,
+  §7.5 and §9 that name no role, and the others §12 lists: those on what a
   contract states, those naming their lint code, and §3.3's rule for a
   descriptor checker. Each binds it where it does what the rule governs
   (§12).
@@ -1563,6 +1563,91 @@ accept SHM buffers.
   segment that cannot be locked panics.
 - A tool's check of the limit at start: [`observer.md`](observer.md) §7.4.
 
+### 7.5 The zk2c envelope
+
+The **zk2c envelope** carries an owner's run and sequence number with a
+sample, before its record. This section defines its bytes ahead of their
+use. No rule adopts it yet. So no owner writes one, and no consumer has to
+read one. §4 and §7.2 still say how a sample is stamped and encoded.
+
+**The layouts.** A put carries an envelope as its payload, and a delete as
+its attachment:
+
+```text
+mutation, a put's payload            CH · run · seq · record
+delete, a delete's attachment        CH · run · seq
+```
+
+**The header byte, CH,** holds three fields. Its bits are numbered from 7,
+the most significant, down to 0:
+
+| Bits | Field | Value |
+|---|---|---|
+| 7–5 | form | the form's code (below) |
+| 4 | run width | 0 for a 16-bit run, 1 for a 32-bit run |
+| 3–0 | tag | 0, unless the record's type kind defines a tag |
+
+So CH is the form's code × 32, plus the width bit × 16, plus the tag. With
+tag 0, a mutation's CH is `0x00` with a 16-bit run and `0x10` with a 32-bit
+run. A delete's is `0x20` or `0x30`. And `0x1b` is `000 1 1011`: form 0, a
+32-bit run and tag 11. No type kind defines a tag in this version. A
+delete carries no record, so its tag is 0.
+
+**The forms.** Each form has one code. This version defines two of them,
+and reserves the other six for later versions:
+
+| Code | Form | What it carries |
+|---|---|---|
+| 0 | mutation | a put's run and seq, then its record |
+| 1 | delete | a delete's run and seq, as its attachment, and no record |
+| 2 | value | reserved: an operation's reply value |
+| 3 | error | reserved: an operation's error reply (§5.2) |
+| 4 | event | reserved: an event's occurrence |
+| 5 | frame | reserved: a stream's records under one header |
+| 6 | heartbeat | reserved: an owner's periodic confirmation of what it holds |
+| 7 | snapshot | reserved: a collection's state in one reply |
+
+**The run and the seq.** The run is an unsigned integer of 16 or 32 bits,
+as CH's width bit says. The seq is an unsigned 24-bit integer, from 0 to
+16,777,215. Both are written big-endian, the most significant byte first.
+Together they are the envelope's stamp. This section fixes their widths
+and their byte order. What a run names, and how a seq counts, are for the
+rule that adopts the envelope. Until then, §4.3's stamp alone orders a
+key's values.
+
+**The record** is every byte after the seq, possibly none. It is read as
+the resource's type says (§7.1). A sample that carries an envelope has the
+Encoding `zenoh/bytes`, whatever its record's type: the contract names the
+type.
+
+**Sizes.** A mutation is 6 bytes over its record, or 8 with a 32-bit run.
+A delete's attachment is 6 or 8 bytes, and an attachment costs 2 more on
+the wire. Beside them, a Zenoh timestamp is 26 bytes. A predefined
+Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
+
+**Why the payload.** Zenoh gives a sample one attachment.
+[`telemetry.v1`](profiles/telemetry/v1.md)'s Epoch, a contract's declared
+`attachment` (§2.3) and an archive's replies (§4.4) already use it. So a
+put's envelope leads its payload. A delete has no payload, so its envelope
+is its attachment. It keeps CH, which states the run's width and lets a
+reader refuse an attachment that is not an envelope.
+
+**Parsing.** An envelope is parsed without the contract, as a key is
+(§1.1). The parser knows the sample's kind, put or delete, and nothing
+more. So it reports a mutation's tag, and checks it against no type. An
+implementation MUST refuse an envelope for the first of these
+that applies, in this order:
+- no byte at all, so no CH (`short`);
+- a reserved form (`form`);
+- a form the sample's kind does not carry: a delete on a put, or a
+  mutation as a delete's attachment (`sample_kind`);
+- a delete whose tag is not 0 (`tag`);
+- fewer bytes than CH, the run and the seq need (`short`);
+- a byte after a delete's seq (`trailing`). `[F: envelope/vectors.json]`
+
+Every envelope an implementation accepts MUST write back to the same
+bytes. `[F: envelope/vectors.json]`
+
 ---
 
 ## 8. Presence, descriptors, contract retrieval
@@ -2980,9 +3065,9 @@ The format is the generator's own. The reference reads an enrollment file
 
 Conformance is claimed by role. Five of §0's roles have a **class** each:
 that role's rules, and the static rules that bind every implementation
-(§0). The static rules are those of §1 and §9, and those on what a
+(§0). The static rules are those of §1, §7.5 and §9, and those on what a
 contract states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of
-any of these sections, §1 and §9 included, that names a role is that
+any of these sections, §1, §7.5 and §9 included, that names a role is that
 role's. A rule elsewhere that names the
 lint code checking it (§9.2) is static too, and so is §3.3's rule for a
 descriptor checker. A class holds its role's rules in this text and in
@@ -2990,8 +3075,9 @@ descriptor checker. A class holds its role's rules in this text and in
 
 **How a static rule binds.** A static rule binds an implementation where
 it does what the rule governs. Such acts are parsing or building a key,
-slugging a value, linting a contract, building or verifying a bundle,
-checking a history and classifying a revision. A rule on what a contract
+parsing or writing an envelope (§7.5), slugging a value, linting a
+contract, building or verifying a bundle, checking a history and
+classifying a revision. A rule on what a contract
 states binds it through the contracts it writes and the lints it runs.
 §9.8's publication rules bind whoever publishes a revision: its CI, and the
 person who accepts it.
@@ -3110,6 +3196,17 @@ Appendix B. These are the ones the rules above cite:
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
   It counts from the Unix epoch, 1970-01-01T00:00:00Z: an HLC's physical
   clock is its host's wall clock (uhlc's `system_time_clock`).
+- A timestamp travels as its NTP64 time, a varint of at most 9 bytes,
+  then its id's length and its id's significant bytes. A time in 2026
+  takes 9 bytes, so a stamp with a 16-byte zid is 26 bytes
+  (zenoh-codec's `core/timestamp.rs`). A put leaves out the Encoding
+  `zenoh/bytes`, which is the empty one. A predefined Encoding without a
+  schema is 1 byte (`zenoh/put.rs`, `core/encoding.rs`). An attachment
+  under 128 bytes costs 2 bytes over its own: its extension's header and
+  its length (`common/extension.rs`). The stamp's 26 bytes and the
+  Encoding's 1 were measured in a put on zenoh-modem's simulated radio
+  link (`docs/zk2/measurements/wire-baseline/`, "W1 on RF", finding 3).
+  §7.5 compares the envelope with them.
 - A node with its HLC enabled updates it with the stamp of every put it
   routes, a put a session receives for its own subscriber included. Its
   clock moves to a later stamp, and a stamp more than its delta ahead of
@@ -3477,6 +3574,7 @@ section each was written against, whose pointer leads on.
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
 | `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order, unstamped samples, and a tool's across two ids |
 | `conformance/errors/` | §5.2 |
+| `conformance/envelope/` | §7.5 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §7 step 2 a consumer's and a tool's late joiner across a new epoch, after their seed and inside it; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node |
 | `scenarios/operations.md` | §5, §6 |
@@ -3622,6 +3720,13 @@ brief:
   and one key's arrivals, each a stamp or none and a kind → which are
   kept (`cases`). A stamp is `{time, id}`, the id written as zenoh
   writes it.
+- **`envelope/`**: one byte → CH's form, run width and tag
+  (`vectors.json`'s `headers`). An envelope's bytes in hex, and the kind
+  of the sample that carries them, `put` for a payload or `delete` for an
+  attachment → the parse, or the refusal's token, the first that applies
+  in §7.5's order (`cases`). The parse is the form, the run's width in
+  bits, the run, the seq, the tag, and the record in hex, `null` for a
+  delete. Every header and every accepted case writes back to its bytes.
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).

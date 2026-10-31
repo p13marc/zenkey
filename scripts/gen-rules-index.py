@@ -306,7 +306,8 @@ CODE = re.compile(r"\b([EWD]\d{3})\b")
 LINT = re.compile(r"\b([EW]\d{3})\b")
 ROW_ID = re.compile(r"^(R\d+|S\d+|O\d+|[DEW]\d{3})$")
 TITLE_ID = re.compile(r"\((R\d|S\d|O\d)\)")
-# core §12 lists the static rules: "The static rules are §1's and §9's, …".
+# core §12 lists the static rules: "The static rules are those of §1, §7.5 and
+# §9, …".
 STATIC_LEAD = "The static rules are"
 
 # An entry's sentence is shortened past this many words, never reworded.
@@ -1014,9 +1015,10 @@ def render(rules: list, ids: list) -> str:
     para(w, "**Conformance by role.** An implementation claims one class for each "
          "role it plays ([core §12](core.md#12-conformance-classes)). A class holds "
          "its role's rules and the static rules, listed here under implementation. "
-         "Those are §1's, §9's, the contract rules of the sections §12 lists, and "
-         "any rule naming its lint code. §3.3's descriptor checker is static too. A "
-         "rule of those sections, §1 and §9 included, that names a role is listed "
+         "Those are §1's, §7.5's and §9's. So are the contract rules of the sections "
+         "§12 lists, and any rule naming its lint code. §3.3's descriptor checker is "
+         "static too. A rule of those sections, §1, §7.5 and §9 included, that names "
+         "a role is listed "
          "under that role. A static rule "
          "binds an implementation where it does what the rule governs. A class is "
          "claimed at the full level or the constrained one. A profile is a class of "

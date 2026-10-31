@@ -3,6 +3,114 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.72 — 2026-10-31: the zk2c envelope defined, and no rule adopts it yet (#976)
+
+Epic #975, zk2c, replaces the per-put HLC stamp with an owner's run and
+sequence number, carried in-band. Its plan orders the change as define,
+then expand, then contract. This version is the first step, chunk A1 of
+#976. It adds §7.5, the bytes of the zk2c envelope. No rule adopts it, so
+no owner writes one and no consumer has to read one. Nothing on the wire
+changes. `observer.md` keeps text 0.13, written against 0.71: none of its
+rules moved.
+
+**Added: §7.5, the zk2c envelope.**
+- **CH, the header byte.** The form is in bits 7–5, the run width in bit
+  4, and the tag in bits 3–0. So CH is the form's code × 32, plus the
+  width bit × 16, plus the tag. The worked byte is `0x1b`.
+- **Two forms defined.** A mutation, code 0, is a put's payload: `CH · run
+  · seq · record`. A delete, code 1, is a delete's attachment: `CH · run ·
+  seq`.
+- **Six forms reserved,** each named in words, since the core's text names
+  no issue. The issues that will define them:
+  - 2, value, and 3, error: #980, beside its error envelope;
+  - 4, event: #980, whose event keys are built from the run and the seq;
+  - 5, frame: #981;
+  - 6, heartbeat: #978;
+  - 7, snapshot: #977.
+- **The run** is 16 or 32 bits, as CH's width bit says, and **the seq** 24
+  bits. Both are big-endian. What a run names, and how a seq counts, are
+  left to #976's flip.
+- **The record** is every byte after the seq. A sample carrying an
+  envelope has the Encoding `zenoh/bytes`.
+- **Sizes.** A mutation is 6 bytes over its record, 8 with a 32-bit run.
+  A delete's attachment is 6 or 8 bytes.
+- **Why the payload.** Zenoh gives a sample one attachment, and three
+  users hold it already: `telemetry.v1`'s Epoch, a contract's declared
+  `attachment`, and an archive's replies. A delete has no payload, so its
+  envelope is its attachment.
+- **Parsing.** An implementation refuses for the first of six reasons, in
+  a stated order, each with a token: `short`, `form`, `sample_kind`, `tag`,
+  `short` again, and `trailing`. Every envelope it accepts writes back to
+  the same bytes.
+
+**Added: Appendix B's facts on size.** §7.5 compares the envelope with
+them.
+- **A timestamp is 26 bytes:** a 9-byte varint time, the id's length and
+  a 16-byte zid, read in zenoh-codec's `core/timestamp.rs`. The wire
+  baseline measured the same in a put
+  (`docs/zk2/measurements/wire-baseline/`, "W1 on RF", finding 3).
+- **An Encoding:** `zenoh/bytes` is left out, and a predefined one is 1
+  byte (`zenoh/put.rs`, `core/encoding.rs`).
+- **An attachment** costs 2 bytes over its own (`common/extension.rs`).
+
+**Decided here, where the plan left it open.**
+- **A delete's tag is 0, and a parser refuses any other (`tag`).** A
+  delete carries no record, so no type kind gives it a tag. A tag that is
+  not 0 marks an attachment that is not a delete's envelope. Refusing such
+  an attachment is why a delete keeps CH.
+- **No form is unknown.** The plan asked a reader to refuse a reserved or
+  unknown form. Three bits give eight codes, and each names a form. So the
+  rule refuses a reserved form.
+- **The order of the refusals.** Each fixture expects one token, so the
+  text says which refusal is reported first. It is the order a parser
+  meets them in: CH, its form, the sample's kind, a delete's tag, the
+  stamp's length, then a delete's trailing bytes.
+- **A delete keeps CH,** 6 bytes where the redesign report's §4.4 has 5.
+  CH states the run's width, and lets a reader refuse a foreign
+  attachment.
+
+**The class: static.** The refusals bind whoever parses an envelope: a
+consumer, a tool, an archive, or an owner reading back its own keys.
+- **Why static.** An envelope is parsed without the contract, as a key is
+  (§1.1). §1's rules are static for that reason. So §12's sentence listing
+  the static sections names §7.5 beside §1 and §9, and §0's list follows.
+  "Parsing or writing an envelope" joins the acts §12 says a static rule
+  governs.
+- **Why not a reader's rule.** `observer.md` §0's reader reads presence,
+  state or the admin space, and concludes from it. A consumer parsing a
+  stream's sample is not one, and would be left unbound.
+- **A rule of §7.5 that names a role** stays that role's, as in §1 and §9.
+  Both of its rules name none. [`RULES.md`](RULES.md) lists them under
+  implementation: 173 rules, 36 of them static.
+- **The glossary** gains "zk2c envelope", and its "Static rule" names
+  §7.5. `scripts/gen-rules-index.py`'s header for the index says the same.
+
+**The evidence.** `conformance/envelope/vectors.json` holds 14 header
+bytes and 45 cases, each defined form at each run width among them.
+- **Written by hand** from the text, as `seed/` and `budget/` were. A
+  throwaway reader written from the text alone agreed with every case.
+- **Checked** by `zenkey-model/tests/conformance.rs`'s `envelope_vectors`,
+  through the new `zenkey_model::wire`.
+- **Indexed** in Appendix C, described in Appendix E, and listed in
+  `conformance/README.md`.
+
+**Deliberately not changed.**
+- **No rule adopts the envelope.** §4's stamps, S1 to S7, §4.3's clock and
+  §7.2's Encoding rule stand. #976's flip makes the rules use it.
+- **No wire.** The runtime, the fleet and the tools neither write nor read
+  an envelope.
+- **A mutation's tag** is reported, never checked against a type: the
+  parse holds no contract. #979's `packed` kind is the first to define a
+  tag.
+- **`observer.md` §7.3's decode order** gains no step until a rule adopts
+  the envelope.
+- **An archive's reply attachment** stays as §4.4 says. Where it meets a
+  delete's envelope is for #976's flip and #980's archive attachment.
+
+**The figures.** This text's mean goes from 16.36 to 16.23 words, with no
+sentence over 50 and no tag. `RULES.md` goes from 12.33 to 12.19.
+`spec/.prose-baseline.json` is lowered to them.
+
 ## 0.71 — 2026-10-31: a read on a token's own session can answer that token, not always (#992)
 
 The reference's test of observer §3.8's note failed about one run in
