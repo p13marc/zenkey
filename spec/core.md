@@ -42,7 +42,8 @@ RFC 2119 and RFC 8174, when written in capitals.
 - **tool**: a generic program that reads the bus or contracts without
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
-  (§1, §9) bind it, whichever of the roles above it plays.
+  bind it, whichever of the roles above it plays: §1's, §9's, and each
+  rule elsewhere on what a contract states (§12).
 
 An archive (§4.4) is an owner of its own keys. Conformance is claimed by
 role (§12), and [`RULES.md`](RULES.md) lists the rules of each role's

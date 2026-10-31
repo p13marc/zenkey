@@ -21,8 +21,8 @@ its number unchanged.
   `observer.md`, which holds most of its rules, and the role keeps §0's
   word.
 - **A class** holds its role's rules in this text and in `observer.md`,
-  and the static rules. Those are §1's and §9's, as §0 says, and each rule
-  elsewhere on what a contract states, which §9.2's lints check: §2.2's
+  and the static rules. Those are §1's and §9's, and each rule elsewhere
+  on what a contract states, which §9.2's lints check: §2.2's
   templates, §2.5's history, §2.6's retention, §3.1's `resources`, §7.1's
   `json:` names and §10's `uses`. Each names a contract or a template, and
   no other role.
@@ -45,7 +45,9 @@ its number unchanged.
   by core §0's words already, as the template's §0 asks, so no profile's
   text moves. No class of this text holds a profile's rules.
 - **§0's pointer.** After the roles: "Conformance is claimed by role
-  (§12), and `RULES.md` lists the rules of each role's class."
+  (§12), and `RULES.md` lists the rules of each role's class." §0's
+  implementation role now names the static rules as §12 does: §1's, §9's,
+  and each rule elsewhere on what a contract states.
 
 **Added: [`RULES.md`](RULES.md), generated.**
 - **What it lists.** Every sentence of this text and `observer.md` that
