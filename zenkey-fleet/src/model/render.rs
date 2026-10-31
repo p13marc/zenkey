@@ -1,9 +1,9 @@
 //! A zk2 sample, rendered through the contract in hand (spec §7.2), for a
 //! tool that was never compiled against it.
 //!
-//! The decode order is the declared type, then the sample's `Encoding` for
-//! the type's wire, then sniffing where there is no declared type
-//! (observer §7.3). [`render_with`] decodes through a [`Revision`] with
+//! The decode order: a payload whose declared type the tool holds is
+//! decoded by that type, on the wire its sample's `Encoding` names, and any
+//! other payload is sniffed (observer §7.3). [`render_with`] decodes through a [`Revision`] with
 //! `zenkey_model::decode`, which owns the codecs (protobuf through the
 //! bundle's descriptor set, JSON Schema types as JSON or CBOR, raw types as
 //! their media type and size). [`render`] first finds the revision: the

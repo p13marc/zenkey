@@ -1,9 +1,9 @@
 //! Decoding a payload from a bundle alone (spec `core.md` §7.1–§7.2), for
 //! tools that were never compiled against the contract.
 //!
-//! - **Decode order** (observer §7.3): the declared type, then the sample's
-//!   `Encoding` for the type's wire, then sniffing where there is no
-//!   declared type.
+//! - **Decode order** (observer §7.3): a payload whose declared type the
+//!   tool holds is decoded by that type, on the wire its sample's
+//!   `Encoding` names. Any other payload is sniffed.
 //! - **protobuf** decodes through the bundle's `FileDescriptorSet`
 //!   (prost-reflect), without codegen; **jsonschema** types are JSON or CBOR.
 //!   Both render field by field, as JSON.

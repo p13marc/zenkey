@@ -45,7 +45,7 @@ pub struct SeedTotals {
     pub incomplete: usize,
     /// Samples a newer stamp superseded during the merge.
     pub superseded: u64,
-    /// Keys the merges forgot to stay within their bound, the monitor's
+    /// Times the merges forgot a key to stay within their bound, the monitor's
     /// total as the last tick read it ([`crate::message::BusTick::merge_evicted`]),
     /// never folded from a boundary: the merge runs for each watch's life
     /// (observer §4.1).

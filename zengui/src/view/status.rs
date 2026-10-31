@@ -290,7 +290,7 @@ pub fn skeleton_text(skeleton: Option<&zenkey_fleet::SkeletonCoverage>) -> Strin
 /// replies by the leg's own name — the `@adv` history and S4's state GET,
 /// never a storage — what the merge superseded, and, only when one ran
 /// short, how many legs reached their timeout, and only when its bound has
-/// cost something, how many keys the merge forgot (observer §4.1, O6).
+/// cost something, how many times the merge forgot a key (observer §4.1, O6).
 pub fn seed_text(seeded: usize, t: crate::state::observation::SeedTotals) -> String {
     let mut label = format!(
         "seeded {}: {} history · {} state · {} superseded",
