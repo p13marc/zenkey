@@ -20131,9 +20131,13 @@ zk2py claims the **owner**, **consumer**, **caller** and **observer**
 classes at the full level (not the constrained modifier), and not the
 deployment class: zk2py configures no deployment, and its generators are
 tools (core §0, §11.1). Its profiles' classes are claimed by role in
-`README.md`. `zk2py/classes.py` walks every `RULES.md` entry of the four
-classes and of the static rules, each with what shows it, and a reading
-keeps the walk in step with `RULES.md`.
+`README.md`. `zk2py/classes.py` gives a verdict to every `RULES.md` row of
+the four classes and of the static rules, each with what shows it. Each
+verdict is keyed to its rule as the text states it (its section and a
+phrase of its sentence), never to the index's display, so a regenerated
+`RULES.md` moves none. A row with no verdict is reported below the totals,
+never failed, and the one failure is a verdict whose rule its text no
+longer states. The rows at f07f2287, by class:
 
 | Class | Entries | Met | Not met | Not applicable |
 |---|---|---|---|---|
@@ -20161,10 +20165,10 @@ keeps the walk in step with `RULES.md`.
   an event's; §3.3's cardinality never raised; O6's one summary; §5.2's
   detail; §5.1's "Beside replicas". And observer §7.4's check at the echo
   tool's start.
-- **Beyond the index:** `classes.BEYOND` walks ten rules of the texts that
-  bind a claimed class and that `RULES.md` does not list under it (F-361 to
-  F-363). zk2py meets nine; the tenth binds a bundle holder, which no zk2py
-  tool is.
+- **Beyond the index:** fourteen verdicts walk no row: rules of the texts
+  that bind a claimed class and that `RULES.md` does not list under it
+  (F-361 to F-363). zk2py meets thirteen; the fourteenth binds a bundle
+  holder, which no zk2py tool is.
 
 ### F-358 · ambiguous · core §12, "Full": a level, or every class claimed
 
@@ -20285,7 +20289,8 @@ keeps the walk in step with `RULES.md`.
   the instance's under every role a service plays. The ids table gives S7
   "owner, consumer".
 - **Changes:** the index, and what a class's reader of it finds. zk2py
-  walks the four in `classes.BEYOND`, and meets those that bind it.
+  gives the four verdicts of their own, beyond the index, and meets those
+  that bind it.
 
 ### F-362 · index · the observer class's rules stated without a keyword
 
@@ -20484,8 +20489,10 @@ its table says "46, 24 of them a reader's".
   with zenoh's defaults, congestion `drop` where the contract says
   `block`.
 - **Took:** reliability is the one opt-in §0 allows here. zk2py's owner now
-  sets it on every publisher (`owner.qos_of`), and puts each event on a
-  publisher of its own declared with all four fields.
+  sets it on every publisher (`owner.qos_of`). A reliable event goes on
+  `Session.put` with the three stable fields, zenoh's own reliability being
+  reliable. A `best_effort` event goes on a publisher declared for its one
+  put, since its key is its occurrence's own.
 - **Fix:** §2.4: "Three fields map onto zenoh's stable QoS. `reliability`
   is unstable API in zenoh 1.10.1: an owner sets it through that opt-in
   (§0), and one that cannot publishes reliable, which a reader can only
@@ -20690,20 +20697,26 @@ index's sentences use them:
 ### The texts in zk2py
 
 - **`zk2py/classes.py`** holds the claim: four classes at the full level,
-  the profiles by role, the walk of `RULES.md` (158 rows: 56 owner, 12
-  consumer, 11 caller, 46 observer and 33 static, every entry but the
-  deployment's 14), and `BEYOND`, ten rules the index misses. `python -m
-  zk2py.classes` prints the walk as a table, and exits 1 when it is out of
-  step with `RULES.md`.
+  the profiles by role, and the walk: 172 verdicts, 158 walking the
+  `RULES.md` rows of its classes at f07f2287 (56 owner, 12 consumer, 11
+  caller, 46 observer and 33 static, every row but the deployment's 14),
+  and 14 beyond the index. Each verdict is keyed to its rule in the texts
+  (`classes.norm`), so a row's antecedent in brackets, "(n items)" or
+  evidence moves none. `python -m zk2py.classes` prints the walk as a
+  table, and the counts and every row with no verdict on standard error.
 - **The owner rules the walk found unkept**, kept now in `owner.py`:
   - **§2.4:** `qos_of` gives every publisher its resource's four fields,
-    reliability through zenoh's unstable setting (F-369); an event goes on
-    a publisher of its own with the four, where it went on `Session.put`
-    with zenoh's defaults;
-  - **§3.3:** a stated cardinality above the contract's, below 1, or of no
-    templated resource is refused at §8.2's step 2, nothing declared;
+    reliability through zenoh's unstable setting (F-369). An event went on
+    `Session.put` with zenoh's defaults. A reliable one now goes there with
+    the three stable fields, and a `best_effort` one on a publisher of its
+    own for its one put. An occurrence counts for its rate only once put;
+  - **§3.3:** a stated cardinality above the contract's, below 1, of no
+    templated resource, or not an integer, is refused at §8.2's step 2,
+    nothing declared. Every zk2py caller lowers a bound, and still starts;
   - **O6:** `OpCall.summary` refuses a second summary, a value after one,
-    and a summary for an operation that declares none;
+    and a summary for an operation that declares none. A handler that
+    raises at a refusal gets its caller `internal`, never silence, but
+    after its summary, which ended the replier, nothing more;
   - **§5.2:** `OpCall.refuse` refuses a detail for an operation with no
     `error` type, nothing sent;
   - **§5.1, "Beside replicas":** an instance whose exposed resources of an
@@ -20717,10 +20730,13 @@ index's sentences use them:
 - **`readings`: 706, up from 686.** Twenty, in `_round89_readings`: each
   text at its version; F-347 to F-357's answers as they read; the 22
   sentences that name their role, the old forms gone; §12's and observer
-  §0's new text; `RULES.md`'s table against its entries (56, 12, 11, 14,
-  33, 46, 24 readers, 167 once, 71 ids); the walk in step, and its counts;
-  the glossary's 36 terms, each linked; and seven of the owner's kept
-  rules, on a session that records what is declared.
+  §0's new text; every verdict of the walk naming a rule the texts still
+  state, and the walk holding of itself; the glossary's terms each linked;
+  and seven of the owner's kept rules, on a session that records what is
+  declared and put. Below the totals the runner reports, as `NOTE`s, the
+  walk's counts, its rows with no verdict, `RULES.md`'s table against its
+  own entries (56, 12, 11, 14, 33, 46, 24 readers, 167 once and 71 ids, in
+  agreement) and the glossary's 36 terms.
 
 **`just py-conformance`: 3663 of 3663.**
 

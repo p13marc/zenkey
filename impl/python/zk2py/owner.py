@@ -327,7 +327,11 @@ class OpCall:
         ends "as zero values then completion, when no summary is declared,
         and is answered internal when one is"."""
         r = self.resource
-        if self.envelopes:
+        if self.envelopes or self.summaries:
+            # An envelope answers the call; a summary ends its replier (O6),
+            # so a handler that raises after it owes nothing more: the call
+            # has its values and its summary, and what it then attempted was
+            # refused to it, never sent.
             return
         if r["replies"] == "one":
             owed = not self.values
@@ -665,7 +669,11 @@ class Owner:
                      and r["params"]), None)
                 if r is None:
                     raise OwnerRefused(f"{iface}: cardinality names {rid}, no templated resource of it (§3.3, D007)")
-                if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= r["cardinality"]:
+                if not isinstance(n, int) or isinstance(n, bool):
+                    # a descriptor's cardinality is a JSON integer (§3.3's
+                    # uint64): "3" is a caller's text, never a bound
+                    raise OwnerRefused(f"{iface}: cardinality {rid} = {n!r} is not an integer (§3.3, D000)")
+                if not 1 <= n <= r["cardinality"]:
                     raise OwnerRefused(f"{iface}: cardinality {rid} = {n} is not from 1 to the contract's "
                                        f"{r['cardinality']}: a descriptor never raises it (§3.3, D007)")
         # §8.2 step 2 (0.17): "It also refuses an owner whose tokenless set
@@ -1279,14 +1287,28 @@ class Owner:
             enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                 ("application/cbor" if r.get("encoding") == "cbor" else "application/json")
                 if r["type"]["kind"] == "jsonschema" else "application/protobuf")
-            # §2.4: with the event's QoS, every field. zenoh-python's
-            # Session.put takes no reliability, so the occurrence goes on a
-            # publisher of its own, declared for this one put.
-            pub = self.session.declare_publisher(key, encoding=enc, **qos_of(r))
-            try:
-                pub.put(payload)
-            finally:
-                pub.undeclare()
+            # §2.4: with the event's QoS, every field. Each occurrence has a
+            # key of its own (its ULID), so no publisher outlives one put. A
+            # reliable event, the default, goes on Session.put with the three
+            # stable fields: zenoh's own reliability is reliable (a publisher
+            # declared without it reads back RELIABLE). Session.put takes no
+            # reliability, so a best_effort event alone goes on a publisher
+            # declared for that put. Either way the occurrence is counted
+            # only once it is put: one that raises publishes nothing, and
+            # its member keeps its rate (§2.7).
+            qos = qos_of(r)
+            if r["reliability"] == "reliable":
+                self.session.put(key, payload, encoding=enc, congestion_control=qos["congestion_control"],
+                                 priority=qos["priority"], express=qos["express"])
+            else:
+                pub = self.session.declare_publisher(key, encoding=enc, **qos)
+                try:
+                    pub.put(payload)
+                finally:
+                    try:
+                        pub.undeclare()
+                    except Exception:  # noqa: BLE001 - put already; withdrawn when the session closes
+                        pass
             self._occurrences.setdefault(member, []).append(now)
             self.events_put.append((key, payload))
             return key
