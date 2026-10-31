@@ -1,0 +1,154 @@
+{
+ "run": "lean-1",
+ "stack": "lean",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "idle",
+   "seconds": 600.011,
+   "ab": {
+    "tx_sdus": 239,
+    "tx_bytes": 4063,
+    "rx_sdus_far": 224,
+    "rx_bytes_far": 3808,
+    "relay_sdus": 240,
+    "relay_bytes": 4080,
+    "relay_dropped": 16,
+    "kinds": {
+     "keep-alive?": 240
+    },
+    "kind_bytes": {
+     "keep-alive?": 4080
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 239,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 13.543,
+    "per_day": {
+     "sdus": 34415,
+     "bytes": 585061,
+     "airtime_s": 1950.2,
+     "airtime_pct": 2.257,
+     "keepalives": 34559
+    }
+   },
+   "ba": {
+    "tx_sdus": 240,
+    "tx_bytes": 4080,
+    "rx_sdus_far": 227,
+    "rx_bytes_far": 3859,
+    "relay_sdus": 240,
+    "relay_bytes": 4080,
+    "relay_dropped": 12,
+    "kinds": {
+     "keep-alive?": 240
+    },
+    "kind_bytes": {
+     "keep-alive?": 4080
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 240,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 13.6,
+    "per_day": {
+     "sdus": 34559,
+     "bytes": 587509,
+     "airtime_s": 1958.4,
+     "airtime_pct": 2.267,
+     "keepalives": 34559
+    }
+   }
+  },
+  {
+   "window": "w1",
+   "seconds": 600.011,
+   "ab": {
+    "tx_sdus": 261,
+    "tx_bytes": 5858,
+    "rx_sdus_far": 255,
+    "rx_bytes_far": 5756,
+    "relay_sdus": 261,
+    "relay_bytes": 5858,
+    "relay_dropped": 6,
+    "kinds": {
+     "keep-alive?": 230,
+     "other": 31
+    },
+    "kind_bytes": {
+     "keep-alive?": 3910,
+     "other": 1948
+    },
+    "other_sizes": {
+     "57": 3,
+     "58": 19,
+     "72": 1,
+     "73": 1,
+     "75": 2,
+     "76": 5
+    },
+    "tx_layers": {
+     "compress/compressed_total": 9,
+     "compress/stored_total": 252,
+     "compress/bytes_saved_total": 153,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 19.527,
+    "per_day": {
+     "sdus": 37583,
+     "bytes": 843537,
+     "airtime_s": 2811.8,
+     "airtime_pct": 3.254,
+     "keepalives": 33119
+    }
+   },
+   "ba": {
+    "tx_sdus": 240,
+    "tx_bytes": 4080,
+    "rx_sdus_far": 231,
+    "rx_bytes_far": 3927,
+    "relay_sdus": 240,
+    "relay_bytes": 4080,
+    "relay_dropped": 9,
+    "kinds": {
+     "keep-alive?": 240
+    },
+    "kind_bytes": {
+     "keep-alive?": 4080
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 240,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 13.6,
+    "per_day": {
+     "sdus": 34559,
+     "bytes": 587510,
+     "airtime_s": 1958.4,
+     "airtime_pct": 2.267,
+     "keepalives": 34559
+    }
+   },
+   "far_samples": {
+    "air/duty_cycle_wait_ms": 10,
+    "air/duty_cycle_available": 10,
+    "sdu/dropped_total": 10,
+    "sched/queue_depth": 10
+   }
+  }
+ ]
+}

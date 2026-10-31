@@ -1,0 +1,130 @@
+{
+ "run": "bare-1",
+ "stack": "bare",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "idle",
+   "seconds": 600.012,
+   "ab": {
+    "tx_sdus": 240,
+    "tx_bytes": 240,
+    "rx_sdus_far": 224,
+    "rx_bytes_far": 224,
+    "relay_sdus": 240,
+    "relay_bytes": 240,
+    "relay_dropped": 16,
+    "kinds": {
+     "keep-alive": 240
+    },
+    "kind_bytes": {
+     "keep-alive": 240
+    },
+    "other_sizes": {},
+    "tx_layers": {},
+    "airtime_s": 0.8,
+    "per_day": {
+     "sdus": 34559,
+     "bytes": 34559,
+     "airtime_s": 115.2,
+     "airtime_pct": 0.133,
+     "keepalives": 34559
+    }
+   },
+   "ba": {
+    "tx_sdus": 240,
+    "tx_bytes": 240,
+    "rx_sdus_far": 228,
+    "rx_bytes_far": 228,
+    "relay_sdus": 240,
+    "relay_bytes": 240,
+    "relay_dropped": 12,
+    "kinds": {
+     "keep-alive": 240
+    },
+    "kind_bytes": {
+     "keep-alive": 240
+    },
+    "other_sizes": {},
+    "tx_layers": {},
+    "airtime_s": 0.8,
+    "per_day": {
+     "sdus": 34559,
+     "bytes": 34559,
+     "airtime_s": 115.2,
+     "airtime_pct": 0.133,
+     "keepalives": 34559
+    }
+   }
+  },
+  {
+   "window": "w1",
+   "seconds": 600.015,
+   "ab": {
+    "tx_sdus": 255,
+    "tx_bytes": 1802,
+    "rx_sdus_far": 249,
+    "rx_bytes_far": 1796,
+    "relay_sdus": 255,
+    "relay_bytes": 1802,
+    "relay_dropped": 6,
+    "kinds": {
+     "keep-alive": 230,
+     "other": 25
+    },
+    "kind_bytes": {
+     "keep-alive": 230,
+     "other": 1572
+    },
+    "other_sizes": {
+     "41": 1,
+     "42": 16,
+     "77": 4,
+     "112": 1,
+     "146": 2,
+     "147": 1
+    },
+    "tx_layers": {},
+    "airtime_s": 6.007,
+    "per_day": {
+     "sdus": 36719,
+     "bytes": 259482,
+     "airtime_s": 864.9,
+     "airtime_pct": 1.001,
+     "keepalives": 33119
+    }
+   },
+   "ba": {
+    "tx_sdus": 240,
+    "tx_bytes": 240,
+    "rx_sdus_far": 231,
+    "rx_bytes_far": 231,
+    "relay_sdus": 240,
+    "relay_bytes": 240,
+    "relay_dropped": 9,
+    "kinds": {
+     "keep-alive": 240
+    },
+    "kind_bytes": {
+     "keep-alive": 240
+    },
+    "other_sizes": {},
+    "tx_layers": {},
+    "airtime_s": 0.8,
+    "per_day": {
+     "sdus": 34559,
+     "bytes": 34559,
+     "airtime_s": 115.2,
+     "airtime_pct": 0.133,
+     "keepalives": 34559
+    }
+   },
+   "far_samples": {
+    "sdu/dropped_total": 10,
+    "air/duty_cycle_wait_ms": 10,
+    "air/duty_cycle_available": 10,
+    "sched/queue_depth": 10
+   }
+  }
+ ]
+}

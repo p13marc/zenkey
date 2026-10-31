@@ -1,0 +1,47 @@
+{
+  // #989's router A, copied from zenoh-modem's configs/zenohd-rf0.json5 (d8c62df)
+  // and edited for a measurement of today's zk2 wire:
+  // - the TCP face and the lane socket are this run's (127.0.0.1:17401,
+  //   @WORK@/run/a);
+  // - NO lane-face access_control and no downsampling: "today" is everything
+  //   zk2's rules make travel (constrained-overhead-review.md §2.2);
+  // - batch_size is the driver's zenoh_batch_size (222 bare, 206 under the
+  //   lean stack); lease, keep_alive and wait_before_close as rf0 ships them.
+  // zk2 owners attach to the TCP face as zenoh clients.
+  mode: "peer",
+
+  listen: {
+    endpoints: ["tcp/127.0.0.1:17401"],
+  },
+
+  connect: {
+    endpoints: [
+      // rf0's lane: rel=0, every priority, the fork's so_sndbuf at the floor.
+      "unixsock-stream/@WORK@/run/a/rfa/b/air?rel=0;prio=0-7#so_sndbuf=1",
+    ],
+  },
+
+  scouting: {
+    multicast: { enabled: false },
+    gossip: { enabled: false },
+  },
+
+  transport: {
+    unicast: {
+      open_timeout: 10000,
+      accept_timeout: 10000,
+    },
+    link: {
+      tx: {
+        batch_size: 206,
+        lease: 10000,
+        keep_alive: 4,
+        queue: {
+          congestion_control: {
+            block: { wait_before_close: 10000000 },
+          },
+        },
+      },
+    },
+  },
+}

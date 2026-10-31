@@ -1,0 +1,30 @@
+# Driver B of #989's wire baseline: the RF end whose router listens for it.
+# A udp-medium bearer (lab-air), paced to rf()'s 2400 bit/s with its 220-byte
+# frame; loss and latency come from the relay between the two drivers.
+socket_dir = "@WORK@/run/b"
+
+[[device]]
+name = "rfb"
+zenoh_batch_size = 222
+
+[device.medium]
+kind = "udp"
+bind = "127.0.0.1:17411"
+max_sdu = 220
+rate_bps = 2400
+
+[device.medium.peers]
+a = "127.0.0.1:17413"
+
+[[device.endpoints]]
+name = "a"
+role = "dial"
+
+[[device.endpoints.lanes]]
+name = "air"
+reliable = false
+priorities = [0, 7]
+
+[management]
+listen = ["unixsock-stream/@WORK@/run/b/mgmt.sock"]
+telemetry_interval_ms = 1000
