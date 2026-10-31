@@ -828,8 +828,12 @@ impl From<StateAnswer> for StateGet {
 }
 
 /// Orders one owner's values (§4.3, the consumer rule): by time within one
-/// timestamp id, accepting the first value under a new id and restarting
-/// the ordering there. Per key.
+/// timestamp id, accepting a value under an id other than the one the
+/// key's held value carries, and ordering by time within that id from then
+/// on. Per key. A consumer hands it every value from its first on, a late
+/// joiner's seed replies included (§4.2), so an old epoch's value that
+/// arrives after the new epoch's is accepted too, and the key steps back:
+/// §4.3's residual risk.
 #[derive(Debug, Default)]
 pub struct ValueOrder {
     last: BTreeMap<String, Timestamp>,
