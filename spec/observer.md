@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.8 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.9 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.66 ([`core.md`](core.md)) |
+| **Written against** | core 0.67 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -44,7 +44,9 @@ whom it bound in the core.
 **Its classes.** Conformance is claimed by role (core §12). This text's
 rules for a tool belong to the observer class, with the core's. Its rules
 for a reader belong to the class of the role the reader plays.
-[`RULES.md`](RULES.md) lists both texts' rules by role.
+[`RULES.md`](RULES.md) lists both texts' rules stated with a keyword, by
+role. This text states many without one, in §1, §2, §5 and §8. A class
+holds those too.
 
 **Keywords, roles and evidence** are the core's (core §0). `[F: path]` is
 a fixture under [`conformance/`](conformance/), and `[Sc: file §n]` a
@@ -395,7 +397,7 @@ re-minting and the caller's timeouts stay in core §8.1.
     subtree the subscribers read, so a grant that admits them admits it
     (core §11.1). `[Sc: presence.md §10]`
   - **The subscribers of a reader's watch session SHOULD have no history**
-    when it seeds by a read on its other session. The round trip's
+    when the reader seeds by a read on its other session. The round trip's
     final reply follows their history. So with history the round trip
     waits for the population, and without history it is one round trip
     (core Appendix B). The seed reads what is held, and a token declared
@@ -1002,10 +1004,10 @@ that reaches an owner's queryable gets a value or an envelope.
 This is core §7.1's and §7.2's tool half; type identity and the sample's
 `Encoding` stay there.
 
-- **What a generic tool decodes** (core §7.1). A generic tool MUST decode
-  `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON
-  Schema 2020-12, core §7.3), and reads a `raw` type by its media type
-  only. A reserved kind (`flatbuffer`, `ros2msg`, `cdr`), which a contract
+- **What a generic tool decodes** (core §7.1). A tool that shows or judges
+  a payload MUST decode `protobuf` (proto2 and proto3) and `jsonschema`
+  (the zk2 subset of JSON Schema 2020-12, core §7.3), and reads a `raw`
+  type by its media type only. A reserved kind (`flatbuffer`, `ros2msg`, `cdr`), which a contract
   declares as `raw` with a media type, tools MAY decode through a plugin.
   `[Sc: types.md §2]`
 - **Decode order** for a tool is: the sample's `Encoding`, then the

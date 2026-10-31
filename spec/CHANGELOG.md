@@ -3,6 +3,200 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.67 — 2026-10-31: round 89's answers: the classes said exactly, three rules changed, two restated, and the glossary corrected (#926)
+
+zk2py round 89 (PR #967) read 0.66's §0 and §12, `observer.md` 0.8's §0,
+[`RULES.md`](RULES.md) and `spec/README.md`'s glossary cold. It claimed the
+owner, consumer, caller and observer classes, and walked `RULES.md` entry
+by entry. Its findings are F-358 to F-378. This version answers them
+(#926's second part, epic #921 Track B). `observer.md` moves to text 0.9
+beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), for F-370
+and F-376.
+
+**Changed: three rules, each with its reason.**
+- **§2.4, a publisher's `reliability` (F-369).** "The fields map
+  one-to-one onto Zenoh's stable QoS" was false of one field.
+  - **Now:** three fields, `congestion`, `priority` and `express`, map
+    onto stable QoS. `reliability` is unstable API in zenoh 1.10.1, which
+    an owner sets through §0's opt-in. One that cannot set it MAY publish
+    reliable, zenoh's default. The MUST to publish with the contract's QoS
+    stands, with that one exception.
+  - **Why:** in Rust, `PublisherBuilder::reliability` and
+    `PublicationBuilder::reliability` exist only under zenoh's `unstable`
+    feature, and every put without it goes `Reliable`. This was read from
+    zenoh 1.10.1's API, not measured. zk2py measured zenoh-python 1.10.1:
+    `Reliability` is unstable there too, and `Session.put` takes none. An
+    owner on stable API alone broke the MUST for every `best_effort`
+    resource. The reference builds zenoh with `unstable` (the workspace's
+    `Cargo.toml`) and sets it on every publisher and every event's put, so
+    it meets the rule unchanged.
+  - **No verdict moves.** A tool's readings rest on the declared QoS
+    (`observer.md` §5.1), and a reliable sample is dropped only where a
+    best-effort one would be (Appendix B).
+  - **Appendix B** gains both facts: the Rust API's, read from it, under
+    the facts relied on, and zenoh-python's, measured by zk2py, under one
+    binding's facts.
+- **§4.3, S7's consumer rule and a late joiner's seed (F-368).** S7's
+  consumer rule accepts the first value under a new id, though its time
+  be lower. §4.2's merge keeps the later time across ids. The two
+  disagreed after a new epoch on a clock behind, inside a seed.
+  - **Decided for the merge,** as the reference has it: `zenkey_model::seed`,
+    the fleet's seeded subscription and the `seed` fixtures merge by stamp,
+    and so does zk2py's late joiner. S7 gains, under its residual risk: a
+    late joiner's seed merges as §4.2 says, and the consumer rule orders
+    what a consumer receives after its seed. Across two ids within one
+    seed, the value kept may be either epoch's, which is §4.3's residual
+    risk, as §4.2 already says of an old value arriving after a new one.
+  - **The evidence** is `seed/merge.json`'s case "two ids for one key (an
+    owner's new epoch inside the seed)", the new id's time behind, which
+    was there already. No fixture moved.
+  - **What moves:** the consumer rule no longer governs a seed. No
+    implementation moves: the reference and zk2py merge so already.
+- **§1.3, the guard (F-374).** "Or any selector without a verbatim chunk
+  at position 5" is "or any selector without a verbatim chunk".
+  - **Why:** by the old letter, `zk2/*/*/@zk/**` and `zk2/@zk/contract/**`
+    were ambient, and a GET on either reaches control keys, so the guard
+    was false of them. `grammar.md` §1 step 3 reads the instance token
+    through `zk2/g/*/@zk/**`.
+  - **The reference** decides no kind by position.
+    `zenkey_model::grammar::blind_spots` reads what a selector reaches by
+    zenoh's intersection, and finds `@zk` reached by `zk2/*/*/@zk/**`.
+    zk2py's `live.blind_spots` does the same.
+  - **The text that moved** is §1.3. The glossary already said "a
+    selector with no verbatim chunk", and now adds what it never reaches.
+
+**Restated, no rule changed (F-363).** RFC 2119 gives RECOMMENDED and
+SHOULD one meaning, and §0 declares only five keywords.
+- **§11.2:** "This is RECOMMENDED where the router can afford the
+  enumeration" is "A deployment SHOULD run `deny` where the router can
+  afford the enumeration".
+- **§2.2:** "It MAY appear only as the last segment" is "A rest parameter
+  MUST NOT appear except as the last segment (E010)". A MAY with "only" is
+  a restriction, which E010 checks (`e010-template`). The index now lists
+  both.
+
+**§12 and §0, said exactly (F-358, F-359, F-360, F-362, F-377, F-378).**
+- **Full is a level (F-358, its fix (a)).** "Full is every class" read as
+  a claim of all five. Full is now the level of a class claimed without
+  the constrained modifier. The union of the five classes is every rule
+  of both texts. An implementation at the full level meets the rules of
+  the classes it claims.
+- **A static section's role (F-359).** "A rule of these sections that
+  names a role is that role's", which the index already did. §3.3's rule
+  for a descriptor checker is static too, as the index listed it.
+- **How a static rule binds (F-360, F-378's fix (b)).** A static rule
+  binds an implementation where it does what the rule governs: parsing or
+  building a key, slugging a value, linting a contract, building or
+  verifying a bundle, checking a history, classifying a revision.
+  - One on what a contract states binds it through the contracts it
+    writes and the lints it runs, as §2.4's two SHOULDs, which no lint
+    checks.
+  - §9.8's publication rules bind whoever publishes a revision: its CI,
+    and the person who accepts it. The finding's "a deployment's process"
+    is not used, since a deployment is a role of §0 with another meaning.
+  - §0's implementation role says "where it does what they govern", and
+    §12's stream-only owner meets the static rules on what it does.
+  - **This narrows a class's cost and moves no verdict.** A stream-only
+    owner's path held the whole of §9 by default. It now holds the static
+    rules on what it does, such as building its keys. A rule binds what it
+    governs either way, so no implementation's verdict on any rule moves.
+- **Rules without a keyword (F-362).** §0 and §12 say `RULES.md` lists the
+  rules stated with MUST, MUST NOT, SHOULD or SHOULD NOT. A class also
+  holds the rules its texts state without one, such as `observer.md` §1,
+  §2, §5 and §8. None gains a keyword.
+- **§12's Profiles (F-377), the finding's rewrite.** "A profile's rules
+  name the roles they bind, in core §0's words, as each profile's §0 says.
+  So a profile's class holds the profile's rules for each role the
+  implementation plays." "Full included" is "at either level".
+
+**`RULES.md` (F-361, F-364, F-366),** from `scripts/gen-rules-index.py`.
+- **Every role a subject names (F-361).** A late joiner is a consumer or a
+  tool (§4.2), so its two MUSTs are under consumer and observer. "Every
+  instance" (§8.1) and "every holder" (§8.4) are any role a service plays:
+  owner, consumer, caller and observer. An id binds the roles of every rule
+  it is the id of, so S7's row binds "owner, consumer". No other subject
+  names two roles the index missed.
+- **Evidence (F-364).**
+  - A tag that closes a list cites each rule of the list that cites none:
+    the last paragraph of a list item, for its rules; a paragraph of
+    evidence alone at the top level, for the rules since the paragraph or
+    heading before the list.
+  - A tag right after a rule's sentence is its own, so §10's `uses` MUST
+    shows `e020-annotation` alone, not seven tags.
+  - A rule's id is the code that checks it: "(E024)", "is E024", or the
+    code its list item says each failure below is. §9.4's file part is
+    E032, not E024.
+  - Rules citing none: 45 before, 23 after. Of the MUSTs, 22 before and 11
+    after. The eleven are F-365's thirteen less §11.2's two generator
+    MUSTs, which the list's closing `[Sc: security.md §2]` cites. F-365's
+    list goes to #965, as a comment extending its eleven.
+- **What an entry shows (F-366).** A pronoun an entry opens with, or its
+  rule's subject is, shows its noun in brackets: "It [a consumer] MUST
+  accept …". The script fails on one with no noun given. Five of the
+  finding's object pronouns are given too. A lead-in to a list ends with
+  its length, "(2 items)", or a table's, "(12 rows)". No blank is left
+  where a tag was. Otherwise an entry is the text's sentence, never
+  reworded.
+- **The self-test** gains a case for each, and checks seven entries' shown
+  sentences.
+- **The counts.** 167 rules before, 169 after, the two restated rules
+  added. By role: owner 56 and 56; consumer 12 and 13; caller 11 and 13;
+  deployment 14 and 15; observer 46 and 50, 24 of them a reader's both
+  times; implementation 33 and 34. There are 71 rule ids before and
+  after.
+
+**`spec/README.md`'s glossary (F-371 to F-375).**
+- **Complete read (F-371)** now says all of observer §3: the routers'
+  final reply with no error reply, before the interests timeout, a link
+  held throughout, no liveliness subscriber, and, for a reader with a
+  watch session, a round trip standing. It covers what §3.9 says. A reader
+  built from the old one read absence from a cut-off read, which §3.5
+  forbids.
+- **Presence (F-372)** is the liveliness tokens, and a descriptor says
+  what an instance implements.
+- **Eleven definitions (F-373)** say what their sections say: late
+  joiner, re-mint, epoch, member, bundle, revision, round trip, stamp,
+  face, class and instance.
+- **Ambient selector (F-374)** adds what it never reaches.
+- **Sixteen terms added (F-375), reader first:** reader, static rule,
+  expose (and active), possibly incomplete, interests timeout, move,
+  seed, history, envelope, holder, address, plain chunk, verbatim chunk,
+  Established, NotAsked and Unobservable. The glossary holds 52 terms.
+
+**0.66's counts (F-367).** Its editorial heading says nineteen rules, not
+eighteen, and its counts say 24 of the 46 are a reader's, not 26. These
+are counts, not history.
+
+**How the rules were diffed.** Every sentence holding MUST, MUST NOT,
+SHOULD, SHOULD NOT, MAY, REQUIRED or RECOMMENDED was extracted before and
+after, keyed by section, and diffed with the tool of #935's third part.
+- **This text:** 152 before, 155 after; 150 unchanged.
+  - The two rewritten are F-363's restatements.
+  - Of the three only after, one is §2.4's MAY (F-369). The other two are
+    §0's and §12's sentences naming the keywords (F-362), which state no
+    rule.
+- **Without a keyword:** §1.3's guard (F-374) and S7's two sentences
+  (F-368) moved. §12's and §0's other sentences, Appendix B's facts and
+  the header moved too. No other sentence did.
+- **No fixture or scenario moved.**
+
+**The figures.** This text's mean went from 16.41 words to 16.4, with no
+sentence over 50 and no tag. `spec/README.md` stays at 12.43 and
+`RULES.md` went from 13.0 to 12.69. `spec/.prose-baseline.json` is
+lowered to them.
+
+**Deliberately not changed.**
+- **No keyword, condition or scope** but those above, and no section
+  number or anchor.
+- **The classes.** No rule moved between classes. The index lists more
+  rules under consumer, caller and observer (F-361), whose subjects named
+  those roles already.
+- **`scenarios/types.md` §3** still checks the three stable fields. A
+  reader cannot read a sample's reliability on stable API either.
+- **`desired.v1` §2.6's own order** for a target stands. A profile's rules
+  are its class's, and that text orders a target's versions itself.
+- **F-365's thirteen MUSTs** are #965's.
+
 ## 0.66 — 2026-10-31: conformance classes by role, and a generated rule index (#926)
 
 §12 had two levels. Full met every rule, and constrained was full with
@@ -60,7 +254,7 @@ its number unchanged.
   S1–S7, O1–O7, D000–D012 and the E and W codes, each with the role its row
   binds.
 - **The counts.** 167 rules: 56 bind an owner, 12 a consumer, 11 a caller,
-  14 a deployment, 46 the tool role or a reader (26 of them a reader's),
+  14 a deployment, 46 the tool role or a reader (24 of them a reader's),
   and 33 every implementation. A rule that binds two roles is counted in
   each. There are 71 rule ids.
 - **The script,** `scripts/gen-rules-index.py`, uses the Python standard
@@ -93,7 +287,7 @@ its number unchanged.
   owner and implementation. `RULES.md`'s header says so, and §12 and
   `spec/README.md` link it.
 
-**Editorial: eighteen rules that name their role, no rule changed.** The
+**Editorial: nineteen rules that name their role, no rule changed.** The
 index reads each rule's role from its subject. Where a subject named no
 role, the sentence now names it, its keyword, condition and scope kept:
 - **§1.5:** "A counter that crosses a face where neither is visible SHOULD

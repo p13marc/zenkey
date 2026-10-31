@@ -1,6 +1,6 @@
 {
   "spec/CHANGELOG.md": {
-    "mean": 18.03,
+    "mean": 17.88,
     "over": 30,
     "tags": 0
   },
@@ -10,7 +10,7 @@
     "tags": 0
   },
   "spec/RULES.md": {
-    "mean": 13.0,
+    "mean": 12.69,
     "over": 0,
     "tags": 0
   },
@@ -30,17 +30,17 @@
     "tags": 0
   },
   "spec/core.md": {
-    "mean": 16.41,
+    "mean": 16.4,
     "over": 0,
     "tags": 0
   },
   "spec/observer-CHANGELOG.md": {
-    "mean": 16.64,
+    "mean": 16.48,
     "over": 5,
     "tags": 0
   },
   "spec/observer.md": {
-    "mean": 18.26,
+    "mean": 18.24,
     "over": 0,
     "tags": 0
   },

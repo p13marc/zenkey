@@ -50,10 +50,10 @@ The owner, consumer and caller sections each point to them.
 | [Owner](#owner) | 56 |
 | [Consumer](#consumer) | 13 |
 | [Caller](#caller) | 13 |
-| [Deployment](#deployment) | 14 |
+| [Deployment](#deployment) | 15 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 50, 24 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 33 |
-| Every rule, once | 167 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 34 |
+| Every rule, once | 169 |
 | [Rule ids](#rule-ids) | 71 |
 
 ## Owner
@@ -362,6 +362,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§8.5](core.md#85-constrained-faces) | **A deployment SHOULD deny `@stream` keys across the face** unless `link.v1` downsamples them: an `@stream` resource whose contract exposes it, one rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8). | none cited |
 | [§8.5](core.md#85-constrained-faces) | **A far router in a south region needs declarations sent toward it.** … So a deployment MUST grant the far side's principal `declare_queryable` on egress over every queryable its side may query, as the owner declares it. | `[Sc: link.v1 scenarios §2]` |
 
+### [core §11.2 Compiling grants](core.md#112-compiling-grants)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§11.2](core.md#112-compiling-grants) | A deployment SHOULD run `deny` where the router can afford the enumeration. | `[Sc: security.md §2]` |
+
 ### [core §11.3 Facts a deployment designs around](core.md#113-facts-a-deployment-designs-around)
 
 | Rule | Sentence | Evidence |
@@ -469,7 +475,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§3.7](observer.md#37-the-watch-session), *reader* | A reader SHOULD make every liveliness read it may conclude absence from (a seed, a re-read, a tool's presence read) on a session that has never held a liveliness subscriber of any kind. | `[Sc: presence.md §9]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | The reader SHOULD hold its liveliness subscribers on another session of its own: a **watch session**. | `[Sc: presence.md §9]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | A reader that seeds on one session and follows withdrawals on its watch session SHOULD make one round trip on the watch session after declaring its subscribers, and before the seed … | `[Sc: presence.md §9]` |
-| [§3.7](observer.md#37-the-watch-session), *reader* | **The subscribers of a reader's watch session SHOULD have no history** when it seeds by a read on its other session. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | **The subscribers of a reader's watch session SHOULD have no history** when the reader seeds by a read on its other session. | `[Sc: presence.md §10]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | A reader that follows presence in a namespace SHOULD hold its watch session in **no** namespace, and declare its subscribers, without history, on the **wire keys**: the namespace in front, `<ns>/zk2/…`, and its round trip's key so too, `<ns>/zk2/…/@zk/settle`. | `[Sc: presence.md §10]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | A reader that keeps a namespaced watch session with history instead SHOULD run its round trip's wait and its session's interests timeout above the history's time at its population. | `[Sc: presence.md §10]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | **A round trip stands until the watch session's transport moves.** … A reader that follows presence live SHOULD make the round trip again before its next read, and read again at once, when its watch session's transport closes or opens, as after a withdrawal. | `[Sc: presence.md §10]` |
@@ -516,7 +522,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.3](observer.md#73-decoding-and-rendering) | A generic tool MUST decode `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and reads a `raw` type by its media type only. | `[Sc: types.md §2]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a payload MUST decode `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and reads a `raw` type by its media type only. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool MUST render a kind it cannot decode as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
 
@@ -558,6 +564,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
+| [E010](core.md#22-templates) | A rest parameter MUST NOT appear except as the last segment (E010), and its value is a list of strings. | `[F: contracts/e010-template, e010-literal-x, e011-params, e012-path]` |
 | [§2.2](core.md#22-templates) | **Within one interface,** two templates under the same kind token MUST NOT have the same shape. | `[F: contracts/e021-shape]` |
 | [§2.2](core.md#22-templates) | A template with parameters MUST declare `cardinality`, a positive integer that bounds its population in one instance, or `"unbounded"` (below). | `[F: contracts/e013-cardinality, e014-field]` |
 | [§2.2](core.md#22-templates) | **Cardinality.** … A template without parameters MUST NOT declare it. | `[F: contracts/e013-cardinality, e014-field]` |

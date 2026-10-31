@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.66** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.67** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -42,12 +42,14 @@ RFC 2119 and RFC 8174, when written in capitals.
 - **tool**: a generic program that reads the bus or contracts without
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
-  bind it, whichever of the roles above it plays: §1's, §9's, and those
-  §12 lists on what a contract states.
+  bind it, whichever of the roles above it plays, where it does what they
+  govern (§12): §1's, §9's, and those §12 lists on what a contract states.
 
 An archive (§4.4) is an owner of its own keys. Conformance is claimed by
-role (§12), and [`RULES.md`](RULES.md) lists the rules of each role's
-class.
+role (§12). [`RULES.md`](RULES.md) lists each class's rules stated with
+MUST, MUST NOT, SHOULD or SHOULD NOT. A class also holds the rules its
+texts state without one, such as [`observer.md`](observer.md) §1, §2, §5
+and §8.
 
 **Evidence.** Each MUST cites what checks it:
 - `[F: path]` is a fixture under `conformance/`, which every implementation
@@ -145,9 +147,9 @@ to, if any, is resolution's question (§2.2). `[F: keys.json]`
 Zenoh's `*` and `**` never match a verbatim chunk. Two consequences follow,
 and an implementation MUST NOT break either:
 - **The guard.** An ambient selector (`zk2/**`, `zk2/<system>/**`, or any
-  selector without a verbatim chunk at position 5) never delivers an
-  `@stream` or `@state` sample, and a GET on it never reaches an `@op`
-  queryable or a control key. `[Sc: grammar.md §1]`
+  selector without a verbatim chunk) never delivers an `@stream` or
+  `@state` sample, and a GET on it never reaches an `@op` queryable or a
+  control key. `[Sc: grammar.md §1]`
 - **Exact kind selectors.** Positions 1–5 have fixed arity, so
   `zk2/*/*/*/state/**` selects exactly the plain state of every service.
   `[Sc: grammar.md §1]`
@@ -261,8 +263,8 @@ A resource's **template** is its path below the kind chunk.
 - **`{name}`** is one chunk holding a slugged value. A parameter name is
   `[a-z][a-z0-9_]*`, at most once per template.
 - **`{name...}`** is a **rest** parameter: one or more chunks, each slugged.
-  It MAY appear only as the last segment, and its value is a list of
-  strings.
+  A rest parameter MUST NOT appear except as the last segment (E010), and
+  its value is a list of strings.
 - **Parameter types** are `string`, `uint` and `path`.
   - `path` is the type of a rest parameter, and only of one.
   - A `uint` value is written in decimal without leading zeros, then slugged
@@ -328,8 +330,13 @@ reading are §2.7's.
 
 Each stream, state and event resource carries Zenoh QoS in its contract
 (`[F: contracts/ok-kinds, ok-defaults-defaulted]`). An owner MUST publish
-with it. The fields map one-to-one onto Zenoh's stable QoS.
-`[Sc: types.md §3]`
+with it. `[Sc: types.md §3]`
+- **Three of its fields**, `congestion`, `priority` and `express`, map
+  one-to-one onto Zenoh's stable QoS.
+- **`reliability`** is unstable API in zenoh 1.10.1 (Appendix B). An owner
+  sets it through §0's opt-in. One that cannot set it MAY publish
+  reliable, zenoh's default. A tool's readings rest on the declared QoS
+  ([`observer.md`](observer.md) §5.1), so none moves by it.
 
 | Field | Values | Default: `stream` | Default: `@stream` | Default: `state`, `@state`, `events` |
 |---|---|---|---|---|
@@ -946,6 +953,12 @@ through the same router, arrives with the router's zid.
     restart its ordering there.
   - **Residual risk.** A value from the old epoch that is still in transit
     can arrive after the new epoch starts. That is accepted at this version.
+    - **A late joiner's seed** merges as §4.2 says, and the consumer rule
+      orders what a consumer receives after its seed. Across two ids within
+      one seed, the value kept may be either epoch's: the merge keeps the
+      later time, and a new epoch's clock can be behind. That is this
+      residual risk, as §4.2 says of an old value arriving after a new one.
+      `[F: seed/merge.json]`
 - **Ahead.** An owner SHOULD NOT stamp beyond its router's HLC delta: it
   cannot know its own offset without a reference.
   - The owner SHOULD detect drift against a reference it holds for the
@@ -2816,7 +2829,8 @@ The format is the generator's own. The reference reads an enrollment file
 ### 11.2 Compiling grants
 
 - **Under `default_permission: deny`**, a grant compiles to allow rules.
-  This is RECOMMENDED where the router can afford the enumeration.
+  A deployment SHOULD run `deny` where the router can afford the
+  enumeration.
 - **Under `allow`**, Zenoh does not evaluate allow rules. A grant compiles
   into denies of its complement, regenerated on every contract revision.
 - **A query is admitted by inclusion** (Appendix B).
@@ -2933,11 +2947,24 @@ The format is the generator's own. The reference reads an enrollment file
 Conformance is claimed by role. Five of §0's roles have a **class** each:
 that role's rules, and the static rules that bind every implementation
 (§0). The static rules are §1's and §9's, and those on what a contract
-states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule elsewhere that
-names the lint code checking it (§9.2) is static too. A class holds its
-role's rules in this text and in [`observer.md`](observer.md).
-[`RULES.md`](RULES.md) lists each class's rules, generated from both
-texts.
+states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of these
+sections that names a role is that role's. A rule elsewhere that names the
+lint code checking it (§9.2) is static too, and so is §3.3's rule for a
+descriptor checker. A class holds its role's rules in this text and in
+[`observer.md`](observer.md).
+
+**How a static rule binds.** A static rule binds an implementation where
+it does what the rule governs. Such acts are parsing or building a key,
+slugging a value, linting a contract, building or verifying a bundle,
+checking a history and classifying a revision. A rule on what a contract
+states binds it through the contracts it writes and the lints it runs.
+§9.8's publication rules bind whoever publishes a revision: its CI, and the
+person who accepts it.
+
+**The index.** [`RULES.md`](RULES.md) lists each class's rules stated with
+MUST, MUST NOT, SHOULD or SHOULD NOT, generated from both texts. A class
+also holds the rules its texts state without one, such as `observer.md`
+§1, §2, §5 and §8.
 
 **The classes.**
 - **Owner**, **consumer**, **caller** and **deployment**: one class for
@@ -2954,11 +2981,13 @@ plays, and meets every rule of each class it claims. A rule that binds two
 roles, such as O5's caller and tool, is in both classes. A service that
 only publishes a stream plays the owner role alone. Its class is the
 owner's rules and the static rules: in [`RULES.md`](RULES.md), the
-entries under owner and implementation.
+entries under owner and implementation. Of the static rules, it meets those
+that govern what it does (above).
 
-**Full** is every class, their union: it holds every rule of both texts,
-and no rule that a class does not. A rule binds only the role it names. So
-at the full level an implementation meets the rules of the roles it plays.
+**Full** is the level of a class claimed without the constrained modifier.
+The union of the five classes is every rule of both texts. A rule binds
+only the role it names, so an implementation at the full level meets the
+rules of the classes it claims.
 
 **Constrained** is a modifier on a class. A class claimed at the
 constrained level holds every rule of the class, with these relaxations and
@@ -2977,9 +3006,10 @@ additions:
 **Profiles** stay opt-in, one class each (§10). An implementation claims a
 profile's class by following the profile. A service lists it in its
 descriptor's `profiles` (§3.3), and a tool answers its questions (its §5).
-A profile's rules name the roles they bind, as this text's do (its §0). So
-its class holds its rules for each role the implementation plays. No class
-of this text, full included, holds a profile's rules.
+A profile's rules name the roles they bind, in core §0's words, as each
+profile's §0 says. So a profile's class holds the profile's rules for each
+role the implementation plays. No class of this text, at either level,
+holds a profile's rules.
 
 ---
 
@@ -3031,6 +3061,14 @@ Appendix B. These are the ones the rules above cite:
 - A session with its HLC enabled stamps every put it is not given a
   timestamp for, a publisher's included, from its own HLC
   (`Session::resolve_put`).
+- A put's `reliability` is unstable API. `PublisherBuilder::reliability`
+  and `PublicationBuilder::reliability` exist only under the `unstable`
+  feature. Without it a put is sent `Reliability::DEFAULT`, which is
+  `Reliable`. A publisher declared without a reliability is reliable too
+  (`api/session.rs`, `declare_publisher` and `resolve_put`;
+  zenoh-protocol's `core/mod.rs`; §2.4). This is read from the API, not
+  measured. The reference builds zenoh with `unstable` (the workspace's
+  `Cargo.toml`), and sets it on every publisher and every event's put.
 - The admin space is disabled by default (`adminspace.enabled: false`).
 - A zid is written in lowercase hexadecimal without leading zeros.
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
@@ -3241,6 +3279,9 @@ Appendix B. These are the ones the rules above cite:
   smallest step above a timestamp is 1 ns (§4.3, a tick).
 - zenoh-python 1.10.1 has no unbounded handler, so a callback is its way
   to meet observer §3.1.
+- zenoh-python 1.10.1 marks `Reliability` unstable too, and `Session.put`
+  takes none. Measured by zk2py, a publisher declared without one reads
+  back reliable, with congestion `drop` and priority `data` (§2.4).
 - In Rust, `Session::config()` reads an open session's interests timeout;
   zenoh-python 1.10.1 gives an open session no accessor for it (observer
   §3.3).
