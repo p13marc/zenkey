@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.67** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.68** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -42,8 +42,10 @@ RFC 2119 and RFC 8174, when written in capitals.
 - **tool**: a generic program that reads the bus or contracts without
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
-  bind it, whichever of the roles above it plays, where it does what they
-  govern (§12): §1's, §9's, and those §12 lists on what a contract states.
+  bind it, whichever of the roles above it plays. They are §1's, §9's, and
+  the others §12 lists: those on what a contract states, those naming
+  their lint code, and §3.3's rule for a descriptor checker. Each binds it
+  where it does what the rule governs (§12).
 
 An archive (§4.4) is an owner of its own keys. Conformance is claimed by
 role (§12). [`RULES.md`](RULES.md) lists each class's rules stated with
@@ -200,17 +202,16 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
 - **The instance id is a continuity epoch.** An owner MUST mint a new
   instance id whenever its counters reset or its state's ordering restarts
   (§4.3): a process restart, a device re-enumerated, a polled device's
-  uptime rewound, a container restarted.
+  uptime rewound, a container restarted. `[Sc: presence.md §3]`
   - The owner SHOULD do so in a new session, so that its timestamps' id
-    changes too (§4.3). That change, and presence, are how a consumer sees the
-    discontinuity.
+    changes too (§4.3). `[Sc: state.md §7]` That change, and presence, are
+    how a consumer sees the discontinuity.
   - An owner's counter that crosses a face where neither is visible
     SHOULD carry its epoch in-band, in its value or its attachment, as
     [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9).
-    Without one, a reader across the face reads a decrease as a reset
+    `[Sc: profiles/telemetry/scenarios.md §8]` Without one, a reader across
+    the face reads a decrease as a reset
     ([`link.v1`](profiles/link/v1.md) §2.13; `telemetry.v1` §2.10, §2.14).
-
-  `[Sc: presence.md §3]`
 - **Moving a service to another host changes no key.**
 - **No implicit identity.** Every key form names its system and service
   (§1.1), so a key cannot be built without them. A fleet-wide selection is
@@ -334,9 +335,10 @@ with it. `[Sc: types.md §3]`
 - **Three of its fields**, `congestion`, `priority` and `express`, map
   one-to-one onto Zenoh's stable QoS.
 - **`reliability`** is unstable API in zenoh 1.10.1 (Appendix B). An owner
-  sets it through §0's opt-in. One that cannot set it MAY publish
-  reliable, zenoh's default. A tool's readings rest on the declared QoS
-  ([`observer.md`](observer.md) §5.1), so none moves by it.
+  that opts into it (§0) sets it. One that does not, or whose binding
+  offers no such API, MAY publish reliable, zenoh's default. A tool's
+  readings rest on the declared QoS ([`observer.md`](observer.md) §5.1),
+  so an owner that publishes reliable moves none of them.
 
 | Field | Values | Default: `stream` | Default: `@stream` | Default: `state`, `@state`, `events` |
 |---|---|---|---|---|
@@ -371,10 +373,12 @@ publisher is never found and heartbeat recovery never runs. History from
 publishers already present still works there.
 
 zenoh-ext's advanced publication is behind its `unstable` feature in
-1.10.1, so `history` is the one place where a participant opts into an
-unstable API (§0). An advanced publisher declares its own queryable and
-token under `<key>/@adv/…`, so its grants (§11.1) must include that
-subtree.
+1.10.1, so `history` is one of the places where a participant opts into
+an unstable API (§0). The others are an owner's `reliability` (§2.4), and
+a reader's links, replier id and transport events
+([`observer.md`](observer.md) §3.5, §4.2, §5.2). An advanced publisher
+declares its own queryable and token under `<key>/@adv/…`, so its grants
+(§11.1) must include that subtree.
 
 **`history.miss_detection_ms`** declares miss detection: the
 owner's advanced publisher numbers its samples, and sends a heartbeat
@@ -867,8 +871,9 @@ from S4's GET and follows a subscription.
   answers the GET and before the subscription reaches it is lost, and a
   lost delete leaves a deleted key standing. `[Sc: state.md §10]`
 - **The merge.** A late joiner MUST merge the GET's replies and the
-  subscription's samples per key by the owner's stamp (S1, S2), whichever
-  path brought each one, and keep the newer. `[Sc: state.md §10]`
+  subscription's samples per key, whichever path brought each one, and
+  keep the newer by the owner's stamp (S1, S2), or, for a consumer across
+  two timestamp ids, by §4.3's consumer rule. `[Sc: state.md §10]`
   - A live put or delete newer than a reply replaces it, and a reply newer
     than a live sample replaces that.
   - A `reply_del` is a deletion with its stamp (S3), merged as a live
@@ -882,10 +887,9 @@ from S4's GET and follows a subscription.
     significant byte that differs decides, which is not the ids' order as
     integers: at one time, id `100` (hex) is below id `2`.
     `[F: seed/merge.json]` `[Sc: state.md §11]`
-    - Within one timestamp id, that is by time (§4.3). Two ids for one key
-      within one seed mean the owner started a new epoch inside the seed's
-      window: a value of the old epoch that arrives after one of the new
-      is §4.3's residual risk.
+    - Within one timestamp id, that is by time, as §4.3's consumer rule
+      orders. Two ids for one key mean that the owner started a new epoch
+      (§4.3), and there a consumer and a tool part (below).
   - **An unstamped sample** ranks below every stamped one, as
     `Latest` ranks an unstamped reply lowest (§4.1). It is no owner's
     (S1): it is a foreign key's (§1.7), put by a session with no HLC
@@ -898,6 +902,18 @@ from S4's GET and follows a subscription.
       after a live sample.
 
     `[F: seed/merge.json]` `[Sc: state.md §11]`
+  - **Across two timestamp ids**, a consumer orders by §4.3's consumer
+    rule from its first value on, its seed's replies included. It keeps a
+    value under an id other than its held value's. That is the case the
+    merge leaves to §4.3, for a consumer. Within one id the two orders are
+    one. So a consumer's merge has no end to state: §4.3's rule orders
+    every value it receives.
+    - **A tool** keeps the merge across ids too, for as long as it
+      follows ([`observer.md`](observer.md) §4.1).
+    - **Either way**, a value of the old epoch that arrives after one of
+      the new is §4.3's residual risk.
+
+    `[Sc: state.md §7]`
 - **R6 and a tool's seed**: [`observer.md`](observer.md) §4.1.
 - **A selector over several owners.** A GET on a selector that matches
   several owners' keys is addressed to the owner's keys, as S4 requires,
@@ -948,22 +964,29 @@ through the same router, arrives with the router's zid.
   instance (§1.5) whose session has a fresh, unpinned zid.
   - **The epoch rides each value.** Every timestamp carries its HLC's id
     (§4.1), so no per-sample attribution is needed.
-  - **Consumer rule.** A consumer MUST order an owner's values by time within
-    one timestamp id. It MUST accept the first value under a new id, and
-    restart its ordering there.
+  - **Consumer rule.** A consumer MUST order each key's values by time
+    within one timestamp id, from the first value it receives, a late
+    joiner's seed replies included (§4.2). It MUST accept a value under an
+    id other than the one its held value carries, and order by time within
+    that id from then on. `[Sc: state.md §7]`
+    - **A profile's order.** A profile MAY order a consumer's values more
+      strictly. A `desired.v1` target refuses an older version of an id it
+      remembers, whichever id it holds ([`desired.v1`](profiles/desired/v1.md)
+      §2.6).
   - **Residual risk.** A value from the old epoch that is still in transit
-    can arrive after the new epoch starts. That is accepted at this version.
-    - **A late joiner's seed** merges as §4.2 says, and the consumer rule
-      orders what a consumer receives after its seed. Across two ids within
-      one seed, the value kept may be either epoch's: the merge keeps the
-      later time, and a new epoch's clock can be behind. That is this
-      residual risk, as §4.2 says of an old value arriving after a new one.
-      `[F: seed/merge.json]`
+    can arrive after the new epoch's first value. Its id is not the held
+    value's, so a consumer accepts it. The key steps back to the old epoch
+    until the new one's next value. That is accepted at this version.
+    - **A late joiner** is no exception. Across two ids, a consumer keeps
+      the one whose value arrived last, its seed's replies included. A
+      tool keeps the later time (§4.2), the old epoch's when the new
+      epoch's clock is behind. Either is this residual risk.
+      `[F: seed/merge.json]` `[Sc: state.md §7]`
 - **Ahead.** An owner SHOULD NOT stamp beyond its router's HLC delta: it
-  cannot know its own offset without a reference.
+  cannot know its own offset without a reference. `[Sc: state.md §7]`
   - The owner SHOULD detect drift against a reference it holds for the
     purpose, such as a subscription to a router-stamped heartbeat key,
-    because its own puts are never echoed back.
+    because its own puts are never echoed back. `[Sc: state.md §7]`
   - When a detection shows it beyond the delta, the owner MUST stop
     writing state, re-puts included, and SHOULD report it. Its members then go
     stale, by design ([`freshness.v1`](profiles/freshness/v1.md) §2.10).
@@ -1419,8 +1442,9 @@ has a **type identity**: (kind, name, sha256 of its schema artifact).
 
 `flatbuffer`, `ros2msg` and `cdr` are reserved kinds. Authoring format
 draft 2 has no spelling for them, so a contract declares such payloads as
-`raw` with a media type. `[Sc: types.md §2]` What a generic tool decodes,
-these kinds through a plugin included: [`observer.md`](observer.md) §7.3.
+`raw` with a media type. `[Sc: types.md §2]` What a tool that shows or
+judges a payload decodes, these kinds through a plugin included:
+[`observer.md`](observer.md) §7.3.
 
 **Type references in a contract:**
 
@@ -1750,12 +1774,12 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
   concrete key holds every reply until the query finalizes (`Latest`,
   §4.1), so step 2 cannot happen, and a slow corrupt reply can displace the
   valid one, so that a caller following the steps would report the
-  contract unavailable (Appendix B). A caller MUST set consolidation
-  `None` on both attempts.
+  contract unavailable (Appendix B). A caller or tool MUST set
+  consolidation `None` on both attempts.
   `[Sc: retrieval.md §2]`
 - **The reply.** A holder answers with one reply, the bundle's bytes, with
-  `Encoding` `application/json`. A caller MUST NOT depend on the encoding:
-  the hash is the check. `[Sc: retrieval.md §1]`
+  `Encoding` `application/json`. A caller or tool MUST NOT depend on the
+  encoding: the hash is the check. `[Sc: retrieval.md §1]`
 - **An attempt ends** when its GET completes, or at the caller's timeout
   (§8.1).
 - **From a token to a fingerprint.** An interface token carries
@@ -2946,9 +2970,10 @@ The format is the generator's own. The reference reads an enrollment file
 
 Conformance is claimed by role. Five of §0's roles have a **class** each:
 that role's rules, and the static rules that bind every implementation
-(§0). The static rules are §1's and §9's, and those on what a contract
-states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of these
-sections that names a role is that role's. A rule elsewhere that names the
+(§0). The static rules are those of §1 and §9, and those on what a
+contract states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of
+any of these sections, §1 and §9 included, that names a role is that
+role's. A rule elsewhere that names the
 lint code checking it (§9.2) is static too, and so is §3.3's rule for a
 descriptor checker. A class holds its role's rules in this text and in
 [`observer.md`](observer.md).
@@ -3433,10 +3458,10 @@ section each was written against, whose pointer leads on.
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
-| `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order and unstamped samples |
+| `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order, unstamped samples, and a tool's across two ids |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node |
+| `scenarios/state.md` | §4; §7 step 2 a consumer's and a tool's late joiner across a new epoch; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |

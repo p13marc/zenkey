@@ -1,16 +1,16 @@
 {
   "spec/CHANGELOG.md": {
-    "mean": 17.88,
+    "mean": 17.65,
     "over": 30,
     "tags": 0
   },
   "spec/README.md": {
-    "mean": 12.43,
+    "mean": 12.1,
     "over": 0,
     "tags": 0
   },
   "spec/RULES.md": {
-    "mean": 12.69,
+    "mean": 12.39,
     "over": 0,
     "tags": 0
   },
@@ -30,12 +30,12 @@
     "tags": 0
   },
   "spec/core.md": {
-    "mean": 16.4,
+    "mean": 16.39,
     "over": 0,
     "tags": 0
   },
   "spec/observer-CHANGELOG.md": {
-    "mean": 16.48,
+    "mean": 16.25,
     "over": 5,
     "tags": 0
   },
@@ -260,7 +260,7 @@
     "tags": 0
   },
   "spec/scenarios/state.md": {
-    "mean": 15.54,
+    "mean": 15.35,
     "over": 0,
     "tags": 0
   },

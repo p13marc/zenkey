@@ -67,14 +67,18 @@ From each sentence that states a rule, three things are read.
     and no blank left before the mark after a tag; after its block's run-in
     label, the label first. A pronoun the entry opens with, or its rule's
     subject is, takes its noun in brackets from ANTECEDENTS, or the script
-    fails naming its line. A rule that leads a list ends with the list's
-    length, "(2 items)", or a table's, "(12 rows)". It is shortened past
-    MAX_WORDS, and never reworded.
+    fails naming its line; an entry there may give an object's noun too
+    ("over them [its interfaces' …]"). A rule that leads a list ends with
+    the list's length, "(2 items)", or a table's, "(12 rows)". A rule a MAY
+    excepts shows that MAY after it, "*Except:* …", from EXCEPTED_BY. It is
+    shortened past MAX_WORDS, and never reworded.
 
 A keyword used as a noun ("a MUST", "Each MUST cites") states no rule, and
 neither does a list of the keywords themselves (core §0's "MUST, MUST NOT,
 SHOULD …"). MAY states a permission, not a rule a class must meet, and is not
-indexed.
+indexed on its own. A MAY that excepts a rule is shown in that rule's entry
+(EXCEPTED_BY), since a class's reader who reads the rule alone would read a
+duty the text lifts.
 
 Usage:
   gen-rules-index.py              write spec/RULES.md
@@ -200,7 +204,8 @@ EXCEPTIONS = {}
 
 # What a pronoun in an entry stands for, where the entry does not show it
 # (F-366): {(file, a phrase of the sentence): (the words after which it is
-# shown, the noun)}. The noun follows those words in brackets, "It [a
+# shown, the noun)}, or a list of such pairs for a sentence that needs two,
+# its subject's and an object's (F-384). The noun follows those words in brackets, "It [a
 # consumer] MUST accept …", as a run-in label is shown before an entry. An
 # entry that opens with a pronoun, or whose rule's subject is one, must have
 # its noun here, or the script fails naming its line; an object's pronoun
@@ -214,14 +219,19 @@ ANTECEDENTS = {
     ("core.md", "Its schema is"): ("Its", "the descriptor record's"),
     ("core.md", "The owner's descriptor MUST NOT raise it"): ("raise it", "a template's bound"),
     ("core.md", "it MUST fit one fragment"): ("it", "an owner's descriptor"),
-    ("core.md", "It MUST answer a selector over them"): ("It", "the owner's state queryables"),
-    ("core.md", "It MUST accept the first value under a new id"): ("It", "a consumer"),
+    # core S2: "It" is the owner, the row's label, whose deletions the
+    # sentence names; "them" is what its state queryables cover (F-384).
+    ("core.md", "It MUST answer a selector over them"): [
+        ("It", "the owner"), ("over them", "its interfaces' `state/**` and `@state/**`")],
+    ("core.md", "It MUST accept a value under an id other than"): ("It", "a consumer"),
     ("core.md", "It names the member each reply answers for"): ("It", "a server declared over the whole template"),
     ("core.md", "It MUST refuse:"): ("It", "a tool decoding an envelope"),
     ("core.md", "A deployment's access control MUST NOT grant it"): ("grant it", "a write under another service's prefix"),
     ("core.md", "It MUST NOT add a schema suffix"): ("It", "an owner"),
     ("core.md", "Every instance MUST hold one"): ("hold one", "an instance token"),
     ("core.md", "These SHOULD be the interfaces"): ("These", "the tokenless set's interfaces"),
+    ("core.md", "One that does not, or whose binding offers no such API"): [
+        ("One", "an owner"), ("does not", "opt into `reliability`")],
     ("core.md", "Every holder MUST declare a `complete` queryable on it"): ("queryable on it", "a contract bundle's key"),
     ("core.md", "Its `name` is the file's stem"): ("Its", "a JSON Schema artifact's"),
     # observer.md
@@ -229,14 +239,31 @@ ANTECEDENTS = {
     ("observer.md", "It SHOULD run its interests timeout above that time too"): ("It", "a reader"),
     ("observer.md", "It SHOULD NOT ask a read while one it asked"): ("It", "a reader"),
     ("observer.md", "It SHOULD NOT make a read that it would follow"): ("It", "a reader whose watch session is cut off"),
-    ("observer.md", "It MUST NOT show garbage"): ("It", "a tool"),
+    ("observer.md", "Such a tool MUST decode each payload"): ("Such a tool", "a tool that shows or judges a payload"),
+    ("observer.md", "It MUST NOT show garbage"): ("It", "a tool that shows a payload it cannot decode"),
     # the self-test's text
     ("text.md", "It SHOULD do so in a new session."): ("It", "an owner"),
     ("text.md", "These SHOULD be the framework's interfaces"): ("These", "the tokenless set's interfaces"),
-    ("text.md", "It MUST answer a selector over them"): ("It", "the owner's queryables"),
+    ("text.md", "It MUST answer a selector over them"): [("It", "the owner"), ("over them", "its state")],
+    ("text.md", "One that does not, or whose binding"): [("One", "an owner"), ("does not", "opt in")],
     ("text.md", "it MUST stop writing state"): ("it", "an owner"),
     ("text.md", "Every instance MUST hold one"): ("hold one", "an instance token"),
 }
+# The MAYs that except a listed rule, shown in that rule's entry after it
+# (F-386): {(file, a phrase of the rule's sentence): a phrase of the MAY's
+# sentence}. The MAY's pronouns take their nouns from ANTECEDENTS, as an
+# entry's do. A key or a MAY that matches no sentence fails the script, so
+# the table cannot go stale.
+EXCEPTED_BY = {
+    # core §2.4: the MUST to publish with the contract's QoS, and the MAY for
+    # `reliability`, unstable API, which an owner on stable API alone meets
+    # by publishing reliable (F-380).
+    ("core.md", "An owner MUST publish with it."): "One that does not, or whose binding offers no such API, MAY",
+    # the self-test's text
+    ("text.md", "An owner MUST publish with the contract's QoS."): "One that does not, or whose binding",
+}
+# Where an excepting MAY follows its rule in an entry.
+EXCEPT = "*Except:*"
 # A pronoun an entry opens with, or its rule's subject is.
 OPENS_PRONOUN = re.compile(r"^(?:it|they|this|these|both|its|their)\b", re.I)
 # A rule that leads a list: its sentence ends with ":", or it says the
@@ -446,6 +473,7 @@ def read_rules(path: Path, name: str, static_list=None):
     top_start = 0  # the line of the last top-level paragraph, or heading
     failures = {}  # an item's line -> the code each failure below it is
     used = set()  # the ANTECEDENTS entries an entry took
+    mays = {}  # an EXCEPTED_BY MAY's phrase -> its sentence as an entry shows it
     for index, block in enumerate(blocks):
         kind, line = block["kind"], block["line"]
         if kind == "heading":
@@ -510,6 +538,15 @@ def read_rules(path: Path, name: str, static_list=None):
                 roles.extend(r for r in got if r not in roles)
                 hows.append(how)
             if not kws:
+                for key, phrase in EXCEPTED_BY.items():
+                    if key[0] == rel and phrase in s:
+                        shown_may = shown_sentence(s)
+                        noun, nkey = antecedent(rel, s)
+                        if noun:
+                            used.add(nkey)
+                            for words, n in noun:
+                                shown_may = insert_after(shown_may, words, n)
+                        mays[phrase] = shown_may
                 # A sentence stating no rule leaves its subject's role for a
                 # pronoun after it in its block: a MAY's subject, else the
                 # role word that leads it.
@@ -550,7 +587,8 @@ def read_rules(path: Path, name: str, static_list=None):
             noun, key = antecedent(rel, s)
             if noun:
                 used.add(key)
-                body = insert_after(body, noun[0], noun[1])
+                for words, n in noun:
+                    body = insert_after(body, words, n)
             elif needs_antecedent(s, kws):
                 errors.append(
                     f"{shown_path(path)}:{rule_line}: this entry's pronoun stands for a noun it does not "
@@ -580,6 +618,7 @@ def read_rules(path: Path, name: str, static_list=None):
                 "evidence": ev,
                 "sentence": shown,
                 "lead_in": lead_in,
+                "raw": s,
             }
             rules.append(rule)
             block_rules.append(rule)
@@ -629,6 +668,19 @@ def read_rules(path: Path, name: str, static_list=None):
             if i["id"] in r["ids"]:
                 found.extend(x for x in r["roles"] if x not in found)
         i["roles"] = [r for r in ROLES if r in found]
+    # A rule a MAY excepts shows it after its sentence (F-386).
+    for key, phrase in EXCEPTED_BY.items():
+        if key[0] != rel:
+            continue
+        hit = [r for r in rules if key[1] in r["raw"]]
+        if len(hit) != 1:
+            errors.append(f"{shown_path(path)}: EXCEPTED_BY names {key[1]!r}, which {len(hit)} rules of this "
+                          "text hold; it must name one")
+        elif phrase not in mays:
+            errors.append(f"{shown_path(path)}: EXCEPTED_BY names a MAY no sentence of this text holds: "
+                          f"{phrase!r}")
+        else:
+            hit[0]["sentence"] = f"{hit[0]['sentence']} {EXCEPT} {mays[phrase]}"
     for key in ANTECEDENTS:
         if key[0] == rel and key not in used:
             errors.append(f"{shown_path(path)}: ANTECEDENTS names a sentence no rule of this text holds: "
@@ -647,14 +699,18 @@ def shown_sentence(s: str) -> str:
 
 
 def antecedent(rel: str, s: str):
-    """((words, noun), key) of the ANTECEDENTS entry for a rule's sentence,
-    or (None, None). Two entries whose phrases both occur in one sentence
+    """([(words, noun), …], key) of the ANTECEDENTS entry for a sentence, or
+    (None, None). Two entries whose phrases both occur in one sentence
     are refused: which noun it shows would depend on the table's order."""
     hits = [(value, key) for key, value in ANTECEDENTS.items() if key[0] == rel and key[1] in s]
     if len(hits) > 1:
         phrases = ", ".join(repr(key[1]) for _, key in hits)
         raise Unreadable(f"ANTECEDENTS: {phrases} all occur in one sentence; keep one: {s[:140]}")
-    return hits[0] if hits else (None, None)
+    if not hits:
+        return None, None
+    value, key = hits[0]
+    # One pair, or a list of them.
+    return (value if isinstance(value, list) else [value]), key
 
 
 def needs_antecedent(s: str, kws: list) -> bool:
@@ -937,20 +993,23 @@ def render(rules: list, ids: list) -> str:
     para(w, "A long sentence is shortened, never reworded, and its link leads to the "
          "rest. A sentence after its paragraph's run-in label shows the label first. "
          "A pronoun's noun, where not shown, follows it in brackets. A lead-in ends "
-         "with its list's length, \"(3 items)\", or its table's. Nothing else is "
-         "added.")
+         "with its list's length, \"(3 items)\", or its table's. A MAY that excepts "
+         "a rule follows it, after *Except:*. Nothing else is added.")
     para(w, "**Evidence** is what the text cites beside a rule. That is the tags "
-         "after its sentence, else in its paragraph. A tag that "
+         "after its sentence, else in its paragraph. Else, a list item under it "
+         "that states no rule gives it its tags. A tag that "
          "closes a list cites each rule of it that cites none. Where the text cites "
          "none, the "
          "entry says \"none cited\". A rule's id is its row's, its section's, or the "
-         "code that checks it. MAY grants a permission, and is not listed.")
+         "code that checks it. MAY grants a permission. It is listed only beside a "
+         "rule it excepts.")
     para(w, "**Conformance by role.** An implementation claims one class for each "
          "role it plays ([core §12](core.md#12-conformance-classes)). A class holds "
          "its role's rules and the static rules, listed here under implementation. "
          "Those are §1's, §9's, the contract rules of the sections §12 lists, and "
          "any rule naming its lint code. §3.3's descriptor checker is static too. A "
-         "rule of those sections that names a role is listed under it. A static rule "
+         "rule of those sections that names a role is listed under it. So is one of "
+         "§1 or §9. A static rule "
          "binds an implementation where it does what the rule governs. A class is "
          "claimed at the full level or the constrained one. A profile is a class of "
          "its own, and its rules are in its text.")

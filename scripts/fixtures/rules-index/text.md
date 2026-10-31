@@ -20,6 +20,8 @@ Two templates MUST NOT have the same shape `[F: contracts/e021-shape]`.
 
 An owner MUST publish with the contract's QoS. It SHOULD do so in a new
 session. `[Sc: types.md §3]`
+- **Its reliability.** An owner that opts in sets it. One that does not, or
+  whose binding offers no such API, MAY publish reliable.
 
 A value with several forms SHOULD be canonicalized by the owner.
 
@@ -56,6 +58,10 @@ declare a queryable. `[Sc: retrieval.md §1]`
 
 ### 2.1 Clocks (S7)
 
+- **Drift.** An owner SHOULD NOT stamp ahead. `[Sc: state.md §7]`
+  - **The report** is a stream sample. `[Sc: health.md §4]`
+- **Detect.** An owner SHOULD detect its drift.
+  - **How:** a heartbeat it holds. `[Sc: state.md §7]`
 - **Ahead.** When an owner's clock is ahead, it MUST stop writing state,
   and SHOULD report it.
 - **Consumer rule.** A consumer MUST order an owner's values by time.

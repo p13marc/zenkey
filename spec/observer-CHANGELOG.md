@@ -13,6 +13,68 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.10 — 2026-10-31: round 90's F-379, and a tool's merge after its seed (#926)
+
+zk2py round 90 (PR #969) read 0.9 cold beside core 0.67. Core 0.68
+answers its findings on the core, the index and the glossary. This text
+answers F-379 and the tool's half of F-382, and is written against core
+0.68.
+
+**Changed: §7.3, the tool that decodes (F-379, its fix).** Its label said
+"What a generic tool decodes", which by core §0 names every tool, and its
+two rules named two subjects.
+- **Now:** "What a tool that shows or judges a payload decodes". "Such a
+  tool MUST decode each payload by its declared type: `protobuf` …,
+  `jsonschema` …, and a `raw` type by its media type only". Honest
+  rendering binds "a tool that shows a payload it cannot decode". Core
+  §7.1's pointer says the same.
+- **Does it narrow 0.9?** It makes 0.9 exact under the finding's reading
+  (b), each payload by its type. Under its reading (a), which zk2py took
+  and 0.9's "decodes as before" fits, a tool whose payloads are all of
+  one family held a decoder it never used. A profile's reader is one:
+  `telemetry.v1`'s Point is never a protobuf message. 0.10 asks it to
+  decode what it meets, and no more.
+- **A tool that shows a sample's size and encoding** in its payload's
+  place shows the payload. So it decodes each by its type, and renders as
+  declared type and size only what it cannot decode.
+- **Honest rendering's "payload"** covers a kind with no decoder, which
+  0.9's "a kind" named, and bytes of a known kind that do not decode,
+  which "MUST NOT show garbage" covered. The reference renders both with
+  their declared type and size (`zenkey_model::decode`'s `Opaque` and
+  `Undecodable`).
+- **What moves:** no zk2py verdict. Its echo tool decodes neither family,
+  so it fails the first rule either way.
+
+**A tool's merge lasts (F-382's tool half).** §4.1 gains it, with no
+keyword, as the scope of core §4.2's MUST to merge.
+- **The rule:** a tool keeps core §4.2's merge for as long as it follows,
+  across two timestamp ids too. A tool that bounds what it holds counts
+  what the bound forgot, and treats a forgotten key as holding nothing. A
+  consumer orders by core §4.3's rule instead (core §4.2).
+- **Why:** core 0.67 gave a late joiner's order after its seed no instant,
+  and a tool no order at all. A merge dropped at the boundary lets a new
+  epoch's value on a clock behind replace what the merge kept.
+- **The reference** moved: `zenkey-fleet`'s `Monitor::watch_seeded` keeps
+  its merge for the watch's life. It is bounded at the monitor's
+  `max_keys`, and `Monitor::merge_evicted` counts what it forgot.
+  `seed_subscribe` and the alarms and telemetry books merged so already.
+- **The evidence** is `scenarios/state.md` §7 step 2, whose tool keeps rev
+  10. Appendix B's row for `state.md` says so.
+
+**How the rules were diffed.** 44 sentences holding an RFC 2119 keyword
+before and after, 42 unchanged. The other two are §7.3's (F-379), each
+read pair by pair. Every other sentence was diffed too: the other changes
+are §7.3's label, §4.1's new bullet, Appendix B's row and the header.
+
+**The figures.** This text's mean stays at 18.24 words, with no sentence
+over 50 and no tag.
+
+**Deliberately not changed.**
+- **§0's list of the sections that state rules without a keyword**, "§1,
+  §2, §5 and §8". It names examples, and §4.1 held such rules already.
+- **No other rule**, and no section number, label or anchor.
+- **Appendix A**, which is history.
+
 ## 0.9 — 2026-10-31: round 89's F-370 and F-376, one rule narrowed (#926)
 
 zk2py round 89 (PR #967) read 0.8's §0 cold beside core 0.66's classes and
