@@ -12,10 +12,10 @@
 //! ```
 //!
 //! **Defined ahead of its use.** No rule adopts the envelope yet: no owner
-//! writes one and no consumer has to read one, so nothing in the runtime,
-//! the fleet or the tools calls this module. What a run names and how a
-//! seq counts are for the rule that adopts it (#976's flip); this module
-//! fixes the bytes alone.
+//! writes one and no consumer has to read one. The reference's readers
+//! accept one already (below), so the flip that makes the writers write it
+//! (#976) leaves them reading. What a run names and how a seq counts are
+//! for the rule that adopts it; this module fixes the bytes alone.
 //!
 //! **Parsing reads no contract,** as parsing a key does (§1.1): it knows
 //! the sample's kind, put ([`Envelope::parse`]) or delete
@@ -26,8 +26,17 @@
 //! ([`Refusal::token`]). Every envelope accepted writes back to its bytes.
 //!
 //! Not [`crate::envelope`], the error envelope of a failed call (§5.2).
+//!
+//! **Reading beside today's wire** (#976's A2, ahead of the rule that
+//! adopts the envelope): a reader tells a sample that carries an envelope
+//! by its key and its Encoding alone ([`carries`]), reads a put's payload
+//! through [`read_put`] and a delete's attachment through [`read_delete`],
+//! and reads every other sample as it did. The order of two in-band stamps
+//! is [`crate::seed`]'s.
 
 use thiserror::Error;
+
+use crate::grammar::{KindToken, ZkKey, parse};
 
 /// A form: CH's three high bits. This version defines a mutation and a
 /// delete, and reserves the other six for later versions, each refused.
@@ -461,6 +470,101 @@ impl DeleteStamp {
     }
 }
 
+/// The Encoding a sample that carries an envelope has (§7.5), as zenoh
+/// writes it: its default, with no schema. A raw media type zenoh does not
+/// predefine travels as its custom encoding, which zenoh writes as the
+/// media type itself (§7.2), so it is never this.
+pub const ENCODING: &str = "zenoh/bytes";
+
+/// Whether `key` is a zk2 data key whose kind is a stream, state or an
+/// event (§1.1, by the grammar alone, with no contract): the keys whose
+/// samples may carry an envelope. An operation's (`@op`) and every control
+/// key (`@zk`) keep their wire.
+///
+/// A session in a namespace hears a key base-relative, and one in none
+/// hears it with the namespace in front (§1.6), which is any chunks: the
+/// key is read from its first `zk2` chunk from which the grammar parses a
+/// zk2 key, so another deployment's key reads as its own.
+#[must_use]
+pub fn enveloped_key(key: &str) -> bool {
+    let mut rest = Some(key);
+    while let Some(k) = rest {
+        if k.starts_with("zk2/") {
+            match parse(k) {
+                Ok(ZkKey::Data { kind, .. }) => return kind != KindToken::Op,
+                Ok(_) => return false,
+                Err(_) => {}
+            }
+        }
+        rest = k.split_once('/').map(|(_, r)| r);
+    }
+    false
+}
+
+/// Whether a sample carries an envelope: its key is a zk2 data key whose
+/// kind is a stream, state or an event ([`enveloped_key`]), and its
+/// Encoding is `zenoh/bytes` ([`ENCODING`]). No zk2 owner sends
+/// `zenoh/bytes` before a rule adopts the envelope (§7.2 asks the
+/// predefined Encoding, and a raw type keeps its media type), so the test
+/// tells the two wires apart. Every other sample is read as it is today.
+#[must_use]
+pub fn carries(key: &str, encoding: &str) -> bool {
+    encoding == ENCODING && enveloped_key(key)
+}
+
+/// What a put's payload reads as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reading<'a> {
+    /// The sample carries no envelope ([`carries`]): its payload is read as
+    /// it is today.
+    Plain,
+    /// An envelope: its stamp orders the sample, and its record is the
+    /// payload every later step reads (decode, a schema check, a
+    /// rendering, a profile's reader).
+    Enveloped(Envelope<'a>),
+    /// An envelope refused: the sample is undecodable, with the refusal's
+    /// token as its reason ([`Refusal::reason`]). It is counted and shown
+    /// as such, never read as a payload of today's wire, and never
+    /// ordered.
+    Refused(Refusal),
+}
+
+/// A put's payload read as its key and Encoding say ([`carries`]).
+#[must_use]
+pub fn read_put<'a>(key: &str, encoding: &str, payload: &'a [u8]) -> Reading<'a> {
+    if !carries(key, encoding) {
+        return Reading::Plain;
+    }
+    match Envelope::parse(payload) {
+        Ok(e) => Reading::Enveloped(e),
+        Err(r) => Reading::Refused(r),
+    }
+}
+
+/// A delete's in-band stamp: on a key whose samples may carry an envelope
+/// ([`enveloped_key`]), an attachment that parses as a delete's envelope.
+/// A delete whose attachment is absent or does not parse is read as it is
+/// today, by its Zenoh timestamp: an archive's or a profile's attachment
+/// is never refused here.
+#[must_use]
+pub fn read_delete(key: &str, attachment: Option<&[u8]>) -> Option<Stamp> {
+    let a = attachment?;
+    if !enveloped_key(key) {
+        return None;
+    }
+    DeleteStamp::parse(a).ok().map(|d| d.stamp)
+}
+
+impl Refusal {
+    /// Why a refused envelope's sample is undecodable, for a person and a
+    /// script alike: the refusal's token after a fixed prefix,
+    /// `zk2c envelope refused: short`.
+    #[must_use]
+    pub fn reason(&self) -> String {
+        format!("zk2c envelope refused: {}", self.token())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -548,5 +652,104 @@ mod tests {
             DeleteStamp::parse(&m).map_err(|r| r.token()),
             Err("sample_kind")
         );
+    }
+
+    /// Rule 1 (#976's A2): a stream, state or event key of the grammar,
+    /// under `zenoh/bytes`, and nothing else.
+    #[test]
+    fn a_sample_carries_an_envelope_by_its_key_kind_and_its_encoding() {
+        for key in [
+            "zk2/h/s/i.v1/stream/pose",
+            "zk2/h/s/i.v1/@stream/frames/f1",
+            "zk2/h/s/i.v1/state/mode",
+            "zk2/h/s/i.v1/@state/tracks/t1",
+            "zk2/h/s/i.v1/events/fault/01arz3ndektsv4rrffq69g5fav",
+            // A session in no namespace hears the namespace in front.
+            "prod/zk2/h/s/i.v1/state/mode",
+            "site/a/zk2/h/s/i.v1/stream/pose",
+            // A namespace whose own chunk is `zk2`: the first suffix the
+            // grammar parses decides.
+            "zk2/zk2/h/s/i.v1/state/mode",
+        ] {
+            assert!(enveloped_key(key), "{key}");
+            assert!(carries(key, ENCODING), "{key}");
+            for other in [
+                "application/json",
+                "application/cbor",
+                "application/protobuf",
+                "zenoh/bytes;x",
+                "image/x-portable-anymap",
+                "",
+            ] {
+                assert!(!carries(key, other), "{key} under {other:?}");
+            }
+        }
+        for key in [
+            "zk2/h/s/i.v1/@op/reset",
+            "zk2/h/s/@zk/instance/0a1b2c3d4e5f6071",
+            "zk2/@zk/contract/i.v1/0000000000000000000000000000000000000000000000000000000000000000",
+            "demo/tick",
+            "seedtest/state/health",
+            "zk2/h/s/i.v1",
+            "zk2",
+            "",
+        ] {
+            assert!(!enveloped_key(key), "{key}");
+            assert!(!carries(key, ENCODING), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_put_reads_plain_enveloped_or_refused() {
+        let key = "zk2/h/s/i.v1/state/mode";
+        let stamp = Stamp {
+            run: Run::U16(7),
+            seq: Seq::new(3).unwrap(),
+        };
+        let bytes = Envelope {
+            tag: Tag::NONE,
+            stamp,
+            record: br#"{"up":true}"#,
+        }
+        .write();
+        // Today's wire: the predefined Encoding, read as it is.
+        assert_eq!(read_put(key, "application/json", &bytes), Reading::Plain);
+        let Reading::Enveloped(e) = read_put(key, ENCODING, &bytes) else {
+            panic!("an envelope")
+        };
+        assert_eq!((e.stamp, e.record), (stamp, &br#"{"up":true}"#[..]));
+        // A legacy payload under `zenoh/bytes` is refused, never read: `{`
+        // is form 3, reserved.
+        let refused = read_put(key, ENCODING, br#"{"up":true}"#);
+        assert_eq!(refused, Reading::Refused(Refusal::Reserved(Form::Error)));
+        let Reading::Refused(r) = refused else {
+            unreachable!()
+        };
+        assert_eq!(r.reason(), "zk2c envelope refused: form");
+        assert_eq!(
+            read_put(key, ENCODING, &[]),
+            Reading::Refused(Refusal::Empty)
+        );
+        // A foreign key under `zenoh/bytes` is its own bytes.
+        assert_eq!(read_put("demo/tick", ENCODING, &bytes), Reading::Plain);
+    }
+
+    /// Rule 3: a delete's attachment that parses carries its stamp; any
+    /// other is read as today.
+    #[test]
+    fn a_delete_carries_its_stamp_in_its_attachment_or_none() {
+        let key = "zk2/h/s/i.v1/state/mode";
+        let stamp = Stamp {
+            run: Run::U32(0xdead_beef),
+            seq: Seq::new(9).unwrap(),
+        };
+        let att = DeleteStamp { stamp }.write();
+        assert_eq!(read_delete(key, Some(&att)), Some(stamp));
+        assert_eq!(read_delete(key, None), None);
+        // An archive's JSON, or a mutation's bytes, is no delete stamp.
+        assert_eq!(read_delete(key, Some(br#"{"confirmed":true}"#)), None);
+        assert_eq!(read_delete(key, Some(&[0x00, 0, 7, 0, 0, 9])), None);
+        assert_eq!(read_delete("demo/tick", Some(&att)), None);
+        assert_eq!(read_delete("zk2/h/s/i.v1/@op/reset", Some(&att)), None);
     }
 }
