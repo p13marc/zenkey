@@ -18,6 +18,11 @@ port, which is the address driver B's `peers` lists for `a`, and back.
 It also records every datagram, one JSON line each (time, direction, the lane
 byte, the SDU's length, whether it was dropped, the SDU in hex), and prints a
 per-direction summary on SIGTERM or SIGINT. Standard library only.
+
+With --control, a datagram "cut" on that port drops every datagram both ways
+until a datagram "restore": the radio out of reach, for a reconnect. Each is
+recorded as {"t": ..., "event": "cut"|"restore"}, and a datagram dropped
+while cut is recorded with "cut": true.
 """
 import argparse
 import asyncio
@@ -45,6 +50,8 @@ class Direction:
         self.sdu_bytes = 0
         self.dropped = 0
         self.dropped_bytes = 0
+        self.cut_dropped = 0
+        self.cut_bytes = 0
 
     def decide(self, now):
         """Whether to drop, and when to deliver: never before the last one (FIFO)."""
@@ -81,6 +88,7 @@ class Relay:
         self.driver_b = parse_addr(args.driver_b)
         self.faces = {}
         self.strangers = 0
+        self.cut = False
         self.log = open(args.capture, "w", buffering=1) if args.capture else None
         self.t0 = time.time()
 
@@ -89,8 +97,21 @@ class Relay:
             _, face = await self.loop.create_datagram_endpoint(
                 lambda s=side: Face(self, s), local_addr=parse_addr(addr))
             self.faces[side] = face
+        if self.args.control:
+            await self.loop.create_datagram_endpoint(
+                lambda: Face(self, "control"), local_addr=parse_addr(self.args.control))
+
+    def control(self, data):
+        word = data.decode(errors="replace").strip()
+        if word in ("cut", "restore"):
+            self.cut = word == "cut"
+            if self.log:
+                self.log.write(json.dumps({"t": round(time.time(), 6), "event": word}) + "\n")
 
     def received(self, side, data, addr):
+        if side == "control":
+            self.control(data)
+            return
         now = self.loop.time()
         if side == "a" and addr[:2] == self.driver_a:
             d, out, to = self.dirs["ab"], self.faces["b"], self.driver_b
@@ -99,17 +120,24 @@ class Relay:
         else:
             self.strangers += 1
             return
-        drop, due = d.decide(now)
         sdu = data[1:]
         d.datagrams += 1
         d.sdu_bytes += len(sdu)
-        if drop:
-            d.dropped += 1
-            d.dropped_bytes += len(sdu)
+        if self.cut:
+            drop, due = True, None
+            d.cut_dropped += 1
+            d.cut_bytes += len(sdu)
+        else:
+            drop, due = d.decide(now)
+            if drop:
+                d.dropped += 1
+                d.dropped_bytes += len(sdu)
         if self.log:
-            self.log.write(json.dumps({
-                "t": round(time.time(), 6), "dir": d.name, "lane": data[0] if data else None,
-                "n": len(sdu), "drop": drop, "hex": sdu.hex()}) + "\n")
+            row = {"t": round(time.time(), 6), "dir": d.name, "lane": data[0] if data else None,
+                   "n": len(sdu), "drop": drop, "hex": sdu.hex()}
+            if self.cut:
+                row["cut"] = True
+            self.log.write(json.dumps(row) + "\n")
         if not drop:
             self.loop.call_at(due, out.transport.sendto, data, to)
 
@@ -120,7 +148,8 @@ class Relay:
             "jitter_ms": self.args.jitter_ms, "seed": self.args.seed,
             "strangers": self.strangers,
             **{n: {"datagrams": d.datagrams, "sdu_bytes": d.sdu_bytes, "dropped": d.dropped,
-                   "dropped_bytes": d.dropped_bytes} for n, d in self.dirs.items()},
+                   "dropped_bytes": d.dropped_bytes, "cut_dropped": d.cut_dropped,
+                   "cut_bytes": d.cut_bytes} for n, d in self.dirs.items()},
         }
 
 
@@ -135,6 +164,7 @@ async def main():
     p.add_argument("--jitter-ms", type=float, default=30)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--capture", help="a JSON line per datagram")
+    p.add_argument("--control", help="a UDP address taking cut and restore")
     p.add_argument("--summary", help="where to write the summary at exit")
     args = p.parse_args()
     relay = Relay(args)

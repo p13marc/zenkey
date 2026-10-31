@@ -1,0 +1,90 @@
+# W2's generic constrained device (docs/zk2/constrained-overhead-review.md §2.2;
+# #989): eight gauges and four counters, each a telemetry.v1 metric resource
+# put every 10 s, and the oper_change event. Its health.v1, alarms.v1,
+# config.v1 and desired.v1 target are the owner example's own interfaces.
+#
+# The streams keep the built-in QoS (data, drop, best_effort), as the report's
+# W2 telemetry assumes: no QoS extension on the wire. Each counter is a bare
+# integer whose epoch rides the telemetry.v1.Epoch attachment, as Appendix A's
+# W2 counter does.
+[interface]
+name    = "gendev"
+major   = 1
+minor   = 0
+summary = "W2's generic constrained device: eight gauges, four counters, one event"
+uses    = ["telemetry.v1"]
+
+[schemas]
+jsonschema = ["../../../../../spec/profiles/telemetry/telemetry.v1.json", "gendev.json"]
+
+[resources.temperature]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "Cel" }
+
+[resources.humidity]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
+
+[resources.pressure]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "hPa" }
+
+[resources.battery]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "V" }
+
+[resources.rssi]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dBm" }
+
+[resources.snr]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dB" }
+
+[resources.cpu_load]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
+
+[resources.mem_free]
+kind        = "stream"
+type        = "json:Reading"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "By" }
+
+[resources.tx_frames_total]
+kind        = "stream"
+type        = "json:Count"
+attachment  = "json:telemetry.v1.Epoch"
+annotations = { "telemetry.kind" = "counter" }
+
+[resources.rx_frames_total]
+kind        = "stream"
+type        = "json:Count"
+attachment  = "json:telemetry.v1.Epoch"
+annotations = { "telemetry.kind" = "counter" }
+
+[resources.errors_total]
+kind        = "stream"
+type        = "json:Count"
+attachment  = "json:telemetry.v1.Epoch"
+annotations = { "telemetry.kind" = "counter" }
+
+[resources.resets_total]
+kind        = "stream"
+type        = "json:Count"
+attachment  = "json:telemetry.v1.Epoch"
+annotations = { "telemetry.kind" = "counter" }
+
+# W2's 15 events a day, at most 60 an hour.
+[resources.oper_change]
+kind      = "event"
+type      = "json:OperChange"
+rate      = "burst(60/h)"
+retention = "1d"
+doc       = "the device's operational status changed"

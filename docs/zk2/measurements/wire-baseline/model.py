@@ -50,4 +50,26 @@ for stack, layers in (("lean", LEAN), ("bare", 0)):
             "b_to_a": {"keepalive": row(idle_ka, idle_ka * ka)},
         },
     }
+
+# W2 on RF (Appendix A's section 6): each element's bytes a day, both
+# directions together, as the report states them, today and under zk2c.
+out["w2_rf"] = {k: {"today_bytes": round(v[0]), "zk2c_bytes": round(v[1])}
+                for k, v in ns["rows"].items()}
+out["w2_rf"]["total"] = {"today_bytes": round(ns["today"]), "zk2c_bytes": round(ns["after"])}
+
+# W1 and the idle link on LoRa (Appendix A's sections 8 and 9), per direction:
+# the 4 readings each in its own SDU under the lean stack (tiles of 51 bytes at
+# SF10-12), and one keep-alive per lease / keep_alive on an idle direction.
+air, lora_air_s, link_today = ns["air"], ns["lora_air_s"], ns["link_today"]
+leases = {7: (60, 2), 9: (60, 2), 12: (540, 2)}
+out["lora"] = {}
+for sf, (lease, ka) in leases.items():
+    per_dir = DAY * ka / lease
+    out["lora"][f"sf{sf}"] = {
+        "lease_s": lease, "keep_alive": ka,
+        "w1_data_a_to_b": {"sdus": 4 * 1440, "airtime_s": round(4 * 1440 * air(link_today, sf), 1)},
+        "keepalive_per_direction": {"sdus": round(per_dir),
+                                    "airtime_s": round(per_dir * lora_air_s(KEEPALIVE + LEAN, sf), 1)},
+        "duty_budget_s_per_day": ns["LORA_DUTY_S"],
+    }
 print(json.dumps(out, indent=1))

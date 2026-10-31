@@ -1,0 +1,15 @@
+{
+  "$defs": {
+    "Count": {"type": "integer", "minimum": 0},
+    "Reading": {"type": "number"},
+    "OperChange": {
+      "description": "The device's operational status changed (modem.v3's oper_change, reduced).",
+      "type": "object",
+      "properties": {
+        "status": {"enum": ["up", "down", "notPresent", "unknown"]},
+        "reason": {"type": "string"}
+      },
+      "required": ["status"]
+    }
+  }
+}

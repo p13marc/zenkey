@@ -1,0 +1,38 @@
+{
+  // #989's router @SIDE@ (@MEDIUM_WORDS@, @STACK@ stack), rendered by
+  // render.py from configs/zenohd.json5.in. A copy of zenoh-modem's
+  // configs/zenohd-rf0.json5 (d8c62df), edited for a measurement of today's
+  // zk2 wire:
+  // - the TCP face and the lane socket are this run's;
+  // - NO lane-face access_control and no downsampling: "today" is everything
+  //   zk2's rules make travel (constrained-overhead-review.md §2.2);
+  // - batch_size is the driver's zenoh_batch_size; lease and keep_alive are
+  //   @TIMERS_WHY@;
+  // - wait_before_close is at least the lease, as rf0's comment requires.
+  // zk2 clients attach to the TCP face.
+  mode: "peer",
+@ENDPOINTS@
+  scouting: {
+    multicast: { enabled: false },
+    gossip: { enabled: false },
+  },
+@ROUTING@
+  transport: {
+    unicast: {
+      open_timeout: @OPEN@,
+      accept_timeout: @OPEN@,
+    },
+    link: {
+      tx: {
+        batch_size: @BATCH@,
+        lease: @LEASE@,
+        keep_alive: @KA@,
+        queue: {
+          congestion_control: {
+            block: { wait_before_close: @WBC@ },
+          },
+        },
+      },
+    },
+  },
+}
