@@ -36,6 +36,7 @@ follows a subscription.
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
 from dataclasses import dataclass, field
@@ -161,6 +162,15 @@ def follows(a: Stamp | None, b: Stamp | None) -> bool:
     (a)); an unstamped sample, no owner's (S1), keeps §4.2's rule."""
     if a is None or b is None:
         return newer(a, b)
+    # F-383's reading (a), knowingly: "new" is any id other than the held
+    # value's, so an old epoch's value still in transit, arriving after the
+    # new epoch's, is accepted and the key steps back to the old epoch. That
+    # is S7's residual risk ("A value from the old epoch that is still in
+    # transit can arrive after the new epoch starts. That is accepted"). It
+    # also means two live writers under two ids (a re-mint's overlap, or a
+    # split brain) make a key flap between them, each value accepted as a
+    # new id's. Reading (b), "an id never seen", would hold the key instead.
+    # Kept until the text settles F-383 (#926 part 3).
     if a.id != b.id:
         return True
     return a.time > b.time
@@ -186,7 +196,16 @@ class LateJoiner:
     a sample or a reply on a key that is not concrete (R6); a tool keeps it,
     as the text leaves to the tool. After its seed's GET has ended, a
     consumer orders what it receives by S7's consumer rule (core §4.3, 0.67;
-    :func:`follows`), and a tool by §4.2's merge."""
+    :func:`follows`), and a tool by §4.2's merge.
+
+    **Decided in order of arrival.** zenoh runs the subscriber's callback
+    and the GET's on threads of their own. Each callback's first act puts
+    what it was handed on one queue (:meth:`_arrive`), and the queue is
+    drained in that order under one lock, the GET's end among its items. So
+    a sample that arrived before the GET's final reply is merged by §4.2,
+    even when its thread is handled after the end's; one that arrived after
+    it is ordered by S7. The error replies count toward the seed's
+    completeness by the same order (round 90, review-bot on PR #969)."""
 
     def __init__(self, session: Any, selector: str, *, timeout: float = GET_TIMEOUT_S, consumer: bool = True,
                  order: str = "subscribe-first"):
@@ -199,53 +218,90 @@ class LateJoiner:
         self.seed = Seed()
         self.sub: Any = None
         self._done = threading.Event()
+        #: every arrival, in the order the callbacks were handed them
+        self._inbox: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
 
-    # -- the two paths ------------------------------------------------------
+    # -- arrivals, one queue ------------------------------------------------
 
-    def _merge(self, key: str, via: str, deleted: bool, payload: bytes, encoding: str, ts: Any) -> None:
+    def _arrive(self, item: tuple[str, Any], drain: bool = True) -> None:
+        """Queue one arrival, then apply every queued one in order. With
+        ``drain`` false it is queued alone: a callback whose thread is
+        handled later, which a reading uses to interleave two arrivals."""
+        self._inbox.put(item)
+        if drain:
+            self._drain()
+
+    def _drain(self) -> None:
+        ended = False
+        with self.lock:
+            while True:
+                try:
+                    what, arg = self._inbox.get_nowait()
+                except queue.Empty:
+                    break
+                ended = self._apply(what, arg) or ended
+        if ended:
+            self._done.set()
+
+    def _apply(self, what: str, arg: Any) -> bool:
+        """One arrival, under the lock. True for the GET's end."""
+        if what in ("sample", "reply"):
+            import zenoh
+        if what == "end":
+            self.seed.ended = True
+            self.seed.complete = not self.seed.errors
+            return True
+        if what == "sample":
+            self._merge_locked(str(arg.key_expr), "live", arg.kind == zenoh.SampleKind.DELETE,
+                               arg.payload.to_bytes(), str(arg.encoding), arg.timestamp)
+        elif what == "reply":
+            if arg.ok is None:
+                self.seed.errors.append(f"{arg.err.encoding}: {arg.err.payload.to_bytes()!r}")
+            else:
+                s = arg.ok
+                self.seed.replies += 1
+                self._merge_locked(str(s.key_expr), "reply", s.kind == zenoh.SampleKind.DELETE,
+                                   s.payload.to_bytes(), str(s.encoding), s.timestamp)
+        else:  # "merge": a session-free arrival, its fields given
+            self._merge_locked(*arg)
+        return False
+
+    def _merge_locked(self, key: str, via: str, deleted: bool, payload: bytes, encoding: str, ts: Any) -> None:
         if self.consumer and "*" in key:
             return  # R6
         stamp = Stamp.of(ts)
-        with self.lock:
-            # S7 orders what a consumer receives after its seed, its GET
-            # ended (core §4.3, 0.67); §4.2's merge decides the seed's, and
-            # a tool's after it.
-            rule = "S7" if self.consumer and via == "live" and self.seed.ended else "merge"
-            held = self.state.get(key)
-            replaces = held is None or (follows(stamp, held.stamp) if rule == "S7" else newer(stamp, held.stamp))
-            if replaces:
-                outcome = "kept"
-                self.state[key] = Entry(deleted, payload, encoding, stamp, via)
-            elif stamp is not None and held.stamp is not None and stamp.key() == held.stamp.key():
-                outcome = "same"
-            else:
-                outcome = "dropped"
-            self.applied.append(Applied(key, via, deleted, stamp, outcome, rule))
+        # S7 orders what a consumer receives after its seed, its GET ended
+        # (core §4.3, 0.67); §4.2's merge decides the seed's, and a tool's
+        # after it. ``ended`` is the queue's: what arrived before the end
+        # was applied before it.
+        rule = "S7" if self.consumer and via == "live" and self.seed.ended else "merge"
+        held = self.state.get(key)
+        replaces = held is None or (follows(stamp, held.stamp) if rule == "S7" else newer(stamp, held.stamp))
+        if replaces:
+            outcome = "kept"
+            self.state[key] = Entry(deleted, payload, encoding, stamp, via)
+        elif stamp is not None and held.stamp is not None and stamp.key() == held.stamp.key():
+            outcome = "same"
+        else:
+            outcome = "dropped"
+        self.applied.append(Applied(key, via, deleted, stamp, outcome, rule))
+
+    # -- the two paths, and the GET's end ------------------------------------
+
+    def _merge(self, key: str, via: str, deleted: bool, payload: bytes, encoding: str, ts: Any,
+               drain: bool = True) -> None:
+        """A session-free arrival: a sample (``via`` ``live``) or a reply,
+        its fields given."""
+        self._arrive(("merge", (key, via, deleted, payload, encoding, ts)), drain)
 
     def _sample(self, sample: Any) -> None:
-        import zenoh
-
-        self._merge(str(sample.key_expr), "live", sample.kind == zenoh.SampleKind.DELETE,
-                    sample.payload.to_bytes(), str(sample.encoding), sample.timestamp)
+        self._arrive(("sample", sample))
 
     def _reply(self, reply: Any) -> None:
-        import zenoh
+        self._arrive(("reply", reply))
 
-        if reply.ok is None:
-            with self.lock:
-                self.seed.errors.append(f"{reply.err.encoding}: {reply.err.payload.to_bytes()!r}")
-            return
-        s = reply.ok
-        with self.lock:
-            self.seed.replies += 1
-        self._merge(str(s.key_expr), "reply", s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(),
-                    str(s.encoding), s.timestamp)
-
-    def _ended(self) -> None:
-        with self.lock:
-            self.seed.ended = True
-            self.seed.complete = not self.seed.errors
-        self._done.set()
+    def _ended(self, drain: bool = True) -> None:
+        self._arrive(("end", None), drain)
 
     # -- the seed -----------------------------------------------------------
 

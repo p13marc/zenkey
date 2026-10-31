@@ -21295,13 +21295,25 @@ histories and classifies revisions, and every contract it wrote keeps
   it.
 - **`zk2py/state_scenarios.py` §7 and `live_interop`'s `s7`:** `state.md` §7
   step 2 live, over zk2py's owner (5 of 5) and the owner example (6 of 6).
-- **`readings`: 716, up from 706.** Ten, in `_round90_readings`: each text
-  at its version, F-358 to F-378's answers as they read and the old forms
-  gone, and S7 after the seed (the pure rule over seven pairs, a seed then
+- **`readings`: 717, up from 706.** Eleven, in `_round90_readings`: each
+  text at its version, F-358 to F-378's answers as they read and the old
+  forms gone, S7 after the seed (the pure rule over seven pairs, a seed then
   what follows it, and a consumer's and a tool's late joiner on a fake
-  session).
+  session), and the switch decided by arrival (a sample and the GET's final
+  reply interleaved both ways, in one thread and in two). The sentences
+  F-379 to F-392 ask #926 part 3 to reword are read by a phrase their fixes
+  keep, in their own section: over a copy of `spec/` with those fixes
+  applied, every reading but the walk's verdict keys passes, which round 91
+  re-keys.
+- **After review-bot on PR #969:** `LateJoiner` decides the switch from the
+  merge to S7 by the order of arrival, not by which callback's thread takes
+  the lock first. Each callback's first act queues what it was handed, and
+  one lock drains the queue in order, the GET's end among its items; error
+  replies count toward completeness by the same order. `follows` says
+  beside its code that F-383's reading (a) lets an old epoch's late value
+  step a key back, and two live writers under two ids make it flap.
 
-**`just py-conformance`: 3673 of 3673.**
+**`just py-conformance`: 3674 of 3674.**
 
 **Live, round 90**, `presence_scenarios` against the black boxes, by
 (owner, reader): zk2py, zk2py **95 of 95**; Rust, zk2py **89 of 89**; zk2py,

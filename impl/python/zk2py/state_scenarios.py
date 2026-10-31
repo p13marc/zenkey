@@ -308,7 +308,11 @@ def section7(report: Report, run: Run | None = None) -> None:
         o2 = Owner("ground", "fleet-mgr-s7", [c], connect=ep)
 
         def behind() -> Any:
-            ts = o2.session.new_timestamp()  # type: ignore[union-attr]
+            # Owner.mint calls it from start() on, once the session is open:
+            # the descriptor's first put is the first stamp it mints.
+            if o2.session is None:
+                raise RuntimeError("§7: the restarted owner's clock was read before its session opened")
+            ts = o2.session.new_timestamp()
             n = ts.get_time_as_ntp64().as_nanos() - 5_000_000_000
             return zenoh.Timestamp(zenoh.NTP64(n // 1_000_000_000, n % 1_000_000_000), ts.get_id())
 
