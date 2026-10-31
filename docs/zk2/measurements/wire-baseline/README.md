@@ -376,11 +376,15 @@ rests on.
    them. The uplink is 54 % busy on average, but each tick's 1.1 KB burst
    meets the config view's 1.6 KB (8 SDUs, 5.3 s of air) every 28.6 s, and a
    2,400-bit/s link drains 300 bytes a second.
-4. **Config's re-puts are as large as the model says, and a view rarely
-   crosses whole.** Each 28.6 s the device re-puts its view (1,592 B, 8
-   SDUs) and its status (314 B, 2 SDUs): 1,906 B, where the model has 1,902
-   B with the lean stack. A view crosses only when all 8 of its SDUs do: 38
-   of 65 did (58 %), where 0.95^8 is 66 %.
+4. **Config's re-puts are 8.6 % larger than the model said, and a view
+   rarely crosses whole.** Each 28.6 s the device re-puts its view (1,592 B
+   bare, 8 SDUs) and its status (314 B bare, 2 SDUs). With the lean stack's
+   16 B an SDU that is 2,066 B, where the model had 1,902 B before its
+   correction. Its puts carried no key text, and it took config.v1's 1,286-B
+   view and 330-B status, where the example's are 1,476 and 226 B. The
+   corrected Appendix A gives exactly 2,066 B for these payloads, and 1,980 B
+   for config.v1's. A view crosses only when all 8 of its SDUs do: 38 of 65
+   did (58 %), where 0.95^8 is 66 %.
 5. **Once its transport closed under W2's load, the link never came back.**
    In each of the four W2 runs where it closed, no new transport carried
    data again before the run ended:
