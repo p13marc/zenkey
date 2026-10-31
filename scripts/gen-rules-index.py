@@ -19,26 +19,29 @@ From each sentence that states a rule, three things are read.
     maps core §0's role words and their plain synonyms ("an owner", "the
     owner's", "an archive", "a reader") to roles, each synonym with its
     reason. Every role word the subject holds counts, so "a caller or
-    tool" binds two. Where the subject names none, the reading falls back,
-    in this order:
+    tool" binds two. A reader's rules are the observer class's, marked so
+    (READER), and the index points the roles that read to them (core §12).
+    Where the subject names no role, the reading falls back, in this order,
+    and never further:
     - a keyword that shares the subject before it ("MUST X, and SHOULD
       Y") binds what that one binds;
     - a passive's agent, as in "SHOULD be canonicalized by the owner";
-    - the last run-in role label before the keyword in its block,
-      "**Owner:**", as the tables of core §3.2, §4.2 and §5.1 write them;
-    - for a pronoun subject ("It", "Its backend"), the role of the
-      sentence before it in its block: a rule's, a MAY's subject, or the
-      first role word of a sentence that states neither; else the role of
-      the list item it sits under;
-    - the role its section's title names, when the title names one ("Facts
-      a deployment designs around");
+    - a run-in role label, "**Owner:**", as the tables of core §3.2, §4.2
+      and §5.1 write them, for the sentence it opens and no other;
+    - for a pronoun subject ("It", "Its backend"), the role of the sentence
+      before it in the same paragraph or list item: a rule's, a MAY's
+      subject, or the role word that leads a sentence stating neither ("A
+      tool decodes …"). An antecedent outside the paragraph is never read;
     - a static rule, which binds every implementation (core §0, §12): a
-      sentence in §1 or §9, one naming a lint code (`E026`), or one whose
-      evidence is a contract's lint fixture (`[F: contracts/…]`).
+      sentence of core.md in a section §12's sentence "The static rules
+      are …" lists, or one naming a lint code (`E026`, `W102`). A pronoun
+      with no antecedent is not one: it is unread.
     A sentence whose role none of these reads fails the script, which names
     its line. The cure is in the text, since a rule names the role it binds
     (core §0). EXCEPTIONS is for a sentence the reading cannot parse and the
-    text should not change, each with its reason. It is empty.
+    text should not change, each with its reason. It is empty. `--how`
+    prints how each rule's role was read, so the ones read by a fallback
+    can be audited.
   * **Its rule ids:** the id in the first cell of its table row, the id its
     section's title names ("4.3 Clocks (S7)"), and each lint or descriptor
     code the sentence names (`E024`, `D012`).
@@ -57,7 +60,13 @@ indexed.
 Usage:
   gen-rules-index.py              write spec/RULES.md
   gen-rules-index.py --check      exit 1 when spec/RULES.md is not what this
-                                  script writes, naming the first difference
+                                  script writes, saying how many lines differ
+                                  and showing the diff's first 60
+  gen-rules-index.py --how        print how each rule's role was read
+                                  (subject, passive, label, pronoun,
+                                  static-section, static-lint), and with
+                                  --how=other only those not read from
+                                  their subject: the entries to audit
   gen-rules-index.py --self-test  read the fixture text under
                                   scripts/fixtures/rules-index/ and check
                                   what is read from it against its
@@ -84,6 +93,7 @@ OUT = SPEC / "RULES.md"
 FIXTURES = ROOT / "scripts" / "fixtures" / "rules-index"
 # (file under spec/, the name a citation gives it)
 TEXTS = [("core.md", "core"), ("observer.md", "observer")]
+SHORT = dict(TEXTS)
 
 _prose_spec = importlib.util.spec_from_file_location("check_spec_prose", ROOT / "scripts" / "check-spec-prose.py")
 prose = importlib.util.module_from_spec(_prose_spec)
@@ -93,6 +103,13 @@ _prose_spec.loader.exec_module(prose)
 # core §0's tool role, named for observer.md, which holds most of its rules;
 # observer.md's rules for a reader are listed there too.
 ROLES = ["owner", "consumer", "caller", "deployment", "observer", "implementation"]
+# A reader's rules are listed under observer, and marked so the roles that
+# read find them (core §12, observer.md §0).
+READER = "reader"
+# The roles a reader can play beside the tool (observer.md §0).
+READING_ROLES = ["owner", "consumer", "caller"]
+READER_POINTER = "core §12"
+ARTICLE = {"owner": "An", "consumer": "A", "caller": "A"}
 ROLE_TITLES = {
     "owner": "Owner",
     "consumer": "Consumer",
@@ -114,11 +131,12 @@ ROLE_WORDS = [
     # own keys.
     (r"holders?", ["owner"]),
     # core §5.1, §6: replicas are instances serving one interface, each the
-    # owner of what it exposes; a server is an owner's operation queryable,
-    # and a publisher an owner's writer, since only an owner writes its keys
-    # (core §6).
+    # owner of what it exposes; a server is an owner's operation queryable, a
+    # replier the instance that answers through one (O6), and a publisher an
+    # owner's writer, since only an owner writes its keys (core §6).
     (r"replicas?", ["owner"]),
     (r"servers?", ["owner"]),
+    (r"repliers?", ["owner"]),
     (r"publishers?", ["owner"]),
     (r"a session that serves state", ["owner"]),
     # core §1.5: an instance is one run of a service, which owns its keys.
@@ -132,24 +150,25 @@ ROLE_WORDS = [
     (r"callers?" + POSS, ["caller"]),
     (r"deployments?" + POSS, ["deployment"]),
     # core §0: a tool is a generic program, generators among them.
-    # observer.md §0: a reader is any participant reading.
     (r"tools?" + POSS, ["observer"]),
-    (r"readers?" + POSS, ["observer"]),
     (r"generators?", ["observer"]),
-    # Application code is a service's, in whichever role it plays.
-    (r"application code", ["owner", "consumer", "caller"]),
+    # observer.md §0: a reader is any participant reading. Its rules are the
+    # observer class's, and bind an owner, a consumer or a caller wherever
+    # it reads (core §12), which the index says (READER).
+    (r"readers?" + POSS, [READER]),
     (r"implementations?", ["implementation"]),
+    # The parts of an implementation the fixtures check (core §0's
+    # evidence): §3.3's descriptor checker, §1.4's decoder, §9.8's
+    # classifier and §9.7's history check.
     (r"checkers?", ["implementation"]),
     (r"decoders?", ["implementation"]),
     (r"classifiers?", ["implementation"]),
     (r"history check", ["implementation"]),
-    # A rule on what a contract states is static: every implementation's
-    # lints check it (core §9.2), whoever wrote the contract.
-    (r"contracts?" + POSS, ["implementation"]),
-    (r"templates?", ["implementation"]),
-    (r"request types?", ["implementation"]),
 ]
 ROLE_RX = [(re.compile(r"(?<![\w-])" + p + r"(?![\w-])", re.I), roles) for p, roles in ROLE_WORDS]
+# A sentence's subject that leads it: a determiner, at most two words, and a
+# role word ("A tool decodes", "The owner's state queryables").
+LEADING = re.compile(r"^(?:a|an|the|every|each|its|their)\s+(?:[\w’'-]+\s+){0,2}?", re.I)
 
 # The sentences the reading cannot parse and the text should not change:
 # {(file, a phrase of the sentence): (roles, reason)}. None today: each
@@ -165,22 +184,29 @@ LISTED = re.compile(r"^(?:\s+NOT)?(?:,|\s+and)\s+(?:MUST|SHOULD|MAY)\b")
 LISTED_AFTER = re.compile(r"\b(?:MUST|SHOULD|NOT|MAY)(?:,|\s+and|\s+or)\s+$")
 # A run-in role label: "**Owner:**", "**Caller and tool:**".
 LABEL = re.compile(r"\*\*([A-Z][A-Za-z ]+?):\*\*")
-PRONOUN = re.compile(r"^(?:it|its|they|their|this|these)\b", re.I)
+# A pronoun subject ("It MUST …") takes its paragraph's antecedent or is
+# unread; a possessive one ("Its backend") takes it where there is one, and
+# is a thing's subject otherwise ("Its `name` … MUST be unique").
+PRONOUN = re.compile(r"^(?:it|they|this|these)\b", re.I)
+POSSESSIVE = re.compile(r"^(?:its|their)\b", re.I)
 # Where a clause starts, within a sentence.
 CLAUSE = re.compile(r"[:;—]|,\s+(?:and|or|but|so|then)\s+")
 PASSIVE = re.compile(r"^\s*be\s+[\w-]+(?:\s+[\w-]+)?\s+by\s+(the\s+\w+|an?\s+\w+)")
 PAREN = re.compile(r"\([^()]*\)")
 EVIDENCE = re.compile(r"`\[(F|Sc):\s*([^\]`]*)\]`")
 CODE = re.compile(r"\b([EWD]\d{3})\b")
+LINT = re.compile(r"\b([EW]\d{3})\b")
 ROW_ID = re.compile(r"^(R\d+|S\d+|O\d+|[DEW]\d{3})$")
 TITLE_ID = re.compile(r"\((R\d|S\d|O\d)\)")
-STATIC_SECTIONS = {"1", "9"}
-STATIC_FIXTURE = re.compile(r"^(?:contracts|sets)/")
+# core §12 lists the static rules: "The static rules are §1's and §9's, …".
+STATIC_LEAD = "The static rules are"
 
 # An entry's sentence is shortened past this many words, never reworded.
 MAX_WORDS = 45
 # A rule id's row, in the table of ids, past this many.
 ID_WORDS = 14
+# The diff lines --check prints of a stale index.
+SHOWN_DIFF = 60
 
 
 class Unreadable(Exception):
@@ -217,13 +243,29 @@ def plain(text: str) -> str:
 
 
 def roles_in(text: str) -> list:
-    """The roles a subject names, in ROLES' order."""
+    """The roles a subject names, in ROLES' order, a reader last."""
     text = plain(text)
     found = set()
     for rx, roles in ROLE_RX:
         if rx.search(text):
             found.update(roles)
-    return [r for r in ROLES if r in found]
+    return [r for r in ROLES + [READER] if r in found]
+
+
+def leading_roles(sentence: str) -> list:
+    """The roles of the subject that leads a sentence stating no rule: "A
+    tool decodes …" names a tool, and "Zenoh delivers a put … with the
+    publisher's key" no one."""
+    text = plain(LABEL.sub(" ", sentence)).strip()
+    m = LEADING.match(text)
+    if not m:
+        return []
+    head = text[m.end():]
+    for rx, roles in ROLE_RX:
+        hit = rx.match(head)
+        if hit:
+            return [r for r in ROLES + [READER] if r in roles]
+    return []
 
 
 def subject_of(before: str) -> str:
@@ -306,17 +348,19 @@ def row_cells(text: str) -> list:
     return [c.replace("\0", "|").replace("\1", "\\|").strip() for c in cells]
 
 
-def read_rules(path: Path, name: str):
+def read_rules(path: Path, name: str, static_list=None):
     """(rules, ids) of a text. A rule is a dict: its text's name, line,
     section, title, anchor, roles, ids, evidence and sentence. An id is a
     dict: the id, its line, section, title, anchor, roles and row text.
-    Raises Unreadable naming each rule whose role cannot be read."""
+    `static_list` holds the sections whose rules are static when their
+    subject names no role, as core §12 lists them; a text without one, as
+    observer.md, has none. Raises Unreadable naming each rule whose role
+    cannot be read."""
     lines = path.read_text(encoding="utf-8").splitlines()
     rel = name
     rules, ids, errors = [], [], []
     seen = {}
     number, title, anchor = "", "", ""
-    item_roles = {}  # a block's line -> the roles its rules read
     parents = {}  # a block's line -> the line of the list item it sits under
     pending = []  # (rule, its block's line): this section's rules owed evidence
     for block in blocks_of(lines):
@@ -326,7 +370,7 @@ def read_rules(path: Path, name: str):
             anchor = slug(block["text"], seen)
             pending = []
             continue
-        static_section = number.split(".")[0] in STATIC_SECTIONS
+        static = is_static(number, static_list) if static_list is not None else False
         row_id = None
         if kind == "row":
             cells = row_cells(block["text"])
@@ -344,9 +388,7 @@ def read_rules(path: Path, name: str):
             block_evidence = evidence_in(text)
         parent = block.get("parent")
         title_ids = TITLE_ID.findall(title)
-        label = None
         last_roles = None
-        block_read = []
         block_rules = []
         # A block's run-in label, and where its first sentence after it starts.
         opening = prose.LABEL.match(text) if kind == "prose" else None
@@ -356,22 +398,22 @@ def read_rules(path: Path, name: str):
         for off, raw in sentences_of(text):
             s = flat(raw)
             kws = keywords(s)
+            # A role label binds the sentence it opens, and no other.
             labels = [(m.start(), m.group(1)) for m in LABEL.finditer(s)]
-            roles = []
-            got = []
+            roles, hows = [], []
+            got, how = [], ""
             for k_off, kw in kws:
+                label = None
                 for l_off, lab in labels:
                     if l_off < k_off:
                         label = lab
                 before = s[:k_off]
                 subject = subject_of(before)
-                if not re.sub(r"\b(?:and|or|but|then)\b", "", subject).strip(" ,"):
+                if got and not re.sub(r"\b(?:and|or|but|then)\b", "", subject).strip(" ,"):
                     # "MUST X, and SHOULD Y": the keyword before it's subject.
-                    if got:
-                        roles.extend(r for r in got if r not in roles)
-                        continue
-                got = read_role(s, k_off, kw, subject, before, label, last_roles, item_roles.get(parent),
-                                title, static_section, block_evidence, rel)
+                    roles.extend(r for r in got if r not in roles)
+                    continue
+                got, how = read_role(s, k_off, kw, subject, before, label, last_roles, static, rel)
                 if not got:
                     errors.append(
                         f"{shown_path(path)}:{line + text[:off].count(chr(10))}: no role can be read from "
@@ -379,24 +421,20 @@ def read_rules(path: Path, name: str):
                     )
                     continue
                 roles.extend(r for r in got if r not in roles)
+                hows.append(how)
             if not kws:
                 # A sentence stating no rule leaves its subject's role for a
-                # pronoun after it: a MAY's subject, else the first role
-                # word it holds.
+                # pronoun after it in its block: a MAY's subject, else the
+                # role word that leads it.
                 may = MAY.search(prose.CODE_SPAN.sub(lambda m: "X" * len(m.group(0)), s))
-                if may:
-                    first = roles_in(subject_of(s[: may.start()]))
-                else:
-                    first = first_role(LABEL.sub(" ", s))
+                first = roles_in(subject_of(s[: may.start()])) if may else leading_roles(s)
                 if first:
                     last_roles = first
-            for _, lab in labels:
-                label = lab
             if not kws or not roles:
                 continue
-            roles = [r for r in ROLES if r in roles]
             last_roles = roles
-            block_read.extend(r for r in roles if r not in block_read)
+            reader = READER in roles
+            roles = [r for r in ROLES if r in roles or (r == "observer" and reader)]
             rule_ids = [row_id] if row_id else []
             rule_ids += [t for t in title_ids if t not in rule_ids]
             for c in CODE.findall(plain_codes(s)):
@@ -414,16 +452,14 @@ def read_rules(path: Path, name: str):
                 "title": title,
                 "anchor": anchor,
                 "roles": roles,
+                "reader": reader,
+                "how": "+".join(dict.fromkeys(hows)),
                 "ids": rule_ids,
                 "evidence": ev,
                 "sentence": shown,
             }
             rules.append(rule)
             block_rules.append(rule)
-        if block_read:
-            item_roles[line] = block_read
-        elif parent in item_roles:
-            item_roles[line] = item_roles[parent]
         # Evidence for this section's rules that have none of their own.
         parents[line] = parent
         pending = owe_evidence(pending, line, parent, bool(block.get("item")), block_rules, block_evidence,
@@ -503,51 +539,59 @@ def within(line, top, parents) -> bool:
     return False
 
 
-def first_role(text: str) -> list:
-    """The roles of the first role word in a text, by position."""
-    text = plain(text)
-    best = None
-    for rx, roles in ROLE_RX:
-        m = rx.search(text)
-        if m and (best is None or m.start() < best[0] or (m.start() == best[0] and m.end() > best[1])):
-            best = (m.start(), m.end(), roles)
-    return [r for r in ROLES if best and r in best[2]]
-
-
-def title_role(title: str) -> list:
-    """The role a section's title names, when it names exactly one: "Facts
-    a deployment designs around", "What a tool can count"."""
-    found = roles_in(re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", title))
-    return found if len(found) == 1 else []
-
-
-def read_role(s, k_off, kw, subject, before, label, last_roles, parent_roles, title, static_section,
-              block_evidence, rel) -> list:
-    """The roles a keyword binds, read in the order the module's docstring
-    gives."""
+def read_role(s, k_off, kw, subject, before, label, last_roles, static, rel):
+    """(roles, how) a keyword binds, read in the order the module's
+    docstring gives; ([], "") when none can be read."""
     got = roles_in(subject) or roles_in(LABEL.sub(" ", before))
     if got:
-        return got
+        return got, "subject"
     m = PASSIVE.match(plain(s[k_off + len(kw) :]))
     if m and roles_in(m.group(1)):
-        return roles_in(m.group(1))
+        return roles_in(m.group(1)), "passive"
     if label and roles_in(label):
-        return roles_in(label)
+        return roles_in(label), "label"
     last_piece = subject.split(",")[-1].strip()
-    if PRONOUN.match(last_piece) or PRONOUN.match(plain(s).strip()):
-        got = last_roles or parent_roles or []
-        if got:
-            return got
-    if title_role(title):
-        return title_role(title)
-    if static_section or CODE.search(plain_codes(s)) or any(
-        e.startswith("[F: ") and STATIC_FIXTURE.match(e[4:]) for e in block_evidence
-    ):
-        return ["implementation"]
+    lead = plain(s).strip()
+    if PRONOUN.match(last_piece) or PRONOUN.match(lead):
+        # A pronoun's antecedent is in its paragraph, or it is unread: a
+        # static section is no antecedent.
+        return (last_roles, "pronoun") if last_roles else ([], "")
+    if (POSSESSIVE.match(last_piece) or POSSESSIVE.match(lead)) and last_roles:
+        return last_roles, "pronoun"
+    if static:
+        return ["implementation"], "static-section"
+    if LINT.search(plain_codes(s)):
+        return ["implementation"], "static-lint"
     for (file, phrase), (roles_, _why) in EXCEPTIONS.items():
         if file == rel and phrase in s:
-            return roles_
-    return []
+            return roles_, "exception"
+    return [], ""
+
+def static_sections(path: Path) -> list:
+    """The sections core §12 lists as holding static rules, from its
+    sentence that begins "The static rules are": each `§n` or `§n.m` it
+    names. Raises Unreadable when §12 states no such sentence."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    inside = False
+    for kind, line, raw, _ in prose.blocks(lines):
+        if kind == "other" and not raw.startswith("|"):
+            inside = section_number(raw) == "12"
+            continue
+        if not inside or kind != "prose":
+            continue
+        for _, sentence in sentences_of(raw):
+            sentence = flat(sentence)
+            if sentence.startswith(STATIC_LEAD):
+                found = re.findall(r"§(\d+(?:\.\d+)?)", sentence)
+                if found:
+                    return found
+    raise Unreadable(f"{shown_path(path)}: §12 states no sentence beginning \"{STATIC_LEAD}\" that names "
+                     "the static sections, which the index places static rules by")
+
+
+def is_static(number: str, listed: list) -> bool:
+    """Whether a section is one of the listed ones, or under one."""
+    return any(number == n or number.startswith(n + ".") for n in listed)
 
 
 def plain_codes(s: str) -> str:
@@ -558,20 +602,21 @@ def plain_codes(s: str) -> str:
 
 
 def id_roles(row_id: str, text: str, rules: list) -> list:
-    """The roles an id's row binds: those of its rules, else its labels'
-    and its first sentence's subject's; a code binds an implementation."""
+    """The roles an id's row binds: those of its rules; for a row with no
+    rule, its role labels', else its first sentence's subject's. A lint or
+    descriptor code binds an implementation."""
     if re.match(r"[DEW]\d{3}$", row_id):
         return ["implementation"]
     found = []
     for r in rules:
         found.extend(x for x in r["roles"] if x not in found)
-    for m in LABEL.finditer(text):
-        found.extend(x for x in roles_in(m.group(1)) if x not in found)
+    if not found:
+        for m in LABEL.finditer(text):
+            found.extend(x for x in roles_in(m.group(1)) if x not in found)
     if not found:
         first = next(iter(sentences_of(text)), (0, text))[1]
         found = roles_in(re.split(r"\b(?:MAY|binds|is|are)\b", first)[0])
     return [r for r in ROLES if r in found]
-
 
 # --- writing the index -------------------------------------------------------
 
@@ -610,7 +655,7 @@ def cell(s: str) -> str:
 
 
 def section_label(text: str, number: str, title: str) -> str:
-    who = dict(TEXTS).get(text, text)
+    who = SHORT.get(text, text)
     name = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", title)
     name = re.sub(r"^Appendix [A-Z]\.\s*", "", name)
     num = number if number.startswith("Appendix") else f"§{number}"
@@ -621,11 +666,16 @@ def link(rule: dict) -> str:
     return f"{rule['text']}#{rule['anchor']}"
 
 
+def and_list(items: list) -> str:
+    """"a", "a and b", "a, b and c"."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
 def para(w, text: str, width: int = 76) -> None:
-    """A paragraph, wrapped at `width` with its words and code spans whole,
-    then a blank line."""
+    """A paragraph, wrapped at `width` with its words, code spans and links
+    whole, then a blank line."""
     line = ""
-    for word in re.findall(r"(?:`[^`]*`|\S)+", text):
+    for word in re.findall(r"(?:\[[^\]]*\]\([^)]*\)|`[^`]*`|\S)+", text):
         if line and len(line) + 1 + len(word) > width:
             w(line)
             line = word
@@ -640,6 +690,13 @@ def render(rules: list, ids: list) -> str:
     out = []
     w = out.append
     by_role = {r: [x for x in rules if r in x["roles"]] for r in ROLES}
+    # The sections holding a reader's rules, linked, for the reading roles.
+    reader_sections = []
+    for x in rules:
+        if x["reader"]:
+            ref = f"[§{x['section']}]({x['text']}#{x['anchor']})"
+            if ref not in reader_sections:
+                reader_sections.append(ref)
     total = len(rules)
     w("# zk2 rule index")
     w("")
@@ -655,32 +712,39 @@ def render(rules: list, ids: list) -> str:
          "says. A sentence that binds two roles is listed under each.")
     para(w, "A long sentence is shortened, never reworded, and its link leads to the "
          "rest. A sentence after its paragraph's run-in label shows the label first. "
-         "A rule's evidence is what the text cites beside it, and \"none cited\" "
-         "means it cites none there. MAY grants a permission, and is not listed.")
+         "A rule's evidence is what the text cites beside it. Where it cites none, "
+         "the entry says \"none cited\". MAY grants a permission, and is not listed.")
     para(w, "**Conformance by role.** An implementation claims one class for each "
          "role it plays ([core §12](core.md#12-conformance-classes)). A class holds "
-         "its role's rules and the static rules, which are listed here under "
-         "implementation. Those are §1's and §9's, and the rules on what a contract "
-         "states. Full conformance is every class. A profile is a class of its own, "
-         "and its rules are in its text.")
+         "its role's rules and the static rules, listed here under implementation. "
+         "Those are §1's, §9's, the contract rules of the sections §12 lists, and "
+         "any rule naming its lint code. Full conformance is every class. A profile is a class of its own, and its rules are in "
+         "its text.")
     para(w, "**A stream-only owner's minimum path** is this index filtered to two "
          "roles: [owner](#owner) and [implementation](#implementation-the-static-rules). "
          "A service that only publishes a stream needs no other role's rules.")
-    para(w, "**A reader.** `observer.md` binds a tool, and any participant where it "
-         "reads presence, state or the admin space and concludes from what it read "
-         "(observer.md §0). Its rules for a reader are listed under observer. An "
-         "owner, a consumer or a caller that reads so meets them too, in its own "
-         "class.")
+    para(w, "**A reader.** `observer.md` binds a tool, and any participant that reads "
+         "presence, state or the admin space and concludes from it (observer.md §0). "
+         "Its rules for a reader are listed once, under observer, each marked "
+         "*reader*. They belong to the class of the role the reader plays (core §12). "
+         "The owner, consumer and caller sections each point to them.")
     w("| Role | Rules |")
     w("|---|---|")
     for r in ROLES:
-        w(f"| [{ROLE_TITLES[r]}](#{slug(ROLE_TITLES[r], {})}) | {len(by_role[r])} |")
+        readers = sum(1 for x in by_role[r] if x["reader"]) if r == "observer" else 0
+        count = f"{len(by_role[r])}, {readers} of them a reader's" if readers else f"{len(by_role[r])}"
+        w(f"| [{ROLE_TITLES[r]}](#{slug(ROLE_TITLES[r], {})}) | {count} |")
     w(f"| Every rule, once | {total} |")
     w(f"| [Rule ids](#rule-ids) | {len(ids)} |")
     w("")
     for r in ROLES:
         w(f"## {ROLE_TITLES[r]}")
         w("")
+        if r in READING_ROLES and reader_sections:
+            para(w, f"**Where it reads.** Where {ARTICLE[r].lower()} {r} reads presence, state or the "
+                 f"admin space, `observer.md`'s reader rules bind it ({READER_POINTER}). They "
+                 "are under [observer](#observer-the-tool-role-and-a-reader), marked *reader*: "
+                 + and_list(reader_sections) + ".")
         sections = []
         for x in by_role[r]:
             key = (x["text"], x["anchor"])
@@ -695,8 +759,9 @@ def render(rules: list, ids: list) -> str:
             w("|---|---|---|")
             for x in group:
                 ident = ", ".join(x["ids"]) or ("§" + x["section"] if x["section"] else "§")
+                mark = ", *reader*" if r == "observer" and x["reader"] else ""
                 ev = " ".join(f"`{e}`" for e in x["evidence"]) or "none cited"
-                w(f"| [{ident}]({link(x)}) | {cell(shorten(x['sentence'], MAX_WORDS))} | {cell(ev)} |")
+                w(f"| [{ident}]({link(x)}){mark} | {cell(shorten(x['sentence'], MAX_WORDS))} | {cell(ev)} |")
             w("")
     w("## Rule ids")
     w("")
@@ -718,7 +783,8 @@ def read_all(texts=TEXTS, base=SPEC):
     rules, ids, errors = [], [], []
     for file, _ in texts:
         try:
-            r, i = read_rules(base / file, file)
+            listed = static_sections(base / file) if file == "core.md" else None
+            r, i = read_rules(base / file, file, listed)
         except Unreadable as e:
             errors.append(str(e))
             continue
@@ -738,11 +804,11 @@ def self_test() -> int:
     fails = []
     try:
         expect = json.loads((FIXTURES / "expect.json").read_text(encoding="utf-8"))
-        rules, ids = read_rules(FIXTURES / "text.md", "text.md")
+        rules, ids = read_rules(FIXTURES / "text.md", "text.md", static_sections(FIXTURES / "text.md"))
     except (OSError, ValueError, Unreadable) as e:
         print(f"rules-index: self-test: {e}", file=sys.stderr)
         return 1
-    got = [{k: r[k] for k in ("line", "roles", "ids", "evidence")} for r in rules]
+    got = [{k: r[k] for k in ("line", "roles", "how", "reader", "ids", "evidence")} for r in rules]
     want = expect["rules"]
     if got != want:
         for line in difflib.unified_diff(
@@ -754,7 +820,7 @@ def self_test() -> int:
     if got_ids != expect["ids"]:
         fails.append(f"ids: expected {expect['ids']}, read {got_ids}")
     try:
-        read_rules(FIXTURES / "unreadable.md", "unreadable.md")
+        read_rules(FIXTURES / "unreadable.md", "unreadable.md", static_sections(FIXTURES / "unreadable.md"))
         fails.append("unreadable.md: read without an error; its rule names no role")
     except Unreadable as e:
         lines = str(e).splitlines()
@@ -774,6 +840,8 @@ def self_test() -> int:
 def main(argv) -> int:
     if "--self-test" in argv:
         return self_test()
+    if any(a.startswith("--how") for a in argv):
+        argv = argv + ["--how"]
     try:
         rules, ids = read_all()
     except Unreadable as e:
@@ -783,6 +851,20 @@ def main(argv) -> int:
     except (OSError, UnicodeDecodeError) as e:
         print(f"rules-index: a text cannot be read: {e}", file=sys.stderr)
         return 2
+    if "--how" in argv:
+        # How each rule's role was read, for an audit: every rule, or with
+        # --how=other only those not read from their subject.
+        only_other = "--how=other" in argv
+        for r in rules:
+            if only_other and r["how"] == "subject":
+                continue
+            who = ",".join(r["roles"]) + (" (reader)" if r["reader"] else "")
+            print(f"{r['text']}:{r['line']}\t{r['how']}\t{who}\t{r['sentence'][:110]}")
+        counts = {}
+        for r in rules:
+            counts[r["how"]] = counts.get(r["how"], 0) + 1
+        print("rules-index: read by " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())), file=sys.stderr)
+        return 0
     text = render(rules, ids) + "\n"
     rel = OUT.relative_to(ROOT)
     if "--check" in argv:
@@ -793,9 +875,15 @@ def main(argv) -> int:
             return 1
         if now != text:
             diff = list(difflib.unified_diff(now.splitlines(), text.splitlines(), str(rel), "generated", lineterm="", n=0))
-            print(f"rules-index: {rel} is stale; run python3 scripts/gen-rules-index.py and commit it.", file=sys.stderr)
-            for line in diff[:12]:
+            body = [x for x in diff if x[:1] in "+-" and not x.startswith(("---", "+++"))]
+            gone = sum(1 for x in body if x.startswith("-"))
+            print(f"rules-index: {rel} is stale: against what the texts generate, {gone} of its lines "
+                  f"go and {len(body) - gone} come. Run python3 scripts/gen-rules-index.py and commit it.",
+                  file=sys.stderr)
+            for line in diff[:SHOWN_DIFF]:
                 print(f"  {line}", file=sys.stderr)
+            if len(diff) > SHOWN_DIFF:
+                print(f"  … {len(diff) - SHOWN_DIFF} more diff lines", file=sys.stderr)
             return 1
         print(f"rules-index: {rel} is current: {len(rules)} rules, {len(ids)} rule ids.")
         return 0

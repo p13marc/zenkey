@@ -14,38 +14,46 @@ that binds two roles is listed under each.
 
 A long sentence is shortened, never reworded, and its link leads to the
 rest. A sentence after its paragraph's run-in label shows the label first. A
-rule's evidence is what the text cites beside it, and "none cited" means it
-cites none there. MAY grants a permission, and is not listed.
+rule's evidence is what the text cites beside it. Where it cites none, the
+entry says "none cited". MAY grants a permission, and is not listed.
 
 **Conformance by role.** An implementation claims one class for each role it
 plays ([core §12](core.md#12-conformance-classes)). A class holds its role's
-rules and the static rules, which are listed here under implementation.
-Those are §1's and §9's, and the rules on what a contract states. Full
-conformance is every class. A profile is a class of its own, and its rules
-are in its text.
+rules and the static rules, listed here under implementation. Those are
+§1's, §9's, the contract rules of the sections §12 lists, and any rule
+naming its lint code. Full conformance is every class. A profile is a class
+of its own, and its rules are in its text.
 
 **A stream-only owner's minimum path** is this index filtered to two roles:
 [owner](#owner) and [implementation](#implementation-the-static-rules). A
 service that only publishes a stream needs no other role's rules.
 
-**A reader.** `observer.md` binds a tool, and any participant where it reads
-presence, state or the admin space and concludes from what it read
-(observer.md §0). Its rules for a reader are listed under observer. An
-owner, a consumer or a caller that reads so meets them too, in its own
-class.
+**A reader.** `observer.md` binds a tool, and any participant that reads
+presence, state or the admin space and concludes from it (observer.md §0).
+Its rules for a reader are listed once, under observer, each marked
+*reader*. They belong to the class of the role the reader plays (core §12).
+The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 57 |
-| [Consumer](#consumer) | 13 |
-| [Caller](#caller) | 12 |
+| [Owner](#owner) | 56 |
+| [Consumer](#consumer) | 12 |
+| [Caller](#caller) | 11 |
 | [Deployment](#deployment) | 14 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 46 |
-| [Implementation: the static rules](#implementation-the-static-rules) | 32 |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 46, 24 of them a reader's |
+| [Implementation: the static rules](#implementation-the-static-rules) | 33 |
 | Every rule, once | 167 |
 | [Rule ids](#rule-ids) | 71 |
 
 ## Owner
+
+**Where it reads.** Where an owner reads presence, state or the admin space,
+`observer.md`'s reader rules bind it (core §12). They are under
+[observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](observer.md#33-possibly-incomplete),
+[§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
+[§3.7](observer.md#37-the-watch-session) and
+[§3.9](observer.md#39-what-a-complete-read-covers).
 
 ### [core §1.4 Slugging](core.md#14-slugging)
 
@@ -58,14 +66,8 @@ class.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§1.5](core.md#15-identity) | An owner MUST mint a new instance id whenever its counters reset or its state's ordering restarts (§4.3): a process restart, a device re-enumerated, a polled device's uptime rewound, a container restarted. | `[Sc: presence.md §3]` |
-| [§1.5](core.md#15-identity) | It SHOULD do so in a new session, so that its timestamps' id changes too (§4.3). | none cited |
+| [§1.5](core.md#15-identity) | The owner SHOULD do so in a new session, so that its timestamps' id changes too (§4.3). | none cited |
 | [§1.5](core.md#15-identity) | An owner's counter that crosses a face where neither is visible SHOULD carry its epoch in-band, in its value or its attachment, as [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9). | `[Sc: presence.md §3]` |
-
-### [core §1.6 Namespaces and base-relative keys](core.md#16-namespaces-and-base-relative-keys)
-
-| Rule | Sentence | Evidence |
-|---|---|---|
-| [§1.6](core.md#16-namespaces-and-base-relative-keys) | Application code SHOULD NOT spell a deployment prefix. | `[Sc: grammar.md §2]` |
 
 ### [core §2.3 Resource attributes](core.md#23-resource-attributes)
 
@@ -121,14 +123,14 @@ class.
 | [S7](core.md#43-clocks-s7) | An owner MUST NOT stamp at or below the last timestamp it issued for its keys. | none cited |
 | [S7](core.md#43-clocks-s7) | With neither source, the owner MUST start a new epoch: a new instance (§1.5) whose session has a fresh, unpinned zid. | none cited |
 | [S7](core.md#43-clocks-s7) | An owner SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own offset without a reference. | `[Sc: profiles/health/scenarios.md §4]` |
-| [S7](core.md#43-clocks-s7) | It SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | none cited |
-| [S7](core.md#43-clocks-s7) | When a detection shows it beyond the delta, it MUST stop writing state, re-puts included, and SHOULD report it. | `[Sc: profiles/freshness/scenarios.md §2]` |
+| [S7](core.md#43-clocks-s7) | The owner SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | none cited |
+| [S7](core.md#43-clocks-s7) | When a detection shows it beyond the delta, the owner MUST stop writing state, re-puts included, and SHOULD report it. | `[Sc: profiles/freshness/scenarios.md §2]` |
 
 ### [core §4.4 Archives](core.md#44-archives)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§4.4](core.md#44-archives) | **Its backend MUST NOT accept a put older than a delete it holds.** | none cited |
+| [§4.4](core.md#44-archives) | **An archive's backend MUST NOT accept a put older than a delete it holds.** | none cited |
 | [§4.4](core.md#44-archives) | When an owner becomes reachable again, the archive MUST re-read the owner's recorded collection before serving it as confirmed. | `[Sc: state.md §5]` |
 | [§4.4](core.md#44-archives) | An archive SHOULD repeat an alignment that left keys unconfirmed, a bounded number of times. | `[Sc: state.md §5]` |
 | [§4.4](core.md#44-archives) | **An unconfirmed key expires.** … The archive MAY drop such a key after a deployment-set horizon, and MUST keep serving it as unconfirmed until then. | none cited |
@@ -206,11 +208,13 @@ class.
 
 ## Consumer
 
-### [core §1.6 Namespaces and base-relative keys](core.md#16-namespaces-and-base-relative-keys)
-
-| Rule | Sentence | Evidence |
-|---|---|---|
-| [§1.6](core.md#16-namespaces-and-base-relative-keys) | Application code SHOULD NOT spell a deployment prefix. | `[Sc: grammar.md §2]` |
+**Where it reads.** Where a consumer reads presence, state or the admin
+space, `observer.md`'s reader rules bind it (core §12). They are under
+[observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](observer.md#33-possibly-incomplete),
+[§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
+[§3.7](observer.md#37-the-watch-session) and
+[§3.9](observer.md#39-what-a-complete-read-covers).
 
 ### [core §3.2 Binding rules](core.md#32-binding-rules)
 
@@ -251,11 +255,13 @@ class.
 
 ## Caller
 
-### [core §1.6 Namespaces and base-relative keys](core.md#16-namespaces-and-base-relative-keys)
-
-| Rule | Sentence | Evidence |
-|---|---|---|
-| [§1.6](core.md#16-namespaces-and-base-relative-keys) | Application code SHOULD NOT spell a deployment prefix. | `[Sc: grammar.md §2]` |
+**Where it reads.** Where a caller reads presence, state or the admin space,
+`observer.md`'s reader rules bind it (core §12). They are under
+[observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](observer.md#33-possibly-incomplete),
+[§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
+[§3.7](observer.md#37-the-watch-session) and
+[§3.9](observer.md#39-what-a-complete-read-covers).
 
 ### [core §5.1 Rules](core.md#51-rules)
 
@@ -336,7 +342,7 @@ class.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§11.3](core.md#113-facts-a-deployment-designs-around) | **Under `allow`, a wildcard call is in no deny.** … Under `allow`, an operation that must not run for everyone MUST be `fanout = "forbidden"`, which its server refuses (O2), or the deployment runs `deny`. | none cited |
+| [§11.3](core.md#113-facts-a-deployment-designs-around) | **Under `allow`, a wildcard call is in no deny.** … For a deployment under `allow`, an operation that must not run for everyone MUST be `fanout = "forbidden"`, which its server refuses (O2), or the deployment runs `deny`. | none cited |
 | [§11.3](core.md#113-facts-a-deployment-designs-around) | A deployment under `allow` MUST refuse unauthenticated sessions at the link. | none cited |
 
 ## Observer: the tool role, and a reader
@@ -392,10 +398,10 @@ class.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§3.3](observer.md#33-possibly-incomplete) | A tool SHOULD treat a liveliness GET that ended at its timeout, rather than at the routers' final reply, as possibly incomplete: silence is not a verdict (O5). | `[Sc: presence.md §6]` |
-| [§3.3](observer.md#33-possibly-incomplete) | A reader MUST read as possibly incomplete a read whose time reached its session's interests timeout, as it reads a read that received an error reply. | none cited |
-| [§3.3](observer.md#33-possibly-incomplete) | A reader MUST read as not standing a round trip (§3.7) that ended at that timeout. | none cited |
-| [§3.3](observer.md#33-possibly-incomplete) | A reader whose reads may wait longer SHOULD run its session with an interests timeout above the longest it waits for one: its long reads can then be complete (core Appendix B). | none cited |
-| [§3.3](observer.md#33-possibly-incomplete) | A reader that cannot read its session's interests timeout SHOULD be the one that opens that session, with an interests timeout it sets, so that it knows the value. | `[Sc: presence.md §10]` |
+| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader MUST read as possibly incomplete a read whose time reached its session's interests timeout, as it reads a read that received an error reply. | none cited |
+| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader MUST read as not standing a round trip (§3.7) that ended at that timeout. | none cited |
+| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader whose reads may wait longer SHOULD run its session with an interests timeout above the longest it waits for one: its long reads can then be complete (core Appendix B). | none cited |
+| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader that cannot read its session's interests timeout SHOULD be the one that opens that session, with an interests timeout it sets, so that it knows the value. | `[Sc: presence.md §10]` |
 
 ### [observer §3.4 A refused read](observer.md#34-a-refused-read)
 
@@ -407,41 +413,41 @@ class.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.5](observer.md#35-a-session-cut-off) | A reader MUST NOT conclude absence from it, and MUST NOT take it as healing a loss (§5.2). | none cited |
-| [§3.5](observer.md#35-a-session-cut-off) | A reader SHOULD NOT make such a read. | `[Sc: presence.md §7]` |
+| [§3.5](observer.md#35-a-session-cut-off), *reader* | A reader MUST NOT conclude absence from it, and MUST NOT take it as healing a loss (§5.2). | none cited |
+| [§3.5](observer.md#35-a-session-cut-off), *reader* | A reader SHOULD NOT make such a read. | `[Sc: presence.md §7]` |
 
 ### [observer §3.6 Absence](observer.md#36-absence)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.6](observer.md#36-absence) | **A withdrawal heard live is a reason to read again, never absence by itself.** … A reader MUST NOT conclude absence from a withdrawal alone. | none cited |
-| [§3.6](observer.md#36-absence) | A reader that follows presence live SHOULD read again soon after a withdrawal that leaves one of these with nothing held: | none cited |
-| [§3.6](observer.md#36-absence) | The reader SHOULD report what that read establishes: absent when the read is complete and shows no such token held, present when it shows one. | `[Sc: presence.md §8]` |
+| [§3.6](observer.md#36-absence), *reader* | **A withdrawal heard live is a reason to read again, never absence by itself.** … A reader MUST NOT conclude absence from a withdrawal alone. | none cited |
+| [§3.6](observer.md#36-absence), *reader* | A reader that follows presence live SHOULD read again soon after a withdrawal that leaves one of these with nothing held: | none cited |
+| [§3.6](observer.md#36-absence), *reader* | The reader SHOULD report what that read establishes: absent when the read is complete and shows no such token held, present when it shows one. | `[Sc: presence.md §8]` |
 
 ### [observer §3.7 The watch session](observer.md#37-the-watch-session)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.7](observer.md#37-the-watch-session) | A reader SHOULD make every liveliness read it may conclude absence from (a seed, a re-read, a tool's presence read) on a session that has never held a liveliness subscriber of any kind. | none cited |
-| [§3.7](observer.md#37-the-watch-session) | The reader SHOULD hold its liveliness subscribers on another session of its own: a **watch session**. | none cited |
-| [§3.7](observer.md#37-the-watch-session) | A reader that seeds on one session and follows withdrawals on its watch session SHOULD make one round trip on the watch session after declaring its subscribers, and before the seed … | none cited |
-| [§3.7](observer.md#37-the-watch-session) | **The subscribers of a reader's watch session SHOULD have no history** when it seeds by a read on its other session. | `[Sc: presence.md §10]` |
-| [§3.7](observer.md#37-the-watch-session) | A reader that follows presence in a namespace SHOULD hold its watch session in **no** namespace, and declare its subscribers, without history, on the **wire keys**: the namespace in front, `<ns>/zk2/…`, and its round trip's key so too, `<ns>/zk2/…/@zk/settle`. | none cited |
-| [§3.7](observer.md#37-the-watch-session) | A reader that keeps a namespaced watch session with history instead SHOULD run its round trip's wait and its session's interests timeout above the history's time at its population. | `[Sc: presence.md §10]` |
-| [§3.7](observer.md#37-the-watch-session) | **A round trip stands until the watch session's transport moves.** … A reader that follows presence live SHOULD make the round trip again before its next read, and read again at once, when its watch session's transport closes or opens, as after a withdrawal. | `[Sc: presence.md §10]` |
-| [§3.7](observer.md#37-the-watch-session) | **A close's withdrawals come before its transport event.** … So a reader that holds back what a move makes it hear SHOULD begin the move at the first of two instants … | `[Sc: profiles/arbitration/scenarios.md §7]` |
-| [§3.7](observer.md#37-the-watch-session) | **An open is told before the subscribers' interests are declared again.** … A reader SHOULD ask the round trip after an open a margin after its event (the reference: 100 ms), and SHOULD take what its watch heard before the round trip's reply as heard … | `[Sc: profiles/arbitration/scenarios.md §7]` |
-| [§3.7](observer.md#37-the-watch-session) | After a move, a reader SHOULD wait for the round trip longer than the reopening's telling takes at its population. | none cited |
-| [§3.7](observer.md#37-the-watch-session) | It SHOULD run its interests timeout above that time too. | none cited |
-| [§3.7](observer.md#37-the-watch-session) | A reader SHOULD NOT ask a round trip while one it asked since its watch session's transport last moved is in flight. | none cited |
-| [§3.7](observer.md#37-the-watch-session) | **One round trip, and one read, at a time.** … It SHOULD NOT ask a read while one it asked of the same scope is in flight. | none cited |
-| [§3.7](observer.md#37-the-watch-session) | It SHOULD NOT make a read that it would follow from that watch session, whatever its reading session's links. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader SHOULD make every liveliness read it may conclude absence from (a seed, a re-read, a tool's presence read) on a session that has never held a liveliness subscriber of any kind. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | The reader SHOULD hold its liveliness subscribers on another session of its own: a **watch session**. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader that seeds on one session and follows withdrawals on its watch session SHOULD make one round trip on the watch session after declaring its subscribers, and before the seed … | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | **The subscribers of a reader's watch session SHOULD have no history** when it seeds by a read on its other session. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader that follows presence in a namespace SHOULD hold its watch session in **no** namespace, and declare its subscribers, without history, on the **wire keys**: the namespace in front, `<ns>/zk2/…`, and its round trip's key so too, `<ns>/zk2/…/@zk/settle`. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader that keeps a namespaced watch session with history instead SHOULD run its round trip's wait and its session's interests timeout above the history's time at its population. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | **A round trip stands until the watch session's transport moves.** … A reader that follows presence live SHOULD make the round trip again before its next read, and read again at once, when its watch session's transport closes or opens, as after a withdrawal. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | **A close's withdrawals come before its transport event.** … So a reader that holds back what a move makes it hear SHOULD begin the move at the first of two instants … | `[Sc: profiles/arbitration/scenarios.md §7]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | **An open is told before the subscribers' interests are declared again.** … A reader SHOULD ask the round trip after an open a margin after its event (the reference: 100 ms), and SHOULD take what its watch heard before the round trip's reply as heard … | `[Sc: profiles/arbitration/scenarios.md §7]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | After a move, a reader SHOULD wait for the round trip longer than the reopening's telling takes at its population. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | It SHOULD run its interests timeout above that time too. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader SHOULD NOT ask a round trip while one it asked since its watch session's transport last moved is in flight. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | **One round trip, and one read, at a time.** … It SHOULD NOT ask a read while one it asked of the same scope is in flight. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | It SHOULD NOT make a read that it would follow from that watch session, whatever its reading session's links. | `[Sc: presence.md §10]` |
 
 ### [observer §3.9 What a complete read covers](observer.md#39-what-a-complete-read-covers)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.9](observer.md#39-what-a-complete-read-covers) | A reader that concludes absence of a token a peer holds SHOULD be a client of a router, or a peer linked to that peer. | `[Sc: profiles/redundancy/scenarios.md §5]` |
+| [§3.9](observer.md#39-what-a-complete-read-covers), *reader* | A reader that concludes absence of a token a peer holds SHOULD be a client of a router, or a peer linked to that peer. | `[Sc: profiles/redundancy/scenarios.md §5]` |
 
 ### [observer §4.3 What a tool does not ask of the admin space](observer.md#43-what-a-tool-does-not-ask-of-the-admin-space)
 
@@ -459,7 +465,7 @@ class.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§6.1](observer.md#61-split-brain) | It SHOULD exceed the longest re-mint overlap the deployment allows (core §8.1). | `[Sc: operations.md §8]` |
+| [§6.1](observer.md#61-split-brain) | A tool's grace period SHOULD exceed the longest re-mint overlap the deployment allows (core §8.1). | `[Sc: operations.md §8]` |
 
 ### [observer §7.1 The graph and liveness](observer.md#71-the-graph-and-liveness)
 
@@ -503,6 +509,12 @@ class.
 |---|---|---|
 | [§1.4](core.md#14-slugging) | Both MUST be implemented exactly as follows. | `[F: slugs.json]` |
 | [§1.4](core.md#14-slugging) | The decoder MUST accept exactly the canonical chunks the encoder produces, and MUST refuse any other chunk as a value. | `[F: slugs.json; templates.json]` |
+
+### [core §1.6 Namespaces and base-relative keys](core.md#16-namespaces-and-base-relative-keys)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§1.6](core.md#16-namespaces-and-base-relative-keys) | Application code SHOULD NOT spell a deployment prefix. | `[Sc: grammar.md §2]` |
 
 ### [core §2.2 Templates](core.md#22-templates)
 
@@ -549,7 +561,7 @@ class.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§5.1](core.md#51-rules) | A request type SHOULD NOT repeat a template parameter. | `[F: contracts/w102-repeat]` |
+| [W102](core.md#51-rules) | A request type SHOULD NOT repeat a template parameter (W102). | `[F: contracts/w102-repeat]` |
 
 ### [core §7.1 Type identity](core.md#71-type-identity)
 
@@ -627,7 +639,7 @@ MAY, and a row with no keyword, are listed here alone.
 |---|---|---|---|
 | [R1](core.md#32-binding-rules) | deployment | core §3.2 Binding rules | **Deployment:** a role MUST be bound by configuration, never in code. A binding is … |
 | [R2](core.md#32-binding-rules) | deployment | core §3.2 Binding rules | **Deployment:** a template parameter MAY be bound too. `{vehicle} = self.system` (or `self.service`) binds … |
-| [R3](core.md#32-binding-rules) | owner, observer | core §3.2 Binding rules | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings, in their configured … |
+| [R3](core.md#32-binding-rules) | owner | core §3.2 Binding rules | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings, in their configured … |
 | [R4](core.md#32-binding-rules) | consumer | core §3.2 Binding rules | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.8). |
 | [R5](core.md#32-binding-rules) | consumer | core §3.2 Binding rules | A consumer MAY wait on presence for its bound providers. A binding resolves at … |
 | [R6](core.md#32-binding-rules) | consumer | core §3.2 Binding rules | **Consumer:** MUST discard a sample, or a GET reply, whose key expression is not … |
@@ -649,7 +661,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [S2](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. The … |
 | [S3](core.md#42-rules-for-owners-and-consumers) | owner, deployment | core §4.2 Rules for owners and consumers | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer … |
 | [S4](core.md#42-rules-for-owners-and-consumers) | consumer, deployment | core §4.2 Rules for owners and consumers | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` … |
-| [S5](core.md#42-rules-for-owners-and-consumers) | owner, consumer | core §4.2 Rules for owners and consumers | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** … |
+| [S5](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** … |
 | [S6](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** current state is the owner's answer. A consumer turns to an archive only … |
 | [S7](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** clocks are bounded both ways (§4.3). |
 | [O1](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template) … |

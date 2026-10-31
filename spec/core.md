@@ -42,8 +42,8 @@ RFC 2119 and RFC 8174, when written in capitals.
 - **tool**: a generic program that reads the bus or contracts without
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
-  bind it, whichever of the roles above it plays: §1's, §9's, and each
-  rule elsewhere on what a contract states (§12).
+  bind it, whichever of the roles above it plays: §1's, §9's, and those
+  §12 lists on what a contract states.
 
 An archive (§4.4) is an owner of its own keys. Conformance is claimed by
 role (§12), and [`RULES.md`](RULES.md) lists the rules of each role's
@@ -199,8 +199,8 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   instance id whenever its counters reset or its state's ordering restarts
   (§4.3): a process restart, a device re-enumerated, a polled device's
   uptime rewound, a container restarted.
-  - It SHOULD do so in a new session, so that its timestamps' id changes
-    too (§4.3). That change, and presence, are how a consumer sees the
+  - The owner SHOULD do so in a new session, so that its timestamps' id
+    changes too (§4.3). That change, and presence, are how a consumer sees the
     discontinuity.
   - An owner's counter that crosses a face where neither is visible
     SHOULD carry its epoch in-band, in its value or its attachment, as
@@ -948,11 +948,11 @@ through the same router, arrives with the router's zid.
     can arrive after the new epoch starts. That is accepted at this version.
 - **Ahead.** An owner SHOULD NOT stamp beyond its router's HLC delta: it
   cannot know its own offset without a reference.
-  - It SHOULD detect drift against a reference it holds for the purpose,
-    such as a subscription to a router-stamped heartbeat key, because its
-    own puts are never echoed back.
-  - When a detection shows it beyond the delta, it MUST stop writing
-    state, re-puts included, and SHOULD report it. Its members then go
+  - The owner SHOULD detect drift against a reference it holds for the
+    purpose, such as a subscription to a router-stamped heartbeat key,
+    because its own puts are never echoed back.
+  - When a detection shows it beyond the delta, the owner MUST stop
+    writing state, re-puts included, and SHOULD report it. Its members then go
     stale, by design ([`freshness.v1`](profiles/freshness/v1.md) §2.10).
     `[Sc: profiles/freshness/scenarios.md §2]`
   - **The report is not state.** A state value saying so would be
@@ -1006,9 +1006,9 @@ written. This section is what the core requires of it.
     `iface` is the interface id, `contract` the fingerprint, and `type`
     the type object of §9.5.
   - `confirmed` is `false` while alignment has not confirmed the key (below).
-- **Its backend MUST NOT accept a put older than a delete it holds.** The
-  storage manager of zenoh 1.10.1 accepts one, and resurrects the key, so it
-  cannot be an archive's store as released.
+- **An archive's backend MUST NOT accept a put older than a delete it
+  holds.** The storage manager of zenoh 1.10.1 accepts one, and resurrects
+  the key, so it cannot be an archive's store as released.
 - **Alignment.** When an owner becomes reachable again, the archive MUST
   re-read the owner's recorded collection before serving it as confirmed.
   While the owner stays absent, it re-reads that collection from an archive
@@ -1079,7 +1079,7 @@ written. This section is what the core requires of it.
 | O7 | **Caller:** a request MAY carry an attachment, the JSON object `{"actor", "request_id"}` (strings), which an owner MAY record for audit. It is claimed, never authentication, and never a reason to refuse a call (below). | `[Sc: operations.md §7]` |
 
 Work that outlives a query timeout belongs to `jobs.v1`. A request type
-SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
+SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
 
 **Calling.**
 - **A concrete call (O1).** `BestMatching` reaches one `complete`
@@ -2916,10 +2916,10 @@ The format is the generator's own. The reference reads an enrollment file
   unless the grants deny it (observer.md §4.2, "Who answered").
 - **Under `allow`, a wildcard call is in no deny.** A
   `fanout = "allowed"` operation executes on every provider for a
-  principal never granted it; only its answers are denied. Under `allow`,
-  an operation that must not run for everyone MUST be `fanout =
-  "forbidden"`, which its server refuses (O2), or the deployment runs
-  `deny`.
+  principal never granted it; only its answers are denied. For a
+  deployment under `allow`, an operation that must not run for everyone
+  MUST be `fanout = "forbidden"`, which its server refuses (O2), or the
+  deployment runs `deny`.
 - **Under `allow`, an ungranted wildcard GET gets nothing back**: each
   value reply is denied by its own key.
 - **A session that matches no subject gets no policy**, so it gets
@@ -2931,9 +2931,10 @@ The format is the generator's own. The reference reads an enrollment file
 ## 12. Conformance classes
 
 Conformance is claimed by role. Five of §0's roles have a **class** each:
-the rules that bind that role, and the static rules. The static rules bind
-every implementation (§0). They are §1's and §9's, and each rule elsewhere
-on what a contract states, which §9.2's lints check. A class holds its
+that role's rules, and the static rules that bind every implementation
+(§0). The static rules are §1's and §9's, and those on what a contract
+states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule elsewhere that
+names the lint code checking it (§9.2) is static too. A class holds its
 role's rules in this text and in [`observer.md`](observer.md).
 [`RULES.md`](RULES.md) lists each class's rules, generated from both
 texts.
@@ -2942,13 +2943,11 @@ texts.
 - **Owner**, **consumer**, **caller** and **deployment**: one class for
   each of those roles.
 - **Observer**: the class of §0's **tool** role. It is named for
-  `observer.md`, which holds most of its rules, and the role keeps its
-  name.
-- **A reader's rules.** `observer.md` also binds a participant of any role
-  where it reads presence, state or the admin space and concludes from
-  what it read (observer.md §0). Those rules belong to the class of the
-  role it plays there, as a consumer's wait on presence (R5) belongs to
-  the consumer class.
+  `observer.md`, which holds most of its rules. The role keeps its name.
+- **A reader's rules.** `observer.md` also binds any participant that
+  reads presence, state or the admin space and concludes from it
+  (observer.md §0). Those rules belong to the class of the role it plays
+  there. A consumer's wait on presence (R5) is the consumer class's.
 
 **Claiming classes.** An implementation claims one class for each role it
 plays, and meets every rule of each class it claims. A rule that binds two
@@ -2958,7 +2957,7 @@ owner's rules and the static rules: in [`RULES.md`](RULES.md), the
 entries under owner and implementation.
 
 **Full** is every class, their union: it holds every rule of both texts,
-and no rule that a class does not. A rule binds only the role it names, so
+and no rule that a class does not. A rule binds only the role it names. So
 at the full level an implementation meets the rules of the roles it plays.
 
 **Constrained** is a modifier on a class. A class claimed at the
@@ -2976,7 +2975,7 @@ additions:
 `[Sc: constrained.md]`
 
 **Profiles** stay opt-in, one class each (§10). An implementation claims a
-profile's class by following the profile: a service lists it in its
+profile's class by following the profile. A service lists it in its
 descriptor's `profiles` (§3.3), and a tool answers its questions (its §5).
 A profile's rules name the roles they bind, as this text's do (its §0). So
 its class holds its rules for each role the implementation plays. No class

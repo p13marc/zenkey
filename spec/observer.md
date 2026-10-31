@@ -942,8 +942,8 @@ is no fence either, since writes in flight still land (core §6).
   instances in both reads, not necessarily the same ones. A re-mint's
   overlap shows in one read at most, and a standby in neither. A read
   that ended at its timeout can miss a holder, never invent one (§3.3).
-- The grace period is a tool setting. It SHOULD exceed the longest
-  re-mint overlap the deployment allows (core §8.1).
+- The grace period is a tool setting. A tool's grace period SHOULD exceed
+  the longest re-mint overlap the deployment allows (core §8.1).
 
 `[Sc: operations.md §8]`
 

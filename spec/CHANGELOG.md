@@ -21,11 +21,14 @@ its number unchanged.
   `observer.md`, which holds most of its rules, and the role keeps §0's
   word.
 - **A class** holds its role's rules in this text and in `observer.md`,
-  and the static rules. Those are §1's and §9's, and each rule elsewhere
-  on what a contract states, which §9.2's lints check: §2.2's
-  templates, §2.5's history, §2.6's retention, §3.1's `resources`, §7.1's
-  `json:` names and §10's `uses`. Each names a contract or a template, and
-  no other role.
+  and the static rules. §12 lists them: §1's and §9's, and those on what a
+  contract states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule
+  elsewhere that names the lint code checking it (§9.2) is static too, as
+  §5.1's request type is (W102). The rules of those sections that name no
+  role are on what a contract states. They are §2.2's templates, §2.4's
+  QoS, §2.5's history, §2.6's retention, §3.1's `resources`, §7.1's
+  `json:` names and §10's `uses`. A rule there that names a role is that
+  role's.
 - **A reader's rules,** which `observer.md` §0 extends to any participant
   that reads presence, state or the admin space and concludes from it,
   belong to the class of the role that participant plays.
@@ -47,7 +50,7 @@ its number unchanged.
 - **§0's pointer.** After the roles: "Conformance is claimed by role
   (§12), and `RULES.md` lists the rules of each role's class." §0's
   implementation role now names the static rules as §12 does: §1's, §9's,
-  and each rule elsewhere on what a contract states.
+  and those §12 lists on what a contract states.
 
 **Added: [`RULES.md`](RULES.md), generated.**
 - **What it lists.** Every sentence of this text and `observer.md` that
@@ -56,18 +59,32 @@ its number unchanged.
   its rule ids and its evidence. A table of the rule ids follows: R1–R7,
   S1–S7, O1–O7, D000–D012 and the E and W codes, each with the role its row
   binds.
-- **The counts.** 167 rules: 57 bind an owner, 13 a consumer, 12 a caller,
-  14 a deployment, 46 the tool role or a reader, and 32 every
-  implementation. A rule that binds two roles is counted in each. There are
-  71 rule ids.
+- **The counts.** 167 rules: 56 bind an owner, 12 a consumer, 11 a caller,
+  14 a deployment, 46 the tool role or a reader (26 of them a reader's),
+  and 33 every implementation. A rule that binds two roles is counted in
+  each. There are 71 rule ids.
 - **The script,** `scripts/gen-rules-index.py`, uses the Python standard
   library alone, like `check-spec-prose.py`, whose reading of blocks and
   sentences it shares. It reads a rule's role from its subject, by §0's
   role words and their plain synonyms (an owner, the owner's, an archive, a
   reader), and fails naming the line of a rule whose role it cannot read.
-  Its header says how it falls back: a passive's agent, a table's role
-  label, a pronoun's antecedent, a section's title, a static section or
-  lint code. Its table of exceptions is empty.
+  Its table of exceptions is empty.
+- **Where a subject names no role,** it reads only what the sentence
+  shows, and prefers failing to guessing:
+  - a passive's agent ("by the owner");
+  - a run-in role label ("**Owner:**"), for the sentence it opens alone;
+  - a pronoun's antecedent, in the same paragraph or list item alone;
+  - a static rule, by §12's list of sections, which it reads from §12's
+    sentence "The static rules are …", or by a lint code.
+  A section's title is no role, and a pronoun with no antecedent in its
+  paragraph is unread, never static. `--how` prints how each rule's role
+  was read. 113 were read from their subject, 17 by a label, 13 by a
+  pronoun and 2 by a passive's agent. 22 are static: 21 by §12's sections,
+  and 1 by its lint code.
+- **A reader's rules** are listed once, under observer, each marked
+  *reader*. The owner, consumer and caller sections each open with a
+  pointer to them, `observer.md` §3.3, §3.5, §3.6, §3.7 and §3.9, as §12
+  places them.
 - **The checks.** `--check` fails when `RULES.md` is stale, and
   `--self-test` reads a fixture text with known rules and roles
   (`scripts/fixtures/rules-index/`). CI runs both in the fmt job and on
@@ -76,11 +93,13 @@ its number unchanged.
   owner and implementation. `RULES.md`'s header says so, and §12 and
   `spec/README.md` link it.
 
-**Editorial: twelve rules that name their role, no rule changed.** The
+**Editorial: eighteen rules that name their role, no rule changed.** The
 index reads each rule's role from its subject. Where a subject named no
 role, the sentence now names it, its keyword, condition and scope kept:
 - **§1.5:** "A counter that crosses a face where neither is visible SHOULD
   carry its epoch" is "An owner's counter that crosses …".
+- **§1.5:** "It SHOULD do so in a new session", a list item under the
+  owner's MUST, is "The owner SHOULD do so in a new session".
 - **§2.4:** "**State and events** SHOULD keep `reliable` and `block`" is
   "**A contract's state and events** SHOULD keep …", the contract that
   declares their QoS.
@@ -94,6 +113,13 @@ role, the sentence now names it, its keyword, condition and scope kept:
 - **§3.3, size:** "A descriptor SHOULD stay within 1 KB" is "An owner's
   descriptor SHOULD stay within 1 KB", and the MUST after it, "it MUST fit
   one fragment", reads its role from it.
+- **§4.3, ahead:** "It SHOULD detect drift" and "it MUST stop writing
+  state", list items under the owner's SHOULD NOT, are "The owner SHOULD
+  detect drift" and "the owner MUST stop writing state".
+- **§4.4:** "**Its backend MUST NOT accept a put older than a delete it
+  holds.**" is "**An archive's backend MUST NOT accept …**".
+- **§5.1:** "A request type SHOULD NOT repeat a template parameter" names
+  the lint that checks it, "(W102)", which makes it a static rule.
 - **§5.2:** "**The reply's `Encoding`** MUST say which" is "**The
   `Encoding` of the owner's reply** MUST say which".
 - **§5.2:** "A detail that does not fit its envelope … MUST NOT be sent" is
@@ -108,6 +134,9 @@ role, the sentence now names it, its keyword, condition and scope kept:
 - **§8.5:** "So the far side's principal MUST be granted
   `declare_queryable`" is "So a deployment MUST grant the far side's
   principal `declare_queryable`".
+- **§11.3:** "Under `allow`, an operation that must not run for everyone
+  MUST be `fanout = "forbidden"`" is "For a deployment under `allow`, …":
+  the section's title named the deployment, and the sentence did not.
 - **§12's table:** the descriptor row, "MUST fit one fragment", is "An
   owner's descriptor MUST fit one fragment".
 
@@ -131,17 +160,17 @@ role, the sentence now names it, its keyword, condition and scope kept:
 part.
 - **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT,
   MAY, REQUIRED or RECOMMENDED was extracted before and after, keyed by
-  section, and the two sets diffed. Both hold 152. 139 are unchanged, and
-  the other 13 are the thirteen above, read pair by pair. Each adds its
-  role's name to its subject, or §7.1's lint code, and keeps its keyword,
-  condition and scope.
+  section, and the two sets diffed. Both hold 152. 133 are unchanged, and
+  the other 19 are the nineteen above, read pair by pair. Each adds its
+  role's name to its subject, or §5.1's and §7.1's lint codes, and keeps
+  its keyword, condition and scope.
 - **Every sentence** was diffed too. The others that moved are §12's new
   text, §0's pointer and the header's version. No fixture moved, and no
   scenario.
 
-**The figures.** This text's mean went from 16.47 words to 16.44, with no
+**The figures.** This text's mean went from 16.47 words to 16.41, with no
 sentence over 50 words and no tag. `spec/README.md`'s went from 14.5 to
-12.43, and `RULES.md` starts at 13.19, with none over 50 and no tag.
+12.43, and `RULES.md` starts at 13.0, with none over 50 and no tag.
 `spec/.prose-baseline.json` is lowered to them, and records `RULES.md`.
 
 **Deliberately not changed.**

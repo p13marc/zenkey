@@ -13,7 +13,7 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
-## 0.8 — 2026-10-31: where its rules belong, and two rules that name their role, no rule changed (#926)
+## 0.8 — 2026-10-31: where its rules belong, and three rules that name their role, no rule changed (#926)
 
 Core 0.66 claims conformance by role (#926, epic #921 Track B): each role
 of core §0 has a class, and the observer class is the tool role's, named
@@ -26,8 +26,9 @@ This text's rules for a tool belong to the observer class, with the core's
 tool rules. Its rules for a reader belong to the class of the role the
 reader plays. `RULES.md` lists both texts' rules by role.
 
-**Editorial: two rules that name their role, no rule changed.** The index
-reads each rule's role from its subject, and two of this text's named none.
+**Editorial: three rules that name their role, no rule changed.** The
+index reads each rule's role from its subject, and three of this text's
+named none.
 - **§3.1:** "Every liveliness subscriber on that session MUST be
   callback-driven" is "Every liveliness subscriber the caller or tool holds
   on that session MUST be callback-driven". The item before it names the
@@ -35,11 +36,15 @@ reads each rule's role from its subject, and two of this text's named none.
 - **§3.7:** "**The watch session's subscribers SHOULD have no history**
   when their reader seeds" is "**The subscribers of a reader's watch
   session SHOULD have no history** when it seeds".
+- **§6.1:** "The grace period is a tool setting. It SHOULD exceed the
+  longest re-mint overlap" is "… A tool's grace period SHOULD exceed …".
+  The index reads a pronoun's antecedent from a rule or a leading subject,
+  and the sentence before it leads with the grace period.
 
 **How "no rule changed" was checked**, as for 0.7. The sentences holding
 an RFC 2119 keyword were diffed before and after, keyed by section: 44
-before and after, 42 unchanged. The other two are the two above, read pair
-by pair, each with its keyword, condition and scope kept. Every other
+before and after, 41 unchanged. The other three are the three above, read
+pair by pair, each with its keyword, condition and scope kept. Every other
 sentence was diffed too: the one other change is §0's new paragraph.
 
 **The figures.** This text's mean went from 18.31 words to 18.26, with no
