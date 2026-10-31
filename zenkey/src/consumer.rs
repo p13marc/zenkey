@@ -23,6 +23,14 @@
 //! events to [`Consumer::subscribe_timed`]'s second callback; a sample that
 //! arrives expired is discarded, counted ([`Subscription::expired`]), and
 //! never delivered.
+//!
+//! **The zk2c envelope** (core §7.5; #976's A2): every data sample is read
+//! through [`crate::inband`], so a stream, state or event sample that
+//! carries an envelope is delivered with its record as its payload and its
+//! run and seq as [`Delivery::inband`], what orders it
+//! ([`Delivery::mark`]). One whose envelope is refused is undecodable:
+//! never delivered, and counted ([`Subscription::undecodable`],
+//! [`StateAnswer::undecodable`]).
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,6 +43,7 @@ use zenkey_model::freshness::{
     ClockMeasure, ClockTrust, Horizon, Judged, Last, Observation, StampAge,
 };
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
+use zenkey_model::seed::Mark;
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::key_expr::OwnedKeyExpr;
@@ -142,12 +151,29 @@ pub struct Delivery {
     /// subscriber's callback (`timing.v1` §2.5): a replay's, when its reply
     /// was read.
     pub arrival: Instant,
-    /// Its Zenoh timestamp, if it carries one (core §4.1).
+    /// Its Zenoh timestamp, if it carries one (core §4.1): its time, where
+    /// a profile reads one.
     pub stamp: Option<Timestamp>,
+    /// Its envelope's run and seq, when it carried one (core §7.5): what
+    /// orders it, whatever Zenoh timestamp it also carries. `sample`'s
+    /// payload is then the envelope's record.
+    pub inband: Option<zenkey_model::wire::Stamp>,
     /// Its lifespan's judgement at its arrival (`timing.v1` §2.6): live, or
     /// unobservable or not asked with why. An expired sample is never
     /// delivered.
     pub lifespan: LifespanSample,
+}
+
+impl Delivery {
+    /// What orders it among its key's values: its in-band stamp, else its
+    /// Zenoh timestamp ([`crate::state::ValueOrder::accept_mark`]).
+    #[must_use]
+    pub fn mark(&self) -> Option<Mark> {
+        Mark::of(
+            self.inband,
+            self.stamp.as_ref().map(crate::inband::stamp_of),
+        )
+    }
 }
 
 /// A role's consumer, compiled against the required interface's contract
@@ -189,6 +215,7 @@ pub struct Subscription {
 struct Seen {
     discarded: AtomicU64,
     unresolved: AtomicU64,
+    undecodable: AtomicU64,
     last: Mutex<BTreeMap<Addr, Instant>>,
     /// Each member's last delivery, on this host's monotonic clock, and
     /// whether it was a delete (`freshness.v1` §2.5).
@@ -518,6 +545,21 @@ impl Consumer {
                             seen.unresolved.fetch_add(1, Ordering::Relaxed);
                             return;
                         };
+                        // Core §7.5: a refused envelope is undecodable,
+                        // never delivered, never an arrival.
+                        let read = crate::inband::read(sample);
+                        let inband = read.stamp();
+                        if let Some(why) = read.refusal() {
+                            seen.undecodable.fetch_add(1, Ordering::Relaxed);
+                            tracing::debug!(
+                                key = %read.sample().key_expr(),
+                                reason = %why.reason(),
+                                "an undecodable sample"
+                            );
+                            return;
+                        }
+                        let sample = read.into_sample();
+                        let key = sample.key_expr().as_str();
                         let lifespan = match &engine {
                             Some(e) => match timing::lock(e)
                                 .arrive(&addr, key, &chunks, &sample, arrival, wall)
@@ -555,6 +597,7 @@ impl Consumer {
                             sample,
                             arrival,
                             stamp,
+                            inband,
                             lifespan,
                         });
                     })
@@ -639,6 +682,13 @@ impl Consumer {
                 }
                 let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
                 if let Some(values) = r.template.matches(&refs) {
+                    let read = crate::inband::read(sample);
+                    if let Some(why) = read.refusal() {
+                        tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable occurrence is not replayed");
+                        continue;
+                    }
+                    let inband = read.stamp();
+                    let sample = read.into_sample();
                     let stamp = sample.timestamp().copied();
                     out.push(Delivery {
                         provider: addr,
@@ -647,6 +697,7 @@ impl Consumer {
                         sample,
                         arrival: Instant::now(),
                         stamp,
+                        inband,
                         lifespan: premise,
                     });
                 }
@@ -714,6 +765,8 @@ impl Consumer {
             }
         };
         let mut out = Vec::new();
+        let mut inband = BTreeMap::new();
+        let mut undecodable = BTreeMap::new();
         let mut complete = true;
         for ke in selectors {
             let rx = self
@@ -734,6 +787,15 @@ impl Consumer {
                 if key.contains('*') {
                     continue;
                 }
+                let read = crate::inband::read(sample);
+                if let Some(why) = read.refusal() {
+                    undecodable.insert(key, why);
+                    continue;
+                }
+                if let Some(stamp) = read.stamp() {
+                    inband.insert(key.clone(), stamp);
+                }
+                let sample = read.into_sample();
                 out.push(match sample.kind() {
                     zenoh::sample::SampleKind::Delete => Current::Deleted {
                         key,
@@ -749,6 +811,8 @@ impl Consumer {
         Ok(StateAnswer {
             current: out,
             complete,
+            inband,
+            undecodable,
         })
     }
 
@@ -896,6 +960,14 @@ impl Subscription {
     #[must_use]
     pub fn discarded(&self) -> u64 {
         self.seen.discarded.load(Ordering::Relaxed)
+    }
+
+    /// Samples dropped as undecodable: a stream, state or event sample
+    /// under `zenoh/bytes` whose zk2c envelope was refused (core §7.5),
+    /// never read as today's payload, nor delivered.
+    #[must_use]
+    pub fn undecodable(&self) -> u64 {
+        self.seen.undecodable.load(Ordering::Relaxed)
     }
 
     /// Samples dropped because their concrete key did not resolve: it is

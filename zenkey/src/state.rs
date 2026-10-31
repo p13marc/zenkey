@@ -32,6 +32,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 use zenkey_model::freshness::{ClockTrust, Horizon, Observation, Reply, StampAge};
+use zenkey_model::seed::Mark;
 use zenoh::Wait;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::key_expr::OwnedKeyExpr;
@@ -809,12 +810,32 @@ pub enum StateGet {
 /// tell a complete reading from one that may miss a member.
 #[derive(Debug, Clone, Default)]
 pub struct StateAnswer {
-    /// Every key answered, its value or its deletion. Empty is silence.
+    /// Every key answered, its value or its deletion. Empty is silence. A
+    /// value that carried a zk2c envelope (core §7.5) holds its record as
+    /// its payload.
     pub current: Vec<Current>,
     /// Whether every GET ran to its final reply with no error reply: a GET
     /// that reached its timeout ends with one (Appendix B), and so may miss
     /// a member. A refused GET is complete and empty (§8.1, 0.8).
     pub complete: bool,
+    /// The in-band stamp of each key answered under a zk2c envelope, a
+    /// value's or a deletion's: what orders it ([`StateAnswer::mark`]).
+    pub inband: BTreeMap<String, zenkey_model::wire::Stamp>,
+    /// Each key answered with an envelope refused: undecodable, with the
+    /// refusal, and left out of [`StateAnswer::current`].
+    pub undecodable: BTreeMap<String, zenkey_model::wire::Refusal>,
+}
+
+impl StateAnswer {
+    /// What orders `current` among its key's values: its in-band stamp,
+    /// else its Zenoh timestamp ([`ValueOrder::accept_mark`]).
+    #[must_use]
+    pub fn mark(&self, current: &Current) -> Option<Mark> {
+        Mark::of(
+            self.inband.get(current.key()).copied(),
+            current.timestamp().as_ref().map(crate::inband::stamp_of),
+        )
+    }
 }
 
 impl From<StateAnswer> for StateGet {
@@ -834,9 +855,14 @@ impl From<StateAnswer> for StateGet {
 /// joiner's seed replies included (§4.2), so an old epoch's value that
 /// arrives after the new epoch's is accepted too, and the key steps back:
 /// §4.3's residual risk.
+///
+/// A value under a zk2c envelope (core §7.5) is ordered by its run and seq
+/// ([`ValueOrder::accept_mark`]): by seq within one run, a value of another
+/// run accepted as another id is, and so is one beside a value held under
+/// a Zenoh timestamp (`zenkey_model::seed::consumer_accepts`).
 #[derive(Debug, Default)]
 pub struct ValueOrder {
-    last: BTreeMap<String, Timestamp>,
+    last: BTreeMap<String, Mark>,
 }
 
 impl ValueOrder {
@@ -849,12 +875,15 @@ impl ValueOrder {
     /// later within the same id, or the first under a new id. Records it if
     /// so.
     pub fn accept(&mut self, key: &str, ts: &Timestamp) -> bool {
-        let newer = match self.last.get(key) {
-            Some(last) if last.get_id() == ts.get_id() => ts.get_time() > last.get_time(),
-            _ => true,
-        };
+        self.accept_mark(key, Mark::Zenoh(crate::inband::stamp_of(ts)))
+    }
+
+    /// [`ValueOrder::accept`], for a value marked `mark`
+    /// ([`crate::consumer::Delivery::mark`], [`StateAnswer::mark`]).
+    pub fn accept_mark(&mut self, key: &str, mark: Mark) -> bool {
+        let newer = zenkey_model::seed::consumer_accepts(self.last.get(key).copied(), mark);
         if newer {
-            self.last.insert(key.to_owned(), *ts);
+            self.last.insert(key.to_owned(), mark);
         }
         newer
     }

@@ -815,7 +815,11 @@ impl RawSafety {
             loop {
                 tick.tick().await;
                 if on.load(Ordering::SeqCst) {
-                    let _ = s.put(cmd_key("safety"), format!("safety {n}")).await;
+                    // The type's Encoding (core §7.2), as the writer sets it.
+                    let _ = s
+                        .put(cmd_key("safety"), format!("safety {n}"))
+                        .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+                        .await;
                     n += 1;
                 }
             }
@@ -1397,7 +1401,10 @@ async fn s11_a_governed_commanders_standby() {
         let mut n = 0u64;
         while on.load(Ordering::SeqCst) {
             tick.tick().await;
-            let _ = raw.put(cmd_key("safety"), format!("standby {n}")).await;
+            let _ = raw
+                .put(cmd_key("safety"), format!("standby {n}"))
+                .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+                .await;
             n += 1;
         }
     });

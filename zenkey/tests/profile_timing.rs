@@ -660,7 +660,12 @@ async fn unstamped_step(ep: &str, owner_hlc: bool) -> (Arc<Heard>, String) {
         sub.owner_zids(&ADDR.parse().unwrap()).contains(&zid)
     })
     .await;
-    let publisher = os.declare_publisher(CMD_KEY).await.unwrap();
+    // The type's Encoding (core §7.2), as the writer sets it.
+    let publisher = os
+        .declare_publisher(CMD_KEY)
+        .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+        .await
+        .unwrap();
     for _ in 0..20 {
         let ten_s_ago = std::time::SystemTime::now() - Duration::from_secs(10);
         let ns = ten_s_ago

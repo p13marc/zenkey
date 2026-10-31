@@ -501,6 +501,18 @@ where
                 {
                     return;
                 }
+                // Core §7.5: a refused envelope is undecodable, no arrival.
+                let read = crate::inband::read(sample);
+                if let Some(why) = read.refusal() {
+                    tracing::debug!(
+                        key = %read.sample().key_expr(),
+                        reason = %why.reason(),
+                        "an undecodable sample is no arrival"
+                    );
+                    return;
+                }
+                let inband = read.stamp();
+                let sample = read.into_sample();
                 let mut c = lock(&core);
                 let key = sample.key_expr().as_str().to_owned();
                 let addr = match c.arbiter.identify(&key) {
@@ -551,6 +563,7 @@ where
                             sample,
                             arrival,
                             stamp,
+                            inband,
                             lifespan: lifespan.unwrap_or(premise),
                         }),
                     });

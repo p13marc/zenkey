@@ -1330,7 +1330,10 @@ enum Why {
     Reread,
 }
 
-/// One sample or reply of the slice, as received.
+/// One sample or reply of the slice, as received: a document under a zk2c
+/// envelope (core §7.5) as its record ([`crate::inband`]). Its stamp is
+/// its Zenoh timestamp, which orders an author's versions (§2.6) whatever
+/// envelope it carries.
 #[derive(Debug, Clone)]
 struct Incoming {
     via: Via,
@@ -1338,10 +1341,16 @@ struct Incoming {
     stamp: Option<Timestamp>,
     payload: Vec<u8>,
     encoding: String,
+    /// A put whose envelope was refused: undecodable (§2.7), its bytes
+    /// never read as a document.
+    refused: Option<zenkey_model::wire::Refusal>,
 }
 
 impl Incoming {
     fn of(s: &Sample, via: Via) -> Self {
+        let read = crate::inband::read(s.clone());
+        let refused = read.refusal();
+        let s = read.sample();
         let put = s.kind() == SampleKind::Put;
         Self {
             via,
@@ -1353,6 +1362,7 @@ impl Incoming {
                 Vec::new()
             },
             encoding: s.encoding().to_string(),
+            refused,
         }
     }
 }
@@ -1893,6 +1903,7 @@ impl TargetInner {
                         stamp: lk.timestamp,
                         payload: lk.value.unwrap_or_default(),
                         encoding: lk.encoding.map(|e| e.to_string()).unwrap_or_default(),
+                        refused: None,
                     }));
                 }
                 Ok(None) => archive = Some(false),
@@ -1914,7 +1925,10 @@ impl TargetInner {
 
     /// The model's sample of one received.
     fn sample_of(&self, i: &Incoming) -> model::Sample {
-        let (revision, content) = if i.put {
+        let (revision, content) = if i.put && i.refused.is_some() {
+            // Never read as a document: its bytes alone.
+            (None, Some(model::Content::of_payload(&i.payload, false)))
+        } else if i.put {
             let revision = if self.json {
                 model::revision_of_text(&i.payload)
             } else {
@@ -1947,6 +1961,9 @@ impl TargetInner {
     /// A put's value as its type decodes it (core §7.2): `Ok(None)` for a
     /// raw type, `Err` with why for bytes that do not decode.
     fn decoded(&self, i: &Incoming) -> std::result::Result<Option<Value>, String> {
+        if let Some(why) = i.refused {
+            return Err(why.reason());
+        }
         let (Some(bundle), Some(ty)) = (&self.bundle, &self.ty) else {
             return Ok(None);
         };

@@ -168,7 +168,12 @@ async fn a_tool_subscription_counts_unresolved_samples_apart() {
         "zk2/p1/nav/nav.v2/state/tracks/X",
         "zk2/p1/nav/nav.v2/state/tracks/*",
     ] {
-        writer.put(key, "v").await.unwrap();
+        // The type's Encoding (core §7.2), as a writer sets it.
+        writer
+            .put(key, "v")
+            .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+            .await
+            .unwrap();
     }
     eventually("each sample is accounted for", || async {
         sub.discarded() == 1 && sub.unresolved() == 1 && got.lock().unwrap().len() == 1
