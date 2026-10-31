@@ -992,7 +992,7 @@ def section11(report: Report, mode: Any) -> None:
                      f"pin {p}; St groups {sorted((st or {}).get('values', {}))}; persist {r3.short()}")
         log = o.log()
         sim_requests = [line for line in log if "sim" in line and "request" in line]
-        heard = [x.payload for k in list(bus.s.deliveries) for x in bus.s.of(k)]
+        heard = [x.payload for k in bus.s.keys() for x in bus.s.of(k)]
         replies = [r.raw for r in (r1, r1b, r2, r3)]
         report.check(sec, "step 4: no line of the owner's log holds 1234, and each logged request of sim writes "
                           "\"<redacted>\"; no delivery S recorded, and no reply C received, holds 1234",

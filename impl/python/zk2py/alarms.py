@@ -1622,6 +1622,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
       the owner's stamp (core §4.2), `previous_instance` when that put's
       stamp id is not ``meta.zid`` by value (§2.14 step 5, 0.2)."""
     from . import live
+    from . import seed as sd
 
     pres = live.list_presence(tool, f"zk2/{address}/@zk/**")
     presence = "present" if pres.instances else "absent" if pres.complete else "incomplete"
@@ -1651,22 +1652,24 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
     trust = trust or fr.ClockTrust(word=True)
     for key in sorted(known):
         obs: list[Any] = []
-        cands: list[tuple[int, int, str, bytes, str | None]] = []
+        # (stamp, kind, payload, stamp id), merged by core §4.2 through
+        # seed.newest: by time, then by id as Latest compares (round 91;
+        # round 90 compared ids as integers)
+        cands: list[tuple[Any, str, bytes, str | None]] = []
         if subscriber is not None:
             o = subscriber.observation(key)
             obs.append(o if lost_at is None else fr.Subscription(o.listened_ns, False, o.last))
             for x in subscriber.of(key):
-                if x.stamp_ns is not None:
-                    cands.append((x.stamp_ns, _zid(x.stamp_id) or 0, x.kind, x.payload, x.stamp_id))
+                if x.stamp is not None:
+                    cands.append((sd.Stamp.of(x.stamp), x.kind, x.payload, x.stamp_id))
         if seed is not None:
             r = replies.get(key)
             if r is None:
                 g = fr.GetReading(None)
             else:
                 g = fr.GetReading("delete" if r.deleted else "put", r.stamp_ns, r.stamp_id, r.stamp, r.payload)
-                if r.stamp_ns is not None:
-                    cands.append((r.stamp_ns, _zid(r.stamp_id) or 0, "delete" if r.deleted else "put",
-                                  r.payload, r.stamp_id))
+                if r.stamp is not None:
+                    cands.append((sd.Stamp.of(r.stamp), "delete" if r.deleted else "put", r.payload, r.stamp_id))
             if lost_at is None or seed.asked_ns >= lost_at:
                 obs.append(g.observation(trust))
         latest, prev, doc, sid = None, False, None, None
@@ -1677,7 +1680,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
         left_out = is_left_out(seed, verdict.verdict == ESTABLISHED, key,
                                [] if subscriber is None else [x.arrival_ns for x in subscriber.of(key)])
         if cands:
-            _, _, kind, payload, sid = max(cands, key=lambda c: (c[0], c[1]))
+            _, kind, payload, sid = sd.merged(cands)
             if kind == "delete":
                 latest = "deleted"
             else:

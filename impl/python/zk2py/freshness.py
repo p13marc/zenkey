@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, Iterable
@@ -427,14 +428,27 @@ class Subscriber:
     on its own monotonic clock from its declaration. Each put it receives
     with a stamp feeds ``trust`` (§2.6, ground 2). A sample whose key is not
     concrete is discarded (core R6). zenoh-python's callback handler drops
-    nothing, so a subscriber here knows of no lost delivery."""
+    nothing, so a subscriber here knows of no lost delivery.
 
-    def __init__(self, session: Any, selectors: str | list[str], trust: ClockTrust | None = None):
+    **Bounded** (observer §4.1, 0.10; round 91): the alarms, health and
+    config readers merge what it recorded with their GETs' replies, so its
+    keys are a tool's merge state. It holds at most ``max_keys`` keys
+    (:data:`zk2py.seed.MAX_KEYS` unless told otherwise), the least recently
+    arrived forgotten first, whole, and counted in ``forgotten``. A
+    forgotten key then holds nothing: no delivery, as before its first."""
+
+    def __init__(self, session: Any, selectors: str | list[str], trust: ClockTrust | None = None,
+                 max_keys: int | None = None):
         import zenoh
+
+        from . import seed
 
         self.trust = trust
         self.lock = threading.Lock()
-        self.deliveries: dict[str, list[Received]] = {}
+        self.deliveries: OrderedDict[str, list[Received]] = OrderedDict()
+        self.max_keys = seed.MAX_KEYS if max_keys is None else max_keys
+        #: how many times the bound forgot a key (observer §4.1)
+        self.forgotten = 0
         self.discarded: list[str] = []
         self.complete = True
         self.declared_ns = time.monotonic_ns()
@@ -457,9 +471,22 @@ class Subscriber:
         kind = "delete" if sample.kind == zenoh.SampleKind.DELETE else "put"
         rec = Received(kind, arrival, utc, sample.payload.to_bytes(), str(sample.encoding), stamp_ns, sid, text)
         with self.lock:
-            self.deliveries.setdefault(key, []).append(rec)
+            self._record(key, rec)
         if self.trust is not None and kind == "put" and stamp_ns is not None and sid is not None:
             self.trust.measure(sid, stamp_ns, utc)
+
+    def _record(self, key: str, rec: Received) -> None:
+        """One delivery, under the lock: the key moved to the recent end,
+        and the least recent forgotten past the bound."""
+        self.deliveries.setdefault(key, []).append(rec)
+        self.deliveries.move_to_end(key)
+        while len(self.deliveries) > self.max_keys:
+            self.deliveries.popitem(last=False)
+            self.forgotten += 1
+
+    def keys(self) -> list[str]:
+        with self.lock:
+            return list(self.deliveries)
 
     def of(self, key: str) -> list[Received]:
         with self.lock:
@@ -566,7 +593,7 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
             rid = f"{r['token']}/{r['template']}"
             h = horizon(r["kind"], r["annotations"])
             expr = zenoh.KeyExpr(_template_key(key))
-            known = sorted({k for k in list(sub.deliveries) + list(readings) if expr.intersects(zenoh.KeyExpr(k))})
+            known = sorted({k for k in sub.keys() + list(readings) if expr.intersects(zenoh.KeyExpr(k))})
             members: dict[str, Verdict] = {}
             for m in known:
                 obs: list[Observation] = [sub.observation(m, now_mono)]

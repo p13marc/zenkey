@@ -1796,6 +1796,7 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
     ``freshness.v1`` at 60 s; the events from ``subscriber``."""
     from . import freshness as fr
     from . import live
+    from . import seed as sd
 
     if presence:
         pres = live.list_presence(session, f"zk2/{address}/@zk/**")
@@ -1817,18 +1818,23 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
     for which in ("view", "status"):
         key = f"zk2/{address}/{IFACE}/state/{which}"
         observations: list[Any] = []
-        latest: tuple[int, bytes] | None = None
+        # The document as a late joiner holds it: the subscription's samples
+        # and the GET's reply merged by core §4.2, the newer by the owner's
+        # stamp, across two ids too (observer §4.1, 0.10; round 91). Round
+        # 90 took the subscription's last put by arrival against the GET's
+        # by time alone.
+        arrivals: list[tuple[Any, bool, bytes]] = []
         if subscriber is not None:
             observations.append(subscriber.observation(key))
-            got = [x for x in subscriber.of(key) if x.kind == "put"]
-            if got:
-                latest = (got[-1].stamp_ns or 0, got[-1].payload)
+            arrivals += [(sd.Stamp.of(x.stamp), x.kind == "delete", x.payload) for x in subscriber.of(key)]
         g = fr.get_reading(session, key, timeout=timeout)
         observations.append(g.observation(trust))
-        if g.reply == "put" and (latest is None or (g.stamp_ns or 0) >= latest[0]):
-            latest = (g.stamp_ns or 0, g.payload)
+        if g.reply in ("put", "delete"):
+            arrivals.append((sd.Stamp.of(g.stamp), g.reply == "delete", g.payload))
+        held = sd.merged(arrivals)
+        latest = None if held is None or held[1] else held[2]
         fresh = fr.judge("state", HORIZON, observations).verdict == fr.FRESH
-        docv = json.loads(latest[1]) if latest is not None else None
+        docv = json.loads(latest) if latest is not None else None
         setattr(out, which, docv)
         setattr(out, f"{which}_fresh", fresh and docv is not None)
     if subscriber is not None:

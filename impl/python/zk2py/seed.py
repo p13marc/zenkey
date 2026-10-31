@@ -15,16 +15,23 @@ follows a subscription.
   stamped one, and two unstamped samples have no order but their arrival
   (0.27). :func:`compare` and :func:`kept` are the pure rule
   (``conformance/seed/merge.json``).
-- **After the seed** (core §4.3, 0.67, F-368): "A late joiner's seed
-  merges as §4.2 says, and the consumer rule orders what a consumer
-  receives after its seed." Once its GET has ended, a consumer's
-  :class:`LateJoiner` orders each live sample by S7's consumer rule
-  (:func:`follows`): by time within one timestamp id, and the first value
-  under a new id accepted, its ordering restarted there, though its time be
-  lower. zk2py reads "after its seed" as after the GET's final reply, and a
-  new id as one other than the held value's, per key (round 90, F-382 and
-  F-383). A tool's late joiner keeps §4.2's merge after its seed: S7's
-  consumer rule binds a consumer, and nothing else orders a tool's.
+- **Across two timestamp ids** (core §4.2, §4.3, 0.68, F-382, F-383): a
+  consumer orders by S7's consumer rule "from the first value it receives,
+  a late joiner's seed replies included" (:func:`follows`): by time within
+  one timestamp id, and "a value under an id other than the one its held
+  value carries" accepted, ordered by time within that id from then on.
+  Within one id that is the stamp merge. A tool "keeps core §4.2's merge
+  for as long as it follows, across two timestamp ids too" (observer §4.1,
+  0.10; :func:`newer`). Round 90's late joiner turned a consumer's to S7 at
+  its GET's final reply, 0.67's reading; 0.68 corrected that sentence, so a
+  consumer's has no switch to make (round 91).
+- **A tool's bound** (observer §4.1, 0.10): "A tool that bounds what it
+  holds counts what the bound forgot, and treats a forgotten key as holding
+  nothing." :class:`Merge` holds at most ``max_keys`` keys, the least
+  recently arrived forgotten first, each counted (``forgotten``); the next
+  arrival on a forgotten key is kept, as on a key that holds nothing. A
+  tool's :class:`LateJoiner` is bounded at :data:`MAX_KEYS` unless told
+  otherwise; a consumer's is not bounded, since the text bounds a tool's.
 - **R6** binds a consumer, whose seed discards a key that is not concrete
   on either path; a tool's seed keeps it under the key it arrived on,
   merged with that key alone (0.27).
@@ -39,10 +46,17 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 GET_TIMEOUT_S = 1.0
+
+#: The keys a tool's merge holds at most unless told otherwise (observer
+#: §4.1, 0.10: "A tool that bounds what it holds counts what the bound
+#: forgot"). The text sets no number; this one is zk2py's, far above any
+#: scenario's population.
+MAX_KEYS = 65536
 
 
 @dataclass(frozen=True)
@@ -93,9 +107,9 @@ class Applied:
     deleted: bool
     stamp: Stamp | None
     outcome: str
-    #: which rule decided it: §4.2's merge (the seed, and a tool's
-    #: subscription after it), or S7's consumer rule (a consumer's samples
-    #: after its seed, core §4.3, 0.67)
+    #: which rule decided it: §4.2's merge (a tool's, for as long as it
+    #: follows, observer §4.1), or S7's consumer rule (a consumer's, from its
+    #: first value on, its seed's replies included: core §4.3, 0.68)
     rule: str = "merge"
 
 
@@ -154,72 +168,159 @@ def newer(a: Stamp | None, b: Stamp | None) -> bool:
 
 
 def follows(a: Stamp | None, b: Stamp | None) -> bool:
-    """Whether ``a``, a value a consumer receives after its seed, replaces a
-    held ``b`` by S7's consumer rule (core §4.3): "A consumer MUST order an
-    owner's values by time within one timestamp id. It MUST accept the first
-    value under a new id, and restart its ordering there." An id other than
-    the held value's is new, whatever its time (round 90, F-383's reading
-    (a)); an unstamped sample, no owner's (S1), keeps §4.2's rule."""
+    """Whether ``a`` replaces a held ``b`` by S7's consumer rule (core §4.3,
+    0.68): "A consumer MUST order each key's values by time within one
+    timestamp id, from the first value it receives, a late joiner's seed
+    replies included (§4.2). It MUST accept a value under an id other than
+    the one its held value carries, and order by time within that id from
+    then on." An unstamped sample, no owner's (S1), keeps §4.2's rule: it
+    carries no id, so it is under no id other than the held value's."""
     if a is None or b is None:
         return newer(a, b)
-    # F-383's reading (a), knowingly: "new" is any id other than the held
-    # value's, so an old epoch's value still in transit, arriving after the
-    # new epoch's, is accepted and the key steps back to the old epoch. That
-    # is S7's residual risk ("A value from the old epoch that is still in
-    # transit can arrive after the new epoch starts. That is accepted"). It
-    # also means two live writers under two ids (a re-mint's overlap, or a
-    # split brain) make a key flap between them, each value accepted as a
-    # new id's. Reading (b), "an id never seen", would hold the key instead.
-    # Kept until the text settles F-383 (#926 part 3).
+    # 0.68 settles F-383 as reading (a): an id other than the held value's,
+    # per key. So an old epoch's value still in transit, arriving after the
+    # new epoch's first, is accepted and the key steps back until the new
+    # epoch's next value: S7's residual risk, as it now says. Two live
+    # writers under two ids (a re-mint's overlap, a split brain) make a key
+    # flap between them, each value accepted as another id's.
     if a.id != b.id:
         return True
     return a.time > b.time
 
 
-def ordered(arrivals: list[tuple[Stamp | None, bool]]) -> list[bool]:
-    """One key's arrivals in arrival order, each (stamp or None, whether it
-    came after the seed): whether each replaces what the key holds, §4.2's
-    merge deciding the seed's and S7's consumer rule each after it."""
+def consumer_kept(arrivals: Iterable[Stamp | None]) -> list[bool]:
+    """One key's arrivals in arrival order, whichever path brought each:
+    whether each replaces what a consumer holds, S7's consumer rule
+    deciding every one from the first (core §4.2, §4.3, 0.68)."""
     held: Stamp | None = None
     holding = False
     out = []
-    for stamp, after in arrivals:
-        k = (not holding) or (follows(stamp, held) if after else newer(stamp, held))
+    for stamp in arrivals:
+        k = (not holding) or follows(stamp, held)
         out.append(k)
         if k:
             held, holding = stamp, True
     return out
 
 
+def newest(arrivals: Iterable[Stamp | None]) -> int | None:
+    """The index of the arrival a tool's merge holds at the end, over one
+    key's arrivals in arrival order (core §4.2; observer §4.1), or None for
+    none. A reader that records what arrived and merges when it reads calls
+    this, so the merge is §4.2's: by time, then by id as ``Latest``
+    compares, an unstamped sample below every stamped one."""
+    at = None
+    for i, k in enumerate(kept([(x, "put") for x in arrivals])):
+        if k:
+            at = i
+    return at
+
+
+def merged(arrivals: Iterable[tuple[Any, ...]]) -> tuple[Any, ...] | None:
+    """What a tool's merge holds at the end over one key's arrivals, in
+    arrival order, each a tuple whose first item is its :class:`Stamp` or
+    None (core §4.2; observer §4.1): the arrival :func:`newest` names, or
+    None for none."""
+    xs = list(arrivals)
+    at = newest([x[0] for x in xs])
+    return None if at is None else xs[at]
+
+
+class Merge:
+    """One late joiner's per-key merge (core §4.2), by ``rule``: ``"merge"``,
+    a tool's, kept for as long as it follows (observer §4.1, 0.10), or
+    ``"S7"``, a consumer's, S7's consumer rule from its first value on (core
+    §4.3, 0.68).
+
+    **Bounded** at ``max_keys`` when given: "A tool that bounds what it holds
+    counts what the bound forgot, and treats a forgotten key as holding
+    nothing" (observer §4.1). The key that arrived least recently is
+    forgotten first, and counted in ``forgotten``; the next arrival on it is
+    kept, as on a key that holds nothing, whatever its stamp."""
+
+    def __init__(self, rule: str = "merge", max_keys: int | None = None):
+        if rule not in ("merge", "S7"):
+            raise ValueError(f"no such rule: {rule!r}")
+        if max_keys is not None and max_keys < 1:
+            raise ValueError("a bound holds at least one key")
+        self.rule, self.max_keys = rule, max_keys
+        self.held: "OrderedDict[str, Entry]" = OrderedDict()
+        #: how many times the bound forgot a key (observer §4.1)
+        self.forgotten = 0
+        #: the key forgotten last, for a report
+        self.last_forgotten: str | None = None
+
+    def apply(self, key: str, entry: Entry) -> str:
+        """``kept``, ``same`` or ``dropped`` for one arrival."""
+        held = self.held.get(key)
+        if held is None:
+            replaces = True
+        elif self.rule == "S7":
+            replaces = follows(entry.stamp, held.stamp)
+        else:
+            replaces = newer(entry.stamp, held.stamp)
+        if replaces:
+            self.held[key] = entry
+            outcome = "kept"
+        elif entry.stamp is not None and held.stamp is not None and entry.stamp.key() == held.stamp.key():
+            outcome = "same"
+        else:
+            outcome = "dropped"
+        self.held.move_to_end(key)
+        if self.max_keys is not None:
+            while len(self.held) > self.max_keys:
+                gone, _ = self.held.popitem(last=False)
+                self.forgotten += 1
+                self.last_forgotten = gone
+        return outcome
+
+
 class LateJoiner:
     """A late joiner over ``selector`` (§4.2, 0.26). ``consumer`` discards
     a sample or a reply on a key that is not concrete (R6); a tool keeps it,
-    as the text leaves to the tool. After its seed's GET has ended, a
-    consumer orders what it receives by S7's consumer rule (core §4.3, 0.67;
-    :func:`follows`), and a tool by §4.2's merge.
+    as the text leaves to the tool. A consumer orders every value it
+    receives by S7's consumer rule, its seed's replies included (core §4.2,
+    §4.3, 0.68; :func:`follows`); a tool keeps §4.2's merge for as long as
+    it follows, across two ids too (observer §4.1, 0.10; :func:`newer`),
+    bounded at ``max_keys`` (:data:`MAX_KEYS` unless told otherwise),
+    counting in ``forgotten`` what the bound forgot (:class:`Merge`).
 
     **Decided in order of arrival.** zenoh runs the subscriber's callback
     and the GET's on threads of their own. Each callback's first act puts
     what it was handed on one queue (:meth:`_arrive`), and the queue is
     drained in that order under one lock, the GET's end among its items. So
-    a sample that arrived before the GET's final reply is merged by §4.2,
-    even when its thread is handled after the end's; one that arrived after
-    it is ordered by S7. The error replies count toward the seed's
-    completeness by the same order (round 90, review-bot on PR #969)."""
+    the values of a key are ordered as they arrived, whichever thread runs
+    first, and the error replies count toward the seed's completeness by
+    the same order (round 90, review-bot on PR #969). Since 0.68 no rule
+    turns at the GET's end, so the end decides only the seed's completeness
+    (round 91)."""
 
     def __init__(self, session: Any, selector: str, *, timeout: float = GET_TIMEOUT_S, consumer: bool = True,
-                 order: str = "subscribe-first"):
+                 order: str = "subscribe-first", max_keys: int | None = -1):
         self.session, self.selector, self.timeout = session, selector, timeout
         self.consumer = consumer
         self.order = order
         self.lock = threading.Lock()
-        self.state: dict[str, Entry] = {}
+        if max_keys == -1:
+            max_keys = None if consumer else MAX_KEYS
+        #: the per-key merge: S7's for a consumer, §4.2's for a tool
+        self.merge = Merge("S7" if consumer else "merge", max_keys)
         self.applied: list[Applied] = []
         self.seed = Seed()
         self.sub: Any = None
         self._done = threading.Event()
         #: every arrival, in the order the callbacks were handed them
         self._inbox: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
+
+    @property
+    def state(self) -> "OrderedDict[str, Entry]":
+        return self.merge.held
+
+    @property
+    def forgotten(self) -> int:
+        """How many times the bound forgot a key (observer §4.1)."""
+        with self.lock:
+            return self.merge.forgotten
 
     # -- arrivals, one queue ------------------------------------------------
 
@@ -270,21 +371,11 @@ class LateJoiner:
         if self.consumer and "*" in key:
             return  # R6
         stamp = Stamp.of(ts)
-        # S7 orders what a consumer receives after its seed, its GET ended
-        # (core §4.3, 0.67); §4.2's merge decides the seed's, and a tool's
-        # after it. ``ended`` is the queue's: what arrived before the end
-        # was applied before it.
-        rule = "S7" if self.consumer and via == "live" and self.seed.ended else "merge"
-        held = self.state.get(key)
-        replaces = held is None or (follows(stamp, held.stamp) if rule == "S7" else newer(stamp, held.stamp))
-        if replaces:
-            outcome = "kept"
-            self.state[key] = Entry(deleted, payload, encoding, stamp, via)
-        elif stamp is not None and held.stamp is not None and stamp.key() == held.stamp.key():
-            outcome = "same"
-        else:
-            outcome = "dropped"
-        self.applied.append(Applied(key, via, deleted, stamp, outcome, rule))
+        # A consumer by S7 from its first value on, its seed's replies
+        # included (core §4.3, 0.68); a tool by §4.2's merge for as long as
+        # it follows (observer §4.1, 0.10). Neither turns at the GET's end.
+        outcome = self.merge.apply(key, Entry(deleted, payload, encoding, stamp, via))
+        self.applied.append(Applied(key, via, deleted, stamp, outcome, self.merge.rule))
 
     # -- the two paths, and the GET's end ------------------------------------
 
