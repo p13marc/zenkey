@@ -112,6 +112,25 @@ _PRIORITY = {"real_time": "REAL_TIME", "interactive_high": "INTERACTIVE_HIGH",
              "data_low": "DATA_LOW", "background": "BACKGROUND"}
 #: core.md S3: the tombstone window, unless the deployment configures another.
 TOMBSTONE_WINDOW_S = 60.0
+#: core §2.4's ``reliability`` → zenoh's.
+_RELIABILITY = {"reliable": "RELIABLE", "best_effort": "BEST_EFFORT"}
+
+
+def qos_of(r: dict[str, Any]) -> dict[str, Any]:
+    """Core §2.4: "An owner MUST publish with it", the resource's resolved
+    QoS, every field: ``reliability``, ``congestion``, ``priority`` and
+    ``express``, as zenoh's publisher declaration takes them.
+
+    ``reliability`` is the one field zenoh 1.10.1 sets only through unstable
+    API: zenoh-python marks ``Reliability`` unstable, and a publisher
+    declared without it is reliable, so a stream's default ``best_effort``
+    would go out reliable. zk2py opts into it here, the one unstable
+    publisher setting it uses (round 89; §2.4's "Zenoh's stable QoS" and
+    §0's opt-in are a finding)."""
+    return {"congestion_control": getattr(zenoh.CongestionControl, _CONGESTION[r["congestion"]]),
+            "priority": getattr(zenoh.Priority, _PRIORITY[r["priority"]]),
+            "express": r["express"],
+            "reliability": getattr(zenoh.Reliability, _RELIABILITY[r["reliability"]])}
 
 
 class OwnerRefused(RuntimeError):
@@ -185,6 +204,14 @@ def _value_encoding(r: dict[str, Any]) -> str:
     return "application/protobuf"
 
 
+def replica_only(rows: list[tuple[dict[str, Any], str]]) -> bool:
+    """Core §5.1 "Beside replicas": whether an instance's exposed resources
+    of one interface (its plan's rows, :meth:`Owner._plan`) are all
+    replicated operations, and there is at least one."""
+    exposed = [r for r, status in rows if status == "exposed"]
+    return bool(exposed) and all(r["kind"] == "operation" and r.get("serving") == "replicated" for r in exposed)
+
+
 def _refuse(query: zenoh.Query, enc: str, code: str, message: str, **kw: Any) -> None:
     query.reply_err(envelope.encode(enc, code, message, **kw), encoding=enc)
 
@@ -241,19 +268,35 @@ class OpCall:
             raise MemberRefused("name the member this call answers for first")
         if self.resource["replies"] == "one" and (self.values or self.envelopes):
             raise RuntimeError("replies = \"one\": the call is answered already")
+        if self.summaries:
+            # O6: "each replier MUST end with exactly one summary reply".
+            raise RuntimeError("the summary ended this replier: no value after it (O6)")
         self.query.reply(self.member_key, payload, encoding=encoding or _value_encoding(self.resource))
         self.values += 1
 
     def summary(self, payload: bytes, encoding: str | None = None) -> None:
-        """O6: the one summary reply, its attachment the bytes ``summary``."""
+        """O6: the one summary reply, its attachment the bytes ``summary``:
+        "each replier MUST end with exactly one summary reply", so a second
+        is refused to the handler, as is one for an operation that declares
+        no ``summary``, or whose ``replies`` is not ``many`` (E033)."""
         if self.member_key is None:
             raise MemberRefused("name the member this call answers for first")
+        if self.resource.get("summary") is None or self.resource["replies"] != "many":
+            raise RuntimeError("this operation declares no summary (O6, E033)")
+        if self.summaries:
+            raise RuntimeError("one summary per replier: it is sent already (O6)")
         self.query.reply(self.member_key, payload, encoding=encoding or "application/octet-stream",
                          attachment=b"summary")
         self.summaries += 1
 
     def refuse(self, code: str, message: str, **kw: Any) -> None:
-        """A ``reply_err`` carrying the §5.2 envelope."""
+        """A ``reply_err`` carrying the §5.2 envelope. §5.2: "An operation
+        that declares no error type has none to send … an owner MUST NOT put
+        a detail in it", so a detail for one is refused to the handler,
+        nothing sent; one that does not fit its envelope is refused by
+        :func:`zk2py.envelope.encode`, nothing sent either."""
+        if kw.get("detail") is not None and self.resource.get("error") is None:
+            raise ValueError("this operation declares no error type: an envelope carries no detail (§5.2)")
         _refuse(self.query, self.enc, code, message, **kw)
         self.envelopes += 1
 
@@ -606,6 +649,21 @@ class Owner:
             for role, req in c.canonical["requires"].items():
                 if not req["optional"] and not self.bindings.get(role):
                     raise OwnerRefused(f"{c.interface}: required role {role!r} is bound to nothing (§3.2)")
+        # §3.3 `cardinality`: "The owner's descriptor MUST NOT raise it": a
+        # stated bound is from 1 to the contract's, of a templated resource
+        # of that interface (D007 otherwise). Refused before anything is
+        # declared, as step 2 refuses (round 89).
+        for iface, stated in self.cardinality.items():
+            c = next((c for c in self.contracts if c.interface == iface), None)
+            for rid, n in stated.items():
+                r = None if c is None else next(
+                    (r for r in c.canonical["resources"] if f"{r['token']}/{r['template']}" == rid
+                     and r["params"]), None)
+                if r is None:
+                    raise OwnerRefused(f"{iface}: cardinality names {rid}, no templated resource of it (§3.3, D007)")
+                if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= r["cardinality"]:
+                    raise OwnerRefused(f"{iface}: cardinality {rid} = {n} is not from 1 to the contract's "
+                                       f"{r['cardinality']}: a descriptor never raises it (§3.3, D007)")
         # §8.2 step 2 (0.17): "It also refuses an owner whose tokenless set
         # names archive.v1, whether or not the owner implements it (§4.4)".
         if "archive.v1" in self.tokenless:
@@ -718,9 +776,16 @@ class Owner:
         s = self.session
         assert s is not None
         start = len(self._entities)
+        replica = replica_only(rows)
         for r, status in rows:
             key = f"{self.prefix(c)}/{r['token']}/{r['template']}"
             rid = f"{r['token']}/{r['template']}"
+            if replica and r["kind"] == "operation" and status != "exposed" and r.get("serving") != "replicated":
+                # §5.1 "Beside replicas": "An instance whose exposed
+                # resources of an interface are all replicated operations
+                # MUST NOT declare an unavailable queryable on an exclusive
+                # operation of it": the instance serving it may be another.
+                continue
             if r["kind"] == "operation" and status == "exposed" and rid in self.members:
                 # §5.1 "Over a template": "One with a queryable per
                 # member answers for each it holds."
@@ -741,11 +806,7 @@ class Owner:
                 enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                     "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
                     if r["type"]["kind"] == "jsonschema" else "application/protobuf"
-                pub = s.declare_publisher(
-                    key, encoding=enc,
-                    congestion_control=getattr(zenoh.CongestionControl, _CONGESTION[r["congestion"]]),
-                    priority=getattr(zenoh.Priority, _PRIORITY[r["priority"]]),
-                    express=r["express"])
+                pub = s.declare_publisher(key, encoding=enc, **qos_of(r))
                 self._entities.append(pub)
                 self._publishers[key] = pub
                 self._encodings[key] = enc
@@ -1134,10 +1195,7 @@ class Owner:
                     enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                         "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
                         if r["type"]["kind"] == "jsonschema" else "application/protobuf"
-                    pub = self.session.declare_publisher(
-                        key, encoding=enc,
-                        congestion_control=getattr(zenoh.CongestionControl, _CONGESTION[r["congestion"]]),
-                        priority=getattr(zenoh.Priority, _PRIORITY[r["priority"]]), express=r["express"])
+                    pub = self.session.declare_publisher(key, encoding=enc, **qos_of(r))
                     self._entities.append(pub)
                     self._publishers[key], self._encodings[key] = pub, enc
                     # freshness.v1 §2.4 applies to every member of a state
@@ -1217,7 +1275,14 @@ class Owner:
             enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                 ("application/cbor" if r.get("encoding") == "cbor" else "application/json")
                 if r["type"]["kind"] == "jsonschema" else "application/protobuf")
-            self.session.put(key, payload, encoding=enc)
+            # §2.4: with the event's QoS, every field. zenoh-python's
+            # Session.put takes no reliability, so the occurrence goes on a
+            # publisher of its own, declared for this one put.
+            pub = self.session.declare_publisher(key, encoding=enc, **qos_of(r))
+            try:
+                pub.put(payload)
+            finally:
+                pub.undeclare()
             self._occurrences.setdefault(member, []).append(now)
             self.events_put.append((key, payload))
             return key

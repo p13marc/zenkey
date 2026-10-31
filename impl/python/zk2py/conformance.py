@@ -3428,7 +3428,7 @@ def family_readings(root: Path) -> list[Result]:
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
-        + _round88_readings(root)
+        + _round88_readings(root) + _round89_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -3745,6 +3745,313 @@ def _round88_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [missing(arb, "The reference makes one read 0.1 s after the first withdrawal of a burst."),
                  missing(arb_sc, "first put is **500 ms after its tokens**"), actuator, commander, pr.REREAD_DELAY_S],
                 [[], [], 0.1, 0.5, 0.1]))
+    return out
+
+
+def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.66's conformance classes, ``observer.md`` 0.8, ``spec/RULES.md``
+    and the glossary, and round 88's answers (#609, round 89; #926, #935
+    part 6). Each text at its version or later; F-347 to F-357's answers as
+    they read; the nineteen core and three observer sentences 0.66 and 0.8
+    made name their role, as they read, the old forms gone; ``RULES.md``'s
+    own counts against its entries, as zk2py parses them; zk2py's walk of it
+    (:mod:`zk2py.classes`) in step with it, and its counts; the glossary's 36
+    terms; and the owner rules the walk found zk2py's owner not keeping,
+    kept now, read with no session (a fake one records what is declared):
+    core §2.4's QoS, every field and an event's; §3.3's stated cardinality
+    never raised; O6's one summary; §5.2's detail; §5.1's "Beside
+    replicas"; and observer §7.4's check at the echo tool's start."""
+    import inspect
+    import re
+
+    from . import classes, echo_tool
+    from . import owner as ow
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def at_least(rel: str, want: tuple[int, int]) -> list[str]:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", flat(rel))
+        if m is None:
+            return [f"{rel} names no text version"]
+        got = (int(m.group(1)), int(m.group(2)))
+        return [] if got >= want else [f"{rel} at {got[0]}.{got[1]}, below {want[0]}.{want[1]}"]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs = flat("core.md"), flat("observer.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else None
+    out: list[tuple[str, Any, Any]] = [
+        ("#926: core 0.66 or later, observer.md 0.8 or later written against core 0.66 or later, each with its "
+         "entry", [core_v is not None and core_v >= (0, 66)] + at_least("observer.md", (0, 8))
+         + entry("CHANGELOG.md", "0.66", "conformance classes by role")
+         + entry("observer-CHANGELOG.md", "0.8", "no rule changed"), [True]),
+        ("#935 part 6: desired.v1 0.11, timing.v1 0.7, arbitration.v1 0.5 and redundancy.v1 0.7 or later, each "
+         "with its entry",
+         at_least("profiles/desired/v1.md", (0, 11)) + at_least("profiles/timing/v1.md", (0, 7))
+         + at_least("profiles/arbitration/v1.md", (0, 5)) + at_least("profiles/redundancy/v1.md", (0, 7))
+         + entry("profiles/desired/CHANGELOG.md", "0.11", "seeds (F-347)")
+         + entry("profiles/timing/CHANGELOG.md", "0.7", "no rule changed")
+         + entry("profiles/arbitration/CHANGELOG.md", "0.5", "no rule changed")
+         + entry("profiles/redundancy/CHANGELOG.md", "0.7", "no rule changed"), []),
+        ("F-347, resolved by desired.v1 0.11 §2.5: a target seeds at a re-mint that is a restart",
+         missing(flat("profiles/desired/v1.md"),
+                 "A target MUST seed at its start, at a re-mint that is a restart (§2.16), and again each time "
+                 "its author's instance token appears. It appears for a new instance, or for one coming back after "
+                 "an absence (core §8.1). `[Sc: §1, §5, §12]`"), []),
+        ("F-348, F-350 and F-351, resolved by timing.v1 0.7's rewrites",
+         missing(flat("profiles/timing/v1.md"),
+                 "So a reader can handle a new instance's first samples before its descriptor, and read them "
+                 "`unattributed` or `foreign_stamp`.",
+                 "else **not asked**: nobody put the question of any of them. That is never unobservable, the answer "
+                 "of a window that could not answer it.",
+                 "The window's start is the first instant both stand: - its presence read, made after its watch "
+                 "session's round trip (core §8.1); - the descriptor of every instance that read shows, which it "
+                 "holds."), []),
+        ("F-349, resolved by arbitration.v1 0.5's list",
+         missing(flat("profiles/arbitration/v1.md"),
+                 "**As one change:** each address ends the move one of three ways: - withdrawn, when what was kept "
+                 "leaves it with no token known held, and what was kept holds a withdrawal of it. It forgets its "
+                 "arrivals then; - re-admitted, when it was withdrawn before the move, and what was kept leaves a "
+                 "token known held there; - otherwise, as it was."), []),
+        ("F-352 and F-353, resolved by redundancy.v1 0.7's scenarios",
+         missing(flat("profiles/redundancy/scenarios.md"),
+                 "the test does it one of two ways, and §1 and §10 run both: - it makes the instance's links silent "
+                 "first, through a proxy between it and its router that stops forwarding and closes nothing.",
+                 "- or it kills the process as it runs. The host's kernel closes its links, and the crash is seen "
+                 "at once.",
+                 "S's GET at A's instance token answers A's descriptor marked standby. The one exception is a "
+                 "takeover before that GET was answered, which S tells by A's interface token arriving within a "
+                 "round trip of the answer: the token and the answer ride two priorities"), []),
+        ("F-354 to F-356, resolved by core 0.65's presence.md §10, and F-357 by the profiles' index",
+         missing(flat("scenarios/presence.md"),
+                 "It owes a read at once, and makes none. While its watch session is cut off it asks no round trip "
+                 "and makes no read, though its reading session holds its link: a read not made. The owner is "
+                 "unobservable, never down.",
+                 "has no call for it to drop. Its own waits, each given up after 20 ms, stand in for the dropped "
+                 "calls.",
+                 "has run out under the 300 ms interests timeout. How many that is depends on the reader: two for "
+                 "one that asks a round trip at its start and another before its seed, and one for one whose start's "
+                 "round trip serves its seed too.")
+         + missing(flat("profiles/README.md"),
+                   "A stamp's id that is never 0 needed none either. That rule is `desired.v1`'s own, in its §2.4;"),
+         []),
+    ]
+
+    # The sentences 0.66 and 0.8 made name their role: each new form in
+    # place, each old form gone (round 89 compared them pair by pair).
+    core_pairs = [
+        ("The owner SHOULD do so in a new session", "- It SHOULD do so in a new session"),
+        ("An owner's counter that crosses a face where neither is visible SHOULD",
+         "- A counter that crosses a face where neither is visible"),
+        ("**A contract's state and events** SHOULD keep `reliable` and `block`.",
+         "- **State and events** SHOULD keep"),
+        ("| R7 | **Consumer:** a binding MUST NOT require presence.", "| R7 | A binding MUST NOT"),
+        ("A consumer's runtime MUST resolve a provider whose system position is `self.system`",
+         "A runtime MUST resolve a provider"),
+        ("The owner's descriptor MUST NOT raise it.", "contract's. It MUST NOT raise it."),
+        ("**Size.** An owner's descriptor SHOULD stay within 1 KB.", "**Size.** A descriptor SHOULD"),
+        ("- The owner SHOULD detect drift against a reference", "- It SHOULD detect drift"),
+        ("When a detection shows it beyond the delta, the owner MUST stop writing state",
+         "the delta, it MUST stop"),
+        ("**An archive's backend MUST NOT accept a put older than a delete it holds.**", "**Its backend MUST NOT"),
+        ("A request type SHOULD NOT repeat a template parameter (W102).", "repeat a template parameter. `"),
+        ("**The `Encoding` of the owner's reply** MUST say which:", "**The reply's `Encoding`**"),
+        ("or a value in a protobuf one, MUST NOT be sent by an owner.", "protobuf one, MUST NOT be sent. "),
+        ("The name MUST be unique across the listed files (E024).", "unique across the listed files. |"),
+        ("**A deployment's batch SHOULD take at most a third of the lease to cross the face.**",
+         "**A batch SHOULD take"),
+        ("**A deployment SHOULD deny `@stream` keys across the face**", "**`@stream` keys SHOULD be denied"),
+        ("So a deployment MUST grant the far side's principal `declare_queryable`", "MUST be granted"),
+        ("For a deployment under `allow`, an operation that must not run for everyone MUST be",
+         "for a principal never granted it; only its answers are denied. Under `allow`"),
+        ("| Descriptor (§3.3) | An owner's descriptor MUST fit one fragment", "| Descriptor (§3.3) | MUST fit"),
+    ]
+    obs_pairs = [
+        ("Every liveliness subscriber the caller or tool holds on that session MUST be callback-driven",
+         "Every liveliness subscriber on that session MUST"),
+        ("**The subscribers of a reader's watch session SHOULD have no history** when it seeds",
+         "when their reader seeds"),
+        ("A tool's grace period SHOULD exceed the longest re-mint overlap", "tool setting. It SHOULD exceed"),
+    ]
+    out.append(("core 0.66's nineteen and observer.md 0.8's three sentences that now name their role, as they read, "
+                "and none of the old forms",
+                [missing(core, *[n for n, _ in core_pairs]), present(core, *[o for _, o in core_pairs]),
+                 missing(obs, *[n for n, _ in obs_pairs]), present(obs, *[o for _, o in obs_pairs])],
+                [[], [], [], []]))
+    out.append(("core §12 0.66: five classes, the static rules' sections, full the union, constrained a modifier, "
+                "profiles one class each; observer.md §0's classes",
+                missing(core, "## 12. Conformance classes",
+                        "The static rules are §1's and §9's, and those on what a contract states in §2.2, §2.4, §2.5, "
+                        "§2.6, §3.1, §7.1 and §10.",
+                        "**Full** is every class, their union:", "**Constrained** is a modifier on a class.",
+                        "**Profiles** stay opt-in, one class each (§10).")
+                + missing(obs, "**Its classes.** Conformance is claimed by role (core §12)."), []))
+
+    # RULES.md, as zk2py parses it: its own table against its entries.
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    entries = classes._rules_md(spec)
+    by_role = {c: sum(1 for e in entries if e[0] == c) for c in classes.HEADINGS.values()}
+    readers = len(re.findall(r"^\| \[[^\]]+\]\([^)]+\), \*reader\* \|", rules, re.M))
+    once = len({(rid, s) for _, rid, s in entries})
+    ids = len(re.findall(r"^\| \[[RSOEWD]\d+\]\(core\.md#[^)]+\) \| [a-z, ]+ \| core §", rules, re.M))
+    table = {name: int(n) for name, n in re.findall(r"^\| \[([A-Za-z]+)[^\]]*\]\(#[^)]+\) \| (\d+)", rules, re.M)}
+    m_obs = re.search(r"\| \[Observer[^|]*\| (\d+), (\d+) of them a reader's \|", rules)
+    m_once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("spec/RULES.md: its table's counts are its entries' (owner, consumer, caller, deployment, "
+                "implementation, observer and its readers, every rule once, rule ids)",
+                [by_role["owner"], by_role["consumer"], by_role["caller"], by_role["deployment"], by_role["static"],
+                 by_role["observer"], readers, once, ids],
+                [table.get("Owner"), table.get("Consumer"), table.get("Caller"), table.get("Deployment"),
+                 table.get("Implementation"), int(m_obs.group(1)) if m_obs else None,
+                 int(m_obs.group(2)) if m_obs else None, int(m_once.group(1)) if m_once else None,
+                 table.get("Rule")]))
+
+    # zk2py's walk of it (classes.py): every entry of its four classes and
+    # of the static rules walked once, in order, with what shows it.
+    out.append(("core §12: zk2py's walk of RULES.md is in step with it (zk2py.classes.check)",
+                classes.check(spec), []))
+    out.append(("core §12: zk2py claims the owner, consumer, caller and observer classes at the full level; per "
+                "class its entries met, not met and not applicable, and the static rules'",
+                [classes.CLAIMED, classes.counts()],
+                [{"owner": "full", "consumer": "full", "caller": "full", "observer": "full"},
+                 {"owner": {"met": 45, "not met": 3, "n/a": 8}, "consumer": {"met": 7, "not met": 2, "n/a": 3},
+                  "caller": {"met": 11, "not met": 0, "n/a": 0}, "observer": {"met": 44, "not met": 2, "n/a": 0},
+                  "static": {"met": 31, "not met": 0, "n/a": 2}}]))
+
+    # The glossary: 36 terms, each linked to a section.
+    readme = (spec / "README.md").read_text(encoding="utf-8")
+    gloss = readme.split("## Glossary", 1)[1].split("\n## ", 1)[0] if "## Glossary" in readme else ""
+    terms = re.findall(r"^- \*\*([^*]+)\*\*:", gloss, re.M)
+    linked = [t for t in re.split(r"\n(?=- \*\*)", gloss) if t.startswith("- **") and "](" in t]
+    out.append(("spec/README.md's glossary: 36 terms, each linked to its section", [len(terms), len(linked)],
+                [36, 36]))
+
+    # -- the owner rules zk2py's owner keeps since this round ----------------------------
+    probe = load_contract(Path(__file__).resolve().parents[1] / "interop" / "zk2py_probe.v1.toml", spec_dir=spec)
+    replica = load_contract(Path(__file__).resolve().parents[1] / "interop" / "classes" / "zk2py_replica.v1.toml",
+                            spec_dir=spec, check_file_name=True)
+    out.append(("round 89's zk2py_replica.v1 loads with no finding, with the reference CLI's fingerprint",
+                (replica.valid, list(replica.codes), replica.fingerprint),
+                (True, [], "sha256:3ab773bde71104aa5a1f61c74893b521daeede49634f1a0fa8fc10ddd1a4cf68")))
+
+    class Entity:
+        def undeclare(self) -> None:
+            pass
+
+        def put(self, payload: Any, **kw: Any) -> None:
+            pass
+
+    class Fake:
+        """A session that records what is declared on it."""
+
+        def __init__(self) -> None:
+            self.publishers: list[tuple[str, dict[str, Any]]] = []
+            self.queryables: list[str] = []
+
+        def declare_publisher(self, key: Any, **kw: Any) -> Entity:
+            self.publishers.append((str(key), kw))
+            return Entity()
+
+        def declare_queryable(self, key: Any, *a: Any, **kw: Any) -> Entity:
+            self.queryables.append(str(key))
+            return Entity()
+
+    def names(kw: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(str(kw[f]).rsplit(".", 1)[-1] for f in ("reliability", "congestion_control", "priority",
+                                                              "express"))
+
+    res = {f"{r['token']}/{r['template']}": r for r in probe.canonical["resources"]}
+    o = ow.Owner("lab", "probe", [probe])
+    o.session = Fake()  # type: ignore[assignment]
+    o._declare_member("zk2/lab/probe/zk2py_probe.v1/@stream/lanes/a")
+    o.occur("zk2/lab/probe/zk2py_probe.v1/events/changed", b"{}")
+    got = {k.rsplit("/", 1)[0] if "/events/" in k else k: names(kw) for k, kw in o.session.publishers}
+    out.append(("core §2.4 \"An owner MUST publish with it\": zk2py's owner sets every QoS field, reliability "
+                "through zenoh's unstable API, on a templated member's publisher and on each event's",
+                [names(ow.qos_of(res["state/status"])), got],
+                [("RELIABLE", "BLOCK", "DATA", "False"),
+                 {"zk2/lab/probe/zk2py_probe.v1/@stream/lanes/a": ("BEST_EFFORT", "DROP", "DATA_LOW", "False"),
+                  "zk2/lab/probe/zk2py_probe.v1/events/changed": ("RELIABLE", "BLOCK", "DATA", "False")}]))
+
+    def refused(**kw: Any) -> str:
+        try:
+            ow.Owner("lab", "probe", [probe], **kw)._plan()
+        except ow.OwnerRefused as e:
+            return "refused" if "§3.3, D007" in str(e) else str(e)
+        return "starts"
+
+    out.append(("core §3.3 \"The owner's descriptor MUST NOT raise it\": a stated bound above the contract's, or "
+                "below 1, or of no templated resource, refused before anything is declared; a lower one starts",
+                [refused(cardinality={"zk2py_probe.v1": {"@stream/lanes/{lane}": n}}) for n in (5, 0, 4, 1)]
+                + [refused(cardinality={"zk2py_probe.v1": {"state/status": 1}})],
+                ["refused", "refused", "starts", "starts", "refused"]))
+
+    class Query:
+        payload = attachment = None
+
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        def reply(self, key: str, payload: Any, **kw: Any) -> None:
+            self.sent.append("summary" if kw.get("attachment") == b"summary" else "value")
+
+        def reply_err(self, payload: Any, **kw: Any) -> None:
+            self.sent.append("envelope")
+
+    rres = {r["template"]: r for r in replica.canonical["resources"]}
+    base = "zk2/lab/r/zk2py_replica.v1"
+
+    def call(template: str, *steps: tuple[str, Any]) -> tuple[list[str], list[str]]:
+        q = Query()
+        c = ow.OpCall(q, base, rres[template], "application/json", {}, f"{base}/@op/{template}")
+        said = []
+        for what, arg in steps:
+            try:
+                getattr(c, what)(**arg) if isinstance(arg, dict) else getattr(c, what)(arg)
+                said.append("sent")
+            except (RuntimeError, ValueError):
+                said.append("refused")
+        return said, q.sent
+
+    out.append(("core O6 \"each replier MUST end with exactly one summary reply\": a second summary, and a value "
+                "after it, refused to the handler; a summary for an operation that declares none refused",
+                [call("scan", ("reply", b"a"), ("summary", b"1"), ("summary", b"2"), ("reply", b"b")),
+                 call("sync", ("summary", b"1"))],
+                [(["sent", "sent", "refused", "refused"], ["value", "summary"]), (["refused"], [])]))
+    out.append(("core §5.2 \"an owner MUST NOT put a detail in it\": an operation that declares no error type "
+                "refuses a detail to its handler, nothing sent; a refusal without one is sent",
+                [call("sync", ("refuse", {"code": "app", "message": "no", "detail": "x"})),
+                 call("sync", ("refuse", {"code": "app", "message": "no"}))],
+                [(["refused"], []), (["sent"], ["envelope"])]))
+
+    def queryables(unavailable: dict[str, str]) -> list[str]:
+        o = ow.Owner("lab", "r", [replica], unavailable=unavailable)
+        o.session = Fake()  # type: ignore[assignment]
+        plan = o._plan()
+        o._declare_resources(replica, plan[replica.interface])
+        return sorted(k.rsplit("/", 1)[1] for k in o.session.queryables if "/@op/" in k)
+
+    out.append(("core §5.1 \"Beside replicas\": an instance exposing only replicated operations of an interface "
+                "declares no unavailable queryable on an exclusive one; beside an exclusive one exposed it does",
+                [ow.replica_only([(rres["sync"], "exposed"), (rres["admin"], "listed")]),
+                 queryables({"@op/admin": "config", "@op/scan": "config"}), queryables({"@op/admin": "config"})],
+                [True, ["sync"], ["admin", "scan", "sync"]]))
+    out.append(("observer §7.4 \"A tool SHOULD check the limit at start\": zk2py's three tool processes say it on "
+                "their standard error before they listen",
+                ["memlock_said" in inspect.getsource(echo_tool.main)],
+                [True]))
     return out
 
 
