@@ -1,0 +1,23 @@
+{
+  "description": "What scripts/gen-rules-index.py reads from text.md: each rule's line, the roles it binds, its rule ids and its evidence, in the text's order; the rule ids of its tables, each with the roles its row binds; and the lines of unreadable.md whose rule names no role, which the script refuses. text.md holds a rule of each reading: a static section (§1), a subject (line 19), a pronoun after it, a passive's agent (22), two roles and a lead-in's list (24), a pronoun in a nested item and a continuation's evidence (30, 32), a MAY's subject before a pronoun (36), role labels in a table row (40), a section's id (45), a lint code (50) and a section's title (55). Its §0 and its header state keywords that are no rule.",
+  "rules": [
+    {"line": 15, "roles": ["implementation"], "ids": [], "evidence": ["[F: keys.json]"]},
+    {"line": 19, "roles": ["owner"], "ids": [], "evidence": ["[Sc: types.md §3]"]},
+    {"line": 19, "roles": ["owner"], "ids": [], "evidence": ["[Sc: types.md §3]"]},
+    {"line": 22, "roles": ["owner"], "ids": [], "evidence": []},
+    {"line": 24, "roles": ["caller", "observer"], "ids": [], "evidence": ["[Sc: retrieval.md §1]", "[Sc: retrieval.md §2]", "[Sc: retrieval.md §1–§3]"]},
+    {"line": 30, "roles": ["owner"], "ids": [], "evidence": ["[Sc: presence.md §3]"]},
+    {"line": 32, "roles": ["owner"], "ids": [], "evidence": ["[Sc: presence.md §3]"]},
+    {"line": 36, "roles": ["deployment"], "ids": [], "evidence": []},
+    {"line": 40, "roles": ["owner"], "ids": ["S1"], "evidence": ["[Sc: state.md §1]"]},
+    {"line": 40, "roles": ["consumer"], "ids": ["S1"], "evidence": ["[Sc: state.md §1]"]},
+    {"line": 45, "roles": ["owner"], "ids": ["S7"], "evidence": []},
+    {"line": 50, "roles": ["implementation"], "ids": ["E026"], "evidence": ["[F: contracts/e026-retention]"]},
+    {"line": 55, "roles": ["deployment"], "ids": [], "evidence": []}
+  ],
+  "ids": [
+    {"id": "S1", "roles": ["owner", "consumer"]},
+    {"id": "R5", "roles": ["consumer"]}
+  ],
+  "unreadable": [5, 7]
+}

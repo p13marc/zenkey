@@ -10,9 +10,9 @@ name: Docs
 on:
   push:
     branches: [main, v1]
-    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json']
+    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json', 'scripts/gen-rules-index.py', 'scripts/fixtures/rules-index/**']
   pull_request:
-    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json']
+    paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json', 'scripts/gen-rules-index.py', 'scripts/fixtures/rules-index/**']
   workflow_dispatch:
 
 concurrency:
@@ -34,3 +34,8 @@ jobs:
       # per sentence, its sentences over 50 words (35 under docs/guide/) and
       # its inline history tags never rise above spec/.prose-baseline.json.
       - run: python3 scripts/check-spec-prose.py
+      # The rule index (#926): spec/RULES.md is what gen-rules-index.py
+      # generates from core.md and observer.md, and the script reads its
+      # fixture text as the fixture's expect.json says.
+      - run: python3 scripts/gen-rules-index.py --check
+      - run: python3 scripts/gen-rules-index.py --self-test

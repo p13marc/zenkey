@@ -68,6 +68,13 @@ jobs:
       # tags never rise above spec/.prose-baseline.json. Doc-only pushes run
       # it on the Docs lane too (docs.yml).
       - run: python3 scripts/check-spec-prose.py
+      # The rule index (#926): spec/RULES.md is what gen-rules-index.py
+      # generates from core.md and observer.md, every rule under the role it
+      # binds (core §12), and the script reads its fixture text as the
+      # fixture's expect.json says. Doc-only pushes run both on the Docs lane
+      # too (docs.yml).
+      - run: python3 scripts/gen-rules-index.py --check
+      - run: python3 scripts/gen-rules-index.py --self-test
       # No source or report fixture cites v1's RFC set (#925): it is on the
       # `v1` branch only, and a zk2 tool cites observer.md, the core, a
       # profile or the tooling guide.

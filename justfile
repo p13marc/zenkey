@@ -188,6 +188,11 @@ ci:
     # sentences over the limit or inline history tags rise above
     # spec/.prose-baseline.json. Both CI lanes run it.
     python3 scripts/check-spec-prose.py
+    # The rule index (#926): spec/RULES.md is what the script generates from
+    # core.md and observer.md, and its self-test reads its fixture text as
+    # expect.json says. Both CI lanes run them.
+    python3 scripts/gen-rules-index.py --check
+    python3 scripts/gen-rules-index.py --self-test
     # No source or report fixture cites v1's RFC set (#925).
     ./scripts/check-v1-citations.sh
     # The type scale by role (#191), the interactive seam (#193), the
