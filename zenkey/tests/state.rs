@@ -796,6 +796,223 @@ async fn s7_a_late_joiner_across_a_new_epoch() {
     mgr.close().await.unwrap();
 }
 
+/// What a consumer holds of [`ORIGIN`] after `arrivals`: §4.3's consumer
+/// rule over each in order, from the first ([`ValueOrder`]).
+fn consumer_holds(arrivals: &[(String, zenoh::time::Timestamp)]) -> &str {
+    let mut order = ValueOrder::new();
+    let mut held = "";
+    for (v, ts) in arrivals {
+        if order.accept(ORIGIN, ts) {
+            held = v.as_str();
+        }
+    }
+    held
+}
+
+/// What a tool holds of [`ORIGIN`] after `arrivals`: §4.2's merge by the
+/// owner's stamp over each in order (observer §4.1).
+fn tool_holds(arrivals: &[(String, zenoh::time::Timestamp)]) -> &str {
+    use zenkey::model::seed::{Held, Stamp, admits};
+    let mut held = Held::Nothing;
+    let mut value = "";
+    for (v, ts) in arrivals {
+        let incoming = Some(Stamp {
+            time: ts.get_time().as_u64(),
+            id: u128::from_le_bytes(ts.get_id().to_le_bytes()),
+        });
+        if admits(held, incoming) {
+            held = held.after(incoming);
+            value = v.as_str();
+        }
+    }
+    value
+}
+
+/// §7 step 2's new epoch inside a late joiner's seed (core §4.2, §4.3).
+/// The owner writes rev 10. A second session holds a queryable on the
+/// plans that is not `complete`, and keeps each query it takes, so the
+/// consumer's S4 GET stays open after the owner answered it. While it is
+/// open, the owner restarts with no record and a fresh zid, and writes rev
+/// 11, which the subscription hears. Then the holder lets the query go,
+/// and the GET ends. Its reply of rev 10 comes after rev 11's live sample:
+/// `Latest` delivers at the GET's end (core §4.1), and the runtime's GET
+/// returns there. The consumer orders by §4.3's rule from its first value
+/// on, so it holds rev 10, the old epoch's, whatever the two clocks, until
+/// rev 12. A tool's merge, the control, keeps the later time: rev 10 with
+/// the new clock 5 s behind, rev 11 on the host's clock. Run both ways.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_a_new_epoch_inside_a_late_joiners_seed() {
+    new_epoch_inside_the_seed(true).await;
+    new_epoch_inside_the_seed(false).await;
+}
+
+async fn new_epoch_inside_the_seed(behind: bool) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use zenoh::query::{ConsolidationMode, Query, QueryTarget};
+    let clock = if behind {
+        "5 s behind"
+    } else {
+        "on the host's clock"
+    };
+    let (_r1, ep) = router(None).await;
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let s = client(&ep).await;
+    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+    let t10 = w["vehicle-01"].put("rev10").await.unwrap();
+
+    // The holder: a queryable on the plans that is not `complete`. It
+    // answers no query it takes and keeps each one: dropping it is its
+    // final reply, which ends the GET.
+    let holder = client(&ep).await;
+    let held: Arc<Mutex<Vec<Query>>> = Arc::default();
+    let into = Arc::clone(&held);
+    let _hold = holder
+        .declare_queryable("zk2/ground/fleet-mgr/mission_plan.v1/state/plans/**")
+        .complete(false)
+        .callback(move |q| into.lock().unwrap().push(q))
+        .await
+        .unwrap();
+    // The router routes a GET to it: a probe's GET reaches it.
+    let probe = client(&ep).await;
+    eventually("the holder takes a probe's query", || async {
+        let _ = probe
+            .get(ORIGIN)
+            .target(QueryTarget::All)
+            .timeout(T)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut queries = held.lock().unwrap();
+        let took = !queries.is_empty();
+        queries.clear();
+        took
+    })
+    .await;
+
+    // The late joiner: the subscription first, then S4's GET (core §4.2).
+    let got: Arrivals = Arc::default();
+    let live = Arc::clone(&got);
+    let _sub = c
+        .subscribe("state/plans/{vehicle}", move |d| arrived(&live, &d.sample))
+        .await
+        .unwrap();
+    let open = AtomicBool::new(true);
+    let seed = async {
+        let answer = c
+            .get("state/plans/{vehicle}", None, common::SETTLE)
+            .await
+            .unwrap();
+        open.store(false, Ordering::SeqCst);
+        answer
+    };
+    let restart = async {
+        eventually("the holder holds the GET open", || async {
+            !held.lock().unwrap().is_empty()
+        })
+        .await;
+        // The owner answered it before it restarts. The router sent the
+        // GET to the owner when it sent it to the holder, so a later GET
+        // that only the owner's `complete` queryable takes is answered
+        // after it, on the same link.
+        let rx = probe
+            .get(ORIGIN)
+            .target(QueryTarget::BestMatching)
+            .consolidation(ConsolidationMode::None)
+            .timeout(common::SETTLE)
+            .await
+            .unwrap();
+        let first = rx.recv_async().await.expect("a reply to the probe");
+        assert!(first.result().is_ok(), "the owner answers the probe");
+        drop(rx);
+
+        // The new epoch, inside the seed: no record, a fresh zid.
+        drop(w);
+        mgr.close().await.unwrap();
+        s.close().await.unwrap();
+        let s = client(&ep).await;
+        let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+        if behind {
+            mgr.minter().simulate_offset(-5000);
+        }
+        let t11 = w["vehicle-01"].put("rev11").await.unwrap();
+        eventually("rev 11 arrives live, inside the seed", || async {
+            got.lock().unwrap().iter().any(|(v, _)| v == "rev11")
+        })
+        .await;
+        assert!(
+            open.load(Ordering::SeqCst),
+            "{clock}: the GET is still open"
+        );
+        // The holder lets its queries go: the GET ends.
+        held.lock().unwrap().clear();
+        (s, mgr, w, t11)
+    };
+    let (answer, (_s, mgr, w, t11)) = tokio::join!(seed, restart);
+    assert_ne!(t11.get_id(), t10.get_id(), "{clock}: a new timestamp id");
+    if behind {
+        assert!(
+            t11.get_time() < t10.get_time(),
+            "{clock}: older by the clock"
+        );
+    } else {
+        assert!(
+            t11.get_time() > t10.get_time(),
+            "{clock}: later by the clock"
+        );
+    }
+
+    // The consumer hands the seed's replies over at the GET's end, after
+    // what the subscription heard during it.
+    let StateGet::Answered(answer) = answer else {
+        panic!("{clock}: the owner did not answer");
+    };
+    for cur in answer {
+        if let Current::Value { sample, .. } = cur {
+            arrived(&got, &sample);
+        }
+    }
+    let seeded = got.lock().unwrap().clone();
+    assert_eq!(
+        seeded.last(),
+        Some(&("rev10".to_owned(), t10)),
+        "{clock}: the owner's reply of rev 10 arrives last"
+    );
+    assert!(
+        seeded.iter().any(|(v, ts)| v == "rev11" && *ts == t11),
+        "{clock}: rev 11 arrived live before it"
+    );
+    assert_eq!(
+        consumer_holds(&seeded),
+        "rev10",
+        "{clock}: the consumer accepts the reply under the old id, which arrived last"
+    );
+    assert_eq!(
+        tool_holds(&seeded),
+        if behind { "rev10" } else { "rev11" },
+        "{clock}: the tool keeps the later time"
+    );
+
+    // Until the key's next value: rev 12, under the new id.
+    let t12 = w["vehicle-01"].put("rev12").await.unwrap();
+    eventually("rev 12 arrives", || async {
+        got.lock().unwrap().iter().any(|(_, ts)| *ts == t12)
+    })
+    .await;
+    let arrivals = got.lock().unwrap().clone();
+    assert_eq!(
+        consumer_holds(&arrivals),
+        "rev12",
+        "{clock}: the consumer accepts the new epoch's next value"
+    );
+    assert_eq!(
+        tool_holds(&arrivals),
+        if behind { "rev10" } else { "rev12" },
+        "{clock}: the tool keeps the later time"
+    );
+    drop(w);
+    mgr.close().await.unwrap();
+}
+
 /// §9: an archive that holds a delete refuses an older put arriving late.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s9_an_archives_backend_refuses_an_outdated_put() {

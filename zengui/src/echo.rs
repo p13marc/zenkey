@@ -58,9 +58,9 @@ pub struct EchoLine {
     pub preview: String,
     /// True payload size, regardless of how much of it the preview shows.
     pub len: usize,
-    /// The sample's declared encoding, verbatim (observer §7.3: the sample's
-    /// encoding, then the contract's type, then sniffing, so this is the
-    /// highest-precedence signal).
+    /// The sample's `Encoding`, verbatim. Observer §7.3 reads it for the
+    /// declared type's wire, and a payload with no declared type is sniffed,
+    /// as `preview` is.
     pub encoding: String,
     /// A `Delete` is a tombstone — authoritative retirement, never a payload
     /// marker (core §4.2). It must be visibly distinct from an empty put.

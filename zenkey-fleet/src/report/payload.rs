@@ -1,8 +1,9 @@
 //! A zk2 sample, rendered for a tool that was never compiled against its
 //! contract (spec §7.2): `watch` and resolved `get`.
 //!
-//! The decode order is the sample's `Encoding`, then the contract's type,
-//! then sniffing, and the rendering is honest at every step: a value decoded
+//! The decode order is the declared type, then the sample's `Encoding` for
+//! the type's wire, then sniffing where there is no declared type
+//! (observer §7.3), and the rendering is honest at every step: a value decoded
 //! field by field, a raw type as its media type and size, bytes that do not
 //! decode as their declared type as that type, the size and the reason —
 //! and, when no contract is in hand, the structural ladder *with the reason

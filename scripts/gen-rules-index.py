@@ -68,7 +68,8 @@ From each sentence that states a rule, three things are read.
     label, the label first. A pronoun the entry opens with, or its rule's
     subject is, takes its noun in brackets from ANTECEDENTS, or the script
     fails naming its line; an entry there may give an object's noun too
-    ("over them [its interfaces' …]"). A rule that leads a list ends with
+    ("over them [its interfaces' …]"), or a verb the sentence leaves out
+    ("does not [opt into `reliability`]"). A rule that leads a list ends with
     the list's length, "(2 items)", or a table's, "(12 rows)". A rule a MAY
     excepts shows that MAY after it, "*Except:* …", from EXCEPTED_BY. It is
     shortened past MAX_WORDS, and never reworded.
@@ -223,6 +224,7 @@ ANTECEDENTS = {
     # sentence names; "them" is what its state queryables cover (F-384).
     ("core.md", "It MUST answer a selector over them"): [
         ("It", "the owner"), ("over them", "its interfaces' `state/**` and `@state/**`")],
+    ("core.md", "It MUST keep the newer by the owner's stamp"): ("It", "a late joiner"),
     ("core.md", "It MUST accept a value under an id other than"): ("It", "a consumer"),
     ("core.md", "It names the member each reply answers for"): ("It", "a server declared over the whole template"),
     ("core.md", "It MUST refuse:"): ("It", "a tool decoding an envelope"),
@@ -259,8 +261,12 @@ EXCEPTED_BY = {
     # `reliability`, unstable API, which an owner on stable API alone meets
     # by publishing reliable (F-380).
     ("core.md", "An owner MUST publish with it."): "One that does not, or whose binding offers no such API, MAY",
+    # core §4.3: S7's consumer MUST to accept another id, and the MAY for a
+    # profile's stricter order, which a `desired.v1` target uses (F-394).
+    ("core.md", "It MUST accept a value under an id other than"): "A profile MAY order a consumer's values more strictly",
     # the self-test's text
     ("text.md", "An owner MUST publish with the contract's QoS."): "One that does not, or whose binding",
+    ("text.md", "A consumer MUST order an owner's values by time."): "A profile MAY order",
 }
 # Where an excepting MAY follows its rule in an entry.
 EXCEPT = "*Except:*"
@@ -992,7 +998,8 @@ def render(rules: list, ids: list) -> str:
          "Those, such as `observer.md` §1, §2, §5 and §8, are not listed.")
     para(w, "A long sentence is shortened, never reworded, and its link leads to the "
          "rest. A sentence after its paragraph's run-in label shows the label first. "
-         "A pronoun's noun, where not shown, follows it in brackets. A lead-in ends "
+         "A pronoun's noun, where not shown, follows it in brackets. So does a verb "
+         "the sentence omits. A lead-in ends "
          "with its list's length, \"(3 items)\", or its table's. A MAY that excepts "
          "a rule follows it, after *Except:*. Nothing else is added.")
     para(w, "**Evidence** is what the text cites beside a rule. That is the tags "
@@ -1001,15 +1008,15 @@ def render(rules: list, ids: list) -> str:
          "closes a list cites each rule of it that cites none. Where the text cites "
          "none, the "
          "entry says \"none cited\". A rule's id is its row's, its section's, or the "
-         "code that checks it. MAY grants a permission. It is listed only beside a "
-         "rule it excepts.")
+         "code that checks it. MAY grants a permission. It is listed beside a rule "
+         "it excepts. A row's MAY is in the rule ids.")
     para(w, "**Conformance by role.** An implementation claims one class for each "
          "role it plays ([core §12](core.md#12-conformance-classes)). A class holds "
          "its role's rules and the static rules, listed here under implementation. "
          "Those are §1's, §9's, the contract rules of the sections §12 lists, and "
          "any rule naming its lint code. §3.3's descriptor checker is static too. A "
-         "rule of those sections that names a role is listed under it. So is one of "
-         "§1 or §9. A static rule "
+         "rule of those sections, §1 and §9 included, that names a role is listed "
+         "under that role. A static rule "
          "binds an implementation where it does what the rule governs. A class is "
          "claimed at the full level or the constrained one. A profile is a class of "
          "its own, and its rules are in its text.")

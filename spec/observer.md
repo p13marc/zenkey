@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.10 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.11 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.68 ([`core.md`](core.md)) |
+| **Written against** | core 0.69 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -606,10 +606,15 @@ and merge, a selector over several owners and "Observing S1" stay in core
 
 - **A tool's merge lasts.** A tool keeps core §4.2's merge for as long as
   it follows, across two timestamp ids too. A live sample whose stamp is
-  older than what its key holds is not kept after the seed either. A tool
-  that bounds what it holds counts what the bound forgot, and treats a
-  forgotten key as holding nothing. A consumer orders by core §4.3's
-  consumer rule instead (core §4.2). `[Sc: state.md §7]`
+  older than what its key holds is not kept after the seed either. A
+  consumer orders by core §4.3's consumer rule instead (core §4.2).
+  `[Sc: state.md §7]`
+  - **A bound on the merge.** A tool that bounds what it holds counts the
+    keys the bound forgot, and reports the count. A forgotten key holds
+    nothing, so the merge keeps the key's next value whatever its stamp.
+    That is the bound's cost. A tool that marks neither the key nor that
+    value shows the value as the key's latest, and only the count tells a
+    person that the merge did not order every key.
 - **R6 and a tool's seed.** R6 binds a consumer: a consumer that
   seeds discards a reply or a sample whose key is not concrete, whichever
   path brought it. A tool's seed shows what arrived, as its subscription
@@ -1013,12 +1018,21 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
 - **What a tool that shows or judges a payload decodes** (core §7.1).
   Such a tool MUST decode each payload by its declared type: `protobuf`
   (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema
-  2020-12, core §7.3), and a `raw` type by its media type only. A
+  2020-12, core §7.3), and a `raw` type by its media type only. The
+  sample's `Encoding` says which of the type's wires it travels on. A
+  payload with no declared type, a foreign key's, is sniffed (§8.1). A
   reserved kind (`flatbuffer`, `ros2msg`, `cdr`), which a contract
   declares as `raw` with a media type, tools MAY decode through a plugin.
   `[Sc: types.md §2]`
-- **Decode order** for a tool is: the sample's `Encoding`, then the
-  contract's type, then sniffing.
+- **Decode order** for a tool is: the declared type, then the sample's
+  `Encoding` for the type's wire, then sniffing where there is no declared
+  type.
+  - **A type's wires.** A JSON Schema type travels as JSON or CBOR, and a
+    raw family as one of its subtypes (core §7.1, §7.2). So a state
+    declared `cbor` whose sample's `Encoding` is JSON is read as JSON.
+  - **An `Encoding` that names neither JSON nor CBOR**, zenoh's default
+    `zenoh/bytes` or another type's, does not pick a JSON Schema type's
+    wire. The type is then read on its contract's `encoding` (core §7.2).
 - **Honest rendering.** A tool that shows a payload it cannot decode MUST
   render it as its declared type and size, or through a plugin. It MUST
   NOT show garbage, and MUST NOT drop the sample silently.

@@ -22,8 +22,10 @@ section number alone is the core's.
 - **Epoch**: a span of continuity, which an instance id names. An owner
   starts a new one whenever its counters reset or its state's ordering
   restarts ([§1.5](core.md#15-identity)). §1.5 asks for a new session, so
-  that its stamps' id changes too. With no record of its last stamp, §4.3
-  requires a fresh zid ([§4.3](core.md#43-clocks-s7)).
+  that its stamps' id changes too. An owner takes its last stamp from its
+  own record. Without one, it reads an archive on its own side. With
+  neither, §4.3 requires a new instance whose session has a fresh,
+  unpinned zid ([§4.3](core.md#43-clocks-s7)).
 - **Resource**: what an interface provides: a stream, a state, an event or
   an operation ([§2.1](core.md#21-patterns)).
 - **Kind**: which of the four a resource is, and the key token that says
@@ -118,10 +120,10 @@ section number alone is the core's.
   caller or an owner where it reads
   ([observer §0](observer.md#0-conventions)).
 - **Static rule**: a rule that binds every implementation where it does
-  what the rule governs. Those are §1's, §9's, those on what a contract
-  states in the sections §12 lists, any naming its lint code, and §3.3's
-  checker's. A rule of those sections that names a role is that role's
-  ([§12](core.md#12-conformance-classes)).
+  what the rule governs. Those are §1's, §9's, the contract rules of the
+  sections §12 lists, any naming its lint code, and §3.3's checker's. A
+  rule of any of those sections, §1 and §9 included, that names a role is
+  that role's ([§12](core.md#12-conformance-classes)).
 - **Expose**: an instance exposes a resource when it serves it, as its
   descriptor says ([§8.2](core.md#82-start-up-order)). It is **active** on
   an interface when it exposes one of its resources
