@@ -13,6 +13,100 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.12 — 2026-10-31: round 92's F-406, F-407, F-409 and F-412: a type not in hand, the bound's count, a profile's reader (#926)
+
+zk2py round 92 (PR #973) read 0.11 cold beside core 0.69. Core 0.70
+answers its findings on the core, the scenarios and the index. This text
+answers F-406, F-407, F-409 and F-412, and is written against core 0.70.
+
+**The reference, read first.**
+- **F-406, a zk2 key whose contract is not in hand.** `zenkey-fleet`'s
+  `model::render` and `Lens::check` sniff, by `model::structural`, every
+  payload they hold no declared type for.
+  - **That is** a foreign key's, and a zk2 key's when no provider or
+    revision is named, or its contract is not held, unavailable or
+    unreadable.
+  - **Each such rendering carries `Unresolved`**, the step where
+    resolution stopped. zenctl prints its words after the sniffed text,
+    "(structural: contract sha256:… unavailable (§8.4))". zengui's
+    Inspector prints them above it, "structural — …".
+- **F-407, the bound's count.** The seeded merge adds what each eviction
+  removed to `Monitor::merge_evicted` and `SeededSubscriber::evicted`. It
+  keeps no set of the keys it forgot. So a key forgotten, heard again and
+  forgotten again counts twice: the finding's reading (a).
+- **F-409, a profile's reader.** None reads its wire from the sample's
+  `Encoding`.
+  - **`telemetry.v1`:** the fleet's `TelemetryBook`, and the check
+    `Lens::check_sample` runs after the schema's, read a sample by
+    `Datum::decode` on its resource's `encoding`.
+  - **`alarms.v1`:** `zenkey_model::alarms::decode` reads strict JSON.
+  - **`desired.v1`:** `zenkey_model::desired::decode` reads a report as
+    strict JSON. A target reads a document of a JSON Schema type on JSON
+    as strict JSON, and any other through core §7.2's decoding, as its
+    §2.7 says.
+  - **So the profiles' texts stand.**
+
+**Said: a payload whose declared type is not in hand (F-406, a gap).**
+§7.3 named a foreign key's alone. A zk2 key's payload whose contract the
+tool could not retrieve has a declared type, in a contract it does not
+hold.
+- **Now:** "A payload whose declared type the tool does not hold is
+  sniffed (§8.1). That is a foreign key's, or a zk2 key's whose contract
+  is not in hand or is unavailable (§2). The tool says which, naming where
+  it stopped resolving the key."
+- **"Says which"** is what the reference says: the step where resolution
+  stopped, which names the case.
+- **No keyword,** as the sentence it replaces had none. The bullet's MUST
+  and its `[Sc: types.md §2]` stand.
+- **What moves:** what a tool shows. zk2py's echo tool holds no contract,
+  so every zk2 key falls here, as round 92 took it.
+
+**Changed: the bound's count (F-407, ambiguous).** "Counts the keys the
+bound forgot" read as each forgetting, or as each key once. §4.1 now says
+"counts each time the bound forgets a key, and reports the count". That is
+the reference's count and zk2py's. There is no keyword, as before.
+
+**Said: a profile's reader (F-409, a conflict).** §7.3's wires bound every
+tool that judges a payload, a profile's reader among them.
+`telemetry.v1` §2.6 and `alarms.v1` §2.4 read otherwise, for a sample
+whose `Encoding` breaks core §7.2's MUST.
+- **Now:** a bullet under the decode order, "A profile that says how its
+  reader reads a sample's bytes decides for that reader". So a
+  `telemetry.v1` reader reads a sample on its resource's `encoding`, and
+  an `alarms.v1` reader strict JSON, whatever the sample's `Encoding`.
+- **One tool can read such a sample twice.** zengui's Inspector renders it
+  by §7.3, and its metric series reads it as `telemetry.v1` does. Only a
+  non-conforming owner's sample makes the case.
+- **What moves:** zk2py's verdict on the decode order may. Its readers
+  read as their profiles say.
+
+**Wording: the decode order (F-412, hard to read).** Joined by "then", it
+read as fallbacks. A payload that failed its declared type would then be
+sniffed next.
+- **Now:** "a payload whose declared type the tool holds is decoded by
+  that type, on the wire its sample's `Encoding` names (below). Any other
+  payload is sniffed." That is the finding's rewrite, in F-406's terms.
+- **§8.1** called sniffing "§7.3's last rung". It now says "§7.3's
+  sniffing".
+- **A payload that does not decode** stays honest rendering's: its
+  declared type, its size and the reason. zengui's Inspector and zenctl's
+  `echo` also show its bytes sniffed beside them, named as not the
+  declared type. That is no decode, so no rule moved for it.
+
+**How the rules were diffed.** 44 sentences holding an RFC 2119 keyword
+before and after, all unchanged. Every other sentence was diffed too. The
+others that moved are §4.1's count (F-407), and §7.3's sniffing and decode
+order (F-406, F-412). With them moved its profile's reader (F-409), §8.1's
+pointer (F-412) and the header.
+
+**The figures.** This text's mean went from 18.21 words to 18.19, with no
+sentence over 50 and no tag.
+
+**Deliberately not changed.**
+- **§7.3's two MUSTs and honest rendering.**
+- **The profiles' texts,** which say how their readers read already.
+- **No other rule**, and no section number or anchor.
+
 ## 0.11 — 2026-10-31: round 91's F-397 and F-398, the decode order and a merge's bound (#926)
 
 zk2py round 91 (PR #971) read 0.10 cold beside core 0.68. Core 0.69
