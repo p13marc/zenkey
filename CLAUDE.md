@@ -1548,8 +1548,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   long sentences and tags with their lines. Core 0.66 (#926) claims
   conformance by role (§12): one class each for owner, consumer, caller,
   deployment and observer (§0's tool role, named for `observer.md`), each
-  its role's rules in both texts plus the static rules (§1's, §9's and
-  every rule on what a contract states). An implementation claims one
+  its role's rules in both texts plus the static rules (§1's, §9's, those
+  on what a contract states in the sections §12 lists, §2.2, §2.4, §2.5,
+  §2.6, §3.1, §7.1 and §10, and any rule naming the lint code checking
+  it). An implementation claims one
   class per role it plays; full is every class, their union, so what
   conformed still does; constrained modifies a class, its table kept; a
   profile is a class of its own, claimed by following it. A reader's rules
@@ -1562,6 +1564,14 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   rule's role from its subject by §0's role words and plain synonyms, and
   fails naming the line of a rule whose role it cannot read: the cure is a
   sentence that names its role, never an entry in its empty `EXCEPTIONS`.
+  Where a subject names no role it reads only a passive's agent, a run-in
+  role label (for the sentence it opens alone), a pronoun's antecedent in
+  the same paragraph, or a static rule by the list it reads from §12's
+  sentence "The static rules are …" (or a lint code): never a section's
+  title, and a pronoun with no antecedent there is unread, not static.
+  `--how` (`--how=other`) prints how each rule's role was read, for an
+  audit. A reader's rules are listed once, under observer, marked
+  *reader*, and the owner, consumer and caller sections each point to them.
   After a change to either text run `python3 scripts/gen-rules-index.py`
   and commit `RULES.md`: `--check` (the fmt job, the Docs lane and `just
   ci`) fails when it is stale, and `--self-test` reads
