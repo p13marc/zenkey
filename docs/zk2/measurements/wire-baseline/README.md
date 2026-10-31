@@ -380,8 +380,10 @@ rests on.
    rarely crosses whole.** Each 28.6 s the device re-puts its view (1,592 B
    bare, 8 SDUs) and its status (314 B bare, 2 SDUs). With the lean stack's
    16 B an SDU that is 2,066 B, where the model had 1,902 B before its
-   correction. Its puts carried no key text, and it took config.v1's 1,286-B
-   view and 330-B status, where the example's are 1,476 and 226 B. The
+   correction. That model gave the puts no key text, where they carried their
+   key's text all run, since they were put before router A declared their
+   scope. It also took config.v1's 1,286-B view and 330-B status, where the
+   example's are 1,476 and 226 B. The
    corrected Appendix A gives exactly 2,066 B for these payloads, and 1,980 B
    for config.v1's. A view crosses only when all 8 of its SDUs do: 38 of 65
    did (58 %), where 0.95^8 is 66 %.
