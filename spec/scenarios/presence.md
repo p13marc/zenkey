@@ -416,9 +416,9 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    reader that makes no read while no round trip stands, until its first
    round trip has run out under the 300 ms interests timeout. By then
    every round trip the reader asked before that seed has run out under
-   it. How many is the reader's own: two for one that makes a round trip
-   at its start and another before its seed, one for one whose start's
-   round trip is its seed's.
+   the 300 ms interests timeout. How many that is depends on the reader:
+   two for one that asks a round trip at its start and another before its
+   seed, and one for one whose start's round trip serves its seed too.
    Then the stall ends. Then the watch session's link is cut, and
    healed.
 7. As step 1 without the stall, the owner and the tool in `ns`, each case
@@ -458,8 +458,9 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
     its watch session and its reading session both through a link the
     test can cut. Its caller asks it for its next move from a loop that
     also wakes every 20 ms, which may drop the call in flight. A reader
-    whose reads do not run on its caller's call has none to drop, and its
-    own waits, each ended after 20 ms, stand in. Its link is cut for 1 s,
+    whose reads do not run on its caller's call has no call for it to
+    drop. Its own waits, each given up after 20 ms, stand in for the
+    dropped calls. Its link is cut for 1 s,
     and healed.
 
 **Expected.**
@@ -488,10 +489,10 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    round trip first, and once one stands a read is complete again. When
    the link is cut, every address the reader followed is unobservable at
    once, the owner's among them, from the move itself and before any
-   read, since its subscribers may not hear what moved. It reads again
-   at once and makes no read and no round trip through its watch session
-   cut off, though its reading session holds its link (a read not made):
-   the owner unobservable, never down. After the heal it makes
+   read, since its subscribers may not hear what moved. It owes a read at
+   once, and makes none. While its watch session is cut off it asks no
+   round trip and makes no read, though its reading session holds its
+   link: a read not made. The owner is unobservable, never down. After the heal it makes
    the round trip again before the read that finds the owner up.
 7. In `ns`, the subscriber without history never hears the token go: its
    router tells the withdrawal by the token's key, and the namespaced

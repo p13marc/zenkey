@@ -4,6 +4,28 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.11 — 2026-10-31: a re-mint that is a restart seeds (F-347) (#935)
+
+zk2py round 88 (#609) read 0.10 cold. It found F-336's rule as the
+finding asked, and one gap beside it (F-347). §2.16 made a `config.v1`
+owner's re-mint begin a new run that MUST act on the first version it
+reads. But §2.5 asked a seed only at a target's start and at its
+author's instance token appearing, and a re-mint is neither. Its
+subscription was declared by the run before. So the version that run
+acted on is not delivered again. Under §12's setup the author puts
+once, so a re-minted owner that did not seed would read nothing and run
+its startup values for good: the state §2.16 exists to avoid.
+
+**The rule.** §2.5: a target MUST seed at its start, at a re-mint that is
+a restart (§2.16), and at each appearance of its author's instance token.
+The evidence is scenarios §12, now cited beside §1 and §5: Expected 1's
+second branch, the re-minted owner acting on revision 1 again, needs the
+seed. zk2py's owner seeds at its re-mint and runs that branch. The
+reference refuses the re-mint, so it runs the first branch.
+
+**Deliberately not changed:** §2.7's general rule, that a re-mint keeps
+the run, and every other target's seeds. No fixture moved.
+
 ## 0.10 — 2026-10-30: a `config.v1` owner's re-mint is a restart (F-336), and round 87's F-341 to F-346, editorial (#935)
 
 zk2py round 87 (PR #961) read 0.9 cold, beside `alarms.v1` 0.9 and

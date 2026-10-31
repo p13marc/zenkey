@@ -3,6 +3,32 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.65 — 2026-10-31: editorial: round 88's F-354 to F-357 rewritten, no rule changed (#935)
+
+zk2py round 88 (#609) read 0.64 cold and found that it changed no rule.
+It filed four hard-to-read sentences in the core's scenarios and the
+profiles' index, each rewritten as the finding proposed.
+- **`scenarios/presence.md` §10:**
+  - **F-354, Expected 6:** "It reads again at once and makes no read"
+    contradicted itself. It now says the reader owes a read at once and
+    makes none: while its watch session is cut off it asks no round trip
+    and makes no read, though its reading session holds its link.
+  - **F-355, step 10:** "stand in" had no object. A reader whose reads do
+    not run on its caller's call has no call to drop, and its own waits
+    "stand in for the dropped calls".
+  - **F-356, step 6:** "has run out under it" now names the 300 ms
+    interests timeout, and "How many is the reader's own" now reads "How
+    many that is depends on the reader".
+- **F-357, `profiles/README.md`'s `desired.v1` item:** "Nor did a stamp's
+  id that is never 0, which is its own §2.4's" left out its verb. It now
+  says the rule needed no core change either, being `desired.v1`'s own, in
+  its §2.4. The index's rows move with `desired.v1` 0.11, `redundancy.v1`
+  0.7, `timing.v1` 0.7 and `arbitration.v1` 0.5.
+
+**Deliberately not changed:** no rule, no step, no Expected outcome; no
+section number or anchor. `observer.md` keeps text 0.7, written against
+0.63.
+
 ## 0.64 — 2026-10-30: editorial: the core's scenarios and the profiles' index without inline history, no rule changed (#935)
 
 The core's scenarios, the profiles' index and the compatibility

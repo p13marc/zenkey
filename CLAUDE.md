@@ -1109,7 +1109,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   resource; text 0.9, #935: inline history out, no rule changed; text
   0.10, #935: a `config.v1` owner's re-mint is a restart, a new run that
   acts again, §0's and §2.7's one exception (round 87's F-336, `[Sc:
-  §12]`), and F-341 to F-346 rewritten),
+  §12]`), and F-341 to F-346 rewritten; text 0.11, #935: a re-mint that
+  is a restart seeds as a start does, §2.5, round 88's F-347),
   `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
@@ -1134,7 +1135,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   no holder, `polls.json`; text 0.4, F-220 to F-223, #841 RD: a standby
   probe's wildcards and the MUST never to ask one that would run an
   operation, `[Sc: §12]`; text 0.5, F-226: §12 step 9, the MUST's
-  offline half; text 0.6, #935: inline history out, no rule changed),
+  offline half; text 0.6, #935: inline history out, no rule changed;
+  text 0.7: round 88's F-352 and F-353 rewritten in the scenarios),
   `timing.v1`'s (`timing`, #908 MA: the vocabulary,
   `period_ms`, `deadline_ms` and `lifespan_ms`, the interim row published
   unchanged by core 0.53; `declaration`/`declaration_of` over a resolved
@@ -1173,7 +1175,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   again is read over its first life, its span and held time ending
   there); `roll_up_first`, the roll-up's answer with the first member
   giving it in byte order of the keys and its reason, none over no
-  member; text 0.6, #935: inline history out, no rule changed),
+  member; text 0.6, #935: inline history out, no rule changed; text 0.7:
+  round 88's F-348, F-350 and F-351 rewritten),
   and `arbitration.v1`'s (`arbitration`, #909 BA: the
   vocabulary, `policy` on a requirement, the interim row published
   unchanged by core 0.54, the first read on a requirement;
@@ -1215,7 +1218,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   them alike; §2.14 says what a tool's view reads that no descriptor
   carries, no ε and governance from every revision held, and that it has
   listened from its stream subscriptions' declaration; text 0.4, #935:
-  inline history out, no rule changed).
+  inline history out, no rule changed; text 0.5: round 88's F-349
+  rewritten).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1581,7 +1585,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   (`desired.v1` §2.16 and its scenarios' new §12, which the reference
   runs; `config.v1` 0.8 says its instance is that run). No text under
   `spec/` holds an inline history tag outside its changelogs, its history
-  sections and its header.
+  sections and its header. Round 88's F-348 to F-357 are rewritten (the
+  profiles above, and core 0.65 for `presence.md` §10 and the profiles'
+  index), no rule changed, and its F-347 is `desired.v1` 0.11's seed at a
+  re-mint that is a restart.
   `observer.md` holds the reader's discipline core 0.58 moved out, word
   for word, no rule changed (§8.1's "Reading presence" its §3, §2.7's
   readings and conclusions its §5, §4.2's seed, admin-space and S1 checks
