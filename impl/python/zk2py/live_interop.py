@@ -3381,6 +3381,75 @@ def run_python_seed(report: Report, exe: Path) -> None:
         r1.close()
 
 
+def run_python_s7(report: Report, exe: Path) -> None:
+    """``state.md`` §7 step 2 (S7, core §4.3; 0.67, F-368) with the owner
+    example as the owner and zk2py's late joiners as the consumer and the
+    tool: the owner example puts ``items/a`` of ``budget.v1``, both seed it,
+    and it restarts with no record, a new instance on a new session, its
+    clock 5 s behind (``--clock-offset-ms -5000``, its documented "clock's
+    simulated offset"), and puts ``items/a`` again. "The consumer sees a new
+    timestamp id, accepts rev 11, and restarts its ordering": zk2py's
+    consumer orders by S7 once its seed's GET ended (:func:`zk2py.seed.follows`),
+    and its tool's late joiner, by §4.2's merge, is the control."""
+    from . import live
+    from . import seed as sd
+
+    r1, ep, _ = _r1()
+    tool = live.open_client(ep)
+    rusts: list[Owner] = []
+    joiners: list[Any] = []
+    try:
+        run = "core 0.67 S7: state.md §7 step 2, a new epoch behind, after a late joiner's seed (budget.v1 items/a)"
+        first = Owner(exe, "lab/s7", [REPO / BUDGET_V1], connect=ep)
+        rusts.append(first)
+        if not report.check(run, "the owner example starts behind R1", first.wait_for("ready ", 120) is not None,
+                            str(first.stderr[-1:])):
+            return
+        base = "zk2/lab/s7/budget.v1/state/items"
+        put10 = first.command("put budget.v1 state/items/{item} a")
+        time.sleep(0.3)
+        lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
+        lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=5.0)
+        joiners += [lc, lt]
+        for j in joiners:
+            j.start()
+        seeded = all(j.wait() for j in joiners)
+        s10 = lc.view().get(f"{base}/a")
+        report.check(run, "both late joiners seed items/a from the owner example's GET",
+                     bool(put10) and seeded and s10 is not None and lt.view().get(f"{base}/a") is not None,
+                     f"{put10!r}; consumer {s10}")
+        first.close()
+        rusts.remove(first)
+        second = Owner(exe, "lab/s7", [REPO / BUDGET_V1], connect=ep, flags=["--clock-offset-ms", "-5000"])
+        rusts.append(second)
+        if not report.check(run, "it restarts with no record, --clock-offset-ms -5000",
+                            second.wait_for("ready ", 120) is not None, str(second.stderr[-1:])):
+            return
+        put11 = second.command("put budget.v1 state/items/{item} a")
+        time.sleep(0.6)
+        news = [x for x in lc.applied if x.key == f"{base}/a" and x.via == "live"
+                and s10 is not None and x.stamp is not None and x.stamp.id != s10.stamp.id]
+        report.check(run, "the new instance's put carries a new timestamp id, its time below the old one's",
+                     bool(news) and s10 is not None and news[0].stamp.time < s10.stamp.time,
+                     f"{put11!r}; old {s10.stamp if s10 else None}, new {[str(x.stamp) for x in news]}")
+        got = lc.view().get(f"{base}/a")
+        report.check(run, "expected 2: the consumer accepts it, by S7's consumer rule after its seed",
+                     bool(news) and got is not None and got.stamp == news[0].stamp
+                     and [(x.outcome, x.rule) for x in news] == [("kept", "S7")],
+                     f"held {got.stamp if got else None}; {[(x.outcome, x.rule) for x in news]}")
+        held = lt.view().get(f"{base}/a")
+        report.check(run, "the control: a tool's late joiner, §4.2's merge, keeps the old epoch's later time",
+                     s10 is not None and held is not None and held.stamp == s10.stamp,
+                     f"held {held.stamp if held else None}")
+    finally:
+        for j in joiners:
+            j.close()
+        for o in rusts:
+            o.close()
+        tool.close()
+        r1.close()
+
+
 DEFAULT_ZENCTL = REPO / "target" / "debug" / "zenctl"
 
 
@@ -3419,6 +3488,7 @@ def main(argv: list[str] | None = None) -> int:
         "health": lambda r: run_python_health(r, args.owner, args.consume),
         "budget": lambda r: run_python_budget(r, args.owner),
         "seed": lambda r: run_python_seed(r, args.owner),
+        "s7": lambda r: run_python_s7(r, args.owner),
         "config": lambda r: run_python_config(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
         "security4": lambda r: _run_security4(r, args.zenctl),
