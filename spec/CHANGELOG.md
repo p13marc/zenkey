@@ -3,6 +3,158 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.66 — 2026-10-31: conformance classes by role, and a generated rule index (#926)
+
+§12 had two levels. Full met every rule, and constrained was full with
+relaxations. A team that publishes one stream read that it must meet every
+rule, and could not find the rules that bind it short of reading both
+texts. Yet §0 already makes every rule name the role it binds. This version
+claims conformance by role (#926, epic #921 Track B, after #925 and #935).
+It is the review's F3, taken further. `observer.md` moves to text 0.8
+beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), written
+against this version.
+
+**Changed: §12, conformance classes.** Its title is "Conformance classes",
+its number unchanged.
+- **One class per role of §0:** owner, consumer, caller and deployment,
+  and observer for the tool role. The observer class is named for
+  `observer.md`, which holds most of its rules, and the role keeps §0's
+  word.
+- **A class** holds its role's rules in this text and in `observer.md`,
+  and the static rules. Those are §1's and §9's, as §0 says, and each rule
+  elsewhere on what a contract states, which §9.2's lints check: §2.2's
+  templates, §2.5's history, §2.6's retention, §3.1's `resources`, §7.1's
+  `json:` names and §10's `uses`. Each names a contract or a template, and
+  no other role.
+- **A reader's rules,** which `observer.md` §0 extends to any participant
+  that reads presence, state or the admin space and concludes from it,
+  belong to the class of the role that participant plays.
+- **Claiming.** An implementation claims one class for each role it plays.
+  A rule that binds two roles is in both classes. A service that only
+  publishes a stream claims the owner class alone: the owner rules and the
+  static rules.
+- **Full** is every class. A rule binds only the role it names, so full
+  holds what the full level held: every rule of this text, and every rule
+  of `observer.md` that binds a role the implementation plays. Full is the
+  union of the classes, and holds no rule a class does not.
+- **Constrained** is a modifier on a class, with its table kept. The table's
+  descriptor row now names its role (below).
+- **Profiles** stay opt-in, one class each (§10). A service claims a
+  profile's class by listing it in its descriptor's `profiles`, and a tool
+  by answering its questions (its §5). A profile's rules name their roles
+  by core §0's words already, as the template's §0 asks, so no profile's
+  text moves. No class of this text holds a profile's rules.
+- **§0's pointer.** After the roles: "Conformance is claimed by role
+  (§12), and `RULES.md` lists the rules of each role's class."
+
+**Added: [`RULES.md`](RULES.md), generated.**
+- **What it lists.** Every sentence of this text and `observer.md` that
+  states a rule with MUST, MUST NOT, SHOULD or SHOULD NOT. Each is listed
+  under the role it binds, then by section (number and title, linked), with
+  its rule ids and its evidence. A table of the rule ids follows: R1–R7,
+  S1–S7, O1–O7, D000–D012 and the E and W codes, each with the role its row
+  binds.
+- **The counts.** 167 rules: 57 bind an owner, 13 a consumer, 12 a caller,
+  14 a deployment, 46 the tool role or a reader, and 32 every
+  implementation. A rule that binds two roles is counted in each. There are
+  71 rule ids.
+- **The script,** `scripts/gen-rules-index.py`, uses the Python standard
+  library alone, like `check-spec-prose.py`, whose reading of blocks and
+  sentences it shares. It reads a rule's role from its subject, by §0's
+  role words and their plain synonyms (an owner, the owner's, an archive, a
+  reader), and fails naming the line of a rule whose role it cannot read.
+  Its header says how it falls back: a passive's agent, a table's role
+  label, a pronoun's antecedent, a section's title, a static section or
+  lint code. Its table of exceptions is empty.
+- **The checks.** `--check` fails when `RULES.md` is stale, and
+  `--self-test` reads a fixture text with known rules and roles
+  (`scripts/fixtures/rules-index/`). CI runs both in the fmt job and on
+  the Docs lane, and `just ci` runs them too.
+- **The minimum path.** A stream-only owner's is the index filtered to
+  owner and implementation. `RULES.md`'s header says so, and §12 and
+  `spec/README.md` link it.
+
+**Editorial: twelve rules that name their role, no rule changed.** The
+index reads each rule's role from its subject. Where a subject named no
+role, the sentence now names it, its keyword, condition and scope kept:
+- **§1.5:** "A counter that crosses a face where neither is visible SHOULD
+  carry its epoch" is "An owner's counter that crosses …".
+- **§2.4:** "**State and events** SHOULD keep `reliable` and `block`" is
+  "**A contract's state and events** SHOULD keep …", the contract that
+  declares their QoS.
+- **§3.2, R7:** "A binding MUST NOT require presence" is "**Consumer:** a
+  binding MUST NOT require presence", labelled as R6 is.
+- **§3.2:** "A runtime MUST resolve a provider whose system position is
+  `self.system`" is "A consumer's runtime MUST resolve …": a provider is a
+  binding's, and a binding is the consumer's (§0).
+- **§3.3, `cardinality`:** "It MUST NOT raise it" is "The owner's
+  descriptor MUST NOT raise it".
+- **§3.3, size:** "A descriptor SHOULD stay within 1 KB" is "An owner's
+  descriptor SHOULD stay within 1 KB", and the MUST after it, "it MUST fit
+  one fragment", reads its role from it.
+- **§5.2:** "**The reply's `Encoding`** MUST say which" is "**The
+  `Encoding` of the owner's reply** MUST say which".
+- **§5.2:** "A detail that does not fit its envelope … MUST NOT be sent" is
+  "… MUST NOT be sent by an owner".
+- **§7.1:** "The name MUST be unique across the listed files" names the
+  lint that checks it, "(E024)", which makes it a static rule the index can
+  read.
+- **§8.5:** "**A batch SHOULD take at most a third of the lease to cross
+  the face.**" is "**A deployment's batch SHOULD take …**".
+- **§8.5:** "**`@stream` keys SHOULD be denied across the face**" is "**A
+  deployment SHOULD deny `@stream` keys across the face**".
+- **§8.5:** "So the far side's principal MUST be granted
+  `declare_queryable`" is "So a deployment MUST grant the far side's
+  principal `declare_queryable`".
+- **§12's table:** the descriptor row, "MUST fit one fragment", is "An
+  owner's descriptor MUST fit one fragment".
+
+**`spec/README.md`.**
+- **A glossary** at its top: 36 terms, each in one or two sentences and
+  linked to the section that defines it.
+  - **The issue's 23:** system, service, interface, instance, epoch, member,
+    kind, explicit, resource, template, cardinality, descriptor, contract,
+    bundle, fingerprint, revision, binding, role, tokenless, standby,
+    archive, watch session and complete read.
+  - **13 the index's sentences lean on:** ambient selector, requirement,
+    provider, token, presence, re-mint, stamp, late joiner, tombstone
+    window, face, round trip, profile and class.
+- **A row for `RULES.md`** in the table of what is here.
+- **Two tags out of the table.** The glossary's heading puts the table
+  under the prose check's count of tags. So "(#925)" goes from
+  `observer.md`'s row, and "Seeded by `zenkey-model` (#608), completed by
+  #607." from `conformance/`'s.
+
+**How "no rule changed" was checked**, with the tool of #935's third
+part.
+- **The method.** Every sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT,
+  MAY, REQUIRED or RECOMMENDED was extracted before and after, keyed by
+  section, and the two sets diffed. Both hold 152. 139 are unchanged, and
+  the other 13 are the thirteen above, read pair by pair. Each adds its
+  role's name to its subject, or §7.1's lint code, and keeps its keyword,
+  condition and scope.
+- **Every sentence** was diffed too. The others that moved are §12's new
+  text, §0's pointer and the header's version. No fixture moved, and no
+  scenario.
+
+**The figures.** This text's mean went from 16.47 words to 16.44, with no
+sentence over 50 words and no tag. `spec/README.md`'s went from 14.5 to
+12.43, and `RULES.md` starts at 13.19, with none over 50 and no tag.
+`spec/.prose-baseline.json` is lowered to them, and records `RULES.md`.
+
+**Deliberately not changed.**
+- **No rule.** No keyword, condition or scope moved, and no section number.
+  §12's anchor moved with its title, and nothing linked it.
+- **What conforms.** Full is the union of the classes, so what conformed at
+  the full level conforms to every class, and what conformed at the
+  constrained level conforms to every class at it.
+- **The roles and their words.** §0 still names six, the tool among them.
+  The observer class takes its name from `observer.md`, not from a new
+  role.
+- **Every profile's text.** A profile's §0 takes its roles from core §0, so
+  its rules already name the roles they bind.
+- **Appendix C.** Its `constrained.md` row still covers §12.
+
 ## 0.65 — 2026-10-31: editorial: round 88's F-354 to F-357 rewritten, no rule changed (#935)
 
 zk2py round 88 (#609) read 0.64 cold and found that it changed no rule.

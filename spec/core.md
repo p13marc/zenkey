@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.65** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.66** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -44,7 +44,9 @@ RFC 2119 and RFC 8174, when written in capitals.
 - **implementation**: any software claiming conformance. The static rules
   (§1, §9) bind it, whichever of the roles above it plays.
 
-An archive (§4.4) is an owner of its own keys.
+An archive (§4.4) is an owner of its own keys. Conformance is claimed by
+role (§12), and [`RULES.md`](RULES.md) lists the rules of each role's
+class.
 
 **Evidence.** Each MUST cites what checks it:
 - `[F: path]` is a fixture under `conformance/`, which every implementation
@@ -199,8 +201,8 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   - It SHOULD do so in a new session, so that its timestamps' id changes
     too (§4.3). That change, and presence, are how a consumer sees the
     discontinuity.
-  - A counter that crosses a face where neither is visible SHOULD carry
-    its epoch in-band, in its value or its attachment, as
+  - An owner's counter that crosses a face where neither is visible
+    SHOULD carry its epoch in-band, in its value or its attachment, as
     [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9).
     Without one, a reader across the face reads a decrease as a reset
     ([`link.v1`](profiles/link/v1.md) §2.13; `telemetry.v1` §2.10, §2.14).
@@ -335,9 +337,9 @@ with it. The fields map one-to-one onto Zenoh's stable QoS.
 | `priority` | `real_time`, `interactive_high`, `interactive_low`, `data_high`, `data`, `data_low`, `background` | data | data_low | data |
 | `express` | bool | false | false | false |
 
-- **State and events** SHOULD keep `reliable` and `block`. A state declared
-  `best_effort` relies on re-puts to heal a lost update: zenoh-modem re-puts
-  each document every `ttl_s/2`, as
+- **A contract's state and events** SHOULD keep `reliable` and `block`. A
+  state declared `best_effort` relies on re-puts to heal a lost update:
+  zenoh-modem re-puts each document every `ttl_s/2`, as
   [`freshness.v1`](profiles/freshness/v1.md) §2.4 requires of an owner
   whose state declares a horizon. An archive (§4.4) recording such a
   state can then miss values between re-puts, and `drop` loses values on
@@ -517,7 +519,7 @@ the required interface, and MUST NOT be empty.
 | R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.8). | `[F: compat/]` |
 | R5 | A consumer MAY wait on presence for its bound providers. A binding resolves at once without it. | `[Sc: bindings.md §1]` |
 | R6 | **Consumer:** MUST discard a sample, or a GET reply, whose key expression is not concrete. Zenoh delivers a put on a wildcard key with the publisher's key. | `[Sc: bindings.md §4]` |
-| R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it. Where nothing crosses, liveness is *unobservable*; what a tool says of it: [`observer.md`](observer.md) §7.1. A `health.v1` status that crosses is such evidence, and its health is unobservable where the face closes it ([`health.v1`](profiles/health/v1.md) §2.8). | `[Sc: constrained.md §3]` |
+| R7 | **Consumer:** a binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it. Where nothing crosses, liveness is *unobservable*; what a tool says of it: [`observer.md`](observer.md) §7.1. A `health.v1` status that crosses is such evidence, and its health is unobservable where the face closes it ([`health.v1`](profiles/health/v1.md) §2.8). | `[Sc: constrained.md §3]` |
 
 When several providers are bound, choosing between them is the consumer's.
 [`arbitration.v1`](profiles/arbitration/v1.md) says how, for a role whose
@@ -533,7 +535,7 @@ from every bound provider.
   `arbitration.v1` reads it as a priority, the first entry the highest
   (its §2.4). `[Sc: bindings.md §6]` `[F: descriptors/ok-binding-order]`
 
-- **A provider on the service's own system.** A runtime MUST
+- **A provider on the service's own system.** A consumer's runtime MUST
   resolve a provider whose system position is `self.system` into the
   service's own system, once, when the service starts, as it resolves the
   rest of its configuration: `self.system/<service>` becomes
@@ -650,9 +652,10 @@ gate does not name.
     standby is known by its interface token (§6), and a tokenless
     interface has none. `[F: descriptors/d012-standby-tokenless]`
 - **`cardinality`** MAY lower a template's bound for this instance, keyed
-  `<kind token>/<template>`, to a value from 1 to the contract's. It MUST
-  NOT raise it. `[F: descriptors/d007-*]` The bound it states is the one
-  the instance's owner keeps, and a tool judges against (§2.7).
+  `<kind token>/<template>`, to a value from 1 to the contract's. The
+  owner's descriptor MUST NOT raise it. `[F: descriptors/d007-*]` The bound
+  it states is the one the instance's owner keeps, and a tool judges
+  against (§2.7).
 - **Integers.** As in a contract (§9.1), the schema's `format` is a bound,
   not an annotation. Here `uint64` is 0 to 2^64−1, a JSON number with no
   TOML limit, for `minor` and every `cardinality` value. A value outside it
@@ -695,8 +698,9 @@ gate does not name.
     zid's text can be shorter than 32 digits, and another writer can spell
     the same id differently. An owner SHOULD write `meta.zid` as zenoh
     writes it. How a tool compares two zids: [`observer.md`](observer.md) §4.4.
-- **Size.** A descriptor SHOULD stay within 1 KB. At the constrained level
-  (§12), it MUST fit one fragment. `[Sc: constrained.md §5]`
+- **Size.** An owner's descriptor SHOULD stay within 1 KB. At the
+  constrained level (§12), it MUST fit one fragment.
+  `[Sc: constrained.md §5]`
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
   it changes, and MUST answer a GET there with the current one.
   `[Sc: presence.md §2]`
@@ -1276,7 +1280,7 @@ it declares one, else its `response` type:
 - **A raw type:** the envelope is JSON. A raw `error` type's detail is its
   bytes as base64 text (RFC 4648 §4, padded), the JSON form of bytes
   (§7.2). `[F: errors/cases.json]`
-- **The reply's `Encoding`** MUST say which:
+- **The `Encoding` of the owner's reply** MUST say which:
   - `application/json` or `application/cbor`;
   - or `application/protobuf` with the schema suffix `zk2.core.v1.Error`.
 
@@ -1288,7 +1292,8 @@ with it.
   detail, and then it is a value of that type, in the form above.
 - **A detail that does not fit** its envelope, such as bytes in a JSON or
   CBOR envelope other than a raw type's base64 text, or a value in a
-  protobuf one, MUST NOT be sent. The reference sends `internal` instead.
+  protobuf one, MUST NOT be sent by an owner. The reference sends
+  `internal` instead.
 - **Reading one.** A tool decodes the envelope without the contract, so a
   raw detail reads as a string, and a caller holding the contract decodes
   it as base64. A protobuf detail is absent only when its field is not
@@ -1408,7 +1413,7 @@ these kinds through a plugin included: [`observer.md`](observer.md) §7.3.
 | Spelling | Means |
 |---|---|
 | `"nav.v2.Position"` | a protobuf message, fully qualified, defined in a listed file. The well-known types of §9.4 are always available. |
-| `"json:Status"` | `$defs/Status`. The name MUST be unique across the listed files. |
+| `"json:Status"` | `$defs/Status`. The name MUST be unique across the listed files (E024). |
 | `"json:telemetry#Point"` | `$defs/Point` in the listed file whose stem is `telemetry` |
 | `{ raw = "image/jpeg" }` | opaque bytes of a media type |
 | `{ raw = "video/*", media_param = "codec" }` | a raw family. The sample's `Encoding` carries the concrete subtype, and `media_param` names the single-chunk template parameter tied to it. |
@@ -1788,7 +1793,8 @@ facts.
     it relays under its own address.
 
   `[Sc: constrained.md §1]`
-- **A batch SHOULD take at most a third of the lease to cross the face.**
+- **A deployment's batch SHOULD take at most a third of the lease to cross
+  the face.**
   - At 2,400 bit/s with the 10 s lease, a batch of up to 1,000 B
     qualifies: 1,000 B take 3.33 s, exactly a third. zenoh's 64 KB
     default does not: the link reconnected in a loop (Appendix B).
@@ -1797,7 +1803,7 @@ facts.
     for it.
 
   `[Sc: constrained.md §4]`
-- **`@stream` keys SHOULD be denied across the face** unless `link.v1`
+- **A deployment SHOULD deny `@stream` keys across the face** unless `link.v1`
   downsamples them: an `@stream` resource whose contract exposes it, one
   rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8).
   A named key's frames are queued, not dropped, and every request
@@ -1805,7 +1811,7 @@ facts.
   these denies and the downsampling rules (`zenctl acl gen --face-policy`).
 - **A far router in a south region needs declarations sent toward it.**
   It learns of queryables only from the declarations the near router
-  sends it. So the far side's principal MUST be granted
+  sends it. So a deployment MUST grant the far side's principal
   `declare_queryable` on egress over every queryable its side may query,
   as the owner declares it. A declaration is checked by inclusion against
   the queryable's own key expression (§11.3), which the far side's
@@ -2921,25 +2927,59 @@ The format is the generator's own. The reference reads an enrollment file
 
 ---
 
-## 12. Conformance levels
+## 12. Conformance classes
 
-**Full.** An implementation at the full level meets every rule above, and
-every rule of [`observer.md`](observer.md) that binds a role it plays: a
-tool, or a participant where it reads presence, state or the
-admin space and concludes from what it read (observer.md §0).
+Conformance is claimed by role. Five of §0's roles have a **class** each:
+the rules that bind that role, and the static rules. The static rules bind
+every implementation (§0). They are §1's and §9's, and each rule elsewhere
+on what a contract states, which §9.2's lints check. A class holds its
+role's rules in this text and in [`observer.md`](observer.md).
+[`RULES.md`](RULES.md) lists each class's rules, generated from both
+texts.
 
-**Constrained.** An implementation at the constrained level meets every rule
-the full level does, with these relaxations and additions:
+**The classes.**
+- **Owner**, **consumer**, **caller** and **deployment**: one class for
+  each of those roles.
+- **Observer**: the class of §0's **tool** role. It is named for
+  `observer.md`, which holds most of its rules, and the role keeps its
+  name.
+- **A reader's rules.** `observer.md` also binds a participant of any role
+  where it reads presence, state or the admin space and concludes from
+  what it read (observer.md §0). Those rules belong to the class of the
+  role it plays there, as a consumer's wait on presence (R5) belongs to
+  the consumer class.
+
+**Claiming classes.** An implementation claims one class for each role it
+plays, and meets every rule of each class it claims. A rule that binds two
+roles, such as O5's caller and tool, is in both classes. A service that
+only publishes a stream plays the owner role alone. Its class is the
+owner's rules and the static rules: in [`RULES.md`](RULES.md), the
+entries under owner and implementation.
+
+**Full** is every class, their union: it holds every rule of both texts,
+and no rule that a class does not. A rule binds only the role it names, so
+at the full level an implementation meets the rules of the roles it plays.
+
+**Constrained** is a modifier on a class. A class claimed at the
+constrained level holds every rule of the class, with these relaxations and
+additions:
 
 | Topic | Relaxation or addition |
 |---|---|
 | Clock (S7) | A wall clock with a per-session bump instead of the HLC. The catch-up and the ahead bound still apply. |
 | Namespace (§1.6) | The deployment prefix written literally in keys |
-| Descriptor (§3.3) | MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) `[Sc: constrained.md §5]` |
+| Descriptor (§3.3) | An owner's descriptor MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) `[Sc: constrained.md §5]` |
 | Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on receiving (Appendix B). |
 | Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md)). Presence never crosses. |
 
 `[Sc: constrained.md]`
+
+**Profiles** stay opt-in, one class each (§10). An implementation claims a
+profile's class by following the profile: a service lists it in its
+descriptor's `profiles` (§3.3), and a tool answers its questions (its §5).
+A profile's rules name the roles they bind, as this text's do (its §0). So
+its class holds its rules for each role the implementation plays. No class
+of this text, full included, holds a profile's rules.
 
 ---
 

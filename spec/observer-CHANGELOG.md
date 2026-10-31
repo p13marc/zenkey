@@ -13,6 +13,44 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.8 — 2026-10-31: where its rules belong, and two rules that name their role, no rule changed (#926)
+
+Core 0.66 claims conformance by role (#926, epic #921 Track B): each role
+of core §0 has a class, and the observer class is the tool role's, named
+for this text. This text says where its own rules belong, and the
+generated rule index, [`RULES.md`](RULES.md), lists them. The text is
+written against core 0.66, since it cites that version's §12.
+
+**Added: §0's "Its classes."** Conformance is claimed by role (core §12).
+This text's rules for a tool belong to the observer class, with the core's
+tool rules. Its rules for a reader belong to the class of the role the
+reader plays. `RULES.md` lists both texts' rules by role.
+
+**Editorial: two rules that name their role, no rule changed.** The index
+reads each rule's role from its subject, and two of this text's named none.
+- **§3.1:** "Every liveliness subscriber on that session MUST be
+  callback-driven" is "Every liveliness subscriber the caller or tool holds
+  on that session MUST be callback-driven". The item before it names the
+  caller or tool whose session it is.
+- **§3.7:** "**The watch session's subscribers SHOULD have no history**
+  when their reader seeds" is "**The subscribers of a reader's watch
+  session SHOULD have no history** when it seeds".
+
+**How "no rule changed" was checked**, as for 0.7. The sentences holding
+an RFC 2119 keyword were diffed before and after, keyed by section: 44
+before and after, 42 unchanged. The other two are the two above, read pair
+by pair, each with its keyword, condition and scope kept. Every other
+sentence was diffed too: the one other change is §0's new paragraph.
+
+**The figures.** This text's mean went from 18.31 words to 18.26, with no
+sentence over 50 words and no tag. `spec/.prose-baseline.json` is lowered
+to it.
+
+**Deliberately not changed.**
+- **No rule**, and no section number, label or anchor.
+- **Who it binds.** §0's list of the readers it binds stands as it was.
+- **Appendix A**, which is history.
+
 ## 0.7 — 2026-10-30: zk2py round 86's F-324 and F-325, no rule changed (#935)
 
 zk2py round 86 (PR #959) read 0.6 and core 0.62 cold. It found that 0.6

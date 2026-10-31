@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.7 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.8 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.63 ([`core.md`](core.md)) |
+| **Written against** | core 0.66 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -40,6 +40,11 @@ or the admin space and concludes from what it read:
 
 A **reader** is any of them, reading. Each rule moved here binds exactly
 whom it bound in the core.
+
+**Its classes.** Conformance is claimed by role (core §12). This text's
+rules for a tool belong to the observer class, with the core's. Its rules
+for a reader belong to the class of the role the reader plays.
+[`RULES.md`](RULES.md) lists both texts' rules by role.
 
 **Keywords, roles and evidence** are the core's (core §0). `[F: path]` is
 a fixture under [`conformance/`](conformance/), and `[Sc: file §n]` a
@@ -183,10 +188,10 @@ re-minting and the caller's timeouts stay in core §8.1.
   liveliness subscriber MUST use a callback or an unbounded handler. With
   zenoh's default 256-slot handler, such a GET hung at every size measured
   (core Appendix B). `[Sc: presence.md §4]`
-- **The subscribers bind too.** Every liveliness subscriber on that
-  session MUST be callback-driven, or drained as its samples arrive. A
-  bounded subscriber nobody drains starves even a callback GET, silently
-  (core Appendix B). `[Sc: presence.md §4]`
+- **The subscribers bind too.** Every liveliness subscriber the caller or
+  tool holds on that session MUST be callback-driven, or drained as its
+  samples arrive. A bounded subscriber nobody drains starves even a
+  callback GET, silently (core Appendix B). `[Sc: presence.md §4]`
 
 ### 3.2 A fault read from presence's shape
 
@@ -389,8 +394,8 @@ re-minting and the caller's timeouts stay in core §8.1.
     carries nothing: under a key `…/@zk/settle`, inside the presence
     subtree the subscribers read, so a grant that admits them admits it
     (core §11.1). `[Sc: presence.md §10]`
-  - **The watch session's subscribers SHOULD have no history** when
-    their reader seeds by a read on its other session. The round trip's
+  - **The subscribers of a reader's watch session SHOULD have no history**
+    when it seeds by a read on its other session. The round trip's
     final reply follows their history. So with history the round trip
     waits for the population, and without history it is one round trip
     (core Appendix B). The seed reads what is held, and a token declared
