@@ -1,7 +1,7 @@
 # Bandwidth-first wire redesign for zk2 on constrained links
 
 **Date:** 2026-10-31  
-**Status:** redesign proposal; non-normative. It **breaks wire compatibility by design**: zk2c becomes zk2's one wire, on every bus (decided 2026-10-31). No specification, contract, generated artifact or runtime was changed.  
+**Status:** redesign proposal; non-normative. It **breaks wire compatibility by design**: zk2c becomes zk2's one wire, on every bus (decided 2026-10-31). No specification, contract, generated artifact or runtime was changed. The work it proposes is epic #975.  
 **Repository:** zenkey `264ea30db2ef54d71d1500a40f6c0e8f45afb792`; zenoh-modem `95f884bce310ca4bf33f77cf9cf756b4df41a83e`  
 **Scope:** zk2 core (descriptor, presence, keys, state reads, operations, events, archive), all eleven profiles, and how zk2 uses Zenoh 1.10 (stamps, Encoding, keep-alive, lease, declarations, batching).  
 **Links:** the zenoh-modem media: RF packet radio, LoRa SX1262 and Iridium SBD. Zenoh stays the transport.
@@ -22,7 +22,7 @@ The reference device (W2, §2.2) on zenoh-modem's 2,400 bit/s RF link costs **12
 | desired.v1 periodic re-reads | 105 | 19 | Conditional GET by version |
 | Reconnects (4 a day) | 13 | 5 | Instance token only; one key scope per kind |
 | Events (15 a day) | 4 | 0.7 | Declared scope and an 8-character suffix instead of a ULID key |
-| Heartbeat (new) | — | 52 | 18 B every 30 s; 10 KB/day at a declared 300-s horizon |
+| Heartbeat (new) | — | 52 | 18 B every 30 s, half its 60-s horizon; 10.4 KB/day at a 300-s horizon |
 | **Total** | **12,445** | **441** | **28× less** |
 
 Every figure is a model computed by Appendix A from Zenoh 1.10.1's codec layouts, zenoh-modem's layer formats and the zk2 rules. None is a packet capture.
@@ -200,7 +200,7 @@ zk2c does better by construction. The contract is the dictionary, and it is exac
 |---|---|---|
 | S1/S2: order per key, the owner's own stamp | one owner-wide monotone sequence; a new run starts before it wraps | 24 |
 | S7: a new instance's values accepted | the run: a 16-bit persistent boot counter, or 32 bits random where nothing persists or several candidates run (redundancy.v1) | 16 or 32 |
-| core §4.3's residual risk: a late value from an old epoch read as new | closed for a persistent counter run, which orders runs; a 32-bit random run, or a candidate-and-counter run under redundancy.v1, keeps the residual risk, and a counter run must widen before it wraps | 0 |
+| core §4.3's residual risk: a late value from an old epoch read as new | closed for a persistent counter run, which orders runs; a 32-bit random run, or a candidate-and-counter run under redundancy.v1, keeps the residual risk, and a counter run must widen before it wraps. A device that finds no counter (a factory reset, a flash wipe) cannot tell a first boot from a lost counter, and a counter restarted at zero would order its runs below the old ones, so its new values would read as an old epoch's. While it holds no counter it takes a 32-bit random run, which keeps the residual risk | 0 |
 | Clock ahead stops writes (S7, spike S12) | order no longer depends on the clock; a clock ahead marks time unknown (reserved value) and writes go on | 0 |
 | Telling a previous instance's put apart (alarms.v1, desired.v1, redundancy.v1 fencing) | run ↔ 64-bit nonce in the birth record and the compact descriptor | 0 per message |
 | Freshness aging, archive display | the confirmation time in the heartbeat and in snapshots | 32 |
@@ -222,7 +222,7 @@ The Encoding is always `zenoh/bytes`, so it costs 0 bytes. The key's contract na
 | Mutation | CH8 · run16 · seq24 · record | 6 B + record |
 | Delete | Zenoh DEL; stamp in a 5-byte attachment | ≈11 B |
 | Frame | CH8 · run16 · seq24 (first record; +1 each) · t32 · records. Periodic records are dated base + i × `timing.period_ms`, flagged scheduled within a declared jitter; off-schedule records carry a Rice-coded offset. **Every frame starts from absolute values.** | 10 B + records |
-| Heartbeat | CH8 · run16 · seq24 · t32 · resource map 8 · for each collection with a horizon, its confirmed members (a bitmap or a slot list, whichever is shorter, behind a 1-bit selector) and its 24-bit high-water seq | 10 B + bits; **18 B extra** in a telemetry frame for W2 (three single members, 3 firing alarms as a list, 4 collections) |
+| Heartbeat | CH8 · run16 · seq24 · t32 · resource map 8 · for each collection with a horizon, its confirmed members (a bitmap or a slot list, whichever is shorter, behind a 1-bit selector) and its 24-bit high-water seq | 10 B + bits on its own. Inside a telemetry frame, whose header it shares, **18 B extra** for W2 (three single members, 3 firing alarms as a list, 4 collections) |
 | Birth | CH8 · run16 · mode2 · rsv6 · nonce64 · t32 · catalog32 | 20 B, once per run |
 | Snapshot (replaces S4's per-key replies) | CH8 · run16 · asof24 · t32 · live count · tombstone count · live entries (id · mseq24 · record · binding) · tombstones (id · dseq24) · more1 | one reply per collection |
 
