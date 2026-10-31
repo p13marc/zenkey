@@ -418,8 +418,7 @@ def section1(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "3. nothing changes: no put, or the same document, which S reads confirmed",
                      same and bus.reads(k)[1:] == [al.CONFIRMED] * len(got),
                      f"act {act}, {len(got)} puts, reads {bus.reads(k)}")
-        with bus.s.lock:
-            ks = sorted(x for x in bus.s.deliveries if "/state/alarms/" in x)
+        ks = sorted(x for x in bus.s.keys() if "/state/alarms/" in x)  # keys() takes the lock itself
         report.check(sec, "3. no second key appears, whatever the order of the labels (§2.2)", ks == [k], f"{ks}")
     finally:
         bus.close()

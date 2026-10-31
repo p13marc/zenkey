@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 and 0.67), and its walk of
-``spec/RULES.md`` (#609, rounds 89 and 90).
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.68), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 91).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
 verdict, with what shows it, and on standard error the counts and every
@@ -229,14 +229,15 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("consumer", "core §4.2", "A late joiner MUST declare its subscription first", MET,
      "seed.LateJoiner (state_scenarios §10)"),
     ("consumer", "core §4.2", "A late joiner MUST merge the GET's replies", MET,
-     "seed.kept and seed.compare (seed family)"),
-    ("consumer", "core §4.3", "A consumer MUST order an owner's values by", MET,
-     "seed.LateJoiner: its seed by core §4.2's merge, as 0.67's S7 says, and what it receives after the seed's GET "
-     "ended by time within one id (seed.follows; state_scenarios §7; round 90); desired.TargetRole keeps "
-     "desired.v1 §2.4's own order"),
-    ("consumer", "core §4.3", "It MUST accept the first value under a", MET,
-     "seed.LateJoiner after its seed: a value under an id other than the held one's is kept, though its time be "
-     "lower (seed.follows; state_scenarios §7 step 2, a new epoch 5 s behind; round 90, F-382, F-383)"),
+     "seed.LateJoiner's seed.Merge, rule S7: by the stamp within one id (seed.compare, seed family), and across two "
+     "ids by §4.3's consumer rule (seed.follows; readings, round 91)"),
+    ("consumer", "core §4.3", "A consumer MUST order each key's values by", MET,
+     "seed.LateJoiner, a consumer's: seed.Merge's rule S7 from the first value it receives, its seed's replies "
+     "included (round 91; readings; state_scenarios §7); desired.TargetRole keeps desired.v1 §2.6's stricter "
+     "order, as §4.3's MAY lets a profile; owner.Owner.subscribe_role carries a stream alone in zk2py"),
+    ("consumer", "core §4.3", "It MUST accept a value under an id other", MET,
+     "seed.follows: an id other than the held value's is kept, whatever its time, from the seed's first reply on "
+     "(readings; state_scenarios §7 step 2, a new epoch 5 s behind; live_interop s7)"),
     ("consumer", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "every zk2py service is an owner.Owner, which holds one (presence_scenarios §1)"),
     ("consumer", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
@@ -264,10 +265,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "complete queryable (live_interop's retrieval); a tool session that calls holds none"),
     ("caller", "core §8.4", "A caller or tool MUST retrieve a bundle", MET,
      "live.retrieve_bundle (live_interop's retrieval, retrieval.md §2, §3)"),
-    ("caller", "core §8.4", "A caller MUST set consolidation `None` on both", MET,
-     "live._answers"),
-    ("caller", "core §8.4", "A caller MUST NOT depend on the encoding", MET,
-     "live.retrieve_bundle verifies the hash, never the encoding"),
+    ("caller", "core §8.4", "A caller or tool MUST set consolidation `None` on both", MET,
+     "live._answers, both of live.retrieve_bundle's attempts"),
+    ("caller", "core §8.4", "A caller or tool MUST NOT depend on the encoding", MET,
+     "live.retrieve_bundle verifies the hash, never the encoding (retrieval.md §1)"),
     ("caller", "observer §3.1", "A caller or tool's liveliness GET on a", MET,
      "live.list_presence, a callback handler (live_interop presence.md §4)"),
     ("caller", "observer §3.1", "Every liveliness subscriber the caller or tool holds", MET,
@@ -275,7 +276,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     # -- observer ------------------------------------------------------------------------
     ("observer", "core §4.2", "A late joiner MUST declare its subscription first", MET,
      "seed.LateJoiner, the seeding tools' reads (state_scenarios §10); a late joiner is \"a consumer or a tool\""),
-    ("observer", "core §4.2", "A late joiner MUST merge the GET's replies", MET, "seed.kept (seed family)"),
+    ("observer", "core §4.2", "A late joiner MUST merge the GET's replies", MET,
+     "seed.LateJoiner, a tool's: seed.Merge's rule merge for as long as it follows, across two ids too, bounded at "
+     "seed.MAX_KEYS and counting what it forgot (observer §4.1; seed family; state_scenarios §7's control); the "
+     "alarms, health and config readers merge their recordings through seed.newest (round 91)"),
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
     ("observer", "core §5.2", "It MUST refuse", MET,
@@ -286,6 +290,11 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "no zk2py tool holds bundles"),
     ("observer", "core §8.4", "A caller or tool MUST retrieve a bundle", MET,
      "live.retrieve_bundle (live_interop's retrieval, retrieval.md §2, §3)"),
+    ("observer", "core §8.4", "A caller or tool MUST set consolidation `None` on both", MET,
+     "every zk2py tool retrieves through live.retrieve_bundle (arbitration_tool, desired_tool, redundancy_live, "
+     "live's contract store), whose two attempts go through live._answers (core 0.68, F-387)"),
+    ("observer", "core §8.4", "A caller or tool MUST NOT depend on the encoding", MET,
+     "live.retrieve_bundle verifies the hash, never the encoding, for every tool (core 0.68, F-387)"),
     ("observer", "core §11.1", "A generator MUST refuse an input that binds", MET,
      "acl.Principal binds by one name: no input can bind one by both"),
     ("observer", "core §11.1", "Under `deny`, a generator MUST NOT compile an", MET,
@@ -364,13 +373,15 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "timing_tool and telemetry_scenarios across a face: owners unseen, never down (link_scenarios §6)"),
     ("observer", "observer §7.1", "A tool that is not a service MUST", MET,
      "owner.resolve_providers with no system raises"),
-    ("observer", "observer §7.3", "A tool that shows or judges a payload MUST decode", NOT_MET,
-     "observer 0.9 narrowed it to a tool that shows or judges a payload, and zk2py has both: echo_tool shows each "
-     "sample, its size and encoding in its payload's place, and decodes none (types.md §2 not run); the profiles' "
-     "readers (alarms, telemetry, desired_tool, health, config) judge payloads, each decoding its profile's JSON "
-     "Schema type, and none holds a protobuf decoder (round 90, F-379)"),
-    ("observer", "observer §7.3", "A tool MUST render a kind it cannot", NOT_MET,
-     "echo_tool renders each sample by its size and encoding, never its declared type: it reads no contract"),
+    ("observer", "observer §7.3", "Such a tool MUST decode each payload by its declared", NOT_MET,
+     "observer 0.10 asks each payload decoded by its own declared type (F-379's reading (b)): the profiles' readers "
+     "(alarms, telemetry, desired_tool, health, config) meet it, each payload they judge being their profile's JSON "
+     "Schema type, which they decode; echo_tool shows each sample, its size and encoding in its payload's place, "
+     "and decodes neither family, so zk2py fails it there (types.md §2 not run)"),
+    ("observer", "observer §7.3", "A tool that shows a payload it cannot decode MUST", NOT_MET,
+     "echo_tool renders each sample by its size and its sample's encoding, never its declared type: it reads no "
+     "contract; the profiles' readers show no payload they cannot decode, an undecodable one being their "
+     "judgement's own answer"),
     ("observer", "observer §7.3", "It MUST NOT show garbage, and MUST NOT", MET,
      "echo_tool shows no payload bytes and drops no sample (observer_scenarios)"),
     ("observer", "observer §7.4", "A tool SHOULD check the limit at start", MET,
@@ -454,6 +465,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §1", "An empty scope is Unobservable", MET, "budget, timing (budget family; F-362)"),
     ("observer", "observer §2", "Unattributable silence is Unestablished, never Established(no)", MET,
      "live.o3_verdict, judgement (observer_scenarios; F-362)"),
+    ("observer", "observer §4.1", "A tool keeps core §4.2's merge for as long as it follows", MET,
+     "seed.LateJoiner, a tool's: seed.Merge's rule merge, across two ids too, after the seed as inside it "
+     "(state_scenarios §7 and its run inside the seed; live_interop s7; observer 0.10, round 91)"),
+    ("observer", "observer §4.1", "A tool that bounds what it holds counts what the bound forgot", MET,
+     "seed.Merge and freshness.Subscriber, each bounded at seed.MAX_KEYS, the least recent key forgotten whole and "
+     "counted in forgotten, holding nothing after (readings; observer 0.10, round 91)"),
     ("observer", "observer §5.2", "A complete reading of a stream or an event", MET,
      "budget.Window (budget family, budget_scenarios; F-362)"),
     ("observer", "observer §7.1", "The data-flow graph is read from descriptors, never inferred", MET,

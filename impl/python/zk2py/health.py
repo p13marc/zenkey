@@ -492,14 +492,6 @@ def status_agrees(r: Reading) -> str:
     return "yes"
 
 
-def _latest(*values: tuple[int | None, bytes] | None) -> bytes | None:
-    """The payload with the latest stamp among (stamp_ns, payload) pairs."""
-    got = [v for v in values if v is not None]
-    if not got:
-        return None
-    return max(got, key=lambda v: -1 if v[0] is None else v[0])[1]
-
-
 def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = None,
               trust: fr.ClockTrust | None = None, get: bool = True,
               timeout: float = 1.0) -> tuple[Reading, dict[str, Any]]:
@@ -513,6 +505,7 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
     import json
 
     from . import live
+    from . import seed as sd
     from .slug import unslug
 
     info: dict[str, Any] = {}
@@ -535,13 +528,16 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
             descriptor = {"lists": False} if entry is None else {"lists": True, "token": entry.get("token", True)}
     status_key = f"zk2/{address}/{IFACE}/state/status"
     observations: list[Any] = []
-    sub_value = None
+    # The status as a late joiner holds it: the subscription's samples and
+    # the GET's reply merged by core §4.2, the newer by the owner's stamp,
+    # across two ids too (observer §4.1, 0.10; round 91). Round 90 took the
+    # subscription's last put by arrival, which an old epoch's late value
+    # could displace.
+    arrivals: list[tuple[Any, bool, bytes]] = []
     if subscriber is not None:
         observations.append(subscriber.observation(status_key))
-        last = [x for x in subscriber.of(status_key) if x.kind == "put"]
-        sub_value = (last[-1].stamp_ns, last[-1].payload) if last else None
+        arrivals += [(sd.Stamp.of(x.stamp), x.kind == "delete", x.payload) for x in subscriber.of(status_key)]
     checks = None
-    get_value = None
     if get:
         st = live.get_state(tool, f"zk2/{address}/{IFACE}/state/**", timeout=timeout)
         info["replies"] = st.replies
@@ -550,7 +546,7 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
             x = mine[-1]
             got = (fr.GetReading("delete", x.stamp_ns, x.stamp_id, x.stamp) if x.deleted
                    else fr.GetReading("put", x.stamp_ns, x.stamp_id, x.stamp, x.payload))
-            get_value = None if x.deleted else (x.stamp_ns, x.payload)
+            arrivals.append((sd.Stamp.of(x.stamp), x.deleted, x.payload))
         else:
             got = fr.GetReading(None)
         info["status_reading"] = got
@@ -558,7 +554,8 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
         prefix = f"zk2/{address}/{IFACE}/state/checks/"
         checks = [(unslug(x.key[len(prefix):]) or x.key[len(prefix):], check_level(x.payload))
                   for x in st.replies if x.key.startswith(prefix) and not x.deleted]
-    payload = _latest(sub_value, get_value)
+    held = sd.merged(arrivals)
+    payload = None if held is None or held[1] else held[2]
     level = None if payload is None else status_level(payload)
     return Reading(presence, descriptor, None, observations, level, checks), info
 

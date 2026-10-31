@@ -3428,8 +3428,203 @@ def family_readings(root: Path) -> list[Result]:
         + _timing_readings(root) + _arbitration_readings(root) + _unbounded_readings(root) \
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
-        + _round88_readings(root) + _round89_readings(root) + _round90_readings(root)
+        + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
+        + _round91_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.68 and ``observer.md`` 0.10, round 90's answers (#609, round 91;
+    #926 part 3). Each text at its version or later, the rules F-379 to
+    F-392 changed as they read, and the forms they replaced gone. Then the
+    late joiner 0.68 asks for, which round 91 implements:
+    - **a consumer** orders by S7 from its first value, its seed's replies
+      included (core §4.2, §4.3): inside the seed, a value under another id
+      is kept whichever path brought it, so the consumer holds the id whose
+      value arrived last;
+    - **a tool** keeps §4.2's merge for as long as it follows, and a tool
+      that bounds what it holds counts what the bound forgot and treats a
+      forgotten key as holding nothing (observer §4.1): zk2py's tool
+      ``LateJoiner`` (:class:`zk2py.seed.Merge`), and the recording the
+      alarms, health and config readers merge from
+      (:class:`zk2py.freshness.Subscriber`), each bounded and counted;
+    - **the readers' merge** (:func:`zk2py.seed.merged`): by time, then by
+      id as ``Latest`` compares, across two ids too.
+    Read with no session: a fake one stands in."""
+    import re
+
+    from . import freshness as fr
+    from . import seed as sd
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules = flat("core.md"), flat("observer.md"), flat("RULES.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Written against\*\* \| core (\d+)\.(\d+) ", obs)
+    against = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("#926 part 3: core 0.68 or later, observer.md 0.10 or later written against core 0.68 or later, each "
+         "with its entry",
+         [core_v >= (0, 68), obs_v >= (0, 10), against >= (0, 68)]
+         + entry("CHANGELOG.md", "0.68", "round 90's answers")
+         + entry("observer-CHANGELOG.md", "0.10", "F-379"),
+         [True, True, True]),
+        ("F-382 and F-383: a consumer by S7 from its first value, its seed's replies included, an id other than "
+         "the held value's accepted, a tool's merge lasting and bounded; 0.67's sentences gone",
+         missing(core,
+                 "A consumer MUST order each key's values by time within one timestamp id, from the first value it "
+                 "receives, a late joiner's seed replies included (§4.2).",
+                 "It MUST accept a value under an id other than the one its held value carries, and order by time "
+                 "within that id from then on.",
+                 "A profile MAY order a consumer's values more strictly.",
+                 "or, for a consumer across two timestamp ids, by §4.3's consumer rule.",
+                 "So a consumer's merge has no end to state")
+         + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows, "
+                   "across two timestamp ids too.",
+                   "A tool that bounds what it holds counts what the bound forgot, and treats a forgotten key as "
+                   "holding nothing.")
+         + present(core, "merges as §4.2 says, and the consumer rule", "It MUST accept the first value under a new id",
+                   "A consumer MUST order an owner's values"), []),
+        ("F-379, F-380, F-381 and F-387: §7.3 by each payload's declared type, §2.4's opt-in, §2.5's places, and "
+         "§8.4's two MUSTs naming a caller or tool; the old forms gone",
+         missing(obs, "**What a tool that shows or judges a payload decodes** (core §7.1). Such a tool MUST decode "
+                      "each payload by its declared type:",
+                 "A tool that shows a payload it cannot decode MUST render it as its declared type and size")
+         + missing(core, "An owner that opts into it (§0) sets it. One that does not, or whose binding offers no such "
+                         "API, MAY publish reliable, zenoh's default.",
+                   "so `history` is one of the places where a participant opts into an unstable API (§0).",
+                   "A caller or tool MUST set consolidation `None` on both attempts.",
+                   "A caller or tool MUST NOT depend on the encoding: the hash is the check.")
+         + present(core, "One that cannot set it", "`history` is the one place", "A caller MUST set consolidation",
+                   "so none moves by it")
+         + present(obs, "What a generic tool decodes", "A tool MUST render a kind it cannot decode"), []),
+        ("F-384 and F-386 in RULES.md: S2's \"It [the owner]\", §2.4's MAY after *Except:*",
+         missing(rules, "It [the owner] MUST answer a selector over them [its interfaces' `state/**` and "
+                        "`@state/**`]",
+                 "*Except:* One [an owner] that does not [opt into `reliability`], or whose binding offers no such "
+                 "API, MAY publish reliable, zenoh's default."), []),
+    ]
+
+    st = lambda t, i: sd.Stamp(t, i)  # noqa: E731
+
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    k = "zk2/g/s/zk2py_plans.v1/state/plans/r"
+    sel = "zk2/g/s/zk2py_plans.v1/state/plans/*"
+
+    def inside(consumer: bool, live_first: bool) -> list[Any]:
+        """Two ids inside one seed: the reply under the old epoch's id, the
+        live sample under the new one's, its clock behind."""
+        lj = sd.LateJoiner(Fake(), sel, consumer=consumer)
+        old = (k, "reply", False, b"rev10", "application/json", "200/a1")
+        new = (k, "live", False, b"rev11", "application/json", "150/b2")
+        for x in ((new, old) if live_first else (old, new)):
+            lj._merge(*x)
+        lj._ended()
+        return [[(a.outcome, a.rule) for a in lj.applied], lj.view()[k].payload.decode()]
+
+    out.append(("core §4.2, §4.3 (0.68): inside a seed, a consumer keeps the id whose value arrived last, its seed's "
+                "reply included (rev 11 live after rev 10's reply; rev 10's reply after rev 11 live); a tool keeps "
+                "the later time either way (observer §4.1)",
+                [inside(True, False), inside(True, True), inside(False, False), inside(False, True)],
+                [[[("kept", "S7"), ("kept", "S7")], "rev11"], [[("kept", "S7"), ("kept", "S7")], "rev10"],
+                 [[("kept", "merge"), ("dropped", "merge")], "rev10"],
+                 [[("kept", "merge"), ("kept", "merge")], "rev10"]]))
+    out.append(("core §4.3 (0.68): within one id a consumer's order is the stamp merge, equal stamps one mutation; "
+                "an unstamped value under no id never over a stamped one (seed.consumer_kept)",
+                [sd.consumer_kept([st(101, "a1"), st(104, "a1")]), sd.consumer_kept([st(104, "a1"), st(101, "a1")]),
+                 sd.consumer_kept([st(103, "a1"), st(103, "a1")]), sd.consumer_kept([st(101, "a1"), None]),
+                 sd.consumer_kept([None, st(101, "a1")])],
+                [[True, True], [True, False], [True, False], [True, False], [True, True]]))
+
+    # observer §4.1 (0.10): a tool that bounds what it holds counts what the
+    # bound forgot, and treats a forgotten key as holding nothing.
+    def bounded() -> list[Any]:
+        lj = sd.LateJoiner(Fake(), sel, consumer=False, max_keys=2)
+        for key, ts in (("a", "200/a1"), ("b", "200/a1"), ("c", "200/a1"), ("a", "150/a1")):
+            lj._merge(f"zk2/g/s/zk2py_plans.v1/state/plans/{key}", "live", False, key.encode(), "", ts)
+        return [lj.forgotten, sorted(x.rsplit("/", 1)[1] for x in lj.view()), [a.outcome for a in lj.applied],
+                lj.merge.last_forgotten.rsplit("/", 1)[1]]
+
+    out.append(("observer §4.1 (0.10): a tool's LateJoiner bounded at two keys forgets the least recent, counts each "
+                "forgetting, and keeps the next value of a forgotten key, its stamp older, as on a key holding "
+                "nothing; a tool's is bounded by default, a consumer's not",
+                [bounded(), sd.LateJoiner(Fake(), sel, consumer=False).merge.max_keys,
+                 sd.LateJoiner(Fake(), sel, consumer=True).merge.max_keys],
+                [[2, ["a", "c"], ["kept", "kept", "kept", "kept"], "b"], sd.MAX_KEYS, None]))
+
+    def recording() -> list[Any]:
+        sub = fr.Subscriber(Fake(), "zk2/g/s/x.v1/state/*", max_keys=2)
+        for key in ("a", "b", "a", "c"):
+            sub._record(key, fr.Received("put", 0, 0, key.encode(), "", None, None, None))
+        return [sub.forgotten, sub.keys(), len(sub.of("a")), sub.of("b")]
+
+    out.append(("observer §4.1 (0.10): freshness.Subscriber, the recording the alarms, health and config readers "
+                "merge from, bounded at two keys: the least recently arrived forgotten whole, counted, and holding "
+                "nothing; bounded by default",
+                [recording(), fr.Subscriber(Fake(), "zk2/g/s/x.v1/state/*").max_keys],
+                [[1, ["a", "c"], 2, []], sd.MAX_KEYS]))
+    # Review-bot on PR #971: a consumer refuses a bound, and a reader's
+    # observation of a key it holds nothing of is dated from the last
+    # forgetting, never from the declaration.
+    def refused(make: Any) -> str:
+        try:
+            make()
+        except ValueError as e:
+            return "refused" if "a tool's" in str(e) else str(e)
+        return "accepted"
+
+    def forgotten_view() -> list[Any]:
+        sub = fr.Subscriber(Fake(), "zk2/g/s/x.v1/state/*", max_keys=2)
+        d = sub.declared_ns
+        s_ = fr.NS
+        for key, at in (("a", 1), ("b", 2), ("c", 3)):
+            sub._record(key, fr.Received("put", d + at * s_, 0, key.encode(), "", None, None, None))
+        now = d + 10 * s_
+        h = fr.Horizon("within", 5)
+        return [(sub.forgot_ns - d) // s_, sub.observation("a", now).listened_ns // s_,
+                sub.observation("z", now).listened_ns // s_, sub.observation("c", now).listened_ns // s_,
+                fr.judge_subscription(h, sub.observation("a", d + 7 * s_)).reason,
+                fr.judge_subscription(h, sub.observation("a", now)).reason]
+
+    out.append(("observer §4.1 (0.10), review-bot on PR #971: a consumer's late joiner and S7's merge refuse a bound, "
+                "a tool's take one",
+                [refused(lambda: sd.LateJoiner(Fake(), sel, consumer=True, max_keys=2)),
+                 refused(lambda: sd.Merge("S7", 2)), refused(lambda: sd.LateJoiner(Fake(), sel, consumer=False,
+                                                                                    max_keys=2)),
+                 refused(lambda: sd.Merge("merge", 2))],
+                ["refused", "refused", "accepted", "accepted"]))
+    out.append(("observer §4.1 (0.10), F-398, review-bot on PR #971: a Subscriber dates its listening to a key it "
+                "holds nothing of, forgotten or never heard, from its last forgetting: a's silence before it is never "
+                "read as heard (ttl 5 s: listened_too_short 4 s after it, no_delivery only 7 s after it); a held key "
+                "from the declaration",
+                forgotten_view(), [3, 7, 7, 10, "listened_too_short", "no_delivery"]))
+    out.append(("core §4.2 and observer §4.1 (0.10): the readers' merge (seed.merged), across two ids the later "
+                "time, at one time the id Latest ranks higher (2 over 100), a delete kept by its stamp, an "
+                "unstamped value never over a stamped one",
+                [sd.merged([(st(200, "a1"), False, b"old"), (st(150, "b2"), False, b"new")])[2],
+                 sd.merged([(st(5, "2"), False, b"x"), (st(5, "100"), False, b"y")])[2],
+                 sd.merged([(st(5, "a1"), False, b"x"), (st(6, "a1"), True, b"")])[1],
+                 sd.merged([(st(5, "a1"), False, b"x"), (None, False, b"u")])[2], sd.merged([])],
+                [b"old", b"x", True, b"x", None]))
+    return out
 
 
 def _observer_07_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -4235,13 +4430,15 @@ def _round90_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  sd.follows(None, st(200, "a1")), sd.follows(st(1, "a1"), None),
                  sd.follows(st(210, "a1"), st(160, "b2"))],
                 [True, False, True, False, False, True, True]))
-    out.append(("core §4.3 (0.67): a seed by §4.2's merge (merge.json's two ids, the new one's time behind, not "
-                "kept), then S7 for what follows it (seed.ordered)",
-                [sd.ordered([(st(200, "a1"), False), (st(150, "b2"), False)]),
-                 sd.ordered([(st(200, "a1"), False), (st(150, "b2"), True), (st(149, "b2"), True),
-                             (st(151, "b2"), True)])],
-                [[True, False], [True, True, False, True]]))
-
+    # Round 91: 0.68 corrected 0.67's S7 sentence (F-382). A consumer orders
+    # by S7 from its first value on, its seed's replies included, so the
+    # seed-then-S7 order round 90 read here (seed.ordered) is gone.
+    out.append(("core §4.3 (0.68): a consumer by S7 from its first value, its seed's included (merge.json's two "
+                "ids, the new one's time behind, kept), and a tool by the merge (not kept)",
+                [sd.consumer_kept([st(200, "a1"), st(150, "b2")]),
+                 sd.consumer_kept([st(200, "a1"), st(150, "b2"), st(149, "b2"), st(151, "b2")]),
+                 sd.kept([(st(200, "a1"), "put"), (st(150, "b2"), "put")])],
+                [[True, True], [True, True, False, True], [True, False]]))
     class Fake:
         pass
 
@@ -4255,22 +4452,25 @@ def _round90_readings(root: Path) -> list[tuple[str, Any, Any]]:
         lj._merge(k, "live", False, b"late", "application/json", "155/b2")
         return [(a.outcome, a.rule, str(a.stamp)) for a in lj.applied] + [("held", lj.view()[k].payload.decode(), "")]
 
-    out.append(("seed.LateJoiner: a consumer's seed by the merge, then S7 once its GET ended (state.md §7 step 2's "
-                "rev 11 kept); a tool's by the merge throughout, S7 binding a consumer (F-382)",
+    out.append(("seed.LateJoiner (0.68): a consumer's by S7 from its first value, its seed's included, so a new "
+                "id's value inside the seed is kept (state.md §7 step 2's rev 11 after it too); a tool's by the merge "
+                "throughout (F-382)",
                 [joiner(True), joiner(False)],
-                [[("kept", "merge", "200/a1"), ("dropped", "merge", "150/b2"), ("kept", "S7", "160/b2"),
+                [[("kept", "S7", "200/a1"), ("kept", "S7", "150/b2"), ("kept", "S7", "160/b2"),
                   ("dropped", "S7", "155/b2"), ("held", "rev11", "")],
                  [("kept", "merge", "200/a1"), ("dropped", "merge", "150/b2"), ("dropped", "merge", "160/b2"),
                   ("dropped", "merge", "155/b2"), ("held", "rev10", "")]]))
 
-    # The switch from the merge to S7 is decided by the order of arrival into
-    # one queue, never by which callback's thread runs first (review-bot on
-    # PR #969): a sample and the GET's final reply, interleaved both ways.
+    # Round 90 decided the switch from the merge to S7 by the order of
+    # arrival into one queue (review-bot on PR #969). Since 0.68 there is no
+    # switch: a sample and the GET's final reply, interleaved both ways, in
+    # one thread and in two, leave a consumer's by S7 and a tool's by the
+    # merge alike. The queue still orders a key's values as they arrived.
     import threading
 
-    def interleaved(sample_first: bool, threads: bool) -> list[Any]:
+    def interleaved(sample_first: bool, threads: bool, consumer: bool = True) -> list[Any]:
         k = "zk2/g/s/zk2py_plans.v1/state/plans/r"
-        lj = sd.LateJoiner(Fake(), "zk2/g/s/zk2py_plans.v1/state/plans/*", consumer=True)
+        lj = sd.LateJoiner(Fake(), "zk2/g/s/zk2py_plans.v1/state/plans/*", consumer=consumer)
         lj._merge(k, "reply", False, b"rev10", "application/json", "200/a1")
         sample = (k, "live", False, b"rev11", "application/json", "150/b2")
         if not threads:
@@ -4310,14 +4510,14 @@ def _round90_readings(root: Path) -> list[tuple[str, Any, Any]]:
         return [[(a.outcome, a.rule) for a in lj.applied], lj.view()[k].payload.decode(), lj.seed.ended,
                 lj._done.is_set()]
 
-    before = [[("kept", "merge"), ("dropped", "merge")], "rev10", True, True]
-    after = [[("kept", "merge"), ("kept", "S7")], "rev11", True, True]
-    out.append(("seed.LateJoiner decides the switch by arrival: a sample that arrived before the GET's final reply "
-                "is merged by §4.2 though its thread runs after the end's (a new id's lower time dropped), and one "
-                "that arrived after it is ordered by S7 (kept); in one thread and in two",
+    consumer = [[("kept", "S7"), ("kept", "S7")], "rev11", True, True]
+    tool = [[("kept", "merge"), ("dropped", "merge")], "rev10", True, True]
+    out.append(("seed.LateJoiner (0.68): no switch at the GET's final reply: a new id's sample before or after it "
+                "is kept by a consumer (S7 from its first value) and dropped by a tool (the merge for as long as it "
+                "follows); in one thread and in two",
                 [interleaved(True, False), interleaved(False, False), interleaved(True, True),
-                 interleaved(False, True)],
-                [before, after, before, after]))
+                 interleaved(False, True), interleaved(True, False, False), interleaved(False, True, False)],
+                [consumer, consumer, consumer, consumer, tool, tool]))
     return out
 
 

@@ -12,11 +12,15 @@ that the owner's puts land between the late joiner's steps. The late joiner
 is :class:`zk2py.seed.LateJoiner`, a tool's (it keeps a key that is not
 concrete), over ``plans/*``.
 
-§7 step 2 (S7, core §4.3, 0.67) on the same router: a consumer's
+§7 step 2 (S7, core §4.3, 0.68) on the same router: a consumer's
 :class:`~zk2py.seed.LateJoiner` seeds rev 10, the owner restarts as a new
 instance on a new session with its clock 5 s behind (``Owner.clock``) and
-writes rev 11, and the consumer accepts it by S7's consumer rule after its
-seed; a tool's late joiner, §4.2's merge, is the control.
+writes rev 11, and the consumer accepts it by S7's consumer rule, which
+orders its values from the first; a tool's late joiner, §4.2's merge for as
+long as it follows (observer §4.1), is the control. Then the case 0.68
+moved (round 91): the restart and rev 11 land *inside* the seed, its GET
+held open by a second queryable after the owner's reply of rev 10. The
+consumer keeps rev 11, the value that arrived last; the tool rev 10.
 
 Beside §10, two things observer §4.1 says a seed cannot know: a GET that ran to its
 timeout seeds possibly incompletely, and an owner absent at the GET seeds
@@ -264,13 +268,14 @@ def section10(report: Report, run: Run | None = None) -> None:
 
 def section7(report: Report, run: Run | None = None) -> None:
     """§7 step 2, a new epoch, after a consumer's seed (core §4.3, S7's
-    consumer rule; 0.67, F-368). The owner writes rev 10; a consumer's late
-    joiner and a tool's seed from it. The owner then restarts with no
-    record and no owner-side archive, a new instance on a new session (a
-    fresh zid), its clock 5 s behind, and writes rev 11: "The consumer sees
-    a new timestamp id, accepts rev 11, and restarts its ordering." The
-    tool's late joiner is the control: §4.2's merge, which still orders a
-    tool's after its seed, keeps rev 10's later time."""
+    consumer rule; 0.68, F-382, F-383). The owner writes rev 10; a
+    consumer's late joiner and a tool's seed from it. The owner then
+    restarts with no record and no owner-side archive, a new instance on a
+    new session (a fresh zid), its clock 5 s behind, and writes rev 11: "The
+    consumer sees a new timestamp id, accepts rev 11, and restarts its
+    ordering." The tool's late joiner is the control: "The tool keeps §4.2's
+    merge for as long as it follows (observer §4.1). It keeps rev 10."
+    Then :func:`section7_inside`."""
     import zenoh
 
     from . import live
@@ -328,7 +333,7 @@ def section7(report: Report, run: Run | None = None) -> None:
         got = lc.view().get(f"{base}/r")
         arrival = [x for x in lc.applied if x.key == f"{base}/r" and x.via == "live" and str(x.stamp) == str(s11)]
         report.check(sec, "expected 2: the consumer sees a new timestamp id and accepts rev 11, by S7's consumer "
-                          "rule after its seed",
+                          "rule, which orders its values from the first",
                      got is not None and got.payload == b"rev11" and [(x.outcome, x.rule) for x in arrival]
                      == [("kept", "S7")], f"{_show(got)}; {[(x.outcome, x.rule) for x in arrival]}")
         t12 = o2.set_state(f"{base}/r", b"rev12")
@@ -339,8 +344,8 @@ def section7(report: Report, run: Run | None = None) -> None:
                      got is not None and got.payload == b"rev12" and str(got.stamp) == str(sd.Stamp.of(t12)),
                      _show(got))
         held = lt.view().get(f"{base}/r")
-        report.check(sec, "the control: a tool's late joiner, §4.2's merge after its seed, keeps rev 10's later "
-                          "time over the new epoch's values",
+        report.check(sec, "expected 2: the tool's late joiner keeps §4.2's merge for as long as it follows "
+                          "(observer §4.1): rev 10's later time over the new epoch's values",
                      held is not None and held.payload == b"rev10", _show(held))
     finally:
         for j in joiners:
@@ -349,6 +354,131 @@ def section7(report: Report, run: Run | None = None) -> None:
             x.close()
         tool.close()
         r1.close()
+    section7_inside(report, run)
+
+
+def section7_inside(report: Report, run: Run | None = None) -> None:
+    """§7 step 2's new epoch *inside* a late joiner's seed, the case core
+    0.68 moved (F-382; round 91). The owner writes rev 10. A second session
+    holds a non-complete queryable on the plans, so each late joiner's GET
+    stays open after the owner has answered it. Meanwhile the owner restarts
+    with no record, a new epoch, and writes rev 11, whose live sample
+    arrives while the GET is open. Then the GET ends.
+
+    - **What zenoh does** (core §4.1): "`Latest` consolidation … delivers at
+      query completion". So the owner's reply of rev 10 reaches each late
+      joiner at the GET's end, after rev 11's live sample, though the owner
+      answered first.
+    - **The consumer** "orders by §4.3's consumer rule from its first value
+      on, its seed's replies included. It keeps a value under an id other
+      than its held value's" (core §4.2): it holds rev 11, then accepts the
+      reply, under the old id, which arrived last. It keeps rev 10, the old
+      epoch's, whichever clock is ahead.
+    - **The tool** "keeps the merge across ids too" (observer §4.1): the
+      later time, rev 10 with the new epoch's clock 5 s behind, and rev 11
+      with it on the host's clock.
+
+    Run twice, the restarted owner's clock 5 s behind and on the host's
+    clock. Under 0.67's sentence, "a late joiner's seed merges as §4.2
+    says", the consumer kept the later time both times, as the tool does:
+    0.68 moves the second run's consumer from rev 11 to rev 10 (F-393)."""
+    import zenoh
+
+    from . import live
+    from .contract import load_contract
+    from .live_interop import _r1
+    from .owner import Owner
+
+    for offset_s, word in ((-5.0, "5 s behind"), (0.0, "on the host's clock")):
+        sec = f"§7 clocks (S7), a new epoch inside the seed, its clock {word} (core 0.68)"
+        r1, ep, _ = _r1()
+        tool, helper = live.open_client(ep), live.open_client(ep)
+        owners: list[Any] = []
+        joiners: list[sd.LateJoiner] = []
+        try:
+            c = load_contract(PLANS)
+            o1 = Owner("ground", "fleet-mgr-s7i", [c], connect=ep)
+            o1.start()
+            owners.append(o1)
+            base = f"{o1.prefix(c)}/state/plans"
+            t10 = o1.set_state(f"{base}/r", b"rev10")
+            answered = threading.Event()
+            answers: list[str] = []
+
+            def answer_now(query: Any, o1: Any = o1) -> None:  # the owner's own answer, at once
+                asked = str(query.key_expr)  # read before the answer ends the query
+                o1.answer_state(query, o1.state_answer(query))
+                answers.append(asked)
+                if len(answers) >= 2:
+                    answered.set()
+
+            o1.state_hold = answer_now
+
+            def hold(query: Any) -> None:  # answers nothing; its drop is the GET's final reply
+                threading.Timer(4.0, query.drop).start()
+
+            q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(hold), complete=False)
+            time.sleep(0.3)
+            lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=10.0)
+            lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=10.0)
+            joiners += [lc, lt]
+            for j in joiners:
+                j.start()
+            report.check(sec, "the owner answers both GETs, which stay open on the second queryable",
+                         answered.wait(3.0) and not any(j.seed.ended for j in joiners),
+                         f"answered {len(answers)}; ended {[j.seed.ended for j in joiners]}")
+            time.sleep(0.2)  # the answers on their way before the owner's session closes
+            o1.close()
+            owners.remove(o1)
+            o2 = Owner("ground", "fleet-mgr-s7i", [c], connect=ep)
+            if offset_s:
+                def behind(o2: Any = o2) -> Any:
+                    if o2.session is None:
+                        raise RuntimeError("§7: the restarted owner's clock was read before its session opened")
+                    ts = o2.session.new_timestamp()
+                    n = ts.get_time_as_ntp64().as_nanos() + int(offset_s * 1e9)
+                    return zenoh.Timestamp(zenoh.NTP64(n // 1_000_000_000, n % 1_000_000_000), ts.get_id())
+
+                o2.clock = behind
+            o2.start()
+            owners.append(o2)
+            t11 = o2.set_state(f"{base}/r", b"rev11")
+            time.sleep(0.5)
+            s10, s11 = sd.Stamp.of(t10), sd.Stamp.of(t11)
+            first = [[(a.via, str(a.stamp)) for a in j.applied] for j in joiners]
+            report.check(sec, "rev 11 arrives live inside both seeds, under a new id, before any reply: Latest "
+                              "delivers at query completion (core §4.1)",
+                         s10 is not None and s11 is not None and s11.id != s10.id
+                         and ((s11.time < s10.time) if offset_s else (s11.time > s10.time))
+                         and all(f == [("live", str(s11))] for f in first) and not any(j.seed.ended for j in joiners),
+                         f"rev 10 {s10}, rev 11 {s11}; arrivals {first}")
+            ended = all(j.wait(12.0) for j in joiners)
+            order = [[(a.via, a.outcome) for a in j.applied] for j in joiners]
+            report.check(sec, "the GET ends, and the owner's reply of rev 10 arrives last",
+                         ended and all(o[-1][0] == "reply" for o in order) and all(len(o) == 2 for o in order),
+                         f"ended {ended}; {order}")
+            got = lc.view().get(f"{base}/r")
+            report.check(sec, "core §4.2, §4.3 (0.68): the consumer, by S7 from its first value, accepts the reply "
+                              "under the old id, which arrived last: rev 10, the old epoch's",
+                         got is not None and got.payload == b"rev10" and order[0] == [("live", "kept"), ("reply", "kept")],
+                         f"{_show(got)}; {order[0]}")
+            heldt = lt.view().get(f"{base}/r")
+            want = b"rev10" if offset_s else b"rev11"
+            report.check(sec, f"observer §4.1 (0.10): the tool keeps the merge across ids: the later time, "
+                              f"{want.decode()}",
+                         heldt is not None and heldt.payload == want, f"{_show(heldt)}; {order[1]}")
+            try:
+                q.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        finally:
+            for j in joiners:
+                j.close()
+            for x in owners:
+                x.close()
+            helper.close()
+            tool.close()
+            r1.close()
 
 
 def section11(report: Report, run: Run | None = None) -> None:
