@@ -1,0 +1,66 @@
+{
+ "lean": {
+  "w1_put_bytes": 40,
+  "w1_sdu_bytes": 64,
+  "idle": {
+   "per_direction": {
+    "sdus": 34560,
+    "bytes": 587520,
+    "airtime_s": 1958.4
+   }
+  },
+  "w1": {
+   "a_to_b": {
+    "data": {
+     "sdus": 5760,
+     "bytes": 368640,
+     "airtime_s": 1228.8
+    },
+    "keepalive": {
+     "sdus": 33120,
+     "bytes": 563040,
+     "airtime_s": 1876.8
+    }
+   },
+   "b_to_a": {
+    "keepalive": {
+     "sdus": 34560,
+     "bytes": 587520,
+     "airtime_s": 1958.4
+    }
+   }
+  }
+ },
+ "bare": {
+  "w1_put_bytes": 40,
+  "w1_sdu_bytes": 48,
+  "idle": {
+   "per_direction": {
+    "sdus": 34560,
+    "bytes": 34560,
+    "airtime_s": 115.2
+   }
+  },
+  "w1": {
+   "a_to_b": {
+    "data": {
+     "sdus": 5760,
+     "bytes": 276480,
+     "airtime_s": 921.6
+    },
+    "keepalive": {
+     "sdus": 33120,
+     "bytes": 33120,
+     "airtime_s": 110.4
+    }
+   },
+   "b_to_a": {
+    "keepalive": {
+     "sdus": 34560,
+     "bytes": 34560,
+     "airtime_s": 115.2
+    }
+   }
+  }
+ }
+}
