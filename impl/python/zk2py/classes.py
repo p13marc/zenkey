@@ -480,15 +480,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §4.1", "A tool keeps core §4.2's merge for as long as it follows", MET,
      "seed.LateJoiner, a tool's: seed.Merge's rule merge, across two ids too, after the seed as inside it "
      "(state_scenarios §7 and its run inside the seed; live_interop s7; observer 0.10, round 91)"),
-    ("observer", "observer §4.1", "A tool that bounds what it holds counts the keys the bound forgot, and reports "
-     "the count", MET,
+    ("observer", "observer §4.1", "A tool that bounds what it holds counts each time the bound forgets a key, and "
+     "reports the count", MET,
      "seed.Merge and freshness.Subscriber, each bounded at seed.MAX_KEYS, the least recent key forgotten whole and "
      "counted in forgotten, holding nothing after; every reading of what they hold reports the count: "
      "alarms.OwnerReading, health.Reading, config.Reading and freshness.read_service's forgotten, and a tool's "
-     "LateJoiner.bound_note (readings; observer 0.11, round 92)"),
+     "LateJoiner.bound_note; each forgetting counted, a key forgotten, heard again and forgotten again counted "
+     "twice (readings; observer 0.11, round 92; 0.12's F-407, the mend after #926 part 5)"),
     ("observer", "observer §5.2", "A complete reading of a stream or an event", MET,
      "budget.Window (budget family, budget_scenarios; F-362)"),
-    ("observer", "observer §7.3", "Decode order for a tool is: the declared type, then the sample's", NOT_MET,
+    ("observer", "observer §7.3", "Decode order for a tool: a payload whose declared type the tool holds is decoded",
+     NOT_MET,
      "echo_tool decodes nothing: it shows each sample's size and encoding, reads no contract, and sniffs no "
      "foreign payload; the profiles' readers decode their profile's JSON Schema type on the wire their profile "
      "names (telemetry.v1's resource encoding, alarms.v1's strict JSON), never by the sample's Encoding, which "

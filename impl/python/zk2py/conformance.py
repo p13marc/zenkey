@@ -3499,8 +3499,10 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "So a consumer has no instant at which its merge ends")
          + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows, "
                    "across two timestamp ids too.",
-                   "A tool that bounds what it holds counts the keys the bound forgot, and reports the count. A "
-                   "forgotten key holds nothing")
+                   # Re-read under core 0.70 and observer 0.12 (the mend after
+                   # #926 part 5): F-407 says the bound counts each forgetting.
+                   "A tool that bounds what it holds counts each time the bound forgets a key, and reports the "
+                   "count. A forgotten key holds nothing")
          + present(core, "merges as §4.2 says, and the consumer rule", "It MUST accept the first value under a new id",
                    "A consumer MUST order an owner's values"), []),
         ("F-379, F-380, F-381 and F-387: §7.3 by each payload's declared type, §2.4's opt-in, §2.5's places, and "
@@ -3686,12 +3688,18 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          [True, True, True]),
         ("F-393: inside a seed the residual risk lasts the GET, the consumer holding the answering instance's id "
          "until the key's next value, and state.md §7 step 2's step inside the seed",
-         missing(core, "**Inside a seed** the risk lasts the GET.",
-                 "So a consumer holds the id of the instance that answered, whatever the two times, until the key's "
-                 "next value.",
+         # Re-read under core 0.70 (the mend after #926 part 5): F-410
+         # reworded §4.3's bullet and F-411 state.md's "both times", each the
+         # same rule as 0.69 stated it.
+         missing(core, "**Inside a seed.** An old epoch's value can arrive after the new epoch's for as long as the "
+                       "GET is open, not only in transit.",
+                 "So a consumer holds the reply's value, whether its time or the live samples' is later. It holds it "
+                 "until the key's next value.",
                  "Where two instances answer, it receives only the reply `Latest` kept, the one with the greater "
                  "stamp.")
-         + missing(state, "**Inside the seed.**", "It holds rev 10 both times, until rev 12, which it accepts.",
+         + missing(state, "**Inside the seed.**",
+                   "The consumer accepts rev 11, then the reply, which carries the old id. In both runs it then holds "
+                   "rev 10, until rev 12, which it accepts.",
                    "The tool keeps the later time: rev 10 with the clock behind, and rev 11, then rev 12, on the "
                    "host's clock."), []),
         ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
@@ -3712,11 +3720,14 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("F-397 and F-398: observer §7.3's decode order by the declared type, the Encoding picking its wire, "
          "sniffing with no declared type; §4.1's bound counting the keys and reporting the count; types.md §2's "
          "Encoding; the old forms gone",
-         missing(obs, "**Decode order** for a tool is: the declared type, then the sample's `Encoding` for the type's "
-                      "wire, then sniffing where there is no declared type.",
-                 "A payload with no declared type, a foreign key's, is sniffed (§8.1).",
+         # Re-read under observer 0.12 (the mend after #926 part 5): F-412
+         # reworded the decode order, F-406 placed a zk2 key whose contract is
+         # not in hand, and F-407 the bound's count.
+         missing(obs, "**Decode order** for a tool: a payload whose declared type the tool holds is decoded by that "
+                      "type, on the wire its sample's `Encoding` names (below). Any other payload is sniffed.",
+                 "A payload whose declared type the tool does not hold is sniffed (§8.1).",
                  "So a state declared `cbor` whose sample's `Encoding` is JSON is read as JSON.",
-                 "A tool that bounds what it holds counts the keys the bound forgot, and reports the count.")
+                 "A tool that bounds what it holds counts each time the bound forgets a key, and reports the count.")
          + missing(types, "The second carries CBOR's `Encoding` or zenoh's default. Its reason says it was read as "
                           "CBOR.")
          + present(obs, "the sample's `Encoding`, then the contract's type, then sniffing",
@@ -3725,7 +3736,8 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          "the old forms gone",
          missing(rules, "*Except:* A profile MAY order a consumer's values more strictly.",
                  "It is listed beside a rule it excepts. A row's MAY is in the rule ids.",
-                 "So does a verb the sentence omits.",
+                 # Re-read under core 0.70 (the mend after #926 part 5): F-413's rewrite.
+                 "A verb the sentence leaves out is shown in brackets. They sit where it is left out.",
                  "A rule of those sections, §1 and §9 included, that names a role is listed under that role.")
          + missing(readme, "With neither, §4.3 requires a new instance whose session has a fresh, unpinned zid",
                    "A rule of any of those sections, §1 and §9 included, that names a role is that role's")
