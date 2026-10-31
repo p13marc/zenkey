@@ -4572,6 +4572,92 @@ Round 91 found F-393 to F-405, thirteen, none a blocker:
   and a tool part"; F-403, "no end to state"; F-404, "the one whose value
   arrived last"; F-405, `RULES.md`'s "So is one of §1 or §9".
 
+## Core 0.69 and `observer.md` 0.11: round 91 answered (round 92)
+
+Core 0.69 and `observer.md` 0.11 answer round 91's F-393 to F-405 (#926's
+fourth part). All thirteen are resolved. F-398's second half, a forgotten
+key shown as not held, was declined on purpose. zk2py diffed every RFC 2119
+sentence of both texts, and every other sentence: no rule changed beyond
+what the changelogs state.
+- **The core** asks nothing new. §4.2's merge MUST is three sentences, the
+  same obligations (F-401). §4.3's new bullet says what S7 already held
+  inside a seed: the consumer holds the id of the instance that answered
+  (F-393). The rest is wording.
+- **The observer** asks two things new, without a keyword, each stated in
+  its entry. §4.1's bound reports its count (F-398), and §7.3's decode
+  order puts the declared type before the sample's `Encoding` (F-397).
+
+### The classes zk2py claims
+
+Unchanged since round 89: the **owner**, **consumer**, **caller** and
+**observer** classes, each at the full level. Not the deployment class.
+The profiles' classes, by role, are round 89's table above.
+
+### Its walk of `RULES.md` at 9d026529
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 56 | 45 | 3 | 8 |
+| consumer | 15 | 12 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 53 | 49 | 2 | 2 |
+| static, in every class | 34 | 32 | 0 | 2 |
+
+- **171 rows walked, none without a verdict.** Observer §4.1's bound
+  verdict is re-keyed to 0.11's sentence. F-401's split has three new
+  rows: two under consumer ("It MUST keep the newer", "a consumer MUST
+  instead keep") and one under observer. Each is met.
+- **Beyond the index:** twelve observer rules stated without a keyword.
+  Eleven are met: round 90's nine, and observer §4.1's lasting merge and
+  its bound. Observer §7.3's decode order is walked from this round, not
+  met.
+- **Not met:** the owner's three SHOULDs (§1.4's canonical form, §1.5's
+  new session at a re-mint, §3.3's 1 KB), and observer §7.3's two MUSTs
+  and its decode order, in the echo tool.
+
+### What round 92 changed in zk2py
+
+- **A tool's bound reports its count** (observer §4.1, 0.11).
+  `seed.bound_note` says how many keys the bound forgot, and what that
+  costs. A tool's `LateJoiner.bound_note()` and `freshness.Subscriber.note()`
+  give it. The alarms, health and config readings, and
+  `freshness.read_service`'s answer (a `ServiceRead`), carry `forgotten`
+  beside what they hold. zk2py marks neither a forgotten key nor its next
+  value, as the reference does not, so the count is what tells a person.
+- **`state.md` §7 step 2 inside the seed, as 0.69 writes it.** The second
+  queryable lets the GET end once rev 11 is heard, then the owner writes
+  rev 12. The consumer holds rev 10 until rev 12; the tool keeps the later
+  time. The owner example runs it with its clock 5 s behind too. The tool
+  is judged by the stamps, since "rev 10 with the clock behind" holds only
+  while rev 12 comes within the offset of rev 10 (F-408).
+- **The echo tool and §7.3's decode order.** It still decodes nothing. It
+  lacks a contract per key, the decoders by declared type on the wire the
+  `Encoding` picks, honest rendering by the declared type, and sniffing of
+  a foreign payload. The profiles' readers read the wire their profile
+  names, not the sample's `Encoding` (F-409).
+
+**`readings`: 736, up from 728.** **`just py-conformance`: 3693 of 3693.**
+
+**Live, round 92**, by (owner, readers):
+- `state_scenarios` §7: zk2py, zk2py **19 of 19**, the first run and the
+  run inside the seed with the new clock behind and on the host's clock.
+- `live_interop --only s7`: Rust, zk2py **24 of 24**, the same three
+  runs.
+- `health_scenarios` (zk2py, zk2py) **29 of 29**, the readers' new field
+  at run time.
+
+Round 92 found F-406 to F-413, eight, none a blocker:
+- **gaps:** F-406, a zk2 key whose contract the tool does not hold, which
+  §7.3 does not place; F-408, `state.md` §7's clock-behind expectations
+  need rev 12 within the offset;
+- **ambiguous:** F-407, the bound counts keys or forgettings;
+- **a conflict:** F-409, §7.3's wire by the `Encoding` beside
+  `telemetry.v1` §2.6's resource encoding and `alarms.v1` §2.4's strict
+  JSON;
+- **four hard to read:** F-410, "the risk lasts the GET"; F-411, "both
+  times"; F-412, the decode order's "then sniffing"; F-413, `RULES.md`'s
+  "So does a verb".
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -4595,11 +4681,12 @@ Round 91 found F-393 to F-405, thirteen, none a blocker:
     (observer §4.5, 0.10): zk2py counts no budget and runs no archive;
   - `desired.v1`'s scenario §9, a tool's (`zenctl desired`, #840's DD):
     zk2py's §2.17 runs on fixtures only.
-  - of the classes it claims (rounds 89 to 91): observer §7.3's decoding
-    and honest rendering in the echo tool (no contract per key, no
-    protobuf or JSON Schema decoder and no renderer by declared type, so
-    `types.md` §1 to §3 are not run, and §2.4's reliability and §7.2's
-    encodings rest on readings; F-379, F-397); and three owner SHOULDs,
+  - of the classes it claims (rounds 89 to 92): observer §7.3's decoding,
+    its decode order and honest rendering in the echo tool (no contract
+    per key, no protobuf or JSON Schema decoder, no sniffing and no
+    renderer by declared type, so `types.md` §1 to §3 are not run, and
+    §2.4's reliability and §7.2's encodings rest on readings; F-379,
+    F-397, F-406, F-409); and three owner SHOULDs,
     §1.4's canonical form, §1.5's new session at a re-mint and §3.3's 1 KB.
     S7's consumer rule is kept from the first value since round 91. The
     deployment class is not claimed.
@@ -4717,8 +4804,8 @@ impl/python/
                                 readings on a bus
     budget_scenarios.py §2.7, observer §5.2 scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2, §4.3, observer §4.1 a late joiner's seed: subscribe, then S4's GET; a consumer's by S7
-                                from its first value, a tool's by the merge for as long as it follows, bounded;
-                                the pure merge, and the readers' (merged)
+                                from its first value, a tool's by the merge for as long as it follows, bounded,
+                                its count reported (bound_note); the pure merge, and the readers' (merged)
     presence.py       observer §3 what a complete presence read is (0.37, 0.41): the view (a withdrawal unconfirmed until a
                                 read, a read unordered while no round trip stands, a transport's move) and the follower
                                 on a watch session
