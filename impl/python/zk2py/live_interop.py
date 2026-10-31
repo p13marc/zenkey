@@ -3461,15 +3461,25 @@ def run_python_s7_both(report: Report, exe: Path) -> None:
 
 def run_python_s7_inside(report: Report, exe: Path) -> None:
     """``state.md`` §7 step 2's new epoch *inside* a late joiner's seed
-    (core 0.68, F-382; round 91's F-393), over the owner example: it puts
-    ``items/a``, a second zk2py session holds a non-complete queryable on
-    the items so that each late joiner's GET stays open after the owner
-    example has answered, and the owner example restarts with no record on
-    the host's clock and puts ``items/a`` again. "`Latest` consolidation …
-    delivers at query completion" (core §4.1), so the first instance's reply
-    reaches each late joiner after the new instance's live put. The
-    consumer, by S7 from its first value, keeps the reply, the old epoch's;
-    the tool, by the merge, the later time, the new epoch's."""
+    (core 0.68, F-382; round 91's F-393; core 0.69's "Inside the seed",
+    round 92), over the owner example: it puts ``items/a``, a second zk2py
+    session holds a non-complete queryable on the items so that each late
+    joiner's GET stays open after the owner example has answered, and the
+    owner example restarts with no record and puts ``items/a`` again. Then
+    the GET ends, and the new instance puts ``items/a`` a third time. Run
+    with the new clock 5 s behind (``--clock-offset-ms -5000``) and on the
+    host's clock, as the step says. "`Latest` consolidation … delivers at
+    query completion" (core §4.1), so the first instance's reply reaches
+    each late joiner after the new instance's live put:
+    - the consumer, by S7 from its first value, holds the reply, the old
+      epoch's, until the third put, which it accepts;
+    - the tool, by the merge, keeps the later time: the old epoch's with the
+      clock behind, the new epoch's two puts on the host's clock."""
+    for offset_ms in (-5000, 0):
+        _run_python_s7_inside(report, exe, offset_ms)
+
+
+def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
     import zenoh
 
     from . import live
@@ -3479,8 +3489,9 @@ def run_python_s7_inside(report: Report, exe: Path) -> None:
     tool, helper = live.open_client(ep), live.open_client(ep)
     rusts: list[Owner] = []
     joiners: list[Any] = []
+    word = "5 s behind" if offset_ms else "on the host's clock"
     try:
-        run = "core 0.68 S7: state.md §7 step 2, a new epoch on the host's clock inside a late joiner's seed"
+        run = f"core 0.69 S7: state.md §7 step 2, a new epoch {word} inside a late joiner's seed"
         first = Owner(exe, "lab/s7i", [REPO / BUDGET_V1], connect=ep)
         rusts.append(first)
         if not report.check(run, "the owner example starts behind R1", first.wait_for("ready ", 120) is not None,
@@ -3489,10 +3500,10 @@ def run_python_s7_inside(report: Report, exe: Path) -> None:
         base = "zk2/lab/s7i/budget.v1/state/items"
         put10 = first.command("put budget.v1 state/items/{item} a")
 
-        def hold(query: Any) -> None:  # answers nothing; its drop is the GET's final reply
-            threading.Timer(25.0, query.drop).start()
+        from .state_scenarios import _Held
 
-        q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(hold), complete=False)
+        held_q = _Held(limit=30.0)
+        q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(held_q.take), complete=False)
         time.sleep(0.5)
         lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=30.0)
         lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=30.0)
@@ -3505,9 +3516,10 @@ def run_python_s7_inside(report: Report, exe: Path) -> None:
                      f"{put10!r}; {[(j.seed.ended, len(j.applied)) for j in joiners]}")
         first.close()
         rusts.remove(first)
-        second = Owner(exe, "lab/s7i", [REPO / BUDGET_V1], connect=ep)
+        flags = ["--clock-offset-ms", str(offset_ms)] if offset_ms else []
+        second = Owner(exe, "lab/s7i", [REPO / BUDGET_V1], connect=ep, flags=flags)
         rusts.append(second)
-        if not report.check(run, "it restarts with no record, on the host's clock",
+        if not report.check(run, f"it restarts with no record, {word}",
                             second.wait_for("ready ", 120) is not None, str(second.stderr[-1:])):
             return
         put11 = second.command("put budget.v1 state/items/{item} a")
@@ -3517,25 +3529,57 @@ def run_python_s7_inside(report: Report, exe: Path) -> None:
                      bool(put11) and all(len(x) == 1 for x in lives) and not any(j.seed.ended for j in joiners)
                      and not any(a.via == "reply" for j in joiners for a in j.applied),
                      f"{put11!r}; {[[str(a.stamp) for a in x] for x in lives]}")
+        held_q.release()  # "Then the second queryable lets the GET end" (state.md §7, 0.69)
         ended = all(j.wait(40.0) for j in joiners)
         replies = [[a for a in j.applied if a.via == "reply"] for j in joiners]
         new = lives[0][0].stamp if lives[0] else None
         old = replies[0][0].stamp if replies[0] else None
         report.check(run, "the GET ends and the first instance's reply arrives last, under the old id, its time "
-                          "below the new put's",
+                          + ("above" if offset_ms else "below") + " the new put's",
                      ended and all(len(x) == 1 for x in replies) and new is not None and old is not None
-                     and old.id != new.id and old.time < new.time,
+                     and old.id != new.id and ((old.time > new.time) if offset_ms else (old.time < new.time)),
                      f"ended {ended}; old {old}, new {new}")
         got = lc.view().get(f"{base}/a")
-        report.check(run, "core §4.2, §4.3 (0.68): the consumer accepts the reply under the old id, which arrived "
-                          "last: the old epoch's value, though the new epoch's time is later (F-393)",
+        report.check(run, "core §4.2, §4.3 (0.69): the consumer accepts the reply under the old id, which arrived "
+                          "last: it holds the old epoch's value, whatever the two times (F-393)",
                      got is not None and old is not None and got.stamp == old
                      and [(a.via, a.outcome) for a in lc.applied] == [("live", "kept"), ("reply", "kept")],
                      f"held {got.stamp if got else None}; {[(a.via, a.outcome) for a in lc.applied]}")
         held = lt.view().get(f"{base}/a")
-        report.check(run, "observer §4.1 (0.10): the tool keeps the merge: the new epoch's later time",
-                     held is not None and new is not None and held.stamp == new,
-                     f"held {held.stamp if held else None}; {[(a.via, a.outcome) for a in lt.applied]}")
+        want = old if offset_ms else new
+        report.check(run, "observer §4.1 (0.10): the tool keeps the merge: the later time, the "
+                          + ("old" if offset_ms else "new") + " epoch's",
+                     held is not None and want is not None and held.stamp == want,
+                     f"held {held.stamp if held else None}; {[(a.via, a.outcome) for a in lt.applied]}; "
+                     f"{lt.bound_note()}")
+        # "Then the second queryable lets the GET end, and the owner writes
+        # rev 12" (state.md §7, 0.69): the new instance's third put.
+        put12 = second.command("put budget.v1 state/items/{item} a")
+        time.sleep(0.6)
+        third = [a for a in lc.applied if a.via == "live"][1:]
+        s12 = third[0].stamp if third else None
+        got = lc.view().get(f"{base}/a")
+        report.check(run, "state.md §7 (0.69): the consumer holds the old epoch's value until the new instance's "
+                          "next put, which it accepts",
+                     bool(put12) and s12 is not None and new is not None and s12.id == new.id
+                     and s12.time > new.time and got is not None and got.stamp == s12
+                     and [(a.outcome, a.rule) for a in third] == [("kept", "S7")],
+                     f"{put12!r}; held {got.stamp if got else None}; {[(a.outcome, a.rule) for a in third]}")
+        held = lt.view().get(f"{base}/a")
+        lastt = [(a.via, a.outcome) for a in lt.applied][2:]
+        # The tool keeps the later time. "the old epoch's with the clock
+        # behind" holds while the third put, 5 s behind, comes within 5 s of
+        # the first: the step states no such bound (round 92's F-408).
+        later = s12 is not None and old is not None and s12.time > old.time
+        want = s12 if later else old
+        gap = None if s12 is None or old is None else round((s12.time - old.time) / 2**32, 3)
+        report.check(run, "state.md §7 (0.69): the tool keeps the later time: "
+                          + ("the old epoch's, the new put's time below it, dropped" if not later
+                             else "the new instance's next put"
+                             + (", its time past the old one's though 5 s behind" if offset_ms else "")),
+                     held is not None and want is not None and held.stamp == want
+                     and lastt == [("live", "kept" if later else "dropped")] and (later or offset_ms != 0),
+                     f"held {held.stamp if held else None}; {lastt}; the third put's time {gap} s from the first's")
         try:
             q.undeclare()
         except Exception:  # noqa: BLE001 - closing anyway

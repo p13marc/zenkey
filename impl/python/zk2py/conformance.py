@@ -3640,14 +3640,98 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
     :meth:`zk2py.freshness.Subscriber.note`, and ``forgotten`` on the
     alarms, health and config readings and on
     :func:`zk2py.freshness.read_service`'s answer. Read with no session: a
-    fake one stands in, whose GETs end at once with no reply."""
+    fake one stands in, whose GETs end at once with no reply.
+
+    Before it, each text at its version or later, round 91's F-393 to F-405
+    answered as they read, and the forms they replaced gone; and
+    ``state.md`` §7 step 2's new step inside the seed, as 0.69 writes it
+    (F-393), on the fake session: the consumer holds rev 10 until rev 12; the
+    tool keeps the later time."""
+    import re
+
     from . import alarms as al
     from . import config as cf
     from . import freshness as fr
     from . import health as hl
     from . import seed as sd
 
-    out: list[tuple[str, Any, Any]] = []
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules = flat("core.md"), flat("observer.md"), flat("RULES.md")
+    readme, state, types = flat("README.md"), flat("scenarios/state.md"), flat("scenarios/types.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Written against\*\* \| core (\d+)\.(\d+) ", obs)
+    against = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("#926 part 4: core 0.69 or later, observer.md 0.11 or later written against core 0.69 or later, each "
+         "with its entry",
+         [core_v >= (0, 69), obs_v >= (0, 11), against >= (0, 69)]
+         + entry("CHANGELOG.md", "0.69", "round 91's answers")
+         + entry("observer-CHANGELOG.md", "0.11", "F-397"),
+         [True, True, True]),
+        ("F-393: inside a seed the residual risk lasts the GET, the consumer holding the answering instance's id "
+         "until the key's next value, and state.md §7 step 2's step inside the seed",
+         missing(core, "**Inside a seed** the risk lasts the GET.",
+                 "So a consumer holds the id of the instance that answered, whatever the two times, until the key's "
+                 "next value.",
+                 "Where two instances answer, it receives only the reply `Latest` kept, the one with the greater "
+                 "stamp.")
+         + missing(state, "**Inside the seed.**", "It holds rev 10 both times, until rev 12, which it accepts.",
+                   "The tool keeps the later time: rev 10 with the clock behind, and rev 11, then rev 12, on the "
+                   "host's clock."), []),
+        ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
+         "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
+         missing(core, "They are the rules of §1 and §9 that name no role",
+                 "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
+                 "so that a caller or tool following the steps would report the contract unavailable",
+                 "or at the timeout the caller or tool gave it (§8.1).",
+                 "It MUST keep the newer by the owner's stamp (S1, S2). Across two timestamp ids, a consumer MUST "
+                 "instead keep what §4.3's consumer rule accepts.",
+                 "Across them a consumer and a tool order differently (below).",
+                 "So a consumer has no instant at which its merge ends",
+                 "Across two ids, a consumer holds a value under the id of the last value it received")
+         + present(core, "They are §1's, §9's", "A holder on the caller's own session", "at the caller's timeout",
+                   "and keep the newer by the owner's stamp (S1, S2), or, for a consumer",
+                   "there a consumer and a tool part", "has no end to state", "keeps the one whose value arrived last"),
+         []),
+        ("F-397 and F-398: observer §7.3's decode order by the declared type, the Encoding picking its wire, "
+         "sniffing with no declared type; §4.1's bound counting the keys and reporting the count; types.md §2's "
+         "Encoding; the old forms gone",
+         missing(obs, "**Decode order** for a tool is: the declared type, then the sample's `Encoding` for the type's "
+                      "wire, then sniffing where there is no declared type.",
+                 "A payload with no declared type, a foreign key's, is sniffed (§8.1).",
+                 "So a state declared `cbor` whose sample's `Encoding` is JSON is read as JSON.",
+                 "A tool that bounds what it holds counts the keys the bound forgot, and reports the count.")
+         + missing(types, "The second carries CBOR's `Encoding` or zenoh's default. Its reason says it was read as "
+                          "CBOR.")
+         + present(obs, "the sample's `Encoding`, then the contract's type, then sniffing",
+                   "counts what the bound forgot, and treats"), []),
+        ("F-394, F-399, F-400, F-405: S7's *Except:*, the glossary's Epoch and Static rule, the index's header; "
+         "the old forms gone",
+         missing(rules, "*Except:* A profile MAY order a consumer's values more strictly.",
+                 "It is listed beside a rule it excepts. A row's MAY is in the rule ids.",
+                 "So does a verb the sentence omits.",
+                 "A rule of those sections, §1 and §9 included, that names a role is listed under that role.")
+         + missing(readme, "With neither, §4.3 requires a new instance whose session has a fresh, unpinned zid",
+                   "A rule of any of those sections, §1 and §9 included, that names a role is that role's")
+         + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
+         + present(readme, "With no record of its last stamp, §4.3 requires a fresh zid"), []),
+    ]
 
     class Fake:
         """A session that declares nothing and whose GETs, liveliness ones
@@ -3663,6 +3747,27 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
             return self
 
     sel = "zk2/g/s/zk2py_plans.v1/state/plans/*"
+    k = "zk2/g/s/zk2py_plans.v1/state/plans/r"
+
+    def inside(consumer: bool, behind: bool) -> list[Any]:
+        """state.md §7 step 2 inside the seed (0.69): rev 11 live under the new
+        id, the reply of rev 10 at the GET's end, then rev 12 under the new id;
+        the new clock 5 s behind or on the host's clock, rev 12 written within
+        the offset of rev 10."""
+        lj = sd.LateJoiner(Fake(), sel, consumer=consumer)
+        t10, t11, t12 = (200, 150, 151) if behind else (200, 201, 202)
+        for via, rev, t, i in (("live", b"rev11", t11, "b2"), ("reply", b"rev10", t10, "a1"),
+                               ("live", b"rev12", t12, "b2")):
+            lj._merge(k, via, False, rev, "application/json", f"{t}/{i}")
+        lj._ended()
+        return [[a.outcome for a in lj.applied], lj.view()[k].payload.decode()]
+
+    out.append(("state.md §7 step 2 inside the seed (core 0.69, F-393): the consumer accepts rev 11, then the reply "
+                "under the old id, and holds rev 10 until rev 12; the tool keeps the later time, rev 10 with the "
+                "clock behind, rev 11 then rev 12 on the host's clock",
+                [inside(True, True), inside(True, False), inside(False, True), inside(False, False)],
+                [[["kept", "kept", "kept"], "rev12"], [["kept", "kept", "kept"], "rev12"],
+                 [["kept", "kept", "dropped"], "rev10"], [["kept", "dropped", "kept"], "rev12"]]))
 
     def joiner() -> list[Any]:
         lj = sd.LateJoiner(Fake(), sel, consumer=False, max_keys=2)

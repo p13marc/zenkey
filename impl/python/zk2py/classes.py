@@ -488,6 +488,11 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "LateJoiner.bound_note (readings; observer 0.11, round 92)"),
     ("observer", "observer §5.2", "A complete reading of a stream or an event", MET,
      "budget.Window (budget family, budget_scenarios; F-362)"),
+    ("observer", "observer §7.3", "Decode order for a tool is: the declared type, then the sample's", NOT_MET,
+     "echo_tool decodes nothing: it shows each sample's size and encoding, reads no contract, and sniffs no "
+     "foreign payload; the profiles' readers decode their profile's JSON Schema type on the wire their profile "
+     "names (telemetry.v1's resource encoding, alarms.v1's strict JSON), never by the sample's Encoding, which "
+     "0.11 says picks the wire (round 92's F-409)"),
     ("observer", "observer §7.1", "The data-flow graph is read from descriptors, never inferred", MET,
      "live.get_descriptor (live_interop, bindings.md §3; F-362)"),
     ("observer", "observer §8.1", "A tool never hides or refuses a foreign key", MET,

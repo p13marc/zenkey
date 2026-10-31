@@ -131,6 +131,33 @@ class Hold:
         self.taken.set()
 
 
+class _Held:
+    """A queryable's handler that answers nothing and keeps each query until
+    :meth:`release`, whose drop is the GET's final reply (state.md §7, "keeps
+    each query it takes", then "lets the GET end"). A timer releases it after
+    ``limit`` seconds, so that a run that fails cannot leave a GET open."""
+
+    def __init__(self, limit: float = 30.0) -> None:
+        self.lock, self.queries, self.done = threading.Lock(), [], False
+        self.timer = threading.Timer(limit, self.release)
+        self.timer.daemon = True
+        self.timer.start()
+
+    def take(self, query: Any) -> None:
+        with self.lock:
+            if not self.done:
+                self.queries.append(query)
+                return
+        query.drop()
+
+    def release(self) -> None:
+        with self.lock:
+            self.done, queries, self.queries = True, self.queries, []
+        self.timer.cancel()
+        for q in queries:
+            q.drop()
+
+
 def _owner(endpoint: str, service: str):
     from .contract import load_contract
     from .owner import Owner
@@ -359,11 +386,16 @@ def section7(report: Report, run: Run | None = None) -> None:
 
 def section7_inside(report: Report, run: Run | None = None) -> None:
     """§7 step 2's new epoch *inside* a late joiner's seed, the case core
-    0.68 moved (F-382; round 91). The owner writes rev 10. A second session
-    holds a non-complete queryable on the plans, so each late joiner's GET
-    stays open after the owner has answered it. Meanwhile the owner restarts
-    with no record, a new epoch, and writes rev 11, whose live sample
-    arrives while the GET is open. Then the GET ends.
+    0.68 moved (F-382; round 91), and 0.69's "Inside the seed" (F-393;
+    round 92). The owner writes rev 10. A second session holds a
+    non-complete queryable on the plans, so each late joiner's GET stays
+    open after the owner has answered it. Meanwhile the owner restarts with
+    no record, a new epoch, and writes rev 11, whose live sample arrives
+    while the GET is open. Then the GET ends, and the owner writes rev 12:
+    "The consumer accepts rev 11, then the reply, under the old id. It holds
+    rev 10 both times, until rev 12, which it accepts. The tool keeps the
+    later time: rev 10 with the clock behind, and rev 11, then rev 12, on the
+    host's clock."
 
     - **What zenoh does** (core §4.1): "`Latest` consolidation … delivers at
       query completion". So the owner's reply of rev 10 reaches each late
@@ -390,7 +422,7 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
     from .owner import Owner
 
     for offset_s, word in ((-5.0, "5 s behind"), (0.0, "on the host's clock")):
-        sec = f"§7 clocks (S7), a new epoch inside the seed, its clock {word} (core 0.68)"
+        sec = f"§7 clocks (S7), a new epoch inside the seed, its clock {word} (core 0.69)"
         r1, ep, _ = _r1()
         tool, helper = live.open_client(ep), live.open_client(ep)
         owners: list[Any] = []
@@ -414,10 +446,8 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
 
             o1.state_hold = answer_now
 
-            def hold(query: Any) -> None:  # answers nothing; its drop is the GET's final reply
-                threading.Timer(4.0, query.drop).start()
-
-            q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(hold), complete=False)
+            held_q = _Held()
+            q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(held_q.take), complete=False)
             time.sleep(0.3)
             lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=10.0)
             lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=10.0)
@@ -452,6 +482,7 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
                          and ((s11.time < s10.time) if offset_s else (s11.time > s10.time))
                          and all(f == [("live", str(s11))] for f in first) and not any(j.seed.ended for j in joiners),
                          f"rev 10 {s10}, rev 11 {s11}; arrivals {first}")
+            held_q.release()  # "Then the second queryable lets the GET end" (0.69)
             ended = all(j.wait(12.0) for j in joiners)
             order = [[(a.via, a.outcome) for a in j.applied] for j in joiners]
             report.check(sec, "the GET ends, and the owner's reply of rev 10 arrives last",
@@ -468,6 +499,34 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
                               f"{want.decode()}",
                          heldt is not None and heldt.payload == want,
                          f"{_show(heldt)}; {order[1]}; {lt.bound_note()}")
+            # state.md §7 step 2, inside the seed, as core 0.69 writes it
+            # (F-393): "Then the second queryable lets the GET end, and the
+            # owner writes rev 12."
+            t12 = o2.set_state(f"{base}/r", b"rev12")
+            time.sleep(0.5)
+            s12 = sd.Stamp.of(t12)
+            got = lc.view().get(f"{base}/r")
+            last = [(a.via, a.outcome, a.rule) for a in lc.applied][2:]
+            report.check(sec, "state.md §7 (0.69): the consumer holds rev 10 until rev 12, which it accepts, under "
+                              "the new id again",
+                         got is not None and got.payload == b"rev12" and str(got.stamp) == str(s12)
+                         and last == [("live", "kept", "S7")], f"{_show(got)}; {last}")
+            heldt = lt.view().get(f"{base}/r")
+            lastt = [(a.via, a.outcome) for a in lt.applied][2:]
+            # The tool keeps the later time. "rev 10 with the clock behind"
+            # holds while rev 12, 5 s behind, is written within 5 s of rev 10:
+            # the step states no such bound (round 92's F-408).
+            later = s12 is not None and s10 is not None and s12.time > s10.time
+            want = b"rev12" if later else b"rev10"
+            gap = None if s12 is None or s10 is None else round((s12.time - s10.time) / 2**32, 3)
+            report.check(sec, "state.md §7 (0.69): the tool keeps the later time: "
+                              + ("rev 10, rev 12's time below it, dropped" if not later else
+                                 "rev 12" + (", its time past rev 10's though 5 s behind" if offset_s
+                                             else " (rev 11, then rev 12)")),
+                         heldt is not None and heldt.payload == want
+                         and lastt == [("live", "kept" if later else "dropped")]
+                         and (later or offset_s != 0.0),
+                         f"{_show(heldt)}; {lastt}; rev 12's time {gap} s from rev 10's; {lt.bound_note()}")
             try:
                 q.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
