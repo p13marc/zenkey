@@ -1,0 +1,57 @@
+# Driver A of #989's wire baseline: the RF end the zk2 owner's router dials.
+# A udp-medium bearer (lab-air) under the lean layer stack, paced to rf()'s
+# 2400 bit/s with its 220-byte frame; loss and latency come from the relay
+# between the two drivers.
+socket_dir = "@WORK@/run/a"
+# The aead layer's nonce counters (--init-layer-state).
+state_dir = "@WORK@/state/a"
+
+[[device]]
+name = "rfa"
+# 220 - 16 (the lean stack) + Zenoh's 2-byte length prefix
+zenoh_batch_size = 206
+
+[device.medium]
+kind = "udp"
+bind = "127.0.0.1:17410"
+max_sdu = 220
+rate_bps = 2400
+
+[device.medium.peers]
+b = "127.0.0.1:17412"
+
+[[device.endpoints]]
+name = "b"
+role = "bind"
+
+[[device.endpoints.lanes]]
+name = "air"
+reliable = false
+priorities = [0, 7]
+
+# The lean stack (constrained-overhead-review.md §3.2): 16 bytes per SDU.
+# In the order an outgoing SDU meets them, nearest the scheduler first.
+[[device.layers]]
+kind = "compress"                         # 1 byte stored, or 3 + a zstd body
+dictionary_file = "@WORK@/cfg/rf.zdict"   # train-dictionary.sh: a bare run's own SDUs
+level = 3
+
+[[device.layers]]
+kind = "aead"                             # 1 + 4 + 8 = 13 bytes
+suite = "aes-128-ccm"
+tag_bytes = 8
+mode = "sealed"
+key_file = "@WORK@/cfg/rf.keys"
+key_id = 0
+accept = [0]
+self = "a"
+
+# Stands in for the address layer's 2 bytes (dst, src): layer-address refuses
+# the udp medium ("unknown lane */be#0"), which addresses peers itself.
+[[device.layers]]
+kind = "overhead"
+bytes = 2
+
+[management]
+listen = ["unixsock-stream/@WORK@/run/a/mgmt.sock"]
+telemetry_interval_ms = 1000
