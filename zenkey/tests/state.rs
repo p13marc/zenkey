@@ -687,6 +687,115 @@ async fn s7_clocks() {
     );
 }
 
+/// What a late joiner received of one key, in arrival order: each value
+/// and its stamp, whichever path brought it.
+type Arrivals = Arc<Mutex<Vec<(String, zenoh::time::Timestamp)>>>;
+
+fn arrived(into: &Arrivals, sample: &Sample) {
+    into.lock().unwrap().push((
+        String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned(),
+        *sample
+            .timestamp()
+            .expect("an owner stamps every mutation (S1)"),
+    ));
+}
+
+/// §7 step 2's late joiners (core §4.2, §4.3). A consumer subscribes, then
+/// seeds rev 10 by S4's GET. The owner restarts with no record, a fresh zid
+/// and its clock 5 s behind, and writes rev 11, then rev 12. The consumer
+/// orders every value by §4.3's consumer rule from its first value on, its
+/// seed's reply included ([`ValueOrder`]): it accepts rev 11, under an id
+/// other than its held value's though its time is lower, then rev 12. A
+/// tool's late joiner, the control, judges the same arrivals by §4.2's
+/// merge for as long as it follows (observer §4.1), and keeps rev 10: the
+/// fleet's seeded subscriptions do so on the bus
+/// (`zenkey-fleet/tests/seeding.rs`, `s7_a_tools_late_joiner_…`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_a_late_joiner_across_a_new_epoch() {
+    use zenkey::model::seed::{Held, Stamp, admits};
+    let (_r1, ep) = router(None).await;
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let s = client(&ep).await;
+    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+    let t10 = w["vehicle-01"].put("rev10").await.unwrap();
+
+    // The late joiner: the subscription first, then S4's GET (core §4.2).
+    let got: Arrivals = Arc::default();
+    let live = Arc::clone(&got);
+    let _sub = c
+        .subscribe("state/plans/{vehicle}", move |d| arrived(&live, &d.sample))
+        .await
+        .unwrap();
+    for cur in answered(&c, None).await {
+        if let Current::Value { sample, .. } = cur {
+            arrived(&got, &sample);
+        }
+    }
+    // The seed's reply, and the subscription's copy of rev 10 when its put
+    // reached the router after the subscription did: one mutation, one
+    // stamp, whichever path brought it.
+    let seeded = got.lock().unwrap().len();
+    assert!(seeded >= 1, "the seed's reply");
+    assert!(
+        got.lock()
+            .unwrap()
+            .iter()
+            .all(|(v, ts)| v == "rev10" && *ts == t10),
+        "rev 10 alone, with its stamp"
+    );
+
+    // The new epoch: no record, a fresh zid, 5 s behind.
+    drop(w);
+    mgr.close().await.unwrap();
+    s.close().await.unwrap();
+    let s = client(&ep).await;
+    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+    mgr.minter().simulate_offset(-5000);
+    let t11 = w["vehicle-01"].put("rev11").await.unwrap();
+    let t12 = w["vehicle-01"].put("rev12").await.unwrap();
+    assert_ne!(t11.get_id(), t10.get_id(), "a new timestamp id");
+    assert!(t12.get_time() < t10.get_time(), "both behind rev 10's time");
+    eventually("rev 11 and rev 12 arrive", || async {
+        got.lock().unwrap().len() == seeded + 2
+    })
+    .await;
+    let arrivals = got.lock().unwrap().clone();
+
+    // The consumer: §4.3's consumer rule over every arrival, the seed's first.
+    let mut order = ValueOrder::new();
+    let consumer: Vec<&str> = arrivals
+        .iter()
+        .filter(|(_, ts)| order.accept(ORIGIN, ts))
+        .map(|(v, _)| v.as_str())
+        .collect();
+    assert_eq!(
+        consumer,
+        ["rev10", "rev11", "rev12"],
+        "a value under another id is accepted, and ordered by time within it"
+    );
+
+    // The control: a tool's late joiner, by §4.2's merge throughout.
+    let mut held = Held::Nothing;
+    let tool: Vec<&str> = arrivals
+        .iter()
+        .filter(|(_, ts)| {
+            let incoming = Some(Stamp {
+                time: ts.get_time().as_u64(),
+                id: u128::from_le_bytes(ts.get_id().to_le_bytes()),
+            });
+            let kept = admits(held, incoming);
+            if kept {
+                held = held.after(incoming);
+            }
+            kept
+        })
+        .map(|(v, _)| v.as_str())
+        .collect();
+    assert_eq!(tool, ["rev10"], "the merge keeps the later time across ids");
+    drop(w);
+    mgr.close().await.unwrap();
+}
+
 /// §9: an archive that holds a delete refuses an older put arriving late.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s9_an_archives_backend_refuses_an_outdated_put() {

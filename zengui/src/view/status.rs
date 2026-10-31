@@ -289,7 +289,8 @@ pub fn skeleton_text(skeleton: Option<&zenkey_fleet::SkeletonCoverage>) -> Strin
 /// The seed summary (#92; zk2's late joiner since #614, FL6b): each leg's
 /// replies by the leg's own name — the `@adv` history and S4's state GET,
 /// never a storage — what the merge superseded, and, only when one ran
-/// short, how many legs reached their timeout.
+/// short, how many legs reached their timeout, and only when its bound has
+/// cost something, how many keys the merge forgot (observer §4.1, O6).
 pub fn seed_text(seeded: usize, t: crate::state::observation::SeedTotals) -> String {
     let mut label = format!(
         "seeded {}: {} history · {} state · {} superseded",
@@ -302,6 +303,12 @@ pub fn seed_text(seeded: usize, t: crate::state::observation::SeedTotals) -> Str
         label.push_str(&format!(
             " · {} possibly incomplete (a GET reached its timeout)",
             kit::plural(t.incomplete, "leg")
+        ));
+    }
+    if t.evicted > 0 {
+        label.push_str(&format!(
+            " · {} forgotten by the merge's bound",
+            kit::plural(usize::try_from(t.evicted).unwrap_or(usize::MAX), "key")
         ));
     }
     label
@@ -435,13 +442,17 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         )));
     } else if s.seeded_watches > 0 {
         let label = seed_text(s.seeded_watches, s.seed_totals);
-        // A leg that ran to its timeout seeded possibly incompletely: a
-        // caution, never folded into the counts as if they were whole.
-        r = r.push(if s.seed_totals.incomplete > 0 {
-            kit::status_chip(Tone::Caution, label)
-        } else {
-            kit::muted(label)
-        });
+        // A leg that ran to its timeout seeded possibly incompletely, and a
+        // key the merge's bound forgot is ordered by nothing until it holds
+        // again: a caution, never folded into the counts as if they were
+        // whole.
+        r = r.push(
+            if s.seed_totals.incomplete > 0 || s.seed_totals.evicted > 0 {
+                kit::status_chip(Tone::Caution, label)
+            } else {
+                kit::muted(label)
+            },
+        );
     }
     if s.keys_unwatched > 0 {
         r = r.push(kit::muted(format!(
@@ -792,6 +803,14 @@ mod tests {
             seed_text(3, totals),
             "seeded 3 watches: 2 history · 8 state · 1 superseded · 1 leg possibly \
              incomplete (a GET reached its timeout)"
+        );
+
+        // The merge's bound, said once it has cost something (O6).
+        totals.evicted = 2;
+        assert_eq!(
+            seed_text(3, totals),
+            "seeded 3 watches: 2 history · 8 state · 1 superseded · 1 leg possibly \
+             incomplete (a GET reached its timeout) · 2 keys forgotten by the merge's bound"
         );
     }
 

@@ -772,6 +772,11 @@ pub struct BusTick {
     /// Seed boundaries that fired during this tick (issue #92): each seeded
     /// watch's id and what its seed paths contributed.
     pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,
+    /// Keys the seeded watches' merges forgot to stay within their bound,
+    /// so far ([`zenkey_fleet::Monitor::merge_evicted`]): each one's next
+    /// sample was kept whatever its stamp (observer §4.1, tooling guide
+    /// O6). A total, not this tick's.
+    pub merge_evicted: u64,
     /// Across everything watched. Named, because two of the three are `u64`
     /// and the doc comment `(samples, bytes, rate_hz)` was the only thing
     /// saying which was which (#357).

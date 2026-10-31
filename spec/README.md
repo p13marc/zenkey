@@ -21,8 +21,9 @@ section number alone is the core's.
   ([§1.2](core.md#12-lexical-rules)).
 - **Epoch**: a span of continuity, which an instance id names. An owner
   starts a new one whenever its counters reset or its state's ordering
-  restarts ([§1.5](core.md#15-identity)). A new epoch's session has a fresh
-  zid, the id of its stamps ([§4.3](core.md#43-clocks-s7)).
+  restarts ([§1.5](core.md#15-identity)). §1.5 asks for a new session, so
+  that its stamps' id changes too. With no record of its last stamp, §4.3
+  requires a fresh zid ([§4.3](core.md#43-clocks-s7)).
 - **Resource**: what an interface provides: a stream, a state, an event or
   an operation ([§2.1](core.md#21-patterns)).
 - **Kind**: which of the four a resource is, and the key token that says
@@ -79,8 +80,10 @@ section number alone is the core's.
   tick. At the constrained level, a wall clock with a per-session bump
   replaces the HLC ([§4.3](core.md#43-clocks-s7)).
 - **Late joiner**: a consumer or a tool that subscribes to a state, then
-  asks its owner, and merges both by stamp
-  ([§4.2](core.md#42-rules-for-owners-and-consumers)).
+  asks its owner, and merges both by stamp. Across two stamp ids, a
+  consumer keeps what §4.3's consumer rule accepts
+  ([§4.2](core.md#42-rules-for-owners-and-consumers)). A tool keeps the
+  merge for as long as it follows ([observer §4.1](observer.md#41-a-seed)).
 - **Tombstone window**: how long an owner answers a GET of a key it deleted
   with the delete, 60 s by default
   ([§4.2](core.md#42-rules-for-owners-and-consumers)).
@@ -98,9 +101,10 @@ section number alone is the core's.
 - **Complete read**: a presence read that ended at its routers' final reply,
   with no error reply, before its session's interests timeout
   ([observer §3.3](observer.md#33-possibly-incomplete)). Its session held a
-  link throughout ([§3.5](observer.md#35-a-session-cut-off)), and never held
-  a liveliness subscriber. A reader with a watch session made it while a
-  round trip stood ([§3.7](observer.md#37-the-watch-session)). It covers the
+  link throughout ([§3.5](observer.md#35-a-session-cut-off)). A reader is
+  asked to make it on a session that never held a liveliness subscriber.
+  A reader with a watch session made it while a round trip stood
+  ([§3.7](observer.md#37-the-watch-session)). It covers the
   tokens of its routers' clients and its linked peers
   ([§3.9](observer.md#39-what-a-complete-read-covers)). Only a complete read
   shows absence ([§3.6](observer.md#36-absence)).
@@ -115,7 +119,8 @@ section number alone is the core's.
   ([observer §0](observer.md#0-conventions)).
 - **Static rule**: a rule that binds every implementation where it does
   what the rule governs. Those are §1's, §9's, those on what a contract
-  states, any naming its lint code, and §3.3's checker's
+  states in the sections §12 lists, any naming its lint code, and §3.3's
+  checker's. A rule of those sections that names a role is that role's
   ([§12](core.md#12-conformance-classes)).
 - **Expose**: an instance exposes a resource when it serves it, as its
   descriptor says ([§8.2](core.md#82-start-up-order)). It is **active** on
@@ -132,14 +137,19 @@ section number alone is the core's.
   reply ([observer §3.3](observer.md#33-possibly-incomplete)).
 - **Move**: a watch session's transport closing or opening. It unconfirms
   what the reader holds ([observer §3.7](observer.md#37-the-watch-session)).
-- **Seed**: a late joiner's S4 GET, made after its subscription is declared
+- **Seed**: a reader's first read of what it then follows. A late
+  joiner's is its S4 GET, after its subscription
   ([§4.2](core.md#42-rules-for-owners-and-consumers),
-  [observer §4.1](observer.md#41-a-seed)).
-- **History**: two senses. Advanced publication's cache of a stream or a
-  state ([§2.5](core.md#25-advanced-publication)), and the history root of
-  published bundles ([§9.7](core.md#97-history-and-retention)).
-- **Envelope**: what a failed call's `reply_err` carries: a code, a
-  message, and a cause or a detail ([§5.2](core.md#52-the-error-envelope)).
+  [observer §4.1](observer.md#41-a-seed)). A presence reader's is a
+  liveliness read ([observer §3.7](observer.md#37-the-watch-session)).
+- **History**: three senses. Advanced publication's cache of a stream or
+  a state ([§2.5](core.md#25-advanced-publication)). The history root of
+  published bundles ([§9.7](core.md#97-history-and-retention)). A
+  liveliness subscriber's, the tokens it is told were held
+  ([observer §3.7](observer.md#37-the-watch-session)).
+- **Envelope**: what a failed call's `reply_err` carries: a code and a
+  message. `unavailable` adds a cause, and `app` may add a detail
+  ([§5.2](core.md#52-the-error-envelope)).
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it
@@ -151,8 +161,9 @@ section number alone is the core's.
   reserved tokens use one ([§1.2](core.md#12-lexical-rules)).
 - **Established**: the question was put, and the bus answered, yes or no
   ([observer §1](observer.md#1-the-judgement-shape)).
-- **NotAsked**: nobody put the question, so the tool renders no answer
-  ([observer §1](observer.md#1-the-judgement-shape)).
+- **NotAsked**: nobody put the question, so the tool renders no answer. A
+  profile also spells not this profile's so, with its reason. There the
+  question was put ([observer §1](observer.md#1-the-judgement-shape)).
 - **Unobservable**: the question was put, and the observation could not be
   had. Its reason names why ([observer §1](observer.md#1-the-judgement-shape)).
 

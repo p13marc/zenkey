@@ -87,6 +87,7 @@ pub(crate) fn apply_tick(
     obs.keys = tick.keys;
     obs.keys_evicted = tick.keys_evicted;
     obs.keys_unwatched = tick.keys_unwatched;
+    obs.seed_totals.evicted = tick.merge_evicted;
     obs.totals = tick.totals;
     obs.watched = std::sync::Arc::clone(&tick.watched);
     for (id, coverage) in &tick.seeded {

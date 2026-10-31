@@ -16,23 +16,25 @@ class also holds the rules its texts state without a keyword. Those, such as
 A long sentence is shortened, never reworded, and its link leads to the
 rest. A sentence after its paragraph's run-in label shows the label first. A
 pronoun's noun, where not shown, follows it in brackets. A lead-in ends with
-its list's length, "(3 items)", or its table's. Nothing else is added.
+its list's length, "(3 items)", or its table's. A MAY that excepts a rule
+follows it, after *Except:*. Nothing else is added.
 
 **Evidence** is what the text cites beside a rule. That is the tags after
-its sentence, else in its paragraph. A tag that closes a list cites each
-rule of it that cites none. Where the text cites none, the entry says "none
-cited". A rule's id is its row's, its section's, or the code that checks it.
-MAY grants a permission, and is not listed.
+its sentence, else in its paragraph. Else, a list item under it that states
+no rule gives it its tags. A tag that closes a list cites each rule of it
+that cites none. Where the text cites none, the entry says "none cited". A
+rule's id is its row's, its section's, or the code that checks it. MAY
+grants a permission. It is listed only beside a rule it excepts.
 
 **Conformance by role.** An implementation claims one class for each role it
 plays ([core §12](core.md#12-conformance-classes)). A class holds its role's
 rules and the static rules, listed here under implementation. Those are
 §1's, §9's, the contract rules of the sections §12 lists, and any rule
 naming its lint code. §3.3's descriptor checker is static too. A rule of
-those sections that names a role is listed under it. A static rule binds an
-implementation where it does what the rule governs. A class is claimed at
-the full level or the constrained one. A profile is a class of its own, and
-its rules are in its text.
+those sections that names a role is listed under it. So is one of §1 or §9.
+A static rule binds an implementation where it does what the rule governs. A
+class is claimed at the full level or the constrained one. A profile is a
+class of its own, and its rules are in its text.
 
 **A stream-only owner's minimum path** is this index filtered to two roles:
 [owner](#owner) and [implementation](#implementation-the-static-rules). A
@@ -51,7 +53,7 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 13 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 15 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 50, 24 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 52, 24 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 34 |
 | Every rule, once | 169 |
 | [Rule ids](#rule-ids) | 71 |
@@ -77,8 +79,8 @@ The owner, consumer and caller sections each point to them.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§1.5](core.md#15-identity) | An owner MUST mint a new instance id whenever its counters reset or its state's ordering restarts (§4.3): a process restart, a device re-enumerated, a polled device's uptime rewound, a container restarted. | `[Sc: presence.md §3]` |
-| [§1.5](core.md#15-identity) | The owner SHOULD do so in a new session, so that its timestamps' id changes too (§4.3). | `[Sc: presence.md §3]` |
-| [§1.5](core.md#15-identity) | An owner's counter that crosses a face where neither is visible SHOULD carry its epoch in-band, in its value or its attachment, as [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9). | `[Sc: presence.md §3]` |
+| [§1.5](core.md#15-identity) | The owner SHOULD do so in a new session, so that its timestamps' id changes too (§4.3). | `[Sc: state.md §7]` |
+| [§1.5](core.md#15-identity) | An owner's counter that crosses a face where neither is visible SHOULD carry its epoch in-band, in its value or its attachment, as [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9). | `[Sc: profiles/telemetry/scenarios.md §8]` |
 
 ### [core §2.3 Resource attributes](core.md#23-resource-attributes)
 
@@ -90,7 +92,7 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§2.4](core.md#24-qos) | An owner MUST publish with it [its contract's QoS]. | `[Sc: types.md §3]` |
+| [§2.4](core.md#24-qos) | An owner MUST publish with it [its contract's QoS]. *Except:* One [an owner] that does not [opt into `reliability`], or whose binding offers no such API, MAY publish reliable, zenoh's default. | `[Sc: types.md §3]` |
 
 ### [core §2.7 The population budget](core.md#27-the-population-budget)
 
@@ -123,7 +125,7 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [S1](core.md#42-rules-for-owners-and-consumers) | **Owner:** every state mutation, put **and** delete, MUST carry a timestamp the owner set. | `[Sc: state.md §1]` |
 | [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. | `[Sc: state.md §1, §2]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner's state queryables] MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner] MUST answer a selector over them [its interfaces' `state/**` and `@state/**`] with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
 | [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. | `[Sc: state.md §2, §6]` |
 
 ### [core §4.3 Clocks (S7)](core.md#43-clocks-s7)
@@ -133,8 +135,8 @@ The owner, consumer and caller sections each point to them.
 | [S7](core.md#43-clocks-s7) | A session that serves state MUST enable Zenoh's HLC. | `[Sc: state.md §1, §7]` |
 | [S7](core.md#43-clocks-s7) | An owner MUST NOT stamp at or below the last timestamp it issued for its keys. | none cited |
 | [S7](core.md#43-clocks-s7) | With neither source, the owner MUST start a new epoch: a new instance (§1.5) whose session has a fresh, unpinned zid. | none cited |
-| [S7](core.md#43-clocks-s7) | An owner SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own offset without a reference. | `[Sc: profiles/health/scenarios.md §4]` |
-| [S7](core.md#43-clocks-s7) | The owner SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | none cited |
+| [S7](core.md#43-clocks-s7) | An owner SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own offset without a reference. | `[Sc: state.md §7]` |
+| [S7](core.md#43-clocks-s7) | The owner SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | `[Sc: state.md §7]` |
 | [S7](core.md#43-clocks-s7) | When a detection shows it beyond the delta, the owner MUST stop writing state, re-puts included, and SHOULD report it. | `[Sc: profiles/freshness/scenarios.md §2]` |
 
 ### [core §4.4 Archives](core.md#44-archives)
@@ -243,14 +245,14 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [S5](core.md#42-rules-for-owners-and-consumers) | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. | `[Sc: state.md §4–§6, §9]` |
 | [S6](core.md#42-rules-for-owners-and-consumers) | The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key by the owner's stamp (S1, S2), whichever path brought each one, and keep the newer. | `[Sc: state.md §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one, and keep the newer by the owner's stamp (S1, S2), or, for a consumer across two timestamp ids, by §4.3's consumer rule. | `[Sc: state.md §10]` |
 
 ### [core §4.3 Clocks (S7)](core.md#43-clocks-s7)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [S7](core.md#43-clocks-s7) | A consumer MUST order an owner's values by time within one timestamp id. | none cited |
-| [S7](core.md#43-clocks-s7) | **Consumer rule.** … It [a consumer] MUST accept the first value under a new id, and restart its ordering there. | none cited |
+| [S7](core.md#43-clocks-s7) | A consumer MUST order each key's values by time within one timestamp id, from the first value it receives, a late joiner's seed replies included (§4.2). | `[Sc: state.md §7]` |
+| [S7](core.md#43-clocks-s7) | **Consumer rule.** … It [a consumer] MUST accept a value under an id other than the one its held value carries, and order by time within that id from then on. | `[Sc: state.md §7]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -303,8 +305,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
 | [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: (4 items) | `[Sc: retrieval.md §1–§3]` |
-| [§8.4](core.md#84-contract-retrieval) | A caller MUST set consolidation `None` on both attempts. | `[Sc: retrieval.md §2]` |
-| [§8.4](core.md#84-contract-retrieval) | **The reply.** … A caller MUST NOT depend on the encoding: the hash is the check. | `[Sc: retrieval.md §1]` |
+| [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST set consolidation `None` on both attempts. | `[Sc: retrieval.md §2]` |
+| [§8.4](core.md#84-contract-retrieval) | **The reply.** … A caller or tool MUST NOT depend on the encoding: the hash is the check. | `[Sc: retrieval.md §1]` |
 
 ### [observer §3.1 Handlers](observer.md#31-handlers)
 
@@ -382,7 +384,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key by the owner's stamp (S1, S2), whichever path brought each one, and keep the newer. | `[Sc: state.md §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one, and keep the newer by the owner's stamp (S1, S2), or, for a consumer across two timestamp ids, by §4.3's consumer rule. | `[Sc: state.md §10]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 
@@ -408,6 +410,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
 | [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: (4 items) | `[Sc: retrieval.md §1–§3]` |
+| [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST set consolidation `None` on both attempts. | `[Sc: retrieval.md §2]` |
+| [§8.4](core.md#84-contract-retrieval) | **The reply.** … A caller or tool MUST NOT depend on the encoding: the hash is the check. | `[Sc: retrieval.md §1]` |
 
 ### [core §11.1 Grant shapes](core.md#111-grant-shapes)
 
@@ -522,9 +526,9 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a payload MUST decode `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and reads a `raw` type by its media type only. | `[Sc: types.md §2]` |
-| [§7.3](observer.md#73-decoding-and-rendering) | A tool MUST render a kind it cannot decode as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
-| [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | Such a tool [a tool that shows or judges a payload] MUST decode each payload by its declared type: `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and a `raw` type by its media type only. | `[Sc: types.md §2]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows a payload it cannot decode MUST render it as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool that shows a payload it cannot decode] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
 
 ### [observer §7.4 Shared memory](observer.md#74-shared-memory)
 

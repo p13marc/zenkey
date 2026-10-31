@@ -3,6 +3,191 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.68 — 2026-10-31: round 90's answers: a late joiner across two ids, S7's new id, a tool's retrieval, and 0.67 corrected (#926)
+
+zk2py round 90 (PR #969) read 0.67's §0, §1.3, §2.2, §2.4, S7, §11.2, §12
+and Appendix B, `observer.md` 0.9, [`RULES.md`](RULES.md) and the glossary
+cold. Its findings are F-379 to F-392. This version answers them (#926's
+third part, epic #921 Track B). `observer.md` moves to text 0.10 beside it
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), for F-379 and the
+tool's half of F-382.
+
+**The reference, read first.** F-382 and F-383 ask what a late joiner does
+after its seed. The reference answers so:
+- **The runtime has no consumer late joiner of its own.**
+  `zenkey::consumer::Consumer` subscribes and GETs apart.
+  `zenkey::state::ValueOrder`, S7's consumer rule, orders what an
+  application hands it from the first value on. The walkthrough's executor
+  hands it every GET's answer (`zenkey/tests/walkthrough.rs`, `w4_3`).
+- **The runtime's one seeding consumer** is `desired.v1`'s target. It
+  judges each reply and each sample in arrival order by its §2.6 order:
+  S7's rule, and the ids it remembers. It merges no seed by stamp.
+- **`ValueOrder` is per key.** It accepts a value under an id other than
+  its held value's, so an old epoch's late value steps the key back.
+- **The fleet's tools merge by stamp.** `seed_subscribe` and the alarms
+  and telemetry books do so for their whole life. `Monitor::watch_seeded`
+  dropped its merge at its boundary, which #926 fixed (below).
+
+**Changed: five rules, each with its reason.**
+- **§4.2 and §4.3, a late joiner across two ids (F-382).** §4.2's merge
+  had no end, and S7's "after its seed" no instant.
+  - **Now:** a late joiner keeps the newer by the owner's stamp, which is
+    S7's order within one id. Across two ids, a consumer orders by S7 from
+    its first value on, its seed's replies included. It keeps a value under
+    an id other than its held value's. A tool keeps the merge for as long
+    as it follows (`observer.md` §4.1).
+  - **So a consumer's merge has no end to state.** S7 orders every value
+    it receives, and within one id the two orders are one. A tool's ends
+    when it stops following.
+  - **This corrects 0.67.** Its S7 sub-bullet said "a late joiner's seed
+    merges as §4.2 says". Its entry said the reference merges so. That is
+    true of a tool and false of a consumer: the runtime's consumers order
+    by S7 throughout. The error was made in #926's second part, from its
+    reading of the reference for F-368, which read the fleet's tools and
+    not the runtime's consumers. The sub-bullet is rewritten, and 0.67's
+    entry points here.
+  - **What moves:** after a new epoch on a clock behind, inside a seed, a
+    consumer kept the later time under 0.67, the old epoch's. Now it keeps
+    the value that arrived last. The runtime meets 0.68 unchanged. zk2py's round-90 late joiner, which
+    turns to S7 at its GET's final reply, does not, inside a seed.
+  - **The tool's half moved the reference.** `Monitor::watch_seeded`
+    dropped its merge at the boundary, so live samples after it were
+    ordered by nothing. It now keeps the merge for the watch's life,
+    bounded at the monitor's `max_keys` and counting what the bound forgot.
+    `seed_subscribe`'s merge is bounded the same way.
+  - **The evidence** is `scenarios/state.md` §7 step 2's late joiners. A
+    consumer and a tool seed rev 10. The owner starts a new epoch 5 s
+    behind, and writes rev 11 and rev 12. The consumer accepts both, and
+    the tool keeps rev 10. The reference runs it in `zenkey/tests/state.rs`
+    and `zenkey-fleet/tests/seeding.rs`.
+  - **`seed/merge.json`** says that across two ids it is a tool's merge,
+    in its description and its two-ids case. No expectation moved.
+- **§4.3, S7's consumer rule (F-383).** "An owner's values" is "each
+  key's values". "The first value under a new id" is "a value under an id
+  other than the one its held value carries".
+  - **Why:** `ValueOrder` keeps one entry per key, and compares a value's
+    id with the held value's. That is the finding's reading (a).
+  - **The residual risk** says what it is. An old epoch's value that
+    arrives after the new epoch's first is accepted, and the key steps
+    back until the new epoch's next value.
+  - **A profile MAY order more strictly.** A `desired.v1` target refuses
+    an older version of an id it remembers, whichever id it holds. The
+    MUST to accept another id would forbid it without this sentence.
+    `desired.v1` §2.6 says two ids are the case the merge leaves to core
+    §4.3, which now reads true, so `desired.v1` does not move.
+  - **What moves:** a consumer that read "a new id" as one never seen
+    (reading (b)). The reference does not move.
+- **§2.4, `reliability` (F-380, its fix (a)).** "One that cannot set it"
+  read two ways.
+  - **Now:** an owner that opts into it (§0) sets it. One that does not,
+    or whose binding offers no such API, MAY publish reliable. §0's "only
+    stable Zenoh API in the core" stands.
+  - **Why:** reading (b) asked an unstable API of every owner whose
+    binding offers one, against §0.
+  - **What moves:** an owner on stable API alone meets §2.4 now, as it
+    did under reading (a). The reference opts in, and sets it.
+- **§8.4, two MUSTs name a tool too (F-387).** "A caller MUST set
+  consolidation `None`" and "A caller MUST NOT depend on the encoding" say
+  "a caller or tool", as the procedure's own MUST does.
+  - **The roles that retrieve.** The reference retrieves through one
+    function, `zenkey::retrieval::fetch_bundle`. The fleet's contract
+    store retrieves through it for every tool, and the runtime's §6 check
+    through it. No owner or consumer of the runtime retrieves: its
+    contracts are compiled in, or handed to it.
+  - **What moves:** the observer class gains the two MUSTs. zk2py's tools
+    meet both.
+
+**Wording, no rule changed.**
+- **§2.5, the places an unstable API is opted into (F-381).** `history` is
+  "one of the places", not "the one place". The others are an owner's
+  `reliability` (§2.4), and a reader's links, replier id and transport
+  events (`observer.md` §3.5, §4.2, §5.2). Those are every place either
+  text names an unstable API, but §5.1's replier id, which the core does
+  not use.
+- **§0, the implementation role (F-389):** the finding's rewrite. The
+  list that says which rules are static comes first, and names §12's
+  others: those naming their lint code, and §3.3's checker.
+- **§12, "these sections" (F-390):** the finding's rewrite, "§1 and §9
+  included".
+- **§2.4's last sentence (F-391):** "so an owner that publishes reliable
+  moves none of them".
+- **§7.1's pointer (F-379):** "What a tool that shows or judges a payload
+  decodes", as `observer.md` §7.3's label now says.
+
+**Evidence (F-385).** No rule's words moved.
+- **§4.3's SHOULD NOT and the drift SHOULD** cite `scenarios/state.md` §7.
+  Its step 3 runs an owner 2 s ahead that holds a router-stamped
+  heartbeat, detects the drift and stops writing state.
+- **§1.5's tag** follows its MUST now. Its first SHOULD cites
+  `scenarios/state.md` §7, whose step 2 runs a new instance in a new
+  session, its stamps' id changed. Its second cites
+  `profiles/telemetry/scenarios.md` §8, a counter crossing a face with
+  its epoch in-band.
+
+**`RULES.md` (F-384, F-385, F-386),** from `scripts/gen-rules-index.py`.
+- **S2's nouns (F-384).** "It" shows the owner, and "them" what its state
+  queryables cover. An entry may now give an object's noun beside its
+  subject's.
+- **The header follows the script (F-385).** A list item under a rule
+  that states none gives the rule its tags, when it has none of its own.
+  §4.4's alignment MUST shows `state.md` §5 so. The header now says it.
+- **§2.4's MAY (F-386)** follows the MUST it excepts, after *Except:*,
+  from a table, `EXCEPTED_BY`. A key or a MAY that matches no sentence
+  fails the script.
+  - **Why shown, and not pointed to:** a stream-only owner reads its path
+    in the index alone. A pointer would send it to the text for the one
+    sentence that changes what the MUST asks of it. Showing the text's
+    own sentence keeps "never reworded" true.
+- **The self-test** gains a case for each: an entry with two nouns, an
+  excepting MAY, and a list item's tags given to a rule with none and not
+  to one with its own.
+- **The counts.** 169 rules before and after. By role: owner 56 and 56;
+  consumer 13 and 13; caller 13 and 13; deployment 15 and 15; observer 50
+  and 52, 24 of them a reader's both times; implementation 34 and 34. The
+  two §8.4 MUSTs are the observer's two. There are 71 rule ids before and
+  after.
+- **Rules citing none:** 23 before, 20 after. Of the MUSTs, 11 and 9: S7's
+  two consumer MUSTs, which #965 lists, cite `scenarios/state.md` §7 now.
+  The drift SHOULD is the third.
+
+**`spec/README.md`'s glossary (F-388),** eight definitions.
+- **The finding's seven:** epoch, complete read, seed, history, envelope,
+  NotAsked and static rule each say what their sections say. Epoch's new
+  session is §1.5's SHOULD, and §4.3's MUST without a record. A complete
+  read's session without a liveliness subscriber is §3.7's SHOULD. A seed
+  is a presence reader's too. History has a liveliness subscriber's sense.
+- **Late joiner** follows this version's §4.2: across two ids, a
+  consumer keeps what S7 accepts, and a tool keeps the merge.
+
+**0.67's "moves no verdict" (F-392).** It held under F-378's reading (b),
+which 0.67 adopts. Under its reading (a), which zk2py took in round 89, an
+implementation's verdicts on the static rules it does not govern move to
+not applicable. None of zk2py's moves. 0.67's entry points here.
+
+**How the rules were diffed.** Every sentence holding MUST, MUST NOT,
+SHOULD, SHOULD NOT, MAY, REQUIRED or RECOMMENDED was extracted before and
+after, keyed by section, and diffed.
+- **This text:** 155 before, 156 after; 149 unchanged.
+  - The six rewritten are §2.4's MAY (F-380), §4.2's merge (F-382), §4.3's
+    two consumer MUSTs (F-383) and §8.4's two (F-387).
+  - The one only after is §4.3's MAY for a profile (F-383).
+- **Without a keyword:** §4.2's two new bullets and its "within one id",
+  §4.3's residual risk (F-382, F-383), §2.5 (F-381), §0 (F-389), §12
+  (F-390), §2.4's last sentence (F-391), §7.1's pointer (F-379),
+  Appendix C's two rows and the header moved. No other sentence did.
+- **One scenario moved:** `scenarios/state.md` §7 step 2 gains its late
+  joiners, and the section a line naming its reference tests.
+
+**The figures.** This text's mean went from 16.4 words to 16.39, with no
+sentence over 50 and no tag. `spec/README.md` went from 12.43 to 12.1,
+`RULES.md` from 12.69 to 12.39 and `scenarios/state.md` from 15.54 to
+15.35. `spec/.prose-baseline.json` is lowered to them.
+
+**Deliberately not changed.**
+- **`desired.v1`.** Its §2.6 reads true against this version.
+- **F-365's MUSTs** are #965's, as before.
+- **zk2py's late joiner** is round 91's: `impl/python/` is zk2py's own.
+
 ## 0.67 — 2026-10-31: round 89's answers: the classes said exactly, three rules changed, two restated, and the glossary corrected (#926)
 
 zk2py round 89 (PR #967) read 0.66's §0 and §12, `observer.md` 0.8's §0,
@@ -51,7 +236,8 @@ and F-376.
     owner's new epoch inside the seed)", the new id's time behind, which
     was there already. No fixture moved.
   - **What moves:** the consumer rule no longer governs a seed. No
-    implementation moves: the reference and zk2py merge so already.
+    implementation moves: the reference and zk2py merge so already. 0.68
+    corrects this: true of a tool, not of a consumer.
 - **§1.3, the guard (F-374).** "Or any selector without a verbatim chunk
   at position 5" is "or any selector without a verbatim chunk".
   - **Why:** by the old letter, `zk2/*/*/@zk/**` and `zk2/@zk/contract/**`
@@ -100,6 +286,7 @@ SHOULD one meaning, and §0 declares only five keywords.
     owner's path held the whole of §9 by default. It now holds the static
     rules on what it does, such as building its keys. A rule binds what it
     governs either way, so no implementation's verdict on any rule moves.
+    0.68 says under which reading that holds.
 - **Rules without a keyword (F-362).** §0 and §12 say `RULES.md` lists the
   rules stated with MUST, MUST NOT, SHOULD or SHOULD NOT. A class also
   holds the rules its texts state without one, such as `observer.md` §1,

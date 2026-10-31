@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.9 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.10 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.67 ([`core.md`](core.md)) |
+| **Written against** | core 0.68 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -604,6 +604,12 @@ and merge, a selector over several owners and "Observing S1" stay in core
 
 ### 4.1 A seed
 
+- **A tool's merge lasts.** A tool keeps core §4.2's merge for as long as
+  it follows, across two timestamp ids too. A live sample whose stamp is
+  older than what its key holds is not kept after the seed either. A tool
+  that bounds what it holds counts what the bound forgot, and treats a
+  forgotten key as holding nothing. A consumer orders by core §4.3's
+  consumer rule instead (core §4.2). `[Sc: state.md §7]`
 - **R6 and a tool's seed.** R6 binds a consumer: a consumer that
   seeds discards a reply or a sample whose key is not concrete, whichever
   path brought it. A tool's seed shows what arrived, as its subscription
@@ -1004,17 +1010,19 @@ that reaches an owner's queryable gets a value or an envelope.
 This is core §7.1's and §7.2's tool half; type identity and the sample's
 `Encoding` stay there.
 
-- **What a generic tool decodes** (core §7.1). A tool that shows or judges
-  a payload MUST decode `protobuf` (proto2 and proto3) and `jsonschema`
-  (the zk2 subset of JSON Schema 2020-12, core §7.3), and reads a `raw`
-  type by its media type only. A reserved kind (`flatbuffer`, `ros2msg`, `cdr`), which a contract
+- **What a tool that shows or judges a payload decodes** (core §7.1).
+  Such a tool MUST decode each payload by its declared type: `protobuf`
+  (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema
+  2020-12, core §7.3), and a `raw` type by its media type only. A
+  reserved kind (`flatbuffer`, `ros2msg`, `cdr`), which a contract
   declares as `raw` with a media type, tools MAY decode through a plugin.
   `[Sc: types.md §2]`
 - **Decode order** for a tool is: the sample's `Encoding`, then the
   contract's type, then sniffing.
-- **Honest rendering.** A tool MUST render a kind it cannot decode as its
-  declared type and size, or through a plugin. It MUST NOT show garbage, and
-  MUST NOT drop the sample silently. `[Sc: types.md §2]`
+- **Honest rendering.** A tool that shows a payload it cannot decode MUST
+  render it as its declared type and size, or through a plugin. It MUST
+  NOT show garbage, and MUST NOT drop the sample silently.
+  `[Sc: types.md §2]`
   - **A type is named one way**, decoded or not: as a type reference
     is written (core §9.1). That is the message name for protobuf,
     `json:<name>` for a JSON Schema type, and the media type for a raw
@@ -1147,7 +1155,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `conformance/budget/` (`population.json`, `rate.json`, `lossless.json`) | §1, §2, §5 |
 | `conformance/keys.json` | §8.1 |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
-| `scenarios/state.md` §1, §11, §12 | §4.1, §4.3, §8.1, §8.3 |
+| `scenarios/state.md` §1, §7, §11, §12 | §4.1 (§7 step 2: a tool's merge for as long as it follows), §4.3, §8.1, §8.3 |
 | `scenarios/security.md` §3 | §4.2 |
 | `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
 | `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2) |

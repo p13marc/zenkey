@@ -132,6 +132,12 @@ window": wrong without replication).*
    archive, with a fresh zid and its clock 5 s behind, and writes rev 11.
    The consumer sees a new timestamp id, accepts rev 11, and restarts its
    ordering.
+   - **Its late joiners.** Before the restart, a consumer and a tool each
+     seeded rev 10, in §10's order. After rev 11 the owner writes rev 12.
+     The consumer orders by S7 from its first value on, its seed's reply
+     included. It accepts rev 11, then rev 12. The tool keeps §4.2's merge
+     for as long as it follows (observer §4.1). It keeps rev 10: rev 11 and
+     rev 12 come under a new id, at earlier times.
 3. **Ahead.** The owner's clock runs 2 s ahead, beyond the router's HLC
    delta, and it holds a subscription to a router-stamped heartbeat. It
    detects the drift and stops writing state. Where it implements
@@ -142,6 +148,13 @@ window": wrong without replication).*
 *Spike S12: without the catch-up, rev 14 was rejected as stale and never
 converged; with a clock 2 s ahead, the next right-clocked write looked
 stale.*
+
+*The reference (`zenkey/tests/state.rs`) runs steps 1–3 as `s7_clocks`.
+Step 2's late joiners are `s7_a_late_joiner_across_a_new_epoch`: the
+consumer through `ValueOrder`, the tool's merge the control. The fleet's
+two seeded subscriptions run the tool's on the bus
+(`zenkey-fleet/tests/seeding.rs`,
+`s7_a_tools_late_joiner_keeps_the_merge_after_its_seed`).*
 
 ## §8 Events replay
 

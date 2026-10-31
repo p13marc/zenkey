@@ -88,7 +88,12 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   when the lens's generation moves), the seeded watch as core §4.2's late
   joiner (0.26: subscribe, then S4's `All`+`Latest` GET through
   `bus::query::state_get`, merged by the owner's stamp, plus the `@adv`
-  history leg; no storage is a seed), and a `LensFeed` that follows
+  history leg; no storage is a seed; the merge kept for the watch's life,
+  as observer 0.10's §4.1 says a tool's lasts, no longer dropped at the
+  boundary, bounded at `MonitorSpec::max_keys` by last admission, a
+  forgotten key holding nothing, `Monitor::merge_evicted` and
+  `merge_superseded` counting it, and `seed_subscribe`'s merge bounded
+  alike, `SeededSubscriber::evicted`; #926), and a `LensFeed` that follows
   presence moves (`on_presence`, `generation`), so an appearing instance,
   its tokenless interfaces included, resolves without the 5 s re-read. It
   depends on the zk2 runtime as plain `zenkey` (by
@@ -990,9 +995,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   form, fingerprints,
   bundles and `.history`, the compatibility classifier (`compat`,
   #618), a late joiner's merge (`seed`, core 0.27: zenoh's timestamp
-  order spelled out, an unstamped sample below every stamp; core 0.67,
-  F-368: a seed merges by stamp across ids too, and S7's consumer rule
-  orders what a consumer receives after its seed), which the
+  order spelled out, an unstamped sample below every stamp; core 0.68,
+  F-382, correcting 0.67's F-368: across two ids it is a tool's merge, for
+  as long as the tool follows, and a consumer orders by S7 from its first
+  value on, its seed included), which the
   fleet's seeded subscription decides by, `config.v1`'s session-free
   half (`config`, #768 CA: the validators in the profile's order of
   refusals, the window, redaction, and `Owner`, a pure state machine whose
@@ -1239,9 +1245,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `retrieval` is §8.4. `writer` puts with the contract's QoS and `Encoding`
   (advanced publication for `history`; events on fresh ULID keys;
   `reliability` through zenoh's `unstable` feature, which the workspace's
-  `Cargo.toml` turns on: core 0.67's §2.4 names it the one QoS field that
-  is unstable API in zenoh 1.10.1, an owner that cannot set it MAY publish
-  reliable, zenoh's default, and Appendix B says so, read from zenoh 1.10.1's source), and
+  `Cargo.toml` turns on: core §2.4 names it the one QoS field that is
+  unstable API in zenoh 1.10.1; an owner that opts in sets it, and one
+  that does not, or whose binding offers none, MAY publish reliable,
+  zenoh's default (0.68, F-380), and Appendix B says so, read from zenoh
+  1.10.1's source), and
   `consumer` reads through a role's bindings: R2 parameter binding, R6's
   wildcard-key discard, R5's presence wait, R7's *unobservable*; tools
   consume with `Consumer::for_tool` and read presence with
@@ -1287,7 +1295,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   stamps every put and delete (the `Minter`: §4.3's minting, catch-up, a
   clock guard that stops writes when ahead) and answers GETs with
   `reply_del` within the window; `Consumer::get` is S4's owner-only
-  `All`+`Latest` GET, silence being `StateGet::Silent`. `archive` is a
+  `All`+`Latest` GET, silence being `StateGet::Silent`; `ValueOrder` is
+  S7's consumer rule, per key, a value under an id other than the held
+  value's accepted, handed every value from a consumer's first on, a
+  seed's replies included (core 0.68, `state.rs`'s
+  `s7_a_late_joiner_across_a_new_epoch`). `archive` is a
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
   current.
@@ -1611,9 +1623,29 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   sentence as its own, and a rule's code as the one that checks it (§9.4's
   file part is E032). An entry whose opening word or subject is a
   pronoun shows its noun in brackets, from the script's `ANTECEDENTS`,
-  without which it fails naming the line; a lead-in ends with its list's
-  length, "(2 items)" or "(12 rows)". 169 rules, 23 citing none, 11 of
-  them MUSTs (#965's). The glossary holds 52 terms. Core 0.61 and observer text
+  without which it fails naming the line, an entry there able to give an
+  object's noun too (S2's "them"); a lead-in ends with its list's
+  length, "(2 items)" or "(12 rows)"; a rule a MAY excepts shows that
+  MAY after it, "*Except:* …", from `EXCEPTED_BY` (§2.4's
+  `reliability`); and a list item under a rule that states none gives
+  the rule its tags when it has none of its own, as the header now
+  says. 169 rules, 20 citing none, 9 of
+  them MUSTs (#965's; S7's two consumer MUSTs cite `state.md` §7 since
+  0.68). The glossary holds 52 terms. Core 0.68 and observer
+  text 0.10 (#926 part 3, zk2py round 90's F-379 to F-392) changed five
+  rules: a late joiner keeps the newer by the owner's stamp, but across
+  two ids a consumer orders by S7 from its first value on, its seed's
+  replies included, and a tool keeps the merge for as long as it follows
+  (observer §4.1, a bound counting what it forgot), which corrects 0.67,
+  true of a tool and not of a consumer; S7's consumer rule is per key, a
+  value under an id other than the held value's accepted, the step back
+  the residual risk, and a profile MAY order more strictly (`desired.v1`
+  §2.6); §2.4's `reliability` is set by an owner that opts in, and one
+  that does not MAY publish reliable; §8.4's two later MUSTs bind a
+  caller or tool; observer §7.3 decodes each payload a tool shows or
+  judges by its type. `state.md` §7 step 2 runs both late joiners, and
+  §2.5 lists every place an unstable API is opted into. Core 0.61 and
+  observer text
   0.5 (#935 part 2, zk2py round 84's F-295 to F-314) split every sentence
   over 50 words in the two texts, so their baseline holds none, and
   changed no rule but one wording: observer §1's not this profile's,
