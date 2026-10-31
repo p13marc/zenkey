@@ -119,6 +119,11 @@
 //!   §5's three questions (`spec/profiles/arbitration/v1.md`, #909). The
 //!   subscription, the watch, the reads, the timer and the safe value are
 //!   the runtime's and the application's.
+//! - [`wire`]: the zk2c envelope (core §7.5, 0.72; #976): CH's form, run
+//!   width and tag, the run and the seq, a put's mutation and a delete's
+//!   attachment, parsed without a contract with §7.5's refusals and written
+//!   back byte for byte. Defined ahead of its use: no rule adopts it yet,
+//!   and nothing else in the workspace reads or writes one.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -155,3 +160,4 @@ pub mod timing;
 mod toml10;
 mod unbundle;
 pub mod validate;
+pub mod wire;
