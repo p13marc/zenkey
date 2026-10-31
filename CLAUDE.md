@@ -1241,7 +1241,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `reliability` through zenoh's `unstable` feature, which the workspace's
   `Cargo.toml` turns on: core 0.67's §2.4 names it the one QoS field that
   is unstable API in zenoh 1.10.1, an owner that cannot set it MAY publish
-  reliable, zenoh's default, and Appendix B says so, read from the API), and
+  reliable, zenoh's default, and Appendix B says so, read from zenoh 1.10.1's source), and
   `consumer` reads through a role's bindings: R2 parameter binding, R6's
   wildcard-key discard, R5's presence wait, R7's *unobservable*; tools
   consume with `Consumer::for_tool` and read presence with

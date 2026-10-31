@@ -648,11 +648,13 @@ def shown_sentence(s: str) -> str:
 
 def antecedent(rel: str, s: str):
     """((words, noun), key) of the ANTECEDENTS entry for a rule's sentence,
-    or (None, None)."""
-    for key, value in ANTECEDENTS.items():
-        if key[0] == rel and key[1] in s:
-            return value, key
-    return None, None
+    or (None, None). Two entries whose phrases both occur in one sentence
+    are refused: which noun it shows would depend on the table's order."""
+    hits = [(value, key) for key, value in ANTECEDENTS.items() if key[0] == rel and key[1] in s]
+    if len(hits) > 1:
+        phrases = ", ".join(repr(key[1]) for _, key in hits)
+        raise Unreadable(f"ANTECEDENTS: {phrases} all occur in one sentence; keep one: {s[:140]}")
+    return hits[0] if hits else (None, None)
 
 
 def needs_antecedent(s: str, kws: list) -> bool:

@@ -3066,8 +3066,8 @@ Appendix B. These are the ones the rules above cite:
   feature. Without it a put is sent `Reliability::DEFAULT`, which is
   `Reliable`. A publisher declared without a reliability is reliable too
   (`api/session.rs`, `declare_publisher` and `resolve_put`;
-  zenoh-protocol's `core/mod.rs`; §2.4). This is read from the API, not
-  measured. The reference builds zenoh with `unstable` (the workspace's
+  zenoh-protocol's `core/mod.rs`; §2.4). This is read from zenoh 1.10.1's
+  source, not measured. The reference builds zenoh with `unstable` (the workspace's
   `Cargo.toml`), and sets it on every publisher and every event's put.
 - The admin space is disabled by default (`adminspace.enabled: false`).
 - A zid is written in lowercase hexadecimal without leading zeros.
