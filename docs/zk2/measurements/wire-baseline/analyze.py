@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Per-direction figures for one #989 run: the drivers' counters and the relay's capture.
 
-Usage: analyze.py <run-dir> [--json out.json]
+Usage: analyze.py <run-dir> [--json out.json] [--link-failed-at-s S --steady-end-s E]
 
 Reads, from the run directory measure.sh or measure-w2.sh wrote:
 - marks.json: each window's bounds (wall clock, seconds);
@@ -17,7 +17,8 @@ The relay's figures count exactly the datagrams inside the window.
 
 W1's SDUs other than keep-alives are split into data (from each of gen's
 ticks to its burst's end) and the rest; links_opened counts the InitSyns A
-sent, each a transport opened again.
+sent, each a transport opened again, and keepalives_lost the keep-alives the
+relay dropped (on LoRa, with the times of both).
 
 A->B is driver A's transmit side (the owner's router toward the reader's), and
 B->A driver B's. Airtime is each medium's, per SDU, as fake-medium's
@@ -28,7 +29,11 @@ SF11-12). On LoRa each direction's duty use is its airtime an hour against
 EU868's 1 %, 36 s, which nothing here enforces.
 
 W2 (marks with steady_start): the steady window as above, then the acts and
-the reconnect (w2's docstring says how each is costed).
+the reconnect (w2's docstring says how each is costed). When the link failed
+in the steady window and never came back, --link-failed-at-s says when (s
+into the window) and --steady-end-s where the window is cut, before the
+failure: the acts and the reconnect then ran on a link that carried nothing,
+and are recorded as not measured, with the reason.
 """
 import json
 import math
@@ -234,6 +239,16 @@ def window(run, name, t0, t1):
         }
         if reopened is not None:
             rel["links_opened"] = reopened
+        rel["keepalives_lost"] = sum(1 for r in air if r["drop"] and classify(params, r) == "keep-alive")
+        if params.get("medium", "rf") != "rf":
+            # On LoRa, when each keep-alive was lost and each link opened again
+            # (seconds into the window): a close follows a lost keep-alive.
+            rel["keepalives_lost_at"] = [round(r["t"] - t0, 1) for r in air
+                                         if r["drop"] and classify(params, r) == "keep-alive"]
+            if d == "ab":
+                rel["links_opened_at"] = [round(r["t"] - t0, 1) for r in air
+                                          if r["n"] == initsyn_size(params)
+                                          and classify(params, r) == "other"]
         if sdus is not None and byts is not None:
             rel["per_day"] = {
                 "sdus": round(sdus * scale), "bytes": round(byts * scale),
@@ -289,6 +304,12 @@ def w2(run, steady):
         rate = {d: {el: (v["bytes"] / span0, v["sdus"] / span0) for el, v in st[d].items()}
                 for d in ("ab", "ba")}
     acts = [a for a in run["acts"] if "act" in a]
+    failed = run.get("link_failed_at_s")
+    if failed is not None:
+        out["not_measured"] = (
+            f"the link failed {failed} s into the steady window and never came back: the acts, "
+            "the reconnect and the config changes ran on a link that carried nothing")
+        acts, m = [], {k: v for k, v in m.items() if k not in ("cut", "end")}
     if decodable:
         slots, per = [], {}
         for a in acts:
@@ -374,6 +395,16 @@ def main():
     out = {"run": os.path.basename(os.path.normpath(path)), "medium": params.get("medium"),
            "stack": params.get("stack"), "loss": params.get("loss", marks.get("loss")),
            "windows": []}
+
+    def opt(name):
+        return float(sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else None
+    if opt("--link-failed-at-s") is not None:
+        run["link_failed_at_s"] = out["link_failed_at_s"] = opt("--link-failed-at-s")
+        cut = opt("--steady-end-s")
+        assert cut is not None and cut < run["link_failed_at_s"], "--steady-end-s before the failure"
+        out["steady_window_s"] = {"made": round(marks["steady_end"] - marks["steady_start"], 3), "used": cut}
+        marks = dict(marks, steady_end=marks["steady_start"] + cut)
+        run["marks"] = marks
     for name, a, b in (("idle", "idle_start", "idle_end"), ("w1", "w1_start", "w1_end"),
                        ("steady", "steady_start", "steady_end")):
         if a in marks and b in marks:
