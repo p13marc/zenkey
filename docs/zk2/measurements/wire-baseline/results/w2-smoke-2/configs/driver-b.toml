@@ -1,0 +1,36 @@
+# Driver B of #989's wire baseline (RF, rf()'s profile, bare stack).
+# A udp-medium bearer (lab-air) paced to 2400 bit/s with a 220-byte
+# frame; loss and latency come from the relay between the two drivers.
+# Rendered by render.py from configs/driver.toml.in.
+socket_dir = "/srv/dev/targets/zenkey-989/run/smoke/b"
+# The aead layer's nonce counters (--init-layer-state).
+state_dir = "/srv/dev/targets/zenkey-989/state/smoke/b"
+
+[[device]]
+name = "rfb"
+# 220 + Zenoh's 2-byte length prefix
+zenoh_batch_size = 222
+
+[device.medium]
+kind = "udp"
+bind = "127.0.0.1:17611"
+max_sdu = 220
+rate_bps = 2400
+
+[device.medium.peers]
+a = "127.0.0.1:17613"
+
+[[device.endpoints]]
+name = "a"
+role = "dial"
+
+[[device.endpoints.lanes]]
+name = "air"
+reliable = false
+priorities = [0, 7]
+
+# The management plane on a unix socket of its own, never on the data
+# routers, so none of it crosses the air.
+[management]
+listen = ["unixsock-stream//srv/dev/targets/zenkey-989/run/smoke/b/mgmt.sock"]
+telemetry_interval_ms = 1000

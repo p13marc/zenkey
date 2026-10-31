@@ -1,0 +1,41 @@
+{
+  // #989's router B (LoRa SF7, EU868, lean stack), rendered by
+  // render.py from configs/zenohd.json5.in. A copy of zenoh-modem's
+  // configs/zenohd-rf0.json5 (d8c62df), edited for a measurement of today's
+  // zk2 wire:
+  // - the TCP face and the lane socket are this run's;
+  // - NO lane-face access_control and no downsampling: "today" is everything
+  //   zk2's rules make travel (constrained-overhead-review.md §2.2);
+  // - batch_size is the driver's zenoh_batch_size; lease and keep_alive are
+  //   deploy/README.md's for LoRa (60 s, 2);
+  // - wait_before_close is at least the lease, as rf0's comment requires.
+  // zk2 clients attach to the TCP face.
+  mode: "peer",
+
+  // B's side listens where driver B dials (its endpoint "a", role "dial").
+  listen: { endpoints: ["tcp/127.0.0.1:17502", "unixsock-stream//srv/dev/targets/zenkey-989/run/lora/b/rfb/a/air?rel=0;prio=0-7#so_sndbuf=1"] },
+
+  scouting: {
+    multicast: { enabled: false },
+    gossip: { enabled: false },
+  },
+
+  transport: {
+    unicast: {
+      open_timeout: 10000,
+      accept_timeout: 10000,
+    },
+    link: {
+      tx: {
+        batch_size: 208,
+        lease: 60000,
+        keep_alive: 2,
+        queue: {
+          congestion_control: {
+            block: { wait_before_close: 60000000 },
+          },
+        },
+      },
+    },
+  },
+}

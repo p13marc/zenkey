@@ -1,5 +1,6 @@
 {
  "run": "bare-1",
+ "medium": "rf",
  "stack": "bare",
  "loss": 0.05,
  "windows": [
@@ -20,15 +21,27 @@
     "kind_bytes": {
      "keep-alive": 240
     },
+    "kind_airtime_s": {
+     "keep-alive": 0.8
+    },
     "other_sizes": {},
     "tx_layers": {},
     "airtime_s": 0.8,
+    "links_opened": 0,
+    "keepalives_lost": 16,
     "per_day": {
      "sdus": 34559,
      "bytes": 34559,
      "airtime_s": 115.2,
      "airtime_pct": 0.133,
-     "keepalives": 34559
+     "keepalives": 34559,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34559,
+       "bytes": 34559,
+       "airtime_s": 115.2
+      }
+     }
     }
    },
    "ba": {
@@ -45,17 +58,43 @@
     "kind_bytes": {
      "keep-alive": 240
     },
+    "kind_airtime_s": {
+     "keep-alive": 0.8
+    },
     "other_sizes": {},
     "tx_layers": {},
     "airtime_s": 0.8,
+    "keepalives_lost": 12,
     "per_day": {
      "sdus": 34559,
      "bytes": 34559,
      "airtime_s": 115.2,
      "airtime_pct": 0.133,
-     "keepalives": 34559
+     "keepalives": 34559,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34559,
+       "bytes": 34559,
+       "airtime_s": 115.2
+      }
+     }
     }
-   }
+   },
+   "elements_per_day": {
+    "ab": {
+     "keep-alive": {
+      "bytes": 34559,
+      "sdus": 34559.3
+     }
+    },
+    "ba": {
+     "keep-alive": {
+      "bytes": 34559,
+      "sdus": 34559.3
+     }
+    }
+   },
+   "decode_errors": {}
   },
   {
    "window": "w1",
@@ -70,11 +109,15 @@
     "relay_dropped": 6,
     "kinds": {
      "keep-alive": 230,
-     "other": 25
+     "data": 25
     },
     "kind_bytes": {
      "keep-alive": 230,
-     "other": 1572
+     "data": 1572
+    },
+    "kind_airtime_s": {
+     "keep-alive": 0.767,
+     "data": 5.24
     },
     "other_sizes": {
      "41": 1,
@@ -86,12 +129,26 @@
     },
     "tx_layers": {},
     "airtime_s": 6.007,
+    "links_opened": 0,
+    "keepalives_lost": 6,
     "per_day": {
      "sdus": 36719,
      "bytes": 259482,
      "airtime_s": 864.9,
      "airtime_pct": 1.001,
-     "keepalives": 33119
+     "keepalives": 33119,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 33119,
+       "bytes": 33119,
+       "airtime_s": 110.4
+      },
+      "data": {
+       "sdus": 3600,
+       "bytes": 226362,
+       "airtime_s": 754.5
+      }
+     }
     }
    },
    "ba": {
@@ -108,23 +165,53 @@
     "kind_bytes": {
      "keep-alive": 240
     },
+    "kind_airtime_s": {
+     "keep-alive": 0.8
+    },
     "other_sizes": {},
     "tx_layers": {},
     "airtime_s": 0.8,
+    "keepalives_lost": 9,
     "per_day": {
      "sdus": 34559,
      "bytes": 34559,
      "airtime_s": 115.2,
      "airtime_pct": 0.133,
-     "keepalives": 34559
+     "keepalives": 34559,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34559,
+       "bytes": 34559,
+       "airtime_s": 115.2
+      }
+     }
     }
    },
    "far_samples": {
-    "sdu/dropped_total": 10,
-    "air/duty_cycle_wait_ms": 10,
-    "air/duty_cycle_available": 10,
-    "sched/queue_depth": 10
-   }
+    "stream/air/duty_cycle_available": 10,
+    "stream/air/duty_cycle_wait_ms": 10,
+    "stream/sched/queue_depth": 10,
+    "stream/sdu/dropped_total": 10
+   },
+   "elements_per_day": {
+    "ab": {
+     "telemetry": {
+      "bytes": 226362,
+      "sdus": 3599.9
+     },
+     "keep-alive": {
+      "bytes": 33119,
+      "sdus": 33119.2
+     }
+    },
+    "ba": {
+     "keep-alive": {
+      "bytes": 34559,
+      "sdus": 34559.2
+     }
+    }
+   },
+   "decode_errors": {}
   }
  ]
 }

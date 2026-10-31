@@ -1,0 +1,24 @@
+{
+ "medium": "rf",
+ "stack": "bare",
+ "inst": "smoke",
+ "batch_size": 222,
+ "ports": {
+  "router_a": 17601,
+  "router_b": 17602,
+  "driver_a": 17610,
+  "driver_b": 17611,
+  "relay_a": 17612,
+  "relay_b": 17613
+ },
+ "run": "/srv/dev/targets/zenkey-989/run/smoke",
+ "max_sdu": 220,
+ "rate": 2400,
+ "latency_ms": 150,
+ "jitter_ms": 30,
+ "loss": 0.05,
+ "lease": 10000,
+ "keep_alive": 4,
+ "open": 10000,
+ "timers": "as zenohd-rf0.json5 ships them"
+}

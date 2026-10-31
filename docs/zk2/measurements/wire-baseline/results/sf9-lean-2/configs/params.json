@@ -1,0 +1,24 @@
+{
+ "medium": "sf9",
+ "stack": "lean",
+ "inst": "lora",
+ "batch_size": 101,
+ "ports": {
+  "router_a": 17501,
+  "router_b": 17502,
+  "driver_a": 17510,
+  "driver_b": 17511,
+  "relay_a": 17512,
+  "relay_b": 17513
+ },
+ "run": "/srv/dev/targets/zenkey-989/run/lora",
+ "max_sdu": 115,
+ "rate": 1758,
+ "latency_ms": 10,
+ "jitter_ms": 5,
+ "loss": 0.05,
+ "lease": 60000,
+ "keep_alive": 2,
+ "open": 10000,
+ "timers": "deploy/README.md's for LoRa (60 s, 2)"
+}

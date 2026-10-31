@@ -1,5 +1,6 @@
 {
  "run": "lean-1",
+ "medium": "rf",
  "stack": "lean",
  "loss": 0.05,
  "windows": [
@@ -15,10 +16,13 @@
     "relay_bytes": 4080,
     "relay_dropped": 16,
     "kinds": {
-     "keep-alive?": 240
+     "keep-alive": 240
     },
     "kind_bytes": {
-     "keep-alive?": 4080
+     "keep-alive": 4080
+    },
+    "kind_airtime_s": {
+     "keep-alive": 13.6
     },
     "other_sizes": {},
     "tx_layers": {
@@ -28,13 +32,22 @@
      "aead/auth_failures_total": 0,
      "aead/replays_total": 0
     },
-    "airtime_s": 13.543,
+    "airtime_s": 13.6,
+    "links_opened": 0,
+    "keepalives_lost": 16,
     "per_day": {
      "sdus": 34415,
      "bytes": 585061,
-     "airtime_s": 1950.2,
-     "airtime_pct": 2.257,
-     "keepalives": 34559
+     "airtime_s": 1958.4,
+     "airtime_pct": 2.267,
+     "keepalives": 34559,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34559,
+       "bytes": 587509,
+       "airtime_s": 1958.4
+      }
+     }
     }
    },
    "ba": {
@@ -46,10 +59,13 @@
     "relay_bytes": 4080,
     "relay_dropped": 12,
     "kinds": {
-     "keep-alive?": 240
+     "keep-alive": 240
     },
     "kind_bytes": {
-     "keep-alive?": 4080
+     "keep-alive": 4080
+    },
+    "kind_airtime_s": {
+     "keep-alive": 13.6
     },
     "other_sizes": {},
     "tx_layers": {
@@ -60,12 +76,20 @@
      "aead/replays_total": 0
     },
     "airtime_s": 13.6,
+    "keepalives_lost": 12,
     "per_day": {
      "sdus": 34559,
      "bytes": 587509,
      "airtime_s": 1958.4,
      "airtime_pct": 2.267,
-     "keepalives": 34559
+     "keepalives": 34559,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34559,
+       "bytes": 587509,
+       "airtime_s": 1958.4
+      }
+     }
     }
    }
   },
@@ -81,12 +105,16 @@
     "relay_bytes": 5858,
     "relay_dropped": 6,
     "kinds": {
-     "keep-alive?": 230,
-     "other": 31
+     "keep-alive": 230,
+     "data": 31
     },
     "kind_bytes": {
-     "keep-alive?": 3910,
-     "other": 1948
+     "keep-alive": 3910,
+     "data": 1948
+    },
+    "kind_airtime_s": {
+     "keep-alive": 13.033,
+     "data": 6.493
     },
     "other_sizes": {
      "57": 3,
@@ -104,12 +132,26 @@
      "aead/replays_total": 0
     },
     "airtime_s": 19.527,
+    "links_opened": 0,
+    "keepalives_lost": 6,
     "per_day": {
      "sdus": 37583,
      "bytes": 843537,
      "airtime_s": 2811.8,
      "airtime_pct": 3.254,
-     "keepalives": 33119
+     "keepalives": 33119,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 33119,
+       "bytes": 563030,
+       "airtime_s": 1876.8
+      },
+      "data": {
+       "sdus": 4464,
+       "bytes": 280507,
+       "airtime_s": 935.0
+      }
+     }
     }
    },
    "ba": {
@@ -121,10 +163,13 @@
     "relay_bytes": 4080,
     "relay_dropped": 9,
     "kinds": {
-     "keep-alive?": 240
+     "keep-alive": 240
     },
     "kind_bytes": {
-     "keep-alive?": 4080
+     "keep-alive": 4080
+    },
+    "kind_airtime_s": {
+     "keep-alive": 13.6
     },
     "other_sizes": {},
     "tx_layers": {
@@ -135,19 +180,27 @@
      "aead/replays_total": 0
     },
     "airtime_s": 13.6,
+    "keepalives_lost": 9,
     "per_day": {
      "sdus": 34559,
      "bytes": 587510,
      "airtime_s": 1958.4,
      "airtime_pct": 2.267,
-     "keepalives": 34559
+     "keepalives": 34559,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34559,
+       "bytes": 587510,
+       "airtime_s": 1958.4
+      }
+     }
     }
    },
    "far_samples": {
-    "air/duty_cycle_wait_ms": 10,
-    "air/duty_cycle_available": 10,
-    "sdu/dropped_total": 10,
-    "sched/queue_depth": 10
+    "stream/air/duty_cycle_available": 10,
+    "stream/air/duty_cycle_wait_ms": 10,
+    "stream/sched/queue_depth": 10,
+    "stream/sdu/dropped_total": 10
    }
   }
  ]

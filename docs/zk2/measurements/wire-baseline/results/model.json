@@ -62,5 +62,175 @@
     }
    }
   }
+ },
+ "w2_rf": {
+  "telemetry": {
+   "today_bytes": 5166720,
+   "zk2c_bytes": 339840
+  },
+  "health": {
+   "today_bytes": 239495,
+   "zk2c_bytes": 168
+  },
+  "alarms": {
+   "today_bytes": 121414,
+   "zk2c_bytes": 450
+  },
+  "config": {
+   "today_bytes": 5766063,
+   "zk2c_bytes": 305
+  },
+  "desired": {
+   "today_bytes": 105408,
+   "zk2c_bytes": 18720
+  },
+  "events": {
+   "today_bytes": 4365,
+   "zk2c_bytes": 735
+  },
+  "keep-alive": {
+   "today_bytes": 1028160,
+   "zk2c_bytes": 24480
+  },
+  "reconnect": {
+   "today_bytes": 13204,
+   "zk2c_bytes": 4900
+  },
+  "heartbeat": {
+   "today_bytes": 0,
+   "zk2c_bytes": 51840
+  },
+  "total": {
+   "today_bytes": 12444829,
+   "zk2c_bytes": 441438
+  }
+ },
+ "w2_rf_per_direction": {
+  "a_to_b": {
+   "telemetry": {
+    "today_bytes": 5166720,
+    "airtime_s": 17222.4
+   },
+   "health": {
+    "today_bytes": 239495,
+    "airtime_s": 798.3
+   },
+   "alarms": {
+    "today_bytes": 121414,
+    "airtime_s": 404.7
+   },
+   "config": {
+    "today_bytes": 5766063,
+    "airtime_s": 19220.2
+   },
+   "events": {
+    "today_bytes": 4365,
+    "airtime_s": 14.6
+   },
+   "desired": {
+    "today_bytes": 31104,
+    "airtime_s": 103.7
+   },
+   "keep-alive": {
+    "today_bytes": 440640,
+    "airtime_s": 1468.8
+   },
+   "reconnect": {
+    "today_bytes": 11616,
+    "airtime_s": 38.7
+   },
+   "total": {
+    "today_bytes": 11781417,
+    "airtime_s": 39271.4
+   }
+  },
+  "b_to_a": {
+   "desired": {
+    "today_bytes": 74304,
+    "airtime_s": 247.7
+   },
+   "keep-alive": {
+    "today_bytes": 587520,
+    "airtime_s": 1958.4
+   },
+   "reconnect": {
+    "today_bytes": 1588,
+    "airtime_s": 5.3
+   },
+   "total": {
+    "today_bytes": 663412,
+    "airtime_s": 2211.4
+   }
+  }
+ },
+ "lora": {
+  "sf7": {
+   "lease_s": 60,
+   "keep_alive": 2,
+   "w1_data_a_to_b": {
+    "sdus": 5760,
+    "airtime_s": 679.8
+   },
+   "w1_keepalive_a_to_b": {
+    "sdus": 1440,
+    "airtime_s": 74.1
+   },
+   "keepalive_per_direction": {
+    "sdus": 2880,
+    "airtime_s": 148.2
+   },
+   "duty_budget_s_per_day": 864
+  },
+  "sf9": {
+   "lease_s": 60,
+   "keep_alive": 2,
+   "w1_data_a_to_b": {
+    "sdus": 5760,
+    "airtime_s": 2247.2
+   },
+   "w1_keepalive_a_to_b": {
+    "sdus": 1440,
+    "airtime_s": 237.4
+   },
+   "keepalive_per_direction": {
+    "sdus": 2880,
+    "airtime_s": 474.8
+   },
+   "duty_budget_s_per_day": 864
+  },
+  "sf12": {
+   "lease_s": 540,
+   "keep_alive": 2,
+   "w1_data_a_to_b": {
+    "sdus": 5760,
+    "airtime_s": 22743.6
+   },
+   "w1_keepalive_a_to_b": {
+    "sdus": 0,
+    "airtime_s": 0.0
+   },
+   "keepalive_per_direction": {
+    "sdus": 320,
+    "airtime_s": 474.5
+   },
+   "duty_budget_s_per_day": 864
+  },
+  "sf7ka4": {
+   "lease_s": 60,
+   "keep_alive": 4,
+   "w1_data_a_to_b": {
+    "sdus": 5760,
+    "airtime_s": 679.8
+   },
+   "w1_keepalive_a_to_b": {
+    "sdus": 4320,
+    "airtime_s": 222.3
+   },
+   "keepalive_per_direction": {
+    "sdus": 5760,
+    "airtime_s": 296.4
+   },
+   "duty_budget_s_per_day": 864
+  }
  }
 }

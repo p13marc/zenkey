@@ -1,0 +1,803 @@
+[
+ {
+  "run": "w2-smoke-1",
+  "sdus_lost": 49,
+  "lost_with_declarations": [
+   {
+    "t": 21.7,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/alarms.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/alarms.v1/state/**",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/config.v1/state/**",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/health.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/health.v1/state/**",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/worker.v1/state"
+    ]
+   },
+   {
+    "t": 24.4,
+    "dir": "ab",
+    "declared": [
+     "queryable zk2/@zk/contract/worker.v1/66e46fce140ea39b8b939ca17c1a7d607108aee7147dc12a5608b6cdfd876454",
+     "token zk2/h-3fa9c2d41b7e/rf0/@zk/instance/bc2ca04e1108cf6b",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/@zk/alive/gendev.v1/bc2ca04e1108cf6b/3be523eb5a0e98fe",
+     "token zk2/h-3fa9c2d41b7e/rf0/@zk/alive/gendev.v1/bc2ca04e1108cf6b/3be523eb5a0e98fe",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/@zk/alive/health.v1/bc2ca04e1108cf6b/e9dbcdcb2fc325ca",
+     "token zk2/h-3fa9c2d41b7e/rf0/@zk/alive/health.v1/bc2ca04e1108cf6b/e9dbcdcb2fc325ca"
+    ]
+   },
+   {
+    "t": 417.6,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/alarms.v1/state",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/set",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/worker.v1/state"
+    ]
+   }
+  ],
+  "resources": {
+   "alarms.v1/state/alarms": {
+    "sent": 6,
+    "delivered": 6,
+    "received": 0
+   },
+   "config.v1/state/status": {
+    "sent": 13,
+    "delivered": 13,
+    "received": 13
+   },
+   "config.v1/state/view": {
+    "sent": 13,
+    "delivered": 13,
+    "received": 10
+   },
+   "gendev.v1/stream/battery": {
+    "sent": 32,
+    "delivered": 30,
+    "received": 30
+   },
+   "gendev.v1/stream/cpu_load": {
+    "sent": 29,
+    "delivered": 27,
+    "received": 27
+   },
+   "gendev.v1/stream/errors_total": {
+    "sent": 24,
+    "delivered": 21,
+    "received": 21
+   },
+   "gendev.v1/stream/humidity": {
+    "sent": 36,
+    "delivered": 33,
+    "received": 33
+   },
+   "gendev.v1/stream/mem_free": {
+    "sent": 28,
+    "delivered": 25,
+    "received": 25
+   },
+   "gendev.v1/stream/pressure": {
+    "sent": 32,
+    "delivered": 31,
+    "received": 31
+   },
+   "gendev.v1/stream/resets_total": {
+    "sent": 17,
+    "delivered": 16,
+    "received": 16
+   },
+   "gendev.v1/stream/rssi": {
+    "sent": 30,
+    "delivered": 28,
+    "received": 28
+   },
+   "gendev.v1/stream/rx_frames_total": {
+    "sent": 25,
+    "delivered": 22,
+    "received": 22
+   },
+   "gendev.v1/stream/snr": {
+    "sent": 30,
+    "delivered": 28,
+    "received": 28
+   },
+   "gendev.v1/stream/temperature": {
+    "sent": 36,
+    "delivered": 33,
+    "received": 33
+   },
+   "gendev.v1/stream/tx_frames_total": {
+    "sent": 27,
+    "delivered": 25,
+    "received": 25
+   },
+   "health.v1/state/status": {
+    "sent": 14,
+    "delivered": 14,
+    "received": 0
+   },
+   "worker.v1/state/desired": {
+    "sent": 2,
+    "delivered": 2,
+    "received": 2
+   },
+   "worker.v1/state/running": {
+    "sent": 2,
+    "delivered": 2,
+    "received": 2
+   }
+  },
+  "never_received": [
+   "alarms.v1/state/alarms",
+   "health.v1/state/status"
+  ],
+  "desired_gets_crossed": 3,
+  "router_lines": {
+   "zenohd-b: Unknown wire expr": 1,
+   "zenohd-b: Route data with unknown scope": 20
+  }
+ },
+ {
+  "run": "w2-smoke-2",
+  "sdus_lost": 33,
+  "lost_with_declarations": [
+   {
+    "t": 13.2,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/fleet/desired/tasking.v1/state",
+     "queryable zk2/fleet/desired/tasking.v1/state/**"
+    ]
+   },
+   {
+    "t": 22.5,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/worker.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/worker.v1/state/**",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/@zk/instance/151186ab75f36566",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/@zk/instance/151186ab75f36566"
+    ]
+   },
+   {
+    "t": 341.6,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/@zk/contract/alarms.v1/95579151aa231d2ba1224eae828083bdfc7f4f9403a80c831c1915decca9e8b6",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/health.v1/state",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/cancel"
+    ]
+   }
+  ],
+  "resources": {
+   "alarms.v1/state/alarms": {
+    "sent": 6,
+    "delivered": 6,
+    "received": 6
+   },
+   "config.v1/state/status": {
+    "sent": 10,
+    "delivered": 9,
+    "received": 9
+   },
+   "config.v1/state/view": {
+    "sent": 11,
+    "delivered": 11,
+    "received": 8
+   },
+   "gendev.v1/events/oper_change": {
+    "sent": 2,
+    "delivered": 2,
+    "received": 2
+   },
+   "gendev.v1/stream/battery": {
+    "sent": 22,
+    "delivered": 20,
+    "received": 20
+   },
+   "gendev.v1/stream/cpu_load": {
+    "sent": 21,
+    "delivered": 20,
+    "received": 20
+   },
+   "gendev.v1/stream/errors_total": {
+    "sent": 14,
+    "delivered": 13,
+    "received": 13
+   },
+   "gendev.v1/stream/humidity": {
+    "sent": 24,
+    "delivered": 21,
+    "received": 21
+   },
+   "gendev.v1/stream/mem_free": {
+    "sent": 20,
+    "delivered": 19,
+    "received": 19
+   },
+   "gendev.v1/stream/pressure": {
+    "sent": 22,
+    "delivered": 19,
+    "received": 19
+   },
+   "gendev.v1/stream/resets_total": {
+    "sent": 11,
+    "delivered": 11,
+    "received": 11
+   },
+   "gendev.v1/stream/rssi": {
+    "sent": 22,
+    "delivered": 21,
+    "received": 21
+   },
+   "gendev.v1/stream/rx_frames_total": {
+    "sent": 17,
+    "delivered": 17,
+    "received": 17
+   },
+   "gendev.v1/stream/snr": {
+    "sent": 22,
+    "delivered": 22,
+    "received": 22
+   },
+   "gendev.v1/stream/temperature": {
+    "sent": 26,
+    "delivered": 24,
+    "received": 24
+   },
+   "gendev.v1/stream/tx_frames_total": {
+    "sent": 18,
+    "delivered": 17,
+    "received": 17
+   },
+   "health.v1/state/status": {
+    "sent": 12,
+    "delivered": 12,
+    "received": 12
+   },
+   "worker.v1/state/desired": {
+    "sent": 1,
+    "delivered": 1,
+    "received": 1
+   },
+   "worker.v1/state/running": {
+    "sent": 1,
+    "delivered": 0,
+    "received": 0
+   }
+  },
+  "never_received": [],
+  "desired_gets_crossed": 0,
+  "router_lines": {
+   "zenohd-b: Unknown wire expr": 1
+  }
+ },
+ {
+  "run": "w2-rf-bare-1",
+  "sdus_lost": 70,
+  "lost_with_declarations": [
+   {
+    "t": 13.2,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/fleet/desired/tasking.v1/state",
+     "queryable zk2/fleet/desired/tasking.v1/state/**"
+    ]
+   },
+   {
+    "t": 22.5,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/health.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/health.v1/state/**",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/worker.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/worker.v1/state/**",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/@zk/instance/ba7a9cfc96861535",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/@zk/instance/ba7a9cfc96861535"
+    ]
+   },
+   {
+    "t": 743.7,
+    "dir": "ba",
+    "declared": [
+     "unsubscriber ?"
+    ]
+   }
+  ],
+  "resources": {
+   "alarms.v1/state/alarms": {
+    "sent": 6,
+    "delivered": 6,
+    "received": 6
+   },
+   "config.v1/state/status": {
+    "sent": 26,
+    "delivered": 26,
+    "received": 25
+   },
+   "config.v1/state/view": {
+    "sent": 26,
+    "delivered": 25,
+    "received": 20
+   },
+   "gendev.v1/stream/battery": {
+    "sent": 61,
+    "delivered": 57,
+    "received": 57
+   },
+   "gendev.v1/stream/cpu_load": {
+    "sent": 59,
+    "delivered": 56,
+    "received": 56
+   },
+   "gendev.v1/stream/errors_total": {
+    "sent": 44,
+    "delivered": 41,
+    "received": 41
+   },
+   "gendev.v1/stream/humidity": {
+    "sent": 67,
+    "delivered": 65,
+    "received": 65
+   },
+   "gendev.v1/stream/mem_free": {
+    "sent": 59,
+    "delivered": 56,
+    "received": 56
+   },
+   "gendev.v1/stream/pressure": {
+    "sent": 64,
+    "delivered": 58,
+    "received": 58
+   },
+   "gendev.v1/stream/resets_total": {
+    "sent": 35,
+    "delivered": 34,
+    "received": 34
+   },
+   "gendev.v1/stream/rssi": {
+    "sent": 61,
+    "delivered": 59,
+    "received": 59
+   },
+   "gendev.v1/stream/rx_frames_total": {
+    "sent": 53,
+    "delivered": 52,
+    "received": 52
+   },
+   "gendev.v1/stream/snr": {
+    "sent": 61,
+    "delivered": 58,
+    "received": 58
+   },
+   "gendev.v1/stream/temperature": {
+    "sent": 72,
+    "delivered": 69,
+    "received": 69
+   },
+   "gendev.v1/stream/tx_frames_total": {
+    "sent": 57,
+    "delivered": 54,
+    "received": 54
+   },
+   "health.v1/state/status": {
+    "sent": 26,
+    "delivered": 25,
+    "received": 0
+   },
+   "worker.v1/state/desired": {
+    "sent": 1,
+    "delivered": 1,
+    "received": 1
+   },
+   "worker.v1/state/running": {
+    "sent": 1,
+    "delivered": 1,
+    "received": 1
+   }
+  },
+  "never_received": [
+   "health.v1/state/status"
+  ],
+  "desired_gets_crossed": 0,
+  "router_lines": {
+   "zenohd-b: Unknown wire expr": 1,
+   "zenohd-b: Route data with unknown scope": 25
+  }
+ },
+ {
+  "run": "w2-rf-bare-2",
+  "sdus_lost": 52,
+  "lost_with_declarations": [
+   {
+    "t": 13.2,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/fleet/desired/tasking.v1/state",
+     "queryable zk2/fleet/desired/tasking.v1/state/**"
+    ]
+   },
+   {
+    "t": 20.8,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/persist",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/persist",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/alarms.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/alarms.v1/state/**",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/state",
+     "queryable zk2/h-3fa9c2d41b7e/rf0/config.v1/state/**"
+    ]
+   },
+   {
+    "t": 23.5,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/@zk/contract/health.v1/e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+     "queryable zk2/@zk/contract/health.v1/e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+     "keyexpr zk2/@zk/contract/config.v1/727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+    ]
+   }
+  ],
+  "resources": {
+   "alarms.v1/state/alarms": {
+    "sent": 6,
+    "delivered": 6,
+    "received": 0
+   },
+   "config.v1/state/status": {
+    "sent": 21,
+    "delivered": 21,
+    "received": 21
+   },
+   "config.v1/state/view": {
+    "sent": 21,
+    "delivered": 21,
+    "received": 17
+   },
+   "gendev.v1/stream/battery": {
+    "sent": 46,
+    "delivered": 44,
+    "received": 44
+   },
+   "gendev.v1/stream/cpu_load": {
+    "sent": 45,
+    "delivered": 42,
+    "received": 42
+   },
+   "gendev.v1/stream/errors_total": {
+    "sent": 38,
+    "delivered": 35,
+    "received": 35
+   },
+   "gendev.v1/stream/humidity": {
+    "sent": 52,
+    "delivered": 49,
+    "received": 49
+   },
+   "gendev.v1/stream/mem_free": {
+    "sent": 44,
+    "delivered": 42,
+    "received": 42
+   },
+   "gendev.v1/stream/pressure": {
+    "sent": 47,
+    "delivered": 43,
+    "received": 43
+   },
+   "gendev.v1/stream/resets_total": {
+    "sent": 35,
+    "delivered": 35,
+    "received": 35
+   },
+   "gendev.v1/stream/rssi": {
+    "sent": 45,
+    "delivered": 42,
+    "received": 42
+   },
+   "gendev.v1/stream/rx_frames_total": {
+    "sent": 41,
+    "delivered": 39,
+    "received": 39
+   },
+   "gendev.v1/stream/snr": {
+    "sent": 45,
+    "delivered": 41,
+    "received": 41
+   },
+   "gendev.v1/stream/temperature": {
+    "sent": 57,
+    "delivered": 55,
+    "received": 55
+   },
+   "gendev.v1/stream/tx_frames_total": {
+    "sent": 42,
+    "delivered": 40,
+    "received": 40
+   },
+   "health.v1/state/status": {
+    "sent": 21,
+    "delivered": 20,
+    "received": 20
+   },
+   "worker.v1/state/desired": {
+    "sent": 1,
+    "delivered": 1,
+    "received": 1
+   },
+   "worker.v1/state/running": {
+    "sent": 1,
+    "delivered": 1,
+    "received": 1
+   }
+  },
+  "never_received": [
+   "alarms.v1/state/alarms"
+  ],
+  "desired_gets_crossed": 0,
+  "router_lines": {
+   "zenohd-b: Unknown wire expr": 1,
+   "zenohd-b: Route data with unknown scope": 6
+  }
+ },
+ {
+  "run": "w2-rf-bare-3",
+  "sdus_lost": 215,
+  "lost_with_declarations": [
+   {
+    "t": 2047.6,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/fleet/desired/@zk/alive/tasking.v1/13d8e31a94b8c4af/a61f80badbd990e2",
+     "subscriber @/6d10e7da5d6c958d90d110f59f9d2b56/peer/config/**",
+     "subscriber zk2/**",
+     "queryable @/6d10e7da5d6c958d90d110f59f9d2b56/peer/**",
+     "queryable zk2/fleet/desired/tasking.v1/state/**",
+     "queryable zk2/@zk/contract/tasking.v1/a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645",
+     "queryable zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af",
+     "token zk2/fleet/desired/@zk/alive/tasking.v1/13d8e31a94b8c4af/a61f80badbd990e2",
+     "token zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af",
+     "final ?"
+    ]
+   },
+   {
+    "t": 2102.2,
+    "dir": "ab",
+    "declared": [
+     "keyexpr @/41a187917cf2facc059cbceecec3c81/peer/config",
+     "keyexpr zk2/fleet/desired/tasking.v1/state/tasks/h-3fa9c2d41b7e/rf0"
+    ]
+   },
+   {
+    "t": 2118.8,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/worker.v1/state",
+     "keyexpr zk2/@zk/contract/health.v1/e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/@zk/instance/89bd65c17d77dfbe"
+    ]
+   },
+   {
+    "t": 2213.6,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/cancel",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/confirm",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/@zk/instance/89bd65c17d77dfbe",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/state"
+    ]
+   },
+   {
+    "t": 2257.7,
+    "dir": "ba",
+    "declared": [
+     "queryable zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af",
+     "queryable zk2/fleet/desired/tasking.v1/state/**",
+     "queryable zk2/@zk/contract/tasking.v1/a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645",
+     "token zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af",
+     "token zk2/fleet/desired/@zk/alive/tasking.v1/13d8e31a94b8c4af/a61f80badbd990e2",
+     "final ?"
+    ]
+   },
+   {
+    "t": 2272.7,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/@zk/contract/tasking.v1/a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645",
+     "keyexpr zk2/fleet/desired/@zk/alive/tasking.v1/13d8e31a94b8c4af/a61f80badbd990e2",
+     "subscriber @/6d10e7da5d6c958d90d110f59f9d2b56/peer/config/**",
+     "subscriber zk2/**",
+     "queryable zk2/fleet/desired/tasking.v1/state/**"
+    ]
+   },
+   {
+    "t": 2288.0,
+    "dir": "ba",
+    "declared": [
+     "queryable @/6d10e7da5d6c958d90d110f59f9d2b56/peer/**",
+     "queryable zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af",
+     "queryable zk2/fleet/desired/tasking.v1/state/**",
+     "token zk2/fleet/desired/@zk/alive/tasking.v1/13d8e31a94b8c4af/a61f80badbd990e2",
+     "token zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af",
+     "final ?"
+    ]
+   },
+   {
+    "t": 2288.4,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/set",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/@zk/instance/89bd65c17d77dfbe",
+     "keyexpr @/41a187917cf2facc059cbceecec3c81/peer",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/confirm"
+    ]
+   },
+   {
+    "t": 2308.0,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af",
+     "keyexpr @/6d10e7da5d6c958d90d110f59f9d2b56/peer",
+     "keyexpr zk2/fleet/desired/@zk/alive/tasking.v1/13d8e31a94b8c4af/a61f80badbd990e2",
+     "subscriber @/6d10e7da5d6c958d90d110f59f9d2b56/peer/config/**",
+     "subscriber zk2/**"
+    ]
+   },
+   {
+    "t": 2322.8,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/@zk/contract/tasking.v1/a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645",
+     "keyexpr @/6d10e7da5d6c958d90d110f59f9d2b56/peer"
+    ]
+   },
+   {
+    "t": 2366.7,
+    "dir": "ab",
+    "declared": [
+     "keyexpr @/41a187917cf2facc059cbceecec3c81/peer/config",
+     "keyexpr zk2/fleet/desired/tasking.v1/state/tasks/h-3fa9c2d41b7e/rf0"
+    ]
+   },
+   {
+    "t": 2397.5,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/@zk/contract/tasking.v1/a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645",
+     "keyexpr zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af"
+    ]
+   },
+   {
+    "t": 2442.6,
+    "dir": "ab",
+    "declared": [
+     "keyexpr @/41a187917cf2facc059cbceecec3c81/peer/config",
+     "keyexpr zk2/fleet/desired/tasking.v1/state/tasks/h-3fa9c2d41b7e/rf0"
+    ]
+   },
+   {
+    "t": 2487.4,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/@zk/contract/tasking.v1/a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645",
+     "keyexpr zk2/fleet/desired/@zk/instance/13d8e31a94b8c4af"
+    ]
+   },
+   {
+    "t": 2548.9,
+    "dir": "ba",
+    "declared": [
+     "keyexpr zk2/@zk/contract/tasking.v1/a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645",
+     "keyexpr @/6d10e7da5d6c958d90d110f59f9d2b56/peer"
+    ]
+   },
+   {
+    "t": 2656.9,
+    "dir": "ab",
+    "declared": [
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/worker.v1/state",
+     "keyexpr zk2/@zk/contract/worker.v1/66e46fce140ea39b8b939ca17c1a7d607108aee7147dc12a5608b6cdfd876454",
+     "keyexpr zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/extend"
+    ]
+   }
+  ],
+  "resources": {
+   "alarms.v1/state/alarms": {
+    "sent": 15,
+    "delivered": 15,
+    "received": 15
+   },
+   "config.v1/state/status": {
+    "sent": 71,
+    "delivered": 67,
+    "received": 66
+   },
+   "config.v1/state/view": {
+    "sent": 71,
+    "delivered": 64,
+    "received": 41
+   },
+   "gendev.v1/stream/battery": {
+    "sent": 167,
+    "delivered": 161,
+    "received": 161
+   },
+   "gendev.v1/stream/cpu_load": {
+    "sent": 163,
+    "delivered": 152,
+    "received": 152
+   },
+   "gendev.v1/stream/errors_total": {
+    "sent": 131,
+    "delivered": 125,
+    "received": 125
+   },
+   "gendev.v1/stream/humidity": {
+    "sent": 195,
+    "delivered": 187,
+    "received": 187
+   },
+   "gendev.v1/stream/mem_free": {
+    "sent": 163,
+    "delivered": 156,
+    "received": 156
+   },
+   "gendev.v1/stream/pressure": {
+    "sent": 174,
+    "delivered": 165,
+    "received": 165
+   },
+   "gendev.v1/stream/resets_total": {
+    "sent": 104,
+    "delivered": 100,
+    "received": 100
+   },
+   "gendev.v1/stream/rssi": {
+    "sent": 165,
+    "delivered": 153,
+    "received": 153
+   },
+   "gendev.v1/stream/rx_frames_total": {
+    "sent": 154,
+    "delivered": 149,
+    "received": 149
+   },
+   "gendev.v1/stream/snr": {
+    "sent": 165,
+    "delivered": 149,
+    "received": 149
+   },
+   "gendev.v1/stream/temperature": {
+    "sent": 200,
+    "delivered": 191,
+    "received": 191
+   },
+   "gendev.v1/stream/tx_frames_total": {
+    "sent": 160,
+    "delivered": 155,
+    "received": 155
+   },
+   "health.v1/state/status": {
+    "sent": 71,
+    "delivered": 66,
+    "received": 66
+   },
+   "worker.v1/state/desired": {
+    "sent": 1,
+    "delivered": 1,
+    "received": 1
+   },
+   "worker.v1/state/running": {
+    "sent": 1,
+    "delivered": 1,
+    "received": 1
+   }
+  },
+  "never_received": [],
+  "desired_gets_crossed": 8,
+  "router_lines": {}
+ }
+]

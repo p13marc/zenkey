@@ -1,0 +1,239 @@
+{
+ "run": "w2-rf-lean-1",
+ "medium": "rf",
+ "stack": "lean",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "steady",
+   "seconds": 1860.0,
+   "ab": {
+    "tx_sdus": 2759,
+    "tx_bytes": 211863,
+    "rx_sdus_far": 2621,
+    "rx_bytes_far": 201678,
+    "relay_sdus": 2759,
+    "relay_bytes": 211863,
+    "relay_dropped": 138,
+    "kinds": {
+     "keep-alive": 508,
+     "other": 2251
+    },
+    "kind_bytes": {
+     "keep-alive": 8636,
+     "other": 203227
+    },
+    "kind_airtime_s": {
+     "keep-alive": 28.787,
+     "other": 677.423
+    },
+    "other_sizes": {
+     "33": 5,
+     "39": 130,
+     "44": 65,
+     "63": 65,
+     "68": 70,
+     "69": 47,
+     "77": 40,
+     "80": 80,
+     "81": 98,
+     "82": 110,
+     "84": 24,
+     "85": 92,
+     "86": 1,
+     "87": 64,
+     "88": 80,
+     "89": 41,
+     "90": 18,
+     "91": 16,
+     "92": 93,
+     "93": 60,
+     "94": 99,
+     "95": 151,
+     "96": 173,
+     "97": 13,
+     "98": 32,
+     "99": 22,
+     "100": 93,
+     "101": 56,
+     "102": 35,
+     "103": 21,
+     "104": 2,
+     "106": 6,
+     "107": 43,
+     "108": 10,
+     "109": 1,
+     "111": 12,
+     "112": 53,
+     "115": 1,
+     "118": 6,
+     "119": 31,
+     "120": 33,
+     "121": 8,
+     "130": 3,
+     "131": 5,
+     "133": 2,
+     "134": 43,
+     "135": 18,
+     "136": 1,
+     "137": 1,
+     "138": 1,
+     "155": 2,
+     "156": 2,
+     "157": 12,
+     "158": 48,
+     "159": 1,
+     "172": 1,
+     "173": 2,
+     "174": 1,
+     "178": 2,
+     "179": 2,
+     "192": 1,
+     "193": 3
+    },
+    "tx_layers": {
+     "compress/compressed_total": 2190,
+     "compress/stored_total": 569,
+     "compress/bytes_saved_total": 153172,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 706.21,
+    "links_opened": 0,
+    "keepalives_lost": 31,
+    "per_day": {
+     "sdus": 128160,
+     "bytes": 9841378,
+     "airtime_s": 32804.6,
+     "airtime_pct": 37.968,
+     "keepalives": 23597,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 23597,
+       "bytes": 401156,
+       "airtime_s": 1337.2
+      },
+      "other": {
+       "sdus": 104563,
+       "bytes": 9440222,
+       "airtime_s": 31467.4
+      }
+     }
+    }
+   },
+   "ba": {
+    "tx_sdus": 746,
+    "tx_bytes": 13386,
+    "rx_sdus_far": 711,
+    "rx_bytes_far": 12791,
+    "relay_sdus": 746,
+    "relay_bytes": 13386,
+    "relay_dropped": 35,
+    "kinds": {
+     "keep-alive": 740,
+     "other": 6
+    },
+    "kind_bytes": {
+     "keep-alive": 12580,
+     "other": 806
+    },
+    "kind_airtime_s": {
+     "keep-alive": 41.933,
+     "other": 2.687
+    },
+    "other_sizes": {
+     "25": 1,
+     "154": 1,
+     "156": 1,
+     "157": 3
+    },
+    "tx_layers": {
+     "compress/compressed_total": 5,
+     "compress/stored_total": 741,
+     "compress/bytes_saved_total": 130,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 44.62,
+    "keepalives_lost": 35,
+    "per_day": {
+     "sdus": 34653,
+     "bytes": 621801,
+     "airtime_s": 2072.7,
+     "airtime_pct": 2.399,
+     "keepalives": 34374,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 34374,
+       "bytes": 584361,
+       "airtime_s": 1947.9
+      },
+      "other": {
+       "sdus": 279,
+       "bytes": 37440,
+       "airtime_s": 124.8
+      }
+     }
+    }
+   },
+   "far_samples": {
+    "state/alarms/0f248ad3321738dc": 4,
+    "state/alarms/48d08ce92f831220": 4,
+    "state/alarms/a0ab92ecd3df0fd3": 4,
+    "state/status": 124,
+    "state/view": 38,
+    "stream/battery": 165,
+    "stream/cpu_load": 162,
+    "stream/errors_total": 152,
+    "stream/humidity": 179,
+    "stream/mem_free": 162,
+    "stream/pressure": 173,
+    "stream/resets_total": 132,
+    "stream/rssi": 163,
+    "stream/rx_frames_total": 164,
+    "stream/snr": 169,
+    "stream/temperature": 175,
+    "stream/tx_frames_total": 164
+   }
+  }
+ ],
+ "link_failed_at_s": 1878.5,
+ "steady_window_s": {
+  "made": 2100.0,
+  "used": 1860.0
+ },
+ "w2": {
+  "daily_counts": {
+   "health": 4,
+   "event": 15,
+   "alarm_raise": 5,
+   "alarm_resolve": 5,
+   "config": 5
+  },
+  "reconnects_per_day": 4,
+  "decoded": false,
+  "not_measured": "the link failed 1878.5 s into the steady window and never came back: the acts, the reconnect and the config changes ran on a link that carried nothing",
+  "per_day": {
+   "ab": {
+    "steady": {
+     "sdus": 128160,
+     "bytes": 9841378
+    },
+    "total": {
+     "sdus": 128160,
+     "bytes": 9841378
+    }
+   },
+   "ba": {
+    "steady": {
+     "sdus": 34653,
+     "bytes": 621801
+    },
+    "total": {
+     "sdus": 34653,
+     "bytes": 621801
+    }
+   }
+  }
+ }
+}

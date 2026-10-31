@@ -1,0 +1,109 @@
+{
+ "run": "sf7ka4-lean-1",
+ "medium": "sf7ka4",
+ "stack": "lean",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "idle",
+   "seconds": 600.01,
+   "ab": {
+    "tx_sdus": 40,
+    "tx_bytes": 680,
+    "rx_sdus_far": 38,
+    "rx_bytes_far": 646,
+    "relay_sdus": 40,
+    "relay_bytes": 680,
+    "relay_dropped": 2,
+    "kinds": {
+     "keep-alive": 40
+    },
+    "kind_bytes": {
+     "keep-alive": 680
+    },
+    "kind_airtime_s": {
+     "keep-alive": 2.058
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 40,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 2.058,
+    "links_opened": 0,
+    "keepalives_lost": 2,
+    "keepalives_lost_at": [
+     270.4,
+     345.4
+    ],
+    "links_opened_at": [],
+    "per_day": {
+     "sdus": 5760,
+     "bytes": 97918,
+     "airtime_s": 296.4,
+     "airtime_pct": 0.343,
+     "keepalives": 5760,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 5760,
+       "bytes": 97918,
+       "airtime_s": 296.4
+      }
+     }
+    },
+    "duty_s_per_hour": 12.35,
+    "duty_pct_of_eu868": 34.3
+   },
+   "ba": {
+    "tx_sdus": 40,
+    "tx_bytes": 680,
+    "rx_sdus_far": 39,
+    "rx_bytes_far": 663,
+    "relay_sdus": 40,
+    "relay_bytes": 680,
+    "relay_dropped": 1,
+    "kinds": {
+     "keep-alive": 40
+    },
+    "kind_bytes": {
+     "keep-alive": 680
+    },
+    "kind_airtime_s": {
+     "keep-alive": 2.058
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 40,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 2.058,
+    "keepalives_lost": 1,
+    "keepalives_lost_at": [
+     60.4
+    ],
+    "per_day": {
+     "sdus": 5760,
+     "bytes": 97918,
+     "airtime_s": 296.4,
+     "airtime_pct": 0.343,
+     "keepalives": 5760,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 5760,
+       "bytes": 97918,
+       "airtime_s": 296.4
+      }
+     }
+    },
+    "duty_s_per_hour": 12.35,
+    "duty_pct_of_eu868": 34.3
+   }
+  }
+ ]
+}
