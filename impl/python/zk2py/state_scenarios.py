@@ -108,11 +108,20 @@ class Run:
 class Report:
     def __init__(self) -> None:
         self.rows: list[tuple[str, str, bool, str]] = []
+        #: checks whose premise the run did not meet: neither a pass nor a
+        #: failure (state.md §7's clock-behind outcome, F-408)
+        self.undecided: list[tuple[str, str, str]] = []
 
     def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
         self.rows.append((section, name, ok, detail))
         print(f"{'PASS' if ok else 'FAIL'} [{section}] {name}" + (f": {detail}" if detail else ""), flush=True)
         return ok
+
+    def inconclusive(self, section: str, name: str, detail: str) -> None:
+        """A check this run could not decide, never counted as a pass: the
+        runner exits 2 when nothing failed and one is left."""
+        self.undecided.append((section, name, detail))
+        print(f"INCONCLUSIVE [{section}] {name}: {detail}", flush=True)
 
     def note(self, section: str, text: str) -> None:
         print(f"NOTE [{section}] {text}", flush=True)
@@ -212,7 +221,7 @@ def section10(report: Report, run: Run | None = None) -> None:
                      f"{_show(entry('d'))}; arrivals {[(x.via, x.outcome) for x in d_all]}")
         report.check(sec, "expected 5: the seed ran to its final reply, with no error reply: complete",
                      ended and lj.seed.complete and not lj.seed.errors,
-                     f"ended {ended}, complete {lj.seed.complete}, errors {lj.seed.errors}")
+                     f"ended {ended}, complete {lj.seed.complete}, errors {lj.seed.errors}; {lj.bound_note()}")
         lj.close()
 
         # Step 6, the control: the other order.
@@ -346,7 +355,7 @@ def section7(report: Report, run: Run | None = None) -> None:
         held = lt.view().get(f"{base}/r")
         report.check(sec, "expected 2: the tool's late joiner keeps §4.2's merge for as long as it follows "
                           "(observer §4.1): rev 10's later time over the new epoch's values",
-                     held is not None and held.payload == b"rev10", _show(held))
+                     held is not None and held.payload == b"rev10", f"{_show(held)}; {lt.bound_note()}")
     finally:
         for j in joiners:
             j.close()
@@ -359,11 +368,16 @@ def section7(report: Report, run: Run | None = None) -> None:
 
 def section7_inside(report: Report, run: Run | None = None) -> None:
     """§7 step 2's new epoch *inside* a late joiner's seed, the case core
-    0.68 moved (F-382; round 91). The owner writes rev 10. A second session
-    holds a non-complete queryable on the plans, so each late joiner's GET
-    stays open after the owner has answered it. Meanwhile the owner restarts
-    with no record, a new epoch, and writes rev 11, whose live sample
-    arrives while the GET is open. Then the GET ends.
+    0.68 moved (F-382; round 91), and 0.69's "Inside the seed" (F-393;
+    round 92). The owner writes rev 10. A second session holds a
+    non-complete queryable on the plans, so each late joiner's GET stays
+    open after the owner has answered it. Meanwhile the owner restarts with
+    no record, a new epoch, and writes rev 11, whose live sample arrives
+    while the GET is open. Then the GET ends, and the owner writes rev 12:
+    "The consumer accepts rev 11, then the reply, under the old id. It holds
+    rev 10 both times, until rev 12, which it accepts. The tool keeps the
+    later time: rev 10 with the clock behind, and rev 11, then rev 12, on the
+    host's clock."
 
     - **What zenoh does** (core §4.1): "`Latest` consolidation … delivers at
       query completion". So the owner's reply of rev 10 reaches each late
@@ -385,16 +399,19 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
     import zenoh
 
     from . import live
+    from .checks import F408_MARGIN_S, HeldQueries, within_offset
     from .contract import load_contract
     from .live_interop import _r1
     from .owner import Owner
 
     for offset_s, word in ((-5.0, "5 s behind"), (0.0, "on the host's clock")):
-        sec = f"§7 clocks (S7), a new epoch inside the seed, its clock {word} (core 0.68)"
+        sec = f"§7 clocks (S7), a new epoch inside the seed, its clock {word} (core 0.69)"
         r1, ep, _ = _r1()
         tool, helper = live.open_client(ep), live.open_client(ep)
         owners: list[Any] = []
         joiners: list[sd.LateJoiner] = []
+        held_q: HeldQueries | None = None
+        q: Any = None
         try:
             c = load_contract(PLANS)
             o1 = Owner("ground", "fleet-mgr-s7i", [c], connect=ep)
@@ -402,6 +419,7 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
             owners.append(o1)
             base = f"{o1.prefix(c)}/state/plans"
             t10 = o1.set_state(f"{base}/r", b"rev10")
+            w10 = time.monotonic()  # rev 10's write, on the runner's clock (F-408)
             answered = threading.Event()
             answers: list[str] = []
 
@@ -414,10 +432,8 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
 
             o1.state_hold = answer_now
 
-            def hold(query: Any) -> None:  # answers nothing; its drop is the GET's final reply
-                threading.Timer(4.0, query.drop).start()
-
-            q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(hold), complete=False)
+            held_q = HeldQueries()
+            q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(held_q.take), complete=False)
             time.sleep(0.3)
             lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=10.0)
             lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=10.0)
@@ -452,6 +468,7 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
                          and ((s11.time < s10.time) if offset_s else (s11.time > s10.time))
                          and all(f == [("live", str(s11))] for f in first) and not any(j.seed.ended for j in joiners),
                          f"rev 10 {s10}, rev 11 {s11}; arrivals {first}")
+            held_q.release()  # "Then the second queryable lets the GET end" (0.69)
             ended = all(j.wait(12.0) for j in joiners)
             order = [[(a.via, a.outcome) for a in j.applied] for j in joiners]
             report.check(sec, "the GET ends, and the owner's reply of rev 10 arrives last",
@@ -466,12 +483,56 @@ def section7_inside(report: Report, run: Run | None = None) -> None:
             want = b"rev10" if offset_s else b"rev11"
             report.check(sec, f"observer §4.1 (0.10): the tool keeps the merge across ids: the later time, "
                               f"{want.decode()}",
-                         heldt is not None and heldt.payload == want, f"{_show(heldt)}; {order[1]}")
-            try:
-                q.undeclare()
-            except Exception:  # noqa: BLE001 - closing anyway
-                pass
+                         heldt is not None and heldt.payload == want,
+                         f"{_show(heldt)}; {order[1]}; {lt.bound_note()}")
+            # state.md §7 step 2, inside the seed, as core 0.69 writes it
+            # (F-393): "Then the second queryable lets the GET end, and the
+            # owner writes rev 12."
+            t12 = o2.set_state(f"{base}/r", b"rev12")
+            elapsed = time.monotonic() - w10
+            time.sleep(0.5)
+            s12 = sd.Stamp.of(t12)
+            got = lc.view().get(f"{base}/r")
+            last = [(a.via, a.outcome, a.rule) for a in lc.applied][2:]
+            report.check(sec, "state.md §7 (0.69): the consumer holds rev 10 until rev 12, which it accepts, under "
+                              "the new id again",
+                         got is not None and got.payload == b"rev12" and str(got.stamp) == str(s12)
+                         and last == [("live", "kept", "S7")], f"{_show(got)}; {last}")
+            heldt = lt.view().get(f"{base}/r")
+            lastt = [(a.via, a.outcome) for a in lt.applied][2:]
+            later = s12 is not None and s10 is not None and s12.time > s10.time
+            gap = None if s12 is None or s10 is None else round((s12.time - s10.time) / 2**32, 3)
+            detail = (f"{_show(heldt)}; {lastt}; rev 12 written {elapsed:.3f} s after rev 10, its time {gap} s from "
+                      f"rev 10's; {lt.bound_note()}")
+            # The merge's rule, whatever the window: the later time by the
+            # stamps (observer §4.1).
+            report.check(sec, "observer §4.1: the tool keeps the later time by the stamps after rev 12",
+                         heldt is not None and heldt.payload == (b"rev12" if later else b"rev10")
+                         and lastt == [("live", "kept" if later else "dropped")], detail)
+            # The step's stated outcome, its premise judged on the runner's
+            # clock, not from the stamps (round 92's F-408; review-bot on PR #973).
+            step = "state.md §7 (0.69): the tool keeps the later time: "
+            if not offset_s:
+                report.check(sec, step + "rev 11, then rev 12, on the host's clock",
+                             heldt is not None and heldt.payload == b"rev12" and lastt == [("live", "kept")], detail)
+            elif within_offset(elapsed, offset_s):
+                report.check(sec, step + "rev 10 with the clock behind, rev 12 dropped",
+                             heldt is not None and heldt.payload == b"rev10" and lastt == [("live", "dropped")],
+                             detail)
+            else:
+                report.inconclusive(sec, step + "rev 10 with the clock behind",
+                                    f"F-408's premise not met: rev 12 came {elapsed:.3f} s after rev 10, not within "
+                                    f"the {abs(offset_s):g} s offset less {F408_MARGIN_S:g} s; {detail}")
         finally:
+            # Released and undeclared whatever happened above, so that an
+            # early return leaves no GET open (review-bot on PR #973).
+            if held_q is not None:
+                held_q.release()
+            if q is not None:
+                try:
+                    q.undeclare()
+                except Exception:  # noqa: BLE001 - closing anyway
+                    pass
             for j in joiners:
                 j.close()
             for x in owners:
@@ -893,11 +954,13 @@ def main(argv: list[str] | None = None) -> int:
             report.check(name, "the section ran", False, f"{type(e).__name__}: {e}")
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"state scenarios: {passed} passed, {failed} failed")
+    print(f"state scenarios: {passed} passed, {failed} failed, {len(report.undecided)} inconclusive")
     for sec, name, ok, detail in report.rows:
         if not ok:
             print(f"FAIL [{sec}] {name}: {detail}")
-    return 1 if failed else 0
+    for sec, name, detail in report.undecided:
+        print(f"INCONCLUSIVE [{sec}] {name}: {detail}")
+    return 1 if failed else 2 if report.undecided else 0
 
 
 if __name__ == "__main__":

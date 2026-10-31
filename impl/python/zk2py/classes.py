@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.68), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 91).
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.69), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 92).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
 verdict, with what shows it, and on standard error the counts and every
@@ -229,8 +229,16 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("consumer", "core §4.2", "A late joiner MUST declare its subscription first", MET,
      "seed.LateJoiner (state_scenarios §10)"),
     ("consumer", "core §4.2", "A late joiner MUST merge the GET's replies", MET,
-     "seed.LateJoiner's seed.Merge, rule S7: by the stamp within one id (seed.compare, seed family), and across two "
-     "ids by §4.3's consumer rule (seed.follows; readings, round 91)"),
+     "seed.LateJoiner's seed.Merge: one per-key merge of both paths, through one queue in arrival order (readings; "
+     "state_scenarios §10)"),
+    # core 0.69 split the merge's MUST into three sentences (F-401): the
+    # second and the third are rows of their own under consumer.
+    ("consumer", "core §4.2", "It MUST keep the newer by the owner's stamp", MET,
+     "seed.LateJoiner's seed.Merge, rule S7: within one id by the stamp, as Latest compares (seed.compare, "
+     "seed.follows; seed family; state_scenarios §10)"),
+    ("consumer", "core §4.2", "Across two timestamp ids, a consumer MUST instead keep what", MET,
+     "seed.follows: across two ids, a value under an id other than the held value's kept, its seed's replies "
+     "included (readings; state_scenarios §7 step 2, after the seed and inside it; live_interop s7)"),
     ("consumer", "core §4.3", "A consumer MUST order each key's values by", MET,
      "seed.LateJoiner, a consumer's: seed.Merge's rule S7 from the first value it receives, its seed's replies "
      "included (round 91; readings; state_scenarios §7); desired.TargetRole keeps desired.v1 §2.6's stricter "
@@ -277,9 +285,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §4.2", "A late joiner MUST declare its subscription first", MET,
      "seed.LateJoiner, the seeding tools' reads (state_scenarios §10); a late joiner is \"a consumer or a tool\""),
     ("observer", "core §4.2", "A late joiner MUST merge the GET's replies", MET,
-     "seed.LateJoiner, a tool's: seed.Merge's rule merge for as long as it follows, across two ids too, bounded at "
-     "seed.MAX_KEYS and counting what it forgot (observer §4.1; seed family; state_scenarios §7's control); the "
-     "alarms, health and config readers merge their recordings through seed.newest (round 91)"),
+     "seed.LateJoiner, a tool's: one per-key merge of both paths, bounded at seed.MAX_KEYS; the alarms, health and "
+     "config readers merge their recordings and GETs through seed.merged (round 91)"),
+    # core 0.69 (F-401): the merge's second sentence, a row of its own.
+    ("observer", "core §4.2", "It MUST keep the newer by the owner's stamp", MET,
+     "seed.LateJoiner, a tool's: seed.Merge's rule merge, the newer by the stamp as Latest compares, for as long as "
+     "it follows, across two ids too (observer §4.1; seed family; state_scenarios §7's control); seed.merged for the "
+     "readers"),
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
     ("observer", "core §5.2", "It MUST refuse", MET,
@@ -468,11 +480,19 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §4.1", "A tool keeps core §4.2's merge for as long as it follows", MET,
      "seed.LateJoiner, a tool's: seed.Merge's rule merge, across two ids too, after the seed as inside it "
      "(state_scenarios §7 and its run inside the seed; live_interop s7; observer 0.10, round 91)"),
-    ("observer", "observer §4.1", "A tool that bounds what it holds counts what the bound forgot", MET,
+    ("observer", "observer §4.1", "A tool that bounds what it holds counts the keys the bound forgot, and reports "
+     "the count", MET,
      "seed.Merge and freshness.Subscriber, each bounded at seed.MAX_KEYS, the least recent key forgotten whole and "
-     "counted in forgotten, holding nothing after (readings; observer 0.10, round 91)"),
+     "counted in forgotten, holding nothing after; every reading of what they hold reports the count: "
+     "alarms.OwnerReading, health.Reading, config.Reading and freshness.read_service's forgotten, and a tool's "
+     "LateJoiner.bound_note (readings; observer 0.11, round 92)"),
     ("observer", "observer §5.2", "A complete reading of a stream or an event", MET,
      "budget.Window (budget family, budget_scenarios; F-362)"),
+    ("observer", "observer §7.3", "Decode order for a tool is: the declared type, then the sample's", NOT_MET,
+     "echo_tool decodes nothing: it shows each sample's size and encoding, reads no contract, and sniffs no "
+     "foreign payload; the profiles' readers decode their profile's JSON Schema type on the wire their profile "
+     "names (telemetry.v1's resource encoding, alarms.v1's strict JSON), never by the sample's Encoding, which "
+     "0.11 says picks the wire (round 92's F-409)"),
     ("observer", "observer §7.1", "The data-flow graph is read from descriptors, never inferred", MET,
      "live.get_descriptor (live_interop, bindings.md §3; F-362)"),
     ("observer", "observer §8.1", "A tool never hides or refuses a foreign key", MET,

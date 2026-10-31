@@ -108,7 +108,10 @@ class Reading:
     - ``face``: ``{"status_crosses": bool}``, read only across a face;
     - ``observations`` of ``state/status`` (freshness.v1's);
     - ``level``: the latest status value's level, None for no value;
-    - ``checks``: None when not read, else ``[(name, level)]``."""
+    - ``checks``: None when not read, else ``[(name, level)]``;
+    - ``forgotten``: on a bus, the keys the subscription's recording's bound
+      forgot, reported (observer §4.1, 0.11: "counts the keys the bound
+      forgot, and reports the count"; round 92). No judge reads it."""
 
     presence: str
     descriptor: dict[str, Any] | None = None
@@ -116,6 +119,7 @@ class Reading:
     observations: list[Any] | None = None
     level: Level | None = None
     checks: list[tuple[str, Level]] | None = None
+    forgotten: int = 0
 
 
 @dataclass(frozen=True)
@@ -557,7 +561,10 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
     held = sd.merged(arrivals)
     payload = None if held is None or held[1] else held[2]
     level = None if payload is None else status_level(payload)
-    return Reading(presence, descriptor, None, observations, level, checks), info
+    # observer §4.1 (0.11): the bound's count, reported; None with no
+    # subscription, which holds nothing and forgets nothing
+    forgotten, info["bound"] = (0, None) if subscriber is None else subscriber.bound()
+    return Reading(presence, descriptor, None, observations, level, checks, forgotten), info
 
 
 def read_across(subscriber: fr.Subscriber, address: str, status_crosses: bool) -> Reading:
@@ -567,4 +574,5 @@ def read_across(subscriber: fr.Subscriber, address: str, status_crosses: bool) -
     status_key = f"zk2/{address}/{IFACE}/state/status"
     last = [x for x in subscriber.of(status_key) if x.kind == "put"]
     return Reading("across_face", None, {"status_crosses": status_crosses},
-                   [subscriber.observation(status_key)], status_level(last[-1].payload) if last else None, None)
+                   [subscriber.observation(status_key)], status_level(last[-1].payload) if last else None, None,
+                   subscriber.forgotten)

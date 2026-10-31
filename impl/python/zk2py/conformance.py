@@ -3429,7 +3429,7 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
-        + _round91_readings(root)
+        + _round91_readings(root) + _round92_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -3492,12 +3492,15 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "It MUST accept a value under an id other than the one its held value carries, and order by time "
                  "within that id from then on.",
                  "A profile MAY order a consumer's values more strictly.",
-                 "or, for a consumer across two timestamp ids, by §4.3's consumer rule.",
-                 "So a consumer's merge has no end to state")
+                 # Re-read under core 0.69 and observer 0.11 (round 92): F-401
+                 # split the merge's MUST, F-403 reworded "no end to state" and
+                 # F-398 the bound, each the same rule as 0.68 stated it.
+                 "Across two timestamp ids, a consumer MUST instead keep what §4.3's consumer rule accepts.",
+                 "So a consumer has no instant at which its merge ends")
          + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows, "
                    "across two timestamp ids too.",
-                   "A tool that bounds what it holds counts what the bound forgot, and treats a forgotten key as "
-                   "holding nothing.")
+                   "A tool that bounds what it holds counts the keys the bound forgot, and reports the count. A "
+                   "forgotten key holds nothing")
          + present(core, "merges as §4.2 says, and the consumer rule", "It MUST accept the first value under a new id",
                    "A consumer MUST order an owner's values"), []),
         ("F-379, F-380, F-381 and F-387: §7.3 by each payload's declared type, §2.4's opt-in, §2.5's places, and "
@@ -3624,6 +3627,213 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  sd.merged([(st(5, "a1"), False, b"x"), (st(6, "a1"), True, b"")])[1],
                  sd.merged([(st(5, "a1"), False, b"x"), (None, False, b"u")])[2], sd.merged([])],
                 [b"old", b"x", True, b"x", None]))
+    return out
+
+
+def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.69 and ``observer.md`` 0.11, round 91's answers (#609, round 92;
+    #926 part 4). What zk2py implements of them: observer §4.1's bound, "A
+    tool that bounds what it holds counts the keys the bound forgot, and
+    reports the count" (F-398). Round 91 counted and showed nothing. Now
+    every reading of a bounded merge or recording carries the count:
+    :func:`zk2py.seed.bound_note`, a tool's :meth:`zk2py.seed.LateJoiner.bound_note`,
+    :meth:`zk2py.freshness.Subscriber.note`, and ``forgotten`` on the
+    alarms, health and config readings and on
+    :func:`zk2py.freshness.read_service`'s answer. Read with no session: a
+    fake one stands in, whose GETs end at once with no reply.
+
+    Before it, each text at its version or later, round 91's F-393 to F-405
+    answered as they read, and the forms they replaced gone; and
+    ``state.md`` §7 step 2's new step inside the seed, as 0.69 writes it
+    (F-393), on the fake session: the consumer holds rev 10 until rev 12; the
+    tool keeps the later time."""
+    import re
+
+    from . import alarms as al
+    from . import config as cf
+    from . import freshness as fr
+    from . import health as hl
+    from . import seed as sd
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules = flat("core.md"), flat("observer.md"), flat("RULES.md")
+    readme, state, types = flat("README.md"), flat("scenarios/state.md"), flat("scenarios/types.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Written against\*\* \| core (\d+)\.(\d+) ", obs)
+    against = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("#926 part 4: core 0.69 or later, observer.md 0.11 or later written against core 0.69 or later, each "
+         "with its entry",
+         [core_v >= (0, 69), obs_v >= (0, 11), against >= (0, 69)]
+         + entry("CHANGELOG.md", "0.69", "round 91's answers")
+         + entry("observer-CHANGELOG.md", "0.11", "F-397"),
+         [True, True, True]),
+        ("F-393: inside a seed the residual risk lasts the GET, the consumer holding the answering instance's id "
+         "until the key's next value, and state.md §7 step 2's step inside the seed",
+         missing(core, "**Inside a seed** the risk lasts the GET.",
+                 "So a consumer holds the id of the instance that answered, whatever the two times, until the key's "
+                 "next value.",
+                 "Where two instances answer, it receives only the reply `Latest` kept, the one with the greater "
+                 "stamp.")
+         + missing(state, "**Inside the seed.**", "It holds rev 10 both times, until rev 12, which it accepts.",
+                   "The tool keeps the later time: rev 10 with the clock behind, and rev 11, then rev 12, on the "
+                   "host's clock."), []),
+        ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
+         "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
+         missing(core, "They are the rules of §1 and §9 that name no role",
+                 "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
+                 "so that a caller or tool following the steps would report the contract unavailable",
+                 "or at the timeout the caller or tool gave it (§8.1).",
+                 "It MUST keep the newer by the owner's stamp (S1, S2). Across two timestamp ids, a consumer MUST "
+                 "instead keep what §4.3's consumer rule accepts.",
+                 "Across them a consumer and a tool order differently (below).",
+                 "So a consumer has no instant at which its merge ends",
+                 "Across two ids, a consumer holds a value under the id of the last value it received")
+         + present(core, "They are §1's, §9's", "A holder on the caller's own session", "at the caller's timeout",
+                   "and keep the newer by the owner's stamp (S1, S2), or, for a consumer",
+                   "there a consumer and a tool part", "has no end to state", "keeps the one whose value arrived last"),
+         []),
+        ("F-397 and F-398: observer §7.3's decode order by the declared type, the Encoding picking its wire, "
+         "sniffing with no declared type; §4.1's bound counting the keys and reporting the count; types.md §2's "
+         "Encoding; the old forms gone",
+         missing(obs, "**Decode order** for a tool is: the declared type, then the sample's `Encoding` for the type's "
+                      "wire, then sniffing where there is no declared type.",
+                 "A payload with no declared type, a foreign key's, is sniffed (§8.1).",
+                 "So a state declared `cbor` whose sample's `Encoding` is JSON is read as JSON.",
+                 "A tool that bounds what it holds counts the keys the bound forgot, and reports the count.")
+         + missing(types, "The second carries CBOR's `Encoding` or zenoh's default. Its reason says it was read as "
+                          "CBOR.")
+         + present(obs, "the sample's `Encoding`, then the contract's type, then sniffing",
+                   "counts what the bound forgot, and treats"), []),
+        ("F-394, F-399, F-400, F-405: S7's *Except:*, the glossary's Epoch and Static rule, the index's header; "
+         "the old forms gone",
+         missing(rules, "*Except:* A profile MAY order a consumer's values more strictly.",
+                 "It is listed beside a rule it excepts. A row's MAY is in the rule ids.",
+                 "So does a verb the sentence omits.",
+                 "A rule of those sections, §1 and §9 included, that names a role is listed under that role.")
+         + missing(readme, "With neither, §4.3 requires a new instance whose session has a fresh, unpinned zid",
+                   "A rule of any of those sections, §1 and §9 included, that names a role is that role's")
+         + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
+         + present(readme, "With no record of its last stamp, §4.3 requires a fresh zid"), []),
+    ]
+
+    class Fake:
+        """A session that declares nothing and whose GETs, liveliness ones
+        included, end at once with no reply."""
+
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+        def get(self, selector: str, handler: Any, **kw: Any) -> None:
+            handler.drop()
+
+        def liveliness(self) -> "Fake":
+            return self
+
+    sel = "zk2/g/s/zk2py_plans.v1/state/plans/*"
+    k = "zk2/g/s/zk2py_plans.v1/state/plans/r"
+
+    def inside(consumer: bool, behind: bool) -> list[Any]:
+        """state.md §7 step 2 inside the seed (0.69): rev 11 live under the new
+        id, the reply of rev 10 at the GET's end, then rev 12 under the new id;
+        the new clock 5 s behind or on the host's clock, rev 12 written within
+        the offset of rev 10."""
+        lj = sd.LateJoiner(Fake(), sel, consumer=consumer)
+        t10, t11, t12 = (200, 150, 151) if behind else (200, 201, 202)
+        for via, rev, t, i in (("live", b"rev11", t11, "b2"), ("reply", b"rev10", t10, "a1"),
+                               ("live", b"rev12", t12, "b2")):
+            lj._merge(k, via, False, rev, "application/json", f"{t}/{i}")
+        lj._ended()
+        return [[a.outcome for a in lj.applied], lj.view()[k].payload.decode()]
+
+    out.append(("state.md §7 step 2 inside the seed (core 0.69, F-393): the consumer accepts rev 11, then the reply "
+                "under the old id, and holds rev 10 until rev 12; the tool keeps the later time, rev 10 with the "
+                "clock behind, rev 11 then rev 12 on the host's clock",
+                [inside(True, True), inside(True, False), inside(False, True), inside(False, False)],
+                [[["kept", "kept", "kept"], "rev12"], [["kept", "kept", "kept"], "rev12"],
+                 [["kept", "kept", "dropped"], "rev10"], [["kept", "dropped", "kept"], "rev12"]]))
+
+    # Review-bot on PR #973: the step's clock-behind outcome is asserted only
+    # within the offset, by the runner's clock, and is inconclusive past it
+    # (F-408); the held GET's queries are dropped once, at release or at once
+    # after it.
+    from . import checks as ck
+
+    class Q:
+        def __init__(self) -> None:
+            self.dropped = 0
+
+        def drop(self) -> None:
+            self.dropped += 1
+
+    hq, q1, q2 = ck.HeldQueries(limit=60.0), Q(), Q()
+    hq.take(q1)
+    held_before = q1.dropped
+    hq.release()
+    hq.release()
+    hq.take(q2)
+    out.append(("state.md §7 (0.69), F-408, review-bot on PR #973: rev 12 within the 5 s offset of rev 10 by the "
+                "runner's clock, less 0.5 s, asserts the step's rev 10; past it, or within the margin, inconclusive; "
+                "a held query dropped once, at release, and one taken after it at once",
+                [ck.within_offset(3.99, -5.0), ck.within_offset(4.6, -5.0), ck.within_offset(20.5, -5.0),
+                 [held_before, q1.dropped, q2.dropped, hq.done]],
+                [True, False, False, [0, 1, 1, True]]))
+
+    def joiner() -> list[Any]:
+        lj = sd.LateJoiner(Fake(), sel, consumer=False, max_keys=2)
+        for key in ("a", "b", "c", "d", "a"):
+            lj._merge(f"zk2/g/s/zk2py_plans.v1/state/plans/{key}", "live", False, key.encode(), "", "200/a1")
+        return [lj.forgotten, lj.bound_note()]
+
+    out.append(("observer §4.1 (0.11): a tool's late joiner reports the count of keys its bound forgot (bounded at "
+                "two, five arrivals on four keys, a forgotten again after it came back: three forgettings), and what "
+                "the count costs; a consumer's says it has no bound",
+                [joiner(), sd.LateJoiner(Fake(), sel, consumer=True).bound_note(),
+                 sd.bound_note(0, sd.MAX_KEYS)],
+                [[3, "3 keys forgotten by the merge's bound of 2 keys (observer §4.1): a forgotten key's next value "
+                     "was kept whatever its stamp, so the merge did not order every key"],
+                 "the merge holds every key it heard: it has no bound (observer §4.1)",
+                 f"0 keys forgotten by the merge's bound of {sd.MAX_KEYS} keys (observer §4.1)"]))
+
+    def recorded(address: str, keys: list[str]) -> fr.Subscriber:
+        sub = fr.Subscriber(Fake(), f"zk2/{address}/**", max_keys=1)
+        for i, key in enumerate(keys):
+            sub._record(key, fr.Received("put", sub.declared_ns + i, 0, b"{}", "application/json", None, None,
+                                         None))
+        return sub
+
+    hk = "zk2/lab/svc/health.v1/state/status"
+    h = hl.read_across(recorded("lab/svc", ["zk2/lab/svc/health.v1/state/checks/x", hk]), "lab/svc", True)
+    ck = "zk2/lab/rf0/config.v1/state/view"
+    c = cf.read(Fake(), "lab/rf0", subscriber=recorded("lab/rf0", ["zk2/lab/rf0/config.v1/state/status", ck]),
+                presence=False, lists=True)
+    ak = f"zk2/lab/al/{al.PROFILE}/{al.TOKEN}/{al.PREFIX}/k1"
+    a = al.read_owner(Fake(), "lab/al", subscriber=recorded("lab/al", [ak[:-1] + "0", ak]), get=False)
+    srv = fr.read_service(Fake(), "lab/svc", [], 0.0, fr.ClockTrust(word=True))
+    out.append(("observer §4.1 (0.11): each reader's reading reports the count its recording's bound forgot "
+                "(health.v1's §2.11 reader, config.v1's §5 reader, alarms.v1's reader, freshness.v1's tool), "
+                "beside what it holds: the key heard last",
+                [[h.forgotten, h.level is not None], [c.forgotten, c.bound.startswith("1 key forgotten"),
+                                                      c.view is not None],
+                 [a.forgotten, a.bound.startswith("1 key forgotten"), sorted(a.readings) == [ak]],
+                 [isinstance(srv, dict), srv.forgotten, srv.note.startswith("0 keys forgotten")]],
+                [[1, True], [1, True, True], [1, True, True], [True, 0, True]]))
     return out
 
 

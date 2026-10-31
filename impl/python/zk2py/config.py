@@ -1773,6 +1773,10 @@ class Reading:
     view_fresh: bool = False
     status_fresh: bool = False
     events: list[dict[str, Any]] = field(default_factory=list)
+    #: observer §4.1 (0.11): the keys the subscriber's recording's bound
+    #: forgot, and its note, reported with what it holds (round 92)
+    forgotten: int = 0
+    bound: str = ""
 
     def fresh_doc(self) -> dict[str, Any] | None:
         """A fresh view, else a fresh status: what the questions that a
@@ -1815,6 +1819,8 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
         return Reading(NOT_ASKED, "the deployment says it does not implement config.v1")
     trust = trust or fr.ClockTrust(word=True)
     out = Reading("ok")
+    if subscriber is not None:
+        out.forgotten, out.bound = subscriber.bound()
     for which in ("view", "status"):
         key = f"zk2/{address}/{IFACE}/state/{which}"
         observations: list[Any] = []

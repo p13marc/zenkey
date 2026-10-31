@@ -25,11 +25,14 @@ follows a subscription.
   0.10; :func:`newer`). Round 90's late joiner turned a consumer's to S7 at
   its GET's final reply, 0.67's reading; 0.68 corrected that sentence, so a
   consumer's has no switch to make (round 91).
-- **A tool's bound** (observer §4.1, 0.10): "A tool that bounds what it
-  holds counts what the bound forgot, and treats a forgotten key as holding
-  nothing." :class:`Merge` holds at most ``max_keys`` keys, the least
-  recently arrived forgotten first, each counted (``forgotten``); the next
-  arrival on a forgotten key is kept, as on a key that holds nothing. A
+- **A tool's bound** (observer §4.1, 0.11): "A tool that bounds what it
+  holds counts the keys the bound forgot, and reports the count. A
+  forgotten key holds nothing, so the merge keeps the key's next value
+  whatever its stamp." :class:`Merge` holds at most ``max_keys`` keys, the
+  least recently arrived forgotten first, each forgetting counted
+  (``forgotten``); the next arrival on a forgotten key is kept, as on a key
+  that holds nothing. What reports it is :func:`bound_note`, which every
+  reading of a bounded merge or recording carries (round 92). A
   tool's :class:`LateJoiner` is bounded at :data:`MAX_KEYS` unless told
   otherwise. A consumer's is never bounded, and refuses a bound: observer
   §4.1's is a tool's, and S7 orders a consumer's values from the first it
@@ -56,10 +59,26 @@ from typing import Any, Iterable
 GET_TIMEOUT_S = 1.0
 
 #: The keys a tool's merge holds at most unless told otherwise (observer
-#: §4.1, 0.10: "A tool that bounds what it holds counts what the bound
-#: forgot"). The text sets no number; this one is zk2py's, far above any
-#: scenario's population.
+#: §4.1, 0.11: "A tool that bounds what it holds counts the keys the bound
+#: forgot, and reports the count"). The text sets no number; this one is
+#: zk2py's, far above any scenario's population.
 MAX_KEYS = 65536
+
+
+def bound_note(forgotten: int, max_keys: int | None) -> str:
+    """What a tool reports of its merge's bound (observer §4.1, 0.11): "A
+    tool that bounds what it holds counts the keys the bound forgot, and
+    reports the count." zk2py marks neither a forgotten key nor its next
+    value, so the count is the one place a person learns that the merge did
+    not order every key ("That is the bound's cost"). A merge with no bound
+    says so. ``forgotten`` counts each forgetting: a key forgotten, heard
+    again and forgotten again counts twice (round 92's F-407, reading (a))."""
+    if max_keys is None:
+        return "the merge holds every key it heard: it has no bound (observer §4.1)"
+    word = "key" if forgotten == 1 else "keys"
+    cost = "" if not forgotten else (": a forgotten key's next value was kept whatever its stamp, so the merge "
+                                     "did not order every key")
+    return f"{forgotten} {word} forgotten by the merge's bound of {max_keys} keys (observer §4.1){cost}"
 
 
 @dataclass(frozen=True)
@@ -236,10 +255,12 @@ class Merge:
     §4.3, 0.68).
 
     **Bounded** at ``max_keys`` when given: "A tool that bounds what it holds
-    counts what the bound forgot, and treats a forgotten key as holding
-    nothing" (observer §4.1). The key that arrived least recently is
+    counts the keys the bound forgot, and reports the count. A forgotten key
+    holds nothing, so the merge keeps the key's next value whatever its
+    stamp" (observer §4.1, 0.11). The key that arrived least recently is
     forgotten first, and counted in ``forgotten``; the next arrival on it is
-    kept, as on a key that holds nothing, whatever its stamp."""
+    kept, as on a key that holds nothing, whatever its stamp. :meth:`note`
+    reports the count (:func:`bound_note`)."""
 
     def __init__(self, rule: str = "merge", max_keys: int | None = None):
         if rule not in ("merge", "S7"):
@@ -281,6 +302,10 @@ class Merge:
                 self.forgotten += 1
                 self.last_forgotten = gone
         return outcome
+
+    def note(self) -> str:
+        """The count, reported (observer §4.1, 0.11; :func:`bound_note`)."""
+        return bound_note(self.forgotten, self.max_keys)
 
 
 class LateJoiner:
@@ -331,6 +356,12 @@ class LateJoiner:
         """How many times the bound forgot a key (observer §4.1)."""
         with self.lock:
             return self.merge.forgotten
+
+    def bound_note(self) -> str:
+        """What this late joiner reports of its bound wherever what it holds
+        is shown (observer §4.1, 0.11: "reports the count"; round 92)."""
+        with self.lock:
+            return self.merge.note()
 
     # -- arrivals, one queue ------------------------------------------------
 
