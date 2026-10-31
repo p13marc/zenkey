@@ -32,6 +32,10 @@ MEDIA = {
     "sf7": dict(words="LoRa SF7, EU868", max_sdu=222, rate=5469, latency_ms=10,
                 jitter_ms=5, loss=0.05, lease=60_000, keep_alive=2, open=10_000,
                 timers="deploy/README.md's for LoRa (60 s, 2)"),
+    # SF7 at keep_alive 4: does one lost keep-alive still close the link?
+    "sf7ka4": dict(words="LoRa SF7, EU868, keep_alive 4", max_sdu=222, rate=5469, latency_ms=10,
+                   jitter_ms=5, loss=0.05, lease=60_000, keep_alive=4, open=10_000,
+                   timers="60 s and 4, to test the flapping at deploy/README.md's 2"),
     "sf9": dict(words="LoRa SF9, EU868", max_sdu=115, rate=1758, latency_ms=10,
                 jitter_ms=5, loss=0.05, lease=60_000, keep_alive=2, open=10_000,
                 timers="deploy/README.md's for LoRa (60 s, 2)"),

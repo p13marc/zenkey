@@ -129,7 +129,7 @@ def airtime_fn(params):
     if medium == "rf":
         rate = params.get("rate", 2400)
         return lambda n: n * 8 / rate
-    sf = int(medium[2:])
+    sf = int(medium[2:].split("ka")[0])
     t_sym = 2**sf / 125_000
     de = 1 if t_sym > 0.016 else 0
 

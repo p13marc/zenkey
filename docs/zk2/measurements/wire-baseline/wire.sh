@@ -3,7 +3,7 @@
 #
 #   zk2 owner (client) -> zenohd A -> driver A ~udp~ relay ~udp~ driver B -> zenohd B -> readers (clients)
 #
-# Usage: wire.sh up <medium> <stack> | down | status | cut | restore | start <name> <cmd...>
+# Usage: wire.sh up <medium> <stack> | down | status | cut | restore | loss <p> | start <name> <cmd...>
 #   <medium>: rf, sf7, sf9 or sf12 (render.py's MEDIA)
 #   <stack>:  bare (no layers) or lean (compress with a 1 KB dictionary, aead
 #             aes-128-ccm with an 8-byte tag, a 2-byte overhead for address;
@@ -122,7 +122,7 @@ status() {
   done <"$PIDS"
 }
 
-control() { # cut | restore: the relay drops every datagram both ways, or stops
+control() { # cut | restore | "loss <p>": the relay drops every datagram both ways, stops, or takes a loss
   python3 -I -c 'import socket,sys; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(sys.argv[1].encode(), ("127.0.0.1", int(sys.argv[2])))' \
     "$1" "$((BASE + 14))"
   echo "$1 sent"
@@ -133,6 +133,7 @@ case ${1:-} in
   down) down ;;
   status) status ;;
   cut | restore) control "$1" ;;
+  loss) control "loss ${2:?a loss, 0 to 1}" ;;
   start) shift; start "$@" ;;
   *) echo "usage: $0 up <medium> <stack> | down | status | cut | restore | start <name> <cmd...>" >&2; exit 2 ;;
 esac
