@@ -26,6 +26,10 @@ The seconds MUST fit an unsigned 64-bit integer.
 Under `allow`, an operation that must not run for everyone MUST be
 `fanout = "forbidden"`.
 
+## 5. Pronouns
+
+An owner holds a set. It SHOULD keep it small, and names no noun for it.
+
 ## 12. Conformance
 
 The static rules are §1's and §9's.

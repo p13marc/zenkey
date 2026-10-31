@@ -19,7 +19,9 @@ From each sentence that states a rule, three things are read.
     maps core §0's role words and their plain synonyms ("an owner", "the
     owner's", "an archive", "a reader") to roles, each synonym with its
     reason. Every role word the subject holds counts, so "a caller or
-    tool" binds two. A reader's rules are the observer class's, marked so
+    tool" binds two, and a word that names several roles binds each: a
+    late joiner is a consumer or a tool (core §4.2), and every instance and
+    every holder are any role a service plays (core §8.1, §8.4). A reader's rules are the observer class's, marked so
     (READER), and the index points the roles that read to them (core §12).
     Where the subject names no role, the reading falls back, in this order,
     and never further:
@@ -43,14 +45,31 @@ From each sentence that states a rule, three things are read.
     prints how each rule's role was read, so the ones read by a fallback
     can be audited.
   * **Its rule ids:** the id in the first cell of its table row, the id its
-    section's title names ("4.3 Clocks (S7)"), and each lint or descriptor
-    code the sentence names (`E024`, `D012`).
-  * **Its evidence:** each `[F: …]` and `[Sc: …]` in the sentence, else
-    those after it in its block, else those of its block. A rule left with
-    none takes those of the paragraph after it that holds no rule, within
-    its list item, or of a list item under it that holds none. A rule that
-    leads a list (its sentence ends with `:`) takes those of its whole list
-    too. The next block holding a rule ends the wait.
+    section's title names ("4.3 Clocks (S7)"), and the lint or descriptor
+    code that checks it: the one its list item says each failure below it
+    is ("Each failure below is E032"), and each its sentence names as its
+    checker, "(E024)" or "is E024". A code a sentence names otherwise ("one
+    E024 did not refuse") is not its id. An id binds the roles of its row,
+    and of every rule it is the id of: S7's row binds an owner, and §4.3's
+    consumer rule is S7's too.
+  * **Its evidence:** each `[F: …]` and `[Sc: …]` in the sentence, else the
+    tags right after it, else those after it in its block, else those of
+    its block. A rule left with none takes those of the paragraph after it
+    that holds no rule, within its list item, or of a list item under it
+    that holds none. A rule that leads a list (its sentence ends with `:`)
+    takes those of its whole list too. The next block holding a rule ends
+    the wait. Then a paragraph that holds no rule and closes a list cites
+    every rule of the list that still has none: the last paragraph of a
+    list item, for the rules of that item; at the top level, a paragraph of
+    evidence alone, for the rules since the paragraph or heading before the
+    list.
+  * **How its entry shows it:** its sentence, with its evidence set aside
+    and no blank left before the mark after a tag; after its block's run-in
+    label, the label first. A pronoun the entry opens with, or its rule's
+    subject is, takes its noun in brackets from ANTECEDENTS, or the script
+    fails naming its line. A rule that leads a list ends with the list's
+    length, "(2 items)", or a table's, "(12 rows)". It is shortened past
+    MAX_WORDS, and never reworded.
 
 A keyword used as a noun ("a MUST", "Each MUST cites") states no rule, and
 neither does a list of the keywords themselves (core §0's "MUST, MUST NOT,
@@ -127,9 +146,11 @@ ROLE_WORDS = [
     (r"owners?" + POSS, ["owner"]),
     # core §0: "An archive (§4.4) is an owner of its own keys."
     (r"archives?" + POSS, ["owner"]),
-    # core §8.4: a holder serves a bundle on its key, as an owner serves its
-    # own keys.
-    (r"holders?", ["owner"]),
+    # core §8.4: "An owner holds the bundles of the interfaces it implements
+    # (§8.2), and any other participant MAY hold bundles too." A holder is
+    # any participant that holds one: an owner, a consumer, a caller or a
+    # tool.
+    (r"holders?", ["owner", "consumer", "caller", "observer"]),
     # core §5.1, §6: replicas are instances serving one interface, each the
     # owner of what it exposes; a server is an owner's operation queryable, a
     # replier the instance that answers through one (O6), and a publisher an
@@ -142,11 +163,13 @@ ROLE_WORDS = [
     # core §1.5: an instance is one run of a service, which owns its keys.
     (r"instances?", ["owner"]),
     # core §8.1's own words: "Every instance MUST hold one, including pure
-    # consumers."
-    (r"every instance", ["owner", "consumer"]),
+    # consumers." Every run of a service is an instance, whatever roles it
+    # plays: one that only calls, and a tool that is a service, too.
+    (r"every instance", ["owner", "consumer", "caller", "observer"]),
     (r"consumers?" + POSS, ["consumer"]),
-    # core §4.2: a late joiner is a consumer seeding a state.
-    (r"late joiners?", ["consumer"]),
+    # core §4.2: "A consumer or a tool that wants an owner's current state
+    # and every change after it, a late joiner".
+    (r"late joiners?", ["consumer", "observer"]),
     (r"callers?" + POSS, ["caller"]),
     (r"deployments?" + POSS, ["deployment"]),
     # core §0: a tool is a generic program, generators among them.
@@ -174,6 +197,58 @@ LEADING = re.compile(r"^(?:a|an|the|every|each|its|their)\s+(?:[\w’'-]+\s+){0,
 # {(file, a phrase of the sentence): (roles, reason)}. None today: each
 # sentence the reading could not parse was made to name its role.
 EXCEPTIONS = {}
+
+# What a pronoun in an entry stands for, where the entry does not show it
+# (F-366): {(file, a phrase of the sentence): (the words after which it is
+# shown, the noun)}. The noun follows those words in brackets, "It [a
+# consumer] MUST accept …", as a run-in label is shown before an entry. An
+# entry that opens with a pronoun, or whose rule's subject is one, must have
+# its noun here, or the script fails naming its line; an object's pronoun
+# may. An entry here that matches no rule fails too, so the table cannot go
+# stale. The fixture text's are the self-test's.
+ANTECEDENTS = {
+    # core.md
+    ("core.md", "Both MUST be implemented exactly as follows"): ("Both", "the slug and its decoder"),
+    ("core.md", "An owner MUST publish with it."): ("publish with it", "its contract's QoS"),
+    ("core.md", "they MUST also be within"): ("they", "the seconds"),
+    ("core.md", "Its schema is"): ("Its", "the descriptor record's"),
+    ("core.md", "The owner's descriptor MUST NOT raise it"): ("raise it", "a template's bound"),
+    ("core.md", "it MUST fit one fragment"): ("it", "an owner's descriptor"),
+    ("core.md", "It MUST answer a selector over them"): ("It", "the owner's state queryables"),
+    ("core.md", "It MUST accept the first value under a new id"): ("It", "a consumer"),
+    ("core.md", "It names the member each reply answers for"): ("It", "a server declared over the whole template"),
+    ("core.md", "It MUST refuse:"): ("It", "a tool decoding an envelope"),
+    ("core.md", "A deployment's access control MUST NOT grant it"): ("grant it", "a write under another service's prefix"),
+    ("core.md", "It MUST NOT add a schema suffix"): ("It", "an owner"),
+    ("core.md", "Every instance MUST hold one"): ("hold one", "an instance token"),
+    ("core.md", "These SHOULD be the interfaces"): ("These", "the tokenless set's interfaces"),
+    ("core.md", "Every holder MUST declare a `complete` queryable on it"): ("queryable on it", "a contract bundle's key"),
+    ("core.md", "Its `name` is the file's stem"): ("Its", "a JSON Schema artifact's"),
+    # observer.md
+    ("observer.md", "Where it cannot rule out a refusal"): ("Where it", "a tool"),
+    ("observer.md", "It SHOULD run its interests timeout above that time too"): ("It", "a reader"),
+    ("observer.md", "It SHOULD NOT ask a read while one it asked"): ("It", "a reader"),
+    ("observer.md", "It SHOULD NOT make a read that it would follow"): ("It", "a reader whose watch session is cut off"),
+    ("observer.md", "It MUST NOT show garbage"): ("It", "a tool"),
+    # the self-test's text
+    ("text.md", "It SHOULD do so in a new session."): ("It", "an owner"),
+    ("text.md", "These SHOULD be the framework's interfaces"): ("These", "the tokenless set's interfaces"),
+    ("text.md", "It MUST answer a selector over them"): ("It", "the owner's queryables"),
+    ("text.md", "it MUST stop writing state"): ("it", "an owner"),
+    ("text.md", "Every instance MUST hold one"): ("hold one", "an instance token"),
+}
+# A pronoun an entry opens with, or its rule's subject is.
+OPENS_PRONOUN = re.compile(r"^(?:it|they|this|these|both|its|their)\b", re.I)
+# A rule that leads a list: its sentence ends with ":", or it says the
+# list follows.
+LEADS = re.compile(r"(?::\s*\**\s*$|\bas follows\b|\bthe following\b)")
+# A list item that says which code each failure below it is ("Each failure
+# below is E032"): the code that checks the rules under it.
+FAILURES = re.compile(r"\b(?:each|every) failure below is ([EWD]\d{3})\b", re.I)
+# A code named as the one that checks a rule: "(E024)", or "is E024".
+CHECKER = re.compile(r"\(([EWD]\d{3})\)|\bis ([EWD]\d{3})\b")
+# Evidence tags that open what follows a sentence: that sentence's own.
+OWN_TAGS = re.compile(r"\s*(?:`\[(?:F|Sc):[^\]`]*\]`[\s,;]*)+")
 
 KEYWORD = re.compile(r"\b(MUST NOT|MUST|SHOULD NOT|SHOULD)\b")
 MAY = re.compile(r"(?<!\ba )(?<!\bA )\bMAY\b")
@@ -350,25 +425,34 @@ def row_cells(text: str) -> list:
 
 def read_rules(path: Path, name: str, static_list=None):
     """(rules, ids) of a text. A rule is a dict: its text's name, line,
-    section, title, anchor, roles, ids, evidence and sentence. An id is a
-    dict: the id, its line, section, title, anchor, roles and row text.
-    `static_list` holds the sections whose rules are static when their
-    subject names no role, as core §12 lists them; a text without one, as
-    observer.md, has none. Raises Unreadable naming each rule whose role
-    cannot be read."""
+    section, title, anchor, roles, ids, evidence and sentence (as the index
+    shows it). An id is a dict: the id, its line, section, title, anchor,
+    roles and row text. `static_list` holds the sections whose rules are
+    static when their subject names no role, as core §12 lists them; a text
+    without one, as observer.md, has none. Raises Unreadable naming each
+    rule whose role cannot be read, and each entry whose pronoun's noun
+    ANTECEDENTS does not give."""
     lines = path.read_text(encoding="utf-8").splitlines()
     rel = name
     rules, ids, errors = [], [], []
     seen = {}
     number, title, anchor = "", "", ""
-    parents = {}  # a block's line -> the line of the list item it sits under
+    blocks = list(blocks_of(lines))
+    # A block's line -> the line of the list item it sits under, for every
+    # block, so a lead-in can count the items of its list.
+    parents = {b["line"]: b.get("parent") for b in blocks}
     pending = []  # (rule, its block's line): this section's rules owed evidence
-    for block in blocks_of(lines):
+    section_rules = []  # (rule, its block's line): this section's rules
+    top_start = 0  # the line of the last top-level paragraph, or heading
+    failures = {}  # an item's line -> the code each failure below it is
+    used = set()  # the ANTECEDENTS entries an entry took
+    for index, block in enumerate(blocks):
         kind, line = block["kind"], block["line"]
         if kind == "heading":
             number, title = section_number(block["text"]), block["text"]
             anchor = slug(block["text"], seen)
-            pending = []
+            # A list right under the heading starts at the heading.
+            pending, section_rules, top_start = [], [], line
             continue
         static = is_static(number, static_list) if static_list is not None else False
         row_id = None
@@ -386,6 +470,9 @@ def read_rules(path: Path, name: str, static_list=None):
         else:
             text = block["text"]
             block_evidence = evidence_in(text)
+            hit = FAILURES.search(plain_codes(flat(text)))
+            if hit:
+                failures[line] = hit.group(1)
         parent = block.get("parent")
         title_ids = TITLE_ID.findall(title)
         last_roles = None
@@ -437,17 +524,52 @@ def read_rules(path: Path, name: str, static_list=None):
             roles = [r for r in ROLES if r in roles or (r == "observer" and reader)]
             rule_ids = [row_id] if row_id else []
             rule_ids += [t for t in title_ids if t not in rule_ids]
-            for c in CODE.findall(plain_codes(s)):
+            # A rule's code is the one that checks it: the one its list item
+            # says each failure below it is, and those its sentence names as
+            # its checker, "(E024)" or "is E024", never one it names
+            # otherwise ("one E024 did not refuse").
+            codes = []
+            up = parent
+            while up is not None:
+                if up in failures:
+                    codes.append(failures[up])
+                    break
+                up = parents.get(up)
+            for m in CHECKER.finditer(plain_codes(s)):
+                codes.append(m.group(1) or m.group(2))
+            for c in codes:
                 if c not in rule_ids:
                     rule_ids.append(c)
-            ev = evidence_in(s) or evidence_in(text[off + len(raw) :]) or block_evidence
+            # Its evidence: a tag after its sentence, else those after it in
+            # its block, else those of its block.
+            rest = text[off + len(raw) :]
+            own = OWN_TAGS.match(rest)
+            ev = evidence_in(s) or (evidence_in(own.group(0)) if own else []) or evidence_in(rest) or block_evidence
+            rule_line = line + text[:off].count("\n")
+            body = shown_sentence(s)
+            noun, key = antecedent(rel, s)
+            if noun:
+                used.add(key)
+                body = insert_after(body, noun[0], noun[1])
+            elif needs_antecedent(s, kws):
+                errors.append(
+                    f"{shown_path(path)}:{rule_line}: this entry's pronoun stands for a noun it does not "
+                    f"show; give it in ANTECEDENTS: {s[:140]}"
+                )
             # A sentence after its block's run-in label shows the label too.
-            shown = flat(EVIDENCE.sub(" ", s))
+            shown = body
             if opening and off > first_after:
                 shown = f"{flat(opening.group(0))} … {shown}"
+            lead_in = shown.rstrip(" *").endswith(":")
+            # A rule that leads a list says how long the list is.
+            if LEADS.search(s) and not EVIDENCE.sub(" ", rest).strip():
+                n = list_items(blocks, index, parents)
+                if n:
+                    what = "item" if n > 0 else "row"
+                    shown = f"{shown} ({abs(n)} {what}{'s' if abs(n) != 1 else ''})"
             rule = {
                 "text": rel,
-                "line": line + text[:off].count("\n"),
+                "line": rule_line,
                 "section": number,
                 "title": title,
                 "anchor": anchor,
@@ -457,19 +579,35 @@ def read_rules(path: Path, name: str, static_list=None):
                 "ids": rule_ids,
                 "evidence": ev,
                 "sentence": shown,
+                "lead_in": lead_in,
             }
             rules.append(rule)
             block_rules.append(rule)
         # Evidence for this section's rules that have none of their own.
-        parents[line] = parent
         pending = owe_evidence(pending, line, parent, bool(block.get("item")), block_rules, block_evidence,
                                parents)
         pending += [
-            {"rule": r, "block": line, "lead_in": r["sentence"].rstrip(" *").endswith(":"),
+            {"rule": r, "block": line, "lead_in": r["lead_in"],
              "top": parent is None and not block.get("item")}
             for r in block_rules
             if not r["evidence"]
         ]
+        section_rules += [(r, line) for r in block_rules]
+        # A paragraph that holds no rule and closes a list cites every rule
+        # of that list that cites none: the last paragraph of a list item,
+        # for the rules of that item; or, at the top level, a paragraph of
+        # evidence alone, for the rules since the paragraph before the list.
+        if kind == "prose" and not block.get("item") and not block_rules and block_evidence:
+            nxt = blocks[index + 1]["line"] if index + 1 < len(blocks) else None
+            closes_item = parent is not None and not (nxt is not None and within(nxt, parent, parents))
+            closes_top = parent is None and not EVIDENCE.sub("", text).strip()
+            for r, at in section_rules:
+                if r["evidence"]:
+                    continue
+                if (closes_item and within(at, parent, parents)) or (closes_top and at >= top_start):
+                    r["evidence"] = list(block_evidence)
+        if kind == "prose" and parent is None and not block.get("item"):
+            top_start = line
         if row_id:
             ids.append({
                 "id": row_id,
@@ -481,9 +619,92 @@ def read_rules(path: Path, name: str, static_list=None):
                 "roles": id_roles(row_id, text, block_rules),
                 "row": flat(text),
             })
+    # An id binds the roles of every rule it is the id of: S7's row binds an
+    # owner, and §4.3's consumer rule is S7's too.
+    for i in ids:
+        if re.match(r"[DEW]\d{3}$", i["id"]):
+            continue
+        found = list(i["roles"])
+        for r in rules:
+            if i["id"] in r["ids"]:
+                found.extend(x for x in r["roles"] if x not in found)
+        i["roles"] = [r for r in ROLES if r in found]
+    for key in ANTECEDENTS:
+        if key[0] == rel and key not in used:
+            errors.append(f"{shown_path(path)}: ANTECEDENTS names a sentence no rule of this text holds: "
+                          f"{key[1]!r}")
     if errors:
         raise Unreadable("\n".join(errors))
     return rules, ids
+
+
+def shown_sentence(s: str) -> str:
+    """A rule's sentence as an entry shows it: its evidence set aside, and
+    no blank left before the mark that followed a tag."""
+    s = EVIDENCE.sub("\0", s)
+    s = re.sub(r"\s*\0+\s*(?=[.,;:!?])", "", s)
+    return flat(s.replace("\0", " "))
+
+
+def antecedent(rel: str, s: str):
+    """((words, noun), key) of the ANTECEDENTS entry for a rule's sentence,
+    or (None, None)."""
+    for key, value in ANTECEDENTS.items():
+        if key[0] == rel and key[1] in s:
+            return value, key
+    return None, None
+
+
+def needs_antecedent(s: str, kws: list) -> bool:
+    """Whether an entry opens with a pronoun, or its first rule's subject is
+    one: "It MUST …", "At the constrained level, it MUST …"."""
+    body = plain(prose.LABEL.sub("", LABEL.sub(" ", s), count=1)).strip()
+    if OPENS_PRONOUN.match(body):
+        return True
+    subject = subject_of(s[: kws[0][0]]).split(",")[-1].strip()
+    return bool(OPENS_PRONOUN.match(subject))
+
+
+def insert_after(s: str, words: str, noun: str) -> str:
+    """`s` with "[noun]" after the first whole occurrence of `words`."""
+    m = re.search(r"(?<![\w`])" + re.escape(words) + r"(?![\w`])", s)
+    if not m:
+        raise Unreadable(f"ANTECEDENTS: {words!r} is not in the sentence it is given for: {s[:140]}")
+    return s[: m.end()] + f" [{noun}]" + s[m.end() :]
+
+
+def list_items(blocks: list, index: int, parents: dict) -> int:
+    """How many items the list after blocks[index] holds: the items under it
+    when it is a list item, else the top-level items right after it. A
+    table right after a paragraph is counted by its rows, as a negative."""
+    here = blocks[index]
+    n = 0
+    after = blocks[index + 1 :]
+    if after and after[0]["kind"] == "row" and here.get("parent") is None and not here.get("item"):
+        # A table the rule leads: its rows, the header and the rule under it
+        # set aside.
+        rows = 0
+        for b in after:
+            if b["kind"] != "row":
+                break
+            rows += 1
+        return -max(rows - 2, 0)
+    for b in after:
+        if b["kind"] != "prose":
+            break
+        if here.get("item") or here.get("parent") is not None:
+            # A paragraph of the item itself ends the list it leads.
+            if not within(b["line"], here["line"], parents) or (
+                    not b.get("item") and b.get("parent") == here["line"]):
+                break
+            if b.get("item") and b.get("parent") == here["line"]:
+                n += 1
+        else:
+            if b.get("parent") is None and not b.get("item"):
+                break
+            if b.get("item") and b.get("parent") is None:
+                n += 1
+    return n
 
 
 def owe_evidence(pending, line, parent, item, rules, evidence, parents) -> list:
@@ -707,22 +928,32 @@ def render(rules: list, ids: list) -> str:
          "`--check`, which fails when this file is stale.")
     para(w, "The texts are normative, and this index is not. It lists every sentence "
          "of the two texts that states a rule with MUST, MUST NOT, SHOULD or SHOULD "
-         "NOT. Each is listed under the role it binds (core §0), then by section. "
+         "NOT. Each is listed under every role it binds (core §0), then by section. "
          "The role is read from the sentence's subject, as the script's header "
-         "says. A sentence that binds two roles is listed under each.")
+         "says. A class also holds the rules its texts state without a keyword. "
+         "Those, such as `observer.md` §1, §2, §5 and §8, are not listed.")
     para(w, "A long sentence is shortened, never reworded, and its link leads to the "
          "rest. A sentence after its paragraph's run-in label shows the label first. "
-         "A rule's evidence is what the text cites beside it. Where it cites none, "
-         "the entry says \"none cited\". MAY grants a permission, and is not listed.")
+         "A pronoun's noun, where not shown, follows it in brackets. A lead-in to a "
+         "list ends with its length, \"(3 items)\". Nothing else is added.")
+    para(w, "**Evidence** is what the text cites beside a rule. That is the tags "
+         "after its sentence, else those after it in its paragraph. A tag that "
+         "closes a list cites each rule of the list. Where the text cites none, the "
+         "entry says \"none cited\". A rule's id is its row's, its section's, or the "
+         "code that checks it. MAY grants a permission, and is not listed.")
     para(w, "**Conformance by role.** An implementation claims one class for each "
          "role it plays ([core §12](core.md#12-conformance-classes)). A class holds "
          "its role's rules and the static rules, listed here under implementation. "
          "Those are §1's, §9's, the contract rules of the sections §12 lists, and "
-         "any rule naming its lint code. Full conformance is every class. A profile is a class of its own, and its rules are in "
-         "its text.")
+         "any rule naming its lint code. §3.3's descriptor checker is static too. A "
+         "rule of those sections that names a role is listed under it. A static rule "
+         "binds an implementation where it does what the rule governs. A class is "
+         "claimed at the full level or the constrained one. A profile is a class of "
+         "its own, and its rules are in its text.")
     para(w, "**A stream-only owner's minimum path** is this index filtered to two "
          "roles: [owner](#owner) and [implementation](#implementation-the-static-rules). "
-         "A service that only publishes a stream needs no other role's rules.")
+         "A service that only publishes a stream needs no other role's rules. Of the "
+         "static rules, it meets those on what it does.")
     para(w, "**A reader.** `observer.md` binds a tool, and any participant that reads "
          "presence, state or the admin space and concludes from it (observer.md §0). "
          "Its rules for a reader are listed once, under observer, each marked "
@@ -819,21 +1050,25 @@ def self_test() -> int:
     got_ids = [{k: i[k] for k in ("id", "roles")} for i in ids]
     if got_ids != expect["ids"]:
         fails.append(f"ids: expected {expect['ids']}, read {got_ids}")
+    for want_shown in expect["shown"]:
+        shown = [r["sentence"] for r in rules if r["line"] == want_shown["line"]]
+        if want_shown["sentence"] not in shown:
+            fails.append(f"line {want_shown['line']}: expected the entry {want_shown['sentence']!r}, shown {shown}")
     try:
         read_rules(FIXTURES / "unreadable.md", "unreadable.md", static_sections(FIXTURES / "unreadable.md"))
         fails.append("unreadable.md: read without an error; its rule names no role")
     except Unreadable as e:
         lines = str(e).splitlines()
         want = [f"scripts/fixtures/rules-index/unreadable.md:{n}" for n in expect["unreadable"]]
-        if [x.split(": no role")[0] for x in lines] != want:
+        if [re.sub(r"^([^:]+:\d+): .*$", r"\1", x) for x in lines] != want:
             fails.append(f"unreadable.md: expected errors on lines {expect['unreadable']}, got:\n" + str(e))
     if fails:
         print("rules-index: self-test failed:", file=sys.stderr)
         for f in fails:
             print(f"  {f}", file=sys.stderr)
         return 1
-    print(f"rules-index: self-test passed: {len(rules)} rules and {len(ids)} ids read as expect.json says, "
-          f"and {len(expect['unreadable'])} unreadable roles refused on their lines.")
+    print(f"rules-index: self-test passed: {len(rules)} rules, {len(ids)} ids and {len(expect['shown'])} entries "
+          f"read as expect.json says, and {len(expect['unreadable'])} unreadable rules refused on their lines.")
     return 0
 
 

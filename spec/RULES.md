@@ -8,25 +8,36 @@ by hand. After a change to either text, run
 
 The texts are normative, and this index is not. It lists every sentence of
 the two texts that states a rule with MUST, MUST NOT, SHOULD or SHOULD NOT.
-Each is listed under the role it binds (core §0), then by section. The role
-is read from the sentence's subject, as the script's header says. A sentence
-that binds two roles is listed under each.
+Each is listed under every role it binds (core §0), then by section. The
+role is read from the sentence's subject, as the script's header says. A
+class also holds the rules its texts state without a keyword. Those, such as
+`observer.md` §1, §2, §5 and §8, are not listed.
 
 A long sentence is shortened, never reworded, and its link leads to the
 rest. A sentence after its paragraph's run-in label shows the label first. A
-rule's evidence is what the text cites beside it. Where it cites none, the
-entry says "none cited". MAY grants a permission, and is not listed.
+pronoun's noun, where not shown, follows it in brackets. A lead-in to a list
+ends with its length, "(3 items)". Nothing else is added.
+
+**Evidence** is what the text cites beside a rule. That is the tags after
+its sentence, else those after it in its paragraph. A tag that closes a list
+cites each rule of the list. Where the text cites none, the entry says "none
+cited". A rule's id is its row's, its section's, or the code that checks it.
+MAY grants a permission, and is not listed.
 
 **Conformance by role.** An implementation claims one class for each role it
 plays ([core §12](core.md#12-conformance-classes)). A class holds its role's
 rules and the static rules, listed here under implementation. Those are
 §1's, §9's, the contract rules of the sections §12 lists, and any rule
-naming its lint code. Full conformance is every class. A profile is a class
-of its own, and its rules are in its text.
+naming its lint code. §3.3's descriptor checker is static too. A rule of
+those sections that names a role is listed under it. A static rule binds an
+implementation where it does what the rule governs. A class is claimed at
+the full level or the constrained one. A profile is a class of its own, and
+its rules are in its text.
 
 **A stream-only owner's minimum path** is this index filtered to two roles:
 [owner](#owner) and [implementation](#implementation-the-static-rules). A
-service that only publishes a stream needs no other role's rules.
+service that only publishes a stream needs no other role's rules. Of the
+static rules, it meets those on what it does.
 
 **A reader.** `observer.md` binds a tool, and any participant that reads
 presence, state or the admin space and concludes from it (observer.md §0).
@@ -37,10 +48,10 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 56 |
-| [Consumer](#consumer) | 12 |
-| [Caller](#caller) | 11 |
+| [Consumer](#consumer) | 13 |
+| [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 14 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 46, 24 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 50, 24 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 33 |
 | Every rule, once | 167 |
 | [Rule ids](#rule-ids) | 71 |
@@ -59,14 +70,14 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§1.4](core.md#14-slugging) | A value with several textual forms SHOULD be canonicalized by the owner before it is slugged, or the same entity gets two chunks: | none cited |
+| [§1.4](core.md#14-slugging) | A value with several textual forms SHOULD be canonicalized by the owner before it is slugged, or the same entity gets two chunks: (2 items) | none cited |
 
 ### [core §1.5 Identity](core.md#15-identity)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§1.5](core.md#15-identity) | An owner MUST mint a new instance id whenever its counters reset or its state's ordering restarts (§4.3): a process restart, a device re-enumerated, a polled device's uptime rewound, a container restarted. | `[Sc: presence.md §3]` |
-| [§1.5](core.md#15-identity) | The owner SHOULD do so in a new session, so that its timestamps' id changes too (§4.3). | none cited |
+| [§1.5](core.md#15-identity) | The owner SHOULD do so in a new session, so that its timestamps' id changes too (§4.3). | `[Sc: presence.md §3]` |
 | [§1.5](core.md#15-identity) | An owner's counter that crosses a face where neither is visible SHOULD carry its epoch in-band, in its value or its attachment, as [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9). | `[Sc: presence.md §3]` |
 
 ### [core §2.3 Resource attributes](core.md#23-resource-attributes)
@@ -79,7 +90,7 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§2.4](core.md#24-qos) | An owner MUST publish with it. | `[Sc: types.md §3]` |
+| [§2.4](core.md#24-qos) | An owner MUST publish with it [its contract's QoS]. | `[Sc: types.md §3]` |
 
 ### [core §2.7 The population budget](core.md#27-the-population-budget)
 
@@ -99,11 +110,11 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.3](core.md#33-the-descriptor-record) | The owner's descriptor MUST NOT raise it. | `[F: descriptors/d007-*]` |
+| [§3.3](core.md#33-the-descriptor-record) | The owner's descriptor MUST NOT raise it [a template's bound]. | `[F: descriptors/d007-*]` |
 | [§3.3](core.md#33-the-descriptor-record) | One member is used: an owner SHOULD state its session's zid as `meta.zid`, as the reference does. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner SHOULD write `meta.zid` as zenoh writes it. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. | `[Sc: constrained.md §5]` |
-| [§3.3](core.md#33-the-descriptor-record) | **Size.** … At the constrained level (§12), it MUST fit one fragment. | `[Sc: constrained.md §5]` |
+| [§3.3](core.md#33-the-descriptor-record) | **Size.** … At the constrained level (§12), it [an owner's descriptor] MUST fit one fragment. | `[Sc: constrained.md §5]` |
 | [§3.3](core.md#33-the-descriptor-record) | The owner MUST put the descriptor on its instance key whenever it changes, and MUST answer a GET there with the current one. | `[Sc: presence.md §2]` |
 
 ### [core §4.2 Rules for owners and consumers](core.md#42-rules-for-owners-and-consumers)
@@ -112,7 +123,7 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [S1](core.md#42-rules-for-owners-and-consumers) | **Owner:** every state mutation, put **and** delete, MUST carry a timestamp the owner set. | `[Sc: state.md §1]` |
 | [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. | `[Sc: state.md §1, §2]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner's state queryables] MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
 | [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. | `[Sc: state.md §2, §6]` |
 
 ### [core §4.3 Clocks (S7)](core.md#43-clocks-s7)
@@ -130,10 +141,10 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§4.4](core.md#44-archives) | **An archive's backend MUST NOT accept a put older than a delete it holds.** | none cited |
+| [§4.4](core.md#44-archives) | **An archive's backend MUST NOT accept a put older than a delete it holds.** | `[Sc: state.md §4–§6, §9]` |
 | [§4.4](core.md#44-archives) | When an owner becomes reachable again, the archive MUST re-read the owner's recorded collection before serving it as confirmed. | `[Sc: state.md §5]` |
 | [§4.4](core.md#44-archives) | An archive SHOULD repeat an alignment that left keys unconfirmed, a bounded number of times. | `[Sc: state.md §5]` |
-| [§4.4](core.md#44-archives) | **An unconfirmed key expires.** … The archive MAY drop such a key after a deployment-set horizon, and MUST keep serving it as unconfirmed until then. | none cited |
+| [§4.4](core.md#44-archives) | **An unconfirmed key expires.** … The archive MAY drop such a key after a deployment-set horizon, and MUST keep serving it as unconfirmed until then. | `[Sc: state.md §4–§6, §9]` |
 | [§4.4](core.md#44-archives) | An archive MUST hold its `archive.v1` interface token: it is never in the tokenless set (§8.1). | `[F: descriptors/d011-tokenless-archive]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
@@ -146,15 +157,15 @@ The owner, consumer and caller sections each point to them.
 | [O3](core.md#51-rules) | Every call that reaches an owner's queryable MUST get one or the other, never silence (below). | `[Sc: operations.md §3]` `[F: errors/cases.json]` |
 | [O3](core.md#51-rules) | The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. | `[Sc: operations.md §3]` `[F: errors/cases.json]` |
 | [O6](core.md#51-rules) | With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. | `[Sc: operations.md §6]` `[F: contracts/e033-summary]` |
-| [§5.1](core.md#51-rules) | **Beside replicas.** … An instance whose exposed resources of an interface are all replicated operations MUST NOT declare an `unavailable` queryable on an exclusive operation of it … | none cited |
+| [§5.1](core.md#51-rules) | **Beside replicas.** … An instance whose exposed resources of an interface are all replicated operations MUST NOT declare an `unavailable` queryable on an exclusive operation of it … | `[Sc: operations.md §3, §8]` |
 | [§5.1](core.md#51-rules) | Replicas SHOULD expose the same replicated operations, since one answers `unavailable` where another would have served. | `[Sc: operations.md §3, §8]` |
-| [§5.1](core.md#51-rules) | It names the member each reply answers for, and replies on that member's key, which the call's key expression MUST select. | `[Sc: operations.md §2]` |
+| [§5.1](core.md#51-rules) | It [a server declared over the whole template] names the member each reply answers for, and replies on that member's key, which the call's key expression MUST select. | `[Sc: operations.md §2]` |
 
 ### [core §5.2 The error envelope](core.md#52-the-error-envelope)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§5.2](core.md#52-the-error-envelope) | **The `Encoding` of the owner's reply** MUST say which: | none cited |
+| [§5.2](core.md#52-the-error-envelope) | **The `Encoding` of the owner's reply** MUST say which: (2 items) | none cited |
 | [§5.2](core.md#52-the-error-envelope) | An operation that declares no `error` type has none to send: its envelope follows the `response` type, and an owner MUST NOT put a detail in it. | none cited |
 | [§5.2](core.md#52-the-error-envelope) | **A detail that does not fit** its envelope, such as bytes in a JSON or CBOR envelope other than a raw type's base64 text, or a value in a protobuf one, MUST NOT be sent by an owner. | none cited |
 
@@ -162,7 +173,7 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§6](core.md#6-ownership-and-serving) | An owner MUST NOT write under another service's prefix. | none cited |
+| [§6](core.md#6-ownership-and-serving) | An owner MUST NOT write under another service's prefix. | `[Sc: security.md §1]` |
 | [§6](core.md#6-ownership-and-serving) | An owner SHOULD keep a re-mint's overlap below one second. | `[Sc: operations.md §8]` |
 
 ### [core §7.2 Encodings and rendering](core.md#72-encodings-and-rendering)
@@ -170,7 +181,7 @@ The owner, consumer and caller sections each point to them.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§7.2](core.md#72-encodings-and-rendering) | An owner MUST set Zenoh's predefined `Encoding` for every sample whose type has one: protobuf, JSON, CBOR, or a predefined media type. | `[Sc: types.md §1]` |
-| [§7.2](core.md#72-encodings-and-rendering) | **The sample's `Encoding`.** … It MUST NOT add a schema suffix to it, except on the error envelope (§5.2). | `[Sc: types.md §1]` |
+| [§7.2](core.md#72-encodings-and-rendering) | **The sample's `Encoding`.** … It [an owner] MUST NOT add a schema suffix to it, except on the error envelope (§5.2). | `[Sc: types.md §1]` |
 
 ### [core §7.4 Shared memory](core.md#74-shared-memory)
 
@@ -182,7 +193,7 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.1](core.md#81-tokens) | Every instance MUST hold one, including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
+| [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
 | [§8.1](core.md#81-tokens) | An owner MUST hold one per interface **of which it currently exposes at least one resource**, and none otherwise, except for its **tokenless set**. | `[Sc: presence.md §1]` `[Sc: profiles/redundancy/scenarios.md §1]` |
 | [§8.1](core.md#81-tokens) | The owner MUST hold one member token per member, and cycle it whenever that member's continuity breaks. | `[Sc: presence.md §3]` |
 | [§8.1](core.md#81-tokens) | An owner that starts a new instance id while running MUST declare the new descriptor and tokens first, in §8.2's order (the descriptor's queryable and first put, then the tokens), then undeclare the old ones. | `[Sc: presence.md §3]` |
@@ -191,14 +202,14 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.2](core.md#82-start-up-order) | An owner MUST bring itself up in this order, so that alive ⇒ callable: | `[Sc: presence.md §1]` |
+| [§8.2](core.md#82-start-up-order) | An owner MUST bring itself up in this order, so that alive ⇒ callable: (4 items) | `[Sc: presence.md §1]` |
 | [§8.2](core.md#82-start-up-order) | **State values.** … A state's value is not a declaration, so an owner that holds a state member's value at start SHOULD put it before step 4: a GET made when the interface token appears then finds it. | `[Sc: presence.md §1]` |
 
 ### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it. | `[Sc: retrieval.md §1–§3]` |
+| [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
 
 ### [core §12 Conformance classes](core.md#12-conformance-classes)
 
@@ -239,13 +250,19 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [S7](core.md#43-clocks-s7) | A consumer MUST order an owner's values by time within one timestamp id. | none cited |
-| [S7](core.md#43-clocks-s7) | **Consumer rule.** … It MUST accept the first value under a new id, and restart its ordering there. | none cited |
+| [S7](core.md#43-clocks-s7) | **Consumer rule.** … It [a consumer] MUST accept the first value under a new id, and restart its ordering there. | none cited |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.1](core.md#81-tokens) | Every instance MUST hold one, including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
+| [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
+
+### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
 
 ### [core §11.1 Grant shapes](core.md#111-grant-shapes)
 
@@ -274,11 +291,18 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [O6](core.md#51-rules) | **Caller:** MUST use consolidation `None`, since `Latest` and `Auto` drop replies (spike S6, Appendix B). | `[Sc: operations.md §6]` `[F: contracts/e033-summary]` |
 | [§5.1](core.md#51-rules) | A caller MUST NOT depend on a refusal of what the schema refuses: a writer sends only what its schema declares (§9.8). | `[Sc: operations.md §3]` |
 
+### [core §8.1 Tokens](core.md#81-tokens)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
+
 ### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: | `[Sc: retrieval.md §1–§3]` |
+| [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
+| [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: (4 items) | `[Sc: retrieval.md §1–§3]` |
 | [§8.4](core.md#84-contract-retrieval) | A caller MUST set consolidation `None` on both attempts. | `[Sc: retrieval.md §2]` |
 | [§8.4](core.md#84-contract-retrieval) | **The reply.** … A caller MUST NOT depend on the encoding: the hash is the check. | `[Sc: retrieval.md §1]` |
 
@@ -309,7 +333,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§6](core.md#6-ownership-and-serving) | A deployment's access control MUST NOT grant it (§11.1). | `[Sc: security.md §1]` |
+| [§6](core.md#6-ownership-and-serving) | A deployment's access control MUST NOT grant it [a write under another service's prefix] (§11.1). | `[Sc: security.md §1]` |
 
 ### [core §7.4 Shared memory](core.md#74-shared-memory)
 
@@ -321,7 +345,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.1](core.md#81-tokens) | These SHOULD be the interfaces every service of the deployment implements: `health.v1` ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) and the rest of a framework set. | `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]` |
+| [§8.1](core.md#81-tokens) | These [the tokenless set's interfaces] SHOULD be the interfaces every service of the deployment implements: `health.v1` ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) and the rest of a framework set. | `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]` |
 
 ### [core §8.3 The presence budget](core.md#83-the-presence-budget)
 
@@ -333,7 +357,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.5](core.md#85-constrained-faces) | **A deployment SHOULD attach the far side in one of two shapes, with a `@zk` deny on the face** (U23, §13): | `[Sc: constrained.md §6]` `[Sc: constrained.md §1]` |
+| [§8.5](core.md#85-constrained-faces) | **A deployment SHOULD attach the far side in one of two shapes, with a `@zk` deny on the face** (U23, §13): (2 items) | `[Sc: constrained.md §6]` `[Sc: constrained.md §1]` |
 | [§8.5](core.md#85-constrained-faces) | **A deployment's batch SHOULD take at most a third of the lease to cross the face.** | `[Sc: constrained.md §4]` |
 | [§8.5](core.md#85-constrained-faces) | **A deployment SHOULD deny `@stream` keys across the face** unless `link.v1` downsamples them: an `@stream` resource whose contract exposes it, one rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8). | none cited |
 | [§8.5](core.md#85-constrained-faces) | **A far router in a south region needs declarations sent toward it.** … So a deployment MUST grant the far side's principal `declare_queryable` on egress over every queryable its side may query, as the owner declares it. | `[Sc: link.v1 scenarios §2]` |
@@ -347,6 +371,13 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 ## Observer: the tool role, and a reader
 
+### [core §4.2 Rules for owners and consumers](core.md#42-rules-for-owners-and-consumers)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key by the owner's stamp (S1, S2), whichever path brought each one, and keep the newer. | `[Sc: state.md §10]` |
+
 ### [core §5.1 Rules](core.md#51-rules)
 
 | Rule | Sentence | Evidence |
@@ -357,13 +388,20 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§5.2](core.md#52-the-error-envelope) | **Decoding.** … It MUST refuse: | `[F: errors/cases.json]` |
+| [§5.2](core.md#52-the-error-envelope) | **Decoding.** … It [a tool decoding an envelope] MUST refuse: (5 items) | `[F: errors/cases.json]` |
+
+### [core §8.1 Tokens](core.md#81-tokens)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
 
 ### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: | `[Sc: retrieval.md §1–§3]` |
+| [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
+| [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: (4 items) | `[Sc: retrieval.md §1–§3]` |
 
 ### [core §11.1 Grant shapes](core.md#111-grant-shapes)
 
@@ -376,8 +414,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§11.2](core.md#112-compiling-grants) | A generator MUST therefore add to a provider's egress grant every consumer selector that intersects what the provider serves. | none cited |
-| [§11.2](core.md#112-compiling-grants) | A generator MUST grant the consumer selectors above for the provider's ingress `reply` too, so that its refusals reach the caller. | none cited |
+| [§11.2](core.md#112-compiling-grants) | A generator MUST therefore add to a provider's egress grant every consumer selector that intersects what the provider serves. | `[Sc: security.md §2]` |
+| [§11.2](core.md#112-compiling-grants) | A generator MUST grant the consumer selectors above for the provider's ingress `reply` too, so that its refusals reach the caller. | `[Sc: security.md §2]` |
 | [§11.2](core.md#112-compiling-grants) | A generator MUST deny, in each principal's policy, on each message and flow, the keys of the services it does not run that its grants do not name for that message and flow. | `[Sc: security.md §2]` |
 
 ### [observer §3.1 Handlers](observer.md#31-handlers)
@@ -398,50 +436,50 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§3.3](observer.md#33-possibly-incomplete) | A tool SHOULD treat a liveliness GET that ended at its timeout, rather than at the routers' final reply, as possibly incomplete: silence is not a verdict (O5). | `[Sc: presence.md §6]` |
-| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader MUST read as possibly incomplete a read whose time reached its session's interests timeout, as it reads a read that received an error reply. | none cited |
-| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader MUST read as not standing a round trip (§3.7) that ended at that timeout. | none cited |
-| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader whose reads may wait longer SHOULD run its session with an interests timeout above the longest it waits for one: its long reads can then be complete (core Appendix B). | none cited |
+| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader MUST read as possibly incomplete a read whose time reached its session's interests timeout, as it reads a read that received an error reply. | `[Sc: presence.md §10]` |
+| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader MUST read as not standing a round trip (§3.7) that ended at that timeout. | `[Sc: presence.md §10]` |
+| [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader whose reads may wait longer SHOULD run its session with an interests timeout above the longest it waits for one: its long reads can then be complete (core Appendix B). | `[Sc: presence.md §10]` |
 | [§3.3](observer.md#33-possibly-incomplete), *reader* | A reader that cannot read its session's interests timeout SHOULD be the one that opens that session, with an interests timeout it sets, so that it knows the value. | `[Sc: presence.md §10]` |
 
 ### [observer §3.4 A refused read](observer.md#34-a-refused-read)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.4](observer.md#34-a-refused-read) | Where it cannot rule out a refusal, it SHOULD say so, as it says a read is possibly incomplete. | `[Sc: presence.md §6]` |
+| [§3.4](observer.md#34-a-refused-read) | Where it [a tool] cannot rule out a refusal, it SHOULD say so, as it says a read is possibly incomplete. | `[Sc: presence.md §6]` |
 
 ### [observer §3.5 A session cut off](observer.md#35-a-session-cut-off)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.5](observer.md#35-a-session-cut-off), *reader* | A reader MUST NOT conclude absence from it, and MUST NOT take it as healing a loss (§5.2). | none cited |
+| [§3.5](observer.md#35-a-session-cut-off), *reader* | A reader MUST NOT conclude absence from it, and MUST NOT take it as healing a loss (§5.2). | `[Sc: presence.md §7]` |
 | [§3.5](observer.md#35-a-session-cut-off), *reader* | A reader SHOULD NOT make such a read. | `[Sc: presence.md §7]` |
 
 ### [observer §3.6 Absence](observer.md#36-absence)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.6](observer.md#36-absence), *reader* | **A withdrawal heard live is a reason to read again, never absence by itself.** … A reader MUST NOT conclude absence from a withdrawal alone. | none cited |
-| [§3.6](observer.md#36-absence), *reader* | A reader that follows presence live SHOULD read again soon after a withdrawal that leaves one of these with nothing held: | none cited |
+| [§3.6](observer.md#36-absence), *reader* | **A withdrawal heard live is a reason to read again, never absence by itself.** … A reader MUST NOT conclude absence from a withdrawal alone. | `[Sc: presence.md §8]` |
+| [§3.6](observer.md#36-absence), *reader* | A reader that follows presence live SHOULD read again soon after a withdrawal that leaves one of these with nothing held: (3 items) | `[Sc: presence.md §8]` |
 | [§3.6](observer.md#36-absence), *reader* | The reader SHOULD report what that read establishes: absent when the read is complete and shows no such token held, present when it shows one. | `[Sc: presence.md §8]` |
 
 ### [observer §3.7 The watch session](observer.md#37-the-watch-session)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.7](observer.md#37-the-watch-session), *reader* | A reader SHOULD make every liveliness read it may conclude absence from (a seed, a re-read, a tool's presence read) on a session that has never held a liveliness subscriber of any kind. | none cited |
-| [§3.7](observer.md#37-the-watch-session), *reader* | The reader SHOULD hold its liveliness subscribers on another session of its own: a **watch session**. | none cited |
-| [§3.7](observer.md#37-the-watch-session), *reader* | A reader that seeds on one session and follows withdrawals on its watch session SHOULD make one round trip on the watch session after declaring its subscribers, and before the seed … | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader SHOULD make every liveliness read it may conclude absence from (a seed, a re-read, a tool's presence read) on a session that has never held a liveliness subscriber of any kind. | `[Sc: presence.md §9]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | The reader SHOULD hold its liveliness subscribers on another session of its own: a **watch session**. | `[Sc: presence.md §9]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader that seeds on one session and follows withdrawals on its watch session SHOULD make one round trip on the watch session after declaring its subscribers, and before the seed … | `[Sc: presence.md §9]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | **The subscribers of a reader's watch session SHOULD have no history** when it seeds by a read on its other session. | `[Sc: presence.md §10]` |
-| [§3.7](observer.md#37-the-watch-session), *reader* | A reader that follows presence in a namespace SHOULD hold its watch session in **no** namespace, and declare its subscribers, without history, on the **wire keys**: the namespace in front, `<ns>/zk2/…`, and its round trip's key so too, `<ns>/zk2/…/@zk/settle`. | none cited |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader that follows presence in a namespace SHOULD hold its watch session in **no** namespace, and declare its subscribers, without history, on the **wire keys**: the namespace in front, `<ns>/zk2/…`, and its round trip's key so too, `<ns>/zk2/…/@zk/settle`. | `[Sc: presence.md §10]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | A reader that keeps a namespaced watch session with history instead SHOULD run its round trip's wait and its session's interests timeout above the history's time at its population. | `[Sc: presence.md §10]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | **A round trip stands until the watch session's transport moves.** … A reader that follows presence live SHOULD make the round trip again before its next read, and read again at once, when its watch session's transport closes or opens, as after a withdrawal. | `[Sc: presence.md §10]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | **A close's withdrawals come before its transport event.** … So a reader that holds back what a move makes it hear SHOULD begin the move at the first of two instants … | `[Sc: profiles/arbitration/scenarios.md §7]` |
 | [§3.7](observer.md#37-the-watch-session), *reader* | **An open is told before the subscribers' interests are declared again.** … A reader SHOULD ask the round trip after an open a margin after its event (the reference: 100 ms), and SHOULD take what its watch heard before the round trip's reply as heard … | `[Sc: profiles/arbitration/scenarios.md §7]` |
-| [§3.7](observer.md#37-the-watch-session), *reader* | After a move, a reader SHOULD wait for the round trip longer than the reopening's telling takes at its population. | none cited |
-| [§3.7](observer.md#37-the-watch-session), *reader* | It SHOULD run its interests timeout above that time too. | none cited |
-| [§3.7](observer.md#37-the-watch-session), *reader* | A reader SHOULD NOT ask a round trip while one it asked since its watch session's transport last moved is in flight. | none cited |
-| [§3.7](observer.md#37-the-watch-session), *reader* | **One round trip, and one read, at a time.** … It SHOULD NOT ask a read while one it asked of the same scope is in flight. | none cited |
-| [§3.7](observer.md#37-the-watch-session), *reader* | It SHOULD NOT make a read that it would follow from that watch session, whatever its reading session's links. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | After a move, a reader SHOULD wait for the round trip longer than the reopening's telling takes at its population. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | It [a reader] SHOULD run its interests timeout above that time too. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | A reader SHOULD NOT ask a round trip while one it asked since its watch session's transport last moved is in flight. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | **One round trip, and one read, at a time.** … It [a reader] SHOULD NOT ask a read while one it asked of the same scope is in flight. | `[Sc: presence.md §10]` |
+| [§3.7](observer.md#37-the-watch-session), *reader* | It [a reader whose watch session is cut off] SHOULD NOT make a read that it would follow from that watch session, whatever its reading session's links. | `[Sc: presence.md §10]` |
 
 ### [observer §3.9 What a complete read covers](observer.md#39-what-a-complete-read-covers)
 
@@ -480,7 +518,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§7.3](observer.md#73-decoding-and-rendering) | A generic tool MUST decode `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and reads a `raw` type by its media type only. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool MUST render a kind it cannot decode as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
-| [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
 
 ### [observer §7.4 Shared memory](observer.md#74-shared-memory)
 
@@ -501,13 +539,13 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§1.3](core.md#13-kind-tokens) | Two consequences follow, and an implementation MUST NOT break either: | `[Sc: grammar.md §1]` |
+| [§1.3](core.md#13-kind-tokens) | Two consequences follow, and an implementation MUST NOT break either: (2 items) | `[Sc: grammar.md §1]` |
 
 ### [core §1.4 Slugging](core.md#14-slugging)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§1.4](core.md#14-slugging) | Both MUST be implemented exactly as follows. | `[F: slugs.json]` |
+| [§1.4](core.md#14-slugging) | Both [the slug and its decoder] MUST be implemented exactly as follows. (3 items) | `[F: slugs.json]` |
 | [§1.4](core.md#14-slugging) | The decoder MUST accept exactly the canonical chunks the encoder produces, and MUST refuse any other chunk as a value. | `[F: slugs.json; templates.json]` |
 
 ### [core §1.6 Namespaces and base-relative keys](core.md#16-namespaces-and-base-relative-keys)
@@ -520,7 +558,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§2.2](core.md#22-templates) | **Within one interface,** two templates under the same kind token MUST NOT have the same shape . | `[F: contracts/e021-shape]` |
+| [§2.2](core.md#22-templates) | **Within one interface,** two templates under the same kind token MUST NOT have the same shape. | `[F: contracts/e021-shape]` |
 | [§2.2](core.md#22-templates) | A template with parameters MUST declare `cardinality`, a positive integer that bounds its population in one instance, or `"unbounded"` (below). | `[F: contracts/e013-cardinality, e014-field]` |
 | [§2.2](core.md#22-templates) | **Cardinality.** … A template without parameters MUST NOT declare it. | `[F: contracts/e013-cardinality, e014-field]` |
 | [§2.2](core.md#22-templates) | **No ceiling.** … A contract MAY write the number instead: the two spellings have one canonical form (§9.5), so one fingerprint, and an implementation MUST read them alike. | `[F: contracts/ok-cardinality-unbounded, ok-cardinality-no-ceiling, e000-cardinality-string]` |
@@ -543,7 +581,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [E026](core.md#26-events) | The seconds, `<n>` times the unit's, MUST fit an **unsigned** 64-bit integer, at most 2^64−1 (E026). | `[F: contracts/ok-retention-leading-zero, e026-retention-range, e028-retention]` |
-| [E028](core.md#26-events) | Like every canonical integer, they MUST also be within ±(2^53−1) (E028), so 2^63 s is E028 alone. | `[F: contracts/ok-retention-leading-zero, e026-retention-range, e028-retention]` |
+| [E028](core.md#26-events) | Like every canonical integer, they [the seconds] MUST also be within ±(2^53−1) (E028), so 2^63 s is E028 alone. | `[F: contracts/ok-retention-leading-zero, e026-retention-range, e028-retention]` |
 
 ### [core §3.1 Requirements](core.md#31-requirements)
 
@@ -555,7 +593,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§3.3](core.md#33-the-descriptor-record) | Its schema is [`descriptor.schema.json`](descriptor.schema.json), and a checker MUST report exactly the `D…` codes that `conformance/descriptors/expect.json` lists for each document, checked against the fixture contract. | `[F: descriptors/]` |
+| [§3.3](core.md#33-the-descriptor-record) | Its [the descriptor record's] schema is [`descriptor.schema.json`](descriptor.schema.json), and a checker MUST report exactly the `D…` codes that `conformance/descriptors/expect.json` lists for each document, checked against the fixture contract. | `[F: descriptors/]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 
@@ -591,10 +629,10 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [E024](core.md#94-schema-artifacts-and-type-references) | Its `name` is the file's stem, the last path segment without a final `.json`, which MUST be unique among the listed files (E024). | `[F: contracts/e029-duplicate-member]` |
+| [E024](core.md#94-schema-artifacts-and-type-references) | Its [a JSON Schema artifact's] `name` is the file's stem, the last path segment without a final `.json`, which MUST be unique among the listed files (E024). | `[F: contracts/e029-duplicate-member]` |
 | [E024](core.md#94-schema-artifacts-and-type-references) | The id MUST be unique among the listed files too: a later file whose JCS bytes equal an earlier one's, whatever its own bytes, is E024, once even when its stem is taken as well, and is not loaded. | `[F: contracts/e024-identical]` |
-| [E024](core.md#94-schema-artifacts-and-type-references) | Otherwise it resolves as a path relative to the referencing file, lexically normalized, and MUST name a listed file that is loaded: one E024 did not refuse. | none cited |
-| [§9.4](core.md#94-schema-artifacts-and-type-references) | The pointer MUST resolve. | `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]` |
+| [E032](core.md#94-schema-artifacts-and-type-references) | Otherwise it resolves as a path relative to the referencing file, lexically normalized, and MUST name a listed file that is loaded: one E024 did not refuse. | `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]` |
+| [E032](core.md#94-schema-artifacts-and-type-references) | The pointer MUST resolve. | `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]` |
 
 ### [core §9.5 The canonical form and the fingerprint](core.md#95-the-canonical-form-and-the-fingerprint)
 
@@ -606,13 +644,13 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§9.6](core.md#96-bundles) | To verify bundle bytes, an implementation MUST check the following in order, and refuse with the given tag at the first failure. | `[F: bundles/*, expect.json]` |
+| [§9.6](core.md#96-bundles) | To verify bundle bytes, an implementation MUST check the following in order, and refuse with the given tag at the first failure. (12 rows) | `[F: bundles/*, expect.json]` |
 
 ### [core §9.7 History and retention](core.md#97-history-and-retention)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§9.7](core.md#97-history-and-retention) | **The history check** MUST verify: | `[F: history/]` |
+| [§9.7](core.md#97-history-and-retention) | **The history check** MUST verify: (4 items) | `[F: history/]` |
 
 ### [core §9.8 Compatibility](core.md#98-compatibility)
 
@@ -626,7 +664,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§10](core.md#10-extension-points-for-profiles) | **An annotation vocabulary.** … A contract that uses one MUST list the profile in `uses`, which is fingerprinted. | `[F: contracts/e020-annotation]` `[F: contracts/w105-vocabulary]` `[F: contracts/ok-profile-without-vocabulary]` `[F: contracts/w105-redundancy-epoch, w105-timing-max-rate, w105-arbitration-deadline]` `[F: contracts/e020-requirement]` `[F: contracts/w105-alarms-vocabulary]` `[F: contracts/e002-two-majors]` |
+| [§10](core.md#10-extension-points-for-profiles) | **An annotation vocabulary.** … A contract that uses one MUST list the profile in `uses`, which is fingerprinted. | `[F: contracts/e020-annotation]` |
 
 ## Rule ids
 
@@ -663,7 +701,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [S4](core.md#42-rules-for-owners-and-consumers) | consumer, deployment | core §4.2 Rules for owners and consumers | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` … |
 | [S5](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** … |
 | [S6](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** current state is the owner's answer. A consumer turns to an archive only … |
-| [S7](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** clocks are bounded both ways (§4.3). |
+| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer | core §4.2 Rules for owners and consumers | **Owner:** clocks are bounded both ways (§4.3). |
 | [O1](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template) … |
 | [O2](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden` … |
 | [O3](core.md#51-rules) | owner | core §5.1 Rules | **Owner:** a reply MUST go on the operation's own concrete key, a member's for … |
