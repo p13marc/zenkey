@@ -1299,7 +1299,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   S7's consumer rule, per key, a value under an id other than the held
   value's accepted, handed every value from a consumer's first on, a
   seed's replies included (core 0.68, `state.rs`'s
-  `s7_a_late_joiner_across_a_new_epoch`). `archive` is a
+  `s7_a_late_joiner_across_a_new_epoch`); `Consumer::get` returns every
+  reply at the GET's end, so inside a seed a consumer holds the id of the
+  instance that answered until the key's next value (core 0.69,
+  `s7_a_new_epoch_inside_a_late_joiners_seed`). `archive` is a
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
   current.
@@ -1629,7 +1632,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   MAY after it, "*Except:* …", from `EXCEPTED_BY` (§2.4's
   `reliability`); and a list item under a rule that states none gives
   the rule its tags when it has none of its own, as the header now
-  says. 169 rules, 20 citing none, 9 of
+  says; S7's MUST to accept another id shows §4.3's MAY for a profile's
+  stricter order after it (0.69, F-394), and a bracket may also give a
+  verb the sentence omits. 171 rules, 20 citing none, 9 of
   them MUSTs (#965's; S7's two consumer MUSTs cite `state.md` §7 since
   0.68). The glossary holds 52 terms. Core 0.68 and observer
   text 0.10 (#926 part 3, zk2py round 90's F-379 to F-392) changed five
@@ -1644,7 +1649,22 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   that does not MAY publish reliable; §8.4's two later MUSTs bind a
   caller or tool; observer §7.3 decodes each payload a tool shows or
   judges by its type. `state.md` §7 step 2 runs both late joiners, and
-  §2.5 lists every place an unstable API is opted into. Core 0.61 and
+  §2.5 lists every place an unstable API is opted into. Core 0.69 and
+  observer text 0.11 (#926 part 4, zk2py round 91's F-393 to F-405)
+  changed no core rule. Inside a seed the residual risk lasts the GET:
+  `Latest` delivers every reply after the samples heard during it, so a
+  consumer holds the id of the instance that answered until the key's
+  next value (F-393; `state.md` §7 step 2's step inside the seed, its GET
+  held open by a queryable that is not `complete`). §0's static rules are
+  §1's and §9's that name no role (F-395), and §4.2's merge MUST is three
+  sentences (F-401). Observer §7.3's decode order is the declared type,
+  then the sample's `Encoding` for the type's wire (JSON or CBOR, a raw
+  family's subtype; the contract's `encoding` where it names neither JSON
+  nor CBOR), then sniffing where there is no declared type, as
+  `zenkey_model::decode` and `model::structural` read it (F-397, reading
+  (a)). Observer §4.1's bound counts the keys it forgot and reports the
+  count, as zengui's seed strip does; that it marks neither the key nor
+  its next value is named as the bound's cost (F-398). Core 0.61 and
   observer text
   0.5 (#935 part 2, zk2py round 84's F-295 to F-314) split every sentence
   over 50 words in the two texts, so their baseline holds none, and
