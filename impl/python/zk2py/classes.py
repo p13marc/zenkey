@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66), and its walk of
-``spec/RULES.md`` (#609, round 89).
+"""The conformance classes zk2py claims (core §12, 0.66 and 0.67), and its walk of
+``spec/RULES.md`` (#609, rounds 89 and 90).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
 verdict, with what shows it, and on standard error the counts and every
@@ -233,6 +233,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "seed.LateJoiner keeps an older epoch's later stamp over a new id's first value (a finding)"),
     ("consumer", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "every zk2py service is an owner.Owner, which holds one (presence_scenarios §1)"),
+    ("consumer", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
+     "a zk2py consumer is an owner.Owner service, and the bundles it holds, those of the interfaces it implements, "
+     "are each on a complete queryable (live_interop's retrieval); it holds none of an interface it only requires"),
     ("consumer", "core §11.1", "History (§2.5): a consumer's advanced subscriber MUST NOT", NA,
      "zk2py's consumers declare no advanced subscriber (budget_scenarios §3's, a measurement, declares no detection token)"),
     # -- caller --------------------------------------------------------------------------
@@ -248,6 +251,11 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "live.call"),
     ("caller", "core §5.1", "A caller MUST NOT depend on a refusal", MET,
      "live.call sends what it is handed, and reads a refusal as an answer, never as a check"),
+    ("caller", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
+     "a zk2py service that calls is an owner.Owner, which holds one (presence_scenarios §1; F-361)"),
+    ("caller", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
+     "a zk2py service that calls is an owner.Owner, and the bundles it holds, its own interfaces', are each on a "
+     "complete queryable (live_interop's retrieval); a tool session that calls holds none"),
     ("caller", "core §8.4", "A caller or tool MUST retrieve a bundle", MET,
      "live.retrieve_bundle (live_interop's retrieval, retrieval.md §2, §3)"),
     ("caller", "core §8.4", "A caller MUST set consolidation `None` on both", MET,
@@ -259,10 +267,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("caller", "observer §3.1", "Every liveliness subscriber the caller or tool holds", MET,
      "live.declare_liveliness_subscriber, callbacks only"),
     # -- observer ------------------------------------------------------------------------
+    ("observer", "core §4.2", "A late joiner MUST declare its subscription first", MET,
+     "seed.LateJoiner, the seeding tools' reads (state_scenarios §10); a late joiner is \"a consumer or a tool\""),
+    ("observer", "core §4.2", "A late joiner MUST merge the GET's replies", MET, "seed.kept (seed family)"),
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
     ("observer", "core §5.2", "It MUST refuse", MET,
      "envelope.decode (errors family)"),
+    ("observer", "core §8.1", "Every instance MUST hold one, including pure consumers", NA,
+     "no zk2py tool is a service, so none is an instance (observer §7.1's refusal of a self.system provider, met)"),
+    ("observer", "core §8.4", "Every holder MUST declare a `complete` queryable", NA,
+     "no zk2py tool holds bundles"),
     ("observer", "core §8.4", "A caller or tool MUST retrieve a bundle", MET,
      "live.retrieve_bundle (live_interop's retrieval, retrieval.md §2, §3)"),
     ("observer", "core §11.1", "A generator MUST refuse an input that binds", MET,
@@ -343,10 +358,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "timing_tool and telemetry_scenarios across a face: owners unseen, never down (link_scenarios §6)"),
     ("observer", "observer §7.1", "A tool that is not a service MUST", MET,
      "owner.resolve_providers with no system raises"),
-    ("observer", "observer §7.3", "A generic tool MUST decode `protobuf` (proto2 and", NOT_MET,
-     "echo_tool shows each sample's key, kind, size and encoding, and decodes none (types.md §2 not run)"),
+    ("observer", "observer §7.3", "A tool that shows or judges a payload MUST decode", NOT_MET,
+     "observer 0.9 narrowed it to a tool that shows or judges a payload, and zk2py has both: echo_tool shows each "
+     "sample, its size and encoding in its payload's place, and decodes none (types.md §2 not run); the profiles' "
+     "readers (alarms, telemetry, desired_tool, health, config) judge payloads, each decoding its profile's JSON "
+     "Schema type, and none holds a protobuf decoder (round 90, F-379)"),
     ("observer", "observer §7.3", "A tool MUST render a kind it cannot", NOT_MET,
-     "echo_tool reads no contract, so it shows no declared type"),
+     "echo_tool renders each sample by its size and encoding, never its declared type: it reads no contract"),
     ("observer", "observer §7.3", "It MUST NOT show garbage, and MUST NOT", MET,
      "echo_tool shows no payload bytes and drops no sample (observer_scenarios)"),
     ("observer", "observer §7.4", "A tool SHOULD check the limit at start", MET,
@@ -364,6 +382,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "slugs and templates families"),
     ("static", "core §1.6", "Application code SHOULD NOT spell a deployment prefix", MET,
      "keys are base-relative; a namespace is the session's (live.open_client)"),
+    ("static", "core §2.2", "A rest parameter MUST NOT appear except as the last segment", MET,
+     "contracts family (E010: e010-template, a rest parameter that is not last; core 0.67's restatement of "
+     "\"MAY appear only\", F-363)"),
     ("static", "core §2.2", "Within one interface, two templates under the same", MET,
      "contracts family (E021)"),
     ("static", "core §2.2", "A template with parameters MUST declare `cardinality`, a", MET,
@@ -418,15 +439,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "compat family"),
     ("static", "core §10", "A contract that uses one MUST list the", MET,
      "contracts family (E020, W105)"),
-    # -- rules the texts bind a claimed class to, which RULES.md lists under
-    # -- another class or not at all (round 89's F-361, F-362, F-363)
-    ("observer", "core §4.2", "A late joiner MUST declare its subscription first", MET,
-     "seed.LateJoiner, the seeding tools' reads (state_scenarios §10); a late joiner is \"a consumer or a tool\" (F-361)"),
-    ("observer", "core §4.2", "A late joiner MUST merge the GET's replies", MET, "seed.kept (seed family; F-361)"),
-    ("observer", "core §8.4", "Every holder MUST declare a `complete` queryable", NA,
-     "no zk2py tool holds bundles (F-361)"),
-    ("caller", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
-     "a zk2py service that calls is an owner.Owner, which holds one (F-361)"),
+    # -- rules a claimed class holds that the texts state without a keyword,
+    # -- which RULES.md does not list (core §0 and §12 since 0.67, F-362)
     ("observer", "observer §1", "Every verdict a tool presents fits one shape", MET,
      "judgement (budget, freshness, telemetry, desired, timing, arbitration, redundancy families; F-362)"),
     ("observer", "observer §1", "The two Unestablished kinds stay apart in every medium", MET,
@@ -444,7 +458,6 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "echo_tool's scope, live.blind_spots (observer_scenarios, grammar.md §1; F-362)"),
     ("observer", "observer §8.3", "A tool says whose clock a time, an age or a latency is on", MET,
      "timing_tool, live.attribute_stamp (readings; F-362)"),
-    ("static", "core §2.2", "It MAY appear only as the last segment", MET, "contracts family (E012; F-363)"),
 ]
 
 
