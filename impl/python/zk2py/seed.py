@@ -25,8 +25,8 @@ follows a subscription.
   0.10; :func:`newer`). Round 90's late joiner turned a consumer's to S7 at
   its GET's final reply, 0.67's reading; 0.68 corrected that sentence, so a
   consumer's has no switch to make (round 91).
-- **A tool's bound** (observer §4.1, 0.11): "A tool that bounds what it
-  holds counts the keys the bound forgot, and reports the count. A
+- **A tool's bound** (observer §4.1, 0.12): "A tool that bounds what it
+  holds counts each time the bound forgets a key, and reports the count. A
   forgotten key holds nothing, so the merge keeps the key's next value
   whatever its stamp." :class:`Merge` holds at most ``max_keys`` keys, the
   least recently arrived forgotten first, each forgetting counted
@@ -66,19 +66,22 @@ MAX_KEYS = 65536
 
 
 def bound_note(forgotten: int, max_keys: int | None) -> str:
-    """What a tool reports of its merge's bound (observer §4.1, 0.11): "A
-    tool that bounds what it holds counts the keys the bound forgot, and
-    reports the count." zk2py marks neither a forgotten key nor its next
-    value, so the count is the one place a person learns that the merge did
-    not order every key ("That is the bound's cost"). A merge with no bound
-    says so. ``forgotten`` counts each forgetting: a key forgotten, heard
-    again and forgotten again counts twice (round 92's F-407, reading (a))."""
+    """What a tool reports of its merge's bound (observer §4.1, 0.12): "A
+    tool that bounds what it holds counts each time the bound forgets a
+    key, and reports the count." zk2py marks neither a forgotten key nor
+    its next value, so the count is the one place a person learns that the
+    merge did not order every key ("That is the bound's cost"). A merge with
+    no bound says so. ``forgotten`` counts each forgetting: a key forgotten,
+    heard again and forgotten again counts twice (round 92's F-407, reading
+    (a), which 0.12 states). The note counts forgettings, not keys, so that
+    it reads as the count it is (the mend after #926 part 5)."""
     if max_keys is None:
         return "the merge holds every key it heard: it has no bound (observer §4.1)"
-    word = "key" if forgotten == 1 else "keys"
+    word = "forgetting" if forgotten == 1 else "forgettings"
     cost = "" if not forgotten else (": a forgotten key's next value was kept whatever its stamp, so the merge "
                                      "did not order every key")
-    return f"{forgotten} {word} forgotten by the merge's bound of {max_keys} keys (observer §4.1){cost}"
+    return (f"{forgotten} {word} by the merge's bound of {max_keys} keys, each time it forgot a key counted "
+            f"(observer §4.1){cost}")
 
 
 @dataclass(frozen=True)
@@ -254,13 +257,13 @@ class Merge:
     ``"S7"``, a consumer's, S7's consumer rule from its first value on (core
     §4.3, 0.68).
 
-    **Bounded** at ``max_keys`` when given: "A tool that bounds what it holds
-    counts the keys the bound forgot, and reports the count. A forgotten key
-    holds nothing, so the merge keeps the key's next value whatever its
-    stamp" (observer §4.1, 0.11). The key that arrived least recently is
-    forgotten first, and counted in ``forgotten``; the next arrival on it is
-    kept, as on a key that holds nothing, whatever its stamp. :meth:`note`
-    reports the count (:func:`bound_note`)."""
+    **Bounded** at ``max_keys`` when given: "A tool that bounds what it
+    holds counts each time the bound forgets a key, and reports the count. A
+    forgotten key holds nothing, so the merge keeps the key's next value
+    whatever its stamp" (observer §4.1, 0.12). The key that arrived least
+    recently is forgotten first, and counted in ``forgotten``; the next
+    arrival on it is kept, as on a key that holds nothing, whatever its
+    stamp. :meth:`note` reports the count (:func:`bound_note`)."""
 
     def __init__(self, rule: str = "merge", max_keys: int | None = None):
         if rule not in ("merge", "S7"):

@@ -3429,8 +3429,259 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
-        + _round91_readings(root) + _round92_readings(root)
+        + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.70 and ``observer.md`` 0.12, round 92's answers (#609, the mend
+    after #926 part 5). Each text at its version or later, F-406 to F-413
+    answered as they read and the forms they replaced gone; then what zk2py
+    implements of them:
+
+    - **F-406**, observer §7.3: a payload whose declared type the tool does
+      not hold is sniffed, and the tool says which case it is, naming where
+      it stopped resolving the key (:func:`zk2py.decoding.sniff`,
+      :func:`zk2py.decoding.unheld`, each row of :mod:`zk2py.echo_tool`);
+    - **F-407**, observer §4.1: the bound counts each time it forgets a key,
+      and its note says forgettings (:func:`zk2py.seed.bound_note`);
+    - **F-409**, observer §7.3: a profile's reader reads as its profile says,
+      ``telemetry.v1``'s on its resource's ``encoding`` and ``alarms.v1``'s
+      strict JSON, whatever the sample's ``Encoding``;
+    - **F-412**, the decode order: a held type on the wire its sample's
+      ``Encoding`` names (:func:`zk2py.decoding.wire_of`), which
+      ``config.v1``'s reader now follows, its profile saying nothing of it;
+    - **F-408**, ``state.md`` §7 step 2's premise, judged by
+      :func:`zk2py.checks.premise`.
+
+    No session is opened: a fake one stands in."""
+    import re
+
+    from . import alarms as al
+    from . import checks as ck
+    from . import config as cf
+    from . import decoding as dc
+    from . import echo_tool
+    from . import freshness as fr
+    from . import seed as sd
+    from . import telemetry as tm
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules, state = flat("core.md"), flat("observer.md"), flat("RULES.md"), flat("scenarios/state.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Written against\*\* \| core (\d+)\.(\d+) ", obs)
+    against = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("#926 part 5: core 0.70 or later, observer.md 0.12 or later written against core 0.70 or later, each "
+         "with its entry",
+         [core_v >= (0, 70), obs_v >= (0, 12), against >= (0, 70)]
+         + entry("CHANGELOG.md", "0.70", "round 92's answers")
+         + entry("observer-CHANGELOG.md", "0.12", "F-406"),
+         [True, True, True]),
+        ("F-406, F-407, F-409, F-412: observer §7.3's sniffing of a type not held and what the tool says, the "
+         "decode order, a profile's reader, §4.1's count of each forgetting, §8.1's pointer; the old forms gone",
+         missing(obs, "A payload whose declared type the tool does not hold is sniffed (§8.1). That is a foreign "
+                      "key's, or a zk2 key's whose contract is not in hand or is unavailable (§2). The tool says "
+                      "which, naming where it stopped resolving the key.",
+                 "a payload whose declared type the tool holds is decoded by that type, on the wire its sample's "
+                 "`Encoding` names (below). Any other payload is sniffed.",
+                 "A profile that says how its reader reads a sample's bytes decides for that reader.",
+                 "counts each time the bound forgets a key, and reports the count.",
+                 "(§7.3's sniffing)")
+         + present(obs, "A payload with no declared type, a foreign key's, is sniffed",
+                   "counts the keys the bound forgot", "**Decode order** for a tool is:", "§7.3's last rung"), []),
+        ("F-408, F-410, F-411, F-413: state.md §7 step 2's premise in both bullets, §4.3's bullet inside a seed, "
+         "\"In both runs\", RULES.md's header; the old forms gone",
+         [state.count("Rev 11 and rev 12 come within 5 s of rev 10.")]
+         + missing(core, "An old epoch's value can arrive after the new epoch's for as long as the GET is open, not "
+                         "only in transit.",
+                   "It holds it until the key's next value.")
+         + missing(state, "In both runs it then holds rev 10, until rev 12, which it accepts.")
+         + missing(rules, "A verb the sentence leaves out is shown in brackets. They sit where it is left out.")
+         + present(core, "the risk lasts the GET", "whatever the two times")
+         + present(state, "It holds rev 10 both times")
+         + present(rules, "So does a verb the sentence omits"), [2]),
+    ]
+
+    # -- F-406: a payload whose declared type the tool does not hold ----------
+    data = "zk2/g/svc/zk2py_guard.v1/state/level"
+    told = [dc.unheld(k) for k in (data, "rmw/robot1/cmd_vel", "zk2/g/svc/@zk/instance/0123456789abcdef")]
+    out += [
+        ("observer §7.3 (0.12, F-406): what a tool says of a payload whose type it does not hold: which case, and "
+         "where it stopped resolving the key (decoding.unheld)",
+         [(t["held"], t["which"], t["stopped"]) for t in told]
+         + [(dc.unheld(data, unavailable=True)["which"], dc.unheld(data, unavailable=True)["stopped"])],
+         [(False, "contract_not_in_hand", "contract"), (False, "foreign", "grammar"),
+          (False, "no_contract_type", "form"), ("contract_unavailable", "contract")]),
+        ("observer §7.3 (0.12, F-406): the zk2 key's words name its interface and resource, the contract not in "
+         "hand, and never \"no contract\"; the unavailable one says unavailable (observer §2)",
+         ["zk2py_guard.v1's state/level is not in hand" in told[0]["says"], "no contract of" in told[0]["says"],
+          "is unavailable" in dc.unheld(data, unavailable=True)["says"], told[0]["iface"]],
+         [True, False, True, "zk2py_guard.v1"]),
+    ]
+    rows = [echo_tool.row_of(data, False, 1, "text/plain", b"x"),
+            echo_tool.row_of("rmw/robot1/cmd_vel", False, 7, "application/json", b'{"x":1}'),
+            echo_tool.row_of(data, True, 0, "zenoh/bytes", b""),
+            echo_tool.row_of(data, False, 1, "zenoh/bytes")]
+    out.append(("observer §7.3 (0.12), echo_tool: each row says which case and where it stopped, and sniffs a put's "
+                "payload; a delete has none; a row handed no payload sniffs nothing",
+                [(r["zk2"], r["declared_type"]["which"], r["sniffed"]) for r in rows],
+                [(True, "contract_not_in_hand", {"as": "text", "value": "x"}),
+                 (False, "foreign", {"as": "json", "value": {"x": 1}}),
+                 (True, "contract_not_in_hand", None), (True, "contract_not_in_hand", None)]))
+    out.append(("observer §7.3 (0.12), echo_tool: its report's notes say every payload is sniffed and why",
+                ["sniffed" in echo_tool.SNIFFED, "declared_type" in echo_tool.SNIFFED,
+                 "SNIFFED" in __import__("inspect").getsource(echo_tool.main)], [True, True, True]))
+    long = bytes(range(256)) * 2
+    out.append(("observer §7.3, §8.1 (0.12): sniffing, a structural rendering: nothing, strict JSON, a CBOR map, a "
+                "CBOR scalar only on CBOR's Encoding, printable text, else hexadecimal, at most 256 bytes shown",
+                [dc.sniff(b""), dc.sniff(b' {"a": [1, 2]} '), dc.sniff(b"\xa1\x61a\x42\x01\x02", "zenoh/bytes"),
+                 dc.sniff(b"\x01", "application/cbor"), dc.sniff(b"\x01"), dc.sniff(b"hello\n"),
+                 dc.sniff(b'{"a":1,"a":2}'), {k: (len(v) if k == "value" else v) for k, v in dc.sniff(long).items()},
+                 # review-bot on PR #994: text cut at a character, shown counting the bytes it shows
+                 {k: (len(v) if k == "value" else v) for k, v in dc.sniff(b"a" + "é".encode() * 200).items()}],
+                [{"as": "empty"}, {"as": "json", "value": {"a": [1, 2]}}, {"as": "cbor", "value": {"a": "h'0102'"}},
+                 {"as": "cbor", "value": 1}, {"as": "hex", "value": "01"}, {"as": "text", "value": "hello\n"},
+                 {"as": "text", "value": '{"a":1,"a":2}'}, {"as": "hex", "value": 512, "shown": 256},
+                 {"as": "text", "value": 128, "shown": 255}]))
+
+    # -- F-412: the decode order, a held type on its Encoding's wire ----------
+    def undecodable(payload: bytes, encoding: str, declared: str = "json") -> str:
+        try:
+            dc.decode_json_type(payload, encoding, declared)
+        except dc.Undecodable as e:
+            return str(e).split(":", 1)[0]
+        return "decoded"
+
+    out += [
+        ("observer §7.3 (0.12, F-412): a held JSON Schema type's wire is its sample's Encoding's, JSON or CBOR, and "
+         "its contract's encoding when the Encoding names neither",
+         [dc.wire_of("application/json", "cbor"), dc.wire_of("text/json", "cbor"), dc.wire_of("application/cbor"),
+          dc.wire_of("zenoh/bytes", "cbor"), dc.wire_of("zenoh/bytes"), dc.wire_of(""),
+          dc.wire_of("image/jpeg;x", "cbor")],
+         ["json", "json", "cbor", "cbor", "json", "json", "cbor"]),
+        ("observer §7.3 (0.12, F-412): decoded on that wire, never sniffed; one that does not decode says the wire "
+         "it was read from (types.md §2: `{` on CBOR's Encoding or zenoh's default, read as CBOR)",
+         [dc.decode_json_type(b'{"a":1}', "application/json", "cbor"),
+          dc.decode_json_type(b"\xa1\x61a\x01", "application/cbor"),
+          undecodable(b"{", "application/cbor"), undecodable(b"{", "zenoh/bytes", "cbor"),
+          undecodable(b"{", "application/json", "cbor")],
+         [{"a": 1}, {"a": 1}, "read as CBOR", "read as CBOR", "read as JSON"]),
+    ]
+
+    class Fake:
+        """A session that declares nothing and whose GETs end at once with no
+        reply."""
+
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+        def get(self, selector: str, handler: Any, **kw: Any) -> None:
+            handler.drop()
+
+        def liveliness(self) -> "Fake":
+            return self
+
+    def config_reading(payload: bytes, encoding: str, key: str = "state/view") -> Any:
+        sub = fr.Subscriber(Fake(), "zk2/lab/rf0/**")
+        sub._record(f"zk2/lab/rf0/config.v1/{key}",
+                    fr.Received("put", sub.declared_ns, 0, payload, encoding, None, None, None))
+        return cf.read(Fake(), "lab/rf0", subscriber=sub, presence=False, lists=True)
+
+    def config_view(payload: bytes, encoding: str) -> list[Any]:
+        r = config_reading(payload, encoding)
+        return [r.view, [": ".join(u.split(": ")[1:3]) for u in r.undecodable]]
+
+    out.append(("observer §7.3 (0.12, F-412): config.v1's reader, its profile silent on how it reads bytes, reads "
+                "its view on the wire the sample's Encoding names: CBOR on CBOR's, JSON on JSON's, the contract's "
+                "JSON on zenoh's default, and an undecodable one is no view, named with its wire",
+                [config_view(b"\xa1\x68revision\x03", "application/cbor"),
+                 config_view(b'{"revision": 3}', "application/json"), config_view(b'{"revision": 3}', "zenoh/bytes"),
+                 config_view(b"\xa1\x68revision\x03", "zenoh/bytes")],
+                [[{"revision": 3}, []], [{"revision": 3}, []], [{"revision": 3}, []],
+                 [None, ["read as JSON: not UTF-8"]]]))
+    # Review-bot on PR #994: a document that decodes to anything but an
+    # object is undecodable too, and every answer that found no document
+    # names what did not decode, never reading it as merely absent.
+    bad_view = config_reading(b"[1, 2]", "application/json")
+    bad_event = config_reading(b"7", "application/json", "events/change/01jc0000000000000000000000")
+    answers = [cf.answer_pending(bad_view), cf.answer_writable(bad_view, "radio"),
+               cf.answer_survives(bad_view, "radio", "frequency_hz"), cf.answer_converged(bad_view, 1),
+               cf.answer_landed(bad_view, "t1", None), cf.answer_undo_clean(bad_event, "t1")]
+    out.append(("config.v1's reader (review-bot on PR #994): a view or an event that decodes to a list or a number "
+                "is no document, named undecodable with its wire; each §5 answer that found none says so, "
+                "unobservable, never as if it were absent; an answer with nothing undecodable says nothing of it",
+                [config_view(b"[1, 2]", "application/json"), bad_event.events,
+                 [": ".join(u.split(": ")[1:3]) for u in bad_event.undecodable],
+                 [(a[0], "undecodable, not absent" in a[1]) for a in answers],
+                 "undecodable" in cf.answer_pending(config_reading(b'{"revision": 3}', "zenoh/bytes",
+                                                                   "state/x"))[1]],
+                [[None, ["read as JSON: an array, not an object"]], [], ["read as JSON: a number, not an object"],
+                 [(cf.UNOBSERVABLE, True)] * 6, False]))
+
+    # -- F-409: a profile's reader decides --------------------------------------
+    import inspect
+
+    doc = json.loads((spec / "profiles/alarms/conformance/documents.json").read_text())["cases"][0]["document"]
+
+    def telemetry_read(payload: bytes, encoding: str) -> str:
+        try:
+            return f"decoded {tm.decode(payload, 'json:Point', encoding)}"
+        except tm.Undecodable:
+            return "undecodable"
+
+    out.append(("observer §7.3 (0.12, F-409): a profile's reader reads as its profile says, whatever the sample's "
+                "Encoding: telemetry.v1's on its resource's encoding (JSON bytes on a CBOR resource undecodable), "
+                "alarms.v1's strict JSON, its decode taking no Encoding at all",
+                [telemetry_read(b"1", "json"), telemetry_read(b'{"value": 1}', "cbor"),
+                 telemetry_read(b"\x01", "cbor"), list(inspect.signature(al.decode).parameters),
+                 al.decode(json.dumps(doc).encode()) is not None],
+                ["decoded 1", "undecodable", "decoded 1", ["payload"], True]))
+
+    # -- F-407: each forgetting counted -----------------------------------------
+    lj = sd.LateJoiner(Fake(), "zk2/g/s/zk2py_plans.v1/state/plans/*", consumer=False, max_keys=1)
+    sub = fr.Subscriber(Fake(), "zk2/g/s/x.v1/state/*", max_keys=1)
+    for key in ("a", "b", "a", "b"):
+        lj._merge(f"zk2/g/s/zk2py_plans.v1/state/plans/{key}", "live", False, key.encode(), "", "200/a1")
+        sub._record(key, fr.Received("put", 0, 0, key.encode(), "", None, None, None))
+    out.append(("observer §4.1 (0.12, F-407): the bound counts each time it forgets a key, two keys forgotten three "
+                "times counting three, in a tool's late joiner and in the readers' recording; the note says "
+                "forgettings",
+                [lj.forgotten, sub.forgotten, lj.bound_note().split(" (", 1)[0], sd.bound_note(1, 4).split(" (")[0]],
+                [3, 3, "3 forgettings by the merge's bound of 1 keys, each time it forgot a key counted",
+                 "1 forgetting by the merge's bound of 4 keys, each time it forgot a key counted"]))
+
+    # -- F-408: state.md §7 step 2's premise ------------------------------------
+    S = sd.Stamp
+    t10, behind, late = S(200 << 32, "a1"), S(196 << 32, "b2"), S(201 << 32, "b2")
+    # Review-bot on PR #994: judged on the runner's clock for any offset,
+    # never read from the stamps, which hold it only at an offset of 5 s.
+    out.append(("state.md §7 step 2 (core 0.70, F-408): its premise, rev 11 and rev 12 within 5 s of rev 10, "
+                "judged on the runner's clock whatever the offset and whatever the stamps say; a value not heard "
+                "fails it",
+                [ck.premise(-5.0, t10, behind, behind, 4.9)[0], ck.premise(-5.0, t10, behind, behind, 20.5)[0],
+                 ck.premise(-5.0, t10, behind, late, 4.9)[0], ck.premise(-2.0, t10, late, late, 1.0)[0],
+                 ck.premise(-10.0, t10, behind, behind, 7.0)[0], ck.premise(0.0, t10, late, late, 1.2)[0],
+                 ck.premise(0.0, t10, late, late, 5.1)[0], ck.premise(-5.0, t10, behind, None, 1.0)[0],
+                 "within 5 s" in ck.premise(-5.0, t10, behind, behind, 4.9)[1]],
+                [True, False, True, True, False, True, False, False, True]))
+    return out
 
 
 def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -3499,8 +3750,10 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "So a consumer has no instant at which its merge ends")
          + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows, "
                    "across two timestamp ids too.",
-                   "A tool that bounds what it holds counts the keys the bound forgot, and reports the count. A "
-                   "forgotten key holds nothing")
+                   # Re-read under core 0.70 and observer 0.12 (the mend after
+                   # #926 part 5): F-407 says the bound counts each forgetting.
+                   "A tool that bounds what it holds counts each time the bound forgets a key, and reports the "
+                   "count. A forgotten key holds nothing")
          + present(core, "merges as §4.2 says, and the consumer rule", "It MUST accept the first value under a new id",
                    "A consumer MUST order an owner's values"), []),
         ("F-379, F-380, F-381 and F-387: §7.3 by each payload's declared type, §2.4's opt-in, §2.5's places, and "
@@ -3686,12 +3939,18 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          [True, True, True]),
         ("F-393: inside a seed the residual risk lasts the GET, the consumer holding the answering instance's id "
          "until the key's next value, and state.md §7 step 2's step inside the seed",
-         missing(core, "**Inside a seed** the risk lasts the GET.",
-                 "So a consumer holds the id of the instance that answered, whatever the two times, until the key's "
-                 "next value.",
+         # Re-read under core 0.70 (the mend after #926 part 5): F-410
+         # reworded §4.3's bullet and F-411 state.md's "both times", each the
+         # same rule as 0.69 stated it.
+         missing(core, "**Inside a seed.** An old epoch's value can arrive after the new epoch's for as long as the "
+                       "GET is open, not only in transit.",
+                 "So a consumer holds the reply's value, whether its time or the live samples' is later. It holds it "
+                 "until the key's next value.",
                  "Where two instances answer, it receives only the reply `Latest` kept, the one with the greater "
                  "stamp.")
-         + missing(state, "**Inside the seed.**", "It holds rev 10 both times, until rev 12, which it accepts.",
+         + missing(state, "**Inside the seed.**",
+                   "The consumer accepts rev 11, then the reply, which carries the old id. In both runs it then holds "
+                   "rev 10, until rev 12, which it accepts.",
                    "The tool keeps the later time: rev 10 with the clock behind, and rev 11, then rev 12, on the "
                    "host's clock."), []),
         ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
@@ -3712,11 +3971,14 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("F-397 and F-398: observer §7.3's decode order by the declared type, the Encoding picking its wire, "
          "sniffing with no declared type; §4.1's bound counting the keys and reporting the count; types.md §2's "
          "Encoding; the old forms gone",
-         missing(obs, "**Decode order** for a tool is: the declared type, then the sample's `Encoding` for the type's "
-                      "wire, then sniffing where there is no declared type.",
-                 "A payload with no declared type, a foreign key's, is sniffed (§8.1).",
+         # Re-read under observer 0.12 (the mend after #926 part 5): F-412
+         # reworded the decode order, F-406 placed a zk2 key whose contract is
+         # not in hand, and F-407 the bound's count.
+         missing(obs, "**Decode order** for a tool: a payload whose declared type the tool holds is decoded by that "
+                      "type, on the wire its sample's `Encoding` names (below). Any other payload is sniffed.",
+                 "A payload whose declared type the tool does not hold is sniffed (§8.1).",
                  "So a state declared `cbor` whose sample's `Encoding` is JSON is read as JSON.",
-                 "A tool that bounds what it holds counts the keys the bound forgot, and reports the count.")
+                 "A tool that bounds what it holds counts each time the bound forgets a key, and reports the count.")
          + missing(types, "The second carries CBOR's `Encoding` or zenoh's default. Its reason says it was read as "
                           "CBOR.")
          + present(obs, "the sample's `Encoding`, then the contract's type, then sniffing",
@@ -3725,7 +3987,8 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          "the old forms gone",
          missing(rules, "*Except:* A profile MAY order a consumer's values more strictly.",
                  "It is listed beside a rule it excepts. A row's MAY is in the rule ids.",
-                 "So does a verb the sentence omits.",
+                 # Re-read under core 0.70 (the mend after #926 part 5): F-413's rewrite.
+                 "A verb the sentence leaves out is shown in brackets. They sit where it is left out.",
                  "A rule of those sections, §1 and §9 included, that names a role is listed under that role.")
          + missing(readme, "With neither, §4.3 requires a new instance whose session has a fresh, unpinned zid",
                    "A rule of any of those sections, §1 and §9 included, that names a role is that role's")
@@ -3769,10 +4032,11 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [[["kept", "kept", "kept"], "rev12"], [["kept", "kept", "kept"], "rev12"],
                  [["kept", "kept", "dropped"], "rev10"], [["kept", "dropped", "kept"], "rev12"]]))
 
-    # Review-bot on PR #973: the step's clock-behind outcome is asserted only
-    # within the offset, by the runner's clock, and is inconclusive past it
-    # (F-408); the held GET's queries are dropped once, at release or at once
-    # after it.
+    # Review-bot on PR #973: the held GET's queries are dropped once, at
+    # release or at once after it. Round 92 also read the step's clock-behind
+    # outcome past the offset as inconclusive (F-408); core 0.70 states the
+    # premise, which :func:`zk2py.checks.premise` judges since the mend after
+    # #926 part 5 (its readings are that mend's).
     from . import checks as ck
 
     class Q:
@@ -3788,12 +4052,9 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
     hq.release()
     hq.release()
     hq.take(q2)
-    out.append(("state.md §7 (0.69), F-408, review-bot on PR #973: rev 12 within the 5 s offset of rev 10 by the "
-                "runner's clock, less 0.5 s, asserts the step's rev 10; past it, or within the margin, inconclusive; "
-                "a held query dropped once, at release, and one taken after it at once",
-                [ck.within_offset(3.99, -5.0), ck.within_offset(4.6, -5.0), ck.within_offset(20.5, -5.0),
-                 [held_before, q1.dropped, q2.dropped, hq.done]],
-                [True, False, False, [0, 1, 1, True]]))
+    out.append(("state.md §7 (0.69), review-bot on PR #973: a held query dropped once, at release, and one taken "
+                "after it at once",
+                [held_before, q1.dropped, q2.dropped, hq.done], [0, 1, 1, True]))
 
     def joiner() -> list[Any]:
         lj = sd.LateJoiner(Fake(), sel, consumer=False, max_keys=2)
@@ -3806,10 +4067,14 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "the count costs; a consumer's says it has no bound",
                 [joiner(), sd.LateJoiner(Fake(), sel, consumer=True).bound_note(),
                  sd.bound_note(0, sd.MAX_KEYS)],
-                [[3, "3 keys forgotten by the merge's bound of 2 keys (observer §4.1): a forgotten key's next value "
-                     "was kept whatever its stamp, so the merge did not order every key"],
+                # The note counts forgettings since observer 0.12's F-407 (the
+                # mend after #926 part 5); round 92's said "3 keys forgotten".
+                [[3, "3 forgettings by the merge's bound of 2 keys, each time it forgot a key counted (observer "
+                     "§4.1): a forgotten key's next value was kept whatever its stamp, so the merge did not order "
+                     "every key"],
                  "the merge holds every key it heard: it has no bound (observer §4.1)",
-                 f"0 keys forgotten by the merge's bound of {sd.MAX_KEYS} keys (observer §4.1)"]))
+                 f"0 forgettings by the merge's bound of {sd.MAX_KEYS} keys, each time it forgot a key counted "
+                 f"(observer §4.1)"]))
 
     def recorded(address: str, keys: list[str]) -> fr.Subscriber:
         sub = fr.Subscriber(Fake(), f"zk2/{address}/**", max_keys=1)
@@ -3829,10 +4094,10 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("observer §4.1 (0.11): each reader's reading reports the count its recording's bound forgot "
                 "(health.v1's §2.11 reader, config.v1's §5 reader, alarms.v1's reader, freshness.v1's tool), "
                 "beside what it holds: the key heard last",
-                [[h.forgotten, h.level is not None], [c.forgotten, c.bound.startswith("1 key forgotten"),
+                [[h.forgotten, h.level is not None], [c.forgotten, c.bound.startswith("1 forgetting by"),
                                                       c.view is not None],
-                 [a.forgotten, a.bound.startswith("1 key forgotten"), sorted(a.readings) == [ak]],
-                 [isinstance(srv, dict), srv.forgotten, srv.note.startswith("0 keys forgotten")]],
+                 [a.forgotten, a.bound.startswith("1 forgetting by"), sorted(a.readings) == [ak]],
+                 [isinstance(srv, dict), srv.forgotten, srv.note.startswith("0 forgettings by")]],
                 [[1, True], [1, True, True], [1, True, True], [True, 0, True]]))
     return out
 
@@ -5066,8 +5331,11 @@ def _observer_04_readings(root: Path) -> list[tuple[str, Any, Any]]:
     sc = echo_tool.scope_of("zk2/g/**")
     row = echo_tool.row_of("zk2/g/svc/zk2py_guard.v1/stream/cmd", False, 4, "application/json")
     out += [
+        # A sample's row holds its payload's declared type, not held, and its
+        # sniffing since observer 0.12 (the mend after #926 part 5), still
+        # no scope
         ("observer 0.4 §8.2: zk2py's echo tool's NDJSON row is a sample's alone, no scope in it",
-         sorted(row), ["bytes", "delete", "encoding", "key", "kind", "zk2"]),
+         sorted(row), ["bytes", "declared_type", "delete", "encoding", "key", "kind", "sniffed", "zk2"]),
         ("observer 0.4 §8.2: its standard error line states what it watched and every kind it excludes, "
          "whatever the format",
          [all(k in echo_tool.scope_line(sc) for k in ("@stream", "@state", "@op", "@adv", "@zk")),

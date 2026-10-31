@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.69), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 92).
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.70), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 92, and the mend after #926 part 5).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
 verdict, with what shows it, and on standard error the counts and every
@@ -387,15 +387,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.resolve_providers with no system raises"),
     ("observer", "observer §7.3", "Such a tool MUST decode each payload by its declared", NOT_MET,
      "observer 0.10 asks each payload decoded by its own declared type (F-379's reading (b)): the profiles' readers "
-     "(alarms, telemetry, desired_tool, health, config) meet it, each payload they judge being their profile's JSON "
-     "Schema type, which they decode; echo_tool shows each sample, its size and encoding in its payload's place, "
-     "and decodes neither family, so zk2py fails it there (types.md §2 not run)"),
+     "(alarms, telemetry, desired_tool, health, config) meet it, each payload they judge being their profile's "
+     "type, which they decode; echo_tool holds no contract, so since 0.12 it sniffs each payload as a zk2 key's "
+     "whose contract is not in hand (F-406), but zk2py has no tool that holds a contract per key and decodes "
+     "protobuf or a JSON Schema type field by field, so types.md §2 is not run"),
     ("observer", "observer §7.3", "A tool that shows a payload it cannot decode MUST", NOT_MET,
-     "echo_tool renders each sample by its size and its sample's encoding, never its declared type: it reads no "
-     "contract; the profiles' readers show no payload they cannot decode, an undecodable one being their "
-     "judgement's own answer"),
+     "no zk2py tool shows a payload by its declared type: echo_tool sniffs each one, its type not held (0.12); the "
+     "profiles' readers show no payload they cannot decode, an undecodable one being their judgement's own answer "
+     "(config's in Reading.undecodable, named by the wire it was read from)"),
     ("observer", "observer §7.3", "It MUST NOT show garbage, and MUST NOT", MET,
-     "echo_tool shows no payload bytes and drops no sample (observer_scenarios)"),
+     "echo_tool shows each put's payload sniffed, as JSON, CBOR, printable text or hexadecimal "
+     "(decoding.sniff), never bytes as text, and drops no sample (observer_scenarios; readings)"),
     ("observer", "observer §7.4", "A tool SHOULD check the limit at start", MET,
      "live.memlock_said, at the start of timing_tool, arbitration_tool and echo_tool (round 89)"),
     # -- static --------------------------------------------------------------------------
@@ -480,19 +482,29 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §4.1", "A tool keeps core §4.2's merge for as long as it follows", MET,
      "seed.LateJoiner, a tool's: seed.Merge's rule merge, across two ids too, after the seed as inside it "
      "(state_scenarios §7 and its run inside the seed; live_interop s7; observer 0.10, round 91)"),
-    ("observer", "observer §4.1", "A tool that bounds what it holds counts the keys the bound forgot, and reports "
-     "the count", MET,
+    ("observer", "observer §4.1", "A tool that bounds what it holds counts each time the bound forgets a key, and "
+     "reports the count", MET,
      "seed.Merge and freshness.Subscriber, each bounded at seed.MAX_KEYS, the least recent key forgotten whole and "
      "counted in forgotten, holding nothing after; every reading of what they hold reports the count: "
      "alarms.OwnerReading, health.Reading, config.Reading and freshness.read_service's forgotten, and a tool's "
-     "LateJoiner.bound_note (readings; observer 0.11, round 92)"),
+     "LateJoiner.bound_note; each forgetting counted, a key forgotten, heard again and forgotten again counted "
+     "twice (readings; observer 0.11, round 92; 0.12's F-407, the mend after #926 part 5)"),
     ("observer", "observer §5.2", "A complete reading of a stream or an event", MET,
      "budget.Window (budget family, budget_scenarios; F-362)"),
-    ("observer", "observer §7.3", "Decode order for a tool is: the declared type, then the sample's", NOT_MET,
-     "echo_tool decodes nothing: it shows each sample's size and encoding, reads no contract, and sniffs no "
-     "foreign payload; the profiles' readers decode their profile's JSON Schema type on the wire their profile "
-     "names (telemetry.v1's resource encoding, alarms.v1's strict JSON), never by the sample's Encoding, which "
-     "0.11 says picks the wire (round 92's F-409)"),
+    ("observer", "observer §7.3", "Decode order for a tool: a payload whose declared type the tool holds is decoded",
+     MET,
+     "a held type on the wire its sample's Encoding names: config.read's view, status and events by "
+     "decoding.decode_json_type (JSON or CBOR, else the contract's encoding), health's protobuf; a profile's "
+     "reader as its profile says (the next row); any other payload sniffed: echo_tool holds no type and sniffs "
+     "every one (readings; observer_scenarios; 0.12, the mend after #926 part 5)"),
+    ("observer", "observer §7.3", "A payload whose declared type the tool does not hold is sniffed", MET,
+     "echo_tool: each put's payload sniffed (decoding.sniff), and each row's declared_type saying which, a "
+     "foreign key, a zk2 key whose contract is not in hand or unavailable, or a control form, and where it "
+     "stopped resolving the key, the grammar, the contract or the form (decoding.unheld; readings; "
+     "observer_scenarios; 0.12's F-406)"),
+    ("observer", "observer §7.3", "A profile that says how its reader reads a sample's bytes decides for that", MET,
+     "telemetry.decode on its resource's encoding, alarms.decode and desired's reports as strict JSON, none "
+     "reading the sample's Encoding (readings; 0.12's F-409)"),
     ("observer", "observer §7.1", "The data-flow graph is read from descriptors, never inferred", MET,
      "live.get_descriptor (live_interop, bindings.md §3; F-362)"),
     ("observer", "observer §8.1", "A tool never hides or refuses a foreign key", MET,

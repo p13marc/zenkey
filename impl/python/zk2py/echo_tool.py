@@ -13,7 +13,16 @@ With ``--format json``, the default, it prints one JSON document:
 - ``samples``: each sample as it arrived, its key, its kind token where the
   key parses as zk2 (core §1.1), its byte count and its encoding. A key that
   is not zk2 is a fact, not an error (observer §8.1): shown, with its kind
-  ``null`` and ``zk2`` false;
+  ``null`` and ``zk2`` false. Each put's payload is **sniffed**
+  (``sniffed``, :func:`zk2py.decoding.sniff`): a structural rendering, JSON,
+  CBOR, text or hexadecimal, since the tool holds no declared type for it.
+  ``declared_type`` says which case that is and where it stopped resolving
+  the key (:func:`zk2py.decoding.unheld`): "A payload whose declared type
+  the tool does not hold is sniffed (§8.1). That is a foreign key's, or a
+  zk2 key's whose contract is not in hand or is unavailable (§2). The tool
+  says which, naming where it stopped resolving the key" (observer §7.3,
+  text 0.12, F-406). The tool reads no descriptor and holds no contract, so
+  every zk2 data key stops at its contract, not in hand;
 - ``scope``: the selector, the kind tokens it **watches** (the plain kinds
   ``stream``, ``state`` and ``events`` it reaches, and any verbatim kind it
   names), and the verbatim kinds it **excludes** (:func:`zk2py.live.blind_spots`),
@@ -38,6 +47,11 @@ exits 2, never 0 on a truncated stream (review-bot on PR #955).
 At its start it says on standard error what its ``RLIMIT_MEMLOCK`` admits
 (observer §7.4, :func:`zk2py.live.memlock_said`; round 89).
 
+It holds no contract, so every payload is one whose declared type it does
+not hold, which it sniffs as observer §7.3 says. Decoding by the declared
+type and honest rendering, §7.3's two MUSTs, need a tool that holds a
+contract per key, which zk2py has not (README, "What it does not cover").
+
 It judges nothing, so it exits 0 once it has watched, and 2 when it could
 not (the session did not open, the selector is not a key expression, or
 its standard output refused a write).
@@ -53,7 +67,7 @@ import threading
 import time
 from typing import Any, Callable, TextIO
 
-from . import live
+from . import decoding, live
 
 #: The plain kinds by the data form's key (core §1.1: the kind token at
 #: position 5, then one resource chunk or more; an event's last chunk is
@@ -90,16 +104,26 @@ def scope_line(scope: dict[str, Any]) -> str:
     return f"echo: watching {', '.join(scope['watched']) or 'no kind'}; {scope['says']}"
 
 
-def row_of(key: str, delete: bool, size: int, encoding: str) -> dict[str, Any]:
+def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | None = None) -> dict[str, Any]:
     """One sample's row, the same in the JSON document's ``samples`` and as
     an NDJSON line: its key, whether it is zk2, its kind token (``None``
-    for a key that is not zk2, a fact and not an error, observer §8.1)."""
+    for a key that is not zk2, a fact and not an error, observer §8.1);
+    ``declared_type``, what the tool says of a payload whose declared type
+    it does not hold, which case and where it stopped resolving the key;
+    and ``sniffed``, a put's payload sniffed (observer §7.3, 0.12), ``None``
+    for a delete, which has none, or when no payload was handed in."""
     from . import keys
 
     parsed = keys.parse(key)
     return {"key": key, "zk2": parsed is not None,
             "kind": parsed.get("token") if parsed and parsed.get("form") == "data" else None,
-            "delete": delete, "bytes": size, "encoding": encoding}
+            "delete": delete, "bytes": size, "encoding": encoding, "declared_type": decoding.unheld(key),
+            "sniffed": None if delete or payload is None else decoding.sniff(payload, encoding)}
+
+
+#: What the report's notes say of every payload (observer §7.3, 0.12).
+SNIFFED = ("this tool holds no contract, so every payload is sniffed, never decoded by its declared type: each row's "
+           "declared_type says which case it is and where the tool stopped resolving the key (observer §7.3)")
 
 
 class StreamCut(Exception):
@@ -190,8 +214,9 @@ def watch(session: Any, selector: str, window_s: float, count: int = 0,
     rows = Rows(count)
 
     def received(s: Any) -> None:
-        rows.offer(row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(s.payload.to_bytes()),
-                          str(s.encoding)))
+        payload = s.payload.to_bytes()
+        rows.offer(row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(payload), str(s.encoding),
+                          payload))
 
     sub = session.declare_subscriber(selector, zenoh.handlers.Callback(received))
     if listening is not None:
@@ -233,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         watched_s = round(time.monotonic() - start, 3)
         if args.format == "json":
             doc = {"report": "echo", "selector": args.selector, "scope": scope, "window_s": watched_s,
-                   "samples": samples, "notes": [scope["says"]], "exit": 0}
+                   "samples": samples, "notes": [scope["says"], SNIFFED], "exit": 0}
             try:
                 sys.stdout.write(json.dumps(doc, indent=2) + "\n")
                 sys.stdout.flush()

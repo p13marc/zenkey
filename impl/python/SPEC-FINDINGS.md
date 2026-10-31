@@ -22357,3 +22357,147 @@ lock (`freshness.Subscriber.bound()`).
 1.004 s and 1.005 s after rev 10; Rust, zk2py **26 of 26**, the third put
 2.116 s and 2.120 s after the first. Each run was within the offset, and
 none was inconclusive. `health_scenarios` **29 of 29**.
+
+## At core 0.70 and observer.md 0.12 (#926 part 5, mend pass)
+
+A mend pass, not a round: since 2026-10-31 the maintainer runs a cold read
+only when a rule changes in a big way. This pass read the two changelog
+entries (core 0.70, `observer.md` 0.12), the sections they name (core
+§4.3's bullet inside a seed, observer §4.1's bound, §7.3's decoding and
+decode order, §8.1's pointer), `scenarios/state.md` §7 step 2 and
+`RULES.md`'s header, on main c41f57ab (PR #993). Nothing else was read
+cold, and no "hard to read" finding is kept. The black boxes are round
+92's, unchanged, and their source was never read.
+
+### F-406 to F-413
+
+| | Status | How |
+|---|---|---|
+| F-406 | **resolved** | Observer §7.3: "A payload whose declared type the tool does not hold is sniffed (§8.1). That is a foreign key's, or a zk2 key's whose contract is not in hand or is unavailable (§2). The tool says which, naming where it stopped resolving the key." The fix, with "not in hand" beside "unavailable", and the step where resolution stopped for "which". zk2py's echo tool, which holds no contract, sniffs every payload and says so in each row (below). |
+| F-407 | **resolved** | Observer §4.1: "counts each time the bound forgets a key, and reports the count." Reading (a), as zk2py took it; the fix word for word. zk2py counted so already; its note now says forgettings, not keys. |
+| F-408 | **resolved** | `state.md` §7 step 2: "Rev 11 and rev 12 come within 5 s of rev 10", in "Its late joiners" and in "Inside the seed". The fix's second form. zk2py checks it in every run, and a run past it fails on it (below). |
+| F-409 | **resolved** | Observer §7.3's new bullet: "A profile that says how its reader reads a sample's bytes decides for that reader", `telemetry.v1` on its resource's `encoding` and `alarms.v1` strict JSON. The fix's first form, as zk2py took it. Its readers already read so. |
+| F-410 | **resolved** | Core §4.3: "**Inside a seed.** An old epoch's value can arrive after the new epoch's for as long as the GET is open, not only in transit. … So a consumer holds the reply's value, whether its time or the live samples' is later. It holds it until the key's next value." The rewrite, with "the reply's value" for "the value of the instance that answered". The same rule. |
+| F-411 | **resolved** | `state.md` §7: "The consumer accepts rev 11, then the reply, which carries the old id. In both runs it then holds rev 10, until rev 12, which it accepts." The rewrite word for word. |
+| F-412 | **resolved** | Observer §7.3: "a payload whose declared type the tool holds is decoded by that type, on the wire its sample's `Encoding` names (below). Any other payload is sniffed." The rewrite in F-406's terms. §8.1 now says "§7.3's sniffing", not "§7.3's last rung". |
+| F-413 | **resolved** | `RULES.md`'s header: "A verb the sentence leaves out is shown in brackets. They sit where it is left out." The rewrite in two sentences. |
+
+### The rules changed
+
+zk2py extracted every sentence holding an RFC 2119 keyword from b51f139f
+(round 92's merge) and c41f57ab, and diffed the two sets: core 150 and
+150, all unchanged; `observer.md` 41 and 41, the one pair that differs
+being its splitter joining F-409's new bullet to the honest-rendering MUST
+after it; `scenarios/state.md` none. That agrees with both entries: no
+MUST or SHOULD changed. Three sentences without a keyword changed what a
+rule asks, each as its entry says: §7.3's payload not held (F-406), §4.1's
+count (F-407) and a profile's reader (F-409). The rest is wording.
+
+### What zk2py implements of the changes
+
+- **F-406, a payload whose declared type the tool does not hold.**
+  `zk2py.decoding.sniff` renders it structurally: nothing, strict JSON, one
+  CBOR item (first when the sample's `Encoding` names CBOR, else only a map
+  or an array), printable UTF-8 text, else hexadecimal, at most 256 bytes
+  of text or hex shown. `decoding.unheld` says which case it is and where
+  resolution stopped: a foreign key at the grammar (core §1.1), a zk2 data
+  key whose contract is not in hand, or unavailable, at the contract, and a
+  zk2 control form at the form. Every `echo_tool` row carries both,
+  `declared_type` and `sniffed`, and its report's notes say why.
+- **F-412, the decode order.** A held JSON Schema type is read on the wire
+  its sample's `Encoding` names, JSON or CBOR, else on its contract's
+  `encoding` (`decoding.wire_of`, `decode_json_type`). A payload that does
+  not decode says the wire it was read from, never sniffed. `config.v1`'s
+  reader, whose profile says nothing of how it reads bytes, read its view,
+  status and events with `json.loads` whatever their `Encoding`. It now
+  reads them so. One that does not decode, or decodes to anything but an
+  object, is named in `Reading.undecodable`, and every §5 answer that
+  found no document names it.
+- **F-409.** The readers already read as their profiles say:
+  `telemetry.decode` on the resource's `encoding`, `alarms.decode` strict
+  JSON, taking no `Encoding` at all. Readings show both.
+- **F-407.** `seed.bound_note` says "n forgettings by the merge's bound of N
+  keys, each time it forgot a key counted". Round 92's said "n keys
+  forgotten", which read as reading (b).
+- **F-408.** `checks.premise` judges the premise in each run of
+  `state_scenarios` §7 and `live_interop --only s7`, after the seed and
+  inside it, as it is stated: rev 12 written within 5 s of rev 10 by the
+  runner's clock, whatever the new clock's offset (rev 11, written before
+  it, then comes within it too). The stamps are said beside it, never
+  judged. A run past it fails on it, and the clock-behind outcome resting
+  on it is not asserted. Round 92's margin (`checks.within_offset`), which called such a
+  run inconclusive, is gone. `live_interop`'s run after the seed now writes
+  rev 12, which "Its late joiners" names and it had not.
+
+### The walk at c41f57ab
+
+171 rows walked, none without a verdict, none gone. The `RULES.md`
+entries are round 92's, unchanged, and so are their verdicts:
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 56 | 45 | 3 | 8 |
+| consumer | 15 | 12 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 53 | 49 | 2 | 2 |
+| static, in every class | 34 | 32 | 0 | 2 |
+
+- **Re-keyed:** the two verdicts beyond the index whose sentences moved,
+  §4.1's bound (F-407) and §7.3's decode order (F-412).
+- **Beyond the index:** fourteen observer rules stated without a keyword,
+  all met. Round 92's twelve, with §7.3's decode order moved from not met
+  to met (above), and two new: §7.3's payload not held (F-406) and a
+  profile's reader (F-409).
+- **Not met in the index:** the owner's three SHOULDs, and observer §7.3's
+  two MUSTs. No zk2py tool holds a contract per key and shows its
+  payloads, decoded or honestly rendered by the declared type, so
+  `types.md` §2 is not run.
+
+### Counts and live runs
+
+`readings` 751, up from 737. **`just py-conformance`: 3708 of 3708.**
+
+Live, against the black boxes, cores 0 and 1, by (owner, readers):
+- **`state.md` §7 step 2**, `state_scenarios --only 7`: zk2py, zk2py **24
+  of 24**. After the seed, rev 12 came 0.804 s after rev 10, its time
+  4.196 s below; inside the seed, 1.004 s after it with the clock behind
+  (3.996 s below) and on the host's clock (1.004 s above). Each run met its
+  premise.
+- **`state.md` §7 step 2**, `live_interop --only s7`: Rust, zk2py **30 of
+  30**. The third put came 0.926 s after the first after the seed (4.074 s
+  below), and 2.119 s and 2.125 s after it inside the seed. Each met its
+  premise.
+- **grammar.md §1**, `observer_scenarios --only grammar1`, zk2py's echo
+  tool as the reader: zk2py owner and Rust owner, **38 of 38**. Every row
+  said a zk2 key whose contract is not in hand, stopped at the contract,
+  its payload sniffed as text.
+- **`config_scenarios`**, the reader's new decode: zk2py, zk2py **51 of
+  51**; Rust, zk2py **51 of 51**.
+
+### New findings
+
+None open. Each changed rule could be implemented as written, and none
+contradicts another.
+
+### Counts at core 0.70 and observer.md 0.12
+
+413 entries.
+- **Resolved: F-406 to F-413,** eight.
+- **F-365** stays open as #965's.
+- **Open from round 92:** none.
+
+### After review-bot on PR #994
+
+Two should-fixes and two nits, taken on the same branch:
+- **`checks.premise`** judges the premise as it is stated, rev 12 within
+  5 s of rev 10 by the runner's clock, whatever the offset. It had read it
+  from the stamps, which holds only at an offset of exactly 5 s.
+- **`config.read`**: a view, status or event that decodes to anything but
+  an object is undecodable too, and every §5 answer that finds no document
+  names what did not decode, never reading it as merely absent.
+- **Nits:** the echo tool's docstring on §7.3's two MUSTs, and a sniffed
+  text's `shown` counting the bytes it shows, cut at a character.
+
+**`just py-conformance`: 3709 of 3709** (`readings` 752). **Live:**
+`config_scenarios` zk2py, zk2py and Rust, zk2py **51 of 51** each;
+`state.md` §7 step 2 zk2py, zk2py **24 of 24** and Rust, zk2py **30 of 30**.
