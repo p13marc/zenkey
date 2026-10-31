@@ -19607,7 +19607,60 @@ citation in zk2py's modules still leads to its rule. By the splitter, no
 prose sentence of the three profiles is over 50 words; what it counts over
 50 is table cells and bold labels joined to the sentence after them.
 
-LIVE-RESULTS-HERE
+### Live
+
+Every run used in-process zenoh-python 1.10.1 routers, each listener on a
+free loopback port, under `taskset -c 0-1`, one after another: the first
+batch on 2026-10-30 from 12:56 to 13:34, the second on 2026-10-31 from
+02:03 to 02:23. "Rust" is the reference's owner example, "zenctl" its
+tool, both black boxes.
+
+| Runner | Pairing | Result |
+|---|---|---|
+| `redundancy_scenarios` (A, B) | zk2py, zk2py | **105 of 105**, §1 to §12 and zk2py's own; §12 33, both tools |
+| | zk2py, Rust | **104 of 104** |
+| | Rust, zk2py | **103 of 103** |
+| | Rust, Rust | **101 of 102**: §7 Expected 4, the runner's order check (below); then `--only 7` **7 of 7** in each of three runs |
+| `timing_interop` | owner:reader py:py, rs:py, py:rs, rs:rs | **182 of 182**: §1 to §5, 19 a pairing; §6 beside each owner, zk2py's tool and `zenctl timing`, 7 each; face, gone, again, waits, missed and stray beside each owner, both tools, 39 each; every miss within the 10 ms bound |
+| `arbitration_scenarios` | commanders:actuators py:py, rs:py, py:rs, rs:rs | **329 of 329**: §1 to §9 and §11, 70 a pairing; §10 with zk2py's tool and `zenctl arbitration` beside both actuators, token by token |
+| `presence_scenarios` (owner, reader) | zk2py, zk2py | **95 of 95**, 1 not run (§3 step 2: neither owner offers a member's broken continuity from outside) |
+| | Rust, zk2py | **89 of 89**, 2 not run (§3 step 2; §10 step 7, the owner example takes no namespace) |
+| | zk2py, zenctl | **33 of 33**, 6 not run (what zenctl's command line cannot show: §1, §4, §6 step 2, §9 steps 4 and 5, §10 step 9; and §3 step 2) |
+| | Rust, zenctl | **32 of 32**, 7 not run (the same, and §10 step 7) |
+| `desired_scenarios` (author → target), watch and polling | zk2py → zk2py | **188 of 188** each: §1 to §8, §10 and §11 45, the edges 9, the re-mint 2, §9 29, the thirty shapes 90, **§12 9** and **`config-fed` 4** |
+| | Rust → Rust, zk2py → Rust, Rust → zk2py | **85 of 85** each, §12 and `config-fed` not run: the owner example authors `tasking.v1` and has no `config.v1` owner fed through `desired.v1` |
+| `config_scenarios`, the regression for `ConfigOwner`'s change | zk2py's owner | **51 of 51**, §1 to §14 |
+| | Rust (`--config`) | **51 of 51** |
+
+**§12, zk2py's owner.** Both branches of step 1 pass:
+- refusing, the owner raises, S sees no instance token of `lab/rf0` move,
+  `St` stays `{1, converged}`, and the device holds 20000;
+- re-minting, the device boots to its startup values and then applies
+  20000 again, S sees the new instance token declared and the old one
+  withdrawn, the new instance publishes one `applied` event, and its `St`
+  ends at 20000, `{1, converged}`. No `St` of the new instance says
+  converged while it shows 10000.
+
+Step 2 passes after either: the new instance's first `St` shows 10000 and
+no `desired`, then one `applied` event, then 20000 converged.
+
+**The one failure, a runner's.** `redundancy_scenarios` §7 Expected 4
+filtered S's deliveries of B's descriptor to those after B's interface
+token's withdrawal reached S. Once, a Rust B's marked put reached S
+first: zenoh carries the two on two priorities, and the conventions say
+"S's arrival order of a put and a token is noted, never judged". The
+runner now reads B's descriptor puts since the heal, the last one marked,
+and notes an order it sees without judging it. Three `--only 7` runs with
+the Rust pair, and one with zk2py's, passed, none noting the order.
+
+**What did not run.**
+- **§12 beside the reference.** It is the runtime's, and the reference
+  runs it as a `zenkey` test, which zk2py does not read. The owner example
+  has no `config.v1` owner fed through `desired.v1`.
+- **`timing_scenarios`,** zk2py alone, and `live_interop`: `timing_interop`
+  runs §1 to §6 in every pairing, and `live_interop`'s texts did not
+  change.
+- **`presence_scenarios --reopen`,** notes only, and §4 at 10,000 tokens.
 
 ### F-347 · gap · `desired.v1` §2.16 and §2.5: a `config.v1` owner's re-mint begins a new run, and nothing says that run reads its slice
 
@@ -19907,3 +19960,66 @@ LIVE-RESULTS-HERE
   is `desired.v1`'s own, in its §2.4;"
 - **Changes:** wording only. The index has no version, so its line is the
   core's.
+
+### The texts in zk2py
+
+- **`desired.v1` §2.16, implemented** (`config.py`). `ConfigOwner(fed=(slice,
+  author))` is a `config.v1` owner fed through `desired.v1`: it subscribes
+  to its slice, then seeds by S4's GET, and seeds again at each appearance
+  of its author's instance token, read every 500 ms on its own session. It
+  judges every version with `desired.TargetRole`: once per version in a
+  run, a document equal to the last one acted on adopted. It acts through
+  `Core.desire`, and on a delete through `Core.revert`, which sets back the
+  parameters named by the documents it acted on in this run, one `set` per
+  group in bytewise order, a refused document counting for none, and puts
+  no `desired` after it. `Core.desired_end` says how each act ended, and
+  the role is told. `ConfigOwner.remint()` re-mints as a restart, or with
+  `remint="refuse"` refuses, as the reference does. A re-mint returns the
+  device to its startup values, puts the new instance's view and status
+  before its tokens, makes before it breaks (core §8.1), and begins a new
+  run that seeds (F-347's reading).
+- **Not implemented** of §2.16 and of its owner: a watch session (the
+  owner polls), an archive's last-known, and the reference's "wait that
+  cannot end" (zk2py's owner waits on a pending change until it ends, which
+  its deadline bounds).
+- **`desired_scenarios`:** §12, both branches, and `config-fed`, zk2py's
+  own (an equal document adopted, a reach document refused whole, a
+  delete's revert).
+- **`redundancy_scenarios` §7:** the order check, above.
+- **`readings`: 685, up from 673.** Twelve, in `_round88_readings`:
+  - each text at its version or later, and #935's three changelogs and
+    core 0.64's entry saying no rule changed;
+  - `desired.v1` 0.10's §2.16 bullet, its §0 and §2.7 exceptions,
+    `config.v1` 0.8's §2.18 sentences and §12, as the texts state them;
+  - F-337 to F-346's rewrites as they read;
+  - §12's contracts, `interop/desired/configs.v1` and `zk2py_configured.v1`,
+    with no finding and the reference CLI's fingerprints;
+  - `Core.desire` and `Core.revert`: converged, then reverted, the
+    parameter back to 10000 by one applied `set`, no `desired` after it;
+  - the bound version delivered again under its own stamp: the same
+    version within a run, acted on after a restart;
+  - the reference's figures `arbitration.v1` 0.4 gave sentences of their
+    own (a read 0.1 s after a withdrawal, a first put 500 ms after the
+    tokens), held by zk2py's actuator and commander.
+- **The modules' headers** (`config`, `desired`, `desired_scenarios`,
+  `redundancy`, `timing`, `arbitration`) say they were read again.
+
+**`just py-conformance`: 3642 of 3642.**
+
+### Counts at redundancy.v1 0.6, timing.v1 0.6, arbitration.v1 0.4, desired.v1 0.10 and core 0.64
+
+357 entries.
+- **Open: F-347 to F-357,** eleven. None is a blocker.
+  - **Gap, one: F-347.** A `config.v1` owner's re-mint begins a new run,
+    and nothing says that run reads its slice. It changes an
+    implementation that re-mints as a restart, not the reference, and no
+    verdict.
+  - **Hard to read, ten:** F-348 to F-357. Each has a rewrite that keeps
+    its keyword, condition, scope and evidence, so each is wording only.
+    Six are in sentences #935's fifth pass wrote or split: F-348, F-349,
+    F-350, F-352, F-356 and F-357. The other four were there before it,
+    the pass taking only a tag out (F-351, F-353, F-354, F-355).
+- **Resolved: F-336 to F-346,** eleven.
+- **#935's fifth pass changed no rule** in `redundancy.v1`, `timing.v1`,
+  `arbitration.v1` or the core's scenarios. Round 87's answers changed one,
+  `desired.v1` 0.10's §2.16, which says what F-336 asked.

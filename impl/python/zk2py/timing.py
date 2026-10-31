@@ -3,7 +3,8 @@ text 0.5, draft, written against core 0.55; ``spec/profiles/timing/v1.md``).
 
 Read cold from the text, its fixtures and its scenarios alone (#609, round
 76; text 0.2 in round 78, 0.3 in round 79, 0.4 in round 80, 0.5 in round
-81). The session-free half:
+81; text 0.6 in round 88, its inline history taken out and seven long
+sentences split, no rule changed, and none of this module's rules moved). The session-free half:
 - :func:`declaration` reads a resolved resource's three keys (§2.2, §2.3),
   as ``conformance/declarations.json`` does, and :func:`requirement` a
   ``[requires.<role>]``'s (§2.3: ignored at 1.0);

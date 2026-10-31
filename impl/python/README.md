@@ -4131,7 +4131,42 @@ What zk2py does for them:
   `redundancy`, `timing`, `arbitration`) say they were read again.
 - **`just py-conformance`: 3642 of 3642.**
 
-README-LIVE-HERE
+**Live, round 88.** Every check passed but one of a runner's own, fixed and
+run again (below). "Rust" is the owner example, "zenctl" the reference tool.
+- `redundancy_scenarios`, by (A, B): zk2py, zk2py **105 of 105**; zk2py,
+  Rust **104 of 104**; Rust, zk2py **103 of 103**; Rust, Rust **101 of 102**,
+  the failure §7's order check above, then `--only 7` 7 of 7 in each of
+  three runs. §12 33 in each, both tools.
+- `timing_interop`, every owner:reader pairing: **182 of 182**, §6 and its
+  extras with zk2py's tool and `zenctl timing` beside each owner.
+- `arbitration_scenarios`, every commanders:actuators pairing: **329 of
+  329**, §10 with both tools.
+- `presence_scenarios`, by (owner, reader): zk2py, zk2py **95 of 95**;
+  Rust, zk2py **89 of 89**; zk2py, zenctl **33 of 33**; Rust, zenctl **32
+  of 32**. A step a tool's command line cannot show is NOT RUN, as before.
+- `desired_scenarios`, `zenctl desired` as §9's Rust tool:
+
+  | Author → target | Watch | Polling |
+  |---|---|---|
+  | zk2py → zk2py | 188 of 188 | 188 of 188 |
+  | Rust → Rust | 85 of 85 | 85 of 85 |
+  | zk2py → Rust | 85 of 85 | 85 of 85 |
+  | Rust → zk2py | 85 of 85 | 85 of 85 |
+
+  zk2py → zk2py adds §12 (9) and `config-fed` (4) to round 87's 175. Beside
+  the owner example both are NOT RUN: it has no such owner.
+- The regression, `config_scenarios`: **51 of 51** with zk2py's owner, and
+  **51 of 51** with the owner example.
+
+Round 88 found F-347 to F-357, eleven:
+- **F-347**, a gap: a `config.v1` owner's re-mint begins a new run, and
+  nothing says the run reads its slice (`desired.v1` §2.5 seeds at a start
+  and at its author's appearance). Without a seed, §12's re-minted owner
+  would never act again. zk2py's seeds;
+- **ten hard to read**, F-348 to F-357, each with a rewrite that keeps its
+  rule. Six are in sentences #935's fifth pass wrote or split.
+
+None is a blocker, and none moves a verdict.
 
 ## What it does not cover
 
