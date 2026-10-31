@@ -31,7 +31,7 @@ follows a subscription.
   recently arrived forgotten first, each counted (``forgotten``); the next
   arrival on a forgotten key is kept, as on a key that holds nothing. A
   tool's :class:`LateJoiner` is bounded at :data:`MAX_KEYS` unless told
-  otherwise; a consumer's is not bounded, since the text bounds a tool's.
+  otherwise; a consumer's is not, since observer §4.1 speaks of a tool's.
 - **R6** binds a consumer, whose seed discards a key that is not concrete
   on either path; a tool's seed keeps it under the key it arrived on,
   merged with that key alone (0.27).

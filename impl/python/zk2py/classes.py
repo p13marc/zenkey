@@ -465,6 +465,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §1", "An empty scope is Unobservable", MET, "budget, timing (budget family; F-362)"),
     ("observer", "observer §2", "Unattributable silence is Unestablished, never Established(no)", MET,
      "live.o3_verdict, judgement (observer_scenarios; F-362)"),
+    ("observer", "observer §4.1", "A tool keeps core §4.2's merge for as long as it follows", MET,
+     "seed.LateJoiner, a tool's: seed.Merge's rule merge, across two ids too, after the seed as inside it "
+     "(state_scenarios §7 and its run inside the seed; live_interop s7; observer 0.10, round 91)"),
+    ("observer", "observer §4.1", "A tool that bounds what it holds counts what the bound forgot", MET,
+     "seed.Merge and freshness.Subscriber, each bounded at seed.MAX_KEYS, the least recent key forgotten whole and "
+     "counted in forgotten, holding nothing after (readings; observer 0.10, round 91)"),
     ("observer", "observer §5.2", "A complete reading of a stream or an event", MET,
      "budget.Window (budget family, budget_scenarios; F-362)"),
     ("observer", "observer §7.1", "The data-flow graph is read from descriptors, never inferred", MET,
