@@ -4636,12 +4636,12 @@ The profiles' classes, by role, are round 89's table above.
   a foreign payload. The profiles' readers read the wire their profile
   names, not the sample's `Encoding` (F-409).
 
-**`readings`: 736, up from 728.** **`just py-conformance`: 3693 of 3693.**
+**`readings`: 737, up from 728.** **`just py-conformance`: 3694 of 3694.**
 
 **Live, round 92**, by (owner, readers):
-- `state_scenarios` §7: zk2py, zk2py **19 of 19**, the first run and the
+- `state_scenarios` §7: zk2py, zk2py **21 of 21**, the first run and the
   run inside the seed with the new clock behind and on the host's clock.
-- `live_interop --only s7`: Rust, zk2py **24 of 24**, the same three
+- `live_interop --only s7`: Rust, zk2py **26 of 26**, the same three
   runs.
 - `health_scenarios` (zk2py, zk2py) **29 of 29**, the readers' new field
   at run time.

@@ -501,13 +501,18 @@ class Subscriber:
         with self.lock:
             return list(self.deliveries)
 
-    def note(self) -> str:
-        """The bound's count, reported (observer §4.1, 0.11: "counts the keys
-        the bound forgot, and reports the count"; :func:`zk2py.seed.bound_note`)."""
+    def bound(self) -> tuple[int, str]:
+        """The bound's count and its note, read under one lock (observer
+        §4.1, 0.11: "counts the keys the bound forgot, and reports the
+        count"; :func:`zk2py.seed.bound_note`)."""
         from . import seed
 
         with self.lock:
-            return seed.bound_note(self.forgotten, self.max_keys)
+            return self.forgotten, seed.bound_note(self.forgotten, self.max_keys)
+
+    def note(self) -> str:
+        """The bound's note alone (:meth:`bound`)."""
+        return self.bound()[1]
 
     def of(self, key: str) -> list[Received]:
         with self.lock:
@@ -583,7 +588,7 @@ class ServiceRead(dict):
 
 def read_service(session: Any, address: str, contracts: list[dict[str, Any]], window_s: float,
                  trust: ClockTrust, on_subscribed: Any = None,
-                 get_timeout: float = 1.0) -> dict[str, tuple[Verdict, dict[str, dict[str, str]]]]:
+                 get_timeout: float = 1.0) -> ServiceRead:
     """§5's second question for each resource of ``address`` (a
     ``<system>/<service>``), over a window, as scenarios §6 reads: "it
     subscribes to every exposed stream and state resource first, then GETs
@@ -626,7 +631,7 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
         import zenoh
 
         out = ServiceRead()
-        out.forgotten, out.note = sub.forgotten, sub.note()
+        out.forgotten, out.note = sub.bound()
         for _, r, key in plain:
             rid = f"{r['token']}/{r['template']}"
             h = horizon(r["kind"], r["annotations"])

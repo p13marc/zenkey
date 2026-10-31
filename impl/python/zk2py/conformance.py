@@ -3769,6 +3769,32 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [[["kept", "kept", "kept"], "rev12"], [["kept", "kept", "kept"], "rev12"],
                  [["kept", "kept", "dropped"], "rev10"], [["kept", "dropped", "kept"], "rev12"]]))
 
+    # Review-bot on PR #973: the step's clock-behind outcome is asserted only
+    # within the offset, by the runner's clock, and is inconclusive past it
+    # (F-408); the held GET's queries are dropped once, at release or at once
+    # after it.
+    from . import checks as ck
+
+    class Q:
+        def __init__(self) -> None:
+            self.dropped = 0
+
+        def drop(self) -> None:
+            self.dropped += 1
+
+    hq, q1, q2 = ck.HeldQueries(limit=60.0), Q(), Q()
+    hq.take(q1)
+    held_before = q1.dropped
+    hq.release()
+    hq.release()
+    hq.take(q2)
+    out.append(("state.md §7 (0.69), F-408, review-bot on PR #973: rev 12 within the 5 s offset of rev 10 by the "
+                "runner's clock, less 0.5 s, asserts the step's rev 10; past it, or within the margin, inconclusive; "
+                "a held query dropped once, at release, and one taken after it at once",
+                [ck.within_offset(3.99, -5.0), ck.within_offset(4.6, -5.0), ck.within_offset(20.5, -5.0),
+                 [held_before, q1.dropped, q2.dropped, hq.done]],
+                [True, False, False, [0, 1, 1, True]]))
+
     def joiner() -> list[Any]:
         lj = sd.LateJoiner(Fake(), sel, consumer=False, max_keys=2)
         for key in ("a", "b", "c", "d", "a"):

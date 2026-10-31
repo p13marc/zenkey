@@ -1820,7 +1820,7 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
     trust = trust or fr.ClockTrust(word=True)
     out = Reading("ok")
     if subscriber is not None:
-        out.forgotten, out.bound = subscriber.forgotten, subscriber.note()
+        out.forgotten, out.bound = subscriber.bound()
     for which in ("view", "status"):
         key = f"zk2/{address}/{IFACE}/state/{which}"
         observations: list[Any] = []

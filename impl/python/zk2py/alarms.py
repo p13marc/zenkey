@@ -1656,7 +1656,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
         with subscriber.lock:
             known |= {k for k in subscriber.deliveries if k.startswith(prefix)}
         # observer §4.1 (0.11): the bound's count, reported with what it holds
-        out.forgotten, out.bound = subscriber.forgotten, subscriber.note()
+        out.forgotten, out.bound = subscriber.bound()
     trust = trust or fr.ClockTrust(word=True)
     for key in sorted(known):
         obs: list[Any] = []

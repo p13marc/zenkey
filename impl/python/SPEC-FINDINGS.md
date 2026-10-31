@@ -22145,9 +22145,14 @@ entries, by class:
   20.5 s after the first's, and the tool kept it. Released once rev 11 was
   heard, the third put came 2.874 s below the first. zk2py's own owner
   restarts in under a second, so rev 12 came 3.99 s below rev 10.
-- **Took:** the tool keeps the later time by the stamps, and each run says
-  how far rev 12's time is from rev 10's (`state_scenarios`,
-  `live_interop`).
+- **Took:** each run checks two things (`state_scenarios`, `live_interop`;
+  review-bot on PR #973):
+  - the merge's rule, whatever the window: the tool keeps the later time
+    by the stamps;
+  - the step's stated outcome, its premise judged on the runner's clock
+    (`checks.within_offset`). With rev 12 written within the 5 s offset of
+    rev 10, less 0.5 s, the tool must keep rev 10. Past it the run is
+    inconclusive, never a pass, and the runner exits 2.
 - **Fix:** "… its clock behind by more than the time from rev 10 to rev 12
   (5 s, where the restart takes less)", or "rev 11 and rev 12 come within
   5 s of rev 10".
@@ -22329,3 +22334,26 @@ entries, by class:
   changelogs state. The core asks nothing new. The observer asks two
   things new without a keyword, each in its entry: §4.1's count reported,
   and §7.3's decode order, where an `Encoding` names another type's wire.
+
+### After review-bot on PR #973
+
+Three should-fixes, taken on the same branch:
+- **`freshness.read_service`** is annotated as returning a `ServiceRead`.
+- **The step's outcome pinned** (F-408's "Took" above). The tool check had
+  passed whether the tool kept rev 10 or rev 12, its window read from the
+  same stamps. Each run now asserts the step's outcome within the offset,
+  by the runner's clock, beside the merge's rule. Past the offset the
+  run is inconclusive (`Report.inconclusive`).
+- **`checks.HeldQueries`**, moved out of `state_scenarios`, which both
+  runners import. Each run releases its held queries and undeclares the
+  queryable in a `finally`.
+
+And two nits: `health.read_near` always sets `info["bound"]` (None with no
+subscription), and every reader reads the count and its note under one
+lock (`freshness.Subscriber.bound()`).
+
+**`just py-conformance`: 3694 of 3694** (`readings` 737).
+**Live:** `state.md` §7 step 2: zk2py, zk2py **21 of 21**, rev 12 written
+1.004 s and 1.005 s after rev 10; Rust, zk2py **26 of 26**, the third put
+2.116 s and 2.120 s after the first. Each run was within the offset, and
+none was inconclusive. `health_scenarios` **29 of 29**.

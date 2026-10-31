@@ -561,10 +561,10 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
     held = sd.merged(arrivals)
     payload = None if held is None or held[1] else held[2]
     level = None if payload is None else status_level(payload)
-    if subscriber is not None:
-        info["bound"] = subscriber.note()  # observer §4.1 (0.11), reported
-    return Reading(presence, descriptor, None, observations, level, checks,
-                   0 if subscriber is None else subscriber.forgotten), info
+    # observer §4.1 (0.11): the bound's count, reported; None with no
+    # subscription, which holds nothing and forgets nothing
+    forgotten, info["bound"] = (0, None) if subscriber is None else subscriber.bound()
+    return Reading(presence, descriptor, None, observations, level, checks, forgotten), info
 
 
 def read_across(subscriber: fr.Subscriber, address: str, status_crosses: bool) -> Reading:

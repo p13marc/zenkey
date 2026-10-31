@@ -94,11 +94,20 @@ class CannotRun(Exception):
 @dataclass
 class Report:
     rows: list[tuple[str, str, bool, str]] = field(default_factory=list)
+    #: checks whose premise the run did not meet: neither a pass nor a
+    #: failure (state.md §7's clock-behind outcome, F-408)
+    undecided: list[tuple[str, str, str]] = field(default_factory=list)
 
     def check(self, run: str, name: str, ok: bool, detail: str = "") -> bool:
         self.rows.append((run, name, ok, detail))
         print(f"{'PASS' if ok else 'FAIL'} [{run}] {name}" + (f": {detail}" if detail else ""), flush=True)
         return ok
+
+    def inconclusive(self, run: str, name: str, detail: str) -> None:
+        """A check this run could not decide, never counted as a pass: the
+        runner exits 2 when nothing failed and one is left."""
+        self.undecided.append((run, name, detail))
+        print(f"INCONCLUSIVE [{run}] {name}: {detail}", flush=True)
 
     def info(self, run: str, text: str) -> None:
         print(f"info [{run}] {text}", flush=True)
@@ -3484,11 +3493,14 @@ def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
 
     from . import live
     from . import seed as sd
+    from .checks import F408_MARGIN_S, HeldQueries, within_offset
 
     r1, ep, _ = _r1()
     tool, helper = live.open_client(ep), live.open_client(ep)
     rusts: list[Owner] = []
     joiners: list[Any] = []
+    held_q: HeldQueries | None = None
+    q: Any = None
     word = "5 s behind" if offset_ms else "on the host's clock"
     try:
         run = f"core 0.69 S7: state.md §7 step 2, a new epoch {word} inside a late joiner's seed"
@@ -3499,10 +3511,8 @@ def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
             return
         base = "zk2/lab/s7i/budget.v1/state/items"
         put10 = first.command("put budget.v1 state/items/{item} a")
-
-        from .state_scenarios import _Held
-
-        held_q = _Held(limit=30.0)
+        w10 = time.monotonic()  # the first put's answer, on the runner's clock (F-408)
+        held_q = HeldQueries(limit=30.0)
         q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(held_q.take), complete=False)
         time.sleep(0.5)
         lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=30.0)
@@ -3555,6 +3565,7 @@ def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
         # "Then the second queryable lets the GET end, and the owner writes
         # rev 12" (state.md §7, 0.69): the new instance's third put.
         put12 = second.command("put budget.v1 state/items/{item} a")
+        elapsed = time.monotonic() - w10
         time.sleep(0.6)
         third = [a for a in lc.applied if a.via == "live"][1:]
         s12 = third[0].stamp if third else None
@@ -3567,24 +3578,41 @@ def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
                      f"{put12!r}; held {got.stamp if got else None}; {[(a.outcome, a.rule) for a in third]}")
         held = lt.view().get(f"{base}/a")
         lastt = [(a.via, a.outcome) for a in lt.applied][2:]
-        # The tool keeps the later time. "the old epoch's with the clock
-        # behind" holds while the third put, 5 s behind, comes within 5 s of
-        # the first: the step states no such bound (round 92's F-408).
         later = s12 is not None and old is not None and s12.time > old.time
-        want = s12 if later else old
         gap = None if s12 is None or old is None else round((s12.time - old.time) / 2**32, 3)
-        report.check(run, "state.md §7 (0.69): the tool keeps the later time: "
-                          + ("the old epoch's, the new put's time below it, dropped" if not later
-                             else "the new instance's next put"
-                             + (", its time past the old one's though 5 s behind" if offset_ms else "")),
-                     held is not None and want is not None and held.stamp == want
-                     and lastt == [("live", "kept" if later else "dropped")] and (later or offset_ms != 0),
-                     f"held {held.stamp if held else None}; {lastt}; the third put's time {gap} s from the first's")
-        try:
-            q.undeclare()
-        except Exception:  # noqa: BLE001 - closing anyway
-            pass
+        detail = (f"held {held.stamp if held else None}; {lastt}; the third put {elapsed:.3f} s after the first, "
+                  f"its time {gap} s from the first's")
+        # The merge's rule, whatever the window: the later time by the stamps
+        # (observer §4.1).
+        report.check(run, "observer §4.1: the tool keeps the later time by the stamps after the third put",
+                     held is not None and (s12 if later else old) is not None
+                     and held.stamp == (s12 if later else old)
+                     and lastt == [("live", "kept" if later else "dropped")], detail)
+        # The step's stated outcome, its premise judged on the runner's clock,
+        # not from the stamps (round 92's F-408; review-bot on PR #973).
+        step = "state.md §7 (0.69): the tool keeps the later time: "
+        if not offset_ms:
+            report.check(run, step + "the new instance's two puts on the host's clock",
+                         held is not None and s12 is not None and held.stamp == s12
+                         and lastt == [("live", "kept")], detail)
+        elif within_offset(elapsed, offset_ms / 1000):
+            report.check(run, step + "the old epoch's with the clock behind, the third put dropped",
+                         held is not None and old is not None and held.stamp == old
+                         and lastt == [("live", "dropped")], detail)
+        else:
+            report.inconclusive(run, step + "the old epoch's with the clock behind",
+                                f"F-408's premise not met: the third put came {elapsed:.3f} s after the first, not "
+                                f"within the {abs(offset_ms) / 1000:g} s offset less {F408_MARGIN_S:g} s; {detail}")
     finally:
+        # Released and undeclared whatever happened above, so that an early
+        # return leaves no GET open (review-bot on PR #973).
+        if held_q is not None:
+            held_q.release()
+        if q is not None:
+            try:
+                q.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
         for j in joiners:
             j.close()
         for o in rusts:
@@ -3677,14 +3705,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"live interop: {passed} passed, {failed} failed, "
+    print(f"live interop: {passed} passed, {failed} failed, {len(report.undecided)} inconclusive, "
           f"{len(report.known)} known deviations of the Rust owner example")
     for run, name, ok, detail in report.known:
         print(f"{'XPASS' if ok else 'XFAIL'} [{run}] {name}: {detail}")
     for run, name, ok, detail in report.rows:
         if not ok:
             print(f"FAIL [{run}] {name}: {detail}")
-    return 1 if failed else 0
+    for run, name, detail in report.undecided:
+        print(f"INCONCLUSIVE [{run}] {name}: {detail}")
+    return 1 if failed else 2 if report.undecided else 0
 
 
 if __name__ == "__main__":
