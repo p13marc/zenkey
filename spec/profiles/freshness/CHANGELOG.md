@@ -5,6 +5,56 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.2 — 2026-11-01: zk2py round 96's findings answered (#978)
+
+zk2py's round 96 read text 0.1 cold and filed six findings on it and
+the core's half, none a blocker. This version answers them, written
+against core 0.85. Each reading taken is the one the reference and zk2py
+already ran. Only the scenarios' contract changes, in both.
+
+**Changed: §2.4, its stamps (F-445, F-446).**
+- **Every member's replies** carry its last confirmation. For a member no
+  heartbeat vouched for since its put, that is the put's.
+- **The timestamps** are minted at each put of the member and at each
+  heartbeat, as core 0.85's §4.3 "Minting" says. Only the replies carry
+  them.
+- **A heartbeat's time** is the instant of the timestamp minted as it is
+  written, to the millisecond.
+
+**Changed: §2.5, what counts (F-448).** Only a **read heartbeat**, one
+read at step 4, counts.
+- One stopped at step 1, 2 or 3 moves neither the sequence nor a count
+  of divergences in a row. Step 3, the gap and the re-read say "read".
+- `apply.json`'s case of another revision's tag and a refused body
+  already read so. A new case shows it whole: a refused 6 between 5 and
+  7 leaves a gap, and another revision's tag between two divergences
+  leaves them in a row, so a read is due. It is written by hand from the
+  text, and never blessed.
+
+**Changed: §2.10, a guarded heartbeat (F-447).** "Every bit clear" is
+every vouched bit. The map, the live counts and the digests stay as the
+owner holds them, and the guard stops every write that would move them.
+The reference already sent them so. Scenarios §2 step 4 now checks the
+map and `status`'s digest.
+
+**Changed: the scenarios' contract (F-443).** §7 read `link.exposure =
+"link"` on `beacon.v2`'s `status` and `level`, which no section wrote.
+- A contract that writes it lists `link.v1` in `uses` (core E020), so
+  §7's was another revision.
+- `beacon.v2` now carries both marks, and `link.v1` in `uses`. A face
+  that exposes none ignores them, and only §7 runs a face.
+- The reference's `zenkey/tests/contracts/beacon.v2.toml` follows, and
+  its §7 test no longer marks a copy.
+
+**Changed: scenarios §3 (F-446).** H listens too. G's reply's instant,
+to the millisecond, is the time H read in the heartbeat that vouched for
+`status`.
+
+**Deliberately not changed.**
+- **No rule's keyword.** §2.4's, §2.5's and §2.10's are 0.1's.
+- **`beacon.v2`'s fingerprint moves.** It is a test contract, and no
+  published history holds it.
+
 ## `v2.md` 0.1 — 2026-11-01: `freshness.v2`, confirmed by a heartbeat (#978)
 
 Epic #975, zk2c, makes the wire bandwidth-first. `freshness.v1` confirms

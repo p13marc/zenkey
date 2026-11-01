@@ -1,0 +1,11 @@
+# core §9.8, frames: a field renamed that carries a deadband: the deadband keeps its place, so the packed rules' field_renamed alone
+[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+packed = ["old.json"]
+[resources."frames/s"]
+kind = "stream"
+type = "packed:Reading"
+frame = { records = 3, step_ms = 1000, jitter_ms = 100, keyframe_every = 3, deadband = { level = { delta = "4", max_records = 5 } } }

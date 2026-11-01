@@ -2,6 +2,8 @@
 # keep. A deadline below the span; a deadband past the deadline at its
 # period; deadbands beside a deadline with no interval stated, one each; a
 # lifespan; and a deadline below the span beside a deadband past it, two.
+# A deadline below the span beside a period that does not read gives none:
+# timing.v1 §2.2 reads that declaration invalid (cascade 8).
 [interface]
 name  = "seed"
 major = 1
@@ -40,3 +42,9 @@ kind        = "stream"
 type        = "packed:frames#Sample"
 frame       = { records = 3, step_ms = 10000, deadband = { temperature = { delta = "1", max_records = 2 } } }
 annotations = { "timing.deadline_ms" = 20000 }
+
+[resources."frames/unread"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000 }
+annotations = { "timing.deadline_ms" = 20000, "timing.period_ms" = "x" }

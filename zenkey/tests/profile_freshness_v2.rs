@@ -382,7 +382,7 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     .await;
 
     // 4. A clock ahead: the heartbeats go on, every bit clear and the time
-    // unknown.
+    // unknown, the map and the digests as the guard found them (§2.10).
     let tick = client(&ep).await;
     let ahead_session = client(&ep).await;
     let ahead_key = "zk2/lab/ahead/freshness.v2/stream/heartbeat/beacon.v2";
@@ -398,7 +398,7 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     )
     .await;
     matched(ahead.status.writer()).await;
-    ahead.status.put("up").await.unwrap();
+    let ahead_put = ahead.status.put("up").await.unwrap().stamp;
     eventually("the drift is detected", || async {
         tick.put("clock/heartbeat", "tick").await.unwrap();
         ahead.svc.minter().is_ahead()
@@ -410,11 +410,20 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     assert!(held.len() >= 2, "heartbeats go on: {}", held.len());
     for b in &held {
         assert_eq!(b.hb.time, Time::Unknown, "the time unknown while held");
+        assert!(
+            b.hb.sections[0].is_some() && b.hb.sections[1].is_none(),
+            "the map 1 0 1, as the guard found it"
+        );
         let s = b.hb.sections[2].as_ref().expect("status's section");
         assert_eq!(
             s.members,
             Members::One { vouched: false },
             "every bit clear"
+        );
+        assert_eq!(
+            s.digest,
+            Digest::of([("zk2/lab/ahead/beacon.v2/state/status", ahead_put)]),
+            "the digest as the guard found it"
         );
     }
     assert_eq!(
@@ -431,12 +440,15 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
 }
 
 /// §3: the put carries no owner's Zenoh timestamp; the reply carries the
-/// last confirmation, which ages it for a GET reader.
+/// last confirmation, which ages it for a GET reader, its instant a
+/// heartbeat's time to the millisecond (core §4.3, "Minting").
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s3_a_get_readers_age_from_the_confirmation_stamp() {
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
+    let hs = client(&ep).await;
+    let (_h, beats) = heartbeats(&hs, HB_KEY).await;
     let c = reader(&rs, "lab/beacon");
     let (_sub, log, _) = listen(&c, STATUS).await;
     let o = owner(&os, "lab/beacon", &[], 0, None).await;
@@ -490,6 +502,22 @@ async fn s3_a_get_readers_age_from_the_confirmation_stamp() {
             .verdict,
         Verdict::Fresh,
         "3 s after its put"
+    );
+    // The heartbeat that confirmed it has the reply's instant as its time,
+    // truncated to the millisecond; H may hear it just after the reply.
+    let reply_ms = at
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("after the Unix epoch")
+        .as_millis() as i128;
+    tokio::time::sleep(JITTER).await;
+    assert!(
+        beats.lock().unwrap().iter().any(|b| {
+            b.hb.sections[2]
+                .as_ref()
+                .is_some_and(|s| s.members == Members::One { vouched: true })
+                && b.hb.time.unix_ms(0) == Some(reply_ms)
+        }),
+        "a heartbeat vouching for status at the reply's instant, {reply_ms} ms"
     );
 
     // 2. The bit cleared; 3.5 s later, stale.
@@ -725,16 +753,9 @@ link_bps     = 64000
         "beacon".to_owned(),
         vec!["beacon.v2".to_owned(), "freshness.v2".to_owned()],
     );
-    let mut b = contract("beacon.v2");
-    for r in &mut b.resources {
-        if ["status", "level"].contains(&r.template.as_str()) {
-            r.annotations.insert(
-                link::EXPOSURE.to_owned(),
-                serde_json::Value::String("link".to_owned()),
-            );
-        }
-    }
-    d.add_contract(&b);
+    // The contract the owner runs, as the conventions write it: `status`
+    // and `level` marked `link.exposure = "link"`.
+    d.add_contract(&contract("beacon.v2"));
     d.add_contract(zenkey::heartbeat::implementation().contract());
     let plans = link::plan(&policy, &d).expect("a plan");
     let rf = &plans[0];

@@ -158,6 +158,14 @@
       }
     },
     {
+      "note": "a heartbeat on its key: a body after the seq, never a record of the resource's type (observer §7.3)",
+      "key": "zk2/lab/beacon/freshness.v2/stream/heartbeat/beacon.v2",
+      "hex": "c5000100000700000e103e91138cc7be",
+      "expect": {
+        "reads": "heartbeat"
+      }
+    },
+    {
       "note": "a frame on a stream key with a namespace in front",
       "key": "prod/zk2/rf0/modem/modem.v3/stream/frames/link",
       "hex": "a00001000007",

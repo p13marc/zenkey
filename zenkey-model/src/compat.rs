@@ -533,14 +533,56 @@ fn compare_resource(o: &Value, n: &Value, ro: &Revision, rn: &Revision, at: &str
             v.push(Class::Review, rule, at, format!("`{field}` changed"));
         }
     }
-    compare_frame(o.get("frame"), n.get("frame"), at, v);
+    let fields = if o.get("frame").is_some() && n.get("frame").is_some() {
+        (field_names(ro, &o["type"]), field_names(rn, &n["type"]))
+    } else {
+        (None, None)
+    };
+    compare_frame(o.get("frame"), n.get("frame"), &fields, at, v);
+}
+
+/// A packed type's field names, in its record's order: where a frame form
+/// places each deadband (core §7.7). `None` for a type that is not packed,
+/// or whose artifact does not lay it out.
+fn field_names(r: &Revision, t: &Value) -> Option<Vec<String>> {
+    if s(&t["kind"]) != "packed" {
+        return None;
+    }
+    let doc = match r.schemas.get(s(&t["schema"]))? {
+        Schema::Json(doc) => doc,
+        Schema::Protobuf(_) => return None,
+    };
+    let layout = crate::packed::PackedDoc::read(doc)
+        .types
+        .remove(s(&t["name"]))
+        .flatten()?;
+    Some(
+        layout
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                crate::packed::Item::Field(f) => Some(f.name.clone()),
+                crate::packed::Item::Marker => None,
+            })
+            .collect(),
+    )
 }
 
 /// A frame resource's table (core §9.8, "Frames"): `frame` toggled, its
 /// shape or a deadband changed, all breaking, since each moves the
-/// frame's tag; `keyframe_every`, review. The record type is the packed
+/// frame's tag; `keyframe_every`, review. A deadband is compared by its
+/// field's place in the record, `fields` each revision's field names, as
+/// the frame form lists it, so a field renamed keeps its deadband; by
+/// name where a record does not lay out, or the two differ in length,
+/// which the layout's own change reports. The record type is the packed
 /// rules', compared as the resource's type.
-fn compare_frame(o: Option<&Value>, n: Option<&Value>, at: &str, v: &mut Verdict) {
+fn compare_frame(
+    o: Option<&Value>,
+    n: Option<&Value>,
+    fields: &(Option<Vec<String>>, Option<Vec<String>>),
+    at: &str,
+    v: &mut Verdict,
+) {
     let (o, n) = match (o, n) {
         (None, None) => return,
         (Some(o), Some(n)) => (o, n),
@@ -565,7 +607,14 @@ fn compare_frame(o: Option<&Value>, n: Option<&Value>, at: &str, v: &mut Verdict
             "`records`, `step_ms` or `jitter_ms` changed: the bits and the times move",
         );
     }
-    if o["deadband"] != n["deadband"] {
+    let deadbands_differ = match fields {
+        (Some(old), Some(new)) if old.len() == new.len() => old
+            .iter()
+            .zip(new)
+            .any(|(a, b)| o["deadband"].get(a.as_str()) != n["deadband"].get(b.as_str())),
+        _ => o["deadband"] != n["deadband"],
+    };
+    if deadbands_differ {
         v.push(
             Class::Breaking,
             "deadband_changed",

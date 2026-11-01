@@ -2152,7 +2152,9 @@ fn link_v2_transport() {
         let peer = case.get("peer").map(stated_transport);
         let mut findings = link::check_transport(&policy, &router, peer.as_ref());
         if let Some(c) = case.get("catalog") {
-            findings.extend(link::check_catalog(&policy, &link::catalog_id(c)));
+            let held = link::catalog_id(&c.to_string())
+                .unwrap_or_else(|r| panic!("{what}: core §8.6 refuses the catalog: {r}"));
+            findings.extend(link::check_catalog(&policy, &held));
         }
         link::sort_findings(&mut findings);
         expect(

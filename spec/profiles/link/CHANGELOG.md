@@ -7,6 +7,66 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.2 — 2026-11-01: the catalog read as core §8.6 reads one (#988)
+
+zk2py's round 96 found `transport.json`'s catalogs contradicting core
+§8.6 (F-449). Each entry held a `fingerprint`, and each catalog an empty
+`lineage`, which §8.6 refuses (`member`). Yet the fixture compared their
+ids. Core §8.6 landed at 0.79, before this text's 0.1, whose entry said
+it had not.
+
+**Changed: §2.19, `catalog_mismatch`.**
+- **The catalog** given is read as core §8.6 reads one, and its id is
+  §8.6's.
+- **A successor's** id is its own, so a far side holding the policy's
+  catalog's successor is a mismatch too. That is the fixture's second
+  case, now a successor by §8.6's lineage.
+- **A file §8.6 refuses** holds no id to compare. A tool names the
+  refusal and does not ask, which §5's row says.
+
+**Fixtures.** `v2/transport.json`'s catalogs are §8.6 documents:
+`radio.v1` at its fingerprint, id `feb61e3d`, and its successor adding
+`health.v1`, id `62129a35`. The policies name `feb61e3d`.
+
+**The reference.** `zenkey_model::link::catalog_id` reads the text
+through `zenkey_model::catalog`. `zenctl check face --catalog` refuses a
+file §8.6 refuses, exit 2, naming the refusal. Its trycmd's catalog is a
+§8.6 document too.
+
+**Written against core 0.85,** where it said 0.77. The index's row
+follows.
+
+**Deliberately not changed.** The question, its code and its severity.
+
+## 0.12 — 2026-11-01: a heartbeat over several revisions (#978)
+
+zk2py's round 96 asked how §2.9 reads two revisions of one interface, one
+using `freshness.v1` and one `freshness.v2` (F-450). This version states
+the reading the reference and zk2py already run. No rule changed.
+
+**Changed: §2.9, "Which interfaces have one".** A listed interface has a
+heartbeat when a revision given uses `freshness.v2`, and the revisions
+read together (§2.3) give it a collection. A revision using
+`freshness.v1` beside it takes none of it away.
+
+**Changed: §2.12, whichever revision a service runs.**
+- The heartbeat is evidence for each listed service implementing the
+  interface. The deployment names interfaces, not revisions, so the plan
+  cannot tell which one a service runs.
+- A service running the `freshness.v1` revision sends no heartbeat, but
+  its re-puts are evidence of their own. A key nobody puts is never
+  fresh, and stale is never down (core R7).
+
+**Fixtures.** `plan.json` gains a case: the heartbeat case's deployment,
+with `beacon.v2` given as two revisions, one using each text. Its plan is
+the one-revision case's. It is written by hand, and never blessed.
+
+**Deliberately not changed.**
+- **The reading F-450 offered**, evidence only where every revision uses
+  `freshness.v2`. A service running the `freshness.v2` revision puts no
+  state again. With state evidence alone, it would read stale while it
+  runs.
+
 ## link.v2 0.1 — 2026-11-01: the face's transport, per medium (#988, L1 and L2)
 
 `link.v1` left zenoh's transport settings to the deployment. At zenoh's

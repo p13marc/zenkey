@@ -21,12 +21,12 @@ named after it).
   name  = "beacon"
   major = 2
   minor = 0
-  uses  = ["freshness.v2"]
+  uses  = ["freshness.v2", "link.v1"]
 
   [resources.status]                         # one member: a heartbeat every 0.95 s
   kind        = "state"
   type        = { raw = "text/plain" }
-  annotations = { "freshness.ttl_s" = 2 }
+  annotations = { "freshness.ttl_s" = 2, "link.exposure" = "link" }
 
   [resources."peer/{peer}"]                  # templated, best_effort under loss
   kind        = "state"
@@ -56,12 +56,14 @@ named after it).
   [resources.level]                          # a stream, ttl 1 s
   kind        = "stream"
   type        = { raw = "text/plain" }
-  annotations = { "freshness.ttl_s" = 1 }
+  annotations = { "freshness.ttl_s" = 1, "link.exposure" = "link" }
   ```
 
   Its collections, in map order, are `state/peer/{peer}`, `state/route`
   and `state/status`. The shortest horizon is 2 s, so the heartbeats are
-  at most 1 s apart.
+  at most 1 s apart. `link.exposure` marks `status` and `level` to cross
+  a face (`link.v1` §2.2). So the contract lists `link.v1`. Only §7 runs
+  a face.
 - **The owner** is `lab/beacon`, implementing `beacon.v2` with every
   resource exposed but `route`: it does not hold the capability
   `routing`. Its heartbeat key is
@@ -71,9 +73,9 @@ named after it).
 - **S** subscribes to `state/status` or `state/peer/*` of `lab/beacon`, and
   to its heartbeat key. It records each delivery's arrival on its
   monotonic clock. "S judges" applies v2.md §2.5 at that instant.
-- **G** GETs the owner's state keys as core S4 says, and "G judges"
-  applies v2.md §2.6 to the reply, the delta at 500 ms, on the
-  deployment's word: every session runs on one host.
+- **G** GETs the owner's state keys as core S4 says. "G judges" applies
+  v2.md §2.6 to the reply, the delta at 500 ms, on the deployment's word:
+  every session runs on one host.
 - **Jitter.** The reference allows 200 ms on loopback.
 
 ## §1 The cadence, and the bits (§2.4)
@@ -123,15 +125,16 @@ named after it).
   heartbeat that vouched for it.
 - **Step 3.** S judges `status` fresh again from the next heartbeat.
 - **Step 4.** H2 still hears heartbeats while the guard holds, each bit
-  clear and the time unknown, all 42 bits set. S2 judges `status` stale
-  more than 2 s after the guard held.
+  clear and the time unknown, all 42 bits set. Each keeps its map,
+  `1 0 1`, and `status`'s digest, its put's stamp's (§2.10). S2 judges
+  `status` stale more than 2 s after the guard held.
 - **Step 5.** A silent heartbeat: S judges `status` stale more than 2 s
   after the last heartbeat. It never reports the owner down.
 
 ## §3 A GET reader's age from the confirmation stamp (§2.4, §2.6)
 
 **Steps.**
-1. The owner puts `status` = `up`. S listens, and 3 s later G GETs
+1. The owner puts `status` = `up`. S and H listen, and 3 s later G GETs
    `status`.
 2. The owner clears `status`'s bit. 3.5 s later, G GETs `status`.
 
@@ -139,9 +142,10 @@ named after it).
 - **The put** reaches S stamped by R1's clock, if at all: the owner set
   no Zenoh timestamp (core §4.3's table).
 - **Step 1.** G's reply carries a Zenoh timestamp of the owner's zid,
-  later than the put and within 1 s plus jitter of G's clock: the last
-  heartbeat that vouched for it. G judges `status` fresh, 3 s after its
-  put.
+  later than the put and within 1 s plus jitter of G's clock. It is the
+  last heartbeat's that vouched for `status`. To the millisecond, its
+  instant is the time H read in that heartbeat (core §4.3). G judges
+  `status` fresh, 3 s after its put.
 - **Step 2.** The reply's stamp is the last confirmation before the bit
   cleared. G judges `status` stale: its age is above ttl + δ.
 
@@ -204,10 +208,11 @@ loss.
 ## §7 Across a face: liveness, and no downsampling (§2.9; link.v1 §2.8, §2.12)
 
 **Setup.** A face policy names one face, `rf`, of R1, toward the far
-principal F, `expose = "link"` and `interval_s = 2`. `beacon.v2`'s
-`status` and `level` read `link.exposure = "link"` there. The deployment
-lists `lab/beacon` implementing `beacon.v2` and `freshness.v2`. R1 runs
-the plan's downsampling block. F is a client of R1 over the face's link
+principal F, `expose = "link"` and `interval_s = 2`. `beacon.v2` marks
+`status` and `level` `link.exposure = "link"` (the conventions). The
+owner, F and the generator are all given it. The deployment lists
+`lab/beacon` implementing `beacon.v2` and `freshness.v2`. R1 runs the
+plan's downsampling block. F is a client of R1 over the face's link
 protocol.
 
 **Steps.**

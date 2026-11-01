@@ -1834,13 +1834,15 @@ pub fn check_transport(
     out
 }
 
-/// The id of a deployment catalog (v2 §2.19): the first 4 bytes of the
-/// sha256 of the document's JCS bytes, as 8 lowercase hex digits, as #980's
-/// C1 defines it for core §8.6.
-#[must_use]
-pub fn catalog_id(document: &Value) -> String {
-    let id = crate::schema::sha256_id(&crate::schema::jcs(document));
-    id.trim_start_matches("sha256:")[..8].to_owned()
+/// The id of the deployment catalog the far side holds (v2 §2.19): the
+/// catalog read as core §8.6 reads one, and its id §8.6's, as 8 lowercase
+/// hex digits.
+///
+/// # Errors
+/// The first refusal of §8.6's reading: such a file is no catalog, and
+/// holds no id to compare.
+pub fn catalog_id(text: &str) -> Result<String, crate::catalog::Refusal> {
+    crate::catalog::Catalog::parse(text).map(|c| c.id().hex())
 }
 
 /// `catalog_mismatch` (v2 §2.19): the id of the catalog the far side holds,
