@@ -3,7 +3,7 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.76 — 2026-11-01: keys across a face (#980)
+## 0.78 — 2026-11-01: keys across a face (#980)
 
 Epic #975, zk2c, makes the wire bandwidth-first. #989 measured today's wire
 on zenoh-modem's simulated radio. Its largest miss was a stream put

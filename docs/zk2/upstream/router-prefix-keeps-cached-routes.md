@@ -3,7 +3,7 @@
 **Status: not filed.** Drafted on 2026-11-01 for zenkey #980 (chunk
 C1b), from zenoh 1.10.1's source and #989's wire baseline on zenoh-modem's
 simulated radio. It is kept, as the other drafts here are, as a record of
-behaviour zk2 designs around. Core 0.76 records it in Appendix B ("Keys
+behaviour zk2 designs around. Core 0.78 records it in Appendix B ("Keys
 across a face", fact 4). zk2's rule (core §8.5) has a far consumer
 subscribe by exact keys, so the prefixes a put rides are the far side's own
 declarations, which do invalidate the routes.

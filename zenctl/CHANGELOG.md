@@ -8,12 +8,12 @@ sitting.
 
 ## Unreleased (`main`, zk2) — `--across-face`: a raw observer's scope across a constrained face (#980, C1b)
 
-Core 0.76 §8.5: a put toward a face rides the deepest key expression
+Core 0.78 §8.5: a put toward a face rides the deepest key expression
 declared on it for a prefix of its key, and on a constrained face only the
 far side's own subscriptions declare one. Under `<ns>/zk2/**` each put
 carries its key's text after `zk2`; under its exact key, a 1- or 2-byte
 scope (`spec/scenarios/constrained.md` §7: 82 B a put against 45–46 B).
-Observer text 0.16 §7.5 asks a tool there to subscribe by the scopes the
+Observer text 0.18 §7.5 asks a tool there to subscribe by the scopes the
 contracts in hand give.
 
 | Before | Now | Notes |

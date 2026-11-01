@@ -13,12 +13,12 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
-## 0.16 — 2026-11-01: §7.5, subscribing across a face (#980)
+## 0.18 — 2026-11-01: §7.5, subscribing across a face (#980)
 
-Core 0.76 adds §8.5's "Keys across the face": a put toward the far side of
+Core 0.78 adds §8.5's "Keys across the face": a put toward the far side of
 a constrained face can count only on the prefixes the far side's own
 subscriptions declared. This text says what a tool there does, and is
-written against core 0.76.
+written against core 0.78.
 
 **Added: §7.5, "Subscribing across a face".**
 - **The rule.** A tool across a constrained face SHOULD subscribe as core

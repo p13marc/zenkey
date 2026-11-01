@@ -136,7 +136,7 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   selector, exit 2; the three are the data plane but `@op` and `@zk`,
   `observer.md` §8.2, #924; `rate` and `field` keep one selector; with
   `--across-face SYSTEM/SERVICE`, repeatable, on all eight, the scope is
-  `cmd::zk2::FaceScope`'s, core 0.76 §8.5 and observer 0.16 §7.5, #980
+  `cmd::zk2::FaceScope`'s, core 0.78 §8.5 and observer 0.18 §7.5, #980
   C1b: one selector per resource of the contracts in hand under each
   address, an exact key or a template's key with each parameter a
   wildcard, never `<ns>/zk2/**`, a typed or rule selector narrowed to it

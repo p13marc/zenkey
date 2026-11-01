@@ -3,7 +3,7 @@
 **Status: not filed.** Drafted on 2026-11-01 for zenkey #980 (chunk
 C1b), from zenoh 1.10.1's source and the reference's measurement. It is
 kept, as the other drafts here are, as a record of behaviour zk2 designs
-around. Core 0.76 records it in Appendix B ("Keys across a face", fact
+around. Core 0.78 records it in Appendix B ("Keys across a face", fact
 5). zk2 accepts the cost: an S4 reply, a re-read and a call's reply each
 cross a constrained face with their key's text, and only fewer replies
 (one snapshot per collection, zenkey #977) make them cheaper.
