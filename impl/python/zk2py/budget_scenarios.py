@@ -480,8 +480,14 @@ def section3(report: Report) -> None:
         n = [0]
 
         def put() -> None:
+            # core §4.3 (0.73): the envelope a stream sample carries, its
+            # seq the key's, which the reader reads through (observer §7.3);
+            # raw digits under zenoh/bytes would be a refused envelope, and
+            # int() of nothing would raise in the callback (the mend after
+            # round 93)
             n[0] += 1
-            pub.put(str(n[0]).encode())
+            pub.put(zk2c.mutation(zk2c.InBand(32, 0xB0D6E701, n[0] % 2**24), str(n[0]).encode()),
+                    encoding=zk2c.ENCODING)
 
         time.sleep(0.5)
         for _ in range(5):

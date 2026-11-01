@@ -145,7 +145,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "its attachment (state_pairings §1, §2) (round 93, core 0.73)"),
     ("owner", "core §4.2", "On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp", MET,
      "owner.keeps_timestamp, §4.3's table read from the contract, and Owner.mint on each such mutation  "
-     "(state_pairings §1 expected 5) (round 93, core 0.73)"),
+     "(state_pairings §1 expected 5) (round 93, core 0.73); a test rig's stamp_table=False excepted, timing.v1  "
+     "scenarios §5's owner that breaks it on purpose (the mend after round 93)"),
     ("owner", "core §4.2", "Owner: a GET reply MUST carry the in-band stamp", MET,
      "owner.Owner.answer_state: a reply as the bytes the mutation put, a reply_del with the delete's  "
      "attachment (state_pairings §1 expected 2, §2) (round 93, core 0.73)"),

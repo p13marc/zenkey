@@ -74,6 +74,23 @@ EXACT = ["lab/safety", "lab/teleop", "lab/autopilot"]
 #: not here fails the run; one here that passes prints XPASS.
 KNOWN: dict[tuple[str, str], str] = {}
 
+#: F-422 (the mend after round 93): §11's X beside the owner example's
+#: commanders. Its ``commander raw on`` puts ``standby <n>`` with no zk2c
+#: envelope, which every reader refuses since core 0.73 (§4.3, observer
+#: §7.3): no sample, so no ``not_incumbent`` count, and the control's X no
+#: arrival. zk2py's X keeps the envelope (F-422's reading (a)). The checks
+#: that read X, in the two pairings whose commanders are the owner example's.
+F422 = ("F-422: the owner example's commander raw on puts no zk2c envelope, a refused sample for every reader "
+        "since core 0.73, so X's puts are never judged not_incumbent")
+F422_CHECKS = ("step 1: X's raw puts carry the payload standby <n>", "Expected 1 (", "beside step 2 (",
+               "beside step 2, the control (")
+
+
+def _known(section: str, name: str) -> str | None:
+    if section.startswith("§11 a governed commander's standby [rs→") and name.startswith(F422_CHECKS):
+        return F422
+    return KNOWN.get((section, name))
+
 
 class Report:
     """Each check's row: its section, name, outcome, detail, and the open
@@ -88,7 +105,7 @@ class Report:
     def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
         from .checks import tag
 
-        known = KNOWN.get((section, name))
+        known = _known(section, name)
         self.rows.append((section, name, ok, detail, known))
         why = f" (known: {known})" if known else ""
         print(f"{tag(ok, known)} [{section}] {name}{why}" + (f": {detail}" if detail else ""), flush=True)
@@ -676,7 +693,14 @@ class RawSafety:
             i += 1
             if self.putting.is_set() and not self.stop.is_set():
                 try:
-                    self.s.put("zk2/lab/safety/steer.v1/stream/cmd", f"safety {self.n}".encode())
+                    # Core §4.3 (0.73): the envelope an owner writes, a run
+                    # of its own and the key's seq, so a reader reads it
+                    # (observer §7.3); raw bytes under zenoh's default
+                    # Encoding would be a refused envelope, no arrival (the
+                    # mend after round 93).
+                    self.s.put("zk2/lab/safety/steer.v1/stream/cmd",
+                               zk2c.mutation(zk2c.InBand(32, 0x5AFE0001, self.n % 2**24),
+                                             f"safety {self.n}".encode()), encoding=zk2c.ENCODING)
                 except Exception:  # noqa: BLE001 - closed while putting
                     return
                 self.n += 1

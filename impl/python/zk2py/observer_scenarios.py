@@ -443,8 +443,12 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -
     report.check(sec, "step 5, zk2py's echo tool --format ndjson: one row per sample, step 1's three, and no row "
                       "but a sample's",
                  ncode == 0 and sorted({_kind(k) for k in nkeys}) == ["events", "state", "stream"] and len(rows) == 3
-                 and all(set(x) == {"key", "zk2", "kind", "delete", "bytes", "encoding", "declared_type", "sniffed"}
-                         for x in rows)
+                 # observer 0.14, 0.15 (round 93): each row's envelope, a run
+                 # and a seq, and undecodable for a refused one (the mend
+                 # after round 93)
+                 and all(set(x) == {"key", "zk2", "kind", "delete", "bytes", "encoding", "declared_type",
+                                    "envelope", "undecodable", "sniffed"} for x in rows)
+                 and all(x["envelope"] is not None and x["undecodable"] is None for x in rows)
                  and len(rows) == len(n.lines()), f"exit {ncode}, {nkeys}, {len(n.lines())} lines")
     report.check(sec, "step 5, zk2py's echo tool --format ndjson: the scope's exclusion stated on stderr, a stream "
                       "of rows having no place for it",

@@ -61,6 +61,7 @@ from typing import Any
 
 from . import freshness as fr
 from . import link
+from . import zk2c
 
 REPO = Path(__file__).resolve().parents[3]
 EXAMPLE = REPO / "examples" / "zk2" / "link"
@@ -857,17 +858,24 @@ def section4(report: Report) -> None:
 
 # -- §5 ------------------------------------------------------------------------------
 
-def _seed(session: Any, held: dict[str, tuple[int, bytes | None]]) -> None:
+def _seed(session: Any, held: dict[str, tuple[Any, bytes | None]]) -> None:
     """A late joiner's seed (core §4.2) of the granted state selectors,
-    merged into ``held`` by stamp: a reply_del removes a member."""
+    merged into ``held`` by §4.2's merge: by the in-band stamp each reply's
+    envelope carries, a reply_del's its delete envelope (core §4.3, 0.73),
+    a reply with none by its Zenoh timestamp; a reply_del removes a member.
+    Before the mend after round 93 it merged by the Zenoh timestamp alone,
+    which a state off §4.3's table no longer carries."""
     from . import live
+    from . import seed as sd
 
     for sel in (f"{base_of()}/state/oper", f"{base_of()}/state/peers/*"):
         for r in live.get_state(session, sel).replies:
-            stamp = r.stamp_ns or 0
-            if r.key in held and held[r.key][0] >= stamp:
+            if r.refusal is not None:
+                continue  # observer §7.3: undecodable, never merged
+            mark = sd.Mark(r.inband, sd.Stamp.of(r.stamp))
+            if r.key in held and not sd.replaces(mark, held[r.key][0], "state"):
                 continue
-            held[r.key] = (stamp, None if r.deleted else r.payload)
+            held[r.key] = (mark, None if r.deleted else r.payload)
 
 
 def section5(report: Report) -> None:
@@ -998,14 +1006,23 @@ def _asks(session: Any, o: Any) -> dict[str, Any]:
             "descriptor": len([d for d in live.get_descriptor(session, o.instance_key) if d.ok])}
 
 
+def _stranger_put(session: Any, key: str, run: int, seq: int, text: str) -> None:
+    """A put on a stream key that some other service owns, as an owner
+    writes one since core 0.73: core §7.5's envelope under ``zenoh/bytes``,
+    on a 32-bit run of the writer's own. L reads its record (observer §7.3,
+    0.14); a raw put under zenoh's default Encoding, ``zenoh/bytes``, would
+    be a refused envelope there, no payload (the mend after round 93)."""
+    session.put(key, zk2c.mutation(zk2c.InBand(32, run, seq), text.encode()), encoding=zk2c.ENCODING)
+
+
 def _puts(w: World, sessions: dict[str, Any]) -> dict[str, int]:
     """§7 step 1: "Then, the owner silent, each puts five times on
     zk2/lab/radio-a/radio.v1/stream/air/dropped_total, a key only lab/radio-a
     may write … and L counts what reaches it"."""
     key = f"{base_of()}/stream/air/dropped_total"
-    for who, s in sessions.items():
+    for n, (who, s) in enumerate(sessions.items()):
         for i in range(5):
-            s.put(key, f"put {who} {i}".encode())
+            _stranger_put(s, key, 0x7A000000 + n, i, f"put {who} {i}")
             time.sleep(0.05)
     time.sleep(1.0)
     return {who: sum(1 for x in w.ls.of(key) if x.payload.startswith(f"put {who} ".encode())) for who in sessions}
@@ -1704,7 +1721,7 @@ def _g_puts(w: World) -> dict[str, int]:
     for name in ("dropped_total", "frames_total"):
         key = f"{base_of()}/stream/air/{name}"
         for i in range(5):
-            w.g.put(key, f"put G {name} {i}".encode())
+            _stranger_put(w.g, key, 0x7A0000FF, i, f"put G {name} {i}")
             time.sleep(0.05)
         time.sleep(1.0)
         out[name] = sum(1 for x in w.ls.of(key) if x.payload.startswith(f"put G {name} ".encode()))

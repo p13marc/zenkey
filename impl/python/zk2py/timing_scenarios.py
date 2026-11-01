@@ -522,6 +522,11 @@ def _unstamped_step(bus: Bus, hlc: bool, beside_hlc: bool = False) -> tuple[Any,
             lambda s: beside.ids.append(None if s.timestamp is None else str(s.timestamp.get_id()))))
     time.sleep(0.3)
     o = bus.owner(hlc=hlc)
+    # Core 0.73: cmd, declaring a lifespan, is on §4.3's table, so zk2py's
+    # owner sets its stamp from its minting clock, HLC or none; steps 1 and
+    # 2 break that MUST as §5's setup says ("sets no stamp on its puts"),
+    # and step 3's control is the HLC's (the mend after round 93).
+    o.stamp_table = hlc
     _held_by(c, o)
     sent = publish_every(o, CMD, 0.1, 2.0, payload=_payload_10s_old)
     _sleep_until(sent[-1] + 200 * MS)
@@ -844,7 +849,10 @@ def section_hlc(report: Report) -> None:
         got: list[Any] = []
         sub = x.declare_subscriber(CMD, zenoh.handlers.Callback(lambda s: got.append(s.timestamp)))
         time.sleep(0.3)
-        o = bus.owner()
+        # Core 0.53 App. B's measurement is of a session whose HLC is on;
+        # since 0.73 an owner's session runs without one unless asked (§8.2;
+        # the mend after round 93)
+        o = bus.owner(hlc=True)
         clock = stamped_clock(o.session, 300 * MS)
         for _ in range(5):
             o.publish(CMD, b"ahead", timestamp=clock())

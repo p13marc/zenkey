@@ -346,6 +346,11 @@ class PyPace:
     def stamp(self, mode: str) -> None:
         with self.lock:
             self.mode = mode
+        # Core 0.73: cmd, declaring a lifespan, is on §4.3's table, so the
+        # owner stamps it from its minting clock unless told not to; "none"
+        # is §5's owner that "sets no stamp on its puts" (the mend after
+        # round 93).
+        self.o.stamp_table = mode != "none"
 
     def published(self) -> dict[str, int]:
         with self.lock:
@@ -997,11 +1002,18 @@ def section4(report: Report, oi: str, ci: str) -> None:
 
 def section5(report: Report, oi: str, ci: str) -> None:
     sec = f"§5 [{oi}→{ci}]"
+    import zenoh
+
     for step, timestamping, hlc in (("1", True, False), ("2", False, False), ("3", True, True)):
         bus = Bus(timestamping=timestamping)
         try:
             c = bus.reader(ci, RID_CMD, 100)
             c.track_presence(True)
+            # What the owner puts, read as observer §7.3 reads it: whether
+            # each sample carries core §7.5's envelope (core 0.73)
+            tapped: list[Any] = []
+            bus.client().declare_subscriber(CMD, zenoh.handlers.Callback(
+                lambda s: tapped.append(zk2c.read_put(str(s.key_expr), str(s.encoding), s.payload.to_bytes()))))
             time.sleep(0.3)
             o = bus.owner(oi, hlc=hlc)
             held = _wait(lambda: c.holds_zid(o.zid), 3.0)
@@ -1011,6 +1023,17 @@ def section5(report: Report, oi: str, ci: str) -> None:
             time.sleep(2.0)
             o.pause("cmd")
             time.sleep(0.2)
+            if tapped and all(t.refused for t in tapped):
+                # The owner example's `timing stamp none` puts its text with
+                # no envelope under zenoh/bytes: each sample a refused
+                # envelope that no reader hears (observer §7.3), so §5 is
+                # not run with it. The black box's drive, not the spec.
+                report.note(sec, f"step {step} not run: the owner example's `timing stamp none` puts no zk2c "
+                                 f"envelope ({len(tapped)} samples, each refused {tapped[0].refusal}), which core "
+                                 f"§4.3 asks of every stream put since 0.73; no reader hears them")
+                c.close()
+                o.close()
+                continue
             arr = c.arrivals(CMD)
             reasons = sorted({a.reason for a in arr})
             handed = sum(1 for a in arr if a.delivered)
@@ -1738,7 +1761,11 @@ def section6_stray(report: Report, oi: str) -> None:
             n = 0
             while not stop.is_set() and nxt < later + 3 * NS + 300 * MS:
                 _sleep_until(nxt)
-                pub.put(str(n).encode())
+                # core §4.3 (0.73): an envelope on a run of the stray's own,
+                # so the readers read an arrival (observer §7.3); R1 still
+                # stamps it (the mend after round 93)
+                pub.put(zk2c.mutation(zk2c.InBand(32, 0x57A70001, n % 2**24), str(n).encode()),
+                        encoding=zk2c.ENCODING)
                 n += 1
                 nxt += 100 * MS
 

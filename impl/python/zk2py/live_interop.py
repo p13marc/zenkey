@@ -1924,7 +1924,7 @@ def run_python_hostid(report: Report, exe: Path) -> None:
     from .contract import load_contract
     from .descriptor import check_descriptor
     from .hostid_scenarios import M1, SYSTEM, make_root, temps
-    from .owner import Owner as PyOwner, resolve_providers
+    from .owner import Owner as PyOwner, keeps_timestamp, resolve_providers
 
     base_dir = tempfile.mkdtemp(prefix="zk2py-hostid-")
     r1, ep, _ = _r1()
@@ -1999,11 +1999,20 @@ def run_python_hostid(report: Report, exe: Path) -> None:
         peer = consumer.role_keys("peer", "zk2py_echo.v1", "state/health")
         st = live.get_state(consumer.session, peer[0])
         who = [live.attribute_stamp(r.stamp_id, rdoc) for r in st.replies]
+        # Core 0.73 (#976; the mend after round 93): state/health is off
+        # §4.3's table, so its reply carries no Zenoh timestamp, and S1's
+        # attribution is not asked of it (observer §4.4). The owner's in-band
+        # stamp is: its run is the one its descriptor states (§3.3).
+        on_table = keeps_timestamp(echo, next(r for r in echo.canonical["resources"] if r["template"] == "health"))
+        runs = [None if r.inband is None else r.inband.run_hex() for r in st.replies]
         report.check(run, f"through peer's resolved binding {want}/*, a state GET (S4) answers the Rust owner's "
-                          "value alone, attributed to it by meta.zid",
+                          "value alone, under the run its descriptor states (off §4.3's table, no Zenoh timestamp "
+                          "to attribute by meta.zid, observer §4.4)",
                      [(r.key, r.payload) for r in st.replies]
-                     == [(f"zk2/{want}/echo/zk2py_echo.v1/state/health", b"ok")] and who == ["owner"],
-                     f"{peer} → {[(r.key, r.payload) for r in st.replies]} {who}")
+                     == [(f"zk2/{want}/echo/zk2py_echo.v1/state/health", b"ok")]
+                     and who == (["owner"] if on_table else ["unstamped"]) and runs == [rdoc.get("run")],
+                     f"{peer} → {[(r.key, r.payload) for r in st.replies]} {who}; runs {runs}, descriptor's "
+                     f"{rdoc.get('run')}; on the table {on_table}")
         up = consumer.role_keys("upstream", "zk2py_echo.v1", "@op/echo")
         res = live.call(consumer.session, up[0], b"ping")
         report.check(run, f"through upstream's resolved binding {want}/echo, the Rust owner's @op/echo answers "

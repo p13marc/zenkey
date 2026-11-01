@@ -635,6 +635,11 @@ class Owner:
         #: runs and runs its session's HLC (core §4.3, §8.2's exception)
         self.candidate = any("redundancy.v1" in c.canonical["uses"] for c in contracts)
         self.hlc = self.candidate if hlc is None else hlc
+        #: core §4.2's MUST to set a Zenoh timestamp on §4.3's table: False
+        #: is a test rig's break of it ("sets no stamp on its puts: it breaks
+        #: §2.6's MUST, as this section means it to", timing.v1 scenarios
+        #: §5), never an owner's posture
+        self.stamp_table = True
         #: core §4.3 (0.73): the run record, the run written under now, the
         #: runs this owner used, the next state-and-event seq, and each
         #: stream key's next seq in the run
@@ -836,6 +841,8 @@ class Owner:
         """Whether ``key``'s resource carries a Zenoh timestamp the owner
         sets (core §4.3's table): a candidate's every put, or
         :func:`keeps_timestamp`."""
+        if not self.stamp_table:
+            return False
         if self.candidate:
             return True
         cr = self._resource_of.get(key) or self._member_of.get(key)

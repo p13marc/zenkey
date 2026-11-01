@@ -22765,3 +22765,88 @@ none gives evidence its text does not cite.
   - **Contradiction:** F-420 (S7's seq that never wraps).
   - **Index:** F-419. **Changelog:** F-421.
 - **F-365** stays open as #965's.
+
+## At core 0.74 and desired.v1 0.13 (#976, mend pass)
+
+A mend pass, not a round. It read core 0.74's and `desired.v1` 0.13's
+changelog entries and the sentences they name: core §8.2's session
+posture, §3.3's descriptor put, §4.3's run record, its no reuse and its
+MUST NOT on the seq, S7's row, `RULES.md`'s two entries, `types.md` §1,
+and `desired.v1` scenarios §6. Nothing else was read cold, and no "hard to
+read" finding is kept. The black boxes are round 93's, built at core 0.73,
+and their source was never read. Every keyword sentence of `core.md`,
+`observer.md`, `desired.v1` and the two scenario files was diffed between
+3385ed41 (round 93's merge) and dcd5f968: two changed, §4.3's "No wrap"
+and S7's row, each as the 0.74 entry says.
+
+### F-414 to F-421
+
+| | Status | How |
+|---|---|---|
+| F-414 | **resolved** | §8.2: "A timestamp its session adds falls under the posture below. So does one the owner sets where its session would add one anyway." Reading (a), as zk2py took it. zk2py's sessions run without timestamping but a candidate's, so it meets both; its walk's §8.2 verdict says the rig's `hlc=True` is the SHOULD's. |
+| F-415 | **resolved** | §3.3: "Each put of it (below) carries a Zenoh timestamp the owner sets." Reading (a). zk2py's owner stamps each descriptor put from its minting clock; `state_pairings` §7 step 3 now checks it of both owners (the first put and the one stating a new run, each under its session's zid), and the walk holds it beyond the index. |
+| F-416 | **resolved** | §4.3: "The record is durable before the first sample written under each run it issues." The fix word for word. zk2py's record was durable when the run was taken, before any sample. |
+| F-417 | **resolved** | §4.3: "A random run (below) meets it. The chance of a repeat is accepted." Reading (b), as zk2py took it. zk2py's walk keys no reuse as met by the draw. |
+| F-418 | **resolved** | `types.md` §1: "Each record holds its type's predefined `Encoding`. Nothing on the wire names it." The fix's second form. zk2py does not run `types.md`. |
+| F-419 | **resolved** | §4.3's MUST NOT and its `RULES.md` entry: "An owner MUST NOT let its seq for state and events wrap." The fix, written into the sentence rather than in brackets. zk2py's walk is re-keyed to it. |
+| F-420 | **resolved** | S7's row: "a run is never reused, and its seq for state and events never wraps within it (§4.3)." The fix word for word. |
+| F-421 | **resolved** | `desired.v1` 0.13's entry says 0.12's change to §6, and Expected 1 reads "The put's stamp is above the author's last one, though its clock is behind (§2.11)." The fix, with the setup moved into the outcome's own sentence. zk2py's §6 now restarts its author 5 s behind and checks the stamp (below). |
+
+### What the mend changed in zk2py
+
+- **The walk** (`classes.py`): §4.3's MUST NOT re-keyed to "its seq for
+  state and events", the one verdict whose sentence moved; §4.3's no reuse
+  and §8.2's MUST NOT say how F-417 and F-414 settled them; and §3.3's
+  descriptor put, a rule stated without a keyword, met beyond the index.
+- **Review-bot on PR #1005:**
+  - `Owner.take_run` reads a record it cannot use (unreadable, not JSON, no
+    `run`, a `run` that is no counter from 0 to 0xFFFF, or one it cannot
+    write) as no record: "An owner that cannot keep such a record draws
+    32-bit runs." It draws, leaves the record as it is, and never fails
+    `start()`.
+  - `live_interop --only seed` is back: the late joiner's seed over the
+    owner example, a put between the subscription and the GET kept once by
+    its in-band stamp, a stale reply dropped by seq, a `reply_del` merged
+    as a deletion, a GET run to its timeout possibly incomplete. `state.md`
+    §7 seeds across a restart and §10 holds the owner's answer, which the
+    owner example cannot, so neither covered these with it. `seed` and `s7`
+    now name two runs.
+  - `zk2c.read_put` and `read_delete` never raise: a reading over 3,849
+    payloads (random, every CH byte with up to 8 more, and every truncation
+    of four envelopes) finds none raising, and each reading plain, refused
+    with its token, or accepted and written back to the same bytes.
+  - A comment on why `runs_used` keeps a failed re-mint's run.
+  - Nits: `zk2c` imported at module level in `freshness`, `live`,
+    `desired_live` and `arbitration_live`; `live_interop.Report.note` is
+    `info`.
+- **`desired.v1` scenarios §6** (F-421): the author restarts with its clock
+  5 s behind (`desired_owner --clock-offset-ms`, as the owner example), and
+  Expected 1's re-put is checked above D2's delete, the last stamp it
+  issued.
+- **The live suites, 0.70's assumptions mended** (none a spec failure but
+  F-422's):
+  - *A stranger's put*: `link_scenarios` §7, §9 to §12, `acl_interop`'s
+    forgeries, `budget_scenarios` §3, `timing_interop`'s stray beside §6
+    and `arbitration_scenarios` §4's raw safety put raw bytes under zenoh's
+    default `Encoding`, `zenoh/bytes`, which every reader now refuses as an
+    envelope. Each writes §7.5's envelope on a run of its own. A wildcard
+    key carries none and keeps its bytes.
+  - *Stamps off §4.3's table*: `link_scenarios` §5's seed merged by Zenoh
+    timestamp, and now by §4.2's merge (`seed.Mark`). `live_interop
+    --only hostid` attributed an S4 reply by its stamp's id, and now reads
+    its run against the descriptor's (observer §4.4: not asked off the
+    table). `telemetry_scenarios` §1 and §2 told a restart and a re-mint
+    by the stamps' id; now by `meta.zid` and the in-band run each
+    descriptor states. `desired_scenarios` §5's report and `Run` are read
+    by their run.
+  - *An owner breaking the table's MUST on purpose*: `timing.v1` scenarios
+    §5's owner "sets no stamp on its puts". zk2py's owner stamps the
+    table's resources whatever its session, so `Owner.stamp_table = False`
+    is the rig's switch for it, and the `hlc` measurement asks for an HLC
+    session, which an owner no longer runs by default.
+  - *Envelope-first readers*: the telemetry tool's opening reads S4's
+    reply through the envelope; the observer runner's echo row has
+    `envelope` and `undecodable`.
+  - *Arrival order*: `state_pairings`' tap runs its callbacks directly, so
+    a descriptor put and a state put keep their order (§7 step 3 had read
+    them from two threads).
