@@ -1,0 +1,32 @@
+# A link.v2 face policy (spec/profiles/link/v2.md; #988, L1): the lab's
+# router over LoRa at SF12, 293 bit/s, with Appendix B's transport. The
+# handshake's 384 bytes take 10.5 s here, so every timeout is 40 s (v2
+# §2.16), and a reply may take 16 full batches' air, 98 s. The chip has no
+# ARQ, so the linter warns `no_arq`.
+profile  = "link.v2"
+system   = "lab"
+services = ["radio-a"]
+binding  = "zenoh-1.10.1"
+
+[transport]
+lease_ms             = 1080000
+keep_alive           = 4
+wait_before_close_ms = 1080000
+sequence             = "16bit"
+batch_bytes          = 224
+open_timeout_ms      = 40000
+accept_timeout_ms    = 40000
+interests_timeout_ms = 40000
+
+[face.radio]
+far              = "ground"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "link"
+interval_s       = 900
+max_outage_s     = 3600
+link_bps         = 293
+loss_ppm         = 50000
+arq              = false
+reply_timeout_ms = 120000

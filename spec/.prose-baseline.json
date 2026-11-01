@@ -164,6 +164,11 @@
     "over": 12,
     "tags": 0
   },
+  "spec/profiles/link/scenarios-v2.md": {
+    "mean": 14.0,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/link/scenarios.md": {
     "mean": 14.56,
     "over": 0,
@@ -171,6 +176,11 @@
   },
   "spec/profiles/link/v1.md": {
     "mean": 19.48,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/link/v2.md": {
+    "mean": 14.56,
     "over": 0,
     "tags": 0
   },

@@ -1,0 +1,92 @@
+# `link.v2` scenarios
+
+The rules of [`v2.md`](v2.md) that a fixture cannot check, in the form of
+the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
+a setup, steps, and expected observations. The reference runs them as
+tests of the tool that compiles a face policy into a router's
+configuration (`zenctl acl gen`), against live routers, one test per
+section, named after it. [`scenarios.md`](scenarios.md)'s sections are
+`link.v1`'s, and hold for a link.v2 policy too.
+
+**Conventions.**
+- **Section numbers** in parentheses (§2.16) are v2.md's rules. Core
+  sections say "core", and `link.v1`'s say so.
+- **The bus.** N is the near router, zenoh 1.10.1, with `usrpwd`
+  authentication, as `link.v1`'s scenarios run it. It listens on
+  `tcp/127.0.0.1:<port>`, the near side, and on
+  `unixsock-stream/<path>`, the face.
+- **The contract and the enrollment** are `link.v1`'s scenarios'
+  (`radio.v1`, and the reference's
+  `examples/zk2/link/radio.enrollment.toml`).
+- **The face policy**, unless a section changes it:
+
+  ```toml
+  profile  = "link.v2"
+  system   = "lab"
+  services = ["radio-a"]
+  binding  = "zenoh-1.10.1"
+
+  [transport]
+  lease_ms             = 2000
+  keep_alive           = 4
+  wait_before_close_ms = 2000
+  sequence             = "16bit"
+  batch_bytes          = 1000
+
+  [face.radio]
+  far              = "ground"
+  attach           = "client"
+  select           = { link_protocols = ["unixsock-stream"] }
+  class            = "constrained"
+  expose           = "link"
+  interval_s       = 1
+  max_outage_s     = 6
+  link_bps         = 1000000
+  loss_ppm         = 0
+  arq              = true
+  reply_timeout_ms = 1000
+  ```
+
+  Its keep-alive interval is 0.5 s. A linter reports no finding of it.
+- **F** is the far end: a client session, user `ground`, that attaches
+  to N over the face.
+- **R** is a relay between F and N's face, which F connects to. It
+  forwards both directions, and counts each direction's keep-alives: a
+  batch holding one `KeepAlive` message, the 1-byte batch after the
+  stream link's 2-byte length. On request, R **holds** both directions
+  for a time, a silence, and delivers what it held when the time is up.
+  It reads both sockets throughout, so it sees an end close its socket
+  at once.
+
+## §1 The router runs the block (§2.16, §2.18, §2.19)
+
+**Steps.**
+1. The generator compiles N's block from the policy, the enrollment and
+   the contract, and N starts with it. The generator writes the far
+   end's block (§2.18), and F starts with it, through R.
+2. A tool checks N's configuration against the policy, with F's as the
+   far end's (§2.19).
+3. Nothing is published for 4 s, two leases. R counts the keep-alives
+   each way.
+4. R holds both directions for 1 s, half the lease, then delivers what it
+   held. Nothing is published for 1 s more.
+5. R holds both directions for 4 s, twice the lease.
+6. **Control:** the tool checks N's configuration with its
+   `wait_before_close` edited to 1,000,000 µs, half the lease.
+
+**Expected.**
+1. N's configuration states the policy's eight keys: a lease of 2,000 ms,
+   4 keep-alives, `16bit`, a batch of 1,000 B, a `wait_before_close` of
+   2,000,000 µs, and 10,000 ms for each timeout. F's states the same.
+2. The tool reports no finding.
+3. R counts 7 to 9 keep-alives each way: 4 s × 4 / 2 s, §2.16's idle
+   bill. That is 2 × 86,400 × 4 / 2, or 345,600 a day, both directions
+   together.
+4. The transport stays: neither end closes its socket, and R counts
+   keep-alives each way in the second after the silence.
+5. Each end closes the transport between 1.5 s and 2.5 s after the
+   silence began. An end expires its receive side a lease after the last
+   thing it received, which came at most one keep-alive interval before
+   the silence.
+6. The tool reports `wait_under_lease` and `transport_differs`, both at
+   `transport.wait_before_close_ms`.

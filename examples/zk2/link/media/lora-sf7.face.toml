@@ -1,0 +1,32 @@
+# A link.v2 face policy (spec/profiles/link/v2.md; #988, L1): the lab's
+# router over LoRa at SF7, 5,469 bit/s, with Appendix B's transport. 60 s
+# with 2 keep-alives closed the link at every lost keep-alive; 120 s with 4
+# sends as many and needs three losses in a row (v2 §2.16). The chip has no
+# ARQ, so the linter warns `no_arq`.
+profile  = "link.v2"
+system   = "lab"
+services = ["radio-a"]
+binding  = "zenoh-1.10.1"
+
+[transport]
+lease_ms             = 120000
+keep_alive           = 4
+wait_before_close_ms = 120000
+sequence             = "16bit"
+batch_bytes          = 224
+open_timeout_ms      = 10000
+accept_timeout_ms    = 10000
+interests_timeout_ms = 10000
+
+[face.radio]
+far              = "ground"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "link"
+interval_s       = 60
+max_outage_s     = 3600
+link_bps         = 5469
+loss_ppm         = 50000
+arq              = false
+reply_timeout_ms = 15000

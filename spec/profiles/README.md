@@ -45,6 +45,7 @@ does (the process, below).
 |---|---|---|---|---|---|---|
 | [`timing.v1`](timing/v1.md) | 0.8 | experimental | none | 0.73 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
 | [`arbitration.v1`](arbitration/v1.md) | 0.5 | experimental | none | 0.56 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
+| [`link.v2`](link/v2.md) | 0.1 | experimental | none | 0.77 | 2: `link.v1`'s `link.exposure`; 4 through `uses` | `link.v1` with the face's transport: a router-wide `[transport]` (lease, keep-alives, `wait_before_close` at least the lease, sequence width, batch, timeouts) that a generator writes into the router's configuration and for the far end, linted per medium for keep-alives that flap, a sequence window one lease can fill and timeouts below the handshake; the binding the router runs, naming its link protocols; the catalog the far side decodes with; and per face the loss, the ARQ and the reply timeout. A tool checks a router's transport against the policy, read at the binding's defaults where omitted, and the two ends against each other (core §8.5, §11.3) |
 
 ## Layout
 
@@ -54,9 +55,9 @@ profiles/
   .history/               published revisions of the profiles' standard contracts (health.v1, config.v1, alarms.v1)
   <name>/
     v<major>.md           the normative text of one wire major
-    CHANGELOG.md          the versions of that text
-    scenarios.md          the rules a fixture cannot check
-    conformance/          fixtures; each file states its format in its description
+    CHANGELOG.md          the versions of that text, and of a later major's beside it
+    scenarios.md          the rules a fixture cannot check; scenarios-v<major>.md for a later major
+    conformance/          fixtures; each file states its format in its description; v<major>/ for a later major
     <name>.v<major>.toml  the standard contract, for a profile that defines one
     <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1)
 ```
