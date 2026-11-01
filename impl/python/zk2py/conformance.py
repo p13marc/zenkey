@@ -4232,8 +4232,10 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
             else:
                 seen["accepted"] += 1
                 st = r.stamp
-                if st is None or r.record is None or zk2c.write(
-                        "mutation", st.width, st.run, st.seq, data[0] & 0x0F, r.record) != data:
+                # core 0.81: a put carries a mutation or a heartbeat, each
+                # written back in the form it was read in
+                if st is None or r.record is None or r.form not in zk2c.PUT_FORMS or zk2c.write(
+                        r.form, st.width, st.run, st.seq, data[0] & 0x0F, r.record) != data:
                     wrong.append(f"accepted {data.hex()}")
             if d.record is not None or (d.refused and d.refusal not in tokens) or (d.enveloped and not d.refused
                                                                                     and d.stamp is None):

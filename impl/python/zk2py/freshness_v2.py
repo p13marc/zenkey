@@ -347,9 +347,15 @@ class Subscriber:
         self.lock = threading.RLock()
         self.heard: dict[str, Heard] = {}
         self.heartbeats: list[HeartbeatRecord] = []
-        self.samples: list[tuple[int, str, str, zk2c.InBand | None]] = []
-        #: (collection, asked, arrived, members answered) per re-read
+        #: (arrival, key, put or delete, in-band stamp, Zenoh timestamp text)
+        self.samples: list[tuple[int, str, str, zk2c.InBand | None, str | None]] = []
+        #: (collection, asked, arrived, members answered) per re-read, and
+        #: per seed (a late joiner's own GET at the start)
         self.reads: list[tuple[str, int, int, int]] = []
+        self.seeds: list[tuple[str, int, int, int]] = []
+        #: each member's last confirmation: a put heard, or a heartbeat that
+        #: confirmed it, on its monotonic clock
+        self.last_conf: dict[str, int] = {}
         self._reading: set[str] = set()
         self.closed = False
         self.declared_ns = time.monotonic_ns()
@@ -364,7 +370,7 @@ class Subscriber:
             time.sleep(wait_s)
         if seed:
             for resource in list(self.selectors):
-                self._read(resource)
+                self._read(resource, seed=True)
 
     def _state(self, sample: Any) -> None:
         import zenoh
@@ -376,10 +382,13 @@ class Subscriber:
         read = zk2c.read_sample(sample)
         live = sample.kind != zenoh.SampleKind.DELETE
         with self.lock:
-            self.samples.append((at, key, "put" if live else "delete", read.stamp))
+            self.samples.append((at, key, "put" if live else "delete", read.stamp,
+                                 None if sample.timestamp is None else str(sample.timestamp)))
             if read.refused:
                 return
             self.view.mutate(key, read.stamp, at, live)
+            if live:
+                self.last_conf[key] = at
             prev = self.heard.get(key)
             self.heard[key] = Heard("put" if live else "delete", at if live else (prev.put_at if prev else None),
                                     at if live else (prev.last_confirmation if prev else at))
@@ -409,6 +418,7 @@ class Subscriber:
             for resource, sec in answer.get("read", {}).get("sections", {}).items():
                 if isinstance(sec, dict):
                     for k in sec["confirmed"]:
+                        self.last_conf[k] = at
                         h = self.heard.get(k)
                         if h is not None:
                             h.last_confirmation = max(h.last_confirmation, at)
@@ -418,7 +428,7 @@ class Subscriber:
         for resource in due:
             threading.Thread(target=self._read, args=(resource,), daemon=True).start()
 
-    def _read(self, resource: str) -> None:
+    def _read(self, resource: str, seed: bool = False) -> None:
         """S4's GET of the collection, its answer a read (§2.5 "The
         re-read"). A read that fails, silent or ended at its timeout,
         replaces nothing."""
@@ -437,7 +447,7 @@ class Subscriber:
             gone = [(r.key, r.inband) for r in st.replies if r.deleted]
             with self.lock:
                 self.view.read(c.resource, asked, arrived, ok, gone)
-                self.reads.append((c.resource, asked, arrived, len(ok)))
+                (self.seeds if seed else self.reads).append((c.resource, asked, arrived, len(ok)))
         except Exception:  # noqa: BLE001 - a read that fails replaces nothing
             return
         finally:
@@ -459,13 +469,13 @@ class Subscriber:
         now = time.monotonic_ns() if now_ns is None else now_ns
         with self.lock:
             h = self.heard.get(key)
+            m = self.view.members.get(key)
             gap = self.view.gap
-            conf = self.view.confirmed(key)
-        if h is None:
-            return freshness.Subscription(now - self.declared_ns, not gap, None)
-        if h.kind == "delete":
+            last = self.last_conf.get(key)
+        if (m is not None and not m.live) or (m is None and h is not None and h.kind == "delete"):
             return freshness.Subscription(now - self.declared_ns, not gap, freshness.Delivery("delete", 0))
-        last = max(h.last_confirmation, conf or 0)
+        if last is None:
+            return freshness.Subscription(now - self.declared_ns, not gap, None)
         return freshness.Subscription(now - self.declared_ns, not gap, freshness.Delivery("put", now - last))
 
     def judge(self, key: str, now_ns: int | None = None) -> freshness.Verdict:

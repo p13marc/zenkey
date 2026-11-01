@@ -78,8 +78,7 @@ HEADINGS = {"Owner": "owner", "Consumer": "consumer", "Caller": "caller", "Deplo
 PROFILES = {
     "hostid.v1": ("owner (a minted system), tool (the duplicate check)", ""),
     "freshness.v1": ("owner (re-puts), consumer and tool (the judgements)", ""),
-    "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the judgements)",
-                     "round 96: not yet followed"),
+    "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the re-read, the judgements)", ""),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
     "link.v1": ("tool (the generator and the checks)", ""),
@@ -164,7 +163,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
     # core 0.82 (#978 F3): a freshness.v2 member's reply carries its last
     # confirmation (round 96).
     ("owner", "core §4.2", "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead",
-     NOT_MET, "round 96: zk2py's owner sends no heartbeat yet (re-keyed to core 0.82)"),
+     MET, "owner.Owner.answer_state: a covered member's reply stamped with _Held.confirm, the later of its put's "
+     "minted time and the last heartbeat that vouched for it, its put stamped by none (freshness_v2_scenarios §3, "
+     "py-py and py-zenctl: zenctl get state's last_confirmation) (round 96, core 0.82; F-445, F-446)"),
     ("owner", "core §4.2", "It MUST answer a selector over them with", MET,
      "owner.Owner.state_answer, reply_del within the window (state_scenarios §10)"),
     ("owner", "core §4.2", "Owner: for a key it deleted within the", MET,
@@ -707,6 +708,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §8.2", "Across a constrained face the three are too wide", MET,
      "echo_tool --across-face subscribes by observer §7.5's scopes, refused beside a SELECTOR, and its scope  "
      "names what it excludes (constrained_live step 5; readings) (round 95, observer 0.18)"),
+    # core 0.82 (#978 F3): stated without a keyword.
+    ("owner", "core §4.2", "Under `freshness.v2` an owner puts no member again to confirm it", MET,
+     "owner.Owner: no member of a freshness.v2 contract is registered for re-puts, and its heartbeat vouches "
+     "(freshness_v2_scenarios §1 'no re-put', in each pairing) (round 96, core 0.82)"),
     # core 0.74 (F-415): stated without a keyword; an instance key is no
     # data key, so §8.2's MUST NOT does not bind it.
     ("owner", "core §3.3", "Each put of it (below) carries a Zenoh timestamp the owner sets", MET,
