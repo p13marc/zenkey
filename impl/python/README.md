@@ -4847,6 +4847,79 @@ holds in an envelope of its own.
 Round 93 found F-414 to F-421, eight, none a blocker. See "At core 0.73
 and observer.md 0.15" in `SPEC-FINDINGS.md`.
 
+## Core 0.74 and `desired.v1` 0.13: round 93 answered (mend pass)
+
+Core 0.74 and `desired.v1` 0.13 answer F-414 to F-421. They add or remove
+no MUST, SHOULD or MAY. F-414 and F-417 settle the scope of §8.2's and
+§4.3's rules, and the rest is wording: §3.3's descriptor put, §4.3's
+record, "its seq for state and events", `types.md` §1, and `desired.v1`
+0.12's change to scenarios §6. zk2py read the two entries and the
+sentences they name, nothing else cold.
+
+### Its walk of `RULES.md` at dcd5f968
+
+Round 93's table, unchanged: owner 62 (51 met, 3 not, 8 n/a), consumer 15
+(12, 0, 3), caller 13 (13), observer 55 (51, 2, 2), static 36 (34, 0, 2).
+181 rows walked, none without a verdict. §4.3's MUST NOT is re-keyed to
+"its seq for state and events". Beyond the index are seventeen rules
+stated without a keyword, all met. Sixteen are round 93's observer rules,
+and the new one is §3.3's descriptor put, which carries a Zenoh timestamp
+the owner sets.
+
+### What the mend changed in zk2py
+
+- **Review-bot on PR #1005:**
+  - `Owner.take_run` reads a run record it cannot use as no record. It
+    draws a 32-bit run and leaves the record as it is, and `start()`
+    never fails on it.
+  - `live_interop --only seed` is back over the owner example.
+  - `zk2c.read_put` and `read_delete` never raise, and a reading shows it.
+  - A comment explains `runs_used`; `zk2c` is imported at module level;
+    `Report.note` is `info`.
+- **`desired.v1` scenarios §6:** the author restarts with its clock 5 s
+  behind (`desired_owner --clock-offset-ms`), and its re-put is checked
+  above the last stamp it issued.
+- **The live suites, off 0.70's assumptions:**
+  - a stranger's put (`link`, `acl`, `budget` §3, `timing`'s stray,
+    `arbitration`'s raw safety and §11's X) writes §7.5's envelope;
+  - a check that read a Zenoh timestamp off §4.3's table now reads the
+    in-band run against the descriptor's (`link` §5's seed by
+    `seed.Mark`, hostid's S4 reply, `telemetry` §1 and §2, `desired` §5);
+  - `Owner.stamp_table = False` is the rig for `timing.v1` §5's owner that
+    "sets no stamp on its puts";
+  - the `hlc` measurement asks for an HLC session;
+  - the echo row carries `envelope` and `undecodable`;
+  - `state_pairings`' tap keeps arrival order.
+- **`state_pairings` §7 step 3** checks each descriptor put's Zenoh
+  timestamp against the owner's zid (F-415).
+
+**`readings`: 768, up from 759.** **`just py-conformance`: 3887 of 3887.**
+
+**Live**, every suite round 93 did not re-run:
+
+| Suite | Pairings and counts |
+|---|---|
+| config | zk2py 51/51, owner example 51/51, `live_interop` 97/97 |
+| telemetry | zk2py 57/57, owner example 56/56, with `zenctl telemetry` 164/164 |
+| desired | zk2py → zk2py 192/192 watching and polling; the three pairings with the owner example 86/86 each, both ways |
+| timing | `timing_scenarios` 28/28; `timing_interop` 176/176 over four pairings, §5 not run with the owner example as owner |
+| arbitration | py:py 83/83; rs:py, py:rs and rs:rs wait for black boxes whose `commander raw on` writes the envelope (F-422) |
+| budget | 41/41 on both owners; `live_interop` 16/16 |
+| link | 89/89 |
+| hostid | 35/35; `live_interop` 28/28 |
+| presence | (zk2py, zk2py) 95/95, (Rust, zk2py) 89/89, (zk2py, zenctl) 33/33, (Rust, zenctl) 32/32 |
+| observer | 50/50, both owners |
+| security | §4 33/33, both blocks |
+| acl | `live_interop` 31/31 |
+
+The mend found one new finding, **F-422**, a contradiction. In
+`arbitration.v1` scenarios §11, X's "raw" puts carry no envelope under
+core 0.73, so every reader refuses them and no `not_incumbent` count can
+grow. zk2py took reading (a): X keeps the envelope. See "At core 0.74 and
+desired.v1 0.13" in `SPEC-FINDINGS.md`, with two observations beside the
+findings (the owner example's `timing stamp none`, and a forged reply on
+a wildcard GET).
+
 ## What it does not cover
 
 - **The rest of the live half:**

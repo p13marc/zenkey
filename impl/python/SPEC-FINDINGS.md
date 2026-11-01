@@ -22850,3 +22850,143 @@ and S7's row, each as the 0.74 entry says.
   - *Arrival order*: `state_pairings`' tap runs its callbacks directly, so
     a descriptor put and a state put keep their order (§7 step 3 had read
     them from two threads).
+
+### F-422 · contradiction · arbitration.v1 scenarios §11 (text 0.5) beside core §4.3 (0.73) and observer §7.3 (0.14): X's raw puts
+
+> Scenarios §11 step 1: "`X`, `C_s2`'s own session, puts `cmd` every 50 ms
+> raw, round its runtime's writer, payload `standby <n>`, stamped by its
+> own HLC (the reference's `commander raw on`)."
+>
+> Expected 1: "… and its `not_incumbent` count for `lab/safety` grows with
+> `X`'s puts, about 20 a second." Expected 2: "`X`'s samples, counted
+> `not_incumbent`, keep nothing eligible."
+>
+> Core §4.3: "An owner MUST write each put on a `stream`, `state`,
+> `@state` or `events` key, and each delete of a state member, with §7.5's
+> envelope."
+>
+> Observer §7.3: "A tool that shows or judges a payload MUST read a sample
+> on a zk2 data key whose kind is a stream, state or an event, and whose
+> `Encoding` is `zenoh/bytes`, as core §7.5's envelope. … A refused
+> envelope is undecodable, and the tool names the refusal."
+
+- **The contradiction.** Before core 0.73, "raw" meant only "round the
+  writer", past a standby's refusal. Since 0.73 the writer is also what
+  writes the envelope. A put with no envelope under `zenoh/bytes` is a
+  refused envelope to every reader: `standby 0` begins with 0x73, whose
+  form is reserved, refused `form`.
+  It is no sample, so no arbiter judges it, and no `not_incumbent` count
+  grows: Expected 1 cannot hold. Beside step 2, the control (minor 0 held
+  beside minor 1, so not every revision governs) expects X's samples to be
+  arrivals, which a refused envelope never is.
+- **Seen.** In the first run, all four pairings failed §11's seven checks
+  that read X (28 failures). zk2py's X then put raw text, and so does the
+  owner example's `commander raw on`. Every actuator's `not_incumbent`
+  stayed at +0 while S saw X's 20 puts, and both tools' views selected
+  `lab/teleop`.
+- **The readings:**
+  - **(a)** raw passes only the standby's refusal: X writes §7.5's envelope
+    on its run and the key's seq, as every stream put must, and its
+    samples are read, then judged `not_incumbent`;
+  - **(b)** raw carries no envelope: Expected 1 and the control would then
+    count X's samples undecodable, never `not_incumbent` or arrivals.
+- **Took (a).** zk2py's X (`arbitration_live.Commander`'s `raw`) writes the
+  envelope on the owner's run and the key's seq. The pairings whose
+  commanders are the owner example's mark §11's X checks known, F-422's
+  (`arbitration_scenarios.F422_CHECKS`), until its `commander raw on`
+  writes one too.
+- **Fix:** step 1 says "raw, round its runtime's writer's standby refusal,
+  in core §7.5's envelope", or Expected 1 and the control say what (b)
+  makes of X's samples.
+- **Changes:** the scenario's words, the reference's `commander raw on`,
+  and a test. No verdict.
+
+### Beside the findings
+
+- **The owner example's `timing stamp none`** puts its text with no
+  envelope. `timing.v1` scenarios §5's owner "sets no stamp on its puts",
+  which asks for no Zenoh timestamp, not for no envelope, so this is the
+  black box's drive and not the text. `timing_interop` §5 is not run with
+  it, and says why.
+- **A forged reply on a wildcard GET** (`acl_interop`, both postures).
+  own-h1's queryable on own-h2's state key is blocked: a GET of h2's key
+  draws h2's reply alone. A consumer's wildcard GET over `zk2/*/tc/…`
+  reaches own-h1's session through own-h1's own queryable, though, and
+  own-h1's session hands the query to the forged queryable too. A value
+  reply is checked against its own key (0.14), and own-h1's ingress reply
+  grant on the consumer's selector (core §11.2) covers h2's key. So the
+  forged reply reaches the consumer, and under deny it once displaced
+  h2's: off §4.3's table neither reply carries a Zenoh timestamp, so S4's
+  `Latest` has no time to order them by. Before core 0.73, `Latest` kept
+  h2's stamped reply and hid this. No rule this pass read changed it, so
+  it is kept here for the next round, not numbered. zk2py's check now
+  reads the declaration by a GET of h2's key, and says what the wildcard
+  GET drew beside it.
+
+### The walk at dcd5f968
+
+181 rows walked, none without a verdict. The index's entries are round
+93's, two of them reworded (F-419, F-420), and so are their verdicts:
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 62 | 51 | 3 | 8 |
+| consumer | 15 | 12 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 55 | 51 | 2 | 2 |
+| static | 36 | 34 | 0 | 2 |
+
+- **Re-keyed:** §4.3's MUST NOT, to "its seq for state and events", the
+  one verdict whose sentence moved.
+- **Beyond the index:** seventeen rules stated without a keyword, all met.
+  These are round 93's sixteen observer rules and one new owner rule:
+  §3.3's descriptor put, a Zenoh timestamp the owner sets (F-415).
+
+### Counts and live runs
+
+`readings` 768, up from 759. **`just py-conformance`: 3887 of 3887.**
+
+Live, against the black boxes built from a8bda1fa (core 0.74 changed no
+runtime), every suite round 93 did not re-run, after the mends above:
+- `config_scenarios` **51 of 51** with zk2py's owner and **51 of 51** with
+  the owner example; `live_interop --only config` **97 of 97**;
+- `telemetry_scenarios` **57 of 57** (zk2py's owner), **56 of 56** (the
+  owner example), **164 of 164** (zk2py's owner, `zenctl telemetry`
+  judging beside zk2py's reader);
+- `desired_scenarios`, `zenctl desired` as §9's tool: zk2py → zk2py **192
+  of 192** watching and **192 of 192** polling; Rust → Rust, zk2py → Rust
+  and Rust → zk2py **86 of 86** each, watching and polling;
+- `timing_scenarios` **28 of 28**; `timing_interop` **176 of 176** over
+  the four owner:reader pairings, §5's three steps not run with the owner
+  example as owner (above);
+- `arbitration_scenarios` py:py **83 of 83**: §11's actuators count X's
+  20 puts `not_incumbent` (+20). Its first run over the four pairings
+  was 301 of 329, every failure §11's X (F-422). rs:py, py:rs and rs:rs
+  wait for black boxes whose `commander raw on` writes the envelope;
+- `budget_scenarios` **41 of 41** (§4 to §7 on both owners);
+  `live_interop --only budget` **16 of 16**;
+- `link_scenarios` **89 of 89**; `hostid_scenarios` **35 of 35**;
+  `live_interop --only hostid` **28 of 28**;
+- `presence_scenarios` by (owner, reader): zk2py, zk2py **95 of 95**; Rust,
+  zk2py **89 of 89**; zk2py, zenctl **33 of 33**; Rust, zenctl **32 of
+  32**;
+- `observer_scenarios` **50 of 50** (both owners); `security_scenarios`
+  **33 of 33** (zk2py's block and `zenctl acl gen`'s); `live_interop
+  --only acl` **31 of 31**;
+- beside them: `state_pairings --only 7` **54 of 54** over the three
+  pairings, `live_interop --only seed` **8 of 8** and `--only s7` **21 of
+  21**.
+
+### New findings
+
+One, F-422: a contradiction between a rule core 0.73 changed (§4.3's
+envelope on every stream put, which observer §7.3's readers refuse
+without) and `arbitration.v1` scenarios §11's expectations of X's raw
+puts. Each rule 0.74 changed could be implemented as written.
+
+### Counts at core 0.74 and desired.v1 0.13
+
+422 entries.
+- **Resolved: F-414 to F-421,** eight.
+- **Open: F-422,** a contradiction, no blocker.
+- **F-365** stays open as #965's.
