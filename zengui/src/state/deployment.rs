@@ -311,6 +311,11 @@ impl Deployment {
             contracts: self.contracts.as_ref().map(|c| Arc::clone(&c.set)),
             generation: self.lens_generation,
             feed: self.lens_feed.as_ref().map(|h| h.0.clone()),
+            catalogs: self
+                .contracts
+                .as_ref()
+                .map(|c| Arc::clone(&c.catalogs))
+                .unwrap_or_default(),
         }
     }
 

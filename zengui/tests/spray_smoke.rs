@@ -214,6 +214,7 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
         scouting: Some(false),
         zenoh_config: None,
         contracts: vec![],
+        catalogs: vec![],
         timeout_secs: 2,
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],

@@ -44,6 +44,10 @@ pub(crate) fn update(form: &mut SettingsForm, msg: SettingsMsg) -> Task<Message>
             form.contracts = v;
             Task::none()
         }
+        SettingsMsg::CatalogsChanged(v) => {
+            form.catalogs = v;
+            Task::none()
+        }
         SettingsMsg::Apply => {
             // Everything is validated before anything is emitted, so a
             // rejected form never half-applies — the same posture as the
@@ -86,6 +90,10 @@ fn parse(form: &SettingsForm) -> Result<Tuning, String> {
         eager: form.eager,
         admin_declared: form.admin_declared,
         contracts: crate::view::contexts::words(&form.contracts)
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        catalogs: crate::view::contexts::words(&form.catalogs)
             .into_iter()
             .map(Into::into)
             .collect(),

@@ -32,7 +32,13 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   is fed by `namespace_listing`, and a switch reopens the namespaced
   session, the presence monitor and the lens, and forgets what they held.
   Contracts come from `--contracts` (zenctl's loading) or the Settings
-  overlay, remembered in zengui's prefs, never the shared context;
+  overlay, remembered in zengui's prefs, never the shared context; the
+  deployment catalogs alike (#980 C1c, core §8.6: `--catalog`, the
+  overlay's CATALOG box, `Prefs::catalogs`), loaded with the contracts
+  (`services::contracts::load_with`, `LoadedContracts::catalogs`) into
+  `LensInputs::catalogs`, so every lens check, S4 read and archive read
+  takes the epoch in force for the owner (`Lens::epoch_of`); a replay's
+  lens holds none;
   `--registry` is refused by name, exit 2, and a context's stored
   `registry` rides a save untouched. **Presence** runs on a monitor of its
   own on a watch session of its own, in no namespace on the wire keys (`presence_link.rs`, the zenwatch pattern,

@@ -174,9 +174,11 @@ pub(crate) fn update(
                     }
                 }
             }
-            let contracts_changed = t.contracts != dep.settings.contracts;
+            let contracts_changed =
+                t.contracts != dep.settings.contracts || t.catalogs != dep.settings.catalogs;
             if contracts_changed {
                 dep.settings.contracts = t.contracts;
+                dep.settings.catalogs = t.catalogs;
                 applied.push(
                     "contracts changed — reloading: every verdict judged under the old \
                      ones is dropped"
@@ -199,6 +201,7 @@ pub(crate) fn update(
             chrome.prefs.eager = Some(dep.settings.eager);
             chrome.prefs.admin_declared = Some(dep.settings.admin_declared);
             chrome.prefs.contracts = dep.settings.contracts.clone();
+            chrome.prefs.catalogs = dep.settings.catalogs.clone();
             chrome.prefs_dirty = true;
             let declared = if ask_declared {
                 super::bus::read_declared(dep)

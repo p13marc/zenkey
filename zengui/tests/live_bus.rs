@@ -470,6 +470,7 @@ async fn a_late_joiners_seed_counts_its_state_leg() {
         scouting: Some(false),
         zenoh_config: None,
         contracts: vec![],
+        catalogs: vec![],
         timeout_secs: 2,
         scope: ScopePreset::Everything,
         selectors: vec![],
@@ -618,6 +619,7 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
         tool: "zengui live test".into(),
         elect: None,
         run_store: None,
+        catalog: None,
     };
     let plan = zenkey_fleet::gen_plan(&spec).expect("the probe plans");
     let (up_tx, up_rx) = tokio::sync::oneshot::channel();
@@ -645,6 +647,7 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
         scouting: Some(false),
         zenoh_config: None,
         contracts: vec![],
+        catalogs: vec![],
         timeout_secs: 2,
         scope: ScopePreset::Everything,
         selectors: vec![],
@@ -750,6 +753,7 @@ async fn booted_at(
         scouting: Some(false),
         zenoh_config: None,
         contracts,
+        catalogs: vec![],
         timeout_secs: 2,
         scope: ScopePreset::Everything,
         selectors: vec![],
@@ -836,6 +840,7 @@ async fn a_call_keeps_value_envelope_and_silence_apart() {
             tool: "zengui live test".into(),
             elect: None,
             run_store: None,
+            catalog: None,
         },
     )
     .await

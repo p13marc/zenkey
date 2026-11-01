@@ -85,13 +85,15 @@ async fn state_read(
         ));
     };
     let read = zenkey_fleet::StateRead::from_resolved(resolved, timeout);
+    let over = lens.lens();
+    // Core §8.6: the epoch the owner's descriptor names, as the lens reads it.
+    let epoch = over.epoch_of(&resolved.address);
     let report = match archive {
-        None => zenkey_fleet::get_state(session, read).await,
-        Some(archive) => zenkey_fleet::last_known_state(session, read, archive).await,
+        None => zenkey_fleet::get_state_in(session, read, epoch).await,
+        Some(archive) => zenkey_fleet::last_known_state_in(session, read, archive, epoch).await,
     }
     .map_err(ServiceError::of)?;
     let owner = resolved.address.to_string();
-    let over = lens.lens();
     Ok(StateAnswer::new(report, resolution, |clock| {
         over.provenance(Some(&owner), clock)
     }))
@@ -294,6 +296,9 @@ pub struct LensInputs {
     /// provider or a revision nudges it into a background re-read
     /// (`LensFeed::nudge`). From a task, because the nudge spawns.
     pub feed: Option<zenkey_fleet::LensFeed>,
+    /// The deployment catalogs given (core §8.6): a packed record's `time`
+    /// fields are read under the epoch in force for its owner.
+    pub catalogs: Arc<zenkey_fleet::Catalogs>,
 }
 
 impl LensInputs {
@@ -301,7 +306,8 @@ impl LensInputs {
     pub fn lens(&self) -> zenkey_fleet::Lens<'_> {
         let lens = zenkey_fleet::Lens::new(&self.namespace, self.catalog.as_deref(), &self.store)
             .held(self.contracts.as_ref().map_or(0, |c| c.len()))
-            .at_generation(self.generation);
+            .at_generation(self.generation)
+            .catalogs(&self.catalogs);
         match &self.contracts {
             Some(set) => lens.offline(set),
             None => lens,
@@ -519,6 +525,78 @@ pub fn why(
 mod tests {
     use super::*;
 
+    /// Core §8.6 (#980 C1c): the window's lens reads a packed record's
+    /// `time` fields under the catalog the Settings give, the deployment's
+    /// word with no descriptor in hand, and with none under 0, assumed and
+    /// said so ("epoch 0 assumed, #980", which the Inspector prints).
+    #[test]
+    fn a_time_field_is_read_under_the_catalog_given() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let loaded = crate::services::contracts::load_with(
+            &[root.join("zenkey/tests/contracts/packed/packed.v1.toml")],
+            &[root.join("examples/zk2/zenoh-modem/catalog.json")],
+        );
+        assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+        let epoch = loaded.catalogs.held()[0].epoch();
+        let rev = loaded.set.iter().next().unwrap();
+        let clock = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "clock")
+            .unwrap();
+        let zenkey_model::contract::Body::Data(d) = &clock.body else {
+            unreachable!()
+        };
+        let layout = rev.contract().packed_layout(&d.type_).unwrap().unwrap();
+        let at = 1_800_000_000_000_i64;
+        let record = layout
+            .write(
+                &serde_json::json!({"at": at, "at_ms": at, "valid": true}),
+                Some(epoch),
+            )
+            .unwrap();
+        let bytes = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
+            tag: Tag::new(layout.tag()).unwrap(),
+            stamp: Stamp {
+                run: Run::U16(1),
+                seq: Seq::new(1).unwrap(),
+            },
+            record: &record.bytes,
+        }
+        .write();
+        let inputs = |catalogs: Arc<zenkey_fleet::Catalogs>| LensInputs {
+            namespace: String::new(),
+            catalog: None,
+            store: zenkey_fleet::BundleStore::new(Duration::from_secs(1)),
+            contracts: Some(Arc::clone(&loaded.set)),
+            generation: 0,
+            feed: None,
+            catalogs,
+        };
+        let key = "zk2/lab/packed/packed.v1/stream/clock";
+        let value = |l: &LensInputs| {
+            l.lens()
+                .check(key, zenkey_fleet::Member::Type, Some("zenoh/bytes"), &bytes)
+                .rendering
+                .rendered
+        };
+        let held = value(&inputs(Arc::clone(&loaded.catalogs)));
+        let zenkey_fleet::report::Rendered::Value { value: v, .. } = &held else {
+            panic!("{held:?}")
+        };
+        assert_eq!(v["at"], at, "under the catalog's epoch");
+        assert_eq!(held.epoch_note(), None);
+        let bare = value(&inputs(Arc::default()));
+        let zenkey_fleet::report::Rendered::Value { value: v, .. } = &bare else {
+            panic!("{bare:?}")
+        };
+        assert_eq!(v["at"], at - epoch * 1000, "from 0: off by the epoch");
+        assert_eq!(bare.epoch_note().as_deref(), Some("epoch 0 assumed, #980"));
+    }
+
     /// An event replay's answers as the panes read them (#614, FL8a; §2.6):
     /// an occurrence older than the retention filtered out here and counted
     /// — a union storage prunes nothing by retention — and an error reply
@@ -533,6 +611,7 @@ mod tests {
             contracts: Some(set),
             generation: 0,
             feed: None,
+            catalogs: Default::default(),
         };
         let now = std::time::SystemTime::now();
         let day = Duration::from_secs(86_400);
@@ -593,6 +672,7 @@ mod tests {
             contracts: None,
             generation: 0,
             feed: None,
+            catalogs: Default::default(),
         };
         let key = "plant/line-1/temp";
         let at = |seconds: u64, kind: SampleKind| zenkey_fleet::FleetAnswer {
@@ -639,6 +719,7 @@ mod tests {
             contracts: None,
             generation: 0,
             feed: None,
+            catalogs: Default::default(),
         };
         let key = "zk2/lab/m/m.v1/state/level";
         let at = |seconds: u64, payload: Vec<u8>| zenkey_fleet::FleetAnswer {
@@ -711,6 +792,7 @@ mod tests {
             contracts: None,
             generation: 0,
             feed: None,
+            catalogs: Default::default(),
         };
         let key = "zk2/robot1/nav/nav.v2/stream/position";
         let at = |seq: u32| zenkey_fleet::FleetAnswer {

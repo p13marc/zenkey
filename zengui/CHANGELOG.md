@@ -4,6 +4,17 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — `--catalog`: the deployment catalog (#980, C1c)
+
+Core 0.79 §8.6: a deployment provisions a catalog, a file stating the
+epoch §7.6's packed `time` fields count from. No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a packed record's `time` fields read under epoch 0, "epoch 0 assumed, #980" beside every one in the Inspector | `--catalog PATH`, repeatable, and the Settings overlay's CATALOG box: the epoch of the catalog the owner's descriptor names, read through those given; 0 for an owner naming none; the catalogs' own with no descriptor in hand | the note now shows only where nothing stated the epoch; an owner naming a catalog none given is or succeeds is undecodable, `unknown_catalog` named. S4's and an archive's reads take the same epoch |
+| — | remembered in `zengui.toml` (`catalogs`) when applied from the overlay, as the contracts are; a flag wins its launch without becoming the default | a catalog refused is a contracts problem on the status strip, by its path; applying a change reloads it with the contracts |
+| a replay | unchanged: its lens holds no catalog yet | |
+
 ## Unreleased (`main`, zk2) — the History shows the in-band stamp, and diffs records (#976, A4)
 
 No rule changed: observer §7.3 reads an envelope's record as the payload,

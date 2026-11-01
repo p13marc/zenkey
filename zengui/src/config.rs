@@ -80,6 +80,16 @@ pub struct Cli {
     #[arg(long = "contracts", value_name = "PATH")]
     pub contracts: Vec<PathBuf>,
 
+    /// The deployment catalog, repeatable: a `zk2-catalog/1` file the
+    /// deployment provisions (core §8.6), never fetched from the bus.
+    ///
+    /// An owner's packed `time` fields are read under the epoch of the
+    /// catalog its descriptor names, read through these; with no descriptor
+    /// in hand, these state it, the deployment's word. Remembered when
+    /// applied from the Settings overlay, as `--contracts` is.
+    #[arg(long = "catalog", value_name = "PATH")]
+    pub catalog: Vec<PathBuf>,
+
     /// v1's registry directories. Refused by name: zk2 reads contracts
     /// (`--contracts`), and a registry slice describes nothing a zk2 bus
     /// carries.
@@ -181,6 +191,9 @@ pub struct Settings {
     /// Contracts known offline (`--contracts`, or the Settings overlay's
     /// remembered list): files, directories or `.history` roots.
     pub contracts: Vec<PathBuf>,
+    /// The deployment catalogs (`--catalog`, or the Settings overlay's
+    /// remembered list; core §8.6).
+    pub catalogs: Vec<PathBuf>,
     pub timeout_secs: u64,
     pub scope: ScopePreset,
     pub selectors: Vec<String>,
@@ -306,6 +319,7 @@ impl Cli {
             context.base.as_deref(),
         )?;
         let contracts = contracts(self.contracts, &prefs.contracts)?;
+        let catalogs = paths("--catalog", self.catalog, &prefs.catalogs)?;
         Ok(Settings {
             namespace,
             connect: if self.connect.is_empty() {
@@ -328,6 +342,7 @@ impl Cli {
             // and read by nothing here: zk2 reads contracts, and contracts
             // are remembered by this window, never by the shared context.
             contracts,
+            catalogs,
             timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
             scope,
             selectors,
@@ -385,12 +400,18 @@ pub fn check_namespace(namespace: &str) -> anyhow::Result<()> {
 /// refuses it; a remembered one is dropped from this launch (stale, not
 /// fatal) and stays in the preferences for when it comes back.
 pub fn contracts(typed: Vec<PathBuf>, remembered: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
+    paths("--contracts", typed, remembered)
+}
+
+/// A repeatable path flag over a remembered list: the typed paths, each
+/// there or refused, else the remembered ones still on disk.
+fn paths(flag: &str, typed: Vec<PathBuf>, remembered: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
     if typed.is_empty() {
         return Ok(remembered.iter().filter(|p| p.exists()).cloned().collect());
     }
     for p in &typed {
         if !p.exists() {
-            anyhow::bail!("--contracts {}: no such file or directory", p.display());
+            anyhow::bail!("{flag} {}: no such file or directory", p.display());
         }
     }
     Ok(typed)
