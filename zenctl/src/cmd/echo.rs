@@ -108,6 +108,9 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     );
     let mut seen = 0usize;
     let mut dropped_total = 0u64;
+    // One reader per frame key (core §7.7), for the window's life: a frame
+    // lost before another turns the fields it omits unknown.
+    let mut frames = zenkey_fleet::model::frame::Readers::new();
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
     loop {
@@ -140,7 +143,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         let lens = Lens::new(&namespace, catalog.as_deref(), &store)
             .offline(&contracts)
             .catalogs(&catalogs);
-        let line = line_of(&sample, &lens, raw || no_decode);
+        let line = line_of(&sample, &lens, raw || no_decode, &mut frames);
         if let Some(f) = &feed {
             f.nudge(line.identity.unresolved.as_ref());
         }
@@ -185,7 +188,12 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
 }
 
 /// One sample through the lens.
-fn line_of(sample: &zenkey_fleet::SampleView, lens: &Lens<'_>, structural_only: bool) -> Line {
+fn line_of(
+    sample: &zenkey_fleet::SampleView,
+    lens: &Lens<'_>,
+    structural_only: bool,
+    frames: &mut zenkey_fleet::model::frame::Readers,
+) -> Line {
     let attachment = sample.attachment.as_ref().map(|a| a.to_bytes());
     Line::of(
         Payload {
@@ -198,6 +206,7 @@ fn line_of(sample: &zenkey_fleet::SampleView, lens: &Lens<'_>, structural_only: 
         Member::Type,
         lens,
         structural_only,
+        Some(frames),
     )
 }
 
@@ -379,7 +388,12 @@ mod tests {
             ("--raw", Shape::Raw),
             ("--fmt", Shape::Fmt("%n %k <%t> %v (%l B) %T")),
         ] {
-            let line = line_of(s, lens, matches!(shape, Shape::Raw));
+            let line = line_of(
+                s,
+                lens,
+                matches!(shape, Shape::Raw),
+                &mut Default::default(),
+            );
             out.push_str(&format!("# {name}\n"));
             for l in human(&line, s, shape, 1, "prod", "").out {
                 out.push_str(&l);
@@ -454,7 +468,7 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
             "the record, never the envelope's bytes: {shown}"
         );
         assert!(shown.contains("json:Namespaces"), "{shown}");
-        let line = line_of(&s, &lens, false);
+        let line = line_of(&s, &lens, false, &mut Default::default());
         let row = row(&line, &s);
         assert_eq!(
             row.value,
@@ -471,9 +485,119 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
         );
     }
 
+    /// Frames (core §7.7, observer §7.6; #981's K2): `echo` reads a frame
+    /// key's frames through one reader for the window's life, so a lost
+    /// frame turns the fields its successor omits unknown; a scheduled
+    /// record reads scheduled with its jitter; `--raw` shows a frame's
+    /// envelope and size, never its body sniffed.
+    #[test]
+    fn a_frame_keys_frames_read_in_order() {
+        use serde_json::json;
+        use zenkey_model::frame::{Frame, Layout};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/linkframes.v1.toml");
+        let (contracts, problems) = zenkey_fleet::ContractSet::load_path(&path);
+        assert!(problems.is_empty(), "{problems:?}");
+        let lens = Lens::new("prod", None, &contracts).offline(&contracts);
+        let c = zenkey_model::contract::load_path(&path).contract.unwrap();
+        let layout = |t: &str| {
+            let r = c
+                .resources
+                .iter()
+                .find(|r| r.template.as_str() == t)
+                .unwrap();
+            Layout::of_resource(&c, r).unwrap().unwrap()
+        };
+        let frame = |template: &str, seq: u32, v: serde_json::Value| {
+            let l = layout(template);
+            let put = Frame::from_json(&v, &l, None)
+                .unwrap()
+                .envelope(
+                    &l,
+                    Stamp {
+                        run: Run::U16(7),
+                        seq: Seq::new(seq).unwrap(),
+                    },
+                )
+                .unwrap();
+            let mut s = sample(SampleKind::Put);
+            s.key = format!("prod/zk2/lab/modem/linkframes.v1/stream/{template}");
+            s.encoding = "zenoh/bytes".into();
+            s.payload = zenoh::bytes::ZBytes::from(put);
+            s
+        };
+        let table = |line: &Line, s: &zenkey_fleet::SampleView| {
+            human(line, s, Shape::Table { hex: false }, 1, "prod", "")
+                .out
+                .join("\n")
+        };
+        let mut frames = zenkey_fleet::model::frame::Readers::new();
+        let key = frame(
+            "frames/link",
+            10,
+            json!({"time": {"s": 100, "ms": 0}, "records": [{"full": true, "values":
+                {"dropped": 7, "queue_depth": 12, "duty_available": 1}}]}),
+        );
+        let first = line_of(&key, &lens, false, &mut frames);
+        let shown = table(&first, &key);
+        assert!(shown.contains("zk2c frame of packed:Link"), "{shown}");
+        assert!(
+            shown.contains("run 0007, seq 10, the first frame read"),
+            "{shown}"
+        );
+        assert!(shown.contains("duty_wait_ms absent"), "{shown}");
+        // 11 lost: 12's omitted fields unknown, never their last value.
+        let delta = frame(
+            "frames/link",
+            12,
+            json!({"time": {"s": 220, "ms": 0}, "records": [{"full": false, "values": {"dropped": 9}}]}),
+        );
+        let line = line_of(&delta, &lens, false, &mut frames);
+        let shown = table(&line, &delta);
+        assert!(shown.contains("seq 12, 1 record lost before it"), "{shown}");
+        assert!(
+            shown.contains("queue_depth unknown (records lost)"),
+            "{shown}"
+        );
+        assert!(!shown.contains("queue_depth 12"), "{shown}");
+        let row = row(&line, &delta);
+        assert_eq!(row.value.as_ref().unwrap()["follows"], "gap");
+        assert_eq!(row.verdict.as_deref(), Some("valid"));
+        // The same frame alone, as `get` reads a reply: a reader's first.
+        let alone = line_of(&delta, &lens, false, &mut Default::default());
+        assert!(
+            table(&alone, &delta)
+                .contains("queue_depth unknown (not included since the first frame read)")
+        );
+        // Three records: the second scheduled, the third measured late.
+        let s3 = frame(
+            "frames/sample",
+            30,
+            json!({"time": {"s": 7200, "ms": 0}, "records": [
+                {"full": true, "values": {"temperature": "21.5", "rssi": -85, "link_up": true}},
+                {"full": false, "at": "scheduled", "values": {"temperature": "22"}},
+                {"full": false, "at": 20750, "values": {"rssi": -90}}]}),
+        );
+        let shown = table(&line_of(&s3, &lens, false, &mut frames), &s3);
+        assert!(
+            shown.contains("#31 t=7210.000 scheduled ±500 ms"),
+            "{shown}"
+        );
+        assert!(shown.contains("#32 t=7220.750 measured"), "{shown}");
+        // `--raw`: the envelope and the size, the body never sniffed.
+        let raw = line_of(&delta, &lens, true, &mut frames);
+        assert!(
+            human(&raw, &delta, Shape::Table { hex: false }, 1, "prod", "")
+                .out
+                .join("\n")
+                .contains("<zk2c frame, run 0007, seq 12, "),
+        );
+    }
+
     fn shown_refused(s: &zenkey_fleet::SampleView, lens: &Lens<'_>) -> String {
         let mut out = shown(s, lens);
-        let line = line_of(s, lens, false);
+        let line = line_of(s, lens, false, &mut Default::default());
         out.push_str(&row(&line, s).to_line());
         out
     }

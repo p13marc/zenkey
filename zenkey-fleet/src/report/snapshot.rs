@@ -144,9 +144,8 @@ impl SnapshotRow {
         let bytes = self.payload()?;
         match crate::model::inband::payload(&self.key, self.encoding.as_deref(), &bytes) {
             crate::model::inband::Payload::Record { record, .. }
-            | crate::model::inband::Payload::Heartbeat { body: record, .. } => {
-                Some(record.to_vec())
-            }
+            | crate::model::inband::Payload::Heartbeat { body: record, .. }
+            | crate::model::inband::Payload::Frame { body: record, .. } => Some(record.to_vec()),
             crate::model::inband::Payload::Plain(_) | crate::model::inband::Payload::Refused(_) => {
                 Some(bytes)
             }

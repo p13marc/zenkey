@@ -405,6 +405,35 @@ impl<'a> Lens<'a> {
         bytes: &[u8],
         attachment: Option<&[u8]>,
     ) -> Checked {
+        self.check_read(wire, member, encoding, bytes, attachment, None)
+    }
+
+    /// [`Lens::check_sample`] for a window that reads a key's samples in
+    /// the order they arrived: a frame (core §7.7) is applied by its key's
+    /// reader in `readers`, so a frame lost before it turns the fields it
+    /// omits `unknown` (observer §7.6). [`Lens::check_sample`] reads each
+    /// frame alone, as a reader's first.
+    pub fn check_frames(
+        &self,
+        wire: &str,
+        member: Member,
+        encoding: Option<&str>,
+        bytes: &[u8],
+        attachment: Option<&[u8]>,
+        readers: &mut crate::model::frame::Readers,
+    ) -> Checked {
+        self.check_read(wire, member, encoding, bytes, attachment, Some(readers))
+    }
+
+    fn check_read(
+        &self,
+        wire: &str,
+        member: Member,
+        encoding: Option<&str>,
+        bytes: &[u8],
+        attachment: Option<&[u8]>,
+        readers: Option<&mut crate::model::frame::Readers>,
+    ) -> Checked {
         let resolution = self.resolve(wire);
         let key = self.relative(wire).unwrap_or(wire);
         // The envelope first (core §7.5, observer §7.3): its record is the
@@ -415,6 +444,24 @@ impl<'a> Lens<'a> {
             _ => inband::Payload::Plain(bytes),
         };
         let tag = payload.tag();
+        // Core §7.7: a frame resource's put is a frame, applied by the
+        // key's reader; a frame elsewhere, and a mutation on a frame
+        // resource, have no reading.
+        if let Some(checked) = self.frames(
+            wire,
+            key,
+            &resolution,
+            member,
+            payload,
+            bytes.len(),
+            readers,
+        ) {
+            return Checked {
+                rendering: checked.0,
+                conformance: checked.1,
+                identity: resolution.identity,
+            };
+        }
         let (bytes, encoding) = match payload {
             inband::Payload::Refused(refusal) => {
                 let rendering = refused_rendering(
@@ -434,6 +481,21 @@ impl<'a> Lens<'a> {
             // `zenoh/bytes` (observer §7.3).
             inband::Payload::Plain(b) => (b, encoding),
             inband::Payload::Record { record, .. } => (record, None),
+            // A frame [`Lens::frames`] did not read: its declaration is not
+            // in hand, so its envelope and size (observer §7.6).
+            inband::Payload::Frame { body, stamp, .. } => {
+                let why = resolution
+                    .identity
+                    .unresolved
+                    .clone()
+                    .unwrap_or(Unresolved::PresenceNotRead);
+                let reason = why.words();
+                return Checked {
+                    rendering: crate::model::frame::unread_rendering(key, why, stamp, body.len()),
+                    conformance: Conformance::NotChecked { reason },
+                    identity: resolution.identity,
+                };
+            }
             // A heartbeat (core §7.5's form 6): read with the revision of
             // the interface it covers, never as a record.
             inband::Payload::Heartbeat { body, stamp, tag } => {
@@ -477,6 +539,57 @@ impl<'a> Lens<'a> {
                 }
             }
         }
+    }
+
+    /// A frame, or a sample of a frame resource, on a key that resolved
+    /// (core §7.7, #981's K2): read by `readers`' reader of the key, or
+    /// alone, as a reader's first; `None` for any other sample, which its
+    /// type reads.
+    #[allow(clippy::too_many_arguments)]
+    fn frames(
+        &self,
+        wire: &str,
+        key: &str,
+        resolution: &Resolution,
+        member: Member,
+        payload: inband::Payload<'_>,
+        size: usize,
+        readers: Option<&mut crate::model::frame::Readers>,
+    ) -> Option<(PayloadRendering, Conformance)> {
+        let r = resolution.resolved.as_ref()?;
+        if member != Member::Type {
+            return None;
+        }
+        let resource = r.resource();
+        let ty = decode::type_of(
+            r.revision.bundle(),
+            resource.token.as_str(),
+            resource.template.as_str(),
+            member.as_str(),
+        )?;
+        let resolved = ResolvedResource {
+            iface: r.iface.to_string(),
+            fingerprint: r.revision.fingerprint().to_string(),
+            resource: r.resource_name(),
+            member: member.as_str().to_owned(),
+            values: r.values.clone(),
+        };
+        let mut alone = zenkey_model::frame::Reader::new();
+        let reader = match readers {
+            Some(rs) => rs.reader(wire),
+            None => &mut alone,
+        };
+        crate::model::render::frame_check(
+            r.revision.contract(),
+            resource,
+            key,
+            Some(resolved),
+            ty,
+            payload,
+            size,
+            reader,
+            self.epoch_of(&r.address),
+        )
     }
 
     /// A heartbeat heard on `wire` (#978's F2): read with the revision its
@@ -1187,6 +1300,117 @@ mod tests {
                 .resolved
                 .is_some(),
             "one revision held offline resolves without presence"
+        );
+    }
+
+    /// A frame (core §7.7; #981's K2) reads through its resource's layout:
+    /// alone, as a reader's first, by `check_sample`, and by its key's
+    /// reader in `check_frames`, so a frame lost turns the next one's
+    /// omitted fields unknown; a frame on a resource with no `frame` table,
+    /// and a record that came in no frame on a frame resource, are
+    /// undecodable; with no contract in hand, its envelope and size. A
+    /// `.zrec` row reads through the same calls, held offline.
+    #[test]
+    fn a_frame_reads_through_its_resources_layout() {
+        use zenkey_model::frame::{Frame, Layout};
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/linkframes.v1.toml");
+        let (set, problems) = ContractSet::load_path(&path);
+        assert!(problems.is_empty(), "{problems:?}");
+        let lens = Lens::new("prod", None, &set).offline(&set);
+        let c = zenkey_model::contract::load_path(&path).contract.unwrap();
+        let r = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "frames/link")
+            .unwrap();
+        let l = Layout::of_resource(&c, r).unwrap().unwrap();
+        let put = |seq: u32, v: serde_json::Value| {
+            Frame::from_json(&v, &l, None)
+                .unwrap()
+                .envelope(
+                    &l,
+                    Stamp {
+                        run: Run::U16(7),
+                        seq: Seq::new(seq).unwrap(),
+                    },
+                )
+                .unwrap()
+        };
+        let wire = "prod/zk2/lab/modem/linkframes.v1/stream/frames/link";
+        let full = put(
+            1,
+            json!({"time": {"s": 1, "ms": 0}, "records": [{"full": true,
+                "values": {"dropped": 4, "queue_depth": 2}}]}),
+        );
+        let delta = put(
+            3,
+            json!({"time": {"s": 3, "ms": 0}, "records": [{"full": false,
+                "values": {"dropped": 5}}]}),
+        );
+        let value = |c: &Checked| match &c.rendering.rendered {
+            Rendered::Value {
+                declared, value, ..
+            } => {
+                assert_eq!(declared, "zk2c frame of packed:Link");
+                value.clone()
+            }
+            r => panic!("{r:?}"),
+        };
+        let mut readers = crate::model::frame::Readers::new();
+        let enc = Some("zenoh/bytes");
+        let first = lens.check_frames(wire, Member::Type, enc, &full, None, &mut readers);
+        assert_eq!(first.conformance, Conformance::Valid);
+        let q = &value(&first)["records"][0]["fields"]["queue_depth"];
+        assert_eq!(q, &json!({"state": "known", "value": 2}));
+        let gap = lens.check_frames(wire, Member::Type, enc, &delta, None, &mut readers);
+        let v = value(&gap);
+        assert_eq!(
+            (v["follows"].clone(), v["lost"].clone()),
+            (json!("gap"), json!(1))
+        );
+        assert_eq!(
+            v["records"][0]["fields"]["queue_depth"],
+            json!({"state": "unknown", "why": "gap"})
+        );
+        let alone = lens.check_sample(wire, Member::Type, enc, &delta, None);
+        assert_eq!(value(&alone)["follows"], "first");
+        // A record in no frame on the frame resource; a frame on a plain
+        // stream of the same record type.
+        let mutation = Envelope::mutation(
+            l.tag(),
+            Stamp {
+                run: Run::U16(7),
+                seq: Seq::new(4).unwrap(),
+            },
+            &[0; 4],
+        )
+        .write();
+        let c = lens.check_sample(wire, Member::Type, enc, &mutation, None);
+        assert!(
+            matches!(&c.conformance, Conformance::Undecodable { reason, .. }
+                if reason == crate::model::frame::MUTATION_ON_FRAME),
+            "{:?}",
+            c.conformance
+        );
+        let level = "prod/zk2/lab/modem/linkframes.v1/stream/level";
+        let c = lens.check_sample(level, Member::Type, enc, &full, None);
+        assert!(
+            matches!(&c.conformance, Conformance::Undecodable { reason, .. }
+                if reason == crate::model::frame::FRAME_AS_RECORD),
+            "{:?}",
+            c.conformance
+        );
+        // No contract in hand: the envelope and the size, never sniffed.
+        let empty = ContractSet::new();
+        let blind = Lens::new("prod", None, &empty);
+        let c = blind.check_sample(wire, Member::Type, enc, &full, None);
+        assert!(
+            matches!(&c.rendering.rendered, Rendered::Structural { text, value: None, .. }
+                if text.starts_with("<zk2c frame, run 0007, seq 1, ")),
+            "{:?}",
+            c.rendering.rendered
         );
     }
 
