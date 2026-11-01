@@ -439,8 +439,8 @@ pub use model::skeleton::{
 // without a session (`model::target`), then made through the runtime's
 // `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).
 pub use bus::consume::{
-    StateRead, WATCH_BUFFER, Watch, get_state, last_known as last_known_state, stamp,
-    watch as watch_resource,
+    Confirmations, StateRead, WATCH_BUFFER, Watch, get_state, last_known as last_known_state,
+    stamp, watch as watch_resource,
 };
 pub use bus::operation::{OperationCall, call as call_operation};
 pub use model::target::{

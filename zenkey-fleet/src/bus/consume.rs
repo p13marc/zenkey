@@ -392,13 +392,16 @@ fn payload(
 /// counts the rest as lagged.
 pub const WATCH_BUFFER: usize = 4096;
 
+/// What each heartbeat confirmed of a watched collection, as it comes.
+pub type Confirmations = tokio::sync::mpsc::Receiver<crate::report::WatchConfirmation>;
+
 /// A subscription through a tool's consumer, delivering rendered samples.
 /// Dropping it undeclares it.
 pub struct Watch {
     sub: zenkey::consumer::Subscription,
     rx: tokio::sync::mpsc::Receiver<WatchSample>,
     /// What each heartbeat confirmed (#978's F2), apart from the samples.
-    confirmations: tokio::sync::mpsc::Receiver<crate::report::WatchConfirmation>,
+    confirmations: Option<Confirmations>,
     lagged: Arc<AtomicU64>,
     selectors: Vec<String>,
 }
@@ -494,7 +497,7 @@ pub async fn watch(
     Ok(Watch {
         sub,
         rx,
-        confirmations,
+        confirmations: Some(confirmations),
         lagged,
         selectors,
     })
@@ -613,11 +616,12 @@ impl Watch {
         self.rx.recv().await
     }
 
-    /// The next confirmation a heartbeat made of the collection watched
-    /// (#978's F2); `None` once the subscription is gone. A resource that
-    /// is no collection has none.
-    pub async fn next_confirmation(&mut self) -> Option<crate::report::WatchConfirmation> {
-        self.confirmations.recv().await
+    /// What each heartbeat confirmed of the collection watched (#978's
+    /// F2), taken once, so a reader awaits it beside [`Watch::next`]: each
+    /// `recv` is the next confirmation, `None` once the subscription is
+    /// gone. A resource that is no collection has none.
+    pub fn take_confirmations(&mut self) -> Option<Confirmations> {
+        self.confirmations.take()
     }
 
     /// Samples put on a wildcard key and discarded by rule (R6).

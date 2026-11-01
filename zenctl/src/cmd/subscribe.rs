@@ -89,6 +89,7 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
     tokio::pin!(ctrl_c);
     let (mut received, mut discarded, mut lagged, mut unresolved) = (0u64, 0u64, 0u64, 0u64);
     let (mut qos_mismatched, mut nonconforming) = (0u64, 0u64);
+    let mut confirmations = watch.take_confirmations();
     let ended = loop {
         tokio::select! {
             next = watch.next() => {
@@ -111,15 +112,23 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
                     break WatchEnd::Count;
                 }
             }
-            next = watch.next_confirmation() => {
+            next = async {
+                match confirmations.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
                 // A heartbeat confirmed members of the collection (#978's
                 // F2): a row of its own, never a sample.
-                if let Some(c) = next {
-                    sink.row("confirmation", serde_json::to_value(&c)?)?;
-                    for line in crate::render::confirmation_lines(&c) {
-                        sink.line(line)?;
+                match next {
+                    Some(c) => {
+                        sink.row("confirmation", serde_json::to_value(&c)?)?;
+                        for line in crate::render::confirmation_lines(&c) {
+                            sink.line(line)?;
+                        }
+                        sink.flush()?;
                     }
-                    sink.flush()?;
+                    None => confirmations = None,
                 }
             }
             () = async {
