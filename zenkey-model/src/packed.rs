@@ -864,10 +864,12 @@ pub fn reserved_code(width: u32, declared: &[&str], name: &str) -> Option<u64> {
         .map(|i| top_code(width) - i as u64)
 }
 
-/// The deployment epoch the reference reads and writes `time` fields
-/// under while nothing carries one (core §7.6: "This version carries it
-/// nowhere"; #980's catalog will): 0, the Unix epoch, so a `time` field's
-/// 32 bits are Unix seconds, to 2106.
+/// The deployment epoch E of a deployment that states none (core §7.6:
+/// "One that states none has E = 0"): the Unix epoch, so a `time` field's
+/// 32 bits are Unix seconds, to 2106. The codec takes the epoch a
+/// deployment states as an `Option`, `None` where it states none, which
+/// reads and writes under this one; nothing carries one yet (#980's
+/// catalog will).
 pub const DEFAULT_EPOCH: i64 = 0;
 
 /// Why a writer refused a value (core §7.6, the vectors' tokens).
@@ -882,8 +884,6 @@ pub enum WriteRefusal {
     Value,
     /// A value that has no code.
     Range,
-    /// A time field, and no deployment epoch.
-    Epoch,
 }
 
 impl WriteRefusal {
@@ -894,7 +894,6 @@ impl WriteRefusal {
             Self::Unknown => "unknown",
             Self::Value => "value",
             Self::Range => "range",
-            Self::Epoch => "epoch",
         }
     }
 
@@ -906,7 +905,6 @@ impl WriteRefusal {
             Self::Unknown => "unknown: a member the type does not have",
             Self::Value => "value: the wrong JSON type, a name not declared, or no decimal",
             Self::Range => "range: a value that has no code",
-            Self::Epoch => "epoch: a time field, and no deployment epoch",
         }
     }
 }
@@ -933,8 +931,11 @@ pub enum ReadRefusal {
     Extension,
     /// A bit of the pad is 1.
     Pad,
-    /// A time field, and no deployment epoch: the reader's input, not the
-    /// record's fault.
+    /// A time field whose instant, under the deployment epoch given, lies
+    /// past an `i64` of milliseconds: the reader's input, not the record's
+    /// fault, and no epoch within ±9.2 × 10^15 seconds does it. The
+    /// vectors have no such token; a deployment that states no epoch reads
+    /// under [`DEFAULT_EPOCH`].
     Epoch,
 }
 
@@ -960,7 +961,7 @@ impl ReadRefusal {
             Self::Code => "code: a field's code is unused",
             Self::Extension => "extension: a marker read as 1, and no field present after it",
             Self::Pad => "pad: a bit of the pad is 1",
-            Self::Epoch => "epoch: a time field, and no deployment epoch",
+            Self::Epoch => "epoch: the deployment epoch puts the instant past 64-bit milliseconds",
         }
     }
 }
@@ -1120,7 +1121,11 @@ impl<'a> BitReader<'a> {
 }
 
 /// A JSON number or a decimal string, as a writer's decimal (`value` when
-/// it does not read).
+/// it does not read). Core §7.6: integer text from −2^63 to 2^64 − 1 is
+/// that integer, exactly, and any other number the binary64 a JSON reader
+/// holds for it, by its shortest decimal text. That is serde_json's
+/// reading, which holds such integer text as an `i64` or a `u64` and any
+/// other number as an `f64`.
 ///
 /// # Errors
 /// [`WriteRefusal::Value`].
@@ -1134,9 +1139,12 @@ pub fn json_decimal(v: &Value) -> Result<Decimal, WriteRefusal> {
     }
 }
 
-/// A JSON integer. A float that is integral and beyond 64 bits is how a
-/// JSON reader without big integers holds integer text past them: such a
-/// value is out of range (`range`), never of the wrong type (`value`).
+/// A JSON integer, an `int`'s, a `counter`'s or a `time`'s (core §7.6):
+/// integer text from −2^63 to 2^64 − 1, read exactly, so a 64-bit counter
+/// takes 2^64 − 1. Any other number is a binary64: `value`, a number of
+/// the wrong type, below 2^63 in magnitude, and `range` from 2^63 on,
+/// since a JSON reader without big integers holds integer text past 64
+/// bits so.
 ///
 /// # Errors
 /// [`WriteRefusal::Value`] or [`WriteRefusal::Range`].
@@ -1261,14 +1269,15 @@ impl Fixed {
 }
 
 /// A `time` field's code for an instant `t`, in milliseconds since the
-/// Unix epoch, under the deployment epoch in seconds: its seconds since
-/// the epoch, then with `ms` its milliseconds in 10 bits (`range` outside
-/// the epoch's 2^32 seconds, `epoch` with none).
+/// Unix epoch, under the deployment epoch in seconds (`None`: the
+/// deployment states none, [`DEFAULT_EPOCH`]): its seconds since the
+/// epoch, then with `ms` its milliseconds in 10 bits (`range` outside the
+/// epoch's 2^32 seconds).
 ///
 /// # Errors
-/// [`WriteRefusal::Epoch`] or [`WriteRefusal::Range`].
+/// [`WriteRefusal::Range`].
 pub fn time_code(t: i128, epoch: Option<i64>, ms: bool) -> Result<u64, WriteRefusal> {
-    let e = epoch.ok_or(WriteRefusal::Epoch)?;
+    let e = epoch.unwrap_or(DEFAULT_EPOCH);
     let delta = t - 1000 * i128::from(e);
     let (s, m) = (delta.div_euclid(1000), delta.rem_euclid(1000));
     let s = u32::try_from(s).map_err(|_| WriteRefusal::Range)?;
@@ -1281,11 +1290,12 @@ pub fn time_code(t: i128, epoch: Option<i64>, ms: bool) -> Result<u64, WriteRefu
 }
 
 /// A `time` field's instant for a code, in milliseconds since the Unix
-/// epoch (`code` for a millisecond code from 1000 up, then `epoch` with
-/// none).
+/// epoch, under the deployment epoch in seconds (`None`: the deployment
+/// states none, [`DEFAULT_EPOCH`]); `code` for a millisecond code from
+/// 1000 up.
 ///
 /// # Errors
-/// [`ReadRefusal::Code`], then [`ReadRefusal::Epoch`].
+/// [`ReadRefusal::Code`].
 pub fn time_value(code: u64, epoch: Option<i64>, ms: bool) -> Result<i128, ReadRefusal> {
     let (s, m) = if ms {
         (code >> 10, code & 0x3ff)
@@ -1295,7 +1305,7 @@ pub fn time_value(code: u64, epoch: Option<i64>, ms: bool) -> Result<i128, ReadR
     if m >= 1000 {
         return Err(ReadRefusal::Code);
     }
-    let e = epoch.ok_or(ReadRefusal::Epoch)?;
+    let e = epoch.unwrap_or(DEFAULT_EPOCH);
     Ok(1000 * i128::from(e) + 1000 * i128::from(s) + i128::from(m))
 }
 
@@ -1413,8 +1423,9 @@ impl Layout {
         })
     }
 
-    /// Writes a value, the JSON object core §7.6's reading spells, with the
-    /// deployment epoch in seconds where a time field needs one.
+    /// Writes a value, the JSON object core §7.6's reading spells, under
+    /// the deployment epoch in seconds its `time` fields are written since
+    /// (`None`: the deployment states none, [`DEFAULT_EPOCH`]).
     ///
     /// # Errors
     /// The writer's refusal: [`WriteRefusal`].
@@ -1458,7 +1469,8 @@ impl Layout {
     }
 
     /// Reads a record under the tag its envelope's CH carries, refusing it
-    /// for the first of core §7.6's checks that applies.
+    /// for the first of core §7.6's checks that applies, its `time` fields
+    /// under the deployment epoch (`None`: [`DEFAULT_EPOCH`]).
     ///
     /// # Errors
     /// The reader's refusal: [`ReadRefusal`].
@@ -1614,7 +1626,9 @@ impl Field {
             FieldKind::Counter => Ok(Value::from(code)),
             FieldKind::Time { ms } => {
                 let t = time_value(code, epoch, *ms)?;
-                Ok(i64::try_from(t).map_or(Value::Null, Value::from))
+                i64::try_from(t)
+                    .map(Value::from)
+                    .map_err(|_| ReadRefusal::Epoch)
             }
         }
     }

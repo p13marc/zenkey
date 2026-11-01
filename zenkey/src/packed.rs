@@ -37,17 +37,19 @@ pub trait PackedRecord: Sized + Send + Sync + 'static {
     const MIN_BITS: u64;
     const MAX_BITS: u64;
 
-    /// Writes the record: its bits, then the pad. `epoch` is the deployment
-    /// epoch in seconds, which a `time` field needs.
+    /// Writes the record: its bits, then the pad. `epoch` is the epoch the
+    /// deployment states, in seconds, which a `time` field is written
+    /// since: `None` where it states none, so E = 0 ([`DEFAULT_EPOCH`],
+    /// core §7.6).
     ///
     /// # Errors
     /// The writer's refusal: a value with no code (`range`), a reserved
-    /// code the field does not declare (`value`), a time field and no
-    /// epoch (`epoch`).
+    /// code the field does not declare (`value`).
     fn encode(&self, epoch: Option<i64>) -> Result<Record, WriteRefusal>;
 
     /// Reads a record under the tag its envelope's CH carried, refusing it
-    /// for the first of core §7.6's checks that applies.
+    /// for the first of core §7.6's checks that applies, its `time` fields
+    /// under `epoch` as [`PackedRecord::encode`] takes it.
     ///
     /// # Errors
     /// The reader's refusal.
@@ -229,11 +231,12 @@ pub fn json_open<E>(
 }
 
 /// A `time` instant from its code: [`time_value`], in an `i64` of
-/// milliseconds since the Unix epoch.
+/// milliseconds since the Unix epoch, under the deployment epoch (`None`:
+/// [`DEFAULT_EPOCH`]).
 ///
 /// # Errors
-/// [`ReadRefusal::Code`], then [`ReadRefusal::Epoch`] (also for an epoch
-/// that places the instant past an `i64`).
+/// [`ReadRefusal::Code`], then [`ReadRefusal::Epoch`] for an epoch that
+/// places the instant past an `i64`.
 pub fn time_ms(code: u64, epoch: Option<i64>, ms: bool) -> Result<i64, ReadRefusal> {
     i64::try_from(time_value(code, epoch, ms)?).map_err(|_| ReadRefusal::Epoch)
 }

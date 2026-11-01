@@ -3,6 +3,49 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.80 — 2026-11-01: a writer's integers, and the epoch none states (#979)
+
+zk2py's mend after round 94 read 0.76's §7.6 cold and ran packed records
+against the reference. It found two contradictions between the text and
+`conformance/packed/vectors.json`, F-434 and F-435, and a bug in the
+reference's tools, F-436. This version answers the two.
+
+**Answered, the text taking the vectors' reading.**
+- **F-434, a number of magnitude 2^63 or more.** 0.76 put every such
+  number out of range, "however it is written". A 64-bit counter's
+  domain reaches 2^64 − 1, and the vectors write that count. Integer text
+  from −2^63 to 2^64 − 1 is now read as that integer, exactly. Any other
+  JSON number is read as a binary64, as before. Given for an `int`,
+  `counter` or `time` value, a binary64 of magnitude 2^63 or more is out
+  of range, and below it of the wrong type. That is the vectors' rule,
+  which the model and zk2py already read. The cut stays at 2^63: a reader
+  with no big integers holds integer text past 64 bits as such a double.
+  A fixed-point value goes by its code, at any magnitude: no cut applies
+  to it.
+
+**Answered, the vectors taking the text's reading.**
+- **F-435, a `time` field and no epoch given.** 0.76 says a deployment
+  that states no epoch has E = 0, but a write still refused a `time`
+  field given none (`epoch`). That write now writes its record under
+  E = 0, and a new read reads it back. The writer's `epoch` token is gone. The model's
+  codec and the generated code read and write under E = 0 when handed
+  none. A `time` read whose instant would pass 64-bit milliseconds under
+  its epoch is now refused as `epoch`, where it read as `null`.
+
+**Fixtures.** `vectors.json` gains 2 writes and 1 read. A 64-bit counter
+given `1e19`, a binary64 at 2^63 or more, is `range`. A 64-bit `int`
+given 2^62 − 1 writes that code, which a binary64 would round to 2^62.
+The description says both.
+
+**F-436** is the reference's: `zenctl watch` dropped a packed record its
+layout refused, and `zenctl echo` sniffed a one-byte one. Both show it
+undecodable with its refusal now (observer §7.3). No text changes.
+
+**Deliberately not changed.**
+- **No rule.** The sentences changed state no keyword, and `RULES.md` is
+  unchanged.
+- **No fingerprint moves,** and no section number.
+
 ## 0.79 — 2026-11-01: the deployment catalog (#980)
 
 Epic #975, zk2c, makes the wire bandwidth-first. Its later forms carry a

@@ -222,8 +222,8 @@ pub fn decode_in(
                 Ok(l) => l,
                 Err(reason) => return fail(reason),
             };
-            let epoch = cx.epoch.unwrap_or(crate::packed::DEFAULT_EPOCH);
-            match layout.read(tag.get(), bytes, Some(epoch)) {
+            // No epoch stated: E = 0 (`DEFAULT_EPOCH`), as the codec reads.
+            match layout.read(tag.get(), bytes, cx.epoch) {
                 Ok(v) => Rendered::Value(v),
                 Err(r) => fail(format!("refused by its layout, {}", r.reason())),
             }
