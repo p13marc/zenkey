@@ -385,6 +385,7 @@ impl<'a> Lens<'a> {
             Member::Type => inband::payload(wire, encoding, bytes),
             _ => inband::Payload::Plain(bytes),
         };
+        let tag = payload.tag();
         let (bytes, encoding) = match payload {
             inband::Payload::Refused(refusal) => {
                 let rendering = refused_rendering(
@@ -408,7 +409,7 @@ impl<'a> Lens<'a> {
         match &resolution.resolved {
             Some(r) => {
                 let (rendering, conformance) =
-                    check_resolved(r, member, encoding, bytes, attachment);
+                    check_resolved(r, member, encoding, bytes, attachment, tag);
                 Checked {
                     identity: resolution.identity,
                     rendering,
@@ -585,13 +586,16 @@ fn refused_rendering(
 }
 
 /// Rung 7 through a resolved resource: decode the member, then check the
-/// value against its JSON Schema type.
+/// value against its JSON Schema type. A packed record is decoded by the
+/// tag its envelope's CH carried (core §7.6), its layout's refusal its
+/// conformance.
 fn check_resolved(
     r: &Resolved,
     member: Member,
     encoding: Option<&str>,
     bytes: &[u8],
     attachment: Option<&[u8]>,
+    tag: Option<zenkey_model::wire::Tag>,
 ) -> (PayloadRendering, Conformance) {
     let resource = r.resource();
     let name = r.resource_name();
@@ -614,7 +618,8 @@ fn check_resolved(
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid": the contract speaks next.
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
-    let (rendered, conformance) = match decode::decode(bundle, ty, encoding, bytes) {
+    let cx = decode::Context { tag, epoch: None };
+    let (rendered, conformance) = match decode::decode_in(bundle, ty, encoding, bytes, cx) {
         decode::Rendered::Value(value) => {
             let declared = decode::declared(ty);
             let conformance = if ty["kind"] == "jsonschema" {

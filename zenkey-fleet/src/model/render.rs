@@ -146,6 +146,21 @@ pub fn render_with(
     )
 }
 
+/// A record the runtime already read out of its envelope (a consumer's
+/// `Delivery`, a `StateAnswer`'s value), rendered through one revision in
+/// hand: its run and seq and CH's tag in hand, so its bytes are never
+/// stripped twice and a packed type is decoded by its tag (core §7.6).
+pub fn render_record(
+    revision: &Revision,
+    key: &str,
+    record: &[u8],
+    stamp: zenkey_model::wire::Stamp,
+    tag: zenkey_model::wire::Tag,
+) -> PayloadRendering {
+    let payload = Payload::Record { record, stamp, tag };
+    render_read(revision, key, Member::Type, None, payload, record.len())
+}
+
 /// A payload of `member` on `key`, its envelope read (a type member's
 /// alone: an attachment and an operation's members carry none).
 fn read<'a>(key: &str, member: Member, encoding: Option<&str>, bytes: &'a [u8]) -> Payload<'a> {
@@ -235,7 +250,7 @@ fn render_read(
         member: member.as_str().to_owned(),
         values,
     };
-    let bytes = match payload {
+    let (bytes, tag) = match payload {
         Payload::Refused(refusal) => {
             return inband::refused_rendering(
                 key,
@@ -245,12 +260,18 @@ fn render_read(
                 refusal,
             );
         }
-        Payload::Plain(b) | Payload::Record { record: b, .. } => b,
+        Payload::Plain(b) => (b, None),
+        Payload::Record { record, tag, .. } => (record, Some(tag)),
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
-    // the contract speaks next (§7.2's order).
+    // the contract speaks next (§7.2's order). A packed record is read by
+    // its envelope's tag (core §7.6).
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
-    let rendered = rendered(ty, decode::decode(revision.bundle(), ty, encoding, bytes));
+    let cx = decode::Context { tag, epoch: None };
+    let rendered = rendered(
+        ty,
+        decode::decode_in(revision.bundle(), ty, encoding, bytes, cx),
+    );
     PayloadRendering {
         key: key.to_owned(),
         size: bytes.len(),

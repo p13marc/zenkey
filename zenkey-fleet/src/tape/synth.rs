@@ -245,11 +245,77 @@ impl Synth {
                 bytes: self.raw(media_type, tick),
                 value: None,
             }),
-            // core §7.6: the runtime's packed writer is #979's B2.
-            TypeId::Packed { name, .. } => Err(format!(
-                "packed:{name} is a packed type, which `gen` does not synthesize yet"
-            )),
+            TypeId::Packed { .. } => {
+                let layout = revision
+                    .contract()
+                    .packed_layout(ty)?
+                    .ok_or("a packed type with no layout")?;
+                self.packed(&layout, tick, measured_ms)
+            }
         }
+    }
+
+    /// A packed record at `tick` (core §7.6): every field a value of its
+    /// declaration, deterministic per (seed, field, tick), an optional one
+    /// present on even ticks, a counter climbing, a time `measured_ms` (else
+    /// a second per tick from 2023-11-14), under the reference's
+    /// deployment epoch. Written by the model's codec, and the value is
+    /// what it reads back.
+    fn packed(
+        &self,
+        layout: &zenkey_model::packed::Layout,
+        tick: u64,
+        measured_ms: Option<i64>,
+    ) -> Result<Synthesized, String> {
+        use zenkey_model::packed::{DEFAULT_EPOCH, FieldKind, fixed_value};
+        let mut m = serde_json::Map::new();
+        for f in layout.fields() {
+            if f.optional && !tick.is_multiple_of(2) {
+                continue;
+            }
+            let h = splitmix(self.seed ^ fnv(&f.name) ^ tick);
+            let v = match &f.kind {
+                FieldKind::Int {
+                    minimum, maximum, ..
+                } => {
+                    let span = u128::try_from(i128::from(*maximum) - i128::from(*minimum))
+                        .unwrap_or(0)
+                        + 1;
+                    let x = i128::from(*minimum) + i128::try_from(u128::from(h) % span).unwrap_or(0);
+                    Value::from(i64::try_from(x).unwrap_or(*minimum))
+                }
+                FieldKind::Fixed {
+                    minimum,
+                    resolution,
+                    values,
+                    ..
+                } => {
+                    let code = u64::try_from(u128::from(h) % values).unwrap_or(0);
+                    let x = fixed_value(code, minimum, resolution, *values)
+                        .map_err(|r| r.reason().to_owned())?;
+                    Value::String(x.to_string())
+                }
+                FieldKind::Enum { values, .. } => {
+                    Value::String(values[usize::try_from(h % values.len() as u64).unwrap_or(0)].clone())
+                }
+                FieldKind::Bool => Value::Bool(h & 1 == 1),
+                FieldKind::Counter => Value::from(tick.wrapping_mul(1 + fnv(&f.name) % 10)),
+                FieldKind::Time { .. } => Value::from(
+                    measured_ms.unwrap_or(1_700_000_000_000 + i64::try_from(tick).unwrap_or(0) * 1000),
+                ),
+            };
+            m.insert(f.name.clone(), v);
+        }
+        let record = layout
+            .write(&Value::Object(m), Some(DEFAULT_EPOCH))
+            .map_err(|r| format!("the synthesized record does not write: {r}"))?;
+        let value = layout
+            .read(layout.tag(), &record.bytes, Some(DEFAULT_EPOCH))
+            .map_err(|r| format!("the synthesized record does not read back: {r}"))?;
+        Ok(Synthesized {
+            bytes: record.bytes,
+            value: Some(value),
+        })
     }
 
     /// A metric resource's value at `tick`, of its declared kind (the module
