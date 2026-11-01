@@ -3429,8 +3429,196 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
-        + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root)
+        + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
+        + _mend_after_round93_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.74 and ``desired.v1`` 0.13, round 93's answers (#609, the mend
+    after round 93; #976). Each text at its version or later with its entry,
+    F-414 to F-421 answered as they read and the forms they replaced gone;
+    then what zk2py implements of them and of review-bot's points on PR
+    #1005:
+
+    - **F-416, F-417**, core §4.3: a run record it cannot use is no record,
+      a 32-bit draw, the record left as it is (:meth:`zk2py.owner.Owner.take_run`),
+      never a failure of ``start()``;
+    - observer §7.3 in a subscriber's callback: :func:`zk2py.zk2c.read_put`
+      and :func:`zk2py.zk2c.read_delete` never raise, over random and
+      truncated bytes, and each reading is one of its three cases.
+
+    No session is opened."""
+    import os
+    import random
+    import re
+    import tempfile
+
+    from . import owner as ow
+    from . import zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, rules = flat("core.md"), flat("RULES.md")
+    types, dscen, dtext = flat("scenarios/types.md"), flat("profiles/desired/scenarios.md"), flat("profiles/desired/v1.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", dtext)
+    desired_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("#976, round 93's answers: core 0.74 or later and desired.v1 0.13 or later, each with its entry",
+         [core_v >= (0, 74), desired_v >= (0, 13)]
+         + entry("CHANGELOG.md", "0.74", "round 93's answers")
+         + entry("profiles/desired/CHANGELOG.md", "0.13", "0.12's scenario change said"),
+         [True, True]),
+        ("F-414, F-415: §8.2's timestamp a session adds, or one the owner sets where it would, under the posture; "
+         "§3.3's descriptor put carries one the owner sets; the old form gone",
+         missing(core, "A timestamp its session adds falls under the posture below. So does one the owner sets "
+                       "where its session would add one anyway.",
+                 "Each put of it (below) carries a Zenoh timestamp the owner sets.")
+         + present(core, "Each put of it (below) carries the owner's timestamp"), []),
+        ("F-416, F-417: §4.3's record durable before the first sample under each run, and a random run meeting no "
+         "reuse, a repeat's chance accepted; the old form gone",
+         missing(core, "The record is durable before the first sample written under each run it issues.",
+                 "A random run (below) meets it. The chance of a repeat is accepted.")
+         + present(core, "durable before the first mutation"), []),
+        ("F-419, F-420: §4.3's MUST NOT, S7's row and RULES.md say \"its seq for state and events\"; \"that seq\" "
+         "and \"a seq never wraps\" gone",
+         missing(core, "An owner MUST NOT let its seq for state and events wrap.",
+                 "a run is never reused, and its seq for state and events never wraps within it (§4.3).")
+         + missing(rules, "An owner MUST NOT let its seq for state and events wrap.")
+         + present(core, "MUST NOT let that seq wrap", "a seq never wraps within it")
+         + present(rules, "MUST NOT let that seq wrap"), []),
+        ("F-418: types.md §1's record holds its type's predefined Encoding, which nothing on the wire names; the "
+         "writer's sentence gone",
+         missing(types, "Each record holds its type's predefined `Encoding`. Nothing on the wire names it.")
+         + present(types, "The owner's writer names that predefined"), []),
+        ("F-421: desired.v1 scenarios §6, step 1's clock 5 s behind and Expected 1's stamp above the author's last, "
+         "\"though its clock is behind\", no setup left in the outcome",
+         missing(dscen, "Its clock is 5 s behind.",
+                 "The put's stamp is above the author's last one, though its clock is behind (§2.11).")
+         + present(dscen, "last one. Its clock is behind (§2.11)."), []),
+    ]
+
+    # -- core §4.3: a run record it cannot use (review-bot on PR #1005) -------
+    ground = load_contract(spec.parent / "impl/python/interop/state/zk2py_ground.v1.toml")
+    cases: list[tuple[str, bytes | None]] = [
+        ("absent", None), ("{\"run\": 4}", b'{"run": 4}'), ("empty", b""), ("not JSON", b"{\"run\": 4"),
+        ("not UTF-8", b"\xff\xfe"), ("no run", b"{}"), ("a list", b"[4]"), ("a string", b'{"run": "4"}'),
+        ("a boolean", b'{"run": true}'), ("negative", b'{"run": -1}'), ("a fraction", b'{"run": 4.5}'),
+        ("beyond 16 bits", b'{"run": 65536}'), ("spent", b'{"run": 65535}'), ("a directory", None)]
+    def record_state(path: str) -> tuple[Any, ...]:
+        """A run record's path as it stands: a file's bytes, a directory and
+        what it holds, or nothing."""
+        if os.path.isdir(path):
+            return ("dir", tuple(sorted(os.listdir(path))))
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                return ("file", f.read())
+        return ("absent",)
+
+    got: list[tuple[str, Any, int | None, bool]] = []
+    with tempfile.TemporaryDirectory(prefix="zk2py-run-") as d:
+        for name, data in cases:
+            path = os.path.join(d, name.replace(" ", "-").replace('"', "").replace(":", "").replace("{", "")
+                                .replace("}", ""))
+            if name == "a directory":
+                os.mkdir(path)
+            elif data is not None:
+                with open(path, "wb") as f:
+                    f.write(data)
+            before = record_state(path)
+            o = ow.Owner("ground", "fleet-mgr", [ground], run_record=path)
+            try:
+                width, run = o.take_run()
+            except Exception as e:  # noqa: BLE001 - the case's verdict, the exception named (review-bot on #1010)
+                got.append((name, f"raised {type(e).__name__}: {e}", None, False))
+                continue
+            # What the record holds after, judged one way for every case
+            # (review-bot on PR #1010): an absent record written at run 0, a
+            # good one moved on by 1, and every other left exactly as it was,
+            # its bytes, or the directory and what it holds, and no .tmp left
+            # beside it.
+            want = {"absent": ("file", b'{"run": 0}'), '{"run": 4}': ("file", b'{"run": 5}')}.get(name, before)
+            got.append((name, width, run if width == 16 else None,
+                        record_state(path) == want and not os.path.exists(f"{path}.tmp")))
+    out.append(("core §4.3 (0.74, review-bot on PRs #1005 and #1010): a run record the owner cannot use, "
+                "unreadable, not JSON, without a counter from 0 to 0xFFFF, or spent, is no record: a 32-bit draw, "
+                "never a failure of take_run, and the record left exactly as it was; an absent one starts at run 0, "
+                "a good one moves on by 1",
+                got,
+                [("absent", 16, 0, True), ('{"run": 4}', 16, 5, True), ("empty", 32, None, True),
+                 ("not JSON", 32, None, True), ("not UTF-8", 32, None, True), ("no run", 32, None, True),
+                 ("a list", 32, None, True), ("a string", 32, None, True), ("a boolean", 32, None, True),
+                 ("negative", 32, None, True), ("a fraction", 32, None, True), ("beyond 16 bits", 32, None, True),
+                 ("spent", 32, None, True), ("a directory", 32, None, True)]))
+    o = ow.Owner("ground", "fleet-mgr", [ground])
+    runs = [o.take_run() for _ in range(3)]
+    out.append(("core §4.3 (0.74, F-417): with no record each run is a 32-bit draw, none equal to one it used, each "
+                "in runs_used",
+                [[w for w, _ in runs], len(set(runs)), o.runs_used == runs], [[32, 32, 32], 3, True]))
+
+    # -- observer §7.3 in a callback: read_put never raises (review-bot) ------
+    rng = random.Random(976)
+    keys_ = ["zk2/g/svc/zk2py_guard.v1/state/level", "zk2/g/svc/zk2py_guard.v1/stream/x",
+             "zk2/g/svc/zk2py_guard.v1/events/e/01j9zk6q6x5m2f4a8c0d3e7b9h", "ns/zk2/g/svc/zk2py_guard.v1/state/y",
+             "zk2/g/svc/zk2py_guard.v1/@stream/x", "rmw/robot1/cmd_vel", "zk2/g/svc/@zk/instance/0123456789abcdef"]
+    encodings = ["zenoh/bytes", "application/json", "zenoh/bytes;x", ""]
+    payloads: list[bytes] = [bytes(rng.getrandbits(8) for _ in range(rng.randrange(0, 41))) for _ in range(1500)]
+    payloads += [bytes([ch]) + bytes(rng.getrandbits(8) for _ in range(n)) for ch in range(256) for n in range(9)]
+    for good in (zk2c.mutation(zk2c.InBand(16, 3, 9), b'{"a":1}'), zk2c.mutation(zk2c.InBand(32, 0xA1, 2), b"hi"),
+                 zk2c.mutation(zk2c.InBand(16, 0xFFFF, zk2c.SEQ_MAX), b""), zk2c.deletion(zk2c.InBand(32, 1, 5))):
+        payloads += [good[:i] for i in range(len(good) + 1)] + [good + b"\x00"]
+    raised: list[str] = []
+    wrong: list[str] = []
+    seen = {"plain": 0, "refused": 0, "accepted": 0}
+    tokens = {"short", "form", "sample_kind", "tag", "trailing"}
+    for i, data in enumerate(payloads):
+        key, enc = keys_[i % len(keys_)], encodings[(i // len(keys_)) % len(encodings)]
+        for k, e in ((key, enc), (keys_[0], "zenoh/bytes")):
+            try:
+                r = zk2c.read_put(k, e, data)
+                d = zk2c.read_delete(k, e, data if i % 3 else None)
+            except Exception as ex:  # noqa: BLE001 - the case's verdict
+                raised.append(f"{k} {e} {data.hex()}: {type(ex).__name__}: {ex}")
+                continue
+            if not r.enveloped:
+                seen["plain"] += 1
+                if r.record != data or r.stamp is not None or r.refusal is not None:
+                    wrong.append(f"plain {data.hex()}")
+            elif r.refused:
+                seen["refused"] += 1
+                if r.record is not None or r.stamp is not None or r.refusal not in tokens:
+                    wrong.append(f"refused {data.hex()}")
+            else:
+                seen["accepted"] += 1
+                st = r.stamp
+                if st is None or r.record is None or zk2c.write(
+                        "mutation", st.width, st.run, st.seq, data[0] & 0x0F, r.record) != data:
+                    wrong.append(f"accepted {data.hex()}")
+            if d.record is not None or (d.refused and d.refusal not in tokens) or (d.enveloped and not d.refused
+                                                                                    and d.stamp is None):
+                wrong.append(f"delete {data.hex()}")
+    out.append(("observer §7.3 in a subscriber's callback (review-bot on PR #1005): read_put and read_delete never "
+                "raise over random bytes, every CH byte with up to 8 more, and every truncation of four envelopes; "
+                "each put read is plain (its bytes), refused (no record, a token named) or accepted (a record that "
+                "writes back to the same bytes)",
+                [raised[:3], wrong[:3], all(n > 0 for n in seen.values()), len(payloads) > 3800],
+                [[], [], True, True]))
+    return out
 
 
 def _round93_readings(root: Path) -> list[tuple[str, Any, Any]]:

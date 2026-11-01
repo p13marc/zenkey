@@ -203,9 +203,13 @@ class Bus:
 
     def _s(self, smp: Any) -> None:
         ts = smp.timestamp
+        read = zk2c.read_sample(smp)
         with self.lock:
             self.got.append((time.monotonic(), str(smp.key_expr), "delete" if smp.kind == self.zenoh.SampleKind.DELETE
-                             else "put", zk2c.payload_of(smp), None if ts is None else str(ts), ts))
+                             else "put", zk2c.payload_of(smp), None if ts is None else str(ts), ts,
+                             # its in-band run, as a descriptor states one
+                             # (core §4.3, 0.73), or None
+                             None if read.stamp is None else read.stamp.run_hex()))
 
     def _s2(self, smp: Any) -> None:
         ts = smp.timestamp
@@ -218,7 +222,7 @@ class Bus:
             self.tokens.append((time.monotonic(), "put" if smp.kind == self.zenoh.SampleKind.PUT else "delete",
                                 str(smp.key_expr)))
 
-    def since(self, t: float, key: str | None = None) -> list[tuple[float, str, str, bytes, str | None, Any]]:
+    def since(self, t: float, key: str | None = None) -> list[tuple[float, str, str, bytes, str | None, Any, Any]]:
         with self.lock:
             return [g for g in self.got if g[0] >= t and (key is None or g[1] == key)]
 
@@ -249,6 +253,13 @@ class Bus:
         st = self.get(key, on)
         r = [x for x in st.replies if x.key == key and not x.deleted]
         return (json.loads(r[0].payload), r[0].stamp) if r else (None, None)
+
+    def get_run(self, key: str, on: int = 1) -> str | None:
+        """The in-band run of the owner's reply for ``key`` (core §4.3,
+        0.73), as a descriptor states one, or None."""
+        st = self.get(key, on)
+        r = [x for x in st.replies if x.key == key and not x.deleted and x.inband is not None]
+        return r[0].inband.run_hex() if r else None
 
     def descriptor(self, instance_key: str, on: int = 1) -> Any:
         from . import live
@@ -556,12 +567,17 @@ def section5(ctx: Ctx) -> None:
         tok = None
         _wait(lambda: bus.token_put(TARGET, t) is not None, 10.0, 0.01)
         got, stamp = bus.get_json(RP)
+        run = bus.get_run(RP)
         d = bus.descriptor(target2.instance or "")
         zid = None if d is None else d.get("meta", {}).get("zid")
+        new_run = None if d is None else d.get("run")
+        # Core 0.73 (the mend after round 93): a report is off §4.3's table,
+        # so it carries no Zenoh timestamp; its stamp is in band, under the
+        # run the new instance's descriptor states (§3.3, §4.3).
         rp.check(sec, "1. G's GET at the new instance token holds {key: D, source: baseline} under the new "
-                      "instance's stamp",
-                 got == {"key": D, "source": "baseline"} and zid is not None and zid_of(stamp) == int(zid, 16),
-                 f"{got} {stamp}, meta.zid {zid}")
+                      "instance's stamp: the run its descriptor states",
+                 got == {"key": D, "source": "baseline"} and new_run is not None and run == new_run,
+                 f"{got} under run {run} (Zenoh stamp {stamp}), the new descriptor's run {new_run}, meta.zid {zid}")
         t1 = time.monotonic()
         rel = target2.cmd("desired release")
         ok = _wait(lambda: converged_on(target2.report(), s1, 1), 10.0, 0.05)
@@ -572,9 +588,9 @@ def section5(ctx: Ctx) -> None:
         _wait(lambda: bool(runs_v1()), 5.0)  # S's delivery can follow the report's answer
         runs = runs_v1()
         rp.check(sec, "1. released, the target acts on v1 again: converged on v1 under s1, and S receives a put on Run "
-                      "holding v1 from the new instance",
-                 rel == "desired release" and ok and bool(runs) and zid is not None and zid_of(runs[0][4]) == int(zid, 16),
-                 f"{target2.report()}, Run puts {[g[4] for g in runs]}")
+                      "holding v1 from the new instance, under the run its descriptor states",
+                 rel == "desired release" and ok and bool(runs) and new_run is not None and runs[0][6] == new_run,
+                 f"{target2.report()}, Run puts under runs {[g[6] for g in runs]}, the new descriptor's {new_run}")
         del tok
     finally:
         bus.close()
@@ -589,8 +605,8 @@ def section6(ctx: Ctx) -> None:
         author = bus.party(ctx.author_impl, AUTHOR, flags)
         target = bus.party(ctx.target_impl, TARGET, ctx.target_flags())
         s1 = _converge_v1(ctx, bus, author, target, 1)
-        author.put(SPARE, v(7))
-        author.delete(SPARE)
+        s7 = author.put(SPARE, v(7))
+        sdel = author.delete(SPARE)
         time.sleep(5.0)
         rp.check(sec, "setup: the target converged on v1; D2's document deleted 5 s ago, in the record",
                  converged_on(target.report(), s1, 1) and rec.is_file() and "lab/spare" in
@@ -598,7 +614,8 @@ def section6(ctx: Ctx) -> None:
         acts0 = target.acts()
         author.kill()
         t = time.monotonic()
-        author2 = bus.party(ctx.author_impl, AUTHOR, flags)
+        # Step 1 (0.12, F-421): "Its clock is 5 s behind."
+        author2 = bus.party(ctx.author_impl, AUTHOR, flags + ["--clock-offset-ms", "-5000"])
         _wait(lambda: bus.token_put(AUTHOR, t) is not None, 10.0, 0.01)
         gd, gd2 = bus.get(D), bus.get(D2)
         time.sleep(3.0)
@@ -611,6 +628,12 @@ def section6(ctx: Ctx) -> None:
                  reput is not None and json.loads(reput[3]) == v(1) and zid_of(reput[4]) == zid
                  and zid_of(s1) != zid and redel is not None and zid_of(redel[4]) == zid,
                  f"put {reput and reput[4]}, delete {redel and redel[4]}, zid {zid and hex(zid)}")
+        last = max(raw(s1), raw(s7), raw(sdel))
+        rp.check(sec, "1. the put's stamp is above the author's last one, though its clock is behind (§2.11): its "
+                      "record's catch-up, D2's delete the last the author issued",
+                 reput is not None and raw(reput[4]) > last and raw(sdel) == last,
+                 f"re-put {reput and reput[4]}, the last {sdel}; {raw(reput[4]) - last if reput else None} NTP64 "
+                 "units above")
         token_at = next((x[0] for x in bus.tokens if x[0] >= t and x[1] == "put" and x[2].startswith(
             f"zk2/{AUTHOR}/@zk/instance/")), None)
         rp.note(sec, f"S's receipt of the re-put {'before' if reput and token_at and reput[0] <= token_at else 'after'} "

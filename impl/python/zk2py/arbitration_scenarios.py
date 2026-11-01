@@ -75,6 +75,14 @@ EXACT = ["lab/safety", "lab/teleop", "lab/autopilot"]
 KNOWN: dict[tuple[str, str], str] = {}
 
 
+def _known(section: str, name: str) -> str | None:
+    """The open finding a check is known to fail by. F-422's entries for §11's
+    X beside the owner example's commanders went when #1009's `commander raw
+    on` sealed its puts in the envelope, and every one passed (the mend after
+    round 93)."""
+    return KNOWN.get((section, name))
+
+
 class Report:
     """Each check's row: its section, name, outcome, detail, and the open
     finding :data:`KNOWN` says it is known to fail by, if any. A known
@@ -88,7 +96,7 @@ class Report:
     def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
         from .checks import tag
 
-        known = KNOWN.get((section, name))
+        known = _known(section, name)
         self.rows.append((section, name, ok, detail, known))
         why = f" (known: {known})" if known else ""
         print(f"{tag(ok, known)} [{section}] {name}{why}" + (f": {detail}" if detail else ""), flush=True)
@@ -676,7 +684,14 @@ class RawSafety:
             i += 1
             if self.putting.is_set() and not self.stop.is_set():
                 try:
-                    self.s.put("zk2/lab/safety/steer.v1/stream/cmd", f"safety {self.n}".encode())
+                    # Core §4.3 (0.73): the envelope an owner writes, a run
+                    # of its own and the key's seq, so a reader reads it
+                    # (observer §7.3); raw bytes under zenoh's default
+                    # Encoding would be a refused envelope, no arrival (the
+                    # mend after round 93).
+                    self.s.put("zk2/lab/safety/steer.v1/stream/cmd",
+                               zk2c.mutation(zk2c.InBand(32, 0x5AFE0001, self.n % 2**24),
+                                             f"safety {self.n}".encode()), encoding=zk2c.ENCODING)
                 except Exception:  # noqa: BLE001 - closed while putting
                     return
                 self.n += 1

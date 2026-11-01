@@ -208,8 +208,12 @@ class Bus:
         with self.lock:
             return [(t, p) for t, k, p in self.seen if k == key and t >= since]
 
-    def owner(self, impl: str, hlc: bool = True) -> Any:
-        o = PyPace(self, hlc) if impl == "py" else RsPace(self, hlc)
+    def owner(self, impl: str, hlc: bool = True, session_hlc: bool = False) -> Any:
+        """``session_hlc``: the owner example's session timestamping on
+        (``--hlc``). Since core 0.73 its session runs without it unless asked
+        (§8.2), where zk2py's owner turns it on with ``hlc`` (the mend after
+        round 93)."""
+        o = PyPace(self, hlc) if impl == "py" else RsPace(self, hlc, session_hlc)
         self.parties.append(o)
         return o
 
@@ -346,6 +350,11 @@ class PyPace:
     def stamp(self, mode: str) -> None:
         with self.lock:
             self.mode = mode
+        # Core 0.73: cmd, declaring a lifespan, is on §4.3's table, so the
+        # owner stamps it from its minting clock unless told not to; "none"
+        # is §5's owner that "sets no stamp on its puts" (the mend after
+        # round 93).
+        self.o.stamp_table = mode != "none"
 
     def published(self) -> dict[str, int]:
         with self.lock:
@@ -423,9 +432,10 @@ class RsPace:
 
     impl = "rust"
 
-    def __init__(self, bus: Bus, hlc: bool = True) -> None:
+    def __init__(self, bus: Bus, hlc: bool = True, session_hlc: bool = False) -> None:
         self.spawned = time.monotonic_ns()
-        args = [str(BLACKBOX / "owner"), "--connect", bus.endpoint, "--timing"] + ([] if hlc else ["--no-hlc"])
+        args = [str(BLACKBOX / "owner"), "--connect", bus.endpoint, "--timing"] + (
+            ["--hlc"] if session_hlc else [] if hlc else ["--no-hlc"])
         self.box = Lines(args + [ADDRESS])
         ok = _wait(lambda: any(x.startswith("ready ") for _, x in self.box.lines()) or self.box.p.poll() is not None,
                    15.0)
@@ -997,13 +1007,22 @@ def section4(report: Report, oi: str, ci: str) -> None:
 
 def section5(report: Report, oi: str, ci: str) -> None:
     sec = f"§5 [{oi}→{ci}]"
+    import zenoh
+
     for step, timestamping, hlc in (("1", True, False), ("2", False, False), ("3", True, True)):
         bus = Bus(timestamping=timestamping)
+        tap = None
         try:
             c = bus.reader(ci, RID_CMD, 100)
             c.track_presence(True)
+            # What the owner puts, read as observer §7.3 reads it: whether
+            # each sample carries core §7.5's envelope (core 0.73)
+            tapped: list[Any] = []
+            tap = bus.client().declare_subscriber(CMD, zenoh.handlers.Callback(
+                lambda s: tapped.append(zk2c.read_put(str(s.key_expr), str(s.encoding), s.payload.to_bytes()))))
             time.sleep(0.3)
-            o = bus.owner(oi, hlc=hlc)
+            # step 3's control: "the owner with its session's HLC on"
+            o = bus.owner(oi, hlc=hlc, session_hlc=hlc)
             held = _wait(lambda: c.holds_zid(o.zid), 3.0)
             c.track_presence(False)
             o.stamp("none")
@@ -1011,6 +1030,22 @@ def section5(report: Report, oi: str, ci: str) -> None:
             time.sleep(2.0)
             o.pause("cmd")
             time.sleep(0.2)
+            tap.undeclare()
+            tap = None
+            # Core §4.3 (0.73): every stream put carries §7.5's envelope; a
+            # refused one is no sample to any reader (observer §7.3), so the
+            # step's expectations cannot be judged without it, and the step
+            # fails here rather than passing on nothing (review-bot on PR
+            # #1010; the owner example's `timing stamp none` put none before
+            # #1009).
+            refused = sorted({t.refusal for t in tapped if t.refused})
+            if not report.check(sec, f"step {step}: the owner's puts carry core §7.5's envelope (core §4.3), so a "
+                                     f"reader hears them",
+                                bool(tapped) and not refused,
+                                f"{len(tapped)} samples tapped, refused {refused or 'none'}"):
+                c.close()
+                o.close()
+                continue
             arr = c.arrivals(CMD)
             reasons = sorted({a.reason for a in arr})
             handed = sum(1 for a in arr if a.delivered)
@@ -1037,6 +1072,11 @@ def section5(report: Report, oi: str, ci: str) -> None:
             c.close()
             o.close()
         finally:
+            if tap is not None:
+                try:
+                    tap.undeclare()
+                except Exception:  # noqa: BLE001 - closing anyway
+                    pass
             bus.close()
 
 
@@ -1738,7 +1778,11 @@ def section6_stray(report: Report, oi: str) -> None:
             n = 0
             while not stop.is_set() and nxt < later + 3 * NS + 300 * MS:
                 _sleep_until(nxt)
-                pub.put(str(n).encode())
+                # core §4.3 (0.73): an envelope on a run of the stray's own,
+                # so the readers read an arrival (observer §7.3); R1 still
+                # stamps it (the mend after round 93)
+                pub.put(zk2c.mutation(zk2c.InBand(32, 0x57A70001, n % 2**24), str(n).encode()),
+                        encoding=zk2c.ENCODING)
                 n += 1
                 nxt += 100 * MS
 

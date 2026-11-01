@@ -541,6 +541,12 @@ class Reader:
         return {a.stamp.id for a, _ in self.of(res, since_ns) if a.stamp is not None
                 and (until_ns is None or a.arrival_ns <= until_ns)}
 
+    def runs(self, res: str, since_ns: int = 0, until_ns: int | None = None) -> set[str]:
+        """The in-band runs a stream's samples came under (core §4.3, 0.73),
+        as the descriptor states one."""
+        return {a.inband.run_hex() for a, _ in self.of(res, since_ns) if a.inband is not None
+                and (until_ns is None or a.arrival_ns <= until_ns)}
+
     def close(self) -> None:
         for e in self.entities:
             try:
@@ -897,6 +903,15 @@ def _frames(v: int) -> dict[str, Any]:
     return point(v, "counter")
 
 
+def _zid_of_doc(d: dict[str, Any] | None) -> int | None:
+    """A descriptor's ``meta.zid`` by value (observer §4.4), or None."""
+    z = ((d or {}).get("meta") or {}).get("zid")
+    try:
+        return int(z, 16) if isinstance(z, str) else None
+    except ValueError:
+        return None
+
+
 def _descriptor(bus: Bus, o: Any) -> dict[str, Any] | None:
     from . import live
 
@@ -931,6 +946,7 @@ def section1(report: Report, mode: Any, contract: Any, tool: Path | None = None)
         o2 = bus.owner()
         i2 = o2.instance
         bus.appeared(i2)
+        d2 = _descriptor(bus, o2)
         for f, dv in [(0, 0), (4, 2)]:
             o2.put("frames", _frames(f))
             o2.put("drops", dv)
@@ -943,10 +959,20 @@ def section1(report: Report, mode: Any, contract: Any, tool: Path | None = None)
         report.check(sec, "1. each frames Point carries I1 in step 1 and I2 in step 3, I1 ≠ I2",
                      _epochs(R, "frames", mark1, mark3) == [i1] * 3 and _epochs(R, "frames", mark3) == [i2] * 2
                      and i1 != i2, f"{_epochs(R, 'frames')}, I1 {i1}, I2 {i2}")
-        report.check(sec, "1. the restart is a new session: the stamps' id changes with the instance (core §1.5)",
-                     len(R.stamp_ids("frames", mark1, mark3)) == 1 and len(R.stamp_ids("frames", mark3)) == 1
-                     and R.stamp_ids("frames", mark1, mark3) != R.stamp_ids("frames", mark3),
-                     f"{R.stamp_ids('frames', mark1, mark3)} → {R.stamp_ids('frames', mark3)}")
+        # Core 0.73 (the mend after round 93): frames is off §4.3's table,
+        # so it carries no Zenoh timestamp of the owner's (R1 stamps it), and
+        # a restart shows as a new session's zid in the descriptor and a new
+        # run in band, the one each descriptor states (§1.5, §3.3, §4.3).
+        z1, z2 = (_zid_of_doc(x) for x in (d, d2))
+        runs1, runs2 = R.runs("frames", mark1, mark3), R.runs("frames", mark3)
+        owner_stamped = {i for i in R.stamp_ids("frames") if int(i, 16) in (z1, z2)}
+        report.check(sec, "1. the restart is a new session and a new run: the descriptor's meta.zid changes, each "
+                          "instance writes under the run its descriptor states, and no frames sample carries a "
+                          "Zenoh timestamp of the owner's (off §4.3's table) (core §1.5, §4.3)",
+                     z1 is not None and z2 is not None and z1 != z2 and runs1 == {(d or {}).get("run")}
+                     and runs2 == {(d2 or {}).get("run")} and runs1 != runs2 and not owner_stamped,
+                     f"meta.zid {z1 and hex(z1)} → {z2 and hex(z2)}; runs {runs1} → {runs2}; stamps "
+                     f"{R.stamp_ids('frames')}")
         fr, dr = R.pairs("frames"), R.pairs("drops")
         got_f = [(a, b, _p(p)) for a, b, p in fr]
         got_d = [(a, b, _p(p)) for a, b, p in dr]
@@ -1003,8 +1029,10 @@ def section2(report: Report, mode: Any, contract: Any, tool: Path | None = None)
             o.put("drops", d)
             time.sleep(APART_S)
         mark = time.monotonic_ns()
+        da = _descriptor(bus, o)
         i2 = o.new_epoch()
         gone = bus.gone(i1)
+        db = _descriptor(bus, o)
         with bus.R.lock:
             moves = [(k, inst) for t, k, inst in bus.R.tokens if t >= mark]
         report.check(sec, "2. R sees I2's token declared, then I1's withdrawn: an overlap, never a gap (core §8.1)",
@@ -1016,11 +1044,17 @@ def section2(report: Report, mode: Any, contract: Any, tool: Path | None = None)
             time.sleep(APART_S)
         time.sleep(0.3)
         R, R0 = bus.R, bus.R0
-        ids_before, ids_after = R.stamp_ids("frames", mark1, mark), R.stamp_ids("frames", mark3)
-        report.check(sec, "1. every frames Point after step 2 carries I2, the process unchanged (one stamp id "
-                          "throughout, its session's)",
-                     _epochs(R, "frames", mark3) == [i2, i2] and len(ids_before) == 1 and ids_before == ids_after
-                     and i1 != i2, f"{_epochs(R, 'frames', mark3)}, stamp ids {ids_before} → {ids_after}")
+        # Core 0.73 (the mend after round 93): frames carries no Zenoh
+        # timestamp of the owner's; the process unchanged is one meta.zid in
+        # both descriptors, and the re-mint a new run in band (§1.5, §4.3).
+        za, zb = _zid_of_doc(da), _zid_of_doc(db)
+        runs_a, runs_b = R.runs("frames", mark1, mark), R.runs("frames", mark3)
+        report.check(sec, "1. every frames Point after step 2 carries I2, the process unchanged (one meta.zid in "
+                          "both descriptors, its session's), the re-mint under a new run its descriptor states",
+                     _epochs(R, "frames", mark3) == [i2, i2] and za is not None and za == zb and i1 != i2
+                     and runs_a == {(da or {}).get("run")} and runs_b == {(db or {}).get("run")} and runs_a != runs_b,
+                     f"{_epochs(R, 'frames', mark3)}, meta.zid {za and hex(za)} → {zb and hex(zb)}, runs {runs_a} → "
+                     f"{runs_b}")
         fr, dr = R.pairs("frames"), R.pairs("drops")
         arr = [a.arrival_ns for a, _ in R.of("drops")]
         pres = R.presence_of(arr[2], arr[3])
@@ -1610,7 +1644,12 @@ def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> 
         bus.appeared(o.instance)
         o.put("total", 1)
         time.sleep(0.5)
-        held = [json.loads(r.ok.payload.to_bytes()) for r in bus.r_session.get(
+        # S2's reply is the bytes the mutation put, §7.5's envelope around
+        # the record since core 0.73: read envelope first (observer §7.3;
+        # the mend after round 93)
+        from . import zk2c
+
+        held = [json.loads(zk2c.record_of(r.ok) or b"null") for r in bus.r_session.get(
             TOTAL, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST, timeout=2.0)
             if r.ok is not None]
         report.check(sec, "before the first case: the owner holds total's value, which its S4 GET answers (core S2)",

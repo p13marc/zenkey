@@ -50,6 +50,7 @@ from typing import Any, Callable
 from . import arbitration as ab
 from . import live
 from . import timing as tm
+from . import zk2c
 from .owner import StandbyRefused
 
 NS = 1_000_000_000
@@ -338,8 +339,6 @@ class Actuator:
         import zenoh
 
         key = str(sample.key_expr)
-        from . import zk2c
-
         read = zk2c.read_sample(sample)
         if read.refused:
             return  # observer §7.3 (0.14), core §7.5: undecodable, no arrival
@@ -575,7 +574,9 @@ class Commander:
     (:class:`zk2py.redundancy_live.Candidate`, ``contract_path`` its
     contract): its writer refuses while it stands by, each refusal counted,
     and ``raw`` puts round the writer, through its session, stamped by the
-    session's HLC, the payload ``standby <n>`` (scenarios §11's X)."""
+    session's HLC, the payload ``standby <n>`` (scenarios §11's X), in
+    core §7.5's envelope on the owner's run and the key's seq (0.73,
+    F-422's reading (a))."""
 
     def __init__(self, address: str, contract: Any, connect: str, period_s: float = 0.05, *,
                  lead_s: float = 0.5, standby: bool = False, instance: str | None = None,
@@ -641,8 +642,14 @@ class Commander:
                     self.raw_n += 1
                 try:
                     # round the runtime's writer: the session's own put, its
-                    # HLC stamping it (core §4.1)
-                    self.owner.session.put(self.key, f"standby {n}".encode())
+                    # HLC stamping it (core §4.1), past the standby's gate.
+                    # Since core 0.73 it keeps what every stream put carries,
+                    # §7.5's envelope on the owner's run and the key's seq
+                    # (§4.3), so a reader reads it and the arbiter judges it
+                    # not_incumbent; with none it would be a refused envelope,
+                    # no sample at all (F-422; the mend after round 93).
+                    self.owner.session.put(self.key, self.owner.stream_envelope(self.key, f"standby {n}".encode()),
+                                           encoding=zk2c.ENCODING)
                 except Exception:  # noqa: BLE001 - closed while putting
                     return
                 continue

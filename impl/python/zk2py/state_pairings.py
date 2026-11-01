@@ -95,14 +95,21 @@ def router(timestamping: bool) -> tuple[Any, str, str]:
 
 class Tap:
     """A raw subscriber that records every sample as it arrived: key, kind,
-    payload, attachment, Encoding and Zenoh timestamp."""
+    payload, attachment, Encoding and Zenoh timestamp.
+
+    Its callbacks are direct (``indirect=False``), run on zenoh's own thread
+    as each sample arrives: zenoh-python's default runs each subscriber's
+    on a thread of its own, so two selectors' samples, a descriptor's and
+    a state put's, could land in ``got`` out of their arrival order (§7
+    step 3's order, the mend after round 93)."""
 
     def __init__(self, session: Any, selectors: list[str]) -> None:
         import zenoh
 
         self.lock = threading.Lock()
         self.got: list[dict[str, Any]] = []
-        self.subs = [session.declare_subscriber(s, zenoh.handlers.Callback(self._take)) for s in selectors]
+        self.subs = [session.declare_subscriber(s, zenoh.handlers.Callback(self._take, indirect=False))
+                     for s in selectors]
 
     def _take(self, s: Any) -> None:
         import zenoh
@@ -588,6 +595,14 @@ def section7(report: Report, pairing: str) -> None:
                 at_third = next((i for i, x in enumerate(order) if x[0] == "put" and new and new in x[1]), None)
                 report.check(sec, "the owner puts its descriptor stating the new run before it puts the third",
                              at_desc is not None and at_third is not None and at_desc < at_third, str(order))
+                # core 0.74 (F-415): "Each put of it (below) carries a Zenoh
+                # timestamp the owner sets" (§3.3), the first and the wrap's.
+                with tap.lock:
+                    stamps = [x["ts"] for x in tap.got if "/@zk/instance/" in x["key"]]
+                report.check(sec, "each descriptor put carries a Zenoh timestamp the owner sets (core §3.3), its "
+                                  "session's zid (the first, and the one stating the new run)",
+                             len(stamps) >= 2 and all(_same_zid(_zid_of(t), o1.zid()) for t in stamps),
+                             f"{stamps}; zid {o1.zid()}")
                 o1.close()
                 owners.remove(o1)
             else:

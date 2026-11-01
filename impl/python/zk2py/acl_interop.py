@@ -179,6 +179,16 @@ def run_python_acl(report, repo) -> None:
     _unauthenticated(report, repo, allow.block, workdir)
 
 
+def forged_put() -> bytes:
+    """own-h1's forged put on h2's state key, as an owner writes one since
+    core 0.73: core §7.5's envelope, its record ``forged-put``, so that a
+    subscriber that hears it reads ``forged-put`` (observer §7.3). Raw bytes
+    under zenoh's default Encoding would read as a refused envelope, no
+    payload, and a check that it never arrived would pass on nothing (the
+    mend after round 93)."""
+    return zk2c.mutation(zk2c.InBand(32, 0xF0F0F0F0, 0), b"forged-put")
+
+
 def _forgeries(w: World) -> dict[str, Any]:
     """own-h1 writing as own-h2: a put, a queryable and a token on h2's keys,
     and a put on a wildcard key."""
@@ -186,10 +196,13 @@ def _forgeries(w: World) -> dict[str, Any]:
 
     h1 = w.owners["own-h1"].session
     forged_q = h1.declare_queryable("zk2/h2/tc/zk2py_echo.v1/state/health", zenoh.handlers.Callback(
-        lambda q: q.reply("zk2/h2/tc/zk2py_echo.v1/state/health", b"forged")))
+        lambda q: q.reply("zk2/h2/tc/zk2py_echo.v1/state/health",
+                          zk2c.mutation(zk2c.InBand(32, 0xF0F0F0F0, 1), b"forged"), encoding=zk2c.ENCODING)))
     forged_t = h1.liveliness().declare_token("zk2/h2/tc/@zk/instance/" + "f" * 16)
     time.sleep(0.3)
-    h1.put("zk2/h2/tc/zk2py_echo.v1/state/health", b"forged-put")
+    h1.put("zk2/h2/tc/zk2py_echo.v1/state/health", forged_put(), encoding=zk2c.ENCODING)
+    # A wildcard key is no zk2 data key, so it carries no envelope (observer
+    # §7.3): its bytes arrive as they were put.
     h1.put("zk2/*/tc/zk2py_echo.v1/state/health", b"wildcard-put")
     time.sleep(0.3)
     return {"q": forged_q, "t": forged_t}
@@ -232,14 +245,32 @@ def _deny_full(report, repo, gen, workdir) -> None:
         held = _forgeries(w)
         try:
             again = live.get_state(w.sessions["consumer"], "zk2/*/tc/zk2py_echo.v1/state/health")
+            # The queryable's declaration is what §1 blocks: a GET of h2's key
+            # alone never reaches it. (Before the mend after round 93 this
+            # read the wildcard GET, whose forged reply S4's Latest dropped
+            # beside h2's stamped one; off core §4.3's table neither carries a
+            # Zenoh timestamp since 0.73, and a forged reply's raw bytes read
+            # as a refused envelope, so the check proved nothing.)
+            concrete = live.get_state(w.sessions["consumer"], "zk2/h2/tc/zk2py_echo.v1/state/health")
             pres = live.list_presence(w.sessions["tool"], "zk2/h2/tc/@zk/instance/*")
             report.check(run, "§1: a put, a queryable and a token on another principal's keys are blocked, and so "
-                              "is a put on a wildcard key, which deny never granted",
+                              "is a put on a wildcard key, which deny never granted: a GET of h2's key draws h2's "
+                              "reply alone",
                          not any(p in (b"forged-put", b"wildcard-put") for _, p in w.samples["named"])
-                         and b"forged" not in [r.payload for r in again.replies]
+                         and [(r.payload, r.refusal) for r in concrete.replies] == [(b"ok", None)]
                          and [i["instance"] for i in pres.instances] == [h2.instance],
-                         f"samples {w.samples['named']}; GET {[r.payload for r in again.replies]}; "
+                         f"samples {w.samples['named']}; GET of h2's key {[r.payload for r in concrete.replies]}; "
                          f"h2 instances {[i['instance'] for i in pres.instances]}")
+            # What the wildcard GET draws, said and not judged: the query
+            # reaches h1's session through h1's own queryable, its session
+            # hands it to the forged one too, and a value reply is checked
+            # against its own key (0.14), which h1's ingress reply grant on
+            # the consumer's selector covers (core §11.2).
+            forged = [r.key for r in again.replies if r.payload == b"forged"]
+            report.info(run, f"§1 beside the check: the consumer's wildcard GET after the forgeries draws "
+                             f"{[(r.key.split('/')[1], r.payload) for r in again.replies]}"
+                             + (f": a forged reply under {forged[0]}, through own-h1's own queryable and its "
+                                "ingress reply grant on the consumer's selector (core §11.2)" if forged else ""))
         finally:
             held["q"].undeclare()
             held["t"].undeclare()
@@ -520,14 +551,23 @@ def _allow_full(report, repo, block, workdir) -> None:
         held = _forgeries(w)
         try:
             again = live.get_state(w.sessions["consumer"], "zk2/*/tc/zk2py_echo.v1/state/health")
+            # As under deny: the queryable's declaration is what §2 blocks,
+            # shown by a GET of h2's key alone (the mend after round 93).
+            concrete = live.get_state(w.sessions["consumer"], "zk2/h2/tc/zk2py_echo.v1/state/health")
             pres = live.list_presence(w.sessions["tool"], "zk2/h2/tc/@zk/instance/*")
             payloads = [p for _, p in w.samples["named"]]
             report.check(run, "§2: a put, a queryable and a token on another principal's keys are blocked, and so "
-                              "is a subscription the bindings do not name",
-                         b"forged-put" not in payloads and b"forged" not in [r.payload for r in again.replies]
+                              "is a subscription the bindings do not name: a GET of h2's key draws h2's reply alone",
+                         b"forged-put" not in payloads
+                         and [(r.payload, r.refusal) for r in concrete.replies] == [(b"ok", None)]
                          and [i["instance"] for i in pres.instances] == [h2.instance] and not w.samples["unnamed"],
-                         f"samples {payloads}; GET {[r.payload for r in again.replies]}; "
+                         f"samples {payloads}; GET of h2's key {[r.payload for r in concrete.replies]}; "
                          f"h2 instances {[i['instance'] for i in pres.instances]}; unnamed {w.samples['unnamed']}")
+            forged = [r.key for r in again.replies if r.payload == b"forged"]
+            report.info(run, f"§2 beside the check: the consumer's wildcard GET after the forgeries draws "
+                             f"{[(r.key.split('/')[1], r.payload) for r in again.replies]}"
+                             + (f": a forged reply under {forged[0]}, through own-h1's own queryable, its reply "
+                                "on that key denied by no rule of the complement" if forged else ""))
             report.check(run, "§2/§11.3: except a put on a wildcard key, which reaches the consumer (R6 discards it "
                               "there)", ("zk2/*/tc/zk2py_echo.v1/state/health", b"wildcard-put") in w.samples["named"],
                          str(w.samples["named"]))
@@ -568,7 +608,8 @@ def _allow_rules_only(report, repo, block, workdir) -> None:
         w.subscribe("consumer", "zk2/*/tc/zk2py_echo.v1/state/health", "named")
         time.sleep(0.3)
         w.start_owners()
-        w.owners["own-h1"].session.put("zk2/h2/tc/zk2py_echo.v1/state/health", b"forged-put")
+        w.owners["own-h1"].session.put("zk2/h2/tc/zk2py_echo.v1/state/health", forged_put(),
+                                       encoding=zk2c.ENCODING)
         time.sleep(0.3)
         report.check(run, "allow rules alone, under allow, block nothing: own-h1's put on h2's key arrives",
                      ("zk2/h2/tc/zk2py_echo.v1/state/health", b"forged-put") in w.samples["named"],

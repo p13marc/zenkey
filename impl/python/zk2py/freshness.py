@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, Iterable
 
+from . import zk2c
+
 PROFILE = "freshness.v1"
 #: §4: the one key of the vocabulary.
 KEY = "freshness.ttl_s"
@@ -486,8 +488,6 @@ class Subscriber:
         text = None if ts is None else str(ts)
         sid = None if text is None else text.split("/", 1)[1]
         kind = "delete" if sample.kind == zenoh.SampleKind.DELETE else "put"
-        from . import zk2c
-
         read = zk2c.read_sample(sample)
         record = b"" if kind == "delete" or read.refused else (
             read.record if read.record is not None else sample.payload.to_bytes())
