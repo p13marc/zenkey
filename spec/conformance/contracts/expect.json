@@ -6,6 +6,12 @@
       ],
       "fingerprint": null
     },
+    "e000-frame-defaults": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
     "e000-integer-range": {
       "codes": [
         "E000"
@@ -210,6 +216,12 @@
       "fingerprint": null
     },
     "e023-enum": {
+      "codes": [
+        "E023"
+      ],
+      "fingerprint": null
+    },
+    "e023-frame-unresolved": {
       "codes": [
         "E023"
       ],
@@ -497,6 +509,63 @@
       ],
       "fingerprint": null
     },
+    "e046-frame-place": {
+      "codes": [
+        "E046",
+        "E046",
+        "E046",
+        "E046",
+        "E046"
+      ],
+      "fingerprint": null
+    },
+    "e047-frame-type": {
+      "codes": [
+        "E047",
+        "E047"
+      ],
+      "fingerprint": null
+    },
+    "e048-frame-value": {
+      "codes": [
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048",
+        "E048"
+      ],
+      "fingerprint": null
+    },
+    "e049-frame-deadband": {
+      "codes": [
+        "E049",
+        "E049",
+        "E049"
+      ],
+      "fingerprint": null
+    },
+    "e050-frame-timing": {
+      "codes": [
+        "E050",
+        "E050",
+        "E050",
+        "E050",
+        "E050",
+        "E050",
+        "E050"
+      ],
+      "fingerprint": null
+    },
     "ok-cardinality-no-ceiling": {
       "codes": [],
       "fingerprint": "sha256:daec59e632e3fb1e98f9f088cb5747d0115eae4f89ad25bc8d332a9aac161338"
@@ -516,6 +585,10 @@
     "ok-float-integral": {
       "codes": [],
       "fingerprint": "sha256:969a86c807b1bb0cec2bceed1533fd8f36ba5d7f55ca61a07a24c1ed73176958"
+    },
+    "ok-frame": {
+      "codes": [],
+      "fingerprint": "sha256:dd890636bff84513e3e0683db8dd2d7e5bcff313f9b34830bfd9611e75ffcae7"
     },
     "ok-gate-empty": {
       "codes": [],

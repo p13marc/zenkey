@@ -1,0 +1,10 @@
+[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+packed = ["r.json"]
+[resources."frames/s"]
+kind = "stream"
+type = "packed:Reading"
+frame = { records = 1, keyframe_every = 1 }

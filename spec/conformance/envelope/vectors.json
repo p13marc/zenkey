@@ -1,5 +1,5 @@
 {
-  "description": "core §7.5, the zk2c envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's bytes in hex, and `sample`, the kind of the sample that carries them (`put`: they are its payload; `delete`: they are its attachment) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex (a mutation's record, a heartbeat's body), or `null` for a delete. A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form), `sample_kind` (a delete on a put, or a mutation or a heartbeat as a delete's attachment), `tag` (a delete whose tag is not 0), `short` (fewer bytes than CH, the run and the seq need), `trailing` (a byte after a delete's seq). The parse reads no contract, so a mutation's or a heartbeat's tag is reported, never checked against a type or a revision. Every accepted case writes back to its bytes.",
+  "description": "core §7.5, the zk2c envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's bytes in hex, and `sample`, the kind of the sample that carries them (`put`: they are its payload; `delete`: they are its attachment) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex (a mutation's record, a heartbeat's body), or `null` for a delete. A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form), `sample_kind` (a delete on a put, or a mutation, a heartbeat or a frame as a delete's attachment), `tag` (a delete whose tag is not 0), `short` (fewer bytes than CH, the run and the seq need), `trailing` (a byte after a delete's seq). The parse reads no contract and no key, so a mutation's, a heartbeat's or a frame's tag is reported, never checked against a type, a revision or a declaration, and a frame is parsed whatever its key: `key_kind`, which reads the key, is `carries.json`'s `reads`. A heartbeat's or a frame's `record` is its body. Every accepted case writes back to its bytes.",
   "headers": [
     {
       "note": "a mutation with a 16-bit run",
@@ -92,12 +92,21 @@
       }
     },
     {
-      "note": "101 0 0101: form 5, reserved",
+      "note": "101 0 0101: form 5, a frame, tag 5",
       "byte": "a5",
       "expect": {
         "form": "frame",
         "run_width": 16,
         "tag": 5
+      }
+    },
+    {
+      "note": "101 1 1001: a frame with a 32-bit run and tag 9",
+      "byte": "b9",
+      "expect": {
+        "form": "frame",
+        "run_width": 32,
+        "tag": 9
       }
     },
     {
@@ -350,11 +359,58 @@
       }
     },
     {
-      "note": "frame, reserved",
+      "note": "a frame on a put: form 5, its tag reported and its body not read",
       "sample": "put",
       "hex": "a00001000007",
       "expect": {
-        "refused": "form"
+        "form": "frame",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "a frame with tag 5 and a 14-byte body: zenoh-modem's link keyframe, frame/bodies.json's first, 20 bytes in all",
+      "sample": "put",
+      "hex": "a5000100000c00000e103eb00000007819c003c0",
+      "expect": {
+        "form": "frame",
+        "run_width": 16,
+        "run": 1,
+        "seq": 12,
+        "tag": 5,
+        "record": "00000e103eb00000007819c003c0"
+      }
+    },
+    {
+      "note": "a frame with a 32-bit run and tag 9",
+      "sample": "put",
+      "hex": "b9deadbeef00002a0e10400000c0",
+      "expect": {
+        "form": "frame",
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 42,
+        "tag": 9,
+        "record": "0e10400000c0"
+      }
+    },
+    {
+      "note": "101 0 0101: a frame's CH alone",
+      "sample": "put",
+      "hex": "a5",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a frame's 32-bit run cut short",
+      "sample": "put",
+      "hex": "b0000123450000",
+      "expect": {
+        "refused": "short"
       }
     },
     {
@@ -515,6 +571,22 @@
       "note": "a mutation's tag on a delete's attachment: the wrong kind first",
       "sample": "delete",
       "hex": "050001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a frame as a delete's attachment",
+      "sample": "delete",
+      "hex": "a00001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a frame's CH alone as a delete's attachment: the wrong kind before a short stamp",
+      "sample": "delete",
+      "hex": "a3",
       "expect": {
         "refused": "sample_kind"
       }

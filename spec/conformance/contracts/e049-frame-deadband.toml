@@ -1,0 +1,14 @@
+# core §7.7, §9.2 E049: a deadband on a field that takes none, a `bool`
+# and an `enum`, and one naming no field. `temperature`'s is fine.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources."frames/sample"]
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { deadband = { temperature = { delta = "1", max_records = 4 }, link_up = { delta = "1", max_records = 4 }, mode = { delta = "1", max_records = 4 }, humidity = { delta = "1", max_records = 4 } } }

@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.82** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.83** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -43,7 +43,7 @@ RFC 2119 and RFC 8174, when written in capitals.
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
   bind it, whichever of the roles above it plays. They are the rules of §1,
-  §7.5, §7.6, §8.6 and §9 that name no role, and the others §12 lists: those on what a
+  §7.5, §7.6, §7.7, §8.6 and §9 that name no role, and the others §12 lists: those on what a
   contract states, those naming their lint code, and §3.3's rule for a
   descriptor checker. Each binds it where it does what the rule governs
   (§12).
@@ -330,6 +330,7 @@ reading are §2.7's.
 | `deprecated` | `{since, replaced_by, reason}`. `replaced_by` names another template of the contract, and `since` is not later than `minor`. A deprecated resource stays in the contract until the next major, because removing a resource is breaking (§9.8). | `[F: contracts/e031-deprecated; compat/contract/resource-removed]` |
 | `attachment` | A type for the sample attachment, fingerprinted and encoded like a payload (§7). | `[F: contracts/ok-kinds]` |
 | `annotations` | Keys are `<profile>.<key>`, and the profile is listed in `uses` (§10). | `[F: contracts/e020-annotation]` |
+| `frame` | On a plain stream with no parameter and a packed type: its samples travel as frames (§7.7). | `[F: contracts/ok-frame, e046-frame-place]` |
 
 ### 2.4 QoS
 
@@ -1040,7 +1041,7 @@ time a profile reads (the table below).
     seq 0. `[Sc: state.md §7]`
   - **Streams.** Each stream key's seq is its own. It starts at 0 at the
     key's first sample in a run, adds 1 at each sample, and wraps modulo
-    2^24. An owner MUST NOT restart a stream key's seq within a run, even
+    2^24. A frame of n records takes n seqs, one for each record (§7.7). An owner MUST NOT restart a stream key's seq within a run, even
     where it declares the key's publisher again: a takeover, or a member
     removed and added. `[Sc: state.md §13]`
   - **Serial order.** Of two seqs s and s′ of one stream key in one run,
@@ -1587,7 +1588,7 @@ has a **type identity**: (kind, name, sha256 of its schema artifact).
 | `packed` | Records of bit fields, sized from declared ranges and resolutions (§7.6) |
 
 `flatbuffer`, `ros2msg` and `cdr` are reserved kinds. Authoring format
-draft 3 has no spelling for them, so a contract declares such payloads as
+draft 4 has no spelling for them, so a contract declares such payloads as
 `raw` with a media type. `[Sc: types.md §2]` What a tool that shows or
 judges a payload decodes, these kinds through a plugin included:
 [`observer.md`](observer.md) §7.3.
@@ -1728,6 +1729,7 @@ its attachment:
 mutation, a put's payload            CH · run · seq · record
 delete, a delete's attachment        CH · run · seq
 heartbeat, a put's payload           CH · run · seq · body
+frame, a put's payload               CH · run · seq · body
 ```
 
 **The header byte, CH,** holds three fields. Its bits are numbered from 7,
@@ -1744,10 +1746,10 @@ tag 0, a mutation's CH is `0x00` with a 16-bit run and `0x10` with a 32-bit
 run. A delete's is `0x20` or `0x30`. And `0x1b` is `000 1 1011`: form 0, a
 32-bit run and tag 11. Only the `packed` kind defines a tag (§7.6). A
 delete carries no record, so its tag is 0. A heartbeat's tag names a
-contract revision (below).
+contract revision (below). A frame's tag is its declaration's (§7.7).
 
-**The forms.** Each form has one code. This version defines three of
-them, and reserves the other five for later versions:
+**The forms.** Each form has one code. This version defines four of
+them, and reserves the other four for later versions:
 
 | Code | Form | What it carries |
 |---|---|---|
@@ -1756,7 +1758,7 @@ them, and reserves the other five for later versions:
 | 2 | value | reserved: an operation's reply value |
 | 3 | error | reserved: an operation's error reply (§5.2) |
 | 4 | event | reserved: an event's occurrence |
-| 5 | frame | reserved: a stream's records under one header |
+| 5 | frame | a stream's records under one header, a put's payload (§7.7) |
 | 6 | heartbeat | an owner's confirmation of the state it holds for one interface (below) |
 | 7 | snapshot | reserved: a collection's state in one reply |
 
@@ -1768,12 +1770,13 @@ This section fixes their widths and their byte order. What a run names,
 and how a seq counts, are §4.3's.
 
 **The record** is every byte after the seq, possibly none. It is read as
-the resource's type says (§7.1). A sample that carries an envelope has the
+the resource's type says (§7.1). In a frame, those bytes are its body,
+read with its declaration (§7.7). A sample that carries an envelope has the
 Encoding `zenoh/bytes`, whatever its record's type: the contract names the
 type.
 
 **Sizes.** A mutation is 6 bytes over its record, or 8 with a 32-bit run.
-So is a heartbeat over its body.
+So is a heartbeat over its body, and a frame over its body.
 A delete's attachment is 6 or 8 bytes, and an attachment costs 2 more on
 the wire. Beside them, a Zenoh timestamp is 26 bytes. A predefined
 Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
@@ -1786,18 +1789,24 @@ is its attachment. It keeps CH, which states the run's width and lets a
 reader refuse an attachment that is not an envelope.
 
 **Parsing.** An envelope is parsed without the contract, as a key is
-(§1.1). The parser knows the sample's kind, put or delete, and nothing
-more. So it reports a mutation's or a heartbeat's tag, and checks it
-against nothing: §7.6's reader and a heartbeat's reader do. An
+(§1.1). The parser knows the sample's kind, put or delete. For a frame it
+also knows its key's kind token, which the grammar reads from the key
+alone. It knows nothing more. So it reports a mutation's, a heartbeat's
+or a frame's tag, and checks none: §7.6's reader, a heartbeat's reader
+and §7.7's do. An
 implementation MUST refuse an envelope for the first of these
 that applies, in this order:
 - no byte at all, so no CH (`short`);
 - a reserved form (`form`);
 - a form the sample's kind does not carry: a delete on a put, or a
-  mutation or a heartbeat as a delete's attachment (`sample_kind`);
+  mutation, a heartbeat or a frame as a delete's attachment (`sample_kind`);
+- a frame on a key whose kind token is not `stream`, such as a state's,
+  an event's or an `@stream` key (`key_kind`);
 - a delete whose tag is not 0 (`tag`);
 - fewer bytes than CH, the run and the seq need (`short`);
-- a byte after a delete's seq (`trailing`). `[F: envelope/vectors.json]`
+- a byte after a delete's seq (`trailing`).
+
+`[F: envelope/vectors.json, carries.json]`
 
 Every envelope an implementation accepts MUST write back to the same
 bytes. `[F: envelope/vectors.json]`
@@ -2112,6 +2121,207 @@ marker read as 0. `[F: packed/vectors.json]`
   told apart.
 
 `[F: packed/vectors.json]`
+
+### 7.7 Frames
+
+A **frame** puts several records of one packed type (§7.6) under one
+envelope (§7.5), with one time for all of them. A **frame resource** is a
+plain `stream` whose contract declares a `frame` table (§9.1). Its type is
+a packed type with no extension marker, and that type's fields are the
+frame's **fields**. A record holds every field, or only the fields that
+changed. A frame travels only as a put's payload, on its resource's key.
+
+**The declaration.** The `frame` table holds these keys. All but
+`deadband` are integers.
+
+| Key | Value | When absent |
+|---|---|---|
+| `records` | the most records one frame holds, from 1 to 256 | 1 |
+| `step_ms` | from 1 to 2^32 − 1: record i is scheduled `step_ms` × i milliseconds after record 0. Given exactly when `records` is above 1. | no step |
+| `jitter_ms` | from 0 to `step_ms` / 2: how far a scheduled record may lie from its scheduled instant. Given only with `step_ms`. | 0, with a step |
+| `keyframe_every` | from 1 to 65,536: a full record comes at least once every this many records | 1 |
+| `deadband` | an object: a field's name → `{delta, max_records}` (below) | none |
+
+- **A one-record frame** has no step. Its one time is measured, and how
+  often its owner puts one is the owner's.
+- **The span** of a frame with a step is `records` × `step_ms`. Every
+  record of the frame lies within it.
+- **The interval** of a frame resource is its span where it has a step.
+  Otherwise it is the `timing.period_ms` its resource declares
+  ([`timing.v1`](profiles/timing/v1.md) §2.3), and with none it is
+  unstated.
+- **A deadband** is a field's `delta` and `max_records`. `delta` is a
+  decimal string (§7.6) above 0, in the field's own units: a value, not a
+  code. `max_records` is from 1 to 65,536. Only an `int`, `fixed` or
+  `counter` field takes one.
+- **No parameter.** A frame resource's template has none, and its type's
+  fields are concrete.
+
+§9.2's E046 to E050 lint the declaration.
+`[F: contracts/e046-frame-place, e047-frame-type, e048-frame-value, e049-frame-deadband, e050-frame-timing, ok-frame]`
+
+**The body.** A frame's body follows its seq. It is a run of bit fields,
+most significant bit first, with no padding between them, as §7.6's
+records are:
+
+```text
+frame, a put's payload   CH · run · seq · body
+body       time · count · record · … · record · pad
+time       42 bits: record 0's measured time; all ones when unknown
+count      the records in the frame, less 1, in ⌈log₂ records⌉ bits
+record     full · when · offset · fields
+full       1 bit: 1 for a full record, 0 for a delta record
+when       1 bit, in record 1 and later only: 1 when the record is scheduled
+offset     when `when` is 0: the record's time, in milliseconds after
+           record 0's, in ⌈log₂ span⌉ bits
+fields     a full record: every field, as §7.6 writes it
+           a delta record: one bit per field, in field order, 1 when the
+           field follows; then each field whose bit is 1, as §7.6 writes it
+pad        zero bits up to the next whole byte, fewer than 8
+```
+
+- **Count.** A frame holds count + 1 records. With `records` = 1 the
+  count takes no bit, and the frame holds one record.
+- **A field as §7.6 writes it** is its code, after a presence bit when
+  the field is optional. So a delta record can carry a field that became
+  absent: its bit 1, then its presence bit 0.
+- **The time** is §7.6's `time` field with `ms`: 32 bits of seconds from
+  the deployment epoch, then 10 bits of milliseconds. All 42 bits set say
+  the owner's clock is unknown. Any other millisecond code from 1000 up is
+  unused.
+- **A record's time.** Record 0's is `time`. A later record's is an
+  offset from it, so it is known when `time` is not:
+  - **scheduled** (`when` 1): `step_ms` × i after record 0, within
+    `jitter_ms` either way;
+  - **measured** (`when` 0): its offset after record 0.
+- **What the time is not.** A scheduled record's time is an instant and
+  a bound, never a measurement.
+- **Its seq.** The envelope's seq is record 0's. Record i's is that seq
+  plus i, modulo 2^24, so a frame of n records takes n seqs of its key
+  (§4.3).
+
+**The frame's tag.** A frame's **frame form** is a JSON object of two
+members:
+- `frame`: an object of `records`, `step_ms` and `jitter_ms`, the last
+  two `null` without a step, and `deadband`, a list with one item per
+  field in field order. An item is `null`, or `{"delta", "max_records"}`
+  with `delta` in its shortest form (§7.6).
+- `record`: the record type's layout form (§7.6).
+
+Names are left out, so a field renamed keeps the tag. `keyframe_every`
+is left out too: it changes no bit a reader reads. The tag is the low
+four bits of the last byte of the sha256 of the frame form's JCS bytes
+(RFC 8785), as a layout form's is. So a frame and a mutation of the same
+type carry different tags but 1 time in 16. An implementation that
+writes a frame MUST write its tag in CH's tag bits (§7.5).
+`[F: frame/layouts.json]`
+
+**Writing.** An implementation that writes a frame MUST write the bits
+above for its records, then the pad. `[F: frame/bodies.json]`
+- **What it never writes.** An implementation MUST NOT write a frame of no
+  record, or of more than `records`. An implementation MUST NOT write a
+  full record that lacks a field that is not optional, or a field §7.6
+  refuses.
+  `[F: frame/bodies.json]`
+- **Times.** An implementation MUST NOT write an offset at or past the
+  span, or a record that lies before the record before it (below).
+  `[F: frame/bodies.json]`
+
+**Reading.** A body is read with its frame resource's declaration. An
+implementation that reads a frame MUST refuse it for the first of these
+that applies, in this order, naming the refusal:
+- CH's tag is not the frame's (`tag`);
+- then, reading the fields in order:
+  - the body ends before a bit its fields need (`length`);
+  - a code is unused (`code`): a millisecond code from 1000 up but the
+    unknown time's, a count of `records` or more, an offset at or past
+    the span, or a field's unused code (§7.6);
+  - a record lies before the record before it (`order`): its latest
+    time is below that record's earliest. A scheduled record lies from
+    `jitter_ms` before its instant to `jitter_ms` after it, and any other
+    record at its time.
+- the body holds a byte after its pad (`length`);
+- a bit of the pad is 1 (`pad`).
+
+`[F: frame/bodies.json]`
+
+Every body an implementation accepts MUST write back to the same bytes.
+`[F: frame/bodies.json]`
+
+**No reading.** A frame on a resource that declares no `frame` table,
+and a mutation on a frame resource, have no reading. A reader counts
+either as undecodable.
+
+**What the checks catch.** A reader that holds another declaration of the
+frame, or another record type, still matches its tag 1 time in 16. A
+body's length then depends on its full and changed bits, so the length
+check catches less than it does for a record of one length. Where more is
+needed, a reader takes the fingerprint from the owner's descriptor (§3.3).
+
+**The owner's frames.** An owner writes a frame resource's samples as
+frames, each of 1 to `records` records, in the order it measured them.
+- **Seqs.** An owner MUST give a frame the seq of its record 0, and the
+  frame after it the seq that follows its last record's.
+  `[Sc: frames.md §1]`
+- **Full records.** An owner MUST start a key's first frame in a run with
+  a full record. An owner MUST write a full record at least once every
+  `keyframe_every` records. A **keyframe** is a frame whose record 0 is
+  full, and it decodes alone. `[Sc: frames.md §1, §5]`
+- **Delta records.** A delta record is read against the record before it:
+  the frame's previous record, or the previous frame's last. In a delta
+  record, an owner MUST include each field with no deadband whose code or
+  presence differs from that record's. Including an unchanged field is
+  never wrong. `[Sc: frames.md §1]`
+- **The deadband.** An owner MAY omit a field with a deadband while three
+  things hold: the field is present and holds a value, not a reserved
+  code; so did the last record that included it; and the two values
+  differ by at most `delta`. An owner MUST include the field in any other
+  case, and in at least one of every `max_records` records. `[Sc: frames.md §4]`
+  So a deadband field that is absent, or holds a reserved code, is in
+  every record.
+- **Times.** An owner writes record 0's time from its wall clock, or all
+  ones while its clock is unknown. It measures a later record's offset on
+  its monotonic clock, from record 0. An owner MUST mark a record
+  scheduled only when it measured it within `jitter_ms` of its scheduled
+  instant.
+  `[Sc: frames.md §3]`
+- **The span.** A record that would lie at or past its frame's span ends
+  the frame, and starts the next one as its record 0.
+
+**The reader's fields.** A **reader** of a frame key is a consumer or a
+tool. It keeps one state for each field of the key, in the run it holds:
+
+| State | When | What the field holds |
+|---|---|---|
+| `known` | included in this record; or omitted, with no deadband, nothing lost since it was included | its value, at the record's time |
+| `within` | omitted under a deadband, fewer than `max_records` records after a record that included a value | its last value, give or take `delta` |
+| `unknown` | after a record lost, at a run it does not hold, after a rewind, `max_records` records after it was included, or omitted under a deadband after an inclusion that was no value | nothing |
+| `absent` | included absent: its presence bit 0 | nothing: the owner wrote it absent |
+
+- **The frames it expects.** Within the run it holds, a reader expects
+  the seq after the last record it read. A frame at that seq continues
+  the key. One whose seq is newer (§4.3's serial order) follows a
+  **gap**: records lost. Any other is a **rewind**: the key restarted
+  under a run it had used, which §4.3 forbids.
+- **What resets.** A consumer or a tool MUST turn every field `unknown`
+  at a gap, at a rewind, and at a frame of a run other than the one it
+  holds, its first frame included. It then reads the frame, whose
+  included fields are `known` again, or `absent`.
+  `[Sc: frames.md §2, §5, §6]`
+- **Past the deadband.** A consumer or a tool MUST turn a field with a
+  deadband `unknown` at the `max_records`-th record after the one that
+  included it, when that record omits it too. `[Sc: frames.md §4]`
+- **Never a value.** A consumer or a tool MUST NOT show or use an
+  `unknown` or `absent` field as a value, its last value or 0 among
+  them. `[Sc: frames.md §2, §6]`
+
+So a lost record costs the fields its successors omit, until each is
+included again, and a keyframe heals them all. zenoh keeps one key's puts
+in order on one priority, so a rewind is never a reorder on one path.
+
+**Sizes.** A frame is 6 bytes over its body, or 8 with a 32-bit run. A
+keyframe of one record of 63 bits is 42 + 1 + 63 = 106 bits, so its body
+is 14 bytes, and the put's payload 20.
 
 ---
 
@@ -2646,9 +2856,12 @@ is not TOML is **E000**, reported once, and it stops the load.
   per field and resource.
 - `history` is the exception. Outside a plain stream or state, it is
   **E019**.
+- `frame` is another. Outside a plain stream whose template has no
+  parameter, it is **E046**. It is a resource's own, so `[defaults]` and
+  `[defaults.<kind>]` take none (E000).
 - The same rules apply to `[defaults.<kind>]`, where `<kind>` decides.
 
-`[F: contracts/e014-field, e019-history]`
+`[F: contracts/e014-field, e019-history, e046-frame-place]`
 
 **Required fields.** One **E015** per missing field:
 - `type` on stream, state and event;
@@ -2670,6 +2883,9 @@ is not TOML is **E000**, reported once, and it stops the load.
   4294967295 from resolution on (§2.2, §9.5). Any other string is a
   value of the wrong type, so E000.
   `[F: contracts/ok-cardinality-unbounded, e000-cardinality-string]`
+- `frame` is a table of §7.7's keys. Its integers are bounded by E048,
+  not by the schema, and a deadband's `delta` is a string.
+  `[F: contracts/e048-frame-value]`
 - Every other value has the type `contract.schema.json` gives it.
 - A field is judged as written: `history = false` on an event is E019, as
   any `history` there is. `[F: contracts/e019-history-false]`
@@ -2721,6 +2937,11 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | E043 | a packed field whose `type` names no field type of §7.6 | per field |
 | E044 | a packed type with no envelope to carry it: an explicit stream's type, an attachment, or an operation's type (§7.1) | per reference |
 | E045 | an extension marker misplaced: a field after a marker that is not optional, or a marker right after another (§7.6) | per field or marker |
+| E046 | `frame` on a resource that is not a plain stream, or whose template has a parameter (§7.7) | per occurrence |
+| E047 | a frame resource's type that is not packed, or a packed type with an extension marker (§7.7) | per resource |
+| E048 | a `frame` value outside §7.7's table: `records` not from 1 to 256; `step_ms` not from 1 to 2^32 − 1, given with `records` 1, or absent with `records` above 1; `jitter_ms` without `step_ms`, or above `step_ms` / 2; `keyframe_every` not from 1 to 65,536; a deadband's `delta` not a decimal string above 0, or its `max_records` not from 1 to 65,536 | per key; per deadband member |
+| E049 | a deadband naming no field of the record type, or a field that is not an `int`, `fixed` or `counter` (§7.7) | per deadband entry |
+| E050 | timing a frame resource cannot keep (`timing.v1` §2.3): a `timing.deadline_ms` below its span; a deadband beside a `timing.deadline_ms`, unless its `max_records` × the frame's interval is at most the deadline, an unstated interval never; a `timing.lifespan_ms` | per condition: the deadline once, each deadband once, the lifespan once |
 | W101 | two resolved resources under one token whose templates overlap, with different types (the payload type, or an operation's request and response) | per pair |
 | W102 | an operation's request type has a top-level field named like a template parameter | per resource |
 | W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it, judged on resolved types only (cascade 6) | per field (a defaulted one is silent) |
@@ -2761,6 +2982,14 @@ because of these rules:
      E043. A repeat inside one field's `values` or `reserved` is E042 too,
      on a field without E038.
    `[F: contracts/e038-packed-shape, e042-packed-duplicate, e045-packed-extension]`
+8. **On a frame resource,** E046 alone where `frame` cannot be.
+   - E047 and E049 read the record type, so they wait for one that
+     resolves (E023, E024). E047's marker half and E049 also wait for a
+     packed declaration with no finding (E038 to E045).
+   - E050 waits for the values it reads: none of them E048's. It reads a
+     `timing.*` value as `timing.v1` §2.2 does, and one that does not read
+     gives none.
+   `[F: contracts/e023-frame-unresolved, e047-frame-type, e049-frame-deadband, e050-frame-timing]`
 
 **Order.** Resources are taken in the bytewise order of their template
 text: a sorted table's order, not the file's, since TOML gives a table's
@@ -2951,6 +3180,12 @@ always present.
 | `rate` | `"rare"`, `"low"`, `"burst(<n>/h)"`, or `null` |
 | `retention_s` | the retention in seconds (s×1, m×60, h×3600, d×86400, w×604800), or `null` |
 
+**A frame resource** adds `frame`, and no other resource has the member:
+
+| Member | Value |
+|---|---|
+| `frame` | `{"records", "step_ms", "jitter_ms", "keyframe_every", "deadband"}`, each resolved (§7.7). `step_ms` and `jitter_ms` are `null` without a step. `deadband` is an object by field name of `{"delta", "max_records"}`, `delta` in its shortest form (§7.6), and `{}` when none. |
+
 **An operation** adds:
 
 | Member | Value |
@@ -2973,11 +3208,13 @@ or `null` for "all".
 **Excluded:** `minor`, the interface's `summary`, and every `doc`. An
 operation's `summary` *type* is included, and so is `deprecated.reason`.
 
-**The format tag** is unchanged by authoring draft 3. A contract that
-lists no packed file has the canonical bytes, and the fingerprint, it had
-under draft 2. One that lists one holds the kind `packed`, which no
-earlier form holds, so the two cannot be confused.
-`[F: contracts/ok-packed]`
+**The format tag** is unchanged by authoring drafts 3 and 4. A contract
+that lists no packed file has the canonical bytes, and the fingerprint, it
+had under draft 2. One that lists one holds the kind `packed`, which no
+earlier form holds, so the two cannot be confused. Draft 4 adds `frame`.
+A contract with no frame resource keeps its draft 3 bytes, and one with a
+frame resource holds a member no earlier form holds.
+`[F: contracts/ok-packed, ok-frame]`
 
 **Restrictions.** Every string, keys included, is printable ASCII
 (0x20–0x7E), and every number is in the **canonical domain**:
@@ -3226,6 +3463,21 @@ another added. `[F: compat/contract/explicit-true-to-false, kind-changed]`
 | `reliability` best_effort → reliable | compatible | |
 | `congestion` changed, either way | review (`block` can stall the producer; `drop` can lose samples) | `congestion_changed` |
 | `priority`, `express`, `history`, `rate` or `retention_s` changed | review | `priority_changed`, `express_toggled`, `history_changed`, `rate_changed`, `retention_changed` |
+
+**Frames** (§7.7), a frame resource paired with its counterpart:
+
+| Change | Class | Rule |
+|---|---|---|
+| `frame` added or removed | breaking: a reader of the other revision reads none of its samples | `frame_toggled` |
+| `records`, `step_ms` or `jitter_ms` changed | breaking: the bits and the times move | `frame_changed` |
+| A deadband added, removed or changed | breaking: what an omitted field holds moves, either way | `deadband_changed` |
+| `keyframe_every` changed | review: how long a reader waits to heal | `keyframe_changed` |
+
+The record type follows the packed rules below. It has no marker, so
+every change of its layout is breaking. Each breaking change above, and
+each of the layout, moves the frame's tag (§7.7). A reader of the other
+revision then refuses its frames by tag 15 times in 16.
+`[F: compat/frame/]`
 
 **Operations:**
 
@@ -3784,9 +4036,9 @@ The format is the generator's own. The reference reads an enrollment file
 
 Conformance is claimed by role. Five of §0's roles have a **class** each:
 that role's rules, and the static rules that bind every implementation
-(§0). The static rules are those of §1, §7.5, §7.6, §8.6 and §9, and those on what a
+(§0). The static rules are those of §1, §7.5, §7.6, §7.7, §8.6 and §9, and those on what a
 contract states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of
-any of these sections, §1, §7.5, §7.6, §8.6 and §9 included, that names a role is that
+any of these sections, §1, §7.5, §7.6, §7.7, §8.6 and §9 included, that names a role is that
 role's. A rule elsewhere that names the
 lint code checking it (§9.2) is static too, and so is §3.3's rule for a
 descriptor checker. A class holds its role's rules in this text and in
@@ -3794,7 +4046,8 @@ descriptor checker. A class holds its role's rules in this text and in
 
 **How a static rule binds.** A static rule binds an implementation where
 it does what the rule governs. Such acts are parsing or building a key,
-parsing or writing an envelope (§7.5) or a packed record (§7.6), reading a
+parsing or writing an envelope (§7.5), a packed record (§7.6) or a
+frame (§7.7), reading a
 catalog or checking its succession (§8.6), slugging a value, linting a
 contract, building or verifying a bundle, checking a history and
 classifying a revision. A rule on what a contract
@@ -4399,6 +4652,7 @@ section each was written against, whose pointer leads on.
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
 | `conformance/errors/` | §5.2 |
 | `conformance/envelope/` | §7.5 |
+| `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover |
@@ -4427,7 +4681,7 @@ and why.
 ## Appendix D. Authoring fields by kind
 
 Normative for §9.1. A field outside its kind's column is E014 (`history`:
-E019).
+E019; `frame`: E046).
 
 | Field | stream | state | event | operation | Defaultable |
 |---|---|---|---|---|---|
@@ -4439,6 +4693,7 @@ E019).
 | `explicit` | ✓ | ✓ | — | — | no |
 | `reliability`, `congestion`, `priority`, `express` | ✓ | ✓ | ✓ | `priority` only | yes |
 | `history` | plain only | plain only | — (E019) | — (E019) | yes |
+| `frame` | plain, no parameter | — (E046) | — (E046) | — (E046) | no |
 | `rate`, `retention` | — | — | required | — | no |
 | `request`, `response` | — | — | — | required | no |
 | `error`, `summary`, `idempotent`, `fanout`, `serving`, `replies`, `timeout_ms` | — | — | — | ✓ | yes, except `error` and `summary` |
@@ -4560,8 +4815,20 @@ brief:
   bits, the run, the seq, the tag, and the record in hex, `null` for a
   delete. Every header and every accepted case writes back to its bytes.
   A key, as a session hears it, and the sample's `Encoding` → whether the
-  sample carries an envelope (`carries.json`, read by
-  [`observer.md`](observer.md) §7.3).
+  sample carries an envelope (`carries.json`'s `cases`, read by
+  [`observer.md`](observer.md) §7.3). A key and a put's payload under
+  `zenoh/bytes` → how it reads: plain, its form, or the refusal's token
+  (`carries.json`'s `reads`).
+- **`frame/`**: one packed document, shared by every case (`schema`).
+  A record type and a `frame` table → the frame form, its sha256, its
+  tag, the count's and the offset's widths, and the span (`layouts.json`).
+  A layout and a frame's value → the body's bits before the pad, its pad
+  and its bytes in hex, or the writer's refusal (`bodies.json`'s
+  `writes`). A layout, a tag and a body's bytes → the value, or the
+  reader's refusal, the first in §7.7's order (`reads`). A value lists
+  each record's time and its fields: those it includes, as §7.6's JSON
+  reading spells them, and those it includes absent. Every accepted write
+  reads back to its value.
 - **`packed/`**: one packed document, shared by every case (`schema`).
   Each of its types → its layout form, that form's sha256, its tag, each
   item's width and start, and the shortest and longest record this

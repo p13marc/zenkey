@@ -3,6 +3,94 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.83 — 2026-11-01: frames defined (#981)
+
+Epic #975, zk2c, makes the wire bandwidth-first. Today each reading is a
+put of its own, with its own envelope and stamp, and a periodic reading
+repeats a time its contract already implies. A **frame** puts several
+records of one packed type under one envelope and one time. This version
+is #981's K1: it defines the frame and states its owner's and its
+reader's rules. Nothing writes one yet: K2 brings the readers, and K3 the
+owners, the scenarios and `link.v1`'s rule. 0.80 to 0.82 go to #1023 and
+#978's F1 to F3.
+
+**Added: §7.7, frames.**
+- **A frame resource** is a plain stream with a `frame` table, no
+  parameter, and a packed type with no extension marker. The table holds
+  `records` (1 to 256), `step_ms` (exactly when `records` is above 1),
+  `jitter_ms` (at most half the step), `keyframe_every` (1 to 65,536) and
+  `deadband` (a field's `delta` and `max_records`).
+- **The body** is a 42-bit time, record 0's, all ones when unknown. Then
+  comes the count, and each record: a full bit, a `when` bit after record
+  0, a fixed-width offset when it is not scheduled, and its fields. A
+  full record writes every field as §7.6 does. A delta record writes a
+  bit per field, then the fields whose bit is set. One pad ends the body.
+- **The tag** is §7.6's rule over the frame form: the frame's `records`,
+  `step_ms`, `jitter_ms` and deadbands, and the record's layout form.
+- **The reading** refuses `tag`, then `length`, `code` and `order` as the
+  fields are read, then `length` for a byte after the pad and `pad`.
+  `order` is a record that lies before the one before it, a scheduled
+  record lying anywhere within its jitter.
+- **The owner** gives a frame its record 0's seq and takes one seq a
+  record. Its first frame of a key in a run starts full, and a full record
+  comes every `keyframe_every`. A delta record includes every changed
+  field, and a deadband field once it moves past `delta` and every
+  `max_records`. A record is marked scheduled only within its jitter.
+- **The reader** holds each field `known`, `within`, `unknown` or
+  `absent`. A gap, another run and a rewind turn every field unknown, and
+  so does a deadband field past `max_records`. An unknown or absent field
+  is never a value, its last value or 0.
+
+**Changed: §7.5.** Form 5, the frame, is defined: a put's payload,
+refused as a delete's attachment (`sample_kind`). A frame on a key whose
+kind token is not `stream` is refused as `key_kind`, after `sample_kind`.
+The parser reads that kind from the key alone, so parsing stays
+contract-free.
+
+**Changed: §4.3.** A stream key's seq counts records: a frame of n
+records takes n seqs. So a gap in the seqs is a lost record, wherever the
+frames' boundaries fell.
+
+**Changed: §9, authoring draft 4.** `frame` is a resource's own field,
+legal on a plain stream with no parameter (E046 elsewhere). Its lints are
+E047 (the type), E048 (a value), E049 (a deadband's field) and E050, the
+timing a frame cannot keep: a deadline below the span, a deadband whose
+`max_records` × the frame's interval passes the deadline, and a lifespan.
+Cascade 8 orders them. The canonical form gains `frame` on a frame
+resource alone, so no other contract's bytes move, and `format` stays
+`zk2-contract/draft-1`. §9.8 classifies `frame` toggled, its shape and a
+deadband changed as breaking, and `keyframe_every` as review.
+
+**Changed: §0 and §12.** §7.7's rules that name no role are static, and
+writing or reading a frame is a static act. Its owner's and reader's
+rules are their roles'.
+
+**Fixtures.**
+- `frame/layouts.json` and `frame/bodies.json`, with a README. They were
+  written by an independent reading of the text, in Python with the
+  standard library, checked and never blessed. They include zenoh-modem's
+  four link readings in one record type.
+- `envelope/vectors.json` gains form 5's cases. `carries.json` gains
+  `reads`: a key and a put's payload → plain, its form, or the refusal,
+  `key_kind` among them.
+- `contracts/` gains `e046-frame-place`, `e047-frame-type`,
+  `e048-frame-value`, `e049-frame-deadband`, `e050-frame-timing` and
+  `ok-frame`. `compat/frame/` is new.
+
+**Deliberately not changed.**
+- **No sample, key or fingerprint** moves. A frame exists only where a
+  contract declares one, and no contract in `examples/zk2/` does.
+- **The defaults taken.** A delta record is read against the record
+  before it, never the last keyframe, so the deadband compares with the
+  value last included. `frame` is a core table, since its bits cannot be
+  read without it. The offset is fixed width. No heartbeat rides in a
+  frame. A deadband is allowed on a counter.
+- **Every deadband change is breaking,** narrowing included. The frame
+  form carries the deadband, so a reader of the other revision refuses
+  the frames by tag. And a narrower reader of a wider writer shows an
+  omitted value closer than it is.
+- **`observer.md`** is unchanged: how a tool shows a scheduled time and a
+  `within` value is K2's.
 ## 0.82 — 2026-11-01: `freshness.v2` adopts the heartbeat (#978)
 
 0.81 defined §7.5's form 6, the heartbeat, and no rule adopted it. This

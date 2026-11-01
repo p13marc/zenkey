@@ -51,14 +51,14 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 64 |
-| [Consumer](#consumer) | 17 |
+| [Owner](#owner) | 70 |
+| [Consumer](#consumer) | 20 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 17 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 57, 25 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 54 |
-| Every rule, once | 207 |
-| [Rule ids](#rule-ids) | 79 |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 60, 25 of them a reader's |
+| [Implementation: the static rules](#implementation-the-static-rules) | 61 |
+| Every rule, once | 223 |
+| [Rule ids](#rule-ids) | 84 |
 
 ## Owner
 
@@ -200,6 +200,17 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [§7.4](core.md#74-shared-memory) | A generated `@stream` publisher SHOULD accept SHM buffers. | none cited |
 
+### [core §7.7 Frames](core.md#77-frames)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§7.7](core.md#77-frames) | An owner MUST give a frame the seq of its record 0, and the frame after it the seq that follows its last record's. | `[Sc: frames.md §1]` |
+| [§7.7](core.md#77-frames) | An owner MUST start a key's first frame in a run with a full record. | `[Sc: frames.md §1, §5]` |
+| [§7.7](core.md#77-frames) | **Full records.** … An owner MUST write a full record at least once every `keyframe_every` records. | `[Sc: frames.md §1, §5]` |
+| [§7.7](core.md#77-frames) | **Delta records.** … In a delta record, an owner MUST include each field with no deadband whose code or presence differs from that record's. | `[Sc: frames.md §1]` |
+| [§7.7](core.md#77-frames) | **The deadband.** … An owner MUST include the field in any other case, and in at least one of every `max_records` records. | `[Sc: frames.md §4]` |
+| [§7.7](core.md#77-frames) | **Times.** … An owner MUST mark a record scheduled only when it measured it within `jitter_ms` of its scheduled instant. | `[Sc: frames.md §3]` |
+
 ### [core §8.1 Tokens](core.md#81-tokens)
 
 | Rule | Sentence | Evidence |
@@ -267,6 +278,14 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | A consumer MUST order each state key's values by seq within one run, from the first value it receives, a late joiner's seed replies included (§4.2). | `[F: seed/inband.json]` `[Sc: state.md §7]` |
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | **Consumer rule.** … A consumer MUST accept a value under a run other than its held value's, and order by seq within that run from then on. *Except:* A profile MAY order a consumer's values more strictly. | `[F: seed/inband.json]` `[Sc: state.md §7]` |
+
+### [core §7.7 Frames](core.md#77-frames)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn every field `unknown` at a gap, at a rewind, and at a frame of a run other than the one it holds, its first frame included. | `[Sc: frames.md §2, §5, §6]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn a field with a deadband `unknown` at the `max_records`-th record after the one that included it, when that record omits it too. | `[Sc: frames.md §4]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST NOT show or use an `unknown` or `absent` field as a value, its last value or 0 among them. | `[Sc: frames.md §2, §6]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -432,6 +451,14 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§5.2](core.md#52-the-error-envelope) | **Decoding.** … It [a tool decoding an envelope] MUST refuse: (5 items) | `[F: errors/cases.json]` |
+
+### [core §7.7 Frames](core.md#77-frames)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn every field `unknown` at a gap, at a rewind, and at a frame of a run other than the one it holds, its first frame included. | `[Sc: frames.md §2, §5, §6]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn a field with a deadband `unknown` at the `max_records`-th record after the one that included it, when that record omits it too. | `[Sc: frames.md §4]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST NOT show or use an `unknown` or `absent` field as a value, its last value or 0 among them. | `[Sc: frames.md §2, §6]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -673,7 +700,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.5](core.md#75-the-zk2c-envelope) | **Parsing.** … An implementation MUST refuse an envelope for the first of these that applies, in this order: (6 items) | `[F: envelope/vectors.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | **Parsing.** … An implementation MUST refuse an envelope for the first of these that applies, in this order: (7 items) | `[F: envelope/vectors.json, carries.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every envelope an implementation accepts MUST write back to the same bytes. | `[F: envelope/vectors.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a heartbeat MUST write its covered revision's tag in CH. | `[F: heartbeat/layouts.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a templated section MUST write the list only where it is shorter than the bitmap. | `[F: heartbeat/bodies.json]` |
@@ -692,6 +719,18 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.6](core.md#76-packed-records) | **Writing.** … An implementation MUST NOT write a record for an object that holds a member its type does not have, or lacks a field that is not optional. | `[F: packed/vectors.json]` |
 | [§7.6](core.md#76-packed-records) | An implementation that reads a record of a packed type MUST refuse it, naming the refusal, for the first of these that applies, in this order: (5 items) | `[F: packed/vectors.json]` |
 | [§7.6](core.md#76-packed-records) | **A later revision's fields.** … That rest MUST hold at least one bit (`length`). | `[F: packed/vectors.json]` |
+
+### [core §7.7 Frames](core.md#77-frames)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§7.7](core.md#77-frames) | An implementation that writes a frame MUST write its tag in CH's tag bits (§7.5). | `[F: frame/layouts.json]` |
+| [§7.7](core.md#77-frames) | An implementation that writes a frame MUST write the bits above for its records, then the pad. | `[F: frame/bodies.json]` |
+| [§7.7](core.md#77-frames) | An implementation MUST NOT write a frame of no record, or of more than `records`. | `[F: frame/bodies.json]` |
+| [§7.7](core.md#77-frames) | **What it never writes.** … An implementation MUST NOT write a full record that lacks a field that is not optional, or a field §7.6 refuses. | `[F: frame/bodies.json]` |
+| [§7.7](core.md#77-frames) | An implementation MUST NOT write an offset at or past the span, or a record that lies before the record before it (below). | `[F: frame/bodies.json]` |
+| [§7.7](core.md#77-frames) | **Reading.** … An implementation that reads a frame MUST refuse it for the first of these that applies, in this order, naming the refusal: (4 items) | `[F: frame/bodies.json]` |
+| [§7.7](core.md#77-frames) | Every body an implementation accepts MUST write back to the same bytes. | `[F: frame/bodies.json]` |
 
 ### [core §8.6 The deployment catalog](core.md#86-the-deployment-catalog)
 
@@ -843,6 +882,11 @@ MAY, and a row with no keyword, are listed here alone.
 | [E043](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed field whose `type` names no field type of §7.6 |
 | [E044](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed type with no envelope to carry it … |
 | [E045](core.md#92-the-lints) | implementation | core §9.2 The lints | an extension marker misplaced … |
+| [E046](core.md#92-the-lints) | implementation | core §9.2 The lints | `frame` on a resource that is not a plain stream, or whose template has … |
+| [E047](core.md#92-the-lints) | implementation | core §9.2 The lints | a frame resource's type that is not packed, or a packed type with an … |
+| [E048](core.md#92-the-lints) | implementation | core §9.2 The lints | a `frame` value outside §7.7's table … |
+| [E049](core.md#92-the-lints) | implementation | core §9.2 The lints | a deadband naming no field of the record type, or a field that is … |
+| [E050](core.md#92-the-lints) | implementation | core §9.2 The lints | timing a frame resource cannot keep (`timing.v1` §2.3) … |
 | [W101](core.md#92-the-lints) | implementation | core §9.2 The lints | two resolved resources under one token whose templates overlap, with different types (the payload … |
 | [W102](core.md#92-the-lints) | implementation | core §9.2 The lints | an operation's request type has a top-level field named like a template parameter |
 | [W103](core.md#92-the-lints) | implementation | core §9.2 The lints | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it … |

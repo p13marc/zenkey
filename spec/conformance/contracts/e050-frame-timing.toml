@@ -1,0 +1,42 @@
+# core §7.7, §9.2 E050, timing.v1 §2.3: timing a frame resource cannot
+# keep. A deadline below the span; a deadband past the deadline at its
+# period; deadbands beside a deadline with no interval stated, one each; a
+# lifespan; and a deadline below the span beside a deadband past it, two.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["timing.v1"]
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources."frames/short"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000 }
+annotations = { "timing.deadline_ms" = 20000 }
+
+[resources."frames/period"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { deadband = { queue_depth = { delta = "4", max_records = 5 } } }
+annotations = { "timing.period_ms" = 60000, "timing.deadline_ms" = 200000 }
+
+[resources."frames/unstated"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { deadband = { queue_depth = { delta = "4", max_records = 1 }, dropped = { delta = "1", max_records = 1 } } }
+annotations = { "timing.deadline_ms" = 600000 }
+
+[resources."frames/aged"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { records = 1 }
+annotations = { "timing.lifespan_ms" = 1000 }
+
+[resources."frames/both"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000, deadband = { temperature = { delta = "1", max_records = 2 } } }
+annotations = { "timing.deadline_ms" = 20000 }

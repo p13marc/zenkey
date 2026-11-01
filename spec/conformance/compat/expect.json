@@ -624,7 +624,63 @@
    ],
    "type": "m.v1.Pose",
    "warnings": []
+  },
+  "frame/deadband-added": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/deadband-narrowed": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/deadband-removed": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/deadband-respelled": {
+   "class": "compatible",
+   "warnings": []
+  },
+  "frame/deadband-widened": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/defaults-spelled": {
+   "class": "compatible",
+   "warnings": []
+  },
+  "frame/frame-added": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/frame-removed": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/jitter-changed": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/keyframe-changed": {
+   "class": "review",
+   "warnings": []
+  },
+  "frame/record-bound-moved": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/record-field-renamed": {
+   "class": "review",
+   "warnings": []
+  },
+  "frame/records-changed": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "frame/step-changed": {
+   "class": "breaking",
+   "warnings": []
   }
  },
- "description": "Compatibility cases (core.md \u00a79.8), FULL_TRANSITIVE: the class is the worst over both roles (writer and reader) and every revision in the history. Classes: compatible, review, breaking; `invalid` when the new revision does not load (outside the JSON Schema subset). Protobuf uses WIRE semantics with renumber detection. `warnings` are the warning rule names, sorted and deduplicated. `same_revision` (protobuf) is the retention rule's identity (core.md \u00a79.7): true when the normalized descriptor sets are equal, so the old bundle is kept. Layout and wrapping: compat/README.md."
+ "description": "Compatibility cases (core.md §9.8), FULL_TRANSITIVE: the class is the worst over both roles (writer and reader) and every revision in the history. Classes: compatible, review, breaking; `invalid` when the new revision does not load (outside the JSON Schema subset). Protobuf uses WIRE semantics with renumber detection. `warnings` are the warning rule names, sorted and deduplicated. `same_revision` (protobuf) is the retention rule's identity (core.md §9.7): true when the normalized descriptor sets are equal, so the old bundle is kept. Layout and wrapping: compat/README.md."
 }

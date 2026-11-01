@@ -165,6 +165,10 @@ section number alone is the core's.
 - **Packed record**: bit fields, each as wide as its codes need
   ([§7.6](core.md#76-packed-records)). Its layout gives its envelope's
   tag.
+- **Frame**: records of one packed type under one envelope and one time
+  ([§7.7](core.md#77-frames)). A record holds every field, or the ones
+  that changed. A **frame resource** is a plain stream with a `frame`
+  table.
 - **Catalog**: a file a deployment provisions to its owners and its far
   side. It gives each contract revision it lists an index, and states the
   deployment epoch. Nothing serves it on the bus
@@ -207,7 +211,7 @@ section number alone is the core's.
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`catalog.schema.json`](catalog.schema.json) | JSON Schema of the deployment catalog (core §8.6), generated the same way. The reading rules it cannot state are §8.6's. | `zenkey-model/src/catalog.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
-| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, heartbeats, packed records, deployment catalogs. | `zenkey-model/tests/conformance.rs` |
+| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, heartbeats, packed records, frames, deployment catalogs. | `zenkey-model/tests/conformance.rs` |
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
 | [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. They are listed, each with its text version, status, who uses it and the core version it is written against, in [the index](profiles/README.md#index), those nobody uses yet (`experimental`) in a table of their own, beside the template and the process. | `zenkey-model/tests/profiles.rs` |
 | [`CHANGELOG.md`](CHANGELOG.md) | The amendments to `core.md` since its first accepted version, newest first | |

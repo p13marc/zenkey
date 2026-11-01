@@ -1,0 +1,13 @@
+# core §9.1: `frame` is a resource's own, so `[defaults]` takes none: an
+# unknown field, E000, which stops the load.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+
+[defaults]
+frame = { records = 1 }
+
+[resources.level]
+kind = "stream"
+type = { raw = "text/plain" }

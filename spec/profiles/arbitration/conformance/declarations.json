@@ -1512,7 +1512,200 @@
           "cmd"
         ]
       }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "resource",
+          "framed"
+        ]
+      },
+      "note": "a role on a frame resource alone: counted as none, so resource, and framed (§2.2 checks 6 and 9)",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          },
+          {
+            "annotations": {
+              "timing.deadline_ms": 120000
+            },
+            "frame": true,
+            "template": "frames/link",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "frames/link"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "resource",
+          "framed"
+        ]
+      },
+      "note": "a role on a frame resource and a state: the state is the one resource, not a stream, and no stream but the frame",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          },
+          {
+            "annotations": {
+              "timing.deadline_ms": 120000
+            },
+            "frame": true,
+            "template": "frames/link",
+            "token": "stream"
+          },
+          {
+            "annotations": {},
+            "template": "mode",
+            "token": "state"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "frames/link",
+          "mode"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "a role on a frame resource and a plain stream: the frame counted as none, so arbitrated over the stream",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          },
+          {
+            "annotations": {
+              "timing.deadline_ms": 120000
+            },
+            "frame": true,
+            "template": "frames/link",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": [
+          "cmd",
+          "frames/link"
+        ]
+      }
+    },
+    {
+      "expect": {
+        "deadline_ms": 100,
+        "declaration": "arbitrated",
+        "period_ms": 20,
+        "policy": "priority",
+        "resource": "stream/cmd"
+      },
+      "note": "a role naming no resource, over an interface of one plain stream and a frame resource: arbitrated over the stream",
+      "params": {},
+      "provider": {
+        "interface": "twist_cmd.v1",
+        "resources": [
+          {
+            "annotations": {
+              "timing.deadline_ms": 100,
+              "timing.lifespan_ms": 100,
+              "timing.period_ms": 20
+            },
+            "template": "cmd",
+            "token": "stream"
+          },
+          {
+            "annotations": {
+              "timing.deadline_ms": 120000
+            },
+            "frame": true,
+            "template": "frames/link",
+            "token": "stream"
+          }
+        ]
+      },
+      "role": {
+        "annotations": {
+          "arbitration.policy": "priority"
+        },
+        "cardinality": "many",
+        "declared_by": {
+          "uses": [
+            "arbitration.v1"
+          ]
+        },
+        "resources": null
+      }
     }
   ],
-  "description": "arbitration.v1 §2.2, §2.3: one role and the revision of its required interface the consumer holds -> its declaration. role.declared_by is {uses: [profile ids <name>.v<major>]}, the declaring contract's uses, or null for a role a component's manifest declares; role.resources is the requirement's resources (templates), or null when it names none (it consumes every resource); role.cardinality is \"one\" or \"many\"; role.annotations is the requirement's annotations. provider is the revision held: its interface, and each resource's kind token (\"stream\", \"@stream\", \"state\", \"@state\", \"events\", \"@op\"), template and resolved annotations; or null when none is held. params is the role's parameter bindings as configured (core R2), a value self.system or self.service binding its parameter. expect.declaration is \"not_arbitrated\" (no arbitration.policy; or uses lists another major of arbitration and not v1, that major's); \"arbitrated\", with policy, resource (the stream's <token>/<template>), deadline_ms and period_ms (null when not written); \"unread\" (provider null, checks 1 to 5 passing); or \"invalid\", with reasons, in this order, each checked alone: not_used (the policy carried, the declaring contract's uses naming no major of arbitration), manifest_role (declared_by null), policy_unsupported (the string freshest or lease), value (not one of the strings priority, freshest, lease), cardinality (not many), resource (what the role consumes, every resource whose template it names or every resource, is not exactly one resource of token stream or @stream), no_deadline (that stream has no deadline as timing.v1 §2.2 and §2.5 read it: its declaration invalid, a value of timing.period_ms, timing.deadline_ms or timing.lifespan_ms not a whole number of milliseconds from 1 to 2^53-1, an integral float being that integer; or timing.deadline_ms absent; or the deadline below timing.period_ms; read only when resource passes), params_unbound (a parameter of that stream's template is not a key of params; read only when resource passes). With provider null, resource, no_deadline and params_unbound are not read. Another arbitration.<key> makes nothing invalid (W105's)."
+  "description": "arbitration.v1 §2.2, §2.3: one role and the revision of its required interface the consumer holds -> its declaration. role.declared_by is {uses: [profile ids <name>.v<major>]}, the declaring contract's uses, or null for a role a component's manifest declares; role.resources is the requirement's resources (templates), or null when it names none (it consumes every resource); role.cardinality is \"one\" or \"many\"; role.annotations is the requirement's annotations. provider is the revision held: its interface, and each resource's kind token (\"stream\", \"@stream\", \"state\", \"@state\", \"events\", \"@op\"), template and resolved annotations, and `frame`, true for a frame resource (core §7.7), absent for any other; or null when none is held. params is the role's parameter bindings as configured (core R2), a value self.system or self.service binding its parameter. expect.declaration is \"not_arbitrated\" (no arbitration.policy; or uses lists another major of arbitration and not v1, that major's); \"arbitrated\", with policy, resource (the stream's <token>/<template>), deadline_ms and period_ms (null when not written); \"unread\" (provider null, checks 1 to 5 passing); or \"invalid\", with reasons, in this order, each checked alone: not_used (the policy carried, the declaring contract's uses naming no major of arbitration), manifest_role (declared_by null), policy_unsupported (the string freshest or lease), value (not one of the strings priority, freshest, lease), cardinality (not many), resource (what the role consumes, every resource whose template it names or every resource, a frame resource counted as none, is not exactly one resource of token stream or @stream), no_deadline (that stream has no deadline as timing.v1 §2.2 and §2.5 read it: its declaration invalid, a value of timing.period_ms, timing.deadline_ms or timing.lifespan_ms not a whole number of milliseconds from 1 to 2^53-1, an integral float being that integer; or timing.deadline_ms absent; or the deadline below timing.period_ms; read only when resource passes), params_unbound (a parameter of that stream's template is not a key of params; read only when resource passes), framed (the role consumes a frame resource and no stream that is not one; read beside the others). With provider null, resource, no_deadline, params_unbound and framed are not read. Another arbitration.<key> makes nothing invalid (W105's)."
 }

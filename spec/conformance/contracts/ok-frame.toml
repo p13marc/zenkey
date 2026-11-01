@@ -1,0 +1,39 @@
+# core §7.7, §9.5: frame resources. zenoh-modem's link readings as a
+# one-record keyframe, the same with deadbands (a counter's among them,
+# `delta` respelled), a sampler's three-record frame within its deadline,
+# and a one-record frame whose deadband fits its deadline at its period.
+# The canonical form holds `frame` on these resources alone.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["timing.v1"]
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources."frames/link"]
+kind  = "stream"
+type  = "packed:frames#Link"
+frame = { records = 1 }
+
+[resources."frames/radio"]
+kind  = "stream"
+type  = "packed:frames#Link"
+frame = { keyframe_every = 15, deadband = { queue_depth = { delta = "4.0", max_records = 5 }, dropped = { delta = "10", max_records = 3 } } }
+
+[resources."frames/sample"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000, jitter_ms = 500, keyframe_every = 3 }
+annotations = { "timing.deadline_ms" = 30000 }
+
+[resources."frames/minute"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { keyframe_every = 10, deadband = { temperature = { delta = "0.5", max_records = 5 } } }
+annotations = { "timing.period_ms" = 60000, "timing.deadline_ms" = 300000 }
+
+[resources.level]
+kind = "stream"
+type = "packed:frames#Sample"

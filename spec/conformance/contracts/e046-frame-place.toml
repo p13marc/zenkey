@@ -1,0 +1,41 @@
+# core §7.7, §9.1, §9.2 E046: `frame` where it cannot be. A state, an
+# event, an operation, an explicit stream, and a stream whose template has
+# a parameter: one each. Where E046 fires, no other frame code does.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources.held]
+kind  = "state"
+type  = "packed:frames#Link"
+frame = { records = 1 }
+
+[resources.change]
+kind      = "event"
+type      = "packed:frames#Link"
+rate      = "low"
+retention = "1d"
+frame     = { records = 1 }
+
+[resources.reset]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
+frame    = { records = 0 }
+
+[resources.raw_video]
+kind     = "stream"
+explicit = true
+type     = { raw = "video/raw" }
+frame    = { records = 1 }
+
+[resources."frames/{group}"]
+kind        = "stream"
+type        = "packed:frames#Link"
+params      = { group = "string" }
+cardinality = 8
+frame       = { records = 1 }

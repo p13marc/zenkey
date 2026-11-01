@@ -4,6 +4,31 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-11-01: §2.3, the keys on a frame resource (#981)
+
+Core 0.83 defines frames (its §7.7): a stream whose samples carry several
+records of one packed type under one envelope and one time. On such a
+stream this text's keys could read two ways, of the puts or of the
+records. This version says which.
+
+**Added: §2.3, "On a frame resource".**
+- The member is the frame key, and an arrival is a frame's put.
+- `period_ms` is the cadence of the frames. A frame's interval is the
+  core's: its span, else this period, else unstated.
+- Core E050 refuses three declarations: a deadline below the span; a
+  deadband beside a deadline unless `max_records` × the interval is at
+  most the deadline; and a lifespan, which reads a per-sample timestamp
+  no record carries.
+
+**Written against core 0.83,** where it said 0.73. The index's row
+follows.
+
+**Deliberately not changed.**
+- **No other rule.** A stream that is not a frame resource reads as
+  before, and §2.5's tracker judges a frame key as any member.
+- **No fixture of this profile.** E050 is a core lint, so its evidence is
+  the core's `contracts/e050-frame-timing`.
+
 ## 0.8 — 2026-11-01: editorial: §2.6's owner session read under core 0.73's session posture, no rule changed (#976)
 
 Core 0.73 orders state by an owner's run and seq, carried in band. It

@@ -3,6 +3,35 @@
 Amendments to [`v1.md`](v1.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.6 — 2026-11-01: §2.2, a frame is never a role's stream (#981)
+
+Core 0.83 defines frames (its §7.7): a stream whose put carries several
+records of one packed type under one time. Its deadline is the frames'
+(`timing.v1` 0.9 §2.3), so an arbiter judging one would switch providers
+between frames, never between records.
+
+**Changed: §2.2, the declaration.**
+- **Check 6** counts no frame resource. So a role that consumes a frame
+  and one plain stream is read over the stream, as before.
+- **Check 9, `framed`,** is new: the role consumes a frame resource and no
+  stream that is not one. It needs the revision held, as check 6 does, and
+  is read beside the others, each alone.
+- **The linter's SHOULD** names check 9 beside 1 to 7. Its last sentence
+  said no core lint reads an annotation's value. Core E050 now reads
+  `timing.*` on a frame resource, so it says no core lint reads
+  `arbitration.policy`.
+
+**Written against core 0.83,** where it said 0.56. The index's row
+follows.
+
+**Fixtures.** `declarations.json` gains four cases: a role on a frame
+alone, on a frame and a state, on a frame and a stream, and on every
+resource of an interface holding both. Each resource of a revision
+carries `frame`, true for a frame resource, and absent is false.
+
+**Deliberately not changed.** No other check, no other fixture, and no
+section number or label.
+
 ## 0.5 — 2026-10-31: editorial: round 88's F-349 rewritten, no rule changed (#935)
 
 zk2py round 88 (#609) read 0.4 cold and found that it changed no rule.

@@ -1,11 +1,11 @@
 {
   "spec/CHANGELOG.md": {
-    "mean": 16.72,
+    "mean": 16.68,
     "over": 30,
     "tags": 0
   },
   "spec/README.md": {
-    "mean": 11.91,
+    "mean": 11.89,
     "over": 0,
     "tags": 0
   },
@@ -29,13 +29,18 @@
     "over": 0,
     "tags": 0
   },
+  "spec/conformance/frame/README.md": {
+    "mean": 13.55,
+    "over": 0,
+    "tags": 0
+  },
   "spec/conformance/history/stray-entries/README.md": {
     "mean": 4.0,
     "over": 0,
     "tags": 0
   },
   "spec/core.md": {
-    "mean": 15.74,
+    "mean": 15.7,
     "over": 0,
     "tags": 0
   },
@@ -50,7 +55,7 @@
     "tags": 0
   },
   "spec/profiles/README.md": {
-    "mean": 17.25,
+    "mean": 17.14,
     "over": 0,
     "tags": 0
   },
@@ -70,7 +75,7 @@
     "tags": 0
   },
   "spec/profiles/arbitration/CHANGELOG.md": {
-    "mean": 21.5,
+    "mean": 21.05,
     "over": 7,
     "tags": 0
   },
@@ -80,7 +85,7 @@
     "tags": 0
   },
   "spec/profiles/arbitration/v1.md": {
-    "mean": 20.91,
+    "mean": 20.9,
     "over": 0,
     "tags": 0
   },
@@ -225,7 +230,7 @@
     "tags": 0
   },
   "spec/profiles/timing/CHANGELOG.md": {
-    "mean": 20.52,
+    "mean": 20.26,
     "over": 4,
     "tags": 0
   },
@@ -235,7 +240,7 @@
     "tags": 0
   },
   "spec/profiles/timing/v1.md": {
-    "mean": 21.28,
+    "mean": 20.95,
     "over": 0,
     "tags": 0
   },

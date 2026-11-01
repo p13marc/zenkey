@@ -1,0 +1,11 @@
+# core §9.8, frames: a deadband added: deadband_changed
+[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+packed = ["r.json"]
+[resources."frames/s"]
+kind = "stream"
+type = "packed:Reading"
+frame = { keyframe_every = 4 }
