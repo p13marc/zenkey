@@ -666,6 +666,7 @@ mod tests {
     fn a_namespaced_key_strips_and_a_foreign_one_does_not() {
         let st = stamp(3, 4);
         let bytes = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: st,
             record: b"up",
@@ -738,6 +739,7 @@ mod tests {
             r#"{"a":1}"#
         );
         let enveloped = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: stamp(1, 1),
             record: br#"{"a":1}"#,

@@ -666,6 +666,7 @@ fn synth(
 pub fn packed_envelope(n: u32, record: &[u8]) -> Vec<u8> {
     use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
     Envelope {
+        form: zenkey_model::wire::Form::Mutation,
         // `packed:Sensor`'s tag (spec/conformance/packed/vectors.json).
         tag: Tag::new(4).expect("a tag"),
         stamp: Stamp {
@@ -1651,6 +1652,7 @@ impl World {
                 .find(|p| p.0 == key)
                 .unwrap_or_else(|| panic!("{key} is no publisher of this world"));
             row.1 = Envelope {
+                form: zenkey_model::wire::Form::Mutation,
                 tag: Tag::NONE,
                 stamp: Stamp {
                     run: Run::U16(3),

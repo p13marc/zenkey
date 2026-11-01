@@ -339,6 +339,7 @@ mod tests {
             received: std::time::Instant::now(),
         };
         let envelope = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: Stamp {
                 run: Run::U16(1),

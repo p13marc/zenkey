@@ -654,6 +654,7 @@ mod tests {
         };
         let enveloped = |run: u16, seq: u32| {
             Envelope {
+                form: zenkey_model::wire::Form::Mutation,
                 tag: Tag::NONE,
                 stamp: Stamp {
                     run: Run::U16(run),
@@ -720,6 +721,7 @@ mod tests {
             kind: Some(zenoh::sample::SampleKind::Put),
             answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(
                 Envelope {
+                    form: zenkey_model::wire::Form::Mutation,
                     tag: Tag::NONE,
                     stamp: Stamp {
                         run: Run::U32(7),
