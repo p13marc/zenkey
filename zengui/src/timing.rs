@@ -197,11 +197,21 @@ pub fn read(
         );
         return Some(out);
     }
-    // The ring iterates newest first: its arrivals, oldest first.
+    // The ring iterates newest first: its arrivals, oldest first. A refused
+    // zk2c envelope is undecodable, never an arrival (core §7.5).
     let arrivals: Vec<Instant> = ring
         .iter()
         .rev()
         .filter(|e| !e.is_delete)
+        .filter(|e| {
+            zenkey_fleet::model::inband::payload(
+                &resolved.key,
+                Some(&e.encoding),
+                &e.payload.to_bytes(),
+            )
+            .refusal()
+            .is_none()
+        })
         .map(|e| e.received)
         .collect();
     out.arrivals = arrivals.len();

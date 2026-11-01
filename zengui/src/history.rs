@@ -90,15 +90,20 @@ impl HistoryEntry {
         let len = view.payload.len();
         let is_delete = view.kind == zenoh::sample::SampleKind::Delete;
         let bytes = view.payload.to_bytes();
+        // The envelope first (core §7.5, observer §7.3): the record is
+        // sniffed, a refused envelope never is.
+        let encoding = Some(view.encoding.as_str());
         let value = (!is_delete && len <= DECODE_LIMIT)
-            .then(|| zenkey_fleet::structural_value(&bytes))
+            .then(|| zenkey_fleet::model::inband::structural_value(&view.key, encoding, &bytes))
             .flatten();
         let preview = if is_delete {
             "<delete>".to_string()
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(zenkey_fleet::structural(&bytes))
+            truncate(zenkey_fleet::model::inband::structural_text(
+                &view.key, encoding, &bytes,
+            ))
         };
         HistoryEntry {
             seq,

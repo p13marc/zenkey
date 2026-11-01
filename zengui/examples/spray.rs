@@ -263,6 +263,10 @@ fn wander(tick: u64, lo: f64, hi: f64) -> f64 {
 struct Raw {
     key: String,
     payload: Payload,
+    /// The predefined Encoding a zk2 key's raw put carries (core §7.2), so
+    /// it is read as today's wire and not as a zk2c envelope (§7.5);
+    /// zenoh's default for a foreign key.
+    encoding: zenoh::bytes::Encoding,
     /// Published every `every` ticks.
     every: u64,
     stamped: bool,
@@ -582,6 +586,7 @@ impl Spray {
                         reply_key.clone(),
                         r#"{"namespaces":["default","squatted"]}"#,
                     )
+                    .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
                     .timestamp(stamper.new_timestamp())
                     .wait();
             })
@@ -601,6 +606,7 @@ impl Spray {
             Raw {
                 key: in_ns(&nav_position("robot1/nav")?),
                 payload: Payload::Fixed(b"\xff\xfe not a nav.v2.Position".to_vec()),
+                encoding: zenoh::bytes::Encoding::APPLICATION_PROTOBUF,
                 every: per_second,
                 stamped: true,
                 why: "garbage on an owned key, with a stamp not the owner's",
@@ -608,6 +614,7 @@ impl Spray {
             Raw {
                 key: in_ns(&nav_position("robot1/ghost")?),
                 payload: Payload::Fixed(vec![0x09, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]),
+                encoding: zenoh::bytes::Encoding::APPLICATION_PROTOBUF,
                 every: 1,
                 stamped: false,
                 why: "an unowned zk2 key: no provider",
@@ -618,6 +625,7 @@ impl Spray {
                     nav_position("robot9/nav")?.as_str(),
                 ),
                 payload: Payload::Fixed(br#"{"another":"deployment"}"#.to_vec()),
+                encoding: zenoh::bytes::Encoding::APPLICATION_JSON,
                 every: 1,
                 stamped: false,
                 why: "a zk2 key in another namespace",
@@ -625,6 +633,7 @@ impl Spray {
             Raw {
                 key: "demo/example/foo".into(),
                 payload: Payload::Fixed(b"just a plain string".to_vec()),
+                encoding: zenoh::bytes::Encoding::default(),
                 every: 1,
                 stamped: false,
                 why: "foreign",
@@ -632,6 +641,7 @@ impl Spray {
             Raw {
                 key: "demo/cbor".into(),
                 payload: Payload::Fixed(vec![0xA1, 0x61, 0x61, 0x01]),
+                encoding: zenoh::bytes::Encoding::default(),
                 every: 1,
                 stamped: false,
                 why: "foreign, CBOR",
@@ -639,6 +649,7 @@ impl Spray {
             Raw {
                 key: "two/chunks".into(),
                 payload: Payload::Fixed(b"{}".to_vec()),
+                encoding: zenoh::bytes::Encoding::default(),
                 every: 1,
                 stamped: false,
                 why: "foreign, two chunks",
@@ -646,6 +657,7 @@ impl Spray {
             Raw {
                 key: "demo/huge".into(),
                 payload: Payload::Fixed(vec![b'x'; 512 * 1024]),
+                encoding: zenoh::bytes::Encoding::default(),
                 every: 1,
                 stamped: false,
                 why: "foreign, 512 KiB",
@@ -653,6 +665,7 @@ impl Spray {
             Raw {
                 key: "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used".into(),
                 payload: Payload::Wander,
+                encoding: zenoh::bytes::Encoding::default(),
                 every: 1,
                 stamped: false,
                 why: "a v1 key, foreign to zk2; its value wanders",
@@ -660,6 +673,7 @@ impl Spray {
             Raw {
                 key: "demo/cycle".into(),
                 payload: Payload::Cycle,
+                encoding: zenoh::bytes::Encoding::default(),
                 every: 1,
                 stamped: false,
                 why: "foreign, retired by tombstone and revived",
@@ -700,11 +714,15 @@ impl Spray {
                         Some(bytes) if r.stamped => {
                             let _ = publisher
                                 .put(&r.key, bytes)
+                                .encoding(r.encoding.clone())
                                 .timestamp(publisher.new_timestamp())
                                 .await;
                         }
                         Some(bytes) => {
-                            let _ = publisher.put(&r.key, bytes).await;
+                            let _ = publisher
+                                .put(&r.key, bytes)
+                                .encoding(r.encoding.clone())
+                                .await;
                         }
                         None => {
                             let _ = publisher.delete(&r.key).await;

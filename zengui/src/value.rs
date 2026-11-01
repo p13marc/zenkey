@@ -73,6 +73,25 @@ impl DecodedValue {
         DecodedValue { checked, document }
     }
 
+    /// [`DecodedValue::new`] over a sample's bytes as they came on `wire`
+    /// under `encoding`: an undecodable rendering is sniffed from its zk2c
+    /// envelope's record (core §7.5), and a refused envelope never is, its
+    /// document the refusal (observer §7.3).
+    pub fn of_wire(
+        checked: zenkey_fleet::Checked,
+        wire: &str,
+        encoding: Option<&str>,
+        bytes: &[u8],
+    ) -> DecodedValue {
+        let document = match &checked.rendering.rendered {
+            Rendered::Undecodable { .. } => {
+                zenkey_fleet::model::inband::structural_text(wire, encoding, bytes)
+            }
+            _ => rendered_document(&checked.rendering.rendered),
+        };
+        DecodedValue { checked, document }
+    }
+
     /// A rendering handed back with no bytes beside it (#614, FL8a): a
     /// state row that kept none, which since #765 is only one built by
     /// hand — the fleet keeps S4's and an archive's bytes on the row. An
