@@ -9,7 +9,8 @@
 - Each sample carries core §7.5's envelope, so its `Encoding` is
   `zenoh/bytes` (core §7.2).
 - Each record is encoded as its type says: protobuf, CBOR and
-  `image/jpeg`. The owner's writer names that predefined `Encoding`.
+  `image/jpeg`. Each record holds its type's predefined `Encoding`.
+  Nothing on the wire names it.
 - No `Encoding` carries a schema suffix.
 
 ## §2 Decoding and honest rendering

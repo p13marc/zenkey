@@ -4,6 +4,24 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.13 — 2026-11-01: editorial: 0.12's scenario change said, and §6's Expected 1 holds no setup, no rule changed (#976)
+
+zk2py round 93 (PR #1005) found 0.12's entry incomplete (F-421).
+
+**What 0.12 changed and did not say.** `scenarios.md` §6's step 1 gained
+"Its clock is 5 s behind", and its Expected 1 gained the re-put's stamp
+above the last one the author issued. The entry described both as if §6
+already held them. A runner of §6 restarts its author 5 s behind and
+checks that stamp since 0.12.
+
+**Expected 1** said "Its clock is behind (§2.11)." as a sentence of its
+own, which is setup, not an outcome. It now reads "The put's stamp is
+above the author's last one, though its clock is behind (§2.11)."
+
+**Deliberately not changed.** No rule, fixture, section number or label.
+The reference's `s6_the_authors_restart_moves_no_target_to_act_again`
+already runs §6 so.
+
 ## 0.12 — 2026-11-01: editorial: §2.11's catch-up cites this profile's own scenario, no rule changed (#976)
 
 Core 0.73 orders state by an owner's run and seq, carried in band. Its

@@ -140,7 +140,7 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | An owner MUST write each put on a `stream`, `state`, `@state` or `events` key, and each delete of a state member, with §7.5's envelope. | `[Sc: state.md §1]` |
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | An owner MUST NOT write under a run that it, or another instance of its service, wrote under before. | `[Sc: state.md §7]` |
-| [S7](core.md#43-runs-and-sequence-numbers-s7) | An owner MUST NOT let that seq wrap. | `[Sc: state.md §7]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | An owner MUST NOT let its seq for state and events wrap. | `[Sc: state.md §7]` |
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | **Streams.** … An owner MUST NOT restart a stream key's seq within a run, even where it declares the key's publisher again: a takeover, or a member removed and added. | `[Sc: state.md §13]` |
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | **Ahead.** … An owner SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own offset without a reference. | `[Sc: state.md §7]` |
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | The owner SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | `[Sc: state.md §7]` |
@@ -739,7 +739,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [S4](core.md#42-rules-for-owners-and-consumers) | consumer, deployment | core §4.2 Rules for owners and consumers | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` … |
 | [S5](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** … |
 | [S6](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** current state is the owner's answer. A consumer turns to an archive only … |
-| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer | core §4.2 Rules for owners and consumers | **Owner:** a run is never reused, and a seq never wraps within it (§4.3). |
+| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer | core §4.2 Rules for owners and consumers | **Owner:** a run is never reused, and its seq for state and events never … |
 | [O1](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template) … |
 | [O2](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden` … |
 | [O3](core.md#51-rules) | owner | core §5.1 Rules | **Owner:** a reply MUST go on the operation's own concrete key, a member's for … |
