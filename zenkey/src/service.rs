@@ -1791,7 +1791,11 @@ impl Service {
     /// puts every alarm it holds again from the new instance, after its
     /// descriptor and before its tokens (`alarms.v1` §2.9), and an author of
     /// `desired.v1` documents every document it keeps, and every delete
-    /// within its window (`desired.v1` §2.11).
+    /// within its window (`desired.v1` §2.11). Such a service's new epoch
+    /// is refused while the clock guard holds ([`Error::ClockAhead`]),
+    /// nothing changed. A re-put that fails otherwise returns its error
+    /// with the old instance kept, writing under the new run, which its
+    /// descriptor is put again stating (§3.3).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
         if self.config_v1.is_some() {
             return Err(Error::Contract(
@@ -1799,6 +1803,12 @@ impl Service {
                  values (config.v1 §2.12): close this service and start another"
                     .to_owned(),
             ));
+        }
+        // The re-puts below are state writes, which the clock guard refuses
+        // (core §4.3, "Ahead"): refused here instead, before the new
+        // instance's run, descriptor or electors move.
+        if (self.alarms.is_some() || !self.desired_authors.is_empty()) && self.minter.is_ahead() {
+            return Err(Error::ClockAhead);
         }
         let next = mint();
         // Core §1.5, §4.3: the new instance's run, which its descriptor

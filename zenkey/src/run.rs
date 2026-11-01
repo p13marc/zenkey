@@ -45,6 +45,9 @@ pub trait RunStore: Send + Sync + 'static {
 /// - **Spent:** a record at 0xFFFF gives `None`, and is left as it is.
 /// - **Unreadable** (not 2 bytes): read as spent, `None` and a warning. It
 ///   is never reset, since a reset would issue its runs again.
+/// - **One owner per record:** the record is read and written with no
+///   lock, so two services sharing one path could be issued the same run.
+///   Give each service its own path.
 #[derive(Debug, Clone)]
 pub struct FileRunStore {
     path: PathBuf,

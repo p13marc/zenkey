@@ -147,9 +147,14 @@ pub fn stamp(ts: &Timestamp) -> Stamp {
 /// The Zenoh timestamp a desired document's write carries: a desired
 /// resource is on core §4.3's table, so its writer gives every write one,
 /// which orders the author's versions (§2.4, §2.6).
-fn time(s: crate::state::Stamped) -> Timestamp {
-    s.time
-        .expect("a desired resource is on core §4.3's table: every write carries a timestamp")
+fn time(s: crate::state::Stamped) -> Result<Timestamp> {
+    s.time.ok_or_else(|| {
+        Error::Contract(
+            "desired.v1: a desired resource's write carried no Zenoh timestamp, which core \
+             §4.3's table gives it"
+                .to_owned(),
+        )
+    })
 }
 
 /// Milliseconds since the Unix epoch now, on this host's clock.
@@ -714,7 +719,7 @@ impl Author {
             Some(s) => Arc::clone(&s.writer),
             None => Arc::new(self.writer(target).await?),
         };
-        let stamp = time(writer.put(payload.clone()).await?);
+        let stamp = time(writer.put(payload.clone()).await?)?;
         slots.insert(
             target.to_owned(),
             Slot {
@@ -759,7 +764,7 @@ impl Author {
         if matches!(slot.state, SlotState::Deleted { .. }) {
             return Ok(Written::Nothing);
         }
-        let stamp = time(slot.writer.delete().await?);
+        let stamp = time(slot.writer.delete().await?)?;
         slot.state = SlotState::Deleted {
             at_ms: now_ms(),
             stamp: Some(stamp),
@@ -978,7 +983,7 @@ impl Author {
             }
             let done = async {
                 let w = Arc::new(self.writer(target).await?);
-                let stamp = time(w.delete_aged(Duration::from_millis(age)).await?);
+                let stamp = time(w.delete_aged(Duration::from_millis(age)).await?)?;
                 Ok::<_, Error>((w, stamp))
             };
             match done.await {
@@ -1028,7 +1033,7 @@ impl Author {
                 report.reput.push(target.clone());
                 continue;
             }
-            match writer.put(d.payload.clone()).await.map(time) {
+            match writer.put(d.payload.clone()).await.and_then(time) {
                 Ok(stamp) => {
                     slots.insert(
                         target.clone(),
@@ -1112,7 +1117,7 @@ impl Author {
                 if !*pending {
                     continue;
                 }
-                match slot.writer.put(payload.clone()).await.map(time) {
+                match slot.writer.put(payload.clone()).await.and_then(time) {
                     Ok(s) => {
                         *stamp = Some(s);
                         *pending = false;
@@ -1145,12 +1150,12 @@ impl Author {
                     pending,
                     ..
                 } => {
-                    *stamp = Some(time(slot.writer.put(payload.clone()).await?));
+                    *stamp = Some(time(slot.writer.put(payload.clone()).await?)?);
                     *pending = false;
                 }
                 SlotState::Deleted { at_ms, stamp } if now.saturating_sub(*at_ms) < window => {
                     let age = Duration::from_millis(now.saturating_sub(*at_ms));
-                    *stamp = Some(time(slot.writer.delete_aged(age).await?));
+                    *stamp = Some(time(slot.writer.delete_aged(age).await?)?);
                 }
                 SlotState::Deleted { .. } => {}
             }
