@@ -2,14 +2,15 @@
 # configuration of one service, in groups with classes, under confirmed
 # commit, with persistence as a separate act. Every act is its own @op key, so
 # each is separately grantable (docs/zk2/architecture.md section 4.10).
-# Published in spec/profiles/.history/config.v1/.
+# Published in spec/profiles/.history/config.v1/: revision 1.0, which uses
+# freshness.v1, and revision 1.1, which uses freshness.v2 (#978's F4).
 # Doc strings are outside the fingerprint (core section 9.5), and so are comments.
 [interface]
 name    = "config"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "The configuration of one service: groups with classes, confirmed commit, persistence"
-uses    = ["freshness.v1"]
+uses    = ["freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/config.json"]
@@ -26,7 +27,7 @@ fanout     = "forbidden"
 kind        = "state"
 type        = "json:ConfigView"
 annotations = { "freshness.ttl_s" = 60 }
-doc         = "The read-back: the served schema and the running values. A GET on it is the read (config.v1 2.3). Put before the tokens and on every change, re-put at least every 30 s."
+doc         = "The read-back: the served schema and the running values. A GET on it is the read (config.v1 2.3). Put before the tokens and on every change, vouched for by the owner's heartbeat at least every 30 s (freshness.v2 2.4)."
 
 [resources.status]
 kind        = "state"
