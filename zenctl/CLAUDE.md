@@ -267,7 +267,9 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   session's transport events and a ticker on a thread of its own over the
   window and the watch after it, and a closed transport or a gap past
   `budget::stall_bound` (`--wait-before-close`, 5 s, or `--lease` less a
-  keep-alive) reads `reader_stalled`. The runtime
+  keep-alive) reads `reader_stalled`. Every `--wait-before-close` says
+  its 5 s default is zenoh 1.10.1's, and a deployment on another binding
+  states its own (`zm-1.10.2-r1`'s is 10 s; #1011). The runtime
   keeps §2.7 (#741): `zenkey::budget` refuses a new member at the bound,
   an occurrence beyond the rate and a lowering below the live members
   (`Error::Budget`), so a test that needs an owner over its bound uses

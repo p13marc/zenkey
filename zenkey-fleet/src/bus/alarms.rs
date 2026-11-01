@@ -104,8 +104,8 @@ pub struct AlarmSpec {
 }
 
 impl AlarmSpec {
-    /// No window, no word, zenoh's lease and `wait_before_close`, no face,
-    /// archives read.
+    /// No window, no word, zenoh 1.10.1's lease and `wait_before_close`, no
+    /// face, archives read.
     pub fn new(timeout: Duration) -> AlarmSpec {
         AlarmSpec {
             timeout,

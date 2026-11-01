@@ -258,3 +258,8 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `examples/zk2/.history` and compatible with it. After an intended change,
   run `cargo run -p zenkey-model --bin zk2 -- contract bundle <file>
   --history examples/zk2/.history`; the history is append-only.
+  `budget::DEFAULT_LEASE`, `DEFAULT_KEEP_ALIVE` and
+  `DEFAULT_WAIT_BEFORE_CLOSE` are zenoh 1.10.1's defaults, said so
+  (#1011): `zm-1.10.2-r1`'s `wait_before_close` is 10 s, and a tool takes
+  the deployment's word (`--wait-before-close`), never its own session's
+  configuration, which states only its own pushes' wait.

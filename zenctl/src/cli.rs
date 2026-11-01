@@ -3139,7 +3139,8 @@ pub(crate) struct CheckConformArgs {
     /// than it, nor than --lease less one keep-alive (spec §2.7, 0.27). A
     /// router that waits it tells a withdrawal that late, so where it is
     /// longer than --lease, a window's owner is watched for it (observer
-    /// §5.2).
+    /// §5.2). The default is zenoh 1.10.1's; a deployment on another
+    /// binding states its own (zm-1.10.2-r1's is 10 s).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,
@@ -3469,7 +3470,9 @@ pub(crate) struct AlarmsArgs {
     /// The routers' wait_before_close, seconds: a window is lossless only if
     /// this reader never stalled longer than it, nor than --lease less one
     /// keep-alive (spec §2.7, 0.27). Where it is longer than --lease, a
-    /// window's owner is watched for it (observer §5.2).
+    /// window's owner is watched for it (observer §5.2). The default is
+    /// zenoh 1.10.1's; a deployment on another binding states its own
+    /// (zm-1.10.2-r1's is 10 s).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,
@@ -3540,7 +3543,9 @@ pub(crate) struct ArbitrationArgs {
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
     pub(crate) lease: f64,
-    /// The routers' wait_before_close, seconds (spec §2.7, 0.27).
+    /// The routers' wait_before_close, seconds (spec §2.7, 0.27). The
+    /// default is zenoh 1.10.1's; a deployment on another binding states
+    /// its own (zm-1.10.2-r1's is 10 s).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,
@@ -3620,7 +3625,9 @@ pub(crate) struct TelemetryArgs {
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
     pub(crate) lease: f64,
-    /// The routers' wait_before_close, seconds (spec §2.7, 0.27).
+    /// The routers' wait_before_close, seconds (spec §2.7, 0.27). The
+    /// default is zenoh 1.10.1's; a deployment on another binding states
+    /// its own (zm-1.10.2-r1's is 10 s).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,
@@ -3673,7 +3680,9 @@ pub(crate) struct TimingArgs {
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
     pub(crate) lease: f64,
-    /// The routers' wait_before_close, seconds (spec §2.7, 0.27).
+    /// The routers' wait_before_close, seconds (spec §2.7, 0.27). The
+    /// default is zenoh 1.10.1's; a deployment on another binding states
+    /// its own (zm-1.10.2-r1's is 10 s).
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,

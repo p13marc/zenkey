@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.76** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.79** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -3900,11 +3900,11 @@ Appendix B. These are the ones the rules above cite:
 (`zenkey/tests/budget.rs`), with the source each rests on:
 - A sample that is `reliable` with congestion `block` is not droppable. A
   full queue makes its push wait, and one it cannot queue within
-  `wait_before_close` (5 s by default) closes the transport
-  (`unicast/universal/tx.rs`). A best-effort sample, or one with `drop`,
-  is droppable once `wait_before_drop` (1 ms) passes. Through two routers
-  in processes of their own, to a reader that took 2 ms over each 16 KiB
-  sample:
+  `wait_before_close` closes the transport (`unicast/universal/tx.rs`).
+  A best-effort sample, or one with `drop`, is droppable once
+  `wait_before_drop` passes. zenoh 1.10.1's defaults are 5 s and 1 ms.
+  Through two routers in processes of their own, to a reader that took
+  2 ms over each 16 KiB sample:
   - reliable, `block`: 1,000 of 1,000 arrived in order, and the owner's
     put waited;
   - best effort, `drop`: 695–832 of 1,000 were lost, and nothing the
@@ -3923,11 +3923,18 @@ Appendix B. These are the ones the rules above cite:
     runs. Each time its ticker saw a gap of 7.0–7.1 s on its first tick
     after, its session read its transport's close (0.35–0.51 s later in
     the 4 runs that timed it), and it saw the token withdrawn.
+- **Another binding's default.** zm-1.10.2-r1, the zenoh fork that
+  zenoh-modem builds on, defaults `wait_before_close` to 10 s, its lease.
+  A 7 s stall falls inside both there. Measured on 2026-11-01, a reader
+  stuck 7 s lost none of 1,000, and no transport closed, in 3 of 3 runs.
+  With the routers stating 5 s, the stuck reader lost 653 and the stopped
+  one 876, each with its transport closed. So `budget.md` §1's routers
+  state their `wait_before_close`.
 - A transport that closes withdraws the tokens learned through it, between
   routers and on a client's own link alike. The withdrawal reaches the
   reader within 1–2 ms when the link closes, and one lease after a link
-  goes silent: 986–1,037 ms at a 1 s lease, 9,961–10,047 ms at the default
-  10 s (spike S10). The samples put meanwhile are lost.
+  goes silent: 986–1,037 ms at a 1 s lease, 9,961–10,047 ms at zenoh
+  1.10.1's default 10 s (spike S10). The samples put meanwhile are lost.
 - **Only a token the reader had received is withdrawn.** A
   router that gives up on a stalled reader closes the reader's transport
   and discards its queue toward it. In the runs above with no
@@ -3942,7 +3949,8 @@ Appendix B. These are the ones the rules above cite:
   `wait_before_close` shorter than its lease, or a link that closed or
   went silent. Observer §5.2's watch after a window allows for such a
   withdrawal all the same. It reasons from the push above, which waits
-  `wait_before_close` before its transport closes.
+  `wait_before_close` before its transport closes. On zm-1.10.2-r1, a
+  lease below 10 s beside the default `wait_before_close` is this case.
 - A session sees its own transports open and close through zenoh's
   transport events (`Session::info().transport_events_listener()`,
   unstable). A close is reported once the session's receive task has

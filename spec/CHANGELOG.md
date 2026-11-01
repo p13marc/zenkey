@@ -3,6 +3,47 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.79 — 2026-11-01: Appendix B's zenoh defaults labelled as 1.10.1's (#1011)
+
+zenoh-modem builds on a zenoh fork, `zm-1.10.2-r1`, whose
+`wait_before_close` defaults to 10 s, its lease. zenoh 1.10.1's is 5 s.
+Once zenoh-modem depends on zenkey, zenkey runs on the fork. A readiness
+run on 2026-11-01 found the texts' figures to be 1.10.1's. The rules
+already read the deployment's `wait_before_close`, so no rule moves.
+`observer.md` moves to text 0.18 beside it
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)).
+
+**Changed: Appendix B, "What a path drops, and what a reader sees".**
+- **The defaults** are labelled zenoh 1.10.1's: `wait_before_close` 5 s,
+  `wait_before_drop` 1 ms, and the 10 s lease of spike S10.
+- **Added: another binding's default.** On the fork a 7 s stall falls
+  inside both its `wait_before_close` and its lease. Measured there, a
+  stuck reader lost none of 1,000 in 3 of 3 runs, and no transport
+  closed. With the routers stating 5 s, the stuck reader lost 653 and the
+  stopped one 876, each with its transport closed.
+- **"Not measured"** names the fork's boundary: a lease below 10 s beside
+  its default `wait_before_close`. It stays unmeasured.
+
+**Changed: `scenarios/budget.md` §1.** Its routers state
+`wait_before_close`, 5 s, so steps 3 and 4 stall past it on any binding.
+Step 3's expectation reads the stated value, and the fork's runs are
+recorded. §1's receive threads and §2's spike lease are labelled
+1.10.1's. The reference's routers state it too
+(`zenkey/tests/budget.rs`).
+
+**Fixtures.** `conformance/budget/lossless.json`'s first stall bound is
+labelled 1.10.1's. A case for the fork's defaults is added: 10 s and a
+10 s lease give 7.5 s.
+
+**Deliberately not changed.**
+- **No rule,** and no other fixture's expectation.
+- **The 7 s runs** stay true of zenoh 1.10.1, and stand as measured.
+- **The readers' default** stays zenoh 1.10.1's 5 s. A tool's session
+  configuration states how long its own pushes wait, never its routers',
+  so it cannot stand for the deployment's. A deployment on another
+  binding states its own, by zenctl's `--wait-before-close`.
+- **`unixsock-dgram`,** the fork's new link, is link.v2's (#988).
+
 ## 0.76 — 2026-11-01: round 94's answers on packed records (#979)
 
 #979's B2 builds what 0.75 defined: zenkey-build's packed types, the

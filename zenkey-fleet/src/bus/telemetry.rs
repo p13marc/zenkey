@@ -105,7 +105,7 @@ pub struct TelemetrySpec {
 pub const DEFAULT_SETTLE: Duration = Duration::from_millis(250);
 
 impl TelemetrySpec {
-    /// A window, zenoh's lease and `wait_before_close`, no face.
+    /// A window, zenoh 1.10.1's lease and `wait_before_close`, no face.
     pub fn new(timeout: Duration, window: Duration) -> TelemetrySpec {
         TelemetrySpec {
             timeout,

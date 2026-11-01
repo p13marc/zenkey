@@ -115,7 +115,8 @@ pub struct TimingSpec {
 }
 
 impl TimingSpec {
-    /// A window, zenoh's lease and `wait_before_close`, no bound, no face.
+    /// A window, zenoh 1.10.1's lease and `wait_before_close`, no bound, no
+    /// face.
     pub fn new(timeout: Duration, window: Duration) -> TimingSpec {
         TimingSpec {
             timeout,

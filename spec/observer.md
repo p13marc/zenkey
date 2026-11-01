@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.16 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.18 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.76 ([`core.md`](core.md)) |
+| **Written against** | core 0.79 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -806,16 +806,17 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
        held for the reader goes with it;
      - **its process did not stall longer than the bound**: the
        transport's `wait_before_close`, or its lease less one keep-alive
-       interval when that is shorter. With zenoh's defaults these are 5 s
-       and 7.5 s: a 10 s lease, with a keep-alive every quarter of it. A
-       reader stalled no longer than the bound is never given up on: its
-       router waits on its full queue for `wait_before_close`, and hears
-       from it within its lease.
+       interval when that is shorter. With zenoh 1.10.1's defaults these
+       are 5 s and 7.5 s: a 10 s lease, with a keep-alive every quarter of
+       it. On zm-1.10.2-r1, whose `wait_before_close` is 10 s, the lease
+       decides. A reader stalled no longer than the bound is never given
+       up on: its router waits on its full queue for `wait_before_close`,
+       and hears from it within its lease.
   2. **The path could not drop one silently.** The resource declares
      `reliable` with congestion `block` (core §2.4). A router's queue never
      drops such a sample: its push waits for room, and one it cannot queue
-     within the transport's `wait_before_close` (5 s by default) closes
-     the transport (core Appendix B). So a reliable path loses a delivery only
+     within the transport's `wait_before_close` closes the transport
+     (core Appendix B). So a reliable path loses a delivery only
      by failing. A link that fails withdraws the owner's instance token at
      the reader, which the presence premise reads. A reader that stalls
      has its own transport closed, which rule 1 reads.
@@ -874,13 +875,15 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
   end, a tool watches the owner's instance tokens for the longer of one
   lease and the routers' `wait_before_close`, plus its reply timeout.
   `[Sc: budget.md §2]`
-  - **The lease** is the deployment's, 10 s by default.
-  - **`wait_before_close`** is the deployment's too, 5 s by default. A
-    push that cannot queue within it closes the transport it pushes on
-    (core Appendix B, "What a path drops"). A path that stays up while its
-    queue is full keeps its lease. So its withdrawal can reach the reader
-    up to `wait_before_close` after the failure. That is later than a
-    silent link's when `wait_before_close` is longer than the lease.
+  - **The lease** is the deployment's, 10 s by zenoh 1.10.1's default.
+  - **`wait_before_close`** is the deployment's too: the routers'. Its
+    default is 5 s in zenoh 1.10.1, and 10 s in zm-1.10.2-r1. A tool's own
+    session configuration states how long its own pushes wait, not its
+    routers'. A push that cannot queue within it closes the transport it
+    pushes on (core Appendix B, "What a path drops"). A path that stays up
+    while its queue is full keeps its lease. So its withdrawal can reach
+    the reader up to `wait_before_close` after the failure. That is later
+    than a silent link's when `wait_before_close` is longer than the lease.
     - **A bound reasoned, not measured.** This half rests on that
       behaviour of a push alone. `budget.md` §2 measures a silent link's
       withdrawal one lease after the failure. No run has shown one later

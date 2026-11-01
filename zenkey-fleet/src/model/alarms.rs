@@ -241,7 +241,7 @@ pub struct BookSpec {
 }
 
 impl BookSpec {
-    /// No face, nothing on the operator's word, zenoh's lease and
+    /// No face, nothing on the operator's word, zenoh 1.10.1's lease and
     /// `wait_before_close`.
     pub fn new(timeout: Duration) -> BookSpec {
         BookSpec {

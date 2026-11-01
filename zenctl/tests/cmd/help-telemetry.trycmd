@@ -34,7 +34,7 @@ Options:
           [default: 10]
 
       --wait-before-close <SECS>
-          The routers' wait_before_close, seconds (spec §2.7, 0.27)
+          The routers' wait_before_close, seconds (spec §2.7, 0.27). The default is zenoh 1.10.1's; a deployment on another binding states its own (zm-1.10.2-r1's is 10 s)
           
           [default: 5]
 

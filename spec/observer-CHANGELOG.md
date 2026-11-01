@@ -13,6 +13,32 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.18 — 2026-11-01: §5.2's zenoh defaults labelled as 1.10.1's (#1011)
+
+zenoh-modem's zenoh fork, `zm-1.10.2-r1`, defaults `wait_before_close` to
+10 s, its lease. zenoh 1.10.1's is 5 s. §5.2 gave 1.10.1's figures as
+zenoh's. Its rules already read the deployment's `wait_before_close`, so
+no rule moves. This text is written against core 0.79, whose Appendix B
+labels the same figures.
+
+**Changed: §5.2, "Lost no delivery".**
+- **Rule 1's bound** gives 5 s and 7.5 s as zenoh 1.10.1's. On the fork
+  the lease decides, at 7.5 s.
+- **Rule 2** drops its "5 s by default", which rule 1 now states.
+
+**Changed: §5.2, "The owner present until one lease after the end".**
+- **The lease** is 10 s by zenoh 1.10.1's default.
+- **`wait_before_close`** is the routers'. Its default is 5 s in zenoh
+  1.10.1, and 10 s on the fork.
+- **Added: a tool's own session configuration** states how long its own
+  pushes wait, not its routers'. It is a fact of zenoh's, and binds no
+  role.
+
+**Deliberately not changed.**
+- **No rule,** and no section number.
+- **"A bound reasoned, not measured"** stands. Core Appendix B's "Not
+  measured" now names the fork's boundary, still unmeasured.
+
 ## 0.16 — 2026-11-01: §7.3 decodes a packed record (#979)
 
 Core 0.75 added the `packed` type kind, and core 0.76 says where a
