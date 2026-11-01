@@ -40,32 +40,39 @@ pub const NO_CEILING: u64 = 4_294_967_295;
 /// it (§2.7): an hour.
 pub const STREAM_LIVENESS: Duration = Duration::from_secs(3600);
 
-/// zenoh's default link lease (`transport/link/tx/lease`, 10 s): a link
-/// gone silent withdraws the owner's token only when it runs out
+/// zenoh 1.10.1's default link lease (`transport/link/tx/lease`, 10 s;
+/// zm-1.10.2-r1's too): a link gone silent withdraws the owner's token only when it runs out
 /// (Appendix B). A window's owner must stay present for one lease after
 /// the window's end (§2.7, 0.25), and a tool watches its tokens past the
 /// end for the longer of the lease and `wait_before_close`, plus the reply
 /// timeout ([`presence_tail`], observer §5.2).
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(10);
 
-/// zenoh's default keep-alive (`transport/link/tx/keep_alive`, 4): a
-/// session sends a keep-alive every lease ÷ 4 when it has nothing else to
+/// zenoh 1.10.1's default keep-alive (`transport/link/tx/keep_alive`, 4;
+/// zm-1.10.2-r1's too): a session sends a keep-alive every lease ÷ 4 when it has nothing else to
 /// send, so a peer that stops hearing from it closes the transport once a
 /// lease passes (§2.7, 0.27).
 pub const DEFAULT_KEEP_ALIVE: u32 = 4;
 
-/// zenoh's default `wait_before_close`
+/// zenoh 1.10.1's default `wait_before_close`
 /// (`transport/link/tx/queue/congestion_control/block/wait_before_close`,
 /// 5 s): how long a router's push of a `reliable`, `block` sample waits for
 /// room in a reader's queue before it closes the transport (Appendix B).
+///
+/// A deployment on another binding states its own: zm-1.10.2-r1, the fork
+/// zenoh-modem builds on, defaults to 10 s, its lease (#1011). A tool takes
+/// the deployment's word for it (zenctl's `--wait-before-close`), never its
+/// own session's configuration, which states how long the tool's own
+/// pushes wait and says nothing of its routers'.
 pub const DEFAULT_WAIT_BEFORE_CLOSE: Duration = Duration::from_secs(5);
 
 /// The longest a window's reader may stall without a router giving up on
 /// it (§2.7, 0.27): the transport's `wait_before_close`, or its lease less
 /// one keep-alive interval when that is shorter — the longest a router
 /// waits on the reader's full queue, and the longest it may hear nothing
-/// from the reader before its lease runs out. 5 s with zenoh's defaults
-/// (and 7.5 s for the lease). The interval is rounded up to a whole
+/// from the reader before its lease runs out. 5 s with zenoh 1.10.1's
+/// defaults (and 7.5 s for the lease); 7.5 s, the lease's, with
+/// zm-1.10.2-r1's, whose `wait_before_close` is 10 s. The interval is rounded up to a whole
 /// millisecond, which shortens the bound; a `keep_alive` of 0 is taken as
 /// 1.
 #[must_use]
@@ -83,10 +90,12 @@ pub fn stall_bound(wait_before_close: Duration, lease: Duration, keep_alive: u32
 /// silent, and a push that cannot queue within `wait_before_close` closes
 /// its transport (Appendix B), so a router that waits that long before it
 /// closes one tells the withdrawal that late. The reply timeout allows for
-/// the withdrawal's transit. With zenoh's defaults, a 10 s lease against a
-/// 5 s `wait_before_close`, it is the lease plus the timeout; a 1 s lease
-/// beside the default `wait_before_close` watches 5 s plus the timeout
-/// (observer text 0.6, zk2py round 85's F-320).
+/// the withdrawal's transit. With zenoh 1.10.1's defaults, a 10 s lease
+/// against a 5 s `wait_before_close`, it is the lease plus the timeout; a
+/// 1 s lease beside that `wait_before_close` watches 5 s plus the timeout
+/// (observer text 0.6, zk2py round 85's F-320). zm-1.10.2-r1's 10 s
+/// `wait_before_close` beside a 1 s lease watches 10 s plus the timeout, so
+/// a deployment on it states its `wait_before_close` (#1011).
 #[must_use]
 pub fn presence_tail(lease: Duration, wait_before_close: Duration, timeout: Duration) -> Duration {
     lease.max(wait_before_close).saturating_add(timeout)
@@ -840,12 +849,17 @@ mod tests {
         assert_eq!(
             presence_tail(DEFAULT_LEASE, DEFAULT_WAIT_BEFORE_CLOSE, s(1)),
             s(11),
-            "zenoh's defaults: the 10 s lease, then the timeout"
+            "zenoh 1.10.1's defaults: the 10 s lease, then the timeout"
         );
         assert_eq!(
             presence_tail(s(1), DEFAULT_WAIT_BEFORE_CLOSE, s(1)),
             s(6),
             "wait_before_close above the lease is the longer one: budget.md §1's 1 s lease"
+        );
+        assert_eq!(
+            presence_tail(s(1), s(10), s(1)),
+            s(11),
+            "zm-1.10.2-r1's 10 s wait_before_close beside a 1 s lease (#1011)"
         );
         assert_eq!(presence_tail(s(5), s(5), s(2)), s(7), "equal: either");
         assert_eq!(
@@ -861,7 +875,12 @@ mod tests {
         assert_eq!(
             stall_bound(DEFAULT_WAIT_BEFORE_CLOSE, DEFAULT_LEASE, DEFAULT_KEEP_ALIVE),
             s(5),
-            "zenoh's defaults: 5 s, against 7.5 s for the lease"
+            "zenoh 1.10.1's defaults: 5 s, against 7.5 s for the lease"
+        );
+        assert_eq!(
+            stall_bound(s(10), DEFAULT_LEASE, DEFAULT_KEEP_ALIVE),
+            Duration::from_millis(7500),
+            "zm-1.10.2-r1's defaults: the lease's 7.5 s, against 10 s for the queue (#1011)"
         );
         assert_eq!(
             stall_bound(DEFAULT_WAIT_BEFORE_CLOSE, s(1), DEFAULT_KEEP_ALIVE),

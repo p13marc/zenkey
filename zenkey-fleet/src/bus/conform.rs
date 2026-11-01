@@ -116,7 +116,7 @@ pub struct ConformSpec {
     /// owner's token only when it runs out, so a window's owner is watched
     /// for it, or `wait_before_close` when that is longer, and `timeout`
     /// more, after the window ([`ConformSpec::presence_tail`], observer
-    /// §5.2). zenoh's default, `zenkey_model::budget::DEFAULT_LEASE`,
+    /// §5.2). zenoh 1.10.1's default, `zenkey_model::budget::DEFAULT_LEASE`,
     /// unless the deployment lengthens it.
     pub lease: Duration,
     /// The routers' `wait_before_close`: how long a router waits on this
@@ -124,9 +124,11 @@ pub struct ConformSpec {
     /// the longest this run may stall and still read a window lossless
     /// (core §2.7, 0.27). A router that waits it before closing a transport
     /// tells a withdrawal that late, so a window's owner is watched for it
-    /// where it is longer than the lease (observer §5.2). zenoh's default,
-    /// `zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE`, unless the
-    /// deployment changes it.
+    /// where it is longer than the lease (observer §5.2). zenoh 1.10.1's
+    /// default, `zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE`, unless
+    /// the deployment states its own, as one on another binding does
+    /// (zm-1.10.2-r1's is 10 s, #1011). The deployment's word, never this
+    /// run's session configuration, which states only its own pushes'.
     pub wait_before_close: Duration,
     /// The cases `--skip` names. A skipped case sends nothing: an
     /// operation is called only when `operation` is asked, its fan-out
@@ -169,7 +171,8 @@ impl Skipped {
 impl ConformSpec {
     /// The longest this run's reader may stall over a window and the lease
     /// after it (core §2.7, 0.27): `wait_before_close`, or the lease less
-    /// one keep-alive interval (zenoh's default keep-alive) when shorter.
+    /// one keep-alive interval (zenoh 1.10.1's default keep-alive) when
+    /// shorter.
     pub fn stall_bound(&self) -> Duration {
         zenkey_model::budget::stall_bound(
             self.wait_before_close,
@@ -1565,12 +1568,17 @@ mod tail_tests {
         assert_eq!(
             spec(10, 5).presence_tail(),
             s(11),
-            "zenoh's defaults: the lease"
+            "zenoh 1.10.1's defaults: the lease"
         );
         assert_eq!(
             spec(1, 5).presence_tail(),
             s(6),
-            "a 1 s lease beside the default 5 s wait_before_close"
+            "a 1 s lease beside zenoh 1.10.1's default 5 s wait_before_close"
+        );
+        assert_eq!(
+            spec(1, 10).presence_tail(),
+            s(11),
+            "a 1 s lease beside zm-1.10.2-r1's default 10 s wait_before_close (#1011)"
         );
         assert!(spec(1, 5).presence_tail() > spec(1, 0).presence_tail());
     }

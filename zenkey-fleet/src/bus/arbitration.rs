@@ -111,7 +111,7 @@ pub struct ArbitrationSpec {
 }
 
 impl ArbitrationSpec {
-    /// Every role, [`DEFAULT_LISTEN`], zenoh's lease and
+    /// Every role, [`DEFAULT_LISTEN`], zenoh 1.10.1's lease and
     /// `wait_before_close`.
     pub fn new(timeout: Duration) -> ArbitrationSpec {
         ArbitrationSpec {

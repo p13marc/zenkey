@@ -363,5 +363,8 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   its tokens, `raw on` putting `standby <n>` round its writer, scenarios
   §11's `X`, F-276).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
-  clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
+  clients, one test per section, named after it. `tests/budget.rs`'s §1
+  routers state `wait_before_close` 5 s (`ROUTER_WAIT_BEFORE_CLOSE`),
+  never zenoh's default, which zenoh-modem's fork `zm-1.10.2-r1` makes
+  10 s (#1011). v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.

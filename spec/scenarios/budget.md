@@ -44,6 +44,9 @@ holds an instance token. A consumer, a client of R1, subscribes to the
 owner's key and takes 2 ms over each sample in its callback. Beside it, it
 holds a liveliness subscriber on the owner's instance tokens, watches its
 own session's transport events, and runs a ticker on a thread of its own.
+Both routers state `wait_before_close`: 5 s, zenoh 1.10.1's default. On
+zm-1.10.2-r1 the default is 10 s, its lease. Steps 3 and 4 stall past
+the stated 5 s and inside the 10 s lease.
 
 **Steps.** The owner puts 1,000 numbered samples of 16 KiB as fast as its
 publisher lets it:
@@ -58,11 +61,11 @@ publisher lets it:
 1. All 1,000 arrive, in order, and the owner's token is never withdrawn.
    The owner's put waits for the path.
 2. Some never arrive, and nothing the consumer receives says so.
-3. The consumer's router gives up on it after `wait_before_close` (5 s) and
-   closes its transport. Samples are lost. The consumer's session sees its
-   own transport close. It sees the owner's token withdrawn only if the
-   token had reached it before it stalled. Its ticker sees no gap: only
-   zenoh's receive thread was held.
+3. The consumer's router gives up on it after its stated
+   `wait_before_close` and closes its transport. Samples are lost. The
+   consumer's session sees its own transport close. It sees the owner's
+   token withdrawn only if the token had reached it before it stalled.
+   Its ticker sees no gap: only zenoh's receive thread was held.
 4. Samples are lost. The consumer's ticker sees a gap of at least 7 s on
    its first tick after the stop. Its session sees its transport close,
    and it sees the owner's token withdrawn.
@@ -79,18 +82,25 @@ Measured 2026-10-11:*
 
 *Six earlier runs of step 3 saw no withdrawal in 2.*
 
+*Each run above was on zenoh 1.10.1, its routers at its default. Measured
+2026-11-01 on zm-1.10.2-r1:*
+- *its default: step 3 lost none of 1,000 in 3 of 3 runs. No transport
+  closed;*
+- *the routers stating 5 s: step 3 lost 653, and step 4 lost 876. Each
+  saw the consumer's transport close.*
+
 The reference (`zenkey/tests/budget.rs`) asserts only the loss in step 3,
 and the loss and the ticker's gap in step 4, and reports the rest for the
 record.
 
 **Why each router has a process.** The sessions of one process share
-zenoh's receive threads, two by default. With both routers and the slow
-consumer in one process, a router's push waiting on a full `block` queue
-holds one of them, and the consumer's own receive task starves. 3 of 6 such
-runs lost 674–970 of 1,000 reliable, `block` samples, the routers' transport
-closes stalled, and no token was withdrawn while the run lasted. That is a
-measurement of the process, not of the path, and §2.7 names it as a
-premise a deployment provides.
+zenoh's receive threads, two by zenoh 1.10.1's default. With both routers
+and the slow consumer in one process, a router's push waiting on a full
+`block` queue holds one of them, and the consumer's own receive task
+starves. 3 of 6 such runs lost 674–970 of 1,000 reliable, `block`
+samples, the routers' transport closes stalled, and no token was
+withdrawn while the run lasted. That is a measurement of the process, not
+of the path, and §2.7 names it as a premise a deployment provides.
 
 **A tool's window over a stalled reader** (core §2.7). The case
 §2.7's "its reader lost none" (observer §5.2) exists for, read by a tool.
@@ -127,7 +137,8 @@ heal it.
 - The same between the routers and on the consumer's own link.
 
 *Measured 2026-10-10: closed, 0.8–2.0 ms; stalled, 986–1,037 ms, with 88–93
-samples lost each time. The spike measured the default 10 s lease: a frozen
+samples lost each time. The spike measured zenoh 1.10.1's default 10 s
+lease: a frozen
 peer was dropped after 9,961–10,047 ms (S10).*
 
 ## §3 Miss detection cannot see a publisher it never heard

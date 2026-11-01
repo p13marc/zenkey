@@ -466,11 +466,18 @@
   ],
   "stall_bounds": [
     {
-      "note": "zenoh's defaults: wait_before_close 5 s, against 7.5 s for a 10 s lease",
+      "note": "zenoh 1.10.1's defaults: wait_before_close 5 s, against 7.5 s for a 10 s lease",
       "wait_before_close_ms": 5000,
       "lease_ms": 10000,
       "keep_alive": 4,
       "expect_ms": 5000
+    },
+    {
+      "note": "zm-1.10.2-r1's defaults: wait_before_close 10 s, the lease, so the lease less one keep-alive decides",
+      "wait_before_close_ms": 10000,
+      "lease_ms": 10000,
+      "keep_alive": 4,
+      "expect_ms": 7500
     },
     {
       "note": "a 1 s lease: its last keep-alive may be 250 ms old, so 750 ms",

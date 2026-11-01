@@ -136,6 +136,14 @@ fn spawn_router(connect: Option<&str>) -> RouterProcess {
     RouterProcess { child, endpoint }
 }
 
+/// The `wait_before_close` §1's routers state
+/// (`transport/link/tx/queue/congestion_control/block/wait_before_close`):
+/// 5 s, zenoh 1.10.1's default. Stated rather than defaulted, since a
+/// binding may default to another (zm-1.10.2-r1's is 10 s, its lease), and
+/// §1's stuck and stopped readers must outlast it while staying inside the
+/// lease, so that what gives up on them is the router's push.
+const ROUTER_WAIT_BEFORE_CLOSE: Duration = Duration::from_secs(5);
+
 /// The router of [`spawn_router`]: not a test, so it runs only when spawned.
 #[test]
 #[ignore = "a router process, spawned by the tests of this file"]
@@ -149,7 +157,15 @@ fn router_process() {
         .unwrap();
     rt.block_on(async {
         let connect = std::env::var("ZK2_ROUTER_CONNECT").ok();
-        let (_r, ep) = router(connect.as_deref()).await;
+        let wait = ROUTER_WAIT_BEFORE_CLOSE.as_micros().to_string();
+        let (_r, ep) = router_with(
+            connect.as_deref(),
+            &[(
+                "transport/link/tx/queue/congestion_control/block/wait_before_close",
+                &wait,
+            )],
+        )
+        .await;
         println!("\nZK2-LISTENING {ep}");
         // Until the parent closes its end, or kills it.
         let _ = tokio::task::spawn_blocking(|| {
@@ -529,19 +545,25 @@ fn report(what: &str, run: &SlowRun, sent: u32) -> (u32, bool) {
 /// sample arrives in order. The same path at best effort and `drop` loses
 /// samples, and nothing the consumer receives says so.
 ///
-/// A reader stalled longer than the queue's `wait_before_close` (5 s) is
-/// the one way the reliable path loses one: its router closes the
-/// transport. What the reader then sees is reported, and only the loss is
-/// asserted (0.27, #753). It saw the owner's token withdrawn only when the
-/// token had reached it before it stalled, which it had not in 4 of 27
-/// recorded runs. What core §2.7's "its reader lost none" reads instead is
-/// the reader's own: its session's transport closing, and, when its whole
-/// process stopped, its ticker's gap, which step 4 asserts (Appendix B).
+/// A reader stalled longer than the queue's `wait_before_close` (5 s, which
+/// the routers state: [`ROUTER_WAIT_BEFORE_CLOSE`]) is the one way the
+/// reliable path loses one: its router closes the transport. Both stalls
+/// last 7 s, past it and inside zenoh's 10 s lease, on zenoh 1.10.1 and on
+/// a binding whose default is longer alike (#1011). What the reader then
+/// sees is reported, and only the loss is asserted (0.27, #753). It saw
+/// the owner's token withdrawn only when the token had reached it before
+/// it stalled, which it had not in 4 of 27 recorded runs. What core §2.7's
+/// "its reader lost none" reads instead is the reader's own: its session's
+/// transport closing, and, when its whole process stopped, its ticker's
+/// gap, which step 4 asserts (Appendix B).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_a_reliable_blocking_path_loses_nothing_to_a_slow_reader() {
     let _serial = SERIAL.lock().await;
     const SENT: u32 = 1000;
     let slow = Duration::from_millis(2);
+    // Steps 3 and 4: past the routers' wait_before_close, inside the lease.
+    let stall = Duration::from_secs(7);
+    assert!(stall > ROUTER_WAIT_BEFORE_CLOSE);
     for (what, rel, cc, stuck) in [
         (
             "reliable+block",
@@ -559,7 +581,7 @@ async fn s1_a_reliable_blocking_path_loses_nothing_to_a_slow_reader() {
             "reliable+block, the reader stuck 7 s",
             Reliability::Reliable,
             CongestionControl::Block,
-            Duration::from_secs(7),
+            stall,
         ),
     ] {
         let run = slow_reader(rel, cc, SENT, stuck).await;
@@ -584,7 +606,7 @@ async fn s1_a_reliable_blocking_path_loses_nothing_to_a_slow_reader() {
     // the stop on its first tick after it.
     #[cfg(unix)]
     {
-        let stopped = Duration::from_secs(7);
+        let stopped = stall;
         let what = "reliable+block, the reader's process stopped 7 s";
         let run = stopped_reader(SENT, stopped).await;
         let (lost, ordered) = report(what, &run, SENT);
