@@ -45,6 +45,9 @@ GET, so that runner did not test the moment the token appears.*
    lists `unavailable`, its gate's capability held (core §8.2 step 2).
 6. An owner that does not implement `archive.v1` is started with
    `archive.v1` in its tokenless set (core §4.4, §8.2 step 2).
+7. An owner is started given the deployment catalog
+   `examples/zk2/zenoh-modem/catalog.json` (core §8.6). GET its instance
+   key, as in step 1.
 
 **Watching a refusal (steps 3 to 6).** A refusal shows only as a token
 that never appears, and silence is not a verdict (core O5), so the watch
@@ -77,6 +80,8 @@ needs a router that outlives the owner and a control:
    compact (core §3.3).
 6. As 3: the tokenless set is the deployment's configuration, and naming
    the archive in it is an error whatever the owner implements.
+7. Its descriptor states `catalog`, the catalog's id as 8 lowercase hex
+   digits (core §3.3). Step 1's owner, given none, states no `catalog`.
 
 *Measured on the reference owner, from zenoh-python 1.10.1: one
 reply, `application/json`, no timestamp and no attachment; the

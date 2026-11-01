@@ -117,7 +117,7 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [§3.3](core.md#33-the-descriptor-record) | The owner's descriptor MUST NOT raise it [a template's bound]. | `[F: descriptors/d007-*]` |
 | [§3.3](core.md#33-the-descriptor-record) | An owner MUST state its run there, and MUST put its descriptor again when the run changes, before it writes under the new run. | `[F: descriptors/ok-run, d002-run-*]` `[Sc: state.md §1, §7]` |
-| [§3.3](core.md#33-the-descriptor-record) | An owner given a catalog MUST state its id there. | `[F: descriptors/ok-catalog, d002-catalog-*]` |
+| [§3.3](core.md#33-the-descriptor-record) | An owner given a catalog MUST state its id there. | `[F: descriptors/ok-catalog, d002-catalog-*]` `[Sc: presence.md §2]` |
 | [§3.3](core.md#33-the-descriptor-record) | One member is used: an owner SHOULD state its session's zid as `meta.zid`, as the reference does. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner SHOULD write `meta.zid` as zenoh writes it. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. | `[Sc: constrained.md §5]` |

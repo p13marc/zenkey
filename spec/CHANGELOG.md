@@ -3,6 +3,20 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.84 — 2026-11-01: the owner's catalog, in a scenario (#980)
+
+#980's C1c brings the catalog to the runtime and the tools. No rule
+changed.
+
+**Changed: §3.3's evidence.** An owner given a catalog MUST state its id
+in its descriptor. Its fixtures judge a checker's reading of the member
+alone, so the owner's half gains its scenario, `[Sc: presence.md §2]`.
+
+**Changed: `scenarios/presence.md` §2, step 7.** An owner is started
+given `examples/zk2/zenoh-modem/catalog.json`, and its descriptor states
+the catalog's id. Step 1's owner, given none, states no `catalog`. The
+reference runs it in `zenkey/tests/presence.rs`' `s2_the_descriptor`.
+
 ## 0.83 — 2026-11-01: frames defined (#981)
 
 Epic #975, zk2c, makes the wire bandwidth-first. Today each reading is a
