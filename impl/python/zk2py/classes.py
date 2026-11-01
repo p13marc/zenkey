@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.73), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 93, and the mend after #926 part 5).
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.75), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 94, and the mend after #926 part 5).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
 verdict, with what shows it, and on standard error the counts and every
@@ -496,13 +496,32 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "descriptors family"),
     ("static", "core §5.1", "A request type SHOULD NOT repeat a template", MET,
      "contracts family (W102)"),
-    ("static", "core §7.1", "The name MUST be unique across the listed", MET,
+    # core 0.75 (#979 B1): §7.1's uniqueness split by kind, and a packed
+    # type's place.
+    ("static", "core §7.1", "The name MUST be unique across the listed JSON Schema files", MET,
      "contracts family (E024)"),
+    ("static", "core §7.1", "The name MUST be unique across the listed packed files", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py reads no packed file"),
+    ("static", "core §7.1", "A packed type MUST be the `type` of a stream, a state or an event", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py reads no packed type"),
     # core 0.72 (#976): §7.5's two static rules.
     ("static", "core §7.5", "An implementation MUST refuse an envelope for the first of these", MET,
      "zk2c.parse, in §7.5's order, each token (envelope family, vectors.json) (round 93, core 0.72)"),
     ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
      "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
+    # core 0.75 (#979 B1): §7.6's six static rules.
+    ("static", "core §7.6", "An implementation MUST compute a fixed-point code, and the value it reads back", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py has no packed codec"),
+    ("static", "core §7.6", "An implementation that writes a record MUST write the type's tag", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py has no packed codec"),
+    ("static", "core §7.6", "An implementation that writes a record MUST write the bits above", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py has no packed codec"),
+    ("static", "core §7.6", "An implementation MUST NOT write a record for a value that has no code", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py has no packed codec"),
+    ("static", "core §7.6", "An implementation that reads a record of a packed type MUST refuse it", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py has no packed codec"),
+    ("static", "core §7.6", "That rest MUST hold at least one bit", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py has no packed codec"),
     ("static", "core §9.1", "A contract MUST NOT need later TOML", MET,
      "contracts family (the five e000-toml11 cases)"),
     ("static", "core §9.2", "An implementation MUST report, for each fixture, exactly", MET,
@@ -513,6 +532,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "contracts family (E024)"),
     ("static", "core §9.4", "The id MUST be unique among the listed", MET,
      "contracts family (e024-identical)"),
+    # core 0.75 (#979 B1): a packed file's stem and id.
+    ("static", "core §9.4", "A stem MUST be unique among the listed packed files", NOT_MET,
+     "not yet (round 94, core 0.75): zk2py reads no packed file"),
     ("static", "core §9.4", "Otherwise it resolves as a path relative to", MET,
      "contracts family (E032: e032-ref-outside)"),
     ("static", "core §9.4", "The pointer MUST resolve", MET,

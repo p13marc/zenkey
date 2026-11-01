@@ -4259,8 +4259,9 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
          "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
          # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5 joins the
-         # static sections, and §4.2's merge is by the in-band stamp.
-         missing(core, "They are the rules of §1, §7.5 and §9 that name no role",
+         # static sections, and §4.2's merge is by the in-band stamp. Under
+         # core 0.75 (round 94, #979 B1): §7.6 joins them too.
+         missing(core, "They are the rules of §1, §7.5, §7.6 and §9 that name no role",
                  "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
                  "so that a caller or tool following the steps would report the contract unavailable",
                  "or at the timeout the caller or tool gave it (§8.1).",
@@ -4295,8 +4296,11 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "A verb the sentence leaves out is shown in brackets. They sit where it is left out.",
                  # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5
                  # among the static sections, and the glossary's Epoch over
-                 # runs, 0.73 having removed the new epoch's MUST.
-                 "A rule of those sections, §1, §7.5 and §9 included, that names a role is listed under that role.")
+                 # runs, 0.73 having removed the new epoch's MUST. Under core
+                 # 0.75 (round 94, #979 B1) the index lists §7.6's too and
+                 # names no section in the sentence.
+                 "§1's, §7.5's, §7.6's and §9's.",
+                 "A rule of those sections that names a role is listed under that role.")
          + missing(readme, "Each new instance writes under a new run",
                    "A rule of any of those sections, §1, §7.5 and §9 included, that names a role is that role's")
          + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
@@ -4847,7 +4851,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("A request type SHOULD NOT repeat a template parameter (W102).", "repeat a template parameter. `"),
         ("**The `Encoding` of the owner's reply** MUST say which:", "**The reply's `Encoding`**"),
         ("or a value in a protobuf one, MUST NOT be sent by an owner.", "protobuf one, MUST NOT be sent. "),
-        ("The name MUST be unique across the listed files (E024).", "unique across the listed files. |"),
+        # core 0.75 (round 94, #979 B1): the uniqueness split by kind
+        ("The name MUST be unique across the listed JSON Schema files (E024).", "unique across the listed files. |"),
         ("**A deployment's batch SHOULD take at most a third of the lease to cross the face.**",
          "**A batch SHOULD take"),
         ("**A deployment SHOULD deny `@stream` keys across the face**", "**`@stream` keys SHOULD be denied"),
