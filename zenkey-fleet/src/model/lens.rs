@@ -1153,7 +1153,7 @@ mod tests {
             "{:?}",
             sniffed.rendering.rendered
         );
-        // Its predefined Encoding: today's wire.
+        // Its predefined Encoding: a sample with no envelope.
         let today = lens.check(
             wire,
             Member::Type,

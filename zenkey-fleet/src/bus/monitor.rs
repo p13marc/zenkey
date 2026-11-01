@@ -205,8 +205,8 @@ impl SampleView {
         self.envelope()?.ok()
     }
 
-    /// Why its envelope was refused: undecodable, never read as today's
-    /// payload, nor ordered.
+    /// Why its envelope was refused: undecodable, never decoded or sniffed
+    /// as a payload with no envelope (observer §7.3), nor ordered.
     pub fn refusal(&self) -> Option<zenkey_model::wire::Refusal> {
         self.envelope()?.err()
     }
@@ -1006,12 +1006,14 @@ impl Monitor {
     ///   `Latest`: each key's owner answers, and whatever holds a foreign
     ///   key), and the `@adv` caches of the advanced publishers present
     ///   (spec §2.5);
-    /// - one per-key merge by the owner's stamp spans seed *and* live
-    ///   samples for the watch's whole life (observer §4.1: a tool keeps
-    ///   core §4.2's merge for as long as it follows), so a mutation in the
-    ///   seed window lands exactly once, a stale reply cannot regress a
-    ///   key, and neither can a live sample older than what its key holds,
-    ///   a new epoch's on a clock behind among them. Suppressions are
+    /// - one per-key merge by the owner's in-band stamp spans seed *and*
+    ///   live samples for the watch's whole life (observer §4.1: a tool
+    ///   keeps core §4.2's merge for as long as it follows; by seq within a
+    ///   run, the later arrival across two, a sample with no envelope by
+    ///   its Zenoh timestamp), so a mutation in the seed window lands
+    ///   exactly once, a stale reply cannot regress a key within a run, and
+    ///   neither can a live sample older than what its key holds; a value
+    ///   under another run is kept as the later arrival. Suppressions are
     ///   counted, in the coverage up to the boundary and in
     ///   [`Monitor::merge_superseded`] for the watch's life, never silently
     ///   absorbed (O6) — and they are *not* part of `Dropped(n)`, which
@@ -1199,8 +1201,9 @@ impl Monitor {
     }
 
     /// Samples the merges of this monitor's seeded watches did not keep,
-    /// over each watch's life: not newer, by the owner's stamp, than what
-    /// their key held ([`Monitor::watch_seeded`]). Each boundary's
+    /// over each watch's life: not newer, by the owner's in-band stamp (a
+    /// Zenoh timestamp for a sample with no envelope), than what their key
+    /// held ([`Monitor::watch_seeded`]). Each boundary's
     /// [`crate::SeedCoverage::superseded`] counts its watch's up to the
     /// boundary; this counts those and every live one after.
     pub fn merge_superseded(&self) -> u64 {

@@ -40,7 +40,8 @@
 //!    F-159). With no state metric resource in scope, nothing can answer:
 //!    the window opens after `spec.settle`, a margin, never proof;
 //! 5. S4's GET of each state metric resource (core §4.2), its replies merged
-//!    with the live puts by the owner's stamp in the book (§2.10, 0.2);
+//!    with the live puts by the owner's in-band stamp in the book (§2.10;
+//!    core §4.3: by seq within a run, the later arrival across two);
 //! 6. the window, every delivery folded as it comes.
 //!
 //! Nothing is judged here: every sample is read and paired by

@@ -13,8 +13,10 @@
 //! What it builds is what `zenkey_model::alarms` judges, and the verdicts
 //! are that module's, never re-derived here:
 //!
-//! - **one key's samples** merged by the owner's stamp (core §4.2,
-//!   `zenkey_model::seed::admits`), read through
+//! - **one key's samples** merged by the owner's in-band stamp (core §4.2,
+//!   §4.3: by seq within a run, the later arrival across two runs;
+//!   `zenkey_model::seed::admits_mark`), a sample with no envelope by its
+//!   Zenoh timestamp, read through
 //!   `zenkey_model::alarms::Track` into §2.6's transitions, each payload
 //!   read by `decode`, strictly (§2.4, 0.2);
 //! - **one key's reading** ([`KeyReading`]): its owner's presence and
@@ -268,7 +270,11 @@ pub struct AlarmSample {
     /// A delete, or a `reply_del`.
     pub delete: bool,
     pub payload: Vec<u8>,
-    /// The owner's stamp (core S1), when it carried one.
+    /// Its Zenoh timestamp, when it carried one: an alarm's state is on
+    /// core §4.3's table by its ttl, so the owner's (S1), which ages it and
+    /// measures its clock (§2.14 step 5's foreign stamp). Its order is its
+    /// in-band stamp ([`AlarmBook::sample_enveloped`]); this orders only a
+    /// sample with no envelope.
     pub stamp: Option<Timestamp>,
     /// Its arrival, on this host's monotonic clock.
     pub at: Instant,
@@ -382,7 +388,8 @@ impl Break {
     }
 }
 
-/// The latest sample of one key by the owner's stamp.
+/// The latest sample of one key, by the owner's in-band stamp (core
+/// §4.3), or a Zenoh timestamp for a sample with no envelope.
 #[derive(Debug, Clone)]
 struct LatestSample {
     doc: Option<std::result::Result<Alarm, Invalid>>,
@@ -696,9 +703,11 @@ impl AlarmBook {
         entry.withdrawn = entry.instances.is_empty() && (entry.withdrawn || (!held && changed));
     }
 
-    /// One sample of an alarm key, the next to arrive: merged by the
-    /// owner's stamp (core §4.2), and, when it is the key's latest, read as
-    /// §2.6 says. Returns the key's transition, when it made one.
+    /// One sample of an alarm key with no envelope, the next to arrive:
+    /// merged by its Zenoh timestamp (core §4.2), and, when it is the key's
+    /// latest, read as §2.6 says. Returns the key's transition, when it
+    /// made one. An enveloped sample goes through
+    /// [`AlarmBook::sample_enveloped`], which orders it in band.
     pub fn sample(&mut self, s: AlarmSample) -> Option<AlarmTransition> {
         self.sample_enveloped(s, None)
     }

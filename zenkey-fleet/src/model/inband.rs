@@ -1,5 +1,5 @@
-//! A payload read beside today's wire (core §7.5, observer §7.3's "the
-//! envelope first"; #976's A2): the fleet's one place that tells a sample
+//! A payload read as core §4.3 writes it (core §7.5, observer §7.3's "the
+//! envelope first"; #976): the fleet's one place that tells a sample
 //! carrying a zk2c envelope, strips it, says what orders it, and says what
 //! a refused one renders as.
 //!
@@ -10,8 +10,14 @@
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (delete_stamp)
 //! every other sample
-//!     → read as today (Payload::Plain)
+//!     → read with no envelope (Payload::Plain)
 //! ```
+//!
+//! A sample with no envelope is one core §4.3 writes so (an `@stream`
+//! sample, an operation's, a descriptor's, a bundle's), a foreign key's
+//! (§1.7), or one whose owner broke §4.3; core §4.2 orders it by its Zenoh
+//! timestamp among samples with no envelope, and beside an in-band stamp it
+//! is unordered.
 //!
 //! The decision is `zenkey_model::wire`'s, by the key and the Encoding
 //! alone (a namespace in front or none), and the order of two marks
@@ -22,10 +28,11 @@
 //! read, here. A raw zenoh sample in a bus reader is read by [`read`], the
 //! runtime's `zenkey::inband::read`, which makes the same decisions.
 //!
-//! A sample's Zenoh timestamp stays its time where a profile reads one
-//! (freshness's age, timing's lifespan, desired's author order), and its
-//! wire size what the traffic statistics count. Its *order* is its in-band
-//! stamp ([`mark`]).
+//! A sample's Zenoh timestamp stays its time on a resource core §4.3's
+//! table lists, where a profile reads one (freshness's age, timing's
+//! lifespan, desired's author order; [`on_the_table`]), and its wire size
+//! what the traffic statistics count. Its *order* is its in-band stamp
+//! ([`mark`]).
 
 use std::borrow::Cow;
 
@@ -564,7 +571,7 @@ mod tests {
             structural_value(key, Some("zenoh/bytes"), br#"{"a":1}"#),
             None
         );
-        // Its predefined Encoding reads as today.
+        // Its predefined Encoding reads as a sample with no envelope.
         assert_eq!(
             structural_text(key, Some("application/json"), br#"{"a":1}"#),
             r#"{"a":1}"#
@@ -647,7 +654,7 @@ mod tests {
         let att = wire::DeleteStamp { stamp: stamp(2, 9) }.write();
         assert_eq!(delete_stamp(key, Some(&att)), Some(stamp(2, 9)));
         assert_eq!(stamp_any(key, &att), Some(stamp(2, 9)));
-        // An archive's own attachment is read as today.
+        // An archive's own attachment is no envelope (core §4.4).
         assert_eq!(delete_stamp(key, Some(b"archive")), None);
         assert_eq!(delete_stamp(key, None), None);
     }

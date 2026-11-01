@@ -151,8 +151,11 @@ impl SnapshotRow {
     }
 }
 
-/// Whose clock stamped a value (the tooling guide's O7; spec §3.3 0.10), on
-/// the wire, tagged `kind`. The stamp's id rides in every variant.
+/// Whose clock set a value's Zenoh timestamp (observer §4.4, §8.3; the
+/// tooling guide's O7), on the wire, tagged `kind`. The stamp's id rides in
+/// every variant. Off core §4.3's table, another clock is expected, never a
+/// finding; the row's in-band stamp is the owner's by construction
+/// ([`SnapshotRow::inband`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StamperWire {

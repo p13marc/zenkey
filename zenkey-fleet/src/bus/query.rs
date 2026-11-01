@@ -108,8 +108,8 @@ impl FleetAnswer {
         self.envelope()?.ok()
     }
 
-    /// Why its envelope was refused: undecodable, never read as today's
-    /// payload, nor ordered.
+    /// Why its envelope was refused: undecodable, never decoded or sniffed
+    /// as a payload with no envelope (observer §7.3), nor ordered.
     pub fn refusal(&self) -> Option<zenkey_model::wire::Refusal> {
         self.envelope()?.err()
     }

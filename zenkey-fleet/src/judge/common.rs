@@ -2,8 +2,10 @@
 //!
 //! What belongs here: the things **more than one judge must agree about** —
 //! today, the ceilings on how many offenders a report names, and when an
-//! owner's own stamp proves S1 (the doctor's `state-stamp-foreign` and
-//! `check conform`'s `state-stamp`). What does not:
+//! owner's own Zenoh timestamp proves S1 on core §4.3's table (observer
+//! §4.4: the doctor's `state-stamp-foreign` and `check conform`'s
+//! `state-stamp`; an in-band stamp is the owner's by construction). What
+//! does not:
 //! the id vocabularies, which went to [`crate::report`] with #347 because
 //! they are serde-pinned wire shapes and that is where those live; any
 //! check's own logic; and any sentence written in one judge's voice.

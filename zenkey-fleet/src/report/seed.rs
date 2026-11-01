@@ -39,10 +39,12 @@ pub struct SeedCoverage {
     /// off.
     #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
     pub state: Asked<SeedLeg>,
-    /// Samples suppressed by the merge — not newer, by the owner's stamp,
-    /// than what was already held for their key (0.26's merge): a reply
-    /// older than a live sample, a live sample older than a reply, or one
-    /// mutation that both paths carried. Counted, never silently absorbed.
+    /// Samples suppressed by the merge — not newer, by the owner's in-band
+    /// stamp (a Zenoh timestamp for a sample with no envelope), than what
+    /// was already held for their key (core §4.2, §4.3): a reply older than
+    /// a live sample within its run, a live sample older than a reply, or
+    /// one mutation that both paths carried. Counted, never silently
+    /// absorbed.
     pub superseded: u64,
 }
 

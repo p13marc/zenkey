@@ -35,10 +35,13 @@
 //!   none. An in-band epoch needs none.
 //!
 //! **Time bases** (§2.11): a Point's `timestamp`, then, for state, the
-//! owner's stamp in nanoseconds — `zenkey_model::telemetry::stamp_ns` of
-//! each stamp, converted alone (0.2) — then the arrival on this host's
+//! owner's Zenoh timestamp in nanoseconds — a state metric resource is on
+//! core §4.3's table, so it carries one — `zenkey_model::telemetry::stamp_ns`
+//! of each stamp, converted alone (0.2) — then the arrival on this host's
 //! monotonic clock, in nanoseconds since the book opened. No time base
-//! compares the owner's clock with this host's, so no clock is trusted.
+//! compares the owner's clock with this host's, so no clock is trusted. A
+//! state member's samples are *merged* by the in-band stamp (core §4.2,
+//! §4.3); the Zenoh timestamp only times them.
 //!
 //! **Bounded.** At most [`MAX_MEMBERS`] members are held (a member past it
 //! is refused and counted), and each keeps its last [`PAIRS_KEPT`] pairs
@@ -442,7 +445,10 @@ pub struct MetricSample {
     pub delete: bool,
     pub payload: Vec<u8>,
     pub attachment: Option<Vec<u8>>,
-    /// The owner's stamp (core S1), when it carried one.
+    /// Its Zenoh timestamp, when it carried one: on a state metric
+    /// resource, core §4.3's table, the owner's (S1), §2.11's time base. Its
+    /// order is its in-band stamp ([`TelemetryBook::sample_enveloped`]);
+    /// this orders only a sample with no envelope.
     pub stamp: Option<Timestamp>,
     /// Its arrival, on this host's monotonic clock.
     pub at: Instant,
@@ -841,10 +847,12 @@ impl TelemetryBook {
         i128::try_from(at.saturating_duration_since(self.t0).as_nanos()).unwrap_or(i128::MAX)
     }
 
-    /// One sample of a member of `metric`, the next received: read (§2.6),
-    /// merged by the owner's stamp for state (§2.10, 0.2), and paired with
-    /// the member's last conforming sample. Returns the pair it made, when it
-    /// made one.
+    /// One sample with no envelope of a member of `metric`, the next
+    /// received: read (§2.6), merged by its Zenoh timestamp for state
+    /// (§2.10; core §4.2), and paired with the member's last conforming
+    /// sample. Returns the pair it made, when it made one. An enveloped
+    /// sample goes through [`TelemetryBook::sample_enveloped`], which merges
+    /// it in band.
     pub fn sample(&mut self, metric: &Arc<MetricResource>, s: MetricSample) -> Option<PairSeen> {
         self.sample_enveloped(metric, s, None)
     }
@@ -986,7 +994,8 @@ fn sampled(l: &Last) -> tm::Sampled<'_> {
 }
 
 /// The elapsed time §2.11 times a pair over, and its base, as the model
-/// takes it: the Points' timestamps, then the owner's stamps, then the
+/// takes it: the Points' timestamps, then the owner's Zenoh timestamps (core
+/// §4.3's table: a time, where the in-band stamp is none), then the
 /// arrivals.
 fn elapsed(a: &Last, b: &Last) -> (i128, &'static str) {
     if let (Some(x), Some(y)) = (a.reading.timestamp_ms, b.reading.timestamp_ms) {

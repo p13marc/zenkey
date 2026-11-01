@@ -113,7 +113,10 @@ pub enum StateValue {
     Deleted,
 }
 
-/// A timestamp, and whose clock issued it (§4.1, §4.3).
+/// A Zenoh timestamp, and whose clock issued it (core §4.1, §4.3). It is a
+/// time: on a resource §4.3's table lists, the owner's (S1); elsewhere a
+/// router's, a reader's own, or none, expected and never a finding
+/// (observer §4.4). What orders a value is its [`InbandStamp`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Stamp {
     /// The stamp's time, RFC 3339 with nanoseconds, UTC.
