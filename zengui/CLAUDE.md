@@ -101,6 +101,12 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   unobservable. `World::timed` (`robot1/teleop` on the walkthrough's
   `twist_cmd.v1`) feeds `inspector-timing-missed`, and `robot1/nav`'s
   position `inspector-timing-period`.
+  **Packed records (#979 B2)**: the lens decodes a packed record by its
+  envelope's CH tag (the fleet's), so the Inspector shows it as its fields;
+  `World::packed` (`lab/packed` on `zenkey/tests/contracts/packed/`, its
+  sensor stream sealed in envelopes) feeds `inspector-packed`, S4's answer
+  for `reading/u1` read on `zenoh/bytes` (`World::state_read_on`). History
+  rows stay structural, as for every type.
   **The Workbench**: nodes per address from presence (health read once per
   selection, a "clocks synced" toggle), and `redundancy.v1` read beside
   health once per selection (#841, RC: `nodes::RedundancyState`,

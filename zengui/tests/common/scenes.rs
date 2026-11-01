@@ -16,8 +16,8 @@ use zengui::prefs::{Density, LayoutPreset, Prefs, ThemeChoice};
 use zengui::view::palette::{Overlay, PaletteMsg};
 
 use super::{
-    BYTES, DROPS, ETH0, FRAMES, HEALTH, LATENCY, POSITION, TWIST_CMD, TX_BYTES, USED, World, send,
-    window,
+    BYTES, DROPS, ETH0, FRAMES, HEALTH, LATENCY, PACKED_READING, PACKED_SENSOR, POSITION,
+    TWIST_CMD, TX_BYTES, USED, World, send, window,
 };
 
 pub struct Scene {
@@ -269,6 +269,15 @@ pub const ALL: &[Scene] = &[
         size: DESKTOP,
         build: timing_missed,
         landmark: "deadline: no (missed)",
+    },
+    // A packed record (#979 B2, core §7.6) in the Inspector: its envelope
+    // read first, its record decoded through its layout by CH's tag and
+    // shown as its fields, the fixed-point readings exact decimals.
+    Scene {
+        name: "inspector-packed",
+        size: DESKTOP,
+        build: packed_sensor,
+        landmark: "contract-decoded <packed:Sensor>",
     },
     // telemetry.v1 in the Inspector (#819, TD). A Point counter, unit `1`,
     // its epoch in the Point: the plotted leaf is `value.value`, its §2.11
@@ -1309,6 +1318,39 @@ fn history_inband(theme: ThemeChoice) -> Zengui {
 
 fn timing_period(theme: ThemeChoice) -> Zengui {
     timed_on(prefs(theme), World::new(), POSITION, 29).0
+}
+
+/// `lab/packed`'s `reading/u1` (#979 B2): its stream beside it publishing,
+/// the member selected and S4's answer landed, the owner's envelope read
+/// first and its record decoded by CH's tag into its four readings.
+fn packed_sensor(theme: ThemeChoice) -> Zengui {
+    let mut app = window(prefs(theme));
+    let mut world = World::packed();
+    world.connect(&mut app);
+    world.tick(&mut app);
+    for key in [PACKED_SENSOR, PACKED_READING] {
+        send(
+            &mut app,
+            Message::Workspace(WorkspaceMsg::Reveal(key.into())),
+        );
+    }
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(PACKED_READING.into()))),
+    );
+    let body = super::packed_envelope(1, &super::PACKED_RECORD);
+    let answer = world.state_read_on(PACKED_READING, Some(&body), "zenoh/bytes", None);
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::ValueFetched(
+            PACKED_READING.into(),
+            Ok(Arc::new(zengui::value::ValueRead::Owner(answer))),
+        )),
+    );
+    world.ticks(&mut app, 8);
+    world.verdicts(&mut app);
+    preset(&mut app, LayoutPreset::Explore);
+    app
 }
 
 fn timing_missed(theme: ThemeChoice) -> Zengui {

@@ -49,6 +49,15 @@ pub fn metered_contract_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// The packed world's contracts (#979 B2): [`contract_paths`] and the
+/// runtime's packed vectors' contract, `packed.v1`.
+pub fn packed_contract_paths() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = contract_paths();
+    paths.push(root.join("../zenkey/tests/contracts/packed"));
+    paths
+}
+
 /// Settings for a window with no bus behind it: nothing to dial, the
 /// contracts named (they arrive as a message instead), the default scope.
 pub fn settings() -> Settings {
@@ -242,6 +251,9 @@ pub struct World {
     /// (core §4.3, #976 A4; [`World::sealing`]): run `0003`, a seq per
     /// tick, under `zenoh/bytes`. Every other feed keeps its plain wire.
     sealed: Option<&'static str>,
+    /// `lab/packed`'s packed sensor stream beside the rest
+    /// ([`World::packed`], #979 B2).
+    packed: bool,
     /// What the last tick published, as [`World::verdicts`] checks it.
     last: Vec<Published>,
 }
@@ -269,6 +281,24 @@ const TIMED_FEEDS: &[(&str, &str, &str, &str, &str)] = &[(
     "stream",
     "cmd",
     "application/protobuf",
+)];
+/// `lab/packed`'s sensor stream (#979 B2): `packed.v1`'s `sensor`, a
+/// `packed:Sensor` record of four fixed-point readings, 40 bits, sealed in
+/// its envelope with its layout's tag ([`World::packed`]).
+pub const PACKED_SENSOR: &str = "zk2/lab/packed/packed.v1/stream/sensor";
+/// `lab/packed`'s `reading/u1` state member: `packed:Sensor` too, read by
+/// S4's GET in the `inspector-packed` scene.
+pub const PACKED_READING: &str = "zk2/lab/packed/packed.v1/state/reading/u1";
+/// The report's sensor record (`spec/conformance/packed/vectors.json`):
+/// 21.5 °C, 43.5 %, 1013.2 hPa, 3.7 V, in 40 bits.
+pub const PACKED_RECORD: [u8; 5] = [0x4c, 0xea, 0xfb, 0xdc, 0xaa];
+/// The packed publisher ([`World::packed`]).
+const PACKED_FEEDS: &[(&str, &str, &str, &str, &str)] = &[(
+    PACKED_SENSOR,
+    "packed.v1",
+    "stream",
+    "sensor",
+    "zenoh/bytes",
 )];
 /// `robot1/nav`'s status state: a `nav.v2.Status` protobuf, valid.
 pub const NAV_STATUS: &str = "zk2/robot1/nav/nav.v2/state/status";
@@ -631,6 +661,22 @@ fn synth(
         .bytes
 }
 
+/// A packed record at tick `n` in core §7.5's envelope, CH carrying
+/// `packed:Sensor`'s tag, as the runtime's writer seals it (#979 B2).
+pub fn packed_envelope(n: u32, record: &[u8]) -> Vec<u8> {
+    use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+    Envelope {
+        // `packed:Sensor`'s tag (spec/conformance/packed/vectors.json).
+        tag: Tag::new(4).expect("a tag"),
+        stamp: Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(n).expect("a seq"),
+        },
+        record,
+    }
+    .write()
+}
+
 /// The deployment the lens sees (#614, FL6a), as a catalog built by hand
 /// from tokens and descriptors with the real fingerprints of what
 /// [`contracts`] loaded — the fleet's own skeleton tests' recipe — and the
@@ -734,6 +780,20 @@ impl World {
         w
     }
 
+    /// The world with `lab/packed` beside it (#979 B2): its `packed:Sensor`
+    /// stream placed by presence and publishing each tick, each record
+    /// sealed in its envelope with its layout's tag ([`PACKED_SENSOR`]).
+    pub fn packed() -> World {
+        let contracts = Arc::new(zengui::services::contracts::load_all(
+            &packed_contract_paths(),
+        ));
+        let mut addresses = World::ADDRESSES.to_vec();
+        addresses.push(("lab/packed", "packed.v1"));
+        let mut w = World::build(contracts, &addresses, false);
+        w.packed = true;
+        w
+    }
+
     fn build(
         contracts: Arc<zengui::services::contracts::LoadedContracts>,
         addresses: &[(&str, &str)],
@@ -749,6 +809,7 @@ impl World {
             .chain(SYNTH_FEEDS.iter().map(|(key, ..)| *key))
             .chain(METERED_FEEDS.iter().map(|(key, ..)| *key))
             .chain(TIMED_FEEDS.iter().map(|(key, ..)| *key))
+            .chain(PACKED_FEEDS.iter().map(|(key, ..)| *key))
             .map(|key| (key, Axes::declared(&lens, key)))
             .collect();
         World {
@@ -768,6 +829,7 @@ impl World {
             metered,
             timed: false,
             sealed: None,
+            packed: false,
             last: Vec::new(),
         }
     }
@@ -1333,6 +1395,12 @@ impl World {
                 out.push((key, bytes, encoding, None));
             }
         }
+        if self.packed {
+            for (key, iface, token, template, encoding) in PACKED_FEEDS {
+                let record = synth(&self.contracts.set, iface, token, template, n);
+                out.push((key, packed_envelope(n, &record), encoding, None));
+            }
+        }
         out.extend(
             REFUSED_FEEDS
                 .iter()
@@ -1417,6 +1485,19 @@ impl World {
         body: Option<&[u8]>,
         archive: Option<&str>,
     ) -> zengui::value::StateAnswer {
+        self.state_read_on(key, body, "", archive)
+    }
+
+    /// [`World::state_read`], the body read on `encoding`: an envelope's
+    /// bytes on `zenoh/bytes`, so a packed record is decoded by its tag
+    /// (#979 B2), as the fleet renders a row the runtime read with its tag.
+    pub fn state_read_on(
+        &self,
+        key: &str,
+        body: Option<&[u8]>,
+        encoding: &str,
+        archive: Option<&str>,
+    ) -> zengui::value::StateAnswer {
         use zenkey_fleet::report::{StateReading, StateReport, StateRow, StateValue};
         let resolution = self.resolve(key);
         let resolved = resolution.resolved.as_ref().expect("a state key resolves");
@@ -1428,7 +1509,7 @@ impl World {
             .map(|body| StateRow {
                 key: key.to_string(),
                 value: StateValue::Value {
-                    payload: Box::new(self.check(key, body, "").rendering),
+                    payload: Box::new(self.check(key, body, encoding).rendering),
                 },
                 bytes: Some(body.to_vec().into()),
                 inband: Some(zenkey_fleet::report::InbandStamp {
