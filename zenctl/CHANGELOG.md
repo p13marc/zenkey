@@ -16,6 +16,7 @@ a run and a seq).
 |---|---|---|
 | `snapshot` rows (`.zsnap` v2): `timestamp`, `stamper` | `inband` too, `{"run": "0003", "seq": 12}`, where the reply carried an envelope; a deletion's from its `reply_del`'s attachment | additive and omitted when none; `.zsnap` stays at version 2, and a file written before reads as before |
 | `snapshot diff`: two enveloped values compared by their bytes, so a re-put (a new seq) or two deployments' runs read as a value change | compared by their records; a re-put of the same record reads "re-stamped in band (run 0003, seq 4 → run 0003, seq 9), same value" | a `changed` row carries an `inband` pair when either side had one; across two namespaces a stamp that moved alone is still no change |
+| `timeline`: a sample with no HLC in the `unstamped` lane, an enveloped one included | an enveloped sample in its resource's lane, its row's `inband` `{"run": "0003", "seq": 12}`, its lane's `inband` count; the `unstamped` lane holds only a sample with neither stamp | the table shows "in band run 0003, seq 12" beside the HLC, never in its place; the HLC axis is unchanged, a sample with no HLC excluded and counted, its note now "N sample(s) with no HLC are not on this axis" |
 
 ## Unreleased (`main`, zk2) — an owner stamps in band: `--run-file`, S1 and S2 read in band (#976, A3)
 

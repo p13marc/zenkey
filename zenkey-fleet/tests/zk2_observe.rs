@@ -322,20 +322,31 @@ async fn field_judges_paths_against_the_declared_type() {
     );
 }
 
-/// The timeline's lanes are zk2 resources, and its clocks are named: a
-/// state put is stamped by its owner (S1), whose descriptor states the zid,
-/// while a stream sample arrives unstamped and the router stamps it —
-/// another clock. Two stampers, so the HLC axis claims no happened-before.
+/// The timeline's lanes are zk2 resources, and its clocks are named. Every
+/// sample rides in its owner's envelope (core §4.3), so every lane counts
+/// in-band stamps, the owner's run and seq. Beside them, a state on core
+/// §4.3's table (`state/interfaces`, by its `freshness.ttl_s`) carries its
+/// owner's Zenoh timestamp, whose id the descriptor states; off the table
+/// (`state/namespaces`, the stream) a sample arrives without one and the
+/// router stamps it — another clock, expected there and never a finding
+/// (observer §4.4). Two stampers, so the HLC axis claims no
+/// happened-before.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_timeline_names_the_owners_clock_and_the_routers() {
     let mut bed = bed().await;
     let catalog = bed.catalog().await;
     let netif = iface("tc.netif.v1");
-    // The owner's state writer stamps every put (S1); the stream writer
-    // does not, and the router does.
+    // The interfaces state is on the table: its writer sets the owner's
+    // Zenoh timestamp. The namespaces state and the stream are not: the
+    // router stamps them.
     let state = bed
         .service
         .state_writer(&netif, "state/interfaces/{ns}/{iface}", &member("eth0"))
+        .await
+        .expect("state writer");
+    let plain = bed
+        .service
+        .state_writer(&netif, "state/namespaces", &Bindings::new())
         .await
         .expect("state writer");
     let stream = bed
@@ -351,12 +362,18 @@ async fn the_timeline_names_the_owners_clock_and_the_routers() {
     let monitor = monitor.watching(["zk2/**"]).await.expect("watch");
     let epoch = std::time::Instant::now();
     eventually("the writers match", || async {
-        state.writer().matching().await.unwrap_or(false) && stream.matching().await.unwrap_or(false)
+        state.writer().matching().await.unwrap_or(false)
+            && plain.writer().matching().await.unwrap_or(false)
+            && stream.matching().await.unwrap_or(false)
     })
     .await;
     for _ in 0..3 {
         state
             .put_value(&json!({"name": "eth0", "index": 2, "namespace": "default", "is_up": true}))
+            .await
+            .expect("state put");
+        plain
+            .put_value(&json!({"namespaces": ["default"]}))
             .await
             .expect("state put");
         stream
@@ -367,7 +384,7 @@ async fn the_timeline_names_the_owners_clock_and_the_routers() {
     }
     let mut rows = Vec::new();
     let deadline = tokio::time::Instant::now() + util::SETTLE;
-    while rows.len() < 6 && tokio::time::Instant::now() < deadline {
+    while rows.len() < 9 && tokio::time::Instant::now() < deadline {
         if let Ok(Some(StreamItem::Event(FleetEvent::Sample(s)))) =
             tokio::time::timeout(Duration::from_millis(500), events.recv()).await
         {
@@ -375,7 +392,7 @@ async fn the_timeline_names_the_owners_clock_and_the_routers() {
         }
     }
     monitor.shutdown().await.expect("teardown");
-    assert_eq!(rows.len(), 6, "{rows:?}");
+    assert_eq!(rows.len(), 9, "{rows:?}");
     let window = Window {
         rows,
         breaks: Vec::new(),
@@ -396,11 +413,31 @@ async fn the_timeline_names_the_owners_clock_and_the_routers() {
             .unwrap_or_else(|| panic!("{resource}: {:?}", report.lanes))
     };
     let state_lane = lane("state/interfaces/{ns}/{iface}");
-    assert_eq!(state_lane.provenance.owner, 3, "{state_lane:?}");
+    assert_eq!(
+        state_lane.provenance.owner, 3,
+        "on the table, the owner's own clock: {state_lane:?}"
+    );
+    let plain_lane = lane("state/namespaces");
+    assert_eq!(
+        (plain_lane.provenance.owner, plain_lane.provenance.other),
+        (0, 3),
+        "off the table, the router's clock: {plain_lane:?}"
+    );
     let stream_lane = lane("stream/bandwidth/{ns}/{iface}");
     assert_eq!(
         stream_lane.provenance.other, 3,
         "the router's clock, not the owner's: {stream_lane:?}"
+    );
+    for l in [state_lane, plain_lane, stream_lane] {
+        assert_eq!(l.inband, 3, "each in its owner's envelope: {l:?}");
+    }
+    assert!(
+        report
+            .lanes
+            .iter()
+            .all(|l| l.lane != zenkey_fleet::report::LaneId::Unstamped),
+        "a sample stamped in band is never unstamped: {:?}",
+        report.lanes
     );
     assert!(matches!(
         report.axis,

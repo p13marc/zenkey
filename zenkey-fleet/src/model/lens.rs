@@ -483,11 +483,26 @@ impl<'a> Lens<'a> {
         catalog.is_synthetic(&addr)
     }
 
-    /// Whose clock `stamper` is, for a key of `address` (the tooling guide's
-    /// O7; spec §3.3 0.10, §4.2 "Observing S1"): the owner's when it is the
-    /// session zid the address's descriptors state as `meta.zid`, compared
-    /// by value; another clock when they name one and it differs; and
-    /// unattributable when nothing names the owner's — never foreign.
+    /// Whether `wire`'s resource is on core §4.3's table, whose resources
+    /// carry the owner's Zenoh timestamp beside its in-band stamp
+    /// ([`inband::on_the_table`]): `None` when the key does not resolve to
+    /// a resource in hand. Off the table (`Some(false)`), a router's stamp
+    /// on an owner's sample is expected, never a finding (observer §4.4).
+    pub fn on_the_table(&self, wire: &str) -> Option<bool> {
+        let r = self.resolve(wire).resolved?;
+        Some(inband::on_the_table(r.revision.contract(), r.resource()))
+    }
+
+    /// Whose clock a Zenoh timestamp's `stamper` is, for a key of `address`
+    /// (observer §4.4, §8.3): the owner's when it is the session zid the
+    /// address's descriptors state as `meta.zid`, compared by value; another
+    /// clock when they name one and it differs; and unattributable when
+    /// nothing names the owner's — never foreign. It is about the Zenoh
+    /// timestamp only: an in-band stamp is the owner's by construction,
+    /// since only the owner writes its payload (core §4.2, "Observing S1").
+    /// Off core §4.3's table ([`Lens::on_the_table`]) another clock is what
+    /// an owner's sample is expected to carry, so a renderer says so, never
+    /// a finding.
     pub fn provenance(&self, address: Option<&str>, stamper: &str) -> Provenance {
         let owners = self.owner_zids(address);
         if owners.is_empty() {
@@ -1340,6 +1355,33 @@ mod tests {
             Provenance::Unattributable,
             "no meta.zid: unattributable, never foreign"
         );
+    }
+
+    /// Core §4.3's table through the lens: a state with a horizon is on
+    /// it, a plain state is not, and a key resolving to no resource in
+    /// hand says nothing.
+    #[test]
+    fn the_lens_says_whether_a_keys_resource_is_on_the_table() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/zk2/tcgui/tc.netif.v1.toml");
+        let (set, problems) = ContractSet::load_path(&path);
+        assert!(problems.is_empty(), "{problems:?}");
+        let lens = Lens::new("", None, &set).offline(&set);
+        assert_eq!(
+            lens.on_the_table("zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0"),
+            Some(true),
+            "freshness.ttl_s 60"
+        );
+        assert_eq!(
+            lens.on_the_table("zk2/host-a/tc/tc.netif.v1/state/namespaces"),
+            Some(false)
+        );
+        assert_eq!(
+            lens.on_the_table("zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0"),
+            Some(false)
+        );
+        assert_eq!(lens.on_the_table("plain/key"), None);
+        assert_eq!(lens.on_the_table("zk2/host-a/tc/other.v1/state/x"), None);
     }
 
     /// A metric resource's sample is read by `telemetry.v1` after its type

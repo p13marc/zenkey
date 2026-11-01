@@ -1194,10 +1194,37 @@ host-a/tc tc.netif.v1 stream/bandwidth/{ns}/{iface} · hlc · stamper 33 (2 on t
     let n = notes(&fx::timeline_report_hlc());
     assert!(n.contains("happened-before"), "{n}");
     assert!(
-        n.contains("1 unstamped sample(s) are not on this axis"),
+        n.contains("1 sample(s) with no HLC are not on this axis"),
         "{n}"
     );
     assert!(n.contains("have no position on the HLC axis"), "{n}");
+}
+
+/// Under core 0.73's wire (#976 A4) a sample stamped in band keeps its
+/// resource's lane, its run and seq beside its HLC where a router set one,
+/// alone where none did — never in the HLC's place, and never "unstamped".
+#[test]
+fn a_timeline_row_shows_its_in_band_stamp_beside_its_hlc() {
+    assert_data_eq!(
+        table(&fx::timeline_report_inband()),
+        str![[r#"
+host-a/tc tc.netif.v1 stream/bandwidth/{ns}/{iface} · arrival · stamper 44 (1 on another clock); 2 stamped in band
+0  +1.000ms  200/44 · in band run 0003, seq 41  acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0
+1  +2.000ms  in band run 0003, seq 42           acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0
+
+"#]]
+    );
+    let out = ndjson(&fx::timeline_report_inband());
+    let lines: Vec<serde_json::Value> = out
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["lanes"][0]["inband"], 2);
+    assert_eq!(
+        lines[2]["inband"],
+        serde_json::json!({"run": "0003", "seq": 42})
+    );
+    assert!(lines[2].get("hlc").is_none(), "{}", lines[2]);
 }
 
 /// The claim, not the layout: an HLC table never draws an unstamped row.

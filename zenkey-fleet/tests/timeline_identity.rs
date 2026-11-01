@@ -63,9 +63,36 @@ fn view(key: &str, at: Instant, ts: Option<zenoh::time::Timestamp>, delete: bool
     }
 }
 
+/// `key`'s sample in its owner's zk2c envelope (core §4.3), run 3 at `seq`,
+/// with no Zenoh timestamp: a put's envelope is its payload, under
+/// `zenoh/bytes`, and a delete's its attachment.
+fn sealed(key: &str, at: Instant, seq: u32, delete: bool) -> SampleView {
+    use zenkey_model::wire::{DeleteStamp, Envelope, Run, Seq, Stamp, Tag};
+    let stamp = Stamp {
+        run: Run::U16(3),
+        seq: Seq::new(seq).expect("a seq"),
+    };
+    let mut v = view(key, at, None, delete);
+    v.encoding = "zenoh/bytes".into();
+    if delete {
+        v.attachment = Some(zenoh::bytes::ZBytes::from(DeleteStamp { stamp }.write()));
+    } else {
+        v.payload = zenoh::bytes::ZBytes::from(
+            Envelope {
+                tag: Tag::NONE,
+                stamp,
+                record: &[1, 2, 3],
+            }
+            .write(),
+        );
+    }
+    v
+}
+
 /// A window with a reorder (A arrives first, B was stamped first), a
-/// second stamper, an unstamped sample, a tombstone, and a drop between
-/// the third and fourth samples — every case the projection distinguishes.
+/// second stamper, an unstamped sample, a tombstone, a drop between the
+/// third and fourth samples, and two samples stamped in band alone, a put
+/// and a delete (#976 A4) — every case the projection distinguishes.
 fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
     let at = |ms: u64| epoch + Duration::from_millis(ms);
     let a = "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
@@ -77,6 +104,8 @@ fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
         Arrival::Sample(Box::new(view("plain/key", at(30), None, false))),
         Arrival::Dropped(5),
         Arrival::Sample(Box::new(view(c, at(40), Some(stamp(1_500, 0x44)), true))),
+        Arrival::Sample(Box::new(sealed(a, at(50), 7, false))),
+        Arrival::Sample(Box::new(sealed(c, at(60), 8, true))),
     ];
     let header = ZrecHeader {
         zrec: ZREC_VERSION,
@@ -191,7 +220,10 @@ fn the_same_window_from_live_and_from_zrec_is_the_same_timeline_on_both_axes() {
     // second stamper makes the claim a skewed one, the unstamped sample is
     // excluded on HLC and lane-d on arrival, the drop sits where it fell.
     let by_hlc = timeline(&live, Order::Hlc);
-    assert_eq!(by_hlc.unstamped_excluded, 1);
+    assert_eq!(
+        by_hlc.unstamped_excluded, 3,
+        "the unstamped sample and the two stamped in band alone: no HLC"
+    );
     assert!(matches!(
         by_hlc.axis,
         zenkey_fleet::report::AxisLabel::Hlc {
@@ -204,11 +236,13 @@ fn the_same_window_from_live_and_from_zrec_is_the_same_timeline_on_both_axes() {
         by_arrival.rows[3],
         zenkey_fleet::report::TimelineEntry::Break { pos: 3, n: 5, .. }
     ));
-    assert_eq!(by_arrival.rows.len(), 5);
+    assert_eq!(by_arrival.rows.len(), 7);
     assert_eq!(by_hlc.rows.len(), 3);
     // The lanes are zk2 resources, resolved through the contract held
     // offline: one stream of host-a, one state of host-b, and the foreign
-    // key has no HLC, so it lives in the unstamped lane.
+    // key has neither stamp, so it lives in the unstamped lane. The two
+    // stamped in band keep their resources' lanes, the delete's stamp read
+    // from its attachment, live and from the file alike.
     let lanes: Vec<&LaneId> = by_arrival.lanes.iter().map(|l| &l.lane).collect();
     assert!(
         lanes.contains(&&LaneId::Resource {
@@ -229,6 +263,18 @@ fn the_same_window_from_live_and_from_zrec_is_the_same_timeline_on_both_axes() {
         "{lanes:?}"
     );
     assert!(lanes.contains(&&LaneId::Unstamped), "{lanes:?}");
+    let unstamped = by_arrival
+        .lanes
+        .iter()
+        .find(|l| l.lane == LaneId::Unstamped)
+        .expect("the unstamped lane");
+    assert_eq!(unstamped.samples, 1, "only the foreign key: {unstamped:?}");
+    assert_eq!(
+        by_arrival.lanes.iter().map(|l| l.inband).sum::<usize>(),
+        2,
+        "{:?}",
+        by_arrival.lanes
+    );
     // A file names no owner: every stamp is unattributable, never foreign.
     assert!(
         by_arrival

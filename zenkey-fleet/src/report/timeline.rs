@@ -74,8 +74,9 @@ pub const ARRIVAL_CLOCK: &str = "observer monotonic, µs since window start";
 /// one interface's kind at that address, which is as far as the key itself
 /// resolves (the tooling guide's O2). The rest are the ways a sample can
 /// fail to belong: a control key, a key that is not this deployment's zk2
-/// data, and a sample that carries no HLC and so exists on the arrival axis
-/// only.
+/// data, and a sample that carries neither an HLC nor an in-band stamp and
+/// so exists on the arrival axis only, its resource unknowable from its
+/// order.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LaneId {
@@ -100,9 +101,12 @@ pub enum LaneId {
     /// Not this deployment's zk2 data: outside the namespace, or not a zk2
     /// key at all. Kept, never dropped (O1).
     Foreign,
-    /// No HLC rode the sample. This lane has a place on the arrival axis
-    /// and **no place on the HLC axis** — the type system in
-    /// [`crate::model::timeline`] enforces that, not a warning.
+    /// Neither an HLC nor an in-band stamp rode the sample. This lane has
+    /// a place on the arrival axis and **no place on the HLC axis** — the
+    /// type system in [`crate::model::timeline`] enforces that, not a
+    /// warning. A sample stamped in band alone keeps its resource's lane:
+    /// it has no HLC position either (an in-band stamp is never a time,
+    /// observer §8.3), and is excluded from the HLC axis the same way.
     Unstamped,
 }
 
@@ -153,8 +157,11 @@ impl From<&super::KeyGroup> for LaneId {
     }
 }
 
-/// Whose clock stamped a sample (the tooling guide's O7; spec §3.3 0.10,
-/// §4.2 "Observing S1"), stamper identity carried beside it.
+/// Whose clock stamped a sample's Zenoh timestamp (observer §4.4, §8.3),
+/// stamper identity carried beside it. An in-band stamp is the owner's by
+/// construction, since only the owner writes its payload (core §4.2,
+/// "Observing S1"), and is never judged here: this is about the Zenoh
+/// timestamp alone, which a router sets on what arrives unstamped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
@@ -189,9 +196,14 @@ pub struct LaneSummary {
     pub first_t_us: u64,
     pub last_t_us: u64,
     /// Every stamper seen in the lane — one is the happened-before case,
-    /// more is the skew case, none is the unstamped lane.
+    /// more is the skew case, none is the unstamped lane or a lane stamped
+    /// in band alone.
     pub stampers: BTreeSet<String>,
     pub provenance: ProvenanceCounts,
+    /// Samples placed in this lane that carried an in-band stamp, the
+    /// owner's run and seq (core §4.3). Absent at zero.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub inband: usize,
 }
 
 /// The per-`SampleSource` sequence-number lane.
@@ -258,6 +270,11 @@ pub enum TimelineEntry {
         stamped_by: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         provenance: Option<Provenance>,
+        /// The owner's run and seq, when the sample carried a zk2c envelope
+        /// (core §4.3): what orders it within its key, never a time, so no
+        /// position on either axis (observer §8.3).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        inband: Option<super::InbandStamp>,
         kind: RowKind,
     },
     Break {
@@ -289,7 +306,9 @@ pub struct TimelineReport {
     pub lanes: Vec<LaneSummary>,
     pub sn_lane: SnLaneReport,
     /// Samples that carried no HLC and were therefore **not placed** on the
-    /// HLC axis. Always 0 on the arrival axis, where they have a lane.
+    /// HLC axis: unstamped, or stamped in band alone, which is never a time
+    /// (observer §8.3). Always 0 on the arrival axis, where they have a
+    /// lane.
     #[serde(skip_serializing_if = "is_zero_usize")]
     pub unstamped_excluded: usize,
     /// Samples the observer missed while behind, totalled (O6).
@@ -361,6 +380,7 @@ mod tests {
                     owner: 1,
                     ..Default::default()
                 },
+                inband: 0,
             }],
             sn_lane: SnLaneReport::Unavailable {
                 reason: SN_UNAVAILABLE_REASON,
@@ -378,6 +398,7 @@ mod tests {
                 hlc: Some("100/33".into()),
                 stamped_by: Some("33".into()),
                 provenance: Some(Provenance::Owner),
+                inband: None,
                 kind: RowKind::Put,
             }],
         };
@@ -439,6 +460,57 @@ mod tests {
         );
     }
 
+    /// A sample stamped in band alone keeps its resource's lane: the row
+    /// carries its run and seq, the lane counts it, and neither carries an
+    /// HLC (observer §8.3).
+    #[test]
+    fn an_inband_row_and_its_lane_are_pinned() {
+        let row = TimelineEntry::Sample {
+            order_by: OrderLabel::Arrival,
+            pos: 3,
+            lane: lane(),
+            key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
+            t_us: 9,
+            hlc: None,
+            stamped_by: None,
+            provenance: None,
+            inband: Some(crate::report::InbandStamp {
+                run: "0003".into(),
+                seq: 12,
+            }),
+            kind: RowKind::Put,
+        };
+        assert_eq!(
+            serde_json::to_value(&row).unwrap(),
+            json!({
+                "row": "sample",
+                "order_by": "arrival",
+                "pos": 3,
+                "lane": {
+                    "kind": "resource",
+                    "address": "host-a/tc",
+                    "iface": "tc.netif.v1",
+                    "token": "stream",
+                    "resource": "stream/bandwidth/{ns}/{iface}"
+                },
+                "key": "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0",
+                "t_us": 9,
+                "inband": {"run": "0003", "seq": 12},
+                "kind": "put"
+            })
+        );
+        let summary = LaneSummary {
+            lane: lane(),
+            samples: 1,
+            first_t_us: 9,
+            last_t_us: 9,
+            stampers: BTreeSet::new(),
+            provenance: ProvenanceCounts::default(),
+            inband: 1,
+        };
+        assert_eq!(serde_json::to_value(&summary).unwrap()["inband"], 1);
+    }
+
     /// The skew claim, the arrival axis, the unstamped lane, a break row,
     /// and the zero fields that vanish.
     #[test]
@@ -477,6 +549,7 @@ mod tests {
                     hlc: None,
                     stamped_by: None,
                     provenance: None,
+                    inband: None,
                     kind: RowKind::Delete,
                 },
                 TimelineEntry::Break {

@@ -5,9 +5,11 @@
 //! position in the *merged* ordering, so the fleet-wide sequence survives
 //! the grouping; `t` rides on both axes, so a reorder on the HLC listing is
 //! visible as a non-monotonic arrival column. Under `--order hlc` the table
-//! cannot draw an unstamped row, because the report has none to give it —
+//! cannot draw a row with no HLC, because the report has none to give it —
 //! the engine's `Placed<HlcAxis>` refused them — and the note says how
-//! many, and where they are.
+//! many, and where they are. A row's in-band stamp (core §4.3) rides beside
+//! its HLC as `in band run r, seq s`, never in its place (observer §8.3),
+//! and a lane heading counts them.
 
 use zenkey_fleet::report::{
     AxisLabel, BreakKind, HlcClaim, LaneId, OrderLabel, SnLaneReport, TimelineEntry, TimelineReport,
@@ -45,7 +47,7 @@ impl Render for TimelineReport {
         };
         let mut g = Grid::unheaded(4).right(0).right(1);
         for lane in &self.lanes {
-            let stampers = if lane.stampers.is_empty() {
+            let mut stampers = if lane.stampers.is_empty() {
                 String::from("no stamper")
             } else {
                 let mut s = format!(
@@ -68,6 +70,11 @@ impl Render for TimelineReport {
                 }
                 s
             };
+            // The owner's run and seq order a key's values and are never a
+            // time (observer §8.3): counted beside the clocks, not as one.
+            if lane.inband > 0 {
+                stampers.push_str(&format!("; {} stamped in band", lane.inband));
+            }
             g.group(format!("{} · {axis} · {stampers}", lane.lane.label()));
             for entry in &self.rows {
                 if let TimelineEntry::Sample {
@@ -76,16 +83,23 @@ impl Render for TimelineReport {
                     key,
                     t_us,
                     hlc,
+                    inband,
                     ..
                 } = entry
                     && l == &lane.lane
                 {
+                    // Unstamped is *asked and absent*, not unasked: an
+                    // empty cell, never `—`. An in-band stamp rides beside
+                    // the HLC as a run and a seq, never in its place.
+                    let stamps: Vec<String> = hlc
+                        .iter()
+                        .cloned()
+                        .chain(inband.iter().map(|s| format!("in band {s}")))
+                        .collect();
                     g.row([
                         Cell::int(*pos as u64),
                         Cell::text(offset(*t_us)),
-                        // Unstamped is *asked and absent*, not unasked: an
-                        // empty cell, never `—`.
-                        Cell::text(hlc.clone().unwrap_or_default()),
+                        Cell::text(stamps.join(" · ")),
                         Cell::text(key),
                     ]);
                 }
@@ -150,12 +164,16 @@ impl Render for TimelineReport {
             .cite("observer §8.3"),
         );
         if self.unstamped_excluded > 0 {
-            notes.push(Note::coverage(format!(
-                "{} unstamped sample(s) are not on this axis — an unstamped sample has \
-                 no HLC position and is never defaulted to its arrival time; see \
-                 `--order arrival`",
-                self.unstamped_excluded
-            )));
+            notes.push(
+                Note::coverage(format!(
+                    "{} sample(s) with no HLC are not on this axis — unstamped, or stamped \
+                     in band alone (a run and a seq, never a time); a sample with no HLC \
+                     has no HLC position and is never defaulted to its arrival time; see \
+                     `--order arrival`",
+                    self.unstamped_excluded
+                ))
+                .cite("observer §8.3"),
+            );
         }
         if self.order_by == OrderLabel::Hlc && self.dropped > 0 {
             notes.push(Note::coverage(format!(

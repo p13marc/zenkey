@@ -2777,6 +2777,7 @@ fn timeline_sample(
         hlc: hlc.map(|(n, s)| format!("{n}/{s}")),
         stamped_by: hlc.map(|(_, s)| s.to_string()),
         provenance: hlc.map(|_| Provenance::Owner),
+        inband: None,
         kind: RowKind::Put,
     }
 }
@@ -2813,6 +2814,7 @@ pub fn timeline_report_arrival() -> TimelineReport {
                     other: 0,
                     unattributable: 0,
                 },
+                inband: 0,
             },
             LaneSummary {
                 lane: LaneId::Unstamped,
@@ -2821,6 +2823,7 @@ pub fn timeline_report_arrival() -> TimelineReport {
                 last_t_us: 3_000,
                 stampers: Default::default(),
                 provenance: ProvenanceCounts::default(),
+                inband: 0,
             },
         ],
         sn_lane: SnLaneReport::Unavailable {
@@ -2893,6 +2896,7 @@ pub fn timeline_report_hlc() -> TimelineReport {
                 other: 0,
                 unattributable: 0,
             },
+            inband: 0,
         }],
         sn_lane: SnLaneReport::Unavailable {
             reason: SN_UNAVAILABLE_REASON,
@@ -2911,6 +2915,65 @@ pub fn timeline_report_hlc() -> TimelineReport {
                 Some((100, "33")),
             ),
             timeline_sample(OrderLabel::Hlc, 1, lane, TL_A, 1_000, Some((200, "33"))),
+        ],
+    }
+}
+
+/// A window under core 0.73's wire (#976 A4), on the arrival axis: two
+/// samples of one stream resource, each in its owner's envelope (run
+/// `0003`), the first through a router that stamped it (another clock,
+/// expected off core §4.3's table, observer §4.4), the second through none;
+/// both keep their resource's lane, and the in-band stamp is shown as a
+/// run and a seq, never a time (observer §8.3).
+pub fn timeline_report_inband() -> TimelineReport {
+    let lane = timeline_lane();
+    let sample = |pos, key: &str, t_us, hlc: Option<(u64, &str)>, seq| TimelineEntry::Sample {
+        order_by: OrderLabel::Arrival,
+        pos,
+        lane: lane.clone(),
+        key: key.into(),
+        t_us,
+        hlc: hlc.map(|(n, s)| format!("{n}/{s}")),
+        stamped_by: hlc.map(|(_, s)| s.to_string()),
+        provenance: hlc.map(|_| Provenance::Other),
+        inband: Some(InbandStamp {
+            run: "0003".into(),
+            seq,
+        }),
+        kind: RowKind::Put,
+    };
+    TimelineReport {
+        order_by: OrderLabel::Arrival,
+        axis: AxisLabel::Arrival {
+            clock: ARRIVAL_CLOCK,
+        },
+        scopes: vec!["acme/zk2/**".into()],
+        window_s: Some(10.0),
+        source: TimelineSource::Live,
+        lens: timeline_lens(),
+        lanes: vec![LaneSummary {
+            lane: lane.clone(),
+            samples: 2,
+            first_t_us: 1_000,
+            last_t_us: 2_000,
+            stampers: ["44".to_string()].into_iter().collect(),
+            provenance: ProvenanceCounts {
+                owner: 0,
+                other: 1,
+                unattributable: 0,
+            },
+            inband: 2,
+        }],
+        sn_lane: SnLaneReport::Unavailable {
+            reason: SN_UNAVAILABLE_REASON,
+        },
+        unstamped_excluded: 0,
+        dropped: 0,
+        coalesced: 0,
+        keys_evicted: 0,
+        rows: vec![
+            sample(0, TL_A, 1_000, Some((200, "44")), 41),
+            sample(1, TL_A, 2_000, None, 42),
         ],
     }
 }

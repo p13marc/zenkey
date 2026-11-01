@@ -3135,17 +3135,33 @@ async fn rate_groups_by_resource_and_field_judges_paths_against_the_type() {
 }
 
 /// The timeline over a live window and over its `.zrec`: the lanes are zk2
-/// resources either way, and the clocks are named — live, a state put is
-/// stamped by its owner (S1, the zid its descriptor states) and a stream
-/// sample by the router (another clock); from the file, which names no
-/// owner, the same lanes with every stamp unattributable (O7), never
+/// resources either way, and the clocks are named. Every sample rides in
+/// its owner's envelope (core §4.3), so every lane counts in-band stamps,
+/// live and from the file alike. Live, a state on core §4.3's table
+/// (`state/interfaces`, by its ttl) also carries its owner's Zenoh
+/// timestamp, the zid its descriptor states; off the table
+/// (`state/namespaces`, the stream) the router stamps it — another clock,
+/// expected there (observer §4.4). From the file, which names no owner,
+/// the same lanes with every Zenoh timestamp unattributable (O7), never
 /// guessed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn timeline_names_its_clocks_live_and_reads_its_zrec_through_the_same_lanes() {
     let mut bus = Bus::bare(None).await;
-    let (owner, task) = publishing_owner(&bus, json!({}), true).await;
+    let (mut owner, task) = publishing_owner(&bus, json!({}), true).await;
+    let namespaces = owner
+        .state_writer(&iface("tc.netif.v1"), "state/namespaces", &Bindings::new())
+        .await
+        .expect("a state writer");
     bus.services.push(owner);
     bus.keep(task);
+    bus.keep(Task(tokio::spawn(async move {
+        loop {
+            let _ = namespaces
+                .put_value(&json!({"namespaces": ["default"]}))
+                .await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })));
     wait_for(&bus, &["host-a/tc"]).await;
 
     let lane = |doc: &Value, resource: &str| -> Value {
@@ -3158,6 +3174,7 @@ async fn timeline_names_its_clocks_live_and_reads_its_zrec_through_the_same_lane
             .unwrap_or(Value::Null)
     };
     let state = "state/interfaces/{ns}/{iface}";
+    let plain = "state/namespaces";
     let stream = "stream/bandwidth/{ns}/{iface}";
     let run = bus
         .until(
@@ -3173,6 +3190,7 @@ async fn timeline_names_its_clocks_live_and_reads_its_zrec_through_the_same_lane
                 r.code == 0
                     && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
                         lane(&d, state)["provenance"]["owner"].as_u64() > Some(0)
+                            && lane(&d, plain)["samples"].as_u64() > Some(0)
                             && lane(&d, stream)["samples"].as_u64() > Some(0)
                     })
             },
@@ -3188,13 +3206,31 @@ async fn timeline_names_its_clocks_live_and_reads_its_zrec_through_the_same_lane
     assert_eq!(
         owned["stampers"],
         json!([bus.owners.zid().to_string()]),
-        "the owner's own clock (S1)"
+        "on core §4.3's table, the owner's own clock (S1)"
     );
-    let routed = lane(&live, stream);
-    assert_eq!(routed["provenance"]["owner"], 0, "{routed}");
+    for resource in [plain, stream] {
+        let routed = lane(&live, resource);
+        assert_eq!(routed["provenance"]["owner"], 0, "{routed}");
+        assert!(
+            routed["provenance"]["other"].as_u64() > Some(0),
+            "off the table, a put arrives with no Zenoh timestamp and the router \
+             stamps it, another clock: {routed}"
+        );
+    }
+    for resource in [state, plain, stream] {
+        let l = lane(&live, resource);
+        assert_eq!(
+            l["inband"], l["samples"],
+            "every sample in its owner's envelope: {l}"
+        );
+    }
+    let samples = rows_of(&live, "sample");
+    assert!(!samples.is_empty(), "{live}");
     assert!(
-        routed["provenance"]["other"].as_u64() > Some(0),
-        "an unstamped put is the router's clock, not the owner's: {routed}"
+        samples
+            .iter()
+            .all(|r| r["lane"]["kind"] != "unstamped" && r["inband"]["run"].is_string()),
+        "an enveloped sample is never unstamped, and carries its run and seq: {live}"
     );
 
     let file = bus.home.join("window.zrec");
@@ -3214,8 +3250,11 @@ async fn timeline_names_its_clocks_live_and_reads_its_zrec_through_the_same_lane
             ],
             |r| {
                 r.code == 0
-                    && std::fs::read_to_string(&file)
-                        .is_ok_and(|t| t.contains("/state/interfaces/") && t.contains("/stream/"))
+                    && std::fs::read_to_string(&file).is_ok_and(|t| {
+                        t.contains("/state/interfaces/")
+                            && t.contains("/state/namespaces")
+                            && t.contains("/stream/")
+                    })
             },
         )
         .await;
@@ -3236,12 +3275,16 @@ async fn timeline_names_its_clocks_live_and_reads_its_zrec_through_the_same_lane
     let replayed = run.json();
     assert_eq!(replayed["source"]["kind"], "zrec", "{run}");
     assert!(replayed.get("window_s").is_none(), "nothing was asked (O4)");
-    for resource in [state, stream] {
+    for resource in [state, plain, stream] {
         let l = lane(&replayed, resource);
         assert_eq!(l["lane"], lane(&live, resource)["lane"], "one projection");
         assert_eq!(l["provenance"]["owner"], 0, "a file names no owner: {l}");
         assert_eq!(l["provenance"]["other"], 0, "{l}");
         assert!(l["provenance"]["unattributable"].as_u64() > Some(0), "{l}");
+        assert_eq!(
+            l["inband"], l["samples"],
+            "the in-band stamp read back from the row's bytes: {l}"
+        );
     }
 }
 

@@ -746,9 +746,12 @@ pub(crate) enum Command {
     /// bus can establish. What it can say: on the arrival axis, when each
     /// sample was seen here; on the HLC axis (`--order hlc`), the
     /// happened-before of ONE stamping node, or a comparison of skewed wall
-    /// clocks when several stamped (observer §8.3). Unstamped samples get
-    /// their own lane on arrival and cannot be placed on the HLC axis at
-    /// all; drops and coalescing render as breaks where they fell (O6). The
+    /// clocks when several stamped (observer §8.3). A sample in its owner's
+    /// envelope keeps its resource's lane and shows its run and seq beside
+    /// its HLC, never as a time (core §4.3); a sample with neither stamp
+    /// gets the unstamped lane on arrival, and a sample with no HLC cannot
+    /// be placed on the HLC axis at all; drops and coalescing render as
+    /// breaks where they fell (O6). The
     /// per-publisher sequence-number lane is reported UNAVAILABLE on this
     /// zenoh, not empty. `--from <FILE>` reads a .zrec through the same
     /// projection, so live and replay render identically.
