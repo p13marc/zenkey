@@ -1,7 +1,8 @@
-//! A consumer reads heartbeats (core §7.5's form 6; #978's F2): no rule
-//! adopts the heartbeat yet and no owner sends one, so these tests write
-//! one by hand, raw, on the key F3's `freshness.v2` will declare, from the
-//! member's own in-band stamp.
+//! A consumer reads heartbeats (core §7.5's form 6; #978's F2):
+//! `beacon.v1` uses `freshness.v1`, so its owner sends none, and these
+//! tests write one by hand, raw, on the key `freshness.v2` declares, from
+//! the member's own in-band stamp. `profile_freshness_v2.rs` runs an
+//! owner that sends them.
 //!
 //! Setup: R1 a router; the owner `lab/beacon` implements `beacon.v1` as a
 //! client of R1, its status's re-puts off; S a tool's consumer of it on
@@ -190,7 +191,13 @@ async fn a_subscription_folds_a_heartbeat_into_its_freshness() {
             sub.heartbeats() == u64::from(seq)
         })
         .await;
-        assert_eq!(sub.reread_due(&provider), seq == 3);
+        // freshness.v2 §2.5: due at the second, and the subscription
+        // re-reads at once, so the view may already be whole again.
+        assert_eq!(
+            sub.reread_due(&provider) || sub.rereads() > 0,
+            seq == 3,
+            "seq {seq}"
+        );
         // 0 then 2: a heartbeat lost, the observation incomplete until 3
         // comes in sequence.
         let complete = matches!(

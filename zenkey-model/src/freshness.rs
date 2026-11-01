@@ -1052,11 +1052,14 @@ impl<T: Arrival> View<T> {
 /// A subscription's last delivery of a member and, where a [`View`]
 /// holds it, the last heartbeat that vouched for it: the later is its
 /// last confirmation (§2.5). `delivered` is the subscription's own
-/// [`Last`]; a delete stays a delete.
+/// [`Last`]; a delete stays a delete. A member never delivered that a
+/// heartbeat confirmed, one a late joiner's read seeded (`freshness.v2`
+/// §2.5), is confirmed then.
 #[must_use]
 pub fn confirmed_last(delivered: Option<Last>, heartbeat: Option<Duration>) -> Option<Last> {
     match (delivered, heartbeat) {
         (Some(Last::Put(a)), Some(h)) => Some(Last::Put(a.min(h))),
+        (None, Some(h)) => Some(Last::Put(h)),
         (d, _) => d,
     }
 }

@@ -22,6 +22,7 @@
 //! | [`call`]: what a handler receives and a caller gets back, without a session | §5.1 O3, O5–O7, §5.2 |
 //! | [`shm`]: the memlock limit SHM falls back under | §7.4 |
 //! | [`state`]: stamped mutations, tombstones, clocks, the owner-only GET | §4.1–§4.3, S1–S4, S6–S7 |
+//! | [`heartbeat`]: `freshness.v2`'s owner, its standard contract embedded: a heartbeat per covered interface, after the tokens, each member's bit; no re-puts | `freshness.v2` §2.4, §2.10; §4.3, §7.5, §8.2 |
 //! | [`health`]: `health.v1`'s owner, its standard contract embedded: the status, checks and faults; `clock_ahead` | `health.v1` §2.2–§2.6, §2.10; §4.3, §8.2 |
 //! | [`alarms`]: `alarms.v1`'s owner, its standard contract embedded: the acts keyed by the recipe, confirmations every 450 s, the bound, adoption at a restart from the owner's record or an archive | `alarms.v1` §2.1–§2.9; §2.7, §4.3, §4.4 |
 //! | [`config_v1`]: `config.v1`'s owner, its standard contract embedded: the five operations over a device, the view and the status, the change events, the deadline timer, the persisted layer, desired state | `config.v1` §2.1–§2.19; §2.6–§2.7, §5, §8.2 |
@@ -47,6 +48,11 @@
 //!
 //! **The profiles' owner halves** (`spec/profiles/`): `hostid.v1` is
 //! [`hostid`]; `freshness.v1` is the [`state`] writers' refresher (#720);
+//! `freshness.v2` is [`heartbeat`] (#978): a service implementing a
+//! contract that uses it implements the profile's standard contract beside
+//! it, sends one heartbeat per covered interface from its tokens on, and
+//! re-puts nothing, each [`state::StateWriter::set_vouched`] its member's
+//! bit;
 //! `health.v1` is [`health`], through [`ServiceBuilder::health`] (#721): the
 //! status never better than its worst check, put before the tokens and
 //! confirmed every 30 s, checks on change, faults, and `clock_ahead` while
@@ -120,6 +126,8 @@ pub mod error;
 mod gate;
 #[cfg(feature = "zenoh")]
 pub mod health;
+#[cfg(feature = "zenoh")]
+pub mod heartbeat;
 #[cfg(feature = "hostid")]
 pub mod hostid;
 pub mod implementation;

@@ -11,8 +11,20 @@
 //! | S6 current is the owner's answer; silence is no verdict | [`StateGet`] |
 //! | S7 a run never reused, a seq never wrapped within it; §4.3's table's timestamps, ahead | [`Minter`], [`crate::run`], the clock guard (`ServiceConfig::clock_reference`) |
 //! | a re-put is a mutation (0.21); `freshness.v1` §2.4, §2.10 | [`StateWriter`]'s refresher |
+//! | `freshness.v2` §2.4: a collection's members vouched for by a heartbeat, its replies carrying the last confirmation (§4.3's table, row 1) | [`Store`]'s books, [`crate::heartbeat`] |
 //!
 //! Last-known state (S5) is an archive's: [`crate::archive`].
+//!
+//! **Under `freshness.v2`** (#978's F3): a state member of a contract that
+//! uses it is confirmed by its owner's heartbeats ([`crate::heartbeat`]),
+//! never re-put: its writer runs no refresher, [`StateWriter::set_vouched`]
+//! is its bit, and its puts carry no Zenoh timestamp (core §4.3's table
+//! drops row 1 for it). The [`Store`] keeps each covered interface's
+//! collections as a heartbeat reads them: each collection's digest,
+//! toggled at each mutation, and each live member's bit; and each member's
+//! last confirmation, the later of its last mutation and the last
+//! heartbeat that vouched for it, which its GET replies carry as their
+//! Zenoh timestamp (S2).
 //!
 //! **The refresher** (`freshness.v1` §2.4, #720). A state resource whose
 //! contract declares `freshness.ttl_s` above 0 is confirmed at least every
@@ -166,6 +178,10 @@ pub struct Minter {
     /// The descriptor, once the service started: put again at each run
     /// change within the instance (§3.3).
     served: Mutex<Option<std::sync::Weak<dyn RunListener>>>,
+    /// The interfaces whose contracts use `freshness.v2`, by id: their
+    /// states with a horizon leave §4.3's table (row 1), their heartbeats
+    /// confirming them instead.
+    covered: Mutex<std::collections::BTreeSet<String>>,
 }
 
 /// What hears a run change within an instance: the descriptor, which states
@@ -211,7 +227,25 @@ impl Minter {
             runs: Mutex::new(Runs::default()),
             store: Mutex::new(None),
             served: Mutex::new(None),
+            covered: Mutex::new(std::collections::BTreeSet::new()),
         }
+    }
+
+    /// `iface`'s contract uses `freshness.v2` (#978's F3): its states with
+    /// a horizon carry no Zenoh timestamp on their puts (core §4.3's
+    /// table, row 1).
+    pub(crate) fn cover(&self, iface: &zenkey_model::grammar::IfaceId) {
+        self.covered
+            .lock()
+            .expect("not poisoned")
+            .insert(iface.to_string());
+    }
+
+    /// Whether `key`'s interface's contract uses `freshness.v2`.
+    pub(crate) fn covers(&self, key: &str) -> bool {
+        key.split('/')
+            .nth(3)
+            .is_some_and(|i| self.covered.lock().expect("not poisoned").contains(i))
     }
 
     /// Whether the session's timestamping is enabled (core §8.2): then every
@@ -554,7 +588,38 @@ struct Entry {
     /// (S2).
     stamped: Stamped,
     at: Instant,
+    /// A `freshness.v2` member's last confirmation (v2 §2.4): the later of
+    /// its last mutation and the last heartbeat that vouched for it, which
+    /// its replies carry in place of the mutation's Zenoh timestamp (S2,
+    /// core §4.3's table). `None` for any other.
+    confirmed: Option<Timestamp>,
 }
+
+impl Entry {
+    /// The Zenoh timestamp its replies carry (S2).
+    fn reply_time(&self) -> Option<Timestamp> {
+        self.confirmed.or(self.stamped.time)
+    }
+}
+
+/// One covered interface's collections, as its heartbeats read them
+/// (`freshness.v2` §2.4, core §7.5).
+struct Book {
+    layout: Arc<zenkey_model::heartbeat::Layout>,
+    collections: Vec<Collection>,
+}
+
+/// One collection: its digest over its live members, each with its bit.
+#[derive(Default)]
+struct Collection {
+    digest: zenkey_model::heartbeat::Digest,
+    /// Base-relative key → (its stamp, whether it is vouched for).
+    live: BTreeMap<String, (wire::Stamp, bool)>,
+}
+
+/// What a heartbeat vouched for: each member's key and the stamp it held,
+/// so a confirmation never lands on a value put after it was read.
+pub(crate) type Vouched = Vec<(String, wire::Stamp)>;
 
 /// How many distinct selectors a [`Store`] counts the GETs of; a GET on a
 /// selector past them is counted apart, as reaching no key.
@@ -568,6 +633,10 @@ pub struct Store {
     /// of them: what [`Store::asked_reaching`] counts (`desired.v1`'s
     /// scenarios §8, text 0.4).
     asked: Mutex<HashMap<OwnedKeyExpr, u64>>,
+    /// Each interface whose contract uses `freshness.v2`, by id: its
+    /// collections as its heartbeats read them. Lock order: `map`, then
+    /// this.
+    books: Mutex<BTreeMap<String, Book>>,
 }
 
 impl Store {
@@ -576,6 +645,145 @@ impl Store {
             map: Mutex::new(HashMap::new()),
             window,
             asked: Mutex::new(HashMap::new()),
+            books: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    /// Keeps `layout`'s interface's collections from now on: its contract
+    /// uses `freshness.v2` (v2 §2.4). Before any of its members is put.
+    pub(crate) fn cover(&self, layout: Arc<zenkey_model::heartbeat::Layout>) {
+        let n = layout.collections.len();
+        self.books.lock().expect("not poisoned").insert(
+            layout.iface.to_string(),
+            Book {
+                layout,
+                collections: (0..n).map(|_| Collection::default()).collect(),
+            },
+        );
+    }
+
+    /// Whether `key` is a member of a collection a heartbeat covers.
+    pub(crate) fn covers(&self, key: &str) -> bool {
+        let books = self.books.lock().expect("not poisoned");
+        Self::collection_in(&books, key).is_some()
+    }
+
+    fn collection_in<'b>(books: &'b BTreeMap<String, Book>, key: &str) -> Option<(&'b str, usize)> {
+        let iface = key.split('/').nth(3)?;
+        let (id, b) = books.get_key_value(iface)?;
+        Some((id.as_str(), b.layout.collection_of(key)?))
+    }
+
+    /// A member's digest, in or out, and its bit: `old` the stamp of its
+    /// live value before (`None` when it held none), `new` the live
+    /// value's now (`None` after a delete).
+    fn toggle(&self, key: &str, old: Option<wire::Stamp>, new: Option<(wire::Stamp, bool)>) {
+        let mut books = self.books.lock().expect("not poisoned");
+        let Some((iface, i)) = Self::collection_in(&books, key).map(|(a, i)| (a.to_owned(), i))
+        else {
+            return;
+        };
+        let c = &mut books.get_mut(&iface).expect("found").collections[i];
+        if let Some(o) = old {
+            c.digest.toggle(key, o);
+        }
+        match new {
+            Some((stamp, vouched)) => {
+                c.digest.toggle(key, stamp);
+                c.live.insert(key.to_owned(), (stamp, vouched));
+            }
+            None => {
+                c.live.remove(key);
+            }
+        }
+    }
+
+    /// Sets a covered member's bit (`freshness.v2` §2.4): it vouches for
+    /// its value, or no longer does.
+    pub(crate) fn vouch(&self, key: &str, on: bool) {
+        let mut books = self.books.lock().expect("not poisoned");
+        let Some((iface, i)) = Self::collection_in(&books, key).map(|(a, i)| (a.to_owned(), i))
+        else {
+            return;
+        };
+        if let Some(m) = books.get_mut(&iface).expect("found").collections[i]
+            .live
+            .get_mut(key)
+        {
+            m.1 = on;
+        }
+    }
+
+    /// `iface`'s heartbeat body now (core §7.5): a section for each
+    /// collection `exposed` marks, its digest and its members' bits in key
+    /// order, every bit clear when `vouch` is false (the clock guard
+    /// holds, `freshness.v2` §2.10). Returns it with what it vouched for,
+    /// or `None` for an interface it does not cover.
+    pub(crate) fn heartbeat(
+        &self,
+        iface: &str,
+        exposed: &[bool],
+        time: zenkey_model::heartbeat::Time,
+        vouch: bool,
+    ) -> Option<(zenkey_model::heartbeat::Heartbeat, Vouched)> {
+        use zenkey_model::heartbeat::{Heartbeat, Members, Section};
+        let books = self.books.lock().expect("not poisoned");
+        let b = books.get(iface)?;
+        let mut vouched = Vec::new();
+        let sections = b
+            .layout
+            .collections
+            .iter()
+            .zip(&b.collections)
+            .enumerate()
+            .map(|(i, (layout, c))| {
+                if !exposed.get(i).copied().unwrap_or(false) {
+                    return None;
+                }
+                let bits: Vec<bool> = c.live.values().map(|(_, v)| vouch && *v).collect();
+                for ((k, (stamp, _)), on) in c.live.iter().zip(&bits) {
+                    if *on {
+                        vouched.push((k.clone(), *stamp));
+                    }
+                }
+                let members = if layout.is_templated() {
+                    Members::templated(
+                        bits.len() as u64,
+                        bits.iter()
+                            .enumerate()
+                            .filter(|(_, on)| **on)
+                            .map(|(r, _)| r as u64),
+                    )
+                } else {
+                    Members::One {
+                        vouched: bits.first().copied().unwrap_or(false),
+                    }
+                };
+                Some(Section {
+                    digest: c.digest,
+                    members,
+                })
+            })
+            .collect();
+        Some((Heartbeat { time, sections }, vouched))
+    }
+
+    /// A heartbeat put at `at` vouched for `vouched`: each member still
+    /// holding the stamp it was vouched for at is confirmed then, and its
+    /// replies carry `at` (`freshness.v2` §2.4, S2).
+    pub(crate) fn confirm(&self, vouched: &Vouched, at: Timestamp) {
+        let mut map = self.map.lock().expect("not poisoned");
+        for (key, stamp) in vouched {
+            let Ok(k) = OwnedKeyExpr::try_from(key.as_str()) else {
+                continue;
+            };
+            if let Some(e) = map.get_mut(&k)
+                && e.value.is_some()
+                && e.stamped.stamp == *stamp
+                && e.confirmed.is_none_or(|c| c < at)
+            {
+                e.confirmed = Some(at);
+            }
         }
     }
 
@@ -592,6 +800,10 @@ impl Store {
             .sum()
     }
 
+    /// Records a put. A covered member's (`freshness.v2`) is vouched for
+    /// or not as `vouched` says, and confirmed at `confirmed`, the
+    /// mutation's time (v2 §2.4).
+    #[allow(clippy::too_many_arguments)]
     fn put(
         &self,
         key: &OwnedKeyExpr,
@@ -599,31 +811,41 @@ impl Store {
         encoding: Encoding,
         attachment: Option<Vec<u8>>,
         stamped: Stamped,
+        vouched: bool,
+        confirmed: Option<Timestamp>,
     ) {
-        self.map.lock().expect("not poisoned").insert(
+        let mut map = self.map.lock().expect("not poisoned");
+        let old = map.insert(
             key.clone(),
             Entry {
                 value: Some((bytes, encoding)),
                 attachment,
                 stamped,
                 at: Instant::now(),
+                confirmed,
             },
         );
+        let old = old.and_then(|e| e.value.is_some().then_some(e.stamped.stamp));
+        self.toggle(key.as_str(), old, Some((stamped.stamp, vouched)));
     }
 
     /// A delete recorded `age` ago: its tombstone is answered for what is
     /// left of the window (S3), as a delete made then would be.
     fn delete_aged(&self, key: &OwnedKeyExpr, stamped: Stamped, age: Duration) {
         let now = Instant::now();
-        self.map.lock().expect("not poisoned").insert(
+        let mut map = self.map.lock().expect("not poisoned");
+        let old = map.insert(
             key.clone(),
             Entry {
                 value: None,
                 attachment: None,
                 stamped,
                 at: now.checked_sub(age).unwrap_or(now),
+                confirmed: None,
             },
         );
+        let old = old.and_then(|e| e.value.is_some().then_some(e.stamped.stamp));
+        self.toggle(key.as_str(), old, None);
     }
 
     /// Forgets every key under `prefix`, values and tombstones: a governed
@@ -631,10 +853,21 @@ impl Store {
     /// §2.9), so that a later takeover answers only what it puts again
     /// (§2.6).
     pub(crate) fn forget_prefix(&self, prefix: &str) {
-        self.map
-            .lock()
-            .expect("not poisoned")
-            .retain(|k, _| !k.as_str().starts_with(prefix));
+        let mut map = self.map.lock().expect("not poisoned");
+        let gone: Vec<(String, Option<wire::Stamp>)> = map
+            .iter()
+            .filter(|(k, _)| k.as_str().starts_with(prefix))
+            .map(|(k, e)| {
+                (
+                    k.as_str().to_owned(),
+                    e.value.is_some().then_some(e.stamped.stamp),
+                )
+            })
+            .collect();
+        map.retain(|k, _| !k.as_str().starts_with(prefix));
+        for (k, old) in gone {
+            self.toggle(&k, old, None);
+        }
     }
 
     /// Answers a query: every matching live key with the bytes it put, its
@@ -663,7 +896,7 @@ impl Store {
                     .reply(key.clone(), bytes.clone())
                     .encoding(enc.clone())
                     .attachment(e.attachment.clone())
-                    .timestamp(e.stamped.time)
+                    .timestamp(e.reply_time())
                     .wait(),
                 None => q
                     .reply_del(key.clone())
@@ -788,6 +1021,8 @@ impl Refresher {
                     self.writer.encoding().clone(),
                     attachment.clone(),
                     stamped,
+                    true,
+                    None,
                 );
                 h.at = tokio::time::Instant::now();
                 if let Err(e) = self
@@ -814,7 +1049,9 @@ impl Refresher {
 ///
 /// On a resource whose contract declares `freshness.ttl_s` above 0, it
 /// re-puts the member's value unchanged whenever ttl/2 passes without a
-/// put (the module doc's refresher). Dropping it stops that.
+/// put (the module doc's refresher). Dropping it stops that. Under
+/// `freshness.v2` it re-puts nothing: its owner's heartbeat vouches for
+/// the member while [`StateWriter::set_vouched`] leaves its bit set.
 ///
 /// Made by its service, it keeps the resource's budget (core §2.7, #741):
 /// a put of a key without a value while the live members are at the bound
@@ -835,6 +1072,12 @@ pub struct StateWriter {
     /// The refresher's period: [`REFRESH_LEAD`] of ttl/2.
     period: Option<Duration>,
     refresher: Option<tokio::task::JoinHandle<()>>,
+    /// Whether it keeps its last value: a horizon above 0, so a re-put
+    /// ([`StateWriter::reput`]) can put it again.
+    keep: bool,
+    /// Whether a heartbeat vouches for the member (`freshness.v2` §2.4):
+    /// its contract uses the profile, and the resource is a collection.
+    covered: bool,
 }
 
 impl Drop for StateWriter {
@@ -867,10 +1110,13 @@ impl StateWriter {
         if let Some(g) = writer.gate() {
             g.hold(Arc::downgrade(&member) as std::sync::Weak<dyn crate::gate::Slot>);
         }
+        // freshness.v2 §2.4: a member a heartbeat covers is never re-put.
+        let covered = store.covers(key.as_str());
+        let keep = horizon.refresh_bound().is_some();
         let period = horizon
             .refresh_bound()
             .map(|b| b.mul_f64(REFRESH_LEAD))
-            .filter(|p| !p.is_zero());
+            .filter(|p| !p.is_zero() && !covered);
         let refresher = period.and_then(|period| {
             let Ok(rt) = tokio::runtime::Handle::try_current() else {
                 tracing::warn!(
@@ -902,7 +1148,18 @@ impl StateWriter {
             member,
             period,
             refresher,
+            keep,
+            covered,
         }
+    }
+
+    /// The Zenoh timestamp a covered member's replies carry from a
+    /// mutation stamped so (`freshness.v2` §2.4, S2): the mutation's own
+    /// where it set one, else the owner's clock now. `None` for a member no
+    /// heartbeat covers, whose replies carry the mutation's.
+    fn confirmed_at(&self, stamped: &Stamped) -> Option<Timestamp> {
+        self.covered
+            .then(|| stamped.time.unwrap_or_else(|| self.minter.time()))
     }
 
     /// The member's key expression.
@@ -937,10 +1194,37 @@ impl StateWriter {
     /// because the source it reports went away, turns them off and lets the
     /// member go stale, rather than confirming a value it does not know to
     /// be current. Turned back on, a member whose interval has run out is
-    /// re-put at once.
+    /// re-put at once. Under `freshness.v2` it is the member's bit:
+    /// [`StateWriter::set_vouched`].
     pub fn set_refresh(&self, on: bool) {
+        self.set_vouched(on);
+    }
+
+    /// Vouches for the member's value, or stops (`freshness.v1` and
+    /// `freshness.v2` §2.4, "only a value it holds current"). Under
+    /// `freshness.v2` it is the member's bit in its owner's heartbeat: set,
+    /// each heartbeat confirms the value; clear, none does, and the member
+    /// goes stale from its last confirmation. Under `freshness.v1` it
+    /// turns the re-puts on and off ([`StateWriter::set_refresh`]). On by
+    /// default, and kept across puts.
+    pub fn set_vouched(&self, on: bool) {
         self.member.refresh.store(on, Ordering::Relaxed);
+        self.store.vouch(self.key.as_str(), on);
         self.member.wake.notify_one();
+    }
+
+    /// Whether it vouches for the member's value now
+    /// ([`StateWriter::set_vouched`]).
+    #[must_use]
+    pub fn is_vouched(&self) -> bool {
+        self.member.refresh.load(Ordering::Relaxed)
+    }
+
+    /// Whether a heartbeat confirms the member (`freshness.v2` §2.4): its
+    /// contract uses the profile, and its resource is a collection.
+    #[must_use]
+    pub fn is_covered(&self) -> bool {
+        self.covered
     }
 
     /// Puts a value (already in the contract's type), its record sealed in
@@ -977,7 +1261,7 @@ impl StateWriter {
         let record = payload.to_bytes().into_owned();
         let bytes = stamped.seal_tagged(self.writer.tag(), &record);
         let kept = attachment.as_ref().map(|a| a.to_bytes().into_owned());
-        if self.period.is_some() {
+        if self.keep {
             held.value = Some((record, kept.clone()));
         }
         held.at = tokio::time::Instant::now();
@@ -987,6 +1271,8 @@ impl StateWriter {
             self.writer.encoding().clone(),
             kept,
             stamped,
+            self.is_vouched(),
+            self.confirmed_at(&stamped),
         );
         let sent = self
             .writer
@@ -1034,6 +1320,8 @@ impl StateWriter {
             self.writer.encoding().clone(),
             attachment.clone(),
             stamped,
+            self.is_vouched(),
+            self.confirmed_at(&stamped),
         );
         held.at = tokio::time::Instant::now();
         let sent = self

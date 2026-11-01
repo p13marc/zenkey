@@ -52,8 +52,15 @@
 //! delivered. A heartbeat whose section's digest is the view's confirms
 //! the members it vouches for, so [`Subscription::freshness`] ages a
 //! member from its last confirmation, a put or a heartbeat
-//! ([`Consumer::subscribe_confirmed`] hands each one over). No rule adopts
-//! the heartbeat yet, and no owner sends one.
+//! ([`Consumer::subscribe_confirmed`] hands each one over).
+//! `freshness.v2` adopts it (#978's F3): an owner of a contract that uses
+//! it sends a heartbeat per interface, and a reader's rule is v2 §2.5's.
+//! After two heartbeats in a row whose digest is not the view's, the
+//! subscription re-reads the provider's collection by S4's GET on its own
+//! ([`Subscription::rereads`]), and the answer replaces the view, merged
+//! with what it heard since it asked; a late joiner seeds the views from
+//! its own GET ([`Subscription::seed`]). A re-read delivers nothing: it
+//! makes the view whole, so the next heartbeat confirms.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -278,7 +285,14 @@ pub struct Consumer {
     /// Where a subscription hands each sample it refuses as undecodable
     /// ([`Consumer::with_refused`]). `None`: counted alone.
     refused: Option<OnRefused>,
+    /// How long a re-read of a diverged collection waits for its replies
+    /// (`freshness.v2` §2.5; core §8.1: timeouts are the caller's).
+    reread_timeout: Duration,
 }
+
+/// How long a re-read waits unless [`Consumer::with_reread_timeout`] says
+/// otherwise: a GET's timeout, the caller's choice (core §8.1).
+pub const REREAD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A live subscription through a role. Dropping it undeclares it, and
 /// stops its `timing.v1` engine.
@@ -286,6 +300,8 @@ pub struct Subscription {
     _subs: Vec<Subscriber<()>>,
     /// Each bound provider's heartbeat subscriber, for a collection.
     _heartbeats: Vec<Subscriber<()>>,
+    /// The collection it follows by heartbeats, if any.
+    followed: Option<Arc<Followed>>,
     seen: Arc<Seen>,
     /// When it was declared: how long it has listened (`freshness.v1` §2.5),
     /// and the origin of its deadlines (`timing.v1` §2.5).
@@ -314,6 +330,11 @@ struct Seen {
     /// heartbeat key that is no heartbeat.
     heartbeats: AtomicU64,
     heartbeats_unread: AtomicU64,
+    /// The providers whose collection a re-read is running for, and the
+    /// re-reads that replaced a view (`freshness.v2` §2.5).
+    rereading: Mutex<std::collections::BTreeSet<Addr>>,
+    rereads: AtomicU64,
+    last_reread: Mutex<Option<Instant>>,
 }
 
 /// What a heartbeat confirmed of a subscription's collection (#978's F2):
@@ -379,7 +400,17 @@ impl Consumer {
             epsilon: None,
             declaring: None,
             refused: None,
+            reread_timeout: REREAD_TIMEOUT,
         })
+    }
+
+    /// How long a subscription's re-read of a diverged collection waits
+    /// for its replies (`freshness.v2` §2.5): across a slow face, at least
+    /// its round trip. [`REREAD_TIMEOUT`] unless set.
+    #[must_use]
+    pub fn with_reread_timeout(mut self, timeout: Duration) -> Self {
+        self.reread_timeout = timeout;
+        self
     }
 
     /// A consumer for a tool, which has no service of its own: `contract`
@@ -834,6 +865,7 @@ impl Consumer {
         Ok(Subscription {
             _subs: subs,
             _heartbeats: heartbeats,
+            followed,
             seen,
             since,
             timing,
@@ -853,6 +885,7 @@ impl Consumer {
         F: Fn(Confirmation) + Send + Sync + 'static,
     {
         let on_confirm = Arc::new(on_confirm);
+        let rt = tokio::runtime::Handle::try_current().ok();
         let mut out = Vec::new();
         for p in &self.providers {
             let (sys, svc) = p.chunks();
@@ -869,6 +902,7 @@ impl Consumer {
                 self.providers.clone(),
             );
             let iface = self.contract.iface.clone();
+            let (session, timeout, rt) = (self.session.clone(), self.reread_timeout, rt.clone());
             out.push(
                 self.session
                     .declare_subscriber(ke)
@@ -892,7 +926,7 @@ impl Consumer {
                             return;
                         };
                         let body = sample.payload().to_bytes();
-                        let (applied, owner_time) = {
+                        let (applied, owner_time, due) = {
                             let mut views = seen.views.lock().expect("not poisoned");
                             let view = views.entry(addr.clone()).or_insert_with(|| {
                                 let mut v = View::new(f.layout.clone());
@@ -900,8 +934,31 @@ impl Consumer {
                                 v
                             });
                             let applied = view.apply(tag, stamp, &body, arrival);
-                            (applied, view.owner_time())
+                            (
+                                applied,
+                                view.owner_time(),
+                                view.reread_due().contains(&f.index),
+                            )
                         };
+                        // freshness.v2 §2.5: two divergences in a row, a
+                        // re-read of the provider's collection, one at a
+                        // time.
+                        if due
+                            && let Some(rt) = &rt
+                            && seen
+                                .rereading
+                                .lock()
+                                .expect("not poisoned")
+                                .insert(addr.clone())
+                        {
+                            rt.spawn(reread(
+                                session.clone(),
+                                Arc::clone(&f),
+                                Arc::clone(&seen),
+                                addr.clone(),
+                                timeout,
+                            ));
+                        }
                         let sections = match applied {
                             Applied::Read { sections, .. } => sections,
                             Applied::Older => return,
@@ -1475,4 +1532,157 @@ impl Subscription {
             .get(clock)
             .map_or(ClockTrust::Untrusted, |m| m.trust(delta))
     }
+}
+
+impl Subscription {
+    /// The re-reads that replaced a provider's view of the collection it
+    /// follows (`freshness.v2` §2.5): each after two heartbeats in a row
+    /// whose digest was not the view's.
+    #[must_use]
+    pub fn rereads(&self) -> u64 {
+        self.seen.rereads.load(Ordering::Relaxed)
+    }
+
+    /// When the last re-read replaced a view, on this host's monotonic
+    /// clock.
+    #[must_use]
+    pub fn last_reread(&self) -> Option<Instant> {
+        *self.seen.last_reread.lock().expect("not poisoned")
+    }
+
+    /// Seeds the views of the collection it follows from a late joiner's
+    /// own S4 GET, asked at `asked` (core §4.2, `freshness.v2` §2.5): each
+    /// provider's answered members replace its view, merged with what the
+    /// subscription heard since `asked`, so the next heartbeat whose
+    /// digest the owner's is confirms them. Nothing for a subscription
+    /// that follows no collection.
+    pub fn seed(&self, answer: &crate::state::StateAnswer, asked: Instant) {
+        let Some(f) = &self.followed else {
+            return;
+        };
+        let now = Instant::now();
+        let mut by: BTreeMap<Addr, Vec<(String, Option<zenkey_model::wire::Stamp>)>> =
+            BTreeMap::new();
+        for c in &answer.current {
+            let crate::state::Current::Value { key, .. } = c else {
+                continue;
+            };
+            let Some(k) = zenkey_model::heartbeat::base_relative(key) else {
+                continue;
+            };
+            if f.layout.collection_of(k) != Some(f.index) {
+                continue;
+            }
+            if let Ok(ZkKey::Data { addr, .. }) = parse(k) {
+                by.entry(addr)
+                    .or_default()
+                    .push((k.to_owned(), answer.inband.get(key).copied()));
+            }
+        }
+        let mut views = self.seen.views.lock().expect("not poisoned");
+        for (addr, live) in by {
+            let view = views.entry(addr).or_insert_with(|| {
+                let mut v = View::new(f.layout.clone());
+                v.follow(f.index);
+                v
+            });
+            view.reread(
+                f.index,
+                live.iter().map(|(k, s)| (k.as_str(), *s)),
+                asked,
+                now,
+            );
+        }
+    }
+}
+
+/// The selector of `addr`'s members of the collection `f` follows: its
+/// template's pattern, each parameter `*` and a rest `**`.
+fn collection_selector(f: &Followed, addr: &Addr) -> Option<OwnedKeyExpr> {
+    let c = f.layout.collections.get(f.index)?;
+    let tail: Vec<String> = c
+        .template
+        .segments()
+        .iter()
+        .map(|seg| match seg {
+            Segment::Literal(l) => l.clone(),
+            Segment::Param(_) => "*".to_owned(),
+            Segment::Rest(_) => "**".to_owned(),
+        })
+        .collect();
+    OwnedKeyExpr::try_from(format!(
+        "zk2/{}/{}/{}/{}/{}",
+        addr.system,
+        addr.service,
+        f.layout.iface,
+        c.token,
+        tail.join("/")
+    ))
+    .ok()
+}
+
+/// A re-read of `addr`'s collection after two divergences in a row
+/// (`freshness.v2` §2.5): S4's GET on the collection, and, when it ran to
+/// its end, its live members replace the view, merged with what the
+/// subscription heard since it asked (core §4.2). A GET cut short leaves
+/// the view as it was: unconfirmed, the safe side.
+async fn reread(
+    session: zenoh::Session,
+    f: Arc<Followed>,
+    seen: Arc<Seen>,
+    addr: Addr,
+    timeout: Duration,
+) {
+    let done = || {
+        seen.rereading.lock().expect("not poisoned").remove(&addr);
+    };
+    let Some(ke) = collection_selector(&f, &addr) else {
+        done();
+        return;
+    };
+    let asked = Instant::now();
+    let rx = match session
+        .get(ke)
+        .target(zenoh::query::QueryTarget::All)
+        .consolidation(zenoh::query::ConsolidationMode::Latest)
+        .timeout(timeout)
+        .with(flume::unbounded::<zenoh::query::Reply>())
+        .await
+    {
+        Ok(rx) => rx,
+        Err(e) => {
+            tracing::debug!(provider = %addr, "freshness.v2: a re-read was not asked: {e}");
+            done();
+            return;
+        }
+    };
+    let mut live = Vec::new();
+    let mut complete = true;
+    while let Ok(reply) = rx.recv_async().await {
+        let Ok(sample) = reply.into_result() else {
+            complete = false;
+            continue;
+        };
+        if sample.kind() != zenoh::sample::SampleKind::Put {
+            continue;
+        }
+        let key = sample.key_expr().as_str().to_owned();
+        let read = crate::inband::read(sample);
+        live.push((key, read.stamp()));
+    }
+    if complete {
+        let mut views = seen.views.lock().expect("not poisoned");
+        if let Some(v) = views.get_mut(&addr) {
+            v.reread(
+                f.index,
+                live.iter().map(|(k, s)| (k.as_str(), *s)),
+                asked,
+                Instant::now(),
+            );
+        }
+        drop(views);
+        *seen.last_reread.lock().expect("not poisoned") = Some(Instant::now());
+        seen.rereads.fetch_add(1, Ordering::Relaxed);
+    }
+    done();
 }
