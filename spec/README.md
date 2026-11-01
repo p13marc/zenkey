@@ -20,12 +20,9 @@ section number alone is the core's.
   named by an instance id of 64 random bits
   ([§1.2](core.md#12-lexical-rules)).
 - **Epoch**: a span of continuity, which an instance id names. An owner
-  starts a new one whenever its counters reset or its state's ordering
-  restarts ([§1.5](core.md#15-identity)). §1.5 asks for a new session, so
-  that its stamps' id changes too. An owner takes its last stamp from its
-  own record. Without one, it reads an archive on its own side. With
-  neither, §4.3 requires a new instance whose session has a fresh,
-  unpinned zid ([§4.3](core.md#43-clocks-s7)).
+  starts a new one whenever its counters reset
+  ([§1.5](core.md#15-identity)). Each new instance writes under a new run
+  ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
 - **Resource**: what an interface provides: a stream, a state, an event or
   an operation ([§2.1](core.md#21-patterns)).
 - **Kind**: which of the four a resource is, and the key token that says
@@ -77,15 +74,22 @@ section number alone is the core's.
   an owner holds no interface token ([§8.1](core.md#81-tokens)).
 - **Standby**: an instance that implements an interface and exposes none of
   it, its descriptor saying so ([§6](core.md#6-ownership-and-serving)).
-- **Stamp**: the timestamp an owner sets on every state mutation. It is
-  the greater of `Session::new_timestamp()` and its last stamp plus one
-  tick. At the constrained level, a wall clock with a per-session bump
-  replaces the HLC ([§4.3](core.md#43-clocks-s7)).
+- **Run**: an owner's ordering epoch, of 16 or 32 bits. It is a counter
+  from the owner's record, or a random draw. A new instance takes a new
+  run, and nothing orders two runs ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
+- **Seq**: a 24-bit count within a run. An owner keeps one for its state
+  and events, which never wraps, and one for each stream key, which
+  compares by serial arithmetic ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
+- **In-band stamp**: the run and the seq a zk2c envelope carries. It
+  orders a key's values within one run ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
+- **Zenoh timestamp**: a stamp a session's HLC or clock issues, with its
+  zid. Only the resources §4.3's table lists carry one their owner sets
+  ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
 - **Late joiner**: a consumer or a tool that subscribes to a state, then
-  asks its owner, and merges both by stamp. Across two stamp ids, a
-  consumer keeps what §4.3's consumer rule accepts
-  ([§4.2](core.md#42-rules-for-owners-and-consumers)). A tool keeps the
-  merge for as long as it follows ([observer §4.1](observer.md#41-a-seed)).
+  asks its owner, and merges both by in-band stamp
+  ([§4.2](core.md#42-rules-for-owners-and-consumers)). Across two runs, a
+  consumer keeps what §4.3's consumer rule accepts. A tool keeps the
+  later arrival ([observer §4.1](observer.md#41-a-seed)).
 - **Tombstone window**: how long an owner answers a GET of a key it deleted
   with the delete, 60 s by default
   ([§4.2](core.md#42-rules-for-owners-and-consumers)).
@@ -154,9 +158,10 @@ section number alone is the core's.
   message. `unavailable` adds a cause, and `app` may add a detail
   ([§5.2](core.md#52-the-error-envelope)).
 - **zk2c envelope**: a header byte, a run and a seq, then the record. A
-  put carries one as its payload, and a delete as its attachment. It is
-  defined, and no rule adopts it yet
-  ([§7.5](core.md#75-the-zk2c-envelope)).
+  put carries one as its payload, and a delete as its attachment
+  ([§7.5](core.md#75-the-zk2c-envelope)). An owner writes one on every
+  state mutation, stream sample and event, an `@stream` sample's excepted
+  ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it

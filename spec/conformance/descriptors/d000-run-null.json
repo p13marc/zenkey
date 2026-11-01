@@ -1,0 +1,10 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "robot/logger",
+ "instance": "0000000000000001",
+ "run": null,
+ "interfaces": [],
+ "meta": {
+  "note": "a run written null, which is no string: outside the schema, D000. A descriptor that states no run leaves the member out (core §3.3)"
+ }
+}

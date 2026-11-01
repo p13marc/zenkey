@@ -13,6 +13,55 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.15 — 2026-11-01: §4.1, §4.4 and §8.3 read core 0.73's in-band stamps (#976)
+
+Core 0.73 (#976's flip) orders a key's values by an owner's run and seq,
+carried in band in §7.5's envelope. Only the resources its §4.3's table
+lists keep a Zenoh timestamp. This text says what a tool does with each,
+and is written against core 0.73.
+
+**Changed: §4.1, "A tool's merge lasts".**
+- **Within one run,** a tool orders by seq, plain or serial as the key's
+  kind says (core §4.3).
+- **Across two runs,** it keeps the later arrival, since nothing orders
+  them. It kept the merge's order across two timestamp ids.
+- **A sample with no envelope** is ordered by its Zenoh timestamp, across
+  two ids too, as before. Beside an in-band stamp it is unordered, and
+  the tool keeps the later arrival.
+- **Evidence:** `[F: seed/inband.json, seed/merge.json]`, and
+  `[Sc: state.md §7, §13]`.
+
+**Changed: §4.4, "A tool's S1 check".**
+- **An in-band stamp is the owner's,** since only the owner writes its
+  payload.
+- **What a tool checks** is the Zenoh timestamps core §4.3's table keeps.
+  On those resources a stamp not the owner's is a finding, as before.
+- **Outside the table,** a router's stamp, the reader's own, or none is
+  expected on an owner's sample, and is never a finding.
+- **Evidence:** `[Sc: state.md §1]` beside the timing scenarios.
+
+**Changed: §8.3.**
+- **Added: an in-band stamp** is the owner's run and seq. It orders, and
+  has no time: a tool shows it as a run and a seq, never as a time.
+- **The owner's own timestamp** is the owner's on a resource the table
+  lists, where S1 holds. Outside it, an owner's sample arrives with a
+  router's timestamp, or none.
+
+**Appendix B** lists `conformance/seed/` against §4.1, and `state.md`
+§13 beside §1, §7, §11 and §12.
+
+**Deliberately not changed.**
+- **§7.3,** "The envelope first", which 0.14 added. It already reads a
+  stream, state or event sample under `zenoh/bytes` as an envelope.
+- **§4.1's bound,** and what a seed cannot know.
+- **§5.2's spans,** which already fall back to the receive clock where
+  the occurrences carry no one clock id.
+- **No section number.**
+
+**The figures.** This text's mean goes from 18.15 to 18.01 words, with no
+sentence over 50 and no tag. `spec/.prose-baseline.json` is lowered to
+it.
+
 ## 0.14 — 2026-11-01: §7.3 reads the zk2c envelope first (#976)
 
 Core 0.72 (#1000) defines the zk2c envelope (§7.5), and no rule adopts it

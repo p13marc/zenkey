@@ -1,0 +1,10 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "robot/logger",
+ "instance": "0000000000000001",
+ "run": "ABCD",
+ "interfaces": [],
+ "meta": {
+  "note": "a run in uppercase hex: D002 (core §3.3)"
+ }
+}

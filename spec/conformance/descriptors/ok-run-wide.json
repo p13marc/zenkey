@@ -1,0 +1,10 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "robot/logger",
+ "instance": "0000000000000001",
+ "run": "000000a1",
+ "interfaces": [],
+ "meta": {
+  "note": "a 32-bit run, as 8 lowercase hex digits: not the 16-bit run 00a1 (core §3.3, §4.3)"
+ }
+}

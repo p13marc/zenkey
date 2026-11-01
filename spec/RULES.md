@@ -52,13 +52,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 56 |
+| [Owner](#owner) | 62 |
 | [Consumer](#consumer) | 15 |
 | [Caller](#caller) | 13 |
-| [Deployment](#deployment) | 15 |
+| [Deployment](#deployment) | 16 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 55, 24 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 36 |
-| Every rule, once | 175 |
+| Every rule, once | 182 |
 | [Rule ids](#rule-ids) | 71 |
 
 ## Owner
@@ -81,8 +81,8 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§1.5](core.md#15-identity) | An owner MUST mint a new instance id whenever its counters reset or its state's ordering restarts (§4.3): a process restart, a device re-enumerated, a polled device's uptime rewound, a container restarted. | `[Sc: presence.md §3]` |
-| [§1.5](core.md#15-identity) | The owner SHOULD do so in a new session, so that its timestamps' id changes too (§4.3). | `[Sc: state.md §7]` |
+| [§1.5](core.md#15-identity) | An owner MUST mint a new instance id whenever its counters reset: a process restart, a device re-enumerated, a polled device's uptime rewound, a container restarted. | `[Sc: presence.md §3]` |
+| [§1.5](core.md#15-identity) | The owner SHOULD mint it in a new session, so that the Zenoh timestamps §4.3's table keeps change id too. | `[Sc: state.md §7]` |
 | [§1.5](core.md#15-identity) | An owner's counter that crosses a face where neither is visible SHOULD carry its epoch in-band, in its value or its attachment, as [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9). | `[Sc: profiles/telemetry/scenarios.md §8]` |
 
 ### [core §2.3 Resource attributes](core.md#23-resource-attributes)
@@ -116,6 +116,7 @@ The owner, consumer and caller sections each point to them.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§3.3](core.md#33-the-descriptor-record) | The owner's descriptor MUST NOT raise it [a template's bound]. | `[F: descriptors/d007-*]` |
+| [§3.3](core.md#33-the-descriptor-record) | An owner MUST state its run there, and MUST put its descriptor again when the run changes, before it writes under the new run. | `[F: descriptors/ok-run, d002-run-*]` `[Sc: state.md §1, §7]` |
 | [§3.3](core.md#33-the-descriptor-record) | One member is used: an owner SHOULD state its session's zid as `meta.zid`, as the reference does. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner SHOULD write `meta.zid` as zenoh writes it. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. | `[Sc: constrained.md §5]` |
@@ -126,27 +127,30 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [S1](core.md#42-rules-for-owners-and-consumers) | **Owner:** every state mutation, put **and** delete, MUST carry a timestamp the owner set. | `[Sc: state.md §1]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. | `[Sc: state.md §1, §2]` |
+| [S1](core.md#42-rules-for-owners-and-consumers) | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). | `[Sc: state.md §1]` |
+| [S1](core.md#42-rules-for-owners-and-consumers) | On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. | `[Sc: state.md §1, §2]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2]` |
 | [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner] MUST answer a selector over them [its interfaces' `state/**` and `@state/**`] with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
-| [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. | `[Sc: state.md §2, §6]` |
+| [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). | `[Sc: state.md §2, §6]` |
 
-### [core §4.3 Clocks (S7)](core.md#43-clocks-s7)
+### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [S7](core.md#43-clocks-s7) | A session that serves state MUST enable Zenoh's HLC. | `[Sc: state.md §1, §7]` |
-| [S7](core.md#43-clocks-s7) | An owner MUST NOT stamp at or below the last timestamp it issued for its keys. | none cited |
-| [S7](core.md#43-clocks-s7) | With neither source, the owner MUST start a new epoch: a new instance (§1.5) whose session has a fresh, unpinned zid. | none cited |
-| [S7](core.md#43-clocks-s7) | An owner SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own offset without a reference. | `[Sc: state.md §7]` |
-| [S7](core.md#43-clocks-s7) | The owner SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | `[Sc: state.md §7]` |
-| [S7](core.md#43-clocks-s7) | When a detection shows it beyond the delta, the owner MUST stop writing state, re-puts included, and SHOULD report it. | `[Sc: profiles/freshness/scenarios.md §2]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | An owner MUST write each put on a `stream`, `state`, `@state` or `events` key, and each delete of a state member, with §7.5's envelope. | `[Sc: state.md §1]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | An owner MUST NOT write under a run that it, or another instance of its service, wrote under before. | `[Sc: state.md §7]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | An owner MUST NOT let that seq wrap. | `[Sc: state.md §7]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | **Streams.** … An owner MUST NOT restart a stream key's seq within a run, even where it declares the key's publisher again: a takeover, or a member removed and added. | `[Sc: state.md §13]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | **Ahead.** … An owner SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own offset without a reference. | `[Sc: state.md §7]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | The owner SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | `[Sc: state.md §7]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | When a detection shows it beyond the delta, the owner MUST stop writing state, re-puts included, and SHOULD report it. | `[Sc: profiles/freshness/scenarios.md §2]` |
 
 ### [core §4.4 Archives](core.md#44-archives)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§4.4](core.md#44-archives) | **An archive's backend MUST NOT accept a put older than a delete it holds.** | `[Sc: state.md §4–§6, §9]` |
+| [§4.4](core.md#44-archives) | **An archive's backend MUST NOT accept a put older than a delete it holds.** | `[Sc: state.md §9]` |
 | [§4.4](core.md#44-archives) | When an owner becomes reachable again, the archive MUST re-read the owner's recorded collection before serving it as confirmed. | `[Sc: state.md §5]` |
 | [§4.4](core.md#44-archives) | An archive SHOULD repeat an alignment that left keys unconfirmed, a bounded number of times. | `[Sc: state.md §5]` |
 | [§4.4](core.md#44-archives) | **An unconfirmed key expires.** … The archive MAY drop such a key after a deployment-set horizon, and MUST keep serving it as unconfirmed until then. | `[Sc: state.md §4–§6, §9]` |
@@ -185,7 +189,7 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.2](core.md#72-encodings-and-rendering) | An owner MUST set Zenoh's predefined `Encoding` for every sample whose type has one: protobuf, JSON, CBOR, or a predefined media type. | `[Sc: types.md §1]` |
+| [§7.2](core.md#72-encodings-and-rendering) | An owner MUST set Zenoh's predefined `Encoding` for every sample whose type has one (protobuf, JSON, CBOR, or a predefined media type), except a sample that carries §7.5's envelope (§4.3). | `[Sc: types.md §1]` |
 | [§7.2](core.md#72-encodings-and-rendering) | **The sample's `Encoding`.** … It [an owner] MUST NOT add a schema suffix to it, except on the error envelope (§5.2). | `[Sc: types.md §1]` |
 
 ### [core §7.4 Shared memory](core.md#74-shared-memory)
@@ -209,6 +213,8 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [§8.2](core.md#82-start-up-order) | An owner MUST bring itself up in this order, so that alive ⇒ callable: (4 items) | `[Sc: presence.md §1]` |
 | [§8.2](core.md#82-start-up-order) | **State values.** … A state's value is not a declaration, so an owner that holds a state member's value at start SHOULD put it before step 4: a GET made when the interface token appears then finds it. | `[Sc: presence.md §1]` |
+| [§8.2](core.md#82-start-up-order) | An owner MUST NOT set a Zenoh timestamp on a put or a delete of a data key, except on a resource §4.3's table lists. | `[Sc: state.md §1]` |
+| [§8.2](core.md#82-start-up-order) | **The owner's session** SHOULD run with timestamping disabled, zenoh's default for a client and a peer (§4.1). | `[Sc: state.md §1]` |
 
 ### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
 
@@ -248,16 +254,16 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [S5](core.md#42-rules-for-owners-and-consumers) | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. | `[Sc: state.md §4–§6, §9]` |
 | [S6](core.md#42-rules-for-owners-and-consumers) | The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[Sc: state.md §7, §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by the owner's stamp (S1, S2). | `[Sc: state.md §7, §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … Across two timestamp ids, a consumer MUST instead keep what §4.3's consumer rule accepts. | `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by its in-band stamp: within one run, by seq (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … Across two runs, a consumer MUST instead keep what §4.3's consumer rule accepts. | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
 
-### [core §4.3 Clocks (S7)](core.md#43-clocks-s7)
+### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [S7](core.md#43-clocks-s7) | A consumer MUST order each key's values by time within one timestamp id, from the first value it receives, a late joiner's seed replies included (§4.2). | `[Sc: state.md §7]` |
-| [S7](core.md#43-clocks-s7) | **Consumer rule.** … It [a consumer] MUST accept a value under an id other than the one its held value carries, and order by time within that id from then on. *Except:* A profile MAY order a consumer's values more strictly. | `[Sc: state.md §7]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | A consumer MUST order each state key's values by seq within one run, from the first value it receives, a late joiner's seed replies included (§4.2). | `[F: seed/inband.json]` `[Sc: state.md §7]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | **Consumer rule.** … A consumer MUST accept a value under a run other than its held value's, and order by seq within that run from then on. *Except:* A profile MAY order a consumer's values more strictly. | `[F: seed/inband.json]` `[Sc: state.md §7]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -354,6 +360,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§8.1](core.md#81-tokens) | These [the tokenless set's interfaces] SHOULD be the interfaces every service of the deployment implements: `health.v1` ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) and the rest of a framework set. | `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]` |
 
+### [core §8.2 Start-up order](core.md#82-start-up-order)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.2](core.md#82-start-up-order) | A deployment SHOULD run a router that forwards puts onto a constrained face (§8.5) with timestamping disabled. | `[Sc: state.md §1]` |
+
 ### [core §8.3 The presence budget](core.md#83-the-presence-budget)
 
 | Rule | Sentence | Evidence |
@@ -389,8 +401,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[Sc: state.md §7, §10]` |
-| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by the owner's stamp (S1, S2). | `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by its in-band stamp: within one run, by seq (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 
@@ -710,7 +722,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [R7](core.md#32-binding-rules) | consumer | core §3.2 Binding rules | **Consumer:** a binding MUST NOT require presence. Across a constrained face, a consumer binds … |
 | [D000](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | not strict JSON (a duplicate member included), or outside [`descriptor.schema.json`](descriptor.schema.json) … |
 | [D001](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | `format` is not `zk2-descriptor/0.1` |
-| [D002](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | `service` is not `<system>/<service>`, two plain chunks; `instance` is not 16 lowercase hex digits |
+| [D002](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | `service` is not `<system>/<service>`, two plain chunks … |
 | [D003](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | an interface entry's `iface` is not an interface id … |
 | [D004](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | the entry's interface is among the given contracts, but not at its fingerprint |
 | [D005](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | `unavailable` names a resource the contract does not declare, or a required one |
@@ -721,13 +733,13 @@ MAY, and a row with no keyword, are listed here alone.
 | [D010](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | a profile is not `<name>.v<major>`; or one is listed twice |
 | [D011](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | an interface entry for `archive.v1` is marked `"token": false` … |
 | [D012](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | an interface entry is marked both `"standby": true` and `"token": false` … |
-| [S1](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** every state mutation, put **and** delete, MUST carry a timestamp the owner set. |
-| [S2](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. The … |
+| [S1](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a … |
+| [S2](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents … |
 | [S3](core.md#42-rules-for-owners-and-consumers) | owner, deployment | core §4.2 Rules for owners and consumers | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer … |
 | [S4](core.md#42-rules-for-owners-and-consumers) | consumer, deployment | core §4.2 Rules for owners and consumers | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` … |
 | [S5](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** … |
 | [S6](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** current state is the owner's answer. A consumer turns to an archive only … |
-| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer | core §4.2 Rules for owners and consumers | **Owner:** clocks are bounded both ways (§4.3). |
+| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer | core §4.2 Rules for owners and consumers | **Owner:** a run is never reused, and a seq never wraps within it (§4.3). |
 | [O1](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template) … |
 | [O2](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden` … |
 | [O3](core.md#51-rules) | owner | core §5.1 Rules | **Owner:** a reply MUST go on the operation's own concrete key, a member's for … |

@@ -224,8 +224,7 @@ ANTECEDENTS = {
     # sentence names; "them" is what its state queryables cover (F-384).
     ("core.md", "It MUST answer a selector over them"): [
         ("It", "the owner"), ("over them", "its interfaces' `state/**` and `@state/**`")],
-    ("core.md", "It MUST keep the newer by the owner's stamp"): ("It", "a late joiner"),
-    ("core.md", "It MUST accept a value under an id other than"): ("It", "a consumer"),
+    ("core.md", "It MUST keep the newer by its in-band stamp"): ("It", "a late joiner"),
     ("core.md", "It names the member each reply answers for"): ("It", "a server declared over the whole template"),
     ("core.md", "It MUST refuse:"): ("It", "a tool decoding an envelope"),
     ("core.md", "A deployment's access control MUST NOT grant it"): ("grant it", "a write under another service's prefix"),
@@ -261,9 +260,9 @@ EXCEPTED_BY = {
     # `reliability`, unstable API, which an owner on stable API alone meets
     # by publishing reliable (F-380).
     ("core.md", "An owner MUST publish with it."): "One that does not, or whose binding offers no such API, MAY",
-    # core §4.3: S7's consumer MUST to accept another id, and the MAY for a
+    # core §4.3: S7's consumer MUST to accept another run, and the MAY for a
     # profile's stricter order, which a `desired.v1` target uses (F-394).
-    ("core.md", "It MUST accept a value under an id other than"): "A profile MAY order a consumer's values more strictly",
+    ("core.md", "A consumer MUST accept a value under a run other than"): "A profile MAY order a consumer's values more strictly",
     # the self-test's text
     ("text.md", "An owner MUST publish with the contract's QoS."): "One that does not, or whose binding",
     ("text.md", "A consumer MUST order an owner's values by time."): "A profile MAY order",

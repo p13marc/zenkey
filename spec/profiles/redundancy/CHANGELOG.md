@@ -4,6 +4,40 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-11-01: editorial: core 0.73's runs and session posture cited, no rule changed (#976)
+
+Core 0.73 orders state by an owner's run and seq, carried in band. Its
+consumer rule accepts a value under another run, where it accepted one
+under another timestamp id. It asks an owner's session to run without
+timestamping (its §8.2, "Session posture"), and names a candidate of a
+governed interface as the exception, for this text's §2.10.
+
+**Editorial: the citations follow the rules they cite.**
+- **§2.10, "An instance's stamps":** a candidate MUST enable its
+  session's HLC "(core §8.2's exception)", where it cited core §4.3, whose
+  HLC rule 0.73 removes.
+- **§2.10, "Why":** "Core §4.3's consumer accepts the first value under a
+  new run", where it said "Core S7's consumer … under a new id". So two
+  writers flip it at each put, each the first value of its run since the
+  other's.
+- **§2.10, "A consumer that does not follow":** reads both incumbents'
+  samples "by core §4.3's consumer rule alone", where it said "by core S7
+  alone".
+- **§2.6, "Its state":** a new incumbent is another instance, so it
+  writes under another run, and its stamps carry another id. A consumer
+  accepts its first value as another run's, where it said "as a new
+  epoch".
+
+**Written against core 0.73,** where it said 0.40: the text now cites
+core §8.2's exception and §4.3's runs. The index's row follows.
+
+**Deliberately not changed.**
+- **No rule.** A candidate still enables its session's HLC and states
+  `meta.zid`, and a consumer still follows the incumbent by its stamps'
+  id. Under core 0.73 every put of a candidate keeps that Zenoh
+  timestamp (its §4.3's table).
+- **No fixture, scenario, section number or label.**
+
 ## 0.8 — 2026-10-31: §2.5 step 1's reason restated: a session can answer its own tokens (#992)
 
 Core 0.71 (#992) found that a session's read through a refusing router

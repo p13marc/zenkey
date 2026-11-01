@@ -15,6 +15,16 @@
         "D000"
       ]
     },
+    "d000-run-null": {
+      "codes": [
+        "D000"
+      ]
+    },
+    "d000-run-type": {
+      "codes": [
+        "D000"
+      ]
+    },
     "d000-standby-type": {
       "codes": [
         "D000"
@@ -31,6 +41,16 @@
       ]
     },
     "d002-instance": {
+      "codes": [
+        "D002"
+      ]
+    },
+    "d002-run-case": {
+      "codes": [
+        "D002"
+      ]
+    },
+    "d002-run-length": {
       "codes": [
         "D002"
       ]
@@ -206,6 +226,12 @@
       "codes": []
     },
     "ok-optional-unchecked": {
+      "codes": []
+    },
+    "ok-run": {
+      "codes": []
+    },
+    "ok-run-wide": {
       "codes": []
     },
     "ok-standby": {

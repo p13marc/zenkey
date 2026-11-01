@@ -1,0 +1,993 @@
+{
+  "description": "core §4.2 and §4.3, a key's values ordered by their in-band stamps, §7.5's run and seq. Written by hand from the text, checked, never blessed. A stamp is `{width, run, seq}`: `width` the run's width in bits, 16 or 32; `run` its value; `seq` a 24-bit seq. `kind` is the key's kind token, which picks how two seqs of one run compare: a stream's (`stream`, `@stream`) by serial arithmetic over 24 bits, every other kind's as integers. `order`: two stamps of one key → `expect`, `less`, `equal`, `greater` or `unordered` for `a` against `b`. Within one run, the same width and the same value: as integers by plain order; by serial order `b` is newer when (b − a) mod 2^24 is from 1 to 2^23 − 1, older when it is above 2^23, the same at 0, and unordered at exactly 2^23. Two runs are unordered, whatever their values and seqs, and so are two runs of one value at two widths. `cases`: one key's arrivals, in arrival order, whichever path brought each, each a `sample` (`put` or `delete`; a `reply_del` is a `delete`) with its in-band `stamp` or `null`, and its Zenoh timestamp as `zenoh` where it carries one, `{time, id}` as in `merge.json` → `expect.tool_kept`, whether a tool's merge keeps each arrival, and, for a state key whose every arrival carries a stamp, `expect.consumer_accepts`, whether core §4.3's consumer rule accepts it (`null` otherwise). An arrival with an in-band stamp is ordered by it, whatever Zenoh timestamp it also carries. One with a Zenoh timestamp alone is ordered among those as `merge.json` says for a tool, and for a consumer by time within one id, a value under another id accepted. An in-band stamp and a Zenoh timestamp alone are unordered, either way round. A tool keeps a newer or an unordered arrival, never an equal or an older one, and a consumer accepts likewise. An arrival with neither stamp is kept on a key that holds nothing or only such arrivals, and never over a stamped one. The sample's kind never decides.",
+  "order": [
+    {
+      "note": "state: within one run, the higher seq is newer",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 7
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 8
+      },
+      "expect": "less"
+    },
+    {
+      "note": "state: the same seq is the same mutation",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 7
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 7
+      },
+      "expect": "equal"
+    },
+    {
+      "note": "state: a lower seq is older",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 8
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 7
+      },
+      "expect": "greater"
+    },
+    {
+      "note": "state: plain order, so 16,777,215 is newer than 0, which serial order would call older",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 0
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 16777215
+      },
+      "expect": "less"
+    },
+    {
+      "note": "state: plain order, so seqs 2^23 apart are ordered, where serial order would leave them unordered",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 3
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 8388611
+      },
+      "expect": "less"
+    },
+    {
+      "note": "explicit state is plain",
+      "kind": "@state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 1
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 2
+      },
+      "expect": "less"
+    },
+    {
+      "note": "an event key's seqs are plain, a 32-bit run's as a 16-bit one's",
+      "kind": "events",
+      "a": {
+        "width": 32,
+        "run": 9,
+        "seq": 9
+      },
+      "b": {
+        "width": 32,
+        "run": 9,
+        "seq": 10
+      },
+      "expect": "less"
+    },
+    {
+      "note": "state under a 32-bit run: a lower seq is older",
+      "kind": "state",
+      "a": {
+        "width": 32,
+        "run": 5,
+        "seq": 11
+      },
+      "b": {
+        "width": 32,
+        "run": 5,
+        "seq": 10
+      },
+      "expect": "greater"
+    },
+    {
+      "note": "stream: serial order across the wrap, (0 - 16,777,215) mod 2^24 = 1",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 16777215
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 0
+      },
+      "expect": "less"
+    },
+    {
+      "note": "stream: the other way round, (16,777,215 - 0) mod 2^24 is above 2^23, so b is older",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 0
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 16777215
+      },
+      "expect": "greater"
+    },
+    {
+      "note": "stream: exactly 2^23 apart, unordered",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 5
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 8388613
+      },
+      "expect": "unordered"
+    },
+    {
+      "note": "stream: exactly 2^23 apart, either way round",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 8388613
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 5
+      },
+      "expect": "unordered"
+    },
+    {
+      "note": "stream: 2^23 - 1 ahead is newer",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 5
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 8388612
+      },
+      "expect": "less"
+    },
+    {
+      "note": "stream: 2^23 + 1 ahead is older",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 5
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 8388614
+      },
+      "expect": "greater"
+    },
+    {
+      "note": "stream: the same seq",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 42
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 42
+      },
+      "expect": "equal"
+    },
+    {
+      "note": "stream: the next seq",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 0
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 1
+      },
+      "expect": "less"
+    },
+    {
+      "note": "an explicit stream's seqs are serial, should one carry an envelope",
+      "kind": "@stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 16777215
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 0
+      },
+      "expect": "less"
+    },
+    {
+      "note": "state: two runs are unordered, whatever their seqs",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 7
+      },
+      "b": {
+        "width": 16,
+        "run": 6,
+        "seq": 1
+      },
+      "expect": "unordered"
+    },
+    {
+      "note": "state: two runs are unordered either way round: a run's value says nothing of its age",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 6,
+        "seq": 0
+      },
+      "b": {
+        "width": 16,
+        "run": 5,
+        "seq": 9
+      },
+      "expect": "unordered"
+    },
+    {
+      "note": "state: one value at two widths is two runs",
+      "kind": "state",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 7
+      },
+      "b": {
+        "width": 32,
+        "run": 5,
+        "seq": 7
+      },
+      "expect": "unordered"
+    },
+    {
+      "note": "stream: two runs are unordered, the same seq or not",
+      "kind": "stream",
+      "a": {
+        "width": 16,
+        "run": 5,
+        "seq": 3
+      },
+      "b": {
+        "width": 16,
+        "run": 6,
+        "seq": 3
+      },
+      "expect": "unordered"
+    },
+    {
+      "note": "stream: one value at two widths is two runs",
+      "kind": "stream",
+      "a": {
+        "width": 32,
+        "run": 7,
+        "seq": 0
+      },
+      "b": {
+        "width": 16,
+        "run": 7,
+        "seq": 0
+      },
+      "expect": "unordered"
+    }
+  ],
+  "cases": [
+    {
+      "note": "state within one run: newer kept, an equal or older seq not",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          false,
+          false
+        ],
+        "consumer_accepts": [
+          true,
+          true,
+          false,
+          false
+        ]
+      }
+    },
+    {
+      "note": "state: a delete merges as a put does, by its attachment's stamp",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          }
+        },
+        {
+          "sample": "delete",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          false
+        ],
+        "consumer_accepts": [
+          true,
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "state across two runs: the later arrival is kept and accepted, then the new run is ordered by seq; an old run's late value is the residual risk",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 6,
+            "seq": 1
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 6,
+            "seq": 0
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 3
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "consumer_accepts": [
+          true,
+          true,
+          false,
+          true
+        ]
+      }
+    },
+    {
+      "note": "state: one run's value at two widths is two runs",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 32,
+            "run": 5,
+            "seq": 7
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true
+        ],
+        "consumer_accepts": [
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "note": "state on a resource core §4.3's table lists: the in-band stamp orders, whatever Zenoh timestamp the arrival also carries",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          },
+          "zenoh": {
+            "time": 100,
+            "id": "a"
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          },
+          "zenoh": {
+            "time": 200,
+            "id": "a"
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          false
+        ],
+        "consumer_accepts": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "state: an arrival with only a Zenoh timestamp beside one with an in-band stamp is unordered, either way round",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": null,
+          "zenoh": {
+            "time": 9,
+            "id": "a"
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 0
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": null,
+          "zenoh": {
+            "time": 5,
+            "id": "a"
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          true
+        ],
+        "consumer_accepts": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "note": "state, no envelope: a tool keeps merge.json's order across two ids; a consumer accepts a value under another id",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": null,
+          "zenoh": {
+            "time": 9,
+            "id": "a"
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": null,
+          "zenoh": {
+            "time": 5,
+            "id": "b"
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": null,
+          "zenoh": {
+            "time": 8,
+            "id": "a"
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          false,
+          false
+        ],
+        "consumer_accepts": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "note": "state: an arrival with neither stamp ranks below every stamped one, an in-band one included",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": null
+        },
+        {
+          "sample": "put",
+          "stamp": null
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 0
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": null
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          true,
+          false
+        ],
+        "consumer_accepts": null
+      }
+    },
+    {
+      "note": "explicit state is ordered as state",
+      "kind": "@state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 3
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          false
+        ],
+        "consumer_accepts": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "state: plain order keeps a seq far above the held one, where serial order would refuse it",
+      "kind": "state",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 0
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 9000000
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 8999999
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          false
+        ],
+        "consumer_accepts": [
+          true,
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "stream: the key's seq wraps, and the merge keeps every sample across it",
+      "kind": "stream",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 16777214
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 16777215
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 0
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "consumer_accepts": null
+      }
+    },
+    {
+      "note": "stream: after the wrap, a seq from before it is older",
+      "kind": "stream",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 16777215
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 0
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 16777214
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          false
+        ],
+        "consumer_accepts": null
+      }
+    },
+    {
+      "note": "stream: 2^23 apart, the later arrival is kept; serial order from then on",
+      "kind": "stream",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 5
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 8388613
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 6
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 8388614
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "consumer_accepts": null
+      }
+    },
+    {
+      "note": "stream: an older seq is not kept",
+      "kind": "stream",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 10
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 11
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          false,
+          true
+        ],
+        "consumer_accepts": null
+      }
+    },
+    {
+      "note": "stream across two runs: the later arrival is kept, an old run's late sample included",
+      "kind": "stream",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 100
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 6,
+            "seq": 0
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 101
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true,
+          true
+        ],
+        "consumer_accepts": null
+      }
+    },
+    {
+      "note": "stream with a lifespan: the in-band stamp orders, whatever Zenoh timestamp it also carries",
+      "kind": "stream",
+      "arrivals": [
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          },
+          "zenoh": {
+            "time": 200,
+            "id": "a"
+          }
+        },
+        {
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          },
+          "zenoh": {
+            "time": 100,
+            "id": "a"
+          }
+        }
+      ],
+      "expect": {
+        "tool_kept": [
+          true,
+          true
+        ],
+        "consumer_accepts": null
+      }
+    }
+  ]
+}
