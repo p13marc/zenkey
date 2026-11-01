@@ -1,0 +1,77 @@
+{
+  "description": "core §8.6, a catalog's id. Written by hand from the text, checked, never blessed. Each case is an accepted catalog's `text` → `expect`: `jcs`, the RFC 8785 serialization of the document read; `sha256`, the hex sha256 of those bytes; and `id`, their first 4 bytes as 8 lowercase hex digits. Spacing, member order and a string's escapes do not move the id, since JCS reads the document and not its text.",
+  "cases": [
+    {
+      "note": "the smallest catalog",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "jcs": "{\"entries\":[],\"epoch\":0,\"format\":\"zk2-catalog/1\"}",
+        "sha256": "7e895b70727b4874cbcbbed231223579d55ffbad25fadf075ce4bde3f26151e6",
+        "id": "7e895b70"
+      }
+    },
+    {
+      "note": "§8.6's example, written with two spaces of indent",
+      "text": "{\n  \"format\": \"zk2-catalog/1\",\n  \"epoch\": 1767225600,\n  \"entries\": [\n    {\n      \"index\": 0,\n      \"iface\": \"modem.v3\",\n      \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"\n    },\n    {\n      \"index\": 1,\n      \"iface\": \"config.v1\",\n      \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"\n    },\n    {\n      \"index\": 2,\n      \"iface\": \"health.v1\",\n      \"contract\": \"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\"\n    }\n  ]\n}",
+      "expect": {
+        "jcs": "{\"entries\":[{\"contract\":\"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\",\"iface\":\"modem.v3\",\"index\":0},{\"contract\":\"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\",\"iface\":\"config.v1\",\"index\":1},{\"contract\":\"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\",\"iface\":\"health.v1\",\"index\":2}],\"epoch\":1767225600,\"format\":\"zk2-catalog/1\"}",
+        "sha256": "0a90fd610feb1c19bd96e881163db3f599a7494210f2d049b6c5ce1a8575a116",
+        "id": "0a90fd61"
+      }
+    },
+    {
+      "note": "the same catalog, its members in another order: the same JCS bytes, the same id",
+      "text": "{\n  \"entries\": [\n    {\"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\", \"iface\": \"modem.v3\", \"index\": 0},\n    {\"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\", \"iface\": \"config.v1\", \"index\": 1},\n    {\"contract\": \"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\", \"iface\": \"health.v1\", \"index\": 2}\n  ],\n  \"format\": \"zk2-catalog/1\",\n  \"epoch\": 1767225600\n}",
+      "expect": {
+        "jcs": "{\"entries\":[{\"contract\":\"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\",\"iface\":\"modem.v3\",\"index\":0},{\"contract\":\"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\",\"iface\":\"config.v1\",\"index\":1},{\"contract\":\"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\",\"iface\":\"health.v1\",\"index\":2}],\"epoch\":1767225600,\"format\":\"zk2-catalog/1\"}",
+        "sha256": "0a90fd610feb1c19bd96e881163db3f599a7494210f2d049b6c5ce1a8575a116",
+        "id": "0a90fd61"
+      }
+    },
+    {
+      "note": "the same catalog on one line, with no space at all",
+      "text": "{\"format\":\"zk2-catalog/1\",\"epoch\":1767225600,\"entries\":[{\"index\":0,\"iface\":\"modem.v3\",\"contract\":\"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"},{\"index\":1,\"iface\":\"config.v1\",\"contract\":\"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"},{\"index\":2,\"iface\":\"health.v1\",\"contract\":\"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\"}]}",
+      "expect": {
+        "jcs": "{\"entries\":[{\"contract\":\"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\",\"iface\":\"modem.v3\",\"index\":0},{\"contract\":\"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\",\"iface\":\"config.v1\",\"index\":1},{\"contract\":\"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\",\"iface\":\"health.v1\",\"index\":2}],\"epoch\":1767225600,\"format\":\"zk2-catalog/1\"}",
+        "sha256": "0a90fd610feb1c19bd96e881163db3f599a7494210f2d049b6c5ce1a8575a116",
+        "id": "0a90fd61"
+      }
+    },
+    {
+      "note": "the same catalog, its format's solidus escaped",
+      "text": "{\"format\": \"zk2-catalog\\/1\", \"epoch\": 1767225600, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}, {\"index\": 2, \"iface\": \"health.v1\", \"contract\": \"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\"}]}",
+      "expect": {
+        "jcs": "{\"entries\":[{\"contract\":\"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\",\"iface\":\"modem.v3\",\"index\":0},{\"contract\":\"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\",\"iface\":\"config.v1\",\"index\":1},{\"contract\":\"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\",\"iface\":\"health.v1\",\"index\":2}],\"epoch\":1767225600,\"format\":\"zk2-catalog/1\"}",
+        "sha256": "0a90fd610feb1c19bd96e881163db3f599a7494210f2d049b6c5ce1a8575a116",
+        "id": "0a90fd61"
+      }
+    },
+    {
+      "note": "its successor, whose lineage names it",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 1767225600, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}, {\"index\": 2, \"iface\": \"health.v1\", \"contract\": \"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\"}], \"lineage\": [{\"id\": \"eddb48d5\", \"entries\": 2}]}",
+      "expect": {
+        "jcs": "{\"entries\":[{\"contract\":\"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\",\"iface\":\"modem.v3\",\"index\":0},{\"contract\":\"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\",\"iface\":\"config.v1\",\"index\":1},{\"contract\":\"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\",\"iface\":\"health.v1\",\"index\":2}],\"epoch\":1767225600,\"format\":\"zk2-catalog/1\",\"lineage\":[{\"entries\":2,\"id\":\"eddb48d5\"}]}",
+        "sha256": "0319128a5bd7615b155e3b9b6646f0ff77403bb9d0303ff89b9993d5b5a7f42e",
+        "id": "0319128a"
+      }
+    },
+    {
+      "note": "a lineage item's members are ordered by JCS too",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 1767225600, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}, {\"index\": 2, \"iface\": \"health.v1\", \"contract\": \"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\"}], \"lineage\": [{\"entries\": 2, \"id\": \"eddb48d5\"}]}",
+      "expect": {
+        "jcs": "{\"entries\":[{\"contract\":\"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\",\"iface\":\"modem.v3\",\"index\":0},{\"contract\":\"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\",\"iface\":\"config.v1\",\"index\":1},{\"contract\":\"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\",\"iface\":\"health.v1\",\"index\":2}],\"epoch\":1767225600,\"format\":\"zk2-catalog/1\",\"lineage\":[{\"entries\":2,\"id\":\"eddb48d5\"}]}",
+        "sha256": "0319128a5bd7615b155e3b9b6646f0ff77403bb9d0303ff89b9993d5b5a7f42e",
+        "id": "0319128a"
+      }
+    },
+    {
+      "note": "the largest epoch, written as digits",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 9007199254740991, \"entries\": []}",
+      "expect": {
+        "jcs": "{\"entries\":[],\"epoch\":9007199254740991,\"format\":\"zk2-catalog/1\"}",
+        "sha256": "23a1e4b1145fbc87e557eb7a6ac6762a04f9ef68529159fcc0db05cae1671ea6",
+        "id": "23a1e4b1"
+      }
+    }
+  ]
+}

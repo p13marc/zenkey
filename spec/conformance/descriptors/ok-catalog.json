@@ -1,0 +1,11 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "robot/logger",
+ "instance": "0000000000000001",
+ "run": "0003",
+ "catalog": "0319128a",
+ "interfaces": [],
+ "meta": {
+  "note": "an owner given a catalog states its id: 8 lowercase hex digits (core §3.3, §8.6). A checker reads its form, never whether it holds the catalog"
+ }
+}

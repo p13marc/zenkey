@@ -3,6 +3,77 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.79 — 2026-11-01: the deployment catalog (#980)
+
+Epic #975, zk2c, makes the wire bandwidth-first. Its later forms carry a
+contract revision as a small index, and a time as seconds since a
+deployment epoch. This version is #980's C1a, the catalog that holds
+both. No sample changes. 0.76 and 0.77 go to C1b (#1017) and B2 (#1016).
+C1c brings the tools and the runtime: `--catalog`,
+`ServiceBuilder::catalog`, and the doctor's `catalog-missing`.
+
+**Added: §8.6, the deployment catalog.**
+- **The document** is `zk2-catalog/1`, in strict JSON. It holds `format`,
+  `epoch`, `entries`, and an optional `lineage`, never empty. Nothing
+  else is read, so a later chunk adds dictionaries under a new member.
+- **An entry** is an interface id and a fingerprint, at the index of its
+  position. A catalog holds at most 1,024, since a 10-bit index carries
+  one. An interface appears once per revision.
+- **An integer** is digits alone: `-0`, `1.0` and `1e3` are none.
+- **The reading** refuses a catalog for the first reason that applies,
+  each named, in this order: `json`, `format`, `member`, `epoch`, `entries`, then
+  each entry's `member`, `index`, `iface`, `contract` and `duplicate`,
+  then `lineage`.
+- **The id** is the first 4 bytes of the sha256 of the JCS bytes, as 8
+  lowercase hex digits.
+- **Succession** is append-only. A successor keeps the epoch and every
+  index, and its lineage adds its predecessor's id and count. A checker
+  refuses one with `epoch_moved`, `reassigned`, `removed` or `lineage`, in
+  that order. A deployment MUST NOT change a catalog in force otherwise.
+- **A reader** reads an index or a time through the catalog the owner
+  names, or one whose lineage holds its id, below that item's count. It
+  MUST refuse an id it cannot so resolve and an index from an owner that
+  names none, `unknown_catalog`, and an index past the count,
+  `unknown_index`.
+- **Provisioning** is by file. A catalog is never fetched, and nothing
+  serves it, so §1.1's key forms stay closed. Across a constrained face,
+  which catalog an owner writes under is the deployment's word, as its
+  bindings are (R7).
+
+**Changed: §3.3, the descriptor's `catalog`.** An owner given a catalog
+MUST state its id there, as 8 lowercase hex digits. A checker reads the
+member as optional, as it reads `run`: misspelt is D002, and `null` is
+D000. That the checker holds the catalog is not checked.
+
+**Changed: §7.6, the deployment epoch.** It is the catalog's in force,
+and 0, the Unix epoch, where none is. That agrees with B2's answer to
+round 94's F-433 (#1016), a deployment that states no epoch having 0.
+
+**Changed: §0 and §12.** §8.6's rules that name no role are static, as
+§7.6's are. Reading a catalog and checking a succession are static acts.
+Its deployment's rule and its reader's rule are their roles'.
+
+**Fixtures.** `conformance/catalog/`, written by hand from the text,
+checked and never blessed:
+- `documents.json`: texts accepted with their ids, and every refusal,
+  each in its place in the order;
+- `ids.json`: texts whose spacing, member order or escapes differ, each
+  with its JCS bytes, their sha256 and its id;
+- `succession.json`: chains, each refusal, and a reader's resolution,
+  through a successor and past its predecessor's count.
+
+`catalog.schema.json` is new, and `descriptors/` gains `ok-catalog`,
+`d002-catalog-case`, `d002-catalog-length` and `d000-catalog-null`.
+
+**Deliberately not changed.**
+- **No sample, key or fingerprint** moves.
+- **No zk2 epoch.** #980's design memo dated an owner with no catalog
+  from 2026-01-01. This version keeps 0, as B2's answer to F-433 does, so
+  a catalog whose epoch is 0 dates times as no catalog does.
+- **No sixth key form.** Serving a catalog on the bus waits for C5's
+  compact descriptor, which carries its id.
+- **No dictionaries**, and `observer.md` is unchanged.
+
 ## 0.78 — 2026-11-01: keys across a face (#980)
 
 Epic #975, zk2c, makes the wire bandwidth-first. #989 measured today's wire

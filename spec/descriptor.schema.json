@@ -12,6 +12,10 @@
         "type": "string"
       }
     },
+    "catalog": {
+      "description": "The id of the deployment catalog the instance writes under (core\n§3.3, §8.6), as 8 lowercase hex digits. An owner given a catalog\nstates it, and one with none leaves it out; a checker reads it as\noptional, and any other spelling is D002. Never `null`.",
+      "type": "string"
+    },
     "format": {
       "description": "`zk2-descriptor/0.1`.",
       "type": "string"

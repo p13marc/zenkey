@@ -1,0 +1,10 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "robot/logger",
+ "instance": "0000000000000001",
+ "catalog": "0319128",
+ "interfaces": [],
+ "meta": {
+  "note": "a catalog id of 7 hex digits: D002, not D000, since the schema reads catalog as any string (core §3.3)"
+ }
+}

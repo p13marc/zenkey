@@ -10,6 +10,11 @@
         "D000"
       ]
     },
+    "d000-catalog-null": {
+      "codes": [
+        "D000"
+      ]
+    },
     "d000-minor-float": {
       "codes": [
         "D000"
@@ -38,6 +43,16 @@
     "d001-format": {
       "codes": [
         "D001"
+      ]
+    },
+    "d002-catalog-case": {
+      "codes": [
+        "D002"
+      ]
+    },
+    "d002-catalog-length": {
+      "codes": [
+        "D002"
       ]
     },
     "d002-instance": {
@@ -208,6 +223,9 @@
       "codes": []
     },
     "ok-binding-order": {
+      "codes": []
+    },
+    "ok-catalog": {
       "codes": []
     },
     "ok-derivation-profile": {
