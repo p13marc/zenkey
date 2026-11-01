@@ -620,6 +620,7 @@ mod tests {
                 format: "zk2-descriptor/0.1".into(),
                 service: "robot1/nav".into(),
                 instance: "0000000000000001".into(),
+                run: None,
                 interfaces: Vec::new(),
                 capabilities: Vec::new(),
                 requires: Vec::new(),

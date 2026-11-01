@@ -4,8 +4,9 @@
 //! ([`crate::tape::mock`]: a real instance, a descriptor and tokens, P3) and
 //! publishes every stream, state and event resource of each interface
 //! through the runtime's writers, which give each sample the contract's
-//! QoS and `Encoding`, each state put the owner's stamp (S1) and each event
-//! a fresh ULID key (§2.6). Every operation is served over its template,
+//! QoS and `Encoding`, each value its in-band stamp under the instance's
+//! run (S1, core §4.3; [`GenSpec::run_store`]) and each event a fresh ULID
+//! key (§2.6). Every operation is served over its template,
 //! answering each call with one synthesized `response` (and its `summary`,
 //! when `replies = "many"` declares one).
 //!
@@ -60,7 +61,7 @@ use crate::model::catalog::Revision;
 use crate::model::render::Member;
 use crate::report::{GenInterface, GenPlan, GenPlanEntry, GenReport, MemberSource, QosView};
 use crate::tape::mock::{
-    MockAnswer, capabilities, check_roles, config, default_value, implementation, marker,
+    MockAnswer, builder, capabilities, check_roles, config, default_value, implementation, marker,
     runtime_error, serve_answer,
 };
 use crate::tape::synth::Synth;
@@ -123,7 +124,7 @@ impl MemberArg {
 }
 
 /// What to bring up and publish.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GenSpec {
     /// The address the mock owner runs at: the operator's to name.
     pub address: Addr,
@@ -148,6 +149,28 @@ pub struct GenSpec {
     /// (§2.5 step 1, §2.7). `None`: a governed interface is refused at
     /// start, as the runtime refuses it.
     pub elect: Option<zenkey::redundancy::RedundancyStartup>,
+    /// Where each instance takes its 16-bit run (core §4.3, `--run-file`).
+    /// `None`: a random 32-bit run per instance. The runtime refuses one
+    /// beside a governed interface, whose candidates draw 32-bit runs.
+    pub run_store: Option<Arc<dyn zenkey::run::RunStore>>,
+}
+
+impl std::fmt::Debug for GenSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenSpec")
+            .field("address", &self.address)
+            .field("revisions", &self.revisions)
+            .field("members", &self.members)
+            .field("bindings", &self.bindings)
+            .field("rate_hz", &self.rate_hz)
+            .field("pattern", &self.pattern)
+            .field("duration", &self.duration)
+            .field("seed", &self.seed)
+            .field("tool", &self.tool)
+            .field("elect", &self.elect)
+            .field("run_store", &self.run_store.is_some())
+            .finish()
+    }
 }
 
 /// An event's cap on occurrences over a run of `duration`: its declared
@@ -718,7 +741,7 @@ pub async fn run_gen(
             .iter()
             .flat_map(|r| r.contract().resources.iter()),
     );
-    let mut b = zenkey::ServiceBuilder::new(
+    let mut b = builder(
         session,
         config(
             &spec.address,
@@ -726,7 +749,8 @@ pub async fn run_gen(
             &spec.bindings,
             marker(&spec.tool, Some(spec.seed)),
         ),
-    );
+        spec.run_store.as_ref(),
+    )?;
     for rev in &spec.revisions {
         b.implement(implementation(rev)?)
             .map_err(|e| runtime_error(rev, e))?;
@@ -1191,6 +1215,7 @@ mod tests {
             seed: 42,
             tool: "zenctl gen".into(),
             elect: None,
+            run_store: None,
         }
     }
 

@@ -30,7 +30,7 @@ Options:
           [default: 2]
 
       --deep
-          Also ask the checks that GET every owner's state: state-stamp-foreign (whose clock stamped each reply, spec §4.2 S1–S2) and population-over-bound (more live members of a templated state than its bound, §2.7). One GET per owner interface serves both. Costs the owners' data plane, so it is asked only here
+          Also ask the checks that GET every owner's state: state-stamp-foreign (each reply's in-band stamp, and on core §4.3's table whose clock stamped it, spec §4.2 S1–S2) and population-over-bound (more live members of a templated state than its bound, §2.7). One GET per owner interface serves both. Costs the owners' data plane, so it is asked only here
 
       --presence-budget <N>
           The token count presence-over-budget judges the presence domain against (spec §8.3: about 10–15k tokens per domain)

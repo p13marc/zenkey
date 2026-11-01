@@ -59,10 +59,12 @@ async fn an_unsatisfied_role_is_named_by_the_baseline_and_its_provider_is_one_re
         let published = Arc::clone(&published);
         tool.declare_subscriber("zk2/ops-1/zenwatch/zenwatch.v1/state/doctor")
             .callback(move |s| {
-                published
-                    .lock()
-                    .unwrap()
-                    .push((s.kind(), s.payload().to_bytes().to_vec()));
+                // The daemon's put carries its zk2c envelope (core §4.3,
+                // §7.5): its record is the document.
+                let kind = s.kind();
+                let read = zenkey::inband::read(s);
+                let record = read.sample().payload().to_bytes().to_vec();
+                published.lock().unwrap().push((kind, record));
             })
             .await
             .unwrap()

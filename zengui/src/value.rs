@@ -32,7 +32,9 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::report::{Provenance, Rendered, Stamp, StateReport, StateRow, StateValue};
+use zenkey_fleet::report::{
+    InbandStamp, Provenance, Rendered, Stamp, StateReport, StateRow, StateValue,
+};
 use zenkey_fleet::{Resolution, SampleView};
 
 /// A checked sample and the document the Detail pane draws from it.
@@ -164,7 +166,10 @@ pub struct Reply {
     pub attachment: Option<zenoh::bytes::ZBytes>,
     /// A tombstone: retirement, never an empty value.
     pub delete: bool,
-    /// The reply's stamp and whose clock issued it (§4.1).
+    /// The reply's in-band stamp, its zk2c envelope's run and seq (core
+    /// §4.3, §7.5): `None` when it carried no envelope, or one refused.
+    pub inband: Option<InbandStamp>,
+    /// The reply's Zenoh timestamp and whose clock issued it (§4.1).
     pub stamp: Option<Stamp>,
     /// Whose clock that is, as the lens attributed it when the read landed
     /// (O7: the owner's when it is the descriptor's `meta.zid`, by value).
@@ -184,6 +189,7 @@ impl Reply {
             encoding: view.encoding.clone(),
             attachment: view.attachment.clone(),
             delete: view.kind == zenoh::sample::SampleKind::Delete,
+            inband: view.inband().map(InbandStamp::from),
             provenance: stamp.as_ref().map(|_| Provenance::Unattributable),
             stamp,
         }

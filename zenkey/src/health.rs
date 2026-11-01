@@ -420,9 +420,10 @@ async fn publish_fault(
     };
     // health.v1's standard contract is never governed, so this admits it
     // always; every stamped put goes through its writer's gate all the same.
+    // Core §4.3's table: the fault carries the Zenoh timestamp the owner
+    // sets, beside its envelope.
     let admitted = w.serving().await?;
-    w.put_stamped(&admitted, f.encode_to_vec().into(), None, stamp)
-        .await
+    w.put_at(&admitted, &f.encode_to_vec(), stamp).await
 }
 
 /// §2.5: a `clock_ahead` fault when the guard first holds, again every
@@ -801,7 +802,14 @@ impl Health {
             .map_err(|e| Error::Contract(format!("health.v1 {CHECKS:?}: {e}")))?;
         let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
         let key = data_key(&i.addr, &i.iface, i.checks.token, &refs)?;
-        let w = Writer::declare(&i.session, key.into_keyexpr(), &i.checks, &values).await?;
+        let w = Writer::declare(
+            &i.session,
+            &i.minter,
+            key.into_keyexpr(),
+            &i.checks,
+            &values,
+        )
+        .await?;
         Ok(StateWriter::new(
             w,
             Arc::clone(&i.store),

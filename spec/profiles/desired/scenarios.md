@@ -278,8 +278,8 @@ record holds that delete.
 **Steps.**
 1. The author's process ends without closing. It restarts from its
    record, a new instance in a new session with a fresh zid (core §1.5).
-   G GETs `D` and `D2` the moment S sees the author's new instance token.
-   S listens 3 s.
+   Its clock is 5 s behind. G GETs `D` and `D2` the moment S sees the
+   author's new instance token. S listens 3 s.
 2. The author changes its document: it puts v2.
 3. The author's process ends without closing, and its record is removed.
    It restarts with no record: a new epoch, a fresh zid (core §4.3). Its
@@ -290,7 +290,8 @@ record holds that delete.
 1. Before its new instance token (a SHOULD; before G's GET, a MUST), S
    receives a put on `D` holding v1's content, unchanged, under a stamp
    whose id is the author's new zid, and a delete of `D2` under the same
-   id (§2.11). G's GET holds that put for `D` and a `reply_del` for `D2`,
+   id (§2.11). The put's stamp is above the author's last one. Its
+   clock is behind (§2.11). G's GET holds that put for `D` and a `reply_del` for `D2`,
    each stamped by the new instance, whose `meta.zid` is their id. The
    target adopts the re-put without an act: `Run` receives nothing, and S
    receives on `Rp` a report with `observed` and `in_force` the re-put's

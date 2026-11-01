@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.72** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.73** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -201,12 +201,15 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   per presence domain (§8.3). Above that, member tokens (§8.1) are the
   shape, at a third of the tokens.
 - **The instance id is a continuity epoch.** An owner MUST mint a new
-  instance id whenever its counters reset or its state's ordering restarts
-  (§4.3): a process restart, a device re-enumerated, a polled device's
-  uptime rewound, a container restarted. `[Sc: presence.md §3]`
-  - The owner SHOULD do so in a new session, so that its timestamps' id
-    changes too (§4.3). `[Sc: state.md §7]` That change, and presence, are
-    how a consumer sees the discontinuity.
+  instance id whenever its counters reset: a process restart, a device
+  re-enumerated, a polled device's uptime rewound, a container restarted.
+  `[Sc: presence.md §3]`
+  - **A new instance writes under a new run** (§4.3). A run that changes
+    within an instance is no new instance.
+  - The owner SHOULD mint it in a new session, so that the Zenoh
+    timestamps §4.3's table keeps change id too. `[Sc: state.md §7]` The
+    new run, that id and presence are how a consumer sees the
+    discontinuity.
   - An owner's counter that crosses a face where neither is visible
     SHOULD carry its epoch in-band, in its value or its attachment, as
     [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9).
@@ -381,13 +384,17 @@ a reader's links, replier id and transport events
 declares its own queryable and token under `<key>/@adv/…`, so its grants
 (§11.1) must include that subtree.
 
-**`history.miss_detection_ms`** declares miss detection: the
-owner's advanced publisher numbers its samples, and sends a heartbeat
-with the last number every that many milliseconds, so that a subscriber
-can detect a gap (zenoh-ext's sample-miss detection). Without it, an
-advanced publisher's samples carry no number, and a subscriber has
-nothing to detect. What a detected miss shows, and what no detected miss
-does not, is §2.7's.
+**Numbering.** An owner's advanced publisher numbers its samples. Its
+session runs without timestamping (§8.2), and zenoh-ext refuses to
+declare a cache whose samples carry neither a number nor a timestamp
+(Appendix B).
+
+**`history.miss_detection_ms`** declares miss detection: the owner's
+advanced publisher also sends a heartbeat with its last number every that
+many milliseconds (zenoh-ext's sample-miss detection). Without it, a
+subscriber detects a gap between two samples it received, but not a lost
+last sample. What a detected miss shows, and what no detected miss does
+not, is §2.7's.
 
 ### 2.6 Events
 
@@ -603,6 +610,7 @@ for it as long as it chooses (§8.1). `[Sc: presence.md §2]`
   "format": "zk2-descriptor/0.1",
   "service": "vehicle-01/navigation",
   "instance": "3fa9c2d41b7e0012",
+  "run": "0003",
   "interfaces": [
     {"iface": "nav.v2", "contract": "sha256:…", "minor": 1, "token": true,
      "unavailable": [{"resource": "state/covariance", "cause": "config", "reason": "calibrating"}],
@@ -702,6 +710,15 @@ gate does not name.
     ([`profiles/hostid/v1.md`](profiles/hostid/v1.md) §2.8).
 
   `[F: descriptors/ok-derivation-profile]`
+- **`run`** is the run the instance writes under now (§4.3), as its bytes
+  in lowercase hexadecimal: 4 digits for a 16-bit run, and 8 for a 32-bit
+  one. So `"00a1"` and `"000000a1"` are two runs.
+  - An owner MUST state its run there, and MUST put its descriptor again
+    when the run changes, before it writes under the new run.
+    `[F: descriptors/ok-run, d002-run-*]` `[Sc: state.md §1, §7]`
+  - A checker reads `run` as optional, so a descriptor that states none is
+    not D000. Any other spelling than 4 or 8 lowercase hex digits is D002.
+    `[F: descriptors/ok-run-wide, d000-run-*]`
 - **`meta`** is informative: host, process, build, and nothing in it is
   checked. One member is used: an owner SHOULD state its session's zid
   as `meta.zid`, as the reference does. How a tool attributes a state
@@ -731,7 +748,7 @@ and reports these codes. `[F: descriptors/]`
 |---|---|---|---|
 | D000 | not strict JSON (a duplicate member included), or outside [`descriptor.schema.json`](descriptor.schema.json): an unknown or missing member, a value of the wrong type (an integer written with a fraction or an exponent included), an integer outside its `format` (`uint64`: 0 to 2^64−1), a `cause` not `build`, `config` or `capability` | error | once; stops the check |
 | D001 | `format` is not `zk2-descriptor/0.1` | error | once |
-| D002 | `service` is not `<system>/<service>`, two plain chunks; `instance` is not 16 lowercase hex digits | error | per member |
+| D002 | `service` is not `<system>/<service>`, two plain chunks; `instance` is not 16 lowercase hex digits; `run` is not 4 or 8 lowercase hex digits | error | per member |
 | D003 | an interface entry's `iface` is not an interface id; its `contract` is not a fingerprint (§1.2); or the interface is listed twice | error | per entry and condition |
 | D004 | the entry's interface is among the given contracts, but not at its fingerprint | error | per entry |
 | D005 | `unavailable` names a resource the contract does not declare, or a required one | error | per entry |
@@ -804,6 +821,9 @@ and reports these codes. `[F: descriptors/]`
    - that a role's `optional` agrees with the contract that declares it:
      a tool reads the contract's `[requires]` instead.
      `[F: descriptors/ok-optional-unchecked]`
+   - that `run` is stated: an owner states it (above), and a descriptor
+     that states none is checked as any other is
+     `[F: descriptors/ok-minimal]`.
 
 ---
 
@@ -811,12 +831,16 @@ and reports these codes. `[F: descriptors/]`
 
 ### 4.1 Zenoh facts this section relies on
 
-- Routers stamp puts, where timestamping is enabled. Peers and clients do
-  not stamp by default. Deletes and query replies are never stamped by the
-  network.
-- A session whose HLC is enabled, as a serving session's is (§4.3), stamps
-  every put it is not given a timestamp for, a stream sample included, from
-  its own clock.
+- **A router stamps only puts,** where its timestamping is enabled. It
+  never stamps a delete or a query reply.
+- **Timestamping's defaults.** It is enabled by default for a router, and
+  disabled for a peer and a client. A node whose timestamping is enabled
+  has an HLC.
+- **A session whose HLC is enabled** stamps every put and every delete it
+  is not given a timestamp for, a stream sample included, from its own
+  clock.
+- **A given timestamp is sent.** A put, a delete or a reply given a
+  timestamp carries it, on a session without timestamping too.
 - **An HLC follows the stamps it receives.** A node whose HLC is
   enabled, a session's included, moves it to the stamp of each put it
   routes, a put it receives for its own subscriber included, when that
@@ -835,7 +859,7 @@ and reports these codes. `[F: descriptors/]`
   own zid at its receipt.
 - `Latest` consolidation keeps, per key, the reply with the greatest
   timestamp, ranks an unstamped reply lowest, and delivers at query
-  completion.
+  completion. Among unstamped replies it keeps the last to arrive.
 - `reply_del` is stable. `Session::new_timestamp()` uses the HLC when it is
   enabled, else a wall clock with the zid.
 - Routers re-stamp a future-dated put (beyond the HLC's maximum delta, 500 ms
@@ -848,20 +872,21 @@ and reports these codes. `[F: descriptors/]`
 
 | # | Rule | Evidence |
 |---|---|---|
-| S1 | **Owner:** every state mutation, put **and** delete, MUST carry a timestamp the owner set. | `[Sc: state.md §1]` |
-| S2 | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
-| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it. | `[Sc: state.md §2, §6]` |
+| S1 | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
+| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
+| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it. | `[Sc: state.md §2, §6]` |
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
 | S6 | **Consumer:** current state is the owner's answer. A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or presence shows it absent. That silence is not a verdict about the key (O5). The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
-| S7 | **Owner:** clocks are bounded both ways (§4.3). | `[Sc: state.md §7]` |
+| S7 | **Owner:** a run is never reused, and a seq never wraps within it (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7]` |
 
 **A re-put is a mutation.** A put that repeats a member's current
 value, as an owner refreshing it under
 [`freshness.v1`](profiles/freshness/v1.md) §2.4 makes, is a put like any
-other: it carries a timestamp the owner set (S1), minted above every stamp
-it issued (§4.3), and the owner's GET answers carry that stamp from then
-on (S2). A reply represents the member's latest put, not its latest change.
+other. It carries a new seq (S1). On a resource §4.3's table lists, it
+also carries a Zenoh timestamp minted above every one the owner issued
+(§4.3). The owner's GET answers carry those stamps from then on (S2). A
+reply represents the member's latest put, not its latest change.
 `[Sc: profiles/freshness/scenarios.md §1]`
 
 **A late joiner's seed.** A consumer or a tool that wants an
@@ -873,49 +898,49 @@ from S4's GET and follows a subscription.
   lost delete leaves a deleted key standing. `[Sc: state.md §10]`
 - **The merge.** A late joiner MUST merge the GET's replies and the
   subscription's samples per key, whichever path brought each one. It
-  MUST keep the newer by the owner's stamp (S1, S2). Across two timestamp
-  ids, a consumer MUST instead keep what §4.3's consumer rule accepts.
-  `[Sc: state.md §7, §10]`
+  MUST keep the newer by its in-band stamp: within one run, by seq
+  (§4.3). Across two runs, a consumer MUST instead keep what §4.3's
+  consumer rule accepts. `[F: seed/inband.json]` `[Sc: state.md §7, §10]`
   - A live put or delete newer than a reply replaces it, and a reply newer
     than a live sample replaces that.
-  - A `reply_del` is a deletion with its stamp (S3), merged as a live
+  - A `reply_del` is a deletion with its stamps (S3), merged as a live
     delete is.
-  - Two samples with equal stamps are the same mutation, kept once.
-  - **Stamps compare as `Latest` compares replies** (§4.1), which is
-    zenoh's timestamp order (Appendix B). First by time, an
-    unsigned 64-bit NTP64 value. On equal times, by id: each id's 128-bit
-    value written as 16 bytes little-endian, least significant byte first,
-    and the two compared byte by byte from the first. So the least
-    significant byte that differs decides, which is not the ids' order as
-    integers: at one time, id `100` (hex) is below id `2`.
-    `[F: seed/merge.json]` `[Sc: state.md §11]`
-    - Within one timestamp id, that is by time, as §4.3's consumer rule
-      orders. Two ids for one key mean that the owner started a new epoch
-      (§4.3). Across them a consumer and a tool order differently (below).
-  - **An unstamped sample** ranks below every stamped one, as
-    `Latest` ranks an unstamped reply lowest (§4.1). It is no owner's
-    (S1): it is a foreign key's (§1.7), put by a session with no HLC
-    through no node that stamps, the reader's own session included
-    (§4.1).
-    - It is kept on a key that holds nothing, or only unstamped samples,
-      and never over a stamped one.
-    - Two unstamped samples of a key have no order but their arrival, so
-      the later replaces the earlier. That includes a reply that arrives
-      after a live sample.
-
-    `[F: seed/merge.json]` `[Sc: state.md §11]`
-  - **Across two timestamp ids**, a consumer orders by §4.3's consumer
-    rule from its first value on, its seed's replies included. It keeps a
-    value under an id other than its held value's. That is the case the
-    merge leaves to §4.3, for a consumer. Within one id the two orders are
-    one. So a consumer has no instant at which its merge ends: §4.3's rule
-    orders every value the consumer receives.
-    - **A tool** keeps the merge across ids too, for as long as it
-      follows ([`observer.md`](observer.md) §4.1).
-    - **Either way**, a value of the old epoch that arrives after one of
-      the new is §4.3's residual risk.
-
+  - Two samples with one in-band stamp are the same mutation, kept once.
+  - **Across two runs**, nothing orders the values (§4.3). A consumer
+    orders by §4.3's consumer rule from its first value on, its seed's
+    replies included. So it keeps a value under a run other than its held
+    value's. A tool keeps the later arrival
+    ([`observer.md`](observer.md) §4.1). Either way, a value of the old
+    run that arrives after one of the new is §4.3's residual risk.
     `[Sc: state.md §7]`
+  - **A sample with no envelope** is an `@stream` sample (§4.3), a
+    foreign key's (§1.7), or one that broke S1. It is ordered among
+    samples with no envelope by its Zenoh timestamp, as below. Beside an
+    in-band stamp it is unordered, as across runs. `[F: seed/inband.json]`
+    - **Zenoh timestamps compare as `Latest` compares replies** (§4.1),
+      which is zenoh's timestamp order (Appendix B). First by time, an
+      unsigned 64-bit NTP64 value. On equal times, by id: each id's
+      128-bit value written as 16 bytes little-endian, least significant
+      byte first, and the two compared byte by byte from the first. So the
+      least significant byte that differs decides, which is not the ids'
+      order as integers: at one time, id `100` (hex) is below id `2`.
+      `[F: seed/merge.json]` `[Sc: state.md §11]`
+      - Within one timestamp id, that is by time. Across two ids, a
+        consumer accepts a value under an id other than its held value's,
+        as under another run (§4.3). A tool keeps this order across them
+        ([`observer.md`](observer.md) §4.1).
+    - **A sample with neither stamp** ranks below every stamped one, an
+      in-band stamp included, as `Latest` ranks an unstamped reply lowest
+      (§4.1). It is no owner's state (S1). It is an `@stream` sample, or
+      a foreign key's (§1.7), put by a session with no HLC through no node
+      that stamps, the reader's own session included (§4.1).
+      - It is kept on a key that holds nothing, or only such samples, and
+        never over a stamped one.
+      - Two such samples of a key have no order but their arrival, so the
+        later replaces the earlier. That includes a reply that arrives
+        after a live sample.
+
+      `[F: seed/merge.json]` `[Sc: state.md §11]`
 - **R6 and a tool's seed**: [`observer.md`](observer.md) §4.1.
 - **A selector over several owners.** A GET on a selector that matches
   several owners' keys is addressed to the owner's keys, as S4 requires,
@@ -933,67 +958,148 @@ A **tool** checks S4 against the routers' storage admin space: [`observer.md`](o
 - **What a tool does not ask**: observer §4.3.
 - **Who answered**: observer §4.2.
 
-**Observing S1.** An owner's stamp is told from a router's by its id: the
-owner's session's zid, against the router's (§4.1). Where the owner's
-session is itself the router, the two zids are one, and the check proves
-nothing. A tester therefore runs the owner as a client of a router with
-timestamping enabled, which keeps the stamp a put carries unless it is
-future-dated (§4.1). The tester checks the check against a control: a
-put without a timestamp, from a session whose HLC is not enabled (§4.1),
-through the same router, arrives with the router's zid.
-`[Sc: state.md §1]`
+**Observing S1.** An in-band stamp is the owner's, since only the owner
+writes its payload. What a tester checks is the Zenoh timestamps, through
+two routers, the owner a client of each.
+- **Outside §4.3's table,** the owner's puts arrive with no Zenoh
+  timestamp through a router whose timestamping is disabled. Through one
+  with it enabled they arrive with the router's zid. Its deletes and
+  replies arrive with none either way (§4.1). `[Sc: state.md §1]`
+- **On a resource the table lists,** each mutation and reply carries the
+  owner's timestamp, told from a router's by its id: the owner's
+  session's zid, against the router's (§4.1). Where the owner's session
+  is itself the router, the two zids are one, and that check proves
+  nothing. `[Sc: state.md §1]`
 - **A tool's S1 check**: [`observer.md`](observer.md) §4.4.
 
-### 4.3 Clocks (S7)
+### 4.3 Runs and sequence numbers (S7)
 
-- **HLC.** A session that serves state MUST enable Zenoh's HLC. At the
-  constrained level (§12), a wall clock with a per-session bump takes its
-  place. `[Sc: state.md §1, §7]`
-- **Minting.** zenoh 1.10.1 keeps `Session::hlc()` internal. An owner
-  therefore mints each state timestamp as the greater of
-  `Session::new_timestamp()` and the last timestamp it issued plus one
-  tick, with its session's zid as the id. `[Sc: state.md §1]`
-  - **A tick** is the smallest step the owner's timestamp type can take
-    above the last. Timestamps are compared by their time, an NTP64 value
-    (Appendix B), whose unit is 2^−32 s: the reference adds one unit. A
-    larger step keeps the rule, which needs only that each stamp exceed the
-    last (Appendix B gives zenoh-python's smallest step).
-- **Catch-up.** An owner MUST NOT stamp at or below the last timestamp it
-  issued for its keys. Before its first write, it takes that timestamp from
-  its own persistent record, else from an explicit read of an archive on its
-  own side. A consumer-side archive can be stale by a whole partition.
-- **New epoch.** With neither source, the owner MUST start a new epoch: a new
-  instance (§1.5) whose session has a fresh, unpinned zid.
-  - **The epoch rides each value.** Every timestamp carries its HLC's id
-    (§4.1), so no per-sample attribution is needed.
-  - **Consumer rule.** A consumer MUST order each key's values by time
-    within one timestamp id, from the first value it receives, a late
-    joiner's seed replies included (§4.2). It MUST accept a value under an
-    id other than the one its held value carries, and order by time within
-    that id from then on. `[Sc: state.md §7]`
-    - **A profile's order.** A profile MAY order a consumer's values more
-      strictly. A `desired.v1` target refuses an older version of an id it
-      remembers, whichever id it holds ([`desired.v1`](profiles/desired/v1.md)
-      §2.6).
-  - **Residual risk.** A value from the old epoch that is still in transit
-    can arrive after the new epoch's first value. Its id is not the held
-    value's, so a consumer accepts it. The key steps back to the old epoch
-    until the new one's next value. That is accepted at this version.
-    - **A late joiner** is no exception. Across two ids, a consumer holds
-      a value under the id of the last value it received, its seed's
-      replies included. A tool keeps the later time (§4.2), the old
-      epoch's when the new epoch's clock is behind. Either is this residual
-      risk. `[F: seed/merge.json]` `[Sc: state.md §7]`
-      - **Inside a seed.** An old epoch's value can arrive after the new
-        epoch's for as long as the GET is open, not only in transit.
-        `Latest` delivers every reply after the samples heard during the
-        GET (§4.1). So a consumer holds the reply's value, whether its
-        time or the live samples' is later. It holds it until the key's
-        next value. Where two instances answer, it receives only the
-        reply `Latest` kept, the one with the greater stamp.
-        `[Sc: state.md §7]`
-- **Ahead.** An owner SHOULD NOT stamp beyond its router's HLC delta: it
-  cannot know its own offset without a reference. `[Sc: state.md §7]`
+An owner's values are ordered by a stamp it writes in band, in §7.5's
+envelope: a **run**, an ordering epoch, and a **seq**, which counts
+within it. A few resources carry a Zenoh timestamp beside it, for the
+time a profile reads (the table below).
+
+- **The in-band stamp.** An owner MUST write each put on a `stream`,
+  `state`, `@state` or `events` key, and each delete of a state member,
+  with §7.5's envelope. `[Sc: state.md §1]`
+  - The sample's Encoding is `zenoh/bytes`, and its record is encoded as
+    the contract's `encoding` says (§7.2).
+  - **Explicit streams.** An `@stream` sample carries no envelope at this
+    version. Its frames would be copied into one, or out of one, which
+    loses the zero-copy path §7.4 serves.
+  - **What keeps its wire.** Operations, the descriptor and bundles carry
+    no envelope.
+- **The run** is an instance's ordering epoch, of 16 or 32 bits, as
+  §7.5's width bit says. Two runs of different widths are two runs,
+  whatever their values.
+  - **No reuse.** An owner MUST NOT write under a run that it, or another
+    instance of its service, wrote under before. `[Sc: state.md §7]`
+  - **A 16-bit run** is a counter in a record the owner keeps. The record
+    is durable before the first mutation under each run it issues. It
+    moves with the service, since a move changes no key (§1.5). An owner
+    that cannot keep such a record draws 32-bit runs.
+  - **A 32-bit run** is drawn at random. An owner draws one when it keeps
+    no record, when its counter is spent at 0xFFFF, and when it is a
+    candidate of a governed interface
+    ([`redundancy.v1`](profiles/redundancy/v1.md)). It draws again while
+    the run equals one it used.
+  - **A new run** is taken by each new instance (§1.5). Within an
+    instance, an owner takes a new run before its seq would wrap (below).
+    It MAY take one at any other time, such as when it can no longer keep
+    each stream key's seq. A run that changes within an instance mints no
+    new instance.
+  - **The descriptor** states the run the instance writes under (§3.3).
+- **The seq** is an unsigned 24-bit count within one run.
+  - **State and events.** An owner keeps one seq per run for all its
+    state mutations and event occurrences. It starts at 0, and adds 1 at
+    each. So a key's mutations carry increasing seqs, with gaps.
+  - **No wrap.** An owner MUST NOT let that seq wrap. Before it would pass
+    16,777,215, the owner takes a new run and puts its descriptor stating
+    it. Then it writes under the new run from seq 0. `[Sc: state.md §7]`
+  - **Streams.** Each stream key's seq is its own. It starts at 0 at the
+    key's first sample in a run, adds 1 at each sample, and wraps modulo
+    2^24. An owner MUST NOT restart a stream key's seq within a run, even
+    where it declares the key's publisher again: a takeover, or a member
+    removed and added. `[Sc: state.md §13]`
+  - **Serial order.** Of two seqs s and s′ of one stream key in one run,
+    s′ is newer when (s′ − s) mod 2^24 is from 1 to 2^23 − 1, and older
+    when it is above 2^23. At exactly 2^23 they are unordered, as two runs
+    are. A tool's merge of a stream key orders so, its `@adv` history
+    included. `[F: seed/inband.json]` `[Sc: state.md §13]`
+  - **Plain order.** A state or event key's seqs compare as integers.
+    Within one run, a state key's seq can trail the owner's by more than
+    2^23, which serial order would read as older. `[F: seed/inband.json]`
+- **Consumer rule.** A consumer MUST order each state key's values by seq
+  within one run, from the first value it receives, a late joiner's seed
+  replies included (§4.2). A consumer MUST accept a value under a run
+  other than its held value's, and order by seq within that run from then
+  on. `[F: seed/inband.json]` `[Sc: state.md §7]`
+  - **A value with no envelope**, one that broke S1, is ordered by its
+    Zenoh timestamp: by time within one timestamp id, and under another id
+    as under another run. Beside an in-band stamp, it is as under another
+    run. `[F: seed/inband.json]`
+  - **A profile's order.** A profile MAY order a consumer's values more
+    strictly. A `desired.v1` target refuses an older version of an id it
+    remembers, whichever id it holds ([`desired.v1`](profiles/desired/v1.md)
+    §2.6).
+- **Nothing orders two runs.** A reader compares two runs for equality,
+  never as numbers: a run names a span of an owner's writing, not when it
+  began. Ordering two runs is left to a later version.
+- **Residual risk.** A value of an old run that is still in transit can
+  arrive after the new run's first value. A consumer accepts it, as
+  another run's, and a tool keeps it, as the later arrival. The key steps
+  back to the old run until the new one's next value. That is accepted at
+  this version. `[Sc: state.md §7]`
+  - **Inside a seed.** An old run's value can arrive after the new run's
+    for as long as the GET is open, not only in transit. `Latest` delivers
+    every reply at the GET's end, after the samples heard during it
+    (§4.1). So a consumer and a tool both hold the reply's value over a
+    value of the new run heard live, until the key's next value.
+    `[Sc: state.md §7]`
+  - **Where two instances answer**, `Latest` keeps one reply per key. It
+    keeps the one with the greater Zenoh timestamp where a reply carries
+    one, else the last to arrive (§4.1). So a seed can hold either
+    instance's value. `[Sc: state.md §7]`
+- **The Zenoh timestamps kept.** Only these resources carry a Zenoh
+  timestamp the owner sets, beside the in-band stamp. Each is kept for the
+  time a profile reads from it. A state among them carries one on each
+  mutation and reply (S1, S2), and a stream as its profile says.
+
+  | Resource | Read for | Carried as |
+  |---|---|---|
+  | A state whose contract declares `freshness.ttl_s` above 0 | a reply's age ([`freshness.v1`](profiles/freshness/v1.md) §2.4, §2.6) | S1, S2 |
+  | A `desired.v1` desired resource | the order of an author's versions ([`desired.v1`](profiles/desired/v1.md) §2.4, §2.6, §2.11) | S1, S2 |
+  | A state that is a `telemetry.v1` metric resource | a rate's time base ([`telemetry.v1`](profiles/telemetry/v1.md) §2.11) | S1, S2 |
+  | A stream that declares a `timing.v1` lifespan | a sample's age ([`timing.v1`](profiles/timing/v1.md) §2.6) | that section says |
+  | A `health.v1` fault | nothing a reader concludes ([`health.v1`](profiles/health/v1.md) §2.5) | where the owner sets one, as that section allows |
+  | Every put of a `redundancy.v1` candidate | which instance is the incumbent ([`redundancy.v1`](profiles/redundancy/v1.md) §2.10) | by the candidate session's HLC, as that section says |
+
+  - **Minting.** zenoh 1.10.1 keeps `Session::hlc()` internal. So an
+    owner mints each such timestamp as the greater of
+    `Session::new_timestamp()` and the last it issued plus one tick. Its
+    id is the session's zid. On a session without timestamping, as an
+    owner's runs (§8.2), `Session::new_timestamp()` is the wall clock with
+    the zid (§4.1). `[Sc: state.md §1]`
+    - **A tick** is the smallest step the owner's timestamp type can take
+      above the last. Timestamps are compared by their time, an NTP64
+      value (Appendix B), whose unit is 2^−32 s: the reference adds one
+      unit. A larger step keeps the rule, which needs only that each stamp
+      exceed the last (Appendix B gives zenoh-python's smallest step).
+  - **Order and id.** Two such timestamps with one id order by time. A
+    timestamp under another id is another session's.
+  - **Catch-up**, which profiles cite, is the last such timestamp an owner
+    issued for its keys, read from its own persistent record, else from an
+    explicit read of an archive on its own side. A consumer-side archive
+    can be stale by a whole partition.
+  - **A new epoch**, which profiles cite too, is a new instance (§1.5)
+    whose session has a fresh, unpinned zid.
+  - **Across a restart.** A profile that orders these timestamps across a
+    restart says how its owner keeps them above the last.
+    [`desired.v1`](profiles/desired/v1.md) §2.11 does.
+- **Ahead.** A router re-stamps or drops a timestamp beyond its HLC's
+  delta (§4.1), and freshness ages by the table's timestamps. An owner
+  SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own
+  offset without a reference. `[Sc: state.md §7]`
   - The owner SHOULD detect drift against a reference it holds for the
     purpose, such as a subscription to a router-stamped heartbeat key,
     because its own puts are never echoed back. `[Sc: state.md §7]`
@@ -1007,8 +1113,8 @@ through the same router, arrives with the router's zid.
     `clock_ahead`, and its status goes stale
     ([`profiles/health/v1.md`](profiles/health/v1.md) §2.5).
     `[Sc: profiles/health/scenarios.md §4]`
-    - The sample carries a stamp from the owner's clock (§4.1), so a
-      router re-stamps it, or drops it under
+    - Where the owner stamps the sample from its clock, which is ahead
+      (the table above), a router re-stamps it, or drops it under
       `timestamping.drop_future_timestamp`, which loses the report.
   - Spike S12 showed the harm: a clock 2 s ahead produced a revision with
     two timestamps, and the next correctly clocked write looked stale.
@@ -1019,8 +1125,9 @@ An **archive** is a service implementing `archive.v1`, a profile not yet
 written. This section is what the core requires of it.
 
 - **It records** owners' mutations under its own address, with each
-  mutation's timestamp and type identity (§7.1), and keeps tombstones for at
-  least the window (S3).
+  mutation's stamps (S1) and type identity (§7.1), and keeps tombstones
+  for at least the window (S3). A put's bytes are kept as the owner wrote
+  them, its envelope included, and a reply gives them back verbatim.
 - **Its key** is the archived key without its leading `zk2` chunk, slugged
   as a rest parameter, under the archive's own `@state` token:
   `zk2/<system>/<archive>/archive.v1/@state/{origin...}`. For example,
@@ -1055,6 +1162,10 @@ written. This section is what the core requires of it.
 - **An archive's backend MUST NOT accept a put older than a delete it
   holds.** The storage manager of zenoh 1.10.1 accepts one, and resurrects
   the key, so it cannot be an archive's store as released.
+  - **Older** is by seq within one run (§4.3). A put of another run is
+    recorded, since nothing orders two runs. A late put of an old run so
+    revives a deleted key until the next alignment: §4.3's residual risk,
+    as an archive meets it. `[Sc: state.md §9]`
 - **Alignment.** When an owner becomes reachable again, the archive MUST
   re-read the owner's recorded collection before serving it as confirmed.
   While the owner stays absent, it re-reads that collection from an archive
@@ -1082,11 +1193,11 @@ written. This section is what the core requires of it.
     confirmed when the peer's attachment says `"confirmed": true`, and
     unconfirmed otherwise, an absent or unreadable attachment included. A
     `reply_del` from a peer is positive evidence, as one from the owner is:
-    the peer holds the owner's delete, with its timestamp.
+    the peer holds the owner's delete, with its stamps.
     `[Sc: state.md §5]`
   - **Older never wins.** A reply older than what the archive holds changes
-    nothing, as a put older than a held delete does not (above). One at the
-    same timestamp can confirm the key, never unconfirm it.
+    nothing, as a put older than a held delete does not (above). One with
+    the same stamp can confirm the key, never unconfirm it.
   - **A raised window (S3) carries this rule.** With the window at least the
     longest expected outage, every delete the archive missed is still
     answered with `reply_del` after the heal.
@@ -1473,12 +1584,17 @@ listed files.
 ### 7.2 Encodings and rendering
 
 - **The sample's `Encoding`.** An owner MUST set Zenoh's predefined
-  `Encoding` for every sample whose type has one: protobuf, JSON, CBOR, or a
-  predefined media type. It MUST NOT add a schema suffix to it, except on
-  the error envelope (§5.2). A raw media type that Zenoh does not predefine
-  travels as Zenoh's custom encoding, the media type in the suffix, as Zenoh
-  does by itself. A suffix is sent with every put, and is capped at 255
-  bytes. `[Sc: types.md §1]`
+  `Encoding` for every sample whose type has one (protobuf, JSON, CBOR, or
+  a predefined media type), except a sample that carries §7.5's envelope
+  (§4.3). It MUST NOT add a schema suffix to it, except on the error
+  envelope (§5.2). `[Sc: types.md §1]`
+  - **An envelope's sample** has the `Encoding` `zenoh/bytes`, and its
+    record is encoded as its type says, on the contract's `encoding`
+    (below).
+  - **A raw media type** that Zenoh does not predefine travels, outside an
+    envelope, as Zenoh's custom encoding, the media type in the suffix, as
+    Zenoh does by itself. A suffix is sent with every put, and is capped at
+    255 bytes.
 - **JSON Schema types** are encoded as JSON (the default) or CBOR, declared
   by `encoding`. Bytes are CBOR byte strings, or base64 in JSON. An
   attachment declares its own `attachment_encoding` by the same rule.
@@ -1566,9 +1682,9 @@ accept SHM buffers.
 ### 7.5 The zk2c envelope
 
 The **zk2c envelope** carries an owner's run and sequence number with a
-sample, before its record. This section defines its bytes ahead of their
-use. No rule adopts it yet. So no owner writes one, and no consumer has to
-read one. §4 and §7.2 still say how a sample is stamped and encoded.
+sample, before its record. This section defines its bytes. §4.3 adopts
+it: which samples carry one, what a run names and how a seq counts. §7.2
+says the `Encoding` of a sample that carries one.
 
 **The layouts.** A put carries an envelope as its payload, and a delete as
 its attachment:
@@ -1610,10 +1726,9 @@ and reserves the other six for later versions:
 **The run and the seq.** The run is an unsigned integer of 16 or 32 bits,
 as CH's width bit says. The seq is an unsigned 24-bit integer, from 0 to
 16,777,215. Both are written big-endian, the most significant byte first.
-Together they are the envelope's stamp. This section fixes their widths
-and their byte order. What a run names, and how a seq counts, are for the
-rule that adopts the envelope. Until then, §4.3's stamp alone orders a
-key's values.
+Together they are the envelope's stamp, the sample's in-band stamp.
+This section fixes their widths and their byte order. What a run names,
+and how a seq counts, are §4.3's.
 
 **The record** is every byte after the seq, possibly none. It is read as
 the resource's type says (§7.1). A sample that carries an envelope has the
@@ -1827,6 +1942,25 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
     ([`profiles/health/v1.md`](profiles/health/v1.md) §2.3).
     `[Sc: profiles/health/scenarios.md §1]`
 
+**Session posture.** An owner MUST NOT set a Zenoh timestamp on a put or
+a delete of a data key, except on a resource §4.3's table lists.
+`[Sc: state.md §1]`
+- **The owner's session** SHOULD run with timestamping disabled, zenoh's
+  default for a client and a peer (§4.1). A session with it enabled stamps
+  every put and delete it is not given a timestamp for. `[Sc: state.md §1]`
+  - **The exception** is a candidate of a governed interface:
+    [`redundancy.v1`](profiles/redundancy/v1.md) §2.10 asks it to enable
+    timestamping.
+- **A router on a constrained face.** A deployment SHOULD run a router
+  that forwards puts onto a constrained face (§8.5) with timestamping
+  disabled. A router with it enabled stamps every unstamped put it routes,
+  and the stamp crosses the face. `[Sc: state.md §1]`
+  - **What it gives up.** A router with timestamping disabled cannot run
+    zenoh's storage manager, which refuses to start without it
+    (Appendix B). Nor can it serve as a clock guard's reference (§4.3,
+    "Ahead"), since it stamps nothing.
+  - Nothing checks this posture at this version.
+
 ### 8.3 The presence budget
 
 **At scale.** A deployment needs this section only once a presence domain
@@ -1960,6 +2094,7 @@ facts.
 - **Access control is per hop** (§11.3). The near router sees the far
   router as one principal, carrying the union of the grants the far side's
   sessions need.
+- **A router's timestamping** on the face: §8.2, "Session posture".
 
 ---
 
@@ -3116,7 +3251,6 @@ additions:
 
 | Topic | Relaxation or addition |
 |---|---|
-| Clock (S7) | A wall clock with a per-session bump instead of the HLC. The catch-up and the ahead bound still apply. |
 | Namespace (§1.6) | The deployment prefix written literally in keys |
 | Descriptor (§3.3) | An owner's descriptor MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) `[Sc: constrained.md §5]` |
 | Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on receiving (Appendix B). |
@@ -3177,11 +3311,21 @@ Appendix B. These are the ones the rules above cite:
 - A put on a wildcard key is legal, and subscribers receive the publisher's
   key.
 - `BestMatching` reaches the nearest `complete` queryable on each router.
-- Routers stamp puts, not deletes or replies, and re-stamp future-dated puts
-  beyond the HLC delta (500 ms).
-- A session with its HLC enabled stamps every put it is not given a
-  timestamp for, a publisher's included, from its own HLC
-  (`Session::resolve_put`).
+- A router stamps only puts, where its timestamping is enabled, and
+  never a delete or a reply: `treat_timestamp` reads a `PushBody::Put`
+  alone (`dispatcher/pubsub.rs`). It re-stamps a future-dated put beyond
+  the HLC delta (500 ms).
+- Timestamping is enabled by default for a router, and disabled for a
+  peer and a client (`zenoh-config`'s `defaults.rs`, `timestamping`). A
+  runtime has an HLC only where it is enabled.
+- A session with its HLC enabled stamps every put and every delete it is
+  not given a timestamp for, a publisher's included, from its own HLC
+  (`api/session.rs`, `resolve_put`).
+- A put or a delete given a timestamp sends it, on a session without an
+  HLC too (`resolve_put`), and so does a reply or a `reply_del`
+  (`api/queryable.rs`, `_reply_sample`). A reply given none carries none.
+  `Session::new_timestamp()` reads the HLC where there is one, and else
+  the wall clock with the session's zid (`api/session.rs`).
 - A put's `reliability` is unstable API. `PublisherBuilder::reliability`
   and `PublicationBuilder::reliability` exist only under the `unstable`
   feature. Without it a put is sent `Reliability::DEFAULT`, which is
@@ -3222,8 +3366,21 @@ Appendix B. These are the ones the rules above cite:
   (uhlc 0.8's derived `Ord` on `Timestamp` and `ID`), so its least
   significant byte decides first. `Latest` keeps the reply whose
   timestamp is greatest in that order, an unstamped one lowest, and a
-  later one on a tie (`api/session.rs`). Checked against zenoh's
-  own `Timestamp` by `zenkey-fleet`'s `bus::seed` tests.
+  later one on a tie, so the last to arrive among unstamped replies. It
+  delivers them at the final reply (`api/session.rs`). Checked against
+  zenoh's own `Timestamp` by `zenkey-fleet`'s `bus::seed` tests.
+- An advanced publisher with a cache and no sample numbering orders its
+  history by its session's timestamps, and is refused at its declaration
+  on a session with no HLC (zenoh-ext's `advanced_publisher.rs`, `cache`
+  and `Sequencing::Timestamp`). With sample-miss detection it numbers its
+  samples instead, and needs no HLC (§2.5).
+- A numbered sample carries a SourceInfo extension: the publisher's zid,
+  its entity id and the number. With a 16-byte zid that is 21 bytes for a
+  number below 128, and up to 25 (zenoh-codec's `zenoh/mod.rs`,
+  `SourceInfoType`).
+- zenoh's storage manager refuses to start on a session without
+  timestamping, and so runs no storage there
+  (zenoh-plugin-storage-manager's `lib.rs`; §8.2).
 - A reply error carries a payload and an encoding, and no key expression.
   `Reply::replier_id` is behind the `unstable` feature. It names the session
   that sent the reply, whatever key the reply is on. §4.2's admin-space
@@ -3572,11 +3729,11 @@ section each was written against, whose pointer leads on.
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
-| `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order, unstamped samples, and a tool's across two ids |
+| `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
 | `conformance/errors/` | §5.2 |
 | `conformance/envelope/` | §7.5 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §7 step 2 a consumer's and a tool's late joiner across a new epoch, after their seed and inside it; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node |
+| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
@@ -3716,10 +3873,17 @@ brief:
   The bound comes from `wait_before_close`, the lease and the keep-alive
   count (`lossless.json`'s `stall_bounds`). Each file's
   description states the order a reason is chosen in.
-- **`seed/`**: two stamps → their order (`merge.json`'s `order`),
-  and one key's arrivals, each a stamp or none and a kind → which are
-  kept (`cases`). A stamp is `{time, id}`, the id written as zenoh
-  writes it.
+- **`seed/`**: two Zenoh timestamps → their order (`merge.json`'s
+  `order`), and one key's arrivals, each a stamp or none and a kind →
+  which are kept (`cases`). A stamp is `{time, id}`, the id written as
+  zenoh writes it.
+  - **`inband.json`** holds in-band stamps, each `{width, run, seq}`. A
+    key's kind and two stamps → their order: `less`, `equal`, `greater`
+    or `unordered` (`order`).
+  - Its `cases` are a key's kind and its arrivals, each a put or a delete.
+    An arrival carries an in-band stamp, a Zenoh timestamp, both or
+    neither. They give which arrivals a tool's merge keeps, and for a
+    state key, which a consumer accepts.
 - **`envelope/`**: one byte → CH's form, run width and tag
   (`vectors.json`'s `headers`). An envelope's bytes in hex, and the kind
   of the sample that carries them, `put` for a payload or `delete` for an

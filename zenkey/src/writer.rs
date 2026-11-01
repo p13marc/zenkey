@@ -2,8 +2,11 @@
 //! `Encoding` on every sample, advanced publication when the contract
 //! declares `history`, and events as one-shot puts on fresh ULID keys.
 //!
-//! State's own rules (stamps, tombstones, GET answering, S1–S7) are #620's,
-//! built on [`Writer`]; this module only publishes.
+//! Every `stream`, `state`, `@state` and `events` sample carries core §7.5's
+//! envelope under the owner's stamps (§4.3), its record after it, under the
+//! `Encoding` `zenoh/bytes`; an `@stream` sample keeps its record alone,
+//! under its predefined `Encoding`. State's own rules (tombstones, GET
+//! answering, S1–S7) are [`crate::state`]'s, built on [`Writer`].
 
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use zenkey_model::authoring::{Encoding as WireEncoding, Kind};
 use zenkey_model::contract::{Body, Data, Resource};
+use zenkey_model::grammar::KindToken;
 use zenkey_model::schema::TypeId;
 use zenkey_model::template::Bindings;
 use zenoh::bytes::{Encoding, ZBytes};
@@ -119,7 +123,16 @@ impl PubSlot {
                     .map_err(zenoh)?,
             ),
             Some(h) => {
-                let mut b = self
+                // Core §2.5: an owner's advanced publisher numbers its
+                // samples, since its session runs without timestamping
+                // (§8.2) and zenoh-ext refuses a cache whose samples carry
+                // neither a number nor a timestamp; `miss_detection_ms`
+                // adds the heartbeat.
+                let miss = match h.miss_detection_ms {
+                    Some(ms) => MissDetectionConfig::default().heartbeat(Duration::from_millis(ms)),
+                    None => MissDetectionConfig::default(),
+                };
+                let b = self
                     .session
                     .declare_publisher(key)
                     .encoding(self.encoding.clone())
@@ -128,12 +141,8 @@ impl PubSlot {
                     .priority(qos::priority(d.priority))
                     .express(d.express)
                     .cache(CacheConfig::default().max_samples(h.depth as usize))
-                    .publisher_detection();
-                if let Some(ms) = h.miss_detection_ms {
-                    b = b.sample_miss_detection(
-                        MissDetectionConfig::default().heartbeat(Duration::from_millis(ms)),
-                    );
-                }
+                    .publisher_detection()
+                    .sample_miss_detection(miss);
                 Inner::Advanced(b.await.map_err(zenoh)?)
             }
         });
@@ -178,42 +187,89 @@ impl Slot for PubSlot {
 /// a put while it stands by is refused, [`Error::Standby`], with nothing
 /// published (§2.4).
 ///
-/// On a stream that declares `timing.lifespan_ms` (`timing.v1` §2.6,
-/// [`crate::timing`]), each put is stamped from its service's clock, the
-/// stamp's id the session's zid, which the descriptor states as
-/// `meta.zid`, so a reader can age the sample against its owner's clock.
-/// Its period is the application's to keep (§2.4): the writer publishes
-/// only what it is given, and never a sample again on its own.
+/// **The in-band stamp** (core §4.3, §7.5). A `stream` or state sample's
+/// payload is §7.5's envelope, its record after it, under the `Encoding`
+/// `zenoh/bytes` (§7.2's exception): a stream key's seq is its own in the
+/// run, kept by the service's [`crate::state::Minter`] across a publisher
+/// declared again, and a state mutation's is the owner's. An `@stream`
+/// sample keeps today's wire: its record alone, under its predefined
+/// `Encoding`.
+///
+/// **A Zenoh timestamp** goes only on a resource core §4.3's table lists:
+/// a stream that declares `timing.lifespan_ms` (`timing.v1` §2.6,
+/// [`crate::timing`]) is stamped from its service's clock, the stamp's id
+/// the session's zid, which the descriptor states as `meta.zid`, so a
+/// reader can age the sample against its owner's clock; a state with a
+/// horizon above 0, a `desired.v1` desired resource and a `telemetry.v1`
+/// state metric resource on every mutation. On a session whose
+/// timestamping is enabled, every put is (core §8.2). Its period is the
+/// application's to keep (§2.4): the writer publishes only what it is
+/// given, and never a sample again on its own.
 pub struct Writer {
     key: zenoh::key_expr::KeyExpr<'static>,
+    owned: OwnedKeyExpr,
     slot: Arc<PubSlot>,
     gate: Option<Arc<Gate>>,
+    /// Every sample's `Encoding`: `zenoh/bytes` under an envelope.
     encoding: Encoding,
+    /// The record's, as the contract's type says (§7.2).
+    record_encoding: Encoding,
     wire: Option<WireEncoding>,
     json_typed: bool,
     budget: Option<Arc<Budget>>,
     meter: Option<Meter>,
     /// The resource's `timing.v1` values, when it is a timed stream.
     timing: Option<zenkey_model::timing::Declared>,
-    /// The clock each put is stamped from: a timed stream that declares a
-    /// lifespan (`timing.v1` §2.6).
-    clock: Option<Arc<crate::state::Minter>>,
+    /// The service's stamps (core §4.3).
+    minter: Arc<crate::state::Minter>,
+    /// The resource's kind token: a stream's seq is its key's, a state's the
+    /// owner's, an `@stream` carries no envelope.
+    token: KindToken,
+    /// Whether each write carries a Zenoh timestamp: §4.3's table, or a
+    /// session whose timestamping is enabled.
+    timed: bool,
+    /// Held from a stream sample's mint to its put, so that one writer's
+    /// samples go out in their seqs' order.
+    order: tokio::sync::Mutex<()>,
+}
+
+/// Whether `r` is a resource core §4.3's table lists for every mutation of
+/// it: a state with a horizon above 0 (`freshness.v1`), a `desired.v1`
+/// desired resource, or a stream that declares a `timing.v1` lifespan. A
+/// `telemetry.v1` state metric resource is the fourth, known once its
+/// writer is metered ([`Writer::metered`]).
+fn in_table(r: &Resource) -> bool {
+    let state = matches!(r.token, KindToken::State | KindToken::ExplicitState);
+    let horizon = matches!(
+        zenkey_model::freshness::horizon_of(r),
+        zenkey_model::freshness::Horizon::Within(_)
+    );
+    let desired = matches!(
+        zenkey_model::desired::declaration_of(r),
+        zenkey_model::desired::Declaration::Declared(_)
+    );
+    let lifespan = zenkey_model::timing::declaration_of(r)
+        .declared()
+        .is_some_and(|t| t.lifespan.is_some());
+    (state && (horizon || desired)) || lifespan
 }
 
 impl Writer {
     pub(crate) async fn declare(
         session: &zenoh::Session,
+        minter: &Arc<crate::state::Minter>,
         key: OwnedKeyExpr,
         r: &Resource,
         values: &Bindings,
     ) -> Result<Self> {
-        Self::declare_gated(session, key, r, values, None).await
+        Self::declare_gated(session, minter, key, r, values, None).await
     }
 
     /// [`Writer::declare`] on a governed interface's `gate`: its publisher
     /// declared only while the gate is open.
     pub(crate) async fn declare_gated(
         session: &zenoh::Session,
+        minter: &Arc<crate::state::Minter>,
         key: OwnedKeyExpr,
         r: &Resource,
         values: &Bindings,
@@ -226,7 +282,14 @@ impl Writer {
                 r.template
             )));
         }
-        let encoding = wire_encoding(&d.type_, d.encoding, values);
+        let record_encoding = wire_encoding(&d.type_, d.encoding, values);
+        // Core §4.3, §7.2: an envelope's sample is `zenoh/bytes`; an
+        // `@stream`'s keeps its predefined Encoding.
+        let encoding = if r.token == KindToken::ExplicitStream {
+            record_encoding.clone()
+        } else {
+            Encoding::ZENOH_BYTES
+        };
         let slot = Arc::new(PubSlot {
             session: session.clone(),
             key: key.clone(),
@@ -238,30 +301,26 @@ impl Writer {
             None => slot.declare_now().await?,
             Some(g) => g.join(Arc::clone(&slot) as Arc<dyn Slot>).await?,
         }
-        if r.token == zenkey_model::grammar::KindToken::ExplicitStream {
+        if r.token == KindToken::ExplicitStream {
             crate::shm::warn_if_memlock_low();
         }
         Ok(Self {
+            owned: key.clone(),
             key: zenoh::key_expr::KeyExpr::from(key),
             slot,
             gate,
             encoding,
+            record_encoding,
             wire: d.encoding,
             json_typed: matches!(d.type_, TypeId::JsonSchema { .. }),
             budget: None,
             meter: None,
             timing: zenkey_model::timing::declaration_of(r).declared().copied(),
-            clock: None,
+            minter: Arc::clone(minter),
+            token: r.token,
+            timed: in_table(r) || minter.session_timestamping(),
+            order: tokio::sync::Mutex::new(()),
         })
-    }
-
-    /// Stamps each put from `clock`, its service's, when the resource
-    /// declares a lifespan (`timing.v1` §2.6).
-    pub(crate) fn clocked(mut self, clock: &Arc<crate::state::Minter>) -> Self {
-        if self.timing.is_some_and(|t| t.lifespan.is_some()) {
-            self.clock = Some(Arc::clone(clock));
-        }
-        self
     }
 
     /// The resource's `timing.v1` values (`timing.v1` §2.2), when it is a
@@ -272,11 +331,12 @@ impl Writer {
         self.timing.as_ref()
     }
 
-    /// Whether each put is stamped from the service's clock (`timing.v1`
-    /// §2.6).
+    /// Whether each put carries a Zenoh timestamp from the service's clock
+    /// (core §4.3's table: a lifespan's stream, `timing.v1` §2.6, among
+    /// them), or from its session's (§8.2).
     #[must_use]
     pub fn is_stamped(&self) -> bool {
-        self.clock.is_some()
+        self.timed
     }
 
     /// Keeps `budget`, its resource's in its service (§2.7).
@@ -286,8 +346,13 @@ impl Writer {
     }
 
     /// Holds its puts to `telemetry.v1` through `meter`, for a member of a
-    /// metric resource ([`crate::telemetry`]).
+    /// metric resource ([`crate::telemetry`]). A state metric resource is
+    /// on core §4.3's table: its rate's time base is its owner's stamp
+    /// (`telemetry.v1` §2.11).
     pub(crate) fn metered(mut self, meter: Option<Meter>) -> Self {
+        if meter.is_some() && matches!(self.token, KindToken::State | KindToken::ExplicitState) {
+            self.timed = true;
+        }
         self.meter = meter;
         self
     }
@@ -371,10 +436,34 @@ impl Writer {
         }
     }
 
-    /// The `Encoding` every sample carries.
+    /// The `Encoding` every sample carries: `zenoh/bytes` under an
+    /// envelope (core §4.3, §7.2), an `@stream`'s predefined one.
     #[must_use]
     pub fn encoding(&self) -> &Encoding {
         &self.encoding
+    }
+
+    /// The record's `Encoding`, as the contract's type says (§7.2): the
+    /// sample's own on an `@stream`, the envelope's record's otherwise.
+    #[must_use]
+    pub fn record_encoding(&self) -> &Encoding {
+        &self.record_encoding
+    }
+
+    /// Whether its samples carry §7.5's envelope: every kind but `@stream`
+    /// (core §4.3).
+    #[must_use]
+    pub fn is_enveloped(&self) -> bool {
+        self.token != KindToken::ExplicitStream
+    }
+
+    /// The stamps of its next write: a stream key's seq, or the owner's
+    /// state seq, which the clock guard holds (core §4.3).
+    pub(crate) fn mint(&self) -> Result<crate::state::Stamped> {
+        match self.token {
+            KindToken::State | KindToken::ExplicitState => self.minter.mint_state(self.timed),
+            _ => Ok(self.minter.mint_stream(&self.owned, self.timed)),
+        }
     }
 
     /// The member's key expression.
@@ -424,20 +513,25 @@ impl Writer {
         let Some(inner) = &*held else {
             return Err(self.standby());
         };
+        let order = self.order.lock().await;
         self.admit()?;
-        // timing.v1 §2.6: a lifespan's sample carries its owner's stamp.
-        let ts = self.clock.as_ref().map(|c| c.now());
-        match (inner, ts) {
-            (Inner::Plain(p), None) => p.put(payload).attachment(attachment).await,
-            (Inner::Advanced(p), None) => p.put(payload).attachment(attachment).await,
-            (Inner::Plain(p), Some(ts)) => {
-                p.put(payload).attachment(attachment).timestamp(ts).await
-            }
-            (Inner::Advanced(p), Some(ts)) => {
-                p.put(payload).attachment(attachment).timestamp(ts).await
-            }
+        // Core §4.3: the envelope under the next stamps, and a Zenoh
+        // timestamp only on §4.3's table (timing.v1 §2.6: a lifespan's
+        // sample carries its owner's stamp). An `@stream` keeps its wire.
+        let (payload, ts) = if self.is_enveloped() {
+            let stamped = self.mint()?;
+            let record = payload.to_bytes();
+            (ZBytes::from(stamped.seal(&record)), stamped.time)
+        } else {
+            let ts = self.timed.then(|| self.minter.time());
+            (payload, ts)
+        };
+        match inner {
+            Inner::Plain(p) => p.put(payload).attachment(attachment).timestamp(ts).await,
+            Inner::Advanced(p) => p.put(payload).attachment(attachment).timestamp(ts).await,
         }
         .map_err(zenoh)?;
+        drop(order);
         drop(held);
         if let Some(p) = pending {
             p.commit();
@@ -452,14 +546,15 @@ impl Writer {
         }
     }
 
-    /// Puts with the owner's stamp (state, S1), under the write `admitted`
-    /// by [`Writer::serving`], held from the stamp's minting to here.
+    /// Puts `payload`, already sealed under `stamped` (state, S1), with its
+    /// Zenoh timestamp where it has one, under the write `admitted` by
+    /// [`Writer::serving`], held from the stamps' minting to here.
     pub(crate) async fn put_stamped(
         &self,
         _admitted: &Admitted<'_>,
         payload: ZBytes,
         attachment: Option<ZBytes>,
-        ts: zenoh::time::Timestamp,
+        stamped: crate::state::Stamped,
     ) -> Result<()> {
         let held = self.slot.inner.read().await;
         match &*held {
@@ -467,31 +562,74 @@ impl Writer {
             Some(Inner::Plain(p)) => p
                 .put(payload)
                 .attachment(attachment)
-                .timestamp(ts)
+                .timestamp(stamped.time)
                 .await
                 .map_err(zenoh),
             Some(Inner::Advanced(p)) => p
                 .put(payload)
                 .attachment(attachment)
-                .timestamp(ts)
+                .timestamp(stamped.time)
                 .await
                 .map_err(zenoh),
         }
     }
 
-    /// Deletes with the owner's stamp (state, S1), under the write
+    /// Deletes under `stamped` (state, S1): its attachment the delete's
+    /// envelope, its Zenoh timestamp where it has one, under the write
     /// `admitted` as [`Writer::put_stamped`].
     pub(crate) async fn delete_stamped(
         &self,
         _admitted: &Admitted<'_>,
-        ts: zenoh::time::Timestamp,
+        stamped: crate::state::Stamped,
     ) -> Result<()> {
         let held = self.slot.inner.read().await;
+        let attachment = ZBytes::from(stamped.delete_attachment());
         match &*held {
             None => Err(self.standby()),
-            Some(Inner::Plain(p)) => p.delete().timestamp(ts).await.map_err(zenoh),
-            Some(Inner::Advanced(p)) => p.delete().timestamp(ts).await.map_err(zenoh),
+            Some(Inner::Plain(p)) => p
+                .delete()
+                .attachment(attachment)
+                .timestamp(stamped.time)
+                .await
+                .map_err(zenoh),
+            Some(Inner::Advanced(p)) => p
+                .delete()
+                .attachment(attachment)
+                .timestamp(stamped.time)
+                .await
+                .map_err(zenoh),
         }
+    }
+
+    /// Puts a stream sample sealed under its key's next seq and given the
+    /// Zenoh timestamp `time`, where the owner sets one (`health.v1` §2.5's
+    /// fault: core §4.3's table), under the write `admitted`.
+    pub(crate) async fn put_at(
+        &self,
+        _admitted: &Admitted<'_>,
+        payload: &[u8],
+        time: zenoh::time::Timestamp,
+    ) -> Result<()> {
+        let held = self.slot.inner.read().await;
+        let Some(inner) = &*held else {
+            return Err(self.standby());
+        };
+        let order = self.order.lock().await;
+        self.admit()?;
+        let payload = if self.is_enveloped() {
+            let mut stamped = self.minter.mint_stream(&self.owned, false);
+            stamped.time = Some(time);
+            ZBytes::from(stamped.seal(payload))
+        } else {
+            ZBytes::from(payload.to_vec())
+        };
+        let r = match inner {
+            Inner::Plain(p) => p.put(payload).timestamp(time).await,
+            Inner::Advanced(p) => p.put(payload).timestamp(time).await,
+        }
+        .map_err(zenoh);
+        drop(order);
+        r
     }
 
     /// A value of this resource's JSON Schema type, in its wire encoding.
@@ -531,18 +669,24 @@ pub(crate) fn encode_value<T: Serialize>(value: &T, wire: Option<WireEncoding>) 
 pub struct EventWriter {
     session: zenoh::Session,
     prefix: String,
-    encoding: Encoding,
+    /// The record's `Encoding` (§7.2); every occurrence is `zenoh/bytes`,
+    /// under its envelope (core §4.3).
+    record_encoding: Encoding,
     reliability: Reliability,
     congestion: CongestionControl,
     priority: Priority,
     express: bool,
     budget: Option<Arc<Budget>>,
     gate: Option<Arc<Gate>>,
+    /// The service's stamps: an occurrence takes the owner's next state and
+    /// event seq (core §4.3).
+    minter: Arc<crate::state::Minter>,
 }
 
 impl EventWriter {
     pub(crate) fn new(
         session: &zenoh::Session,
+        minter: &Arc<crate::state::Minter>,
         prefix: String,
         r: &Resource,
         values: &Bindings,
@@ -554,14 +698,22 @@ impl EventWriter {
         Ok(Self {
             session: session.clone(),
             prefix,
-            encoding: wire_encoding(&d.type_, d.encoding, values),
+            record_encoding: wire_encoding(&d.type_, d.encoding, values),
             reliability: qos::reliability(d.reliability),
             congestion: qos::congestion(d.congestion),
             priority: qos::priority(d.priority),
             express: d.express,
             budget: None,
             gate: None,
+            minter: Arc::clone(minter),
         })
+    }
+
+    /// The record's `Encoding`, as the contract's type says (§7.2). Every
+    /// occurrence carries `zenoh/bytes`, under its envelope (core §4.3).
+    #[must_use]
+    pub fn record_encoding(&self) -> &Encoding {
+        &self.record_encoding
     }
 
     /// Keeps `budget`, its resource's in its service (§2.7).
@@ -616,10 +768,16 @@ impl EventWriter {
         }
         let key = format!("{}/{}", self.prefix, ulid(at));
         let attachment: Option<ZBytes> = attachment.map(Into::into);
+        // Core §4.3: the occurrence under the owner's next seq, sealed in
+        // §7.5's envelope; a Zenoh timestamp only where its session stamps
+        // (§8.2).
+        let stamped = self.minter.mint_event(false);
+        let payload: ZBytes = payload.into();
         self.session
-            .put(&key, payload)
+            .put(&key, stamped.seal(&payload.to_bytes()))
             .attachment(attachment)
-            .encoding(self.encoding.clone())
+            .encoding(Encoding::ZENOH_BYTES)
+            .timestamp(stamped.time)
             .reliability(self.reliability)
             .congestion_control(self.congestion)
             .priority(self.priority)

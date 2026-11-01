@@ -1,0 +1,11 @@
+# core §2.5 (#976): a stream with `history`, whose owner's advanced
+# publisher numbers its samples on a session without timestamping.
+[interface]
+name  = "ticker"
+major = 1
+minor = 0
+
+[resources.tick]
+kind    = "stream"
+type    = { raw = "text/plain" }
+history = { depth = 5 }

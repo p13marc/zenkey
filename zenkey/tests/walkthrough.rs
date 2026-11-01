@@ -523,7 +523,7 @@ async fn tcgui_set_and_diagnostics() {
 async fn w4_3_commanding_an_intermittently_connected_vehicle() {
     use common::{link_to, router_via};
     use zenkey::archive::{self, Archive, ArchiveConfig, Recorded};
-    use zenkey::state::{StateGet, ValueOrder};
+    use zenkey::state::ValueOrder;
 
     let (_r1, ep1) = router(None).await;
     let link = link_to(&ep1).await;
@@ -594,20 +594,18 @@ async fn w4_3_commanding_an_intermittently_connected_vehicle() {
     let mut order = ValueOrder::new();
     let mut applied: Vec<(Vec<u8>, bool)> = Vec::new();
     let read_and_apply = async |order: &mut ValueOrder, applied: &mut Vec<(Vec<u8>, bool)>| {
-        let (bytes, ts, last_known) = match consumer
-            .get("state/plans/{vehicle}", None, T)
+        let answer = consumer
+            .get_answer("state/plans/{vehicle}", None, T)
             .await
-            .unwrap()
-        {
-            StateGet::Answered(v) => match &v[0] {
-                zenkey::state::Current::Value { sample, .. } => (
-                    sample.payload().to_bytes().into_owned(),
-                    *sample.timestamp().unwrap(),
-                    false,
-                ),
-                zenkey::state::Current::Deleted { .. } => return,
-            },
-            StateGet::Silent => {
+            .unwrap();
+        let (bytes, mark, last_known) = match answer.current.first() {
+            Some(cur @ zenkey::state::Current::Value { sample, .. }) => (
+                sample.payload().to_bytes().into_owned(),
+                answer.mark(cur).expect("an in-band stamp (S1)"),
+                false,
+            ),
+            Some(zenkey::state::Current::Deleted { .. }) => return,
+            None => {
                 let Some(l) =
                     archive::last_known(&vehicle, &common::addr("vehicle-01/archive"), origin, T)
                         .await
@@ -615,10 +613,11 @@ async fn w4_3_commanding_an_intermittently_connected_vehicle() {
                 else {
                     return;
                 };
-                (l.value.unwrap_or_default(), l.timestamp.unwrap(), true)
+                let mark = l.mark().expect("the archive keeps the owner's stamps");
+                (l.value.unwrap_or_default(), mark, true)
             }
         };
-        if order.accept(origin, &ts) {
+        if order.accept_mark(origin, mark) {
             applied.push((bytes, last_known));
         }
     };

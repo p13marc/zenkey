@@ -34,7 +34,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   moved verbatim from zenctl), presence and contract retrieval
   (`bus::presence`, `bus::contracts`), the session-free **lens** a raw
   observer resolves keys through (`model::lens`), contract-resolved
-  rendering (`model::render`, structural when no contract is in hand), the zk2c envelope read first (`model::inband`, core §7.5, observer §7.3, #976 A2: a stream, state or event sample under `zenoh/bytes` stripped to its record where its bytes are read, never where they are carried, `SampleView` and `FleetAnswer` deriving `envelope`/`mark`/`record`; a refused envelope undecodable with its refusal named, never sniffed nor ordered; every merge, the seeded watch, the snapshot fold and telemetry's and alarms' books (`sample_enveloped`, `SeedRead::envelopes`), by seq within a run and the later arrival across runs; a value the runtime already read never stripped twice, `inband::delivered_encoding`; the doctor's `state-stamp-foreign` counting an in-band stamp as the owner's and finding a refused one),
+  rendering (`model::render`, structural when no contract is in hand), the zk2c envelope read first (`model::inband`, core §7.5, observer §7.3, #976 A2: a stream, state or event sample under `zenoh/bytes` stripped to its record where its bytes are read, never where they are carried, `SampleView` and `FleetAnswer` deriving `envelope`/`mark`/`record`; a refused envelope undecodable with its refusal named, never sniffed nor ordered; every merge, the seeded watch, the snapshot fold and telemetry's and alarms' books (`sample_enveloped`, `SeedRead::envelopes`), by seq within a run and the later arrival across runs; a value the runtime already read never stripped twice, `inband::delivered_encoding`; the doctor's `state-stamp-foreign` counting an in-band stamp as the owner's and finding a refused one; and #976 A3, core 0.73: core §4.3's table read from the contract, `inband::on_the_table` and `inband::resource_of` (a state with `freshness.ttl_s` above 0, a desired resource, a state metric resource, a lifespan's stream); a stream key's seqs merged by serial order across their wrap (`bus::seed`'s merge by `seed::Order::of_key`, `state.md` §13); `StateRow::inband` and `WatchSample::inband` (`report::InbandStamp`: the run as the descriptor spells it, and the seq); `state-stamp-foreign` judging a Zenoh clock against `meta.zid` on the table alone, a reply with no envelope a finding, and a Zenoh-stamped reply no revision in hand places unjudged (`StateStamps::add`, `plain`, `untabled`); `check conform`'s `state-stamp` and `state-get` passing S1 and S2 on the in-band stamp, on the table a missing or foreign Zenoh timestamp the finding; `why` saying "stamped in band (run r, seq s)" of the owner's reply and of an archive's `LastKnown::inband`; a mock owner's session with timestamping off, a candidate's on (`open_owner_in_namespace(…, governed)`, core §8.2), its runs from `GenSpec::run_store` and `ServeSpec::run_store`),
   `Monitor` with bounded broadcast + `Dropped(n)` honesty and ArcSwap
   key-tree snapshots, and live per-address presence (`model::presence_live`:
   up, down or unobservable, every token move a value; kept current from a
@@ -87,7 +87,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `model::identity::IdentityCache` (each key's resolution, bounded, dropped
   when the lens's generation moves), the seeded watch as core §4.2's late
   joiner (0.26: subscribe, then S4's `All`+`Latest` GET through
-  `bus::query::state_get`, merged by the owner's stamp, plus the `@adv`
+  `bus::query::state_get`, merged by the in-band stamp (core 0.73: by seq
+  within a run, serial for a stream key, the later arrival across two
+  runs; `state.md` §7 step 4's tool), plus the `@adv`
   history leg; no storage is a seed; the merge kept for the watch's life,
   as observer 0.10's §4.1 says a tool's lasts, no longer dropped at the
   boundary, bounded at `MonitorSpec::max_keys` by last admission, a
@@ -375,7 +377,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   its own `identity_epoch`, bumped at every door the lens's inputs move
   through. Payloads are checked through `Lens::check` into four
   conformance poles (valid, invalid, undecodable, not checked), the
-  verdict cache's "not yet checked" never one of them. A zk2c envelope (core §7.5, #976 A2) is stripped by the lens, the echo and history previews, `DecodedValue::of_wire` and the metric and timing reads (a refused one no arrival); a read's replies sort newest first by `inband::newest_first`; the spray's raw zk2 rows carry their type's predefined Encoding. **The tree** starts
+  verdict cache's "not yet checked" never one of them. A zk2c envelope (core §7.5, #976 A2) is stripped by the lens, the echo and history previews, `DecodedValue::of_wire` and the metric and timing reads (a refused one no arrival); a read's replies sort newest first by `inband::newest_first`; the spray's raw zk2 rows carry their type's predefined Encoding. Since #976 A3 (core 0.73) the Inspector's value chips show an in-band stamp as "`<run>·<seq>` (in band)" (`view::detail::stamp_chips`, over `StateRow::inband` and `value::Reply::inband`), a Zenoh stamp's chip and its "stamp … · clock …" line only where one rides the value, and "unstamped" only for a value with neither; the seeded tree keeps the later arrival across two runs (`state.md` §7 step 4). **The tree** starts
   from the contract skeleton (`Skeleton::build(&lens, admin)`, on the
   update thread, rebuilt by `Arc` identity when the lens's inputs or the
   admin answer move, never on a tick). The admin answer is the declared
@@ -712,8 +714,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   clock), the doctor's `telemetry-declaration` (a warning, from contracts)
   and `telemetry-sample` (`--deep`), and `check conform`'s
   `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`
-  (24 cases); `gen` and `serve` open an owner's session, timestamping on
-  (#825). #840's DD added `desired [SYSTEM/SERVICE] [--role R] [--for SECS]
+  (24 cases); `gen` and `serve` open an owner's session (#825), since core
+  0.73 with timestamping off, a governed interface's candidate's on (§8.2),
+  and `--run-file PATH` gives each instance its next 16-bit run from a
+  `FileRunStore`, refused beside a governed interface before any session,
+  exit 2 (#976 A3); `get state`'s rows and `watch`'s samples carry
+  `inband`, the run and seq, beside `timestamp`, which the table's detail
+  line and the watch's head line say (`stamped in band: run 0003, seq 12`). #840's DD added `desired [SYSTEM/SERVICE] [--role R] [--for SECS]
   [--clocks-synced] [--contracts PATH]`, a root judgement over
   `desired.v1` (exit 1 a refused or failed act, or a target "not yet" on
   one version of its author's for the whole window, by the readings or a
@@ -921,7 +928,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   in a secret position fails to parse. **The three states are preserved**
   into every sink payload; a presence notice carries the engine's pinned
   `PresenceTransition` (`report::presence`), an alert its `AlarmTransition`
-  (`kind: alert`, the document rendered `schema`); an alarm under a zk2c envelope is read and merged by run and seq in the fleet's `AlarmFeed` (core §7.5, #976 A2), and zenwatch reads wire bytes nowhere. Routing — which rule, which
+  (`kind: alert`, the document rendered `schema`); an alarm under a zk2c envelope is read and merged by run and seq in the fleet's `AlarmFeed` (core §7.5, #976 A2), and zenwatch reads wire bytes nowhere. Its own zenwatch.v1 and health.v1 puts carry the runtime's in-band stamps (#976 A3, core 0.73), and `tests/publish.rs`'s self-conformance passes `state-stamp` and `state-get` on them. Routing — which rule, which
   sink, whether it is a duplicate — is the daemon's (`engine::route`, over
   a `Notice` seam). `--dry-run` swaps every sink for a printing one. **The
   discipline** (#389, `discipline/`) sits between `route` and delivery and
@@ -998,7 +1005,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   order spelled out, an unstamped sample below every stamp; core 0.68,
   F-382, correcting 0.67's F-368: across two ids it is a tool's merge, for
   as long as the tool follows, and a consumer orders by S7 from its first
-  value on, its seed included), which the
+  value on, its seed included; core 0.73: by in-band stamp, the kind
+  picking `seed::Order`, `Plain` for state and events and `Serial` for a
+  stream key, through `versus_in`/`admits_mark_in`, the later arrival
+  across two runs, a Zenoh timestamp only for a sample with no envelope),
+  which the
   fleet's seeded subscription decides by, `config.v1`'s session-free
   half (`config`, #768 CA: the validators in the profile's order of
   refusals, the window, redaction, and `Owner`, a pure state machine whose
@@ -1227,7 +1238,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   carries, no ε and governance from every revision held, and that it has
   listened from its stream subscriptions' declaration; text 0.4, #935:
   inline history out, no rule changed; text 0.5: round 88's F-349
-  rewritten), and `wire` (#976 A1): core §7.5's zk2c envelope, `Header`/`Form`/`Tag`/`Run`/`Seq`/`Stamp`, `Envelope::parse`/`write` for a put's mutation and `DeleteStamp::parse`/`write` for a delete's attachment, `Refusal::token` the fixtures' tokens; and (#976 A2) `carries`/`enveloped_key` (a stream, state or event key under `zenoh/bytes`, namespace in front or none), `read_put` → `Reading`, `read_delete`, `Refusal::reason`, with `seed::Mark`/`versus`/`admits_mark`/`consumer_accepts` ordering by seq within a run, nothing across runs or wires.
+  rewritten), and `wire` (#976 A1): core §7.5's zk2c envelope, `Header`/`Form`/`Tag`/`Run`/`Seq`/`Stamp`, `Envelope::parse`/`write` for a put's mutation and `DeleteStamp::parse`/`write` for a delete's attachment, `Refusal::token` the fixtures' tokens; and (#976 A2) `carries`/`enveloped_key` (a stream, state or event key under `zenoh/bytes`, namespace in front or none), `read_put` → `Reading`, `read_delete`, `Refusal::reason`, with `seed::Mark`/`versus`/`admits_mark`/`consumer_accepts` ordering by seq within a run, nothing across runs or wires; and (#976 A3, core 0.73) `enveloped_kind`, `Run::hex`/`from_hex` (a descriptor's `run`, 4 or 8 lowercase hex digits) and `seed::Order`/`versus_in`/`admits_mark_in`; `descriptor::Descriptor` has an optional `run` (never `null`, D002 when misspelt, `stated_run`).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1242,8 +1253,16 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   instance token, then the interface tokens), and the running `Service`
   (capabilities, make-before-break `new_epoch`, member tokens). `presence`
   reads liveliness on an unbounded flume handler (zenoh#2678), and
-  `retrieval` is §8.4. `writer` puts with the contract's QoS and `Encoding`
-  (advanced publication for `history`; events on fresh ULID keys;
+  `retrieval` is §8.4. `writer` puts with the contract's QoS, every
+  `stream`, `state` and `@state` sample sealed in §7.5's envelope under
+  `zenoh/bytes` (an `@stream` sample keeps its record alone under its
+  predefined `Encoding`, `Writer::record_encoding` the record's; core
+  §4.3, §7.2), and a Zenoh timestamp only on §4.3's table
+  (`Writer::is_stamped`: a state with `freshness.ttl_s` above 0, a
+  desired resource, a state metric resource, a lifespan's stream, health's
+  fault, or every write of a session whose timestamping is enabled)
+  (advanced publication for `history`, which always numbers its samples,
+  core §2.5; events on fresh ULID keys, each under its envelope;
   `reliability` through zenoh's `unstable` feature, which the workspace's
   `Cargo.toml` turns on: core §2.4 names it the one QoS field that is
   unstable API in zenoh 1.10.1; an owner that opts in sets it, and one
@@ -1292,20 +1311,39 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   keeps the seam the only one). The
   archive hears owners on `ArchiveConfig::watch` or reads presence every
   500 ms, and R5's wait reads presence. `state`
-  stamps every put and delete (the `Minter`: §4.3's minting, catch-up, a
-  clock guard that stops writes when ahead) and answers GETs with
-  `reply_del` within the window; `Consumer::get` is S4's owner-only
+  stamps every put and delete in band (the `Minter`, core 0.73 §4.3, #976
+  A3: `Stamped { stamp, time }`, which `StateWriter::put`/`delete` and the
+  typed handles return; one state and event seq per run, never wrapping:
+  before it would pass 2^24 − 1 the minter takes a new run and puts the
+  descriptor stating it under its own lock, then hands out seq 0,
+  `Minter::simulate_seq` for tests; one seq per stream key per run,
+  wrapping, kept across a publisher declared again, a takeover or a
+  member's writer made again, and a new run past 65,536 stream keys; the
+  run from `run::RunStore`, `FileRunStore`'s 2-byte record made durable
+  before use, spent at 0xFFFF, an unreadable one read as spent and never
+  reset, `ServiceBuilder::run_store` refused once a run is taken and, at
+  `start()`, beside `redundancy()`; else a random 32-bit run, drawn again
+  while it equals one used; `new_epoch` takes a new run, puts the new
+  instance's descriptor stating it, then alarms' and desired's re-puts
+  under it, then the tokens; §4.3's table's Zenoh timestamps still minted
+  above the last, catch-up included; the clock guard still stops every
+  state write; `start()` reads the session's timestamping for its mode,
+  `Minter::session_timestamping`, and warns naming core §8.2) and answers
+  GETs with the bytes put, a `reply_del` whose attachment is the delete's
+  envelope, each with the mutation's Zenoh timestamp where it had one,
+  within the window; `Consumer::get` is S4's owner-only
   `All`+`Latest` GET, silence being `StateGet::Silent`; `ValueOrder` is
   S7's consumer rule, per key, a value under an id other than the held
   value's accepted, handed every value from a consumer's first on, a
-  seed's replies included (core 0.68, `state.rs`'s
-  `s7_a_late_joiner_across_a_new_epoch`); `Consumer::get` returns every
-  reply at the GET's end, so inside a seed a consumer holds the id of the
-  instance that answered until the key's next value (core 0.69,
-  `s7_a_new_epoch_inside_a_late_joiners_seed`). `archive` is a
+  seed's replies included (core 0.68; since 0.73 by run and seq,
+  `state.rs`'s `s7_late_joiners_across_runs`); `Consumer::get` returns
+  every reply at the GET's end, so inside a seed a consumer holds the
+  value of the run that answered until the key's next value (core 0.69,
+  `s7_late_joiners_across_runs_inside_the_seed`). `archive` is a
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
-  current. `inband` (#976 A2) reads every data sample beside today's wire: an envelope's record as the payload and its run and seq as `Delivery::inband`/`StateAnswer::inband` (`mark()`, `ValueOrder::accept_mark`); a refused one undecodable, never delivered (`Subscription::undecodable`); the archive orders by it, refusing an outdated put only within a run.
+  current (`LastKnown::inband` and `mark()`, its in-band stamp, A3).
+  `inband` (#976 A2) reads every data sample beside today's wire: an envelope's record as the payload and its run and seq as `Delivery::inband`/`StateAnswer::inband` (`mark()`, `ValueOrder::accept_mark`); a refused one undecodable, never delivered (`Subscription::undecodable`); the archive orders by it, refusing an outdated put only within a run.
   Operations (#621, FH): `operation` serves a `complete` queryable that
   refuses fan-out (O2) and answers `unavailable` with its cause before any
   handler runs (O3), and a call left without its reply gets `internal`,
@@ -1485,7 +1523,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   declared. Scenarios §1–§5 are `tests/profile_timing.rs` over
   `tests/contracts/pace.v1.toml`; the owner example's `--timing` (with
   `--no-hlc`) drives `pace.v1` from stdin, and `consume --timing` is
-  scenarios.md's C as a black box, one JSON line per event.
+  scenarios.md's C as a black box, one JSON line per event. Since core
+  0.73 the owner example's session runs without timestamping unless
+  `--hlc` or `--standby` (§8.2), `--run-file PATH` takes its runs from a
+  `FileRunStore`, and a `seq <n>` line sets the next seq (`state.md` §7
+  step 3).
   `arbitration` (#909, BB) is `arbitration.v1`'s runtime over
   `zenkey_model::arbitration`'s `Arbiter`, deciding nothing itself.
   `ServiceBuilder::arbitrate(role, revision)` reads the role's declaration
@@ -1633,11 +1675,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   MAY after it, "*Except:* …", from `EXCEPTED_BY` (§2.4's
   `reliability`); and a list item under a rule that states none gives
   the rule its tags when it has none of its own, as the header now
-  says; S7's MUST to accept another id shows §4.3's MAY for a profile's
+  says; S7's MUST to accept another run shows §4.3's MAY for a profile's
   stricter order after it (0.69, F-394), and a bracket may also give a
-  verb the sentence omits. 175 rules, 20 citing none, 9 of
-  them MUSTs (#965's; S7's two consumer MUSTs cite `state.md` §7 since
-  0.68). The glossary holds 53 terms. Core 0.72 (#976's A1, epic #975) defines §7.5's zk2c envelope ahead of its use, adopted by no rule: CH (form bits 7–5, run width bit 4, tag bits 3–0), a 16- or 32-bit run and a 24-bit seq, big-endian, then the record; a mutation (code 0) is a put's payload, a delete (code 1) a delete's attachment, codes 2–7 reserved; its refusals (short, form, sample_kind, tag, short, trailing, first match) and its round trip are static, §12 listing §7.5 beside §1 and §9; `spec/conformance/envelope/vectors.json` is its evidence. Observer text 0.14 (#976's A2) reads it first: a tool that shows or judges a payload MUST read a stream, state or event sample under `zenoh/bytes` as §7.5's envelope, its record the payload, and MUST NOT sniff a refused one's bytes as a payload with no envelope (§7.3, `spec/conformance/envelope/carries.json`); since core §7.2 already asks an owner for its type's predefined `Encoding`, only a put that broke §7.2 reads differently, and the reference's raw test puts now carry their type's `Encoding`. Core 0.68 and observer
+  verb the sentence omits. 182 rules, 18 citing none, 7 of
+  them MUSTs (#965's; S7's two consumer MUSTs cite `state.md` §7 and
+  `seed/inband.json` since 0.73). The glossary holds 56 terms ("Stamp"
+  gave way to "Run", "Seq", "In-band stamp" and "Zenoh timestamp"). Core 0.72 (#976's A1, epic #975) defines §7.5's zk2c envelope ahead of its use, adopted by no rule: CH (form bits 7–5, run width bit 4, tag bits 3–0), a 16- or 32-bit run and a 24-bit seq, big-endian, then the record; a mutation (code 0) is a put's payload, a delete (code 1) a delete's attachment, codes 2–7 reserved; its refusals (short, form, sample_kind, tag, short, trailing, first match) and its round trip are static, §12 listing §7.5 beside §1 and §9; `spec/conformance/envelope/vectors.json` is its evidence. Core 0.73 (#976's A3) adopts it in §4.3, "Runs and sequence numbers (S7)": an owner writes it on every put of a `stream`, `state`, `@state` or `events` key and every state delete, under `zenoh/bytes` (§7.2's exception; `@stream` keeps its wire, for SHM); a run (no reuse; a 16-bit counter from a record made durable first, else a random 32-bit draw, always for a `redundancy.v1` candidate; a new one per instance and before the seq wraps, MAY at any other time) and a seq (one per run for state and events, plain order, never wrapping; one per stream key, serial order over 24 bits, unordered at 2^23, never restarted within a run) order a key's values; nothing orders two runs, and a consumer accepts another run; S1–S3 carry the in-band stamp, S7's row is a run never reused and a seq never wrapped; the HLC, catch-up and new-epoch MUSTs went, catch-up and a new epoch kept as definitions; only §4.3's table keeps a Zenoh timestamp (a state with `freshness.ttl_s` > 0, a desired resource, a state metric resource, a stream with a lifespan, a health fault where set, every put of a candidate); §8.2's "Session posture" (MUST NOT set a Zenoh timestamp outside the table; owner sessions, and routers onto a constrained face, SHOULD run with timestamping off); §3.3's `run` (4 or 8 lowercase hex digits, D002); §2.5's history publishers always number; §12's constrained clock row gone; `spec/conformance/seed/inband.json` and `scenarios/state.md` (rewritten, a new §13) its evidence. Observer text 0.15 reads it: a tool's merge by seq within a run and the later arrival across two runs (§4.1), its S1 check on the table's timestamps alone (§4.4), an in-band stamp shown as a run and a seq, never a time (§8.3). Observer text 0.14 (#976's A2) reads it first: a tool that shows or judges a payload MUST read a stream, state or event sample under `zenoh/bytes` as §7.5's envelope, its record the payload, and MUST NOT sniff a refused one's bytes as a payload with no envelope (§7.3, `spec/conformance/envelope/carries.json`); since core §7.2 already asks an owner for its type's predefined `Encoding`, only a put that broke §7.2 reads differently, and the reference's raw test puts now carry their type's `Encoding`. Core 0.68 and observer
   text 0.10 (#926 part 3, zk2py round 90's F-379 to F-392) changed five
   rules: a late joiner keeps the newer by the owner's stamp, but across
   two ids a consumer orders by S7 from its first value on, its seed's

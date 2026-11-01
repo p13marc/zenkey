@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use super::observe::{Conformance, QosMismatch};
 use super::payload::PayloadRendering;
-use super::state::Stamp;
+use super::state::{InbandStamp, Stamp};
 
 /// One delivered sample.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -25,8 +25,12 @@ pub struct WatchSample {
     /// The template's values on that key, unslugged.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub values: BTreeMap<String, Vec<String>>,
-    /// The sample's stamp and whose clock issued it; absent when it
-    /// carried none (a stream sample may not).
+    /// The sample's in-band stamp, its envelope's run and seq (core §4.3):
+    /// absent when it carried no envelope, as an `@stream` sample does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inband: Option<InbandStamp>,
+    /// The sample's Zenoh timestamp and whose clock issued it; absent when
+    /// it carried none, as a sample off core §4.3's table may not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Stamp>,
     /// The QoS the sample rode against its resource's (spec §2.4: an owner
@@ -131,6 +135,10 @@ mod tests {
             provider: "host-a/tc".into(),
             key: key.into(),
             values: [("iface".to_owned(), vec!["eth0".to_owned()])].into(),
+            inband: Some(crate::report::InbandStamp {
+                run: "0003".into(),
+                seq: 41,
+            }),
             timestamp: None,
             qos_mismatch: None,
             event: WatchEvent::Put {
@@ -147,6 +155,7 @@ mod tests {
                 "provider": "host-a/tc",
                 "key": key,
                 "values": {"iface": ["eth0"]},
+                "inband": {"run": "0003", "seq": 41},
                 "kind": "put",
                 "payload": serde_json::to_value(&payload).unwrap(),
                 "conformance": {"state": "not_checked", "reason": "no resource matches"},
@@ -155,6 +164,7 @@ mod tests {
         let d = WatchSample {
             event: WatchEvent::Delete,
             values: BTreeMap::new(),
+            inband: None,
             ..s
         };
         assert_eq!(

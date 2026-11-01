@@ -26,6 +26,16 @@ use zenoh_ext::AdvancedPublisherBuilderExt;
 mod util;
 use util::timestamping_pair;
 
+/// A sample's payload as every later step reads it (core §7.5): its
+/// envelope's record, any other sample's bytes, as text; a refused
+/// envelope's reason.
+fn text(v: &zenkey_fleet::SampleView) -> String {
+    match v.record() {
+        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+        Err(r) => r.reason(),
+    }
+}
+
 /// Drain a seeded subscriber until the boundary; returns (payloads, coverage).
 async fn drain_seed(
     sub: &mut zenkey_fleet::SeededSubscriber,
@@ -37,9 +47,7 @@ async fn drain_seed(
             .expect("seed boundary within 5s")
             .expect("stream alive")
         {
-            SeedItem::Sample(v) => {
-                values.push(String::from_utf8_lossy(&v.payload.to_bytes()).to_string())
-            }
+            SeedItem::Sample(v) => values.push(text(&v)),
             SeedItem::Dropped(n) => {
                 panic!("these fixtures never outrun the bounded channel ({n} dropped)")
             }
@@ -909,7 +917,8 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
             .expect("stream alive");
         match item {
             zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) => {
-                seen.insert(s.key.clone(), (s.kind, s.timestamp));
+                let inband = s.envelope().and_then(Result::ok);
+                seen.insert(s.key.clone(), (s.kind, s.timestamp, inband));
             }
             zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::WatchSeeded {
                 id: seeded,
@@ -923,21 +932,23 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
     };
     let owner = TimestampId::from(owners.zid());
     let key = |name: &str| format!("zk2/host-a/tc/tc.netif.v1/state/interfaces/default/{name}");
+    // `interfaces` declares `freshness.ttl_s`: on core §4.3's table, each
+    // reply carries its mutation's Zenoh timestamp beside its in-band stamp.
     assert_eq!(
         seen.get(&key("eth0")),
-        Some(&(SampleKind::Put, Some(put0))),
-        "the current value, with its stamp (S2)"
+        Some(&(SampleKind::Put, put0.time, Some(put0.stamp))),
+        "the current value, with its stamps (S2)"
     );
     assert_eq!(
         seen.get(&key("eth1")),
-        Some(&(SampleKind::Delete, Some(deleted))),
-        "the reply_del, a deletion with the deletion's stamp (S3)"
+        Some(&(SampleKind::Delete, deleted.time, Some(deleted.stamp))),
+        "the reply_del, a deletion with the deletion's stamps (S3)"
     );
-    for (_, stamp) in seen.values() {
+    for (_, stamp, _) in seen.values() {
         assert_eq!(
             stamp.map(|t| *t.get_id()),
             Some(owner),
-            "the owner's stamp (S1)"
+            "the owner's Zenoh timestamp, on the table (S1)"
         );
     }
     assert_eq!(
@@ -1233,13 +1244,6 @@ async fn s11_a_tools_seed_keeps_a_key_that_is_not_concrete() {
     );
 }
 
-/// A stamp of a new epoch whose clock is 5 s behind the writer's: the id
-/// `b2`, and `n` ticks past five seconds (core Appendix B: an NTP64 unit is
-/// 2^-32 s) before the writer's clock.
-fn behind(w: &Foreign, n: u64) -> Timestamp {
-    Timestamp::new(NTP64(w.base - (5 << 32) + n), "b2".parse().expect("an id"))
-}
-
 /// The payloads of a monitor's samples until `until` arrives, `until`
 /// included, or until its seeded watch `seeded`'s boundary when `until` is
 /// `None`.
@@ -1256,7 +1260,7 @@ async fn monitor_samples(
             .expect("stream alive");
         match item {
             zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) => {
-                let value = String::from_utf8_lossy(&s.payload.to_bytes()).into_owned();
+                let value = text(&s);
                 let done = until == Some(value.as_str());
                 seen.push(value);
                 if done {
@@ -1274,15 +1278,16 @@ async fn monitor_samples(
     }
 }
 
-/// `spec/scenarios/state.md` §7, step 2's tool (observer §4.1): a tool's
+/// `spec/scenarios/state.md` §7, step 4's tool (observer §4.1): a tool's
 /// late joiner keeps core §4.2's merge for as long as it follows, through
 /// the fleet's two seeded subscriptions. The owner, played by a writer
-/// that sets its stamps (as §10's reference does), answers the seed with
-/// rev 10 under id `a1`. After the boundary it starts a new epoch, a fresh
-/// id `b2` with its clock 5 s behind, and puts rev 11, then rev 12. The
-/// tool keeps rev 10: both live puts are older by the merge's order, and
-/// each is counted superseded. A consumer, by core §4.3's consumer rule,
-/// accepts both (`zenkey/tests/state.rs`, `s7_a_late_joiner_across_a_new_epoch`).
+/// that writes its envelopes (as §10's reference does), answers the seed
+/// with rev 10 at seq 10 of run 1. After the boundary it restarts under
+/// run 2, and puts rev 11 at seq 0, then rev 12 at seq 1. Nothing orders
+/// two runs, so the tool keeps the later arrival, rev 11, then rev 12 by
+/// seq within run 2: nothing is superseded. A consumer, by core §4.3's
+/// consumer rule, accepts both (`zenkey/tests/state.rs`,
+/// `s7_late_joiners_across_runs`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn s7_a_tools_late_joiner_keeps_the_merge_after_its_seed() {
     let policy = SeedPolicy {
@@ -1293,44 +1298,48 @@ async fn s7_a_tools_late_joiner_keeps_the_merge_after_its_seed() {
     // The fleet's seeded subscription.
     {
         let (writer, joiner) = util::peer_pair().await;
-        let mut w = Foreign::new(&writer, &joiner).await;
-        let mut sub = seed_subscribe(&joiner, "foreign/**", policy)
+        let mut w = Enveloping::new(&writer, &joiner).await;
+        let mut sub = seed_subscribe(&joiner, &format!("{ENVELOPED}/**"), policy)
             .await
             .expect("seed subscribe");
         let q = w.next_query().await;
         w.matched().await;
-        q.reply("foreign/plan", "rev10")
-            .timestamp(w.stamp(0, "a1"))
+        q.reply(format!("{ENVELOPED}/plan"), enveloped(1, 10, "rev10"))
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
             .await
             .expect("reply");
         drop(q);
         let (seeded, _) = drain_seed(&mut sub).await;
         assert_eq!(seeded, ["rev10"], "the seed");
-        w.put("plan", "rev11", Some(behind(&w, 0))).await;
-        w.put("plan", "rev12", Some(behind(&w, 1))).await;
-        w.put("z", "sentinel", None).await;
+        w.put("plan", enveloped(2, 0, "rev11")).await;
+        w.put("plan", enveloped(2, 1, "rev12")).await;
         assert_eq!(
-            next_admitted(&mut sub).await.2,
-            "sentinel",
-            "rev 11 and rev 12 are not kept after the boundary"
+            next_enveloped(&mut sub).await,
+            ("plan".into(), "rev11".into(), Some((2, 0))),
+            "another run: the later arrival"
         );
-        assert_eq!((sub.superseded(), sub.evicted()), (2, 0));
+        assert_eq!(
+            next_enveloped(&mut sub).await,
+            ("plan".into(), "rev12".into(), Some((2, 1))),
+            "the next seq of run 2"
+        );
+        assert_eq!((sub.superseded(), sub.evicted()), (0, 0));
     }
     // A monitor's seeded watch, zengui's tree.
     let (writer, joiner) = util::peer_pair().await;
-    let mut w = Foreign::new(&writer, &joiner).await;
+    let mut w = Enveloping::new(&writer, &joiner).await;
     let monitor = zenkey_fleet::Monitor::start(&joiner, zenkey_fleet::MonitorSpec::default())
         .await
         .expect("monitor");
     let mut events = monitor.events();
     let id = monitor
-        .watch_seeded("foreign/**", policy)
+        .watch_seeded(&format!("{ENVELOPED}/**"), policy)
         .await
         .expect("seeded watch");
     let q = w.next_query().await;
     w.matched().await;
-    q.reply("foreign/plan", "rev10")
-        .timestamp(w.stamp(0, "a1"))
+    q.reply(format!("{ENVELOPED}/plan"), enveloped(1, 10, "rev10"))
+        .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
         .await
         .expect("reply");
     drop(q);
@@ -1339,17 +1348,16 @@ async fn s7_a_tools_late_joiner_keeps_the_merge_after_its_seed() {
         ["rev10"],
         "the seed, before its boundary"
     );
-    w.put("plan", "rev11", Some(behind(&w, 0))).await;
-    w.put("plan", "rev12", Some(behind(&w, 1))).await;
-    w.put("z", "sentinel", None).await;
+    w.put("plan", enveloped(2, 0, "rev11")).await;
+    w.put("plan", enveloped(2, 1, "rev12")).await;
     assert_eq!(
-        monitor_samples(&mut events, Some("sentinel"), None).await,
-        ["sentinel"],
-        "rev 11 and rev 12 are not kept after the boundary"
+        monitor_samples(&mut events, Some("rev12"), None).await,
+        ["rev11", "rev12"],
+        "the later arrival across two runs, then by seq within run 2"
     );
     assert_eq!(
         (monitor.merge_superseded(), monitor.merge_evicted()),
-        (2, 0)
+        (0, 0)
     );
 }
 
@@ -1624,4 +1632,92 @@ async fn a_tools_seed_merges_enveloped_samples_by_run_and_seq() {
         "a's held run 1 seq 3 stood through the refusal: its copy was not kept"
     );
     assert_eq!(sub.superseded(), 3, "a-4, b-2's reply, and a-r1's copy");
+}
+
+/// `spec/scenarios/state.md` §13, steps 1 and 2: a tool's merge of a
+/// stream key orders its seqs by serial arithmetic over 24 bits (core
+/// §4.3, observer §4.1), through the fleet's seeded subscription. A writer
+/// of the test's own plays the owner of a plain stream, writing envelopes
+/// of one run. `pose` crosses its seq's wrap, 16,777,214 to 1, and the
+/// merge keeps all four: seq 0 is newer than 16,777,215. `heading` at seq 5
+/// then at 8,388,613, exactly 2^23 apart: unordered, so the later arrival
+/// is kept. A seq older within the run is not kept, and is counted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s13_a_stream_keys_seq_wraps_in_a_tools_merge() {
+    const STREAM: &str = "zk2/lab/env/m.v1/stream";
+    let (writer, joiner) = util::peer_pair().await;
+    let mut sub = seed_subscribe(
+        &joiner,
+        &format!("{STREAM}/**"),
+        SeedPolicy {
+            history: false,
+            state: false,
+            timeout: util::SETTLE,
+        },
+    )
+    .await
+    .expect("seed subscribe");
+    let probe = writer
+        .declare_publisher(format!("{STREAM}/probe"))
+        .await
+        .expect("publisher");
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while !probe
+        .matching_status()
+        .await
+        .expect("matching status")
+        .matching()
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the subscription never reached the writer"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let put = |key: &'static str, seq: u32, record: &'static str| {
+        let writer = writer.clone();
+        async move {
+            writer
+                .put(format!("{STREAM}/{key}"), enveloped(7, seq, record))
+                .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+                .await
+                .expect("the writer's put");
+        }
+    };
+    let pose = [
+        (16_777_214, "p-a"),
+        (16_777_215, "p-b"),
+        (0, "p-c"),
+        (1, "p-d"),
+    ];
+    for (seq, record) in pose {
+        put("pose", seq, record).await;
+    }
+    for (seq, record) in pose {
+        assert_eq!(
+            next_enveloped(&mut sub).await,
+            ("pose".into(), record.into(), Some((7, seq))),
+            "across the wrap, each newer than the last"
+        );
+    }
+    put("heading", 5, "h-5").await;
+    put("heading", 8_388_613, "h-far").await;
+    // Older within the run: (8,388,612 − 8,388,613) mod 2^24 is above 2^23.
+    put("heading", 8_388_612, "h-older").await;
+    put("z", 0, "sentinel").await;
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("heading".into(), "h-5".into(), Some((7, 5)))
+    );
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("heading".into(), "h-far".into(), Some((7, 8_388_613))),
+        "exactly 2^23 apart: unordered, the later arrival kept"
+    );
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("z".into(), "sentinel".into(), Some((7, 0))),
+        "an older seq of the run was not kept"
+    );
+    assert_eq!(sub.superseded(), 1, "h-older");
 }

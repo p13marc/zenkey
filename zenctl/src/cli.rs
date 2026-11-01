@@ -244,6 +244,15 @@ pub(crate) struct GenArgs {
     /// --contracts holds every interface).
     #[arg(long)]
     pub(crate) dry_run: bool,
+    /// Take the mock owner's runs from this record (core §4.3): 2 bytes,
+    /// the last 16-bit run issued, each instance's next run made durable
+    /// there before anything is written under it. A file that does not
+    /// exist yet starts at run 0. Keep it with the service wherever it
+    /// runs. Without it, each instance draws a random 32-bit run. Refused
+    /// (exit 2) beside an interface redundancy.v1 governs, whose
+    /// candidates draw 32-bit runs.
+    #[arg(long = "run-file", value_name = "PATH")]
+    pub(crate) run_file: Option<PathBuf>,
     /// Start beside an instance already running at the address: a second
     /// writer of its keys (P3) and a split-brain on every exclusive
     /// resource (spec §6).
@@ -391,7 +400,8 @@ pub(crate) struct DoctorArgs {
     #[arg(long, value_name = "SECS", default_value_t = 2.0)]
     pub(crate) grace: f64,
     /// Also ask the checks that GET every owner's state: state-stamp-foreign
-    /// (whose clock stamped each reply, spec §4.2 S1–S2) and
+    /// (each reply's in-band stamp, and on core §4.3's table whose clock
+    /// stamped it, spec §4.2 S1–S2) and
     /// population-over-bound (more live members of a templated state than
     /// its bound, §2.7). One GET per owner interface serves both. Costs the
     /// owners' data plane, so it is asked only here.
@@ -803,8 +813,9 @@ pub(crate) enum Command {
     /// name (P3, spec §6) — an instance, a descriptor (its `meta` carrying
     /// the synthetic marker {"synthetic":true,"tool":…,"seed":…}) and tokens
     /// — publishing every stream, state and event resource of each interface
-    /// through the runtime's writers: the contract's QoS and `Encoding`, the
-    /// owner's stamp on every state put (S1), a fresh ULID per event (§2.6),
+    /// through the runtime's writers: the contract's QoS and `Encoding`,
+    /// every value stamped in band under the instance's run (S1, §4.3; runs
+    /// from --run-file when given), a fresh ULID per event (§2.6),
     /// events within their declared rate. Every operation answers each call
     /// with one synthesized response. Payloads are synthesized from the
     /// bundle, deterministic per --seed: JSON Schema values that validate,
@@ -1352,9 +1363,11 @@ pub(crate) enum CheckCmd {
     ///                    that forbids fan-out is refused fanout_forbidden
     ///                    (O2)
     ///   state-stamp      every state mutation and reply carries the owner's
-    ///                    own stamp, its clock the descriptor's meta.zid,
-    ///                    compared by value (S1)
-    ///   state-get        the owner answers a GET, each reply stamped (S2)
+    ///                    in-band stamp, and on core §4.3's table a Zenoh
+    ///                    timestamp whose clock is the descriptor's
+    ///                    meta.zid, compared by value (S1)
+    ///   state-get        the owner answers a GET, each reply carrying its
+    ///                    mutation's stamps (S2)
     ///   freshness        each member of a stream or state resource that
     ///                    declares freshness.ttl_s is confirmed within it at
     ///                    the end of the window: by this run's receive
@@ -2849,6 +2862,15 @@ pub(crate) struct ServeArgs {
     /// Stop after this many seconds (default: until interrupted).
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
+    /// Take the mock owner's runs from this record (core §4.3): 2 bytes,
+    /// the last 16-bit run issued, each instance's next run made durable
+    /// there before anything is written under it. A file that does not
+    /// exist yet starts at run 0. Keep it with the service wherever it
+    /// runs. Without it, each instance draws a random 32-bit run. Refused
+    /// (exit 2) beside an interface redundancy.v1 governs, whose
+    /// candidates draw 32-bit runs.
+    #[arg(long = "run-file", value_name = "PATH")]
+    pub(crate) run_file: Option<PathBuf>,
     /// Start beside an instance already running at the address: a second
     /// answerer of its operations (P3) and a split-brain on every exclusive
     /// resource (spec §6).
@@ -3081,9 +3103,10 @@ pub(crate) struct CheckConformArgs {
     #[arg(long, default_value_t = 42)]
     pub(crate) seed: u64,
     /// Trust every admin-space answer, not only a verified router's: an
-    /// owner's own stamp passes `state-stamp` only against the routers this
-    /// run verified (spec §4.2, 0.17). Pass it only when the deployment's
-    /// grants deny `@/**` queryables to every principal (§11.1).
+    /// owner's own Zenoh timestamp, on a resource core §4.3's table lists,
+    /// passes `state-stamp` only against the routers this run verified
+    /// (spec §4.2, 0.17). Pass it only when the deployment's grants deny
+    /// `@/**` queryables to every principal (§11.1).
     #[arg(long)]
     pub(crate) trust_admin_space: bool,
     /// This tool's grants let it call the service, or the deployment runs no

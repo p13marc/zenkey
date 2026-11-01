@@ -49,6 +49,10 @@
         "$ref": "#/$defs/RequireEntry"
       }
     },
+    "run": {
+      "description": "The run the instance writes under now (core §3.3, §4.3), as its bytes\nin lowercase hexadecimal: 4 digits for a 16-bit run, 8 for a 32-bit\none. An owner states it; a checker reads it as optional, so a\ndescriptor that states none is not D000, and any other spelling is\nD002. Never `null`.",
+      "type": "string"
+    },
     "service": {
       "description": "`<system>/<service>`.",
       "type": "string"

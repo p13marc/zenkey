@@ -621,11 +621,25 @@ impl ServiceBuilder {
         Ok(())
     }
 
-    /// The service's state stamp minter (§4.3): catch-up before the first
-    /// write goes through it.
+    /// The service's stamp minter (§4.3): its runs and seqs, the table's
+    /// Zenoh timestamps, whose catch-up goes through it before the first
+    /// write.
     #[must_use]
     pub fn minter(&self) -> &Arc<Minter> {
         &self.minter
+    }
+
+    /// Takes the service's 16-bit runs from `store`, a record kept with it
+    /// wherever it runs (core §4.3): each instance its next run, made
+    /// durable before anything is written under it. Without one, every run
+    /// is a random 32-bit draw. Refused once a write took a run, so it
+    /// comes before any profile that puts at its declaration
+    /// ([`ServiceBuilder::alarms`], [`ServiceBuilder::desired_author`]);
+    /// and [`ServiceBuilder::start`] refuses it beside
+    /// [`ServiceBuilder::redundancy`], whose candidates draw 32-bit runs.
+    pub fn run_store(&mut self, store: Arc<dyn crate::run::RunStore>) -> Result<&mut Self> {
+        self.minter.set_store(store)?;
+        Ok(self)
     }
 
     /// A [`StateWriter`] on a state member: stamped puts and deletes (S1),
@@ -653,10 +667,17 @@ impl ServiceBuilder {
         self.expose(iface, resource)?;
         self.state_ifaces.insert(iface.clone());
         let gate = self.gate_of(iface);
-        let w = Writer::declare_gated(&self.session, key.into_keyexpr(), &r, values, gate)
-            .await?
-            .bounded(budget)
-            .metered(meter);
+        let w = Writer::declare_gated(
+            &self.session,
+            &self.minter,
+            key.into_keyexpr(),
+            &r,
+            values,
+            gate,
+        )
+        .await?
+        .bounded(budget)
+        .metered(meter);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -940,13 +961,17 @@ impl ServiceBuilder {
         let meter = s.meter(&r, values, &self.epochs);
         let gate = s.gate.clone();
         self.expose(iface, resource)?;
-        Ok(
-            Writer::declare_gated(&self.session, key.into_keyexpr(), &r, values, gate)
-                .await?
-                .bounded(budget)
-                .metered(meter)
-                .clocked(&self.minter),
+        Ok(Writer::declare_gated(
+            &self.session,
+            &self.minter,
+            key.into_keyexpr(),
+            &r,
+            values,
+            gate,
         )
+        .await?
+        .bounded(budget)
+        .metered(meter))
     }
 
     /// An [`EventWriter`] for an event's member, and exposes the resource.
@@ -963,7 +988,7 @@ impl ServiceBuilder {
         let gate = s.gate.clone();
         self.expose(iface, resource)?;
         Ok(
-            EventWriter::new(&self.session, key.to_string(), &r, values)?
+            EventWriter::new(&self.session, &self.minter, key.to_string(), &r, values)?
                 .bounded(budget)
                 .gated(gate),
         )
@@ -1006,6 +1031,15 @@ impl ServiceBuilder {
             &self.config.tokenless,
             self.redundancy.is_some(),
         )?;
+        // Core §4.3: a candidate of a governed interface draws 32-bit runs,
+        // so a run store beside it is refused, nothing declared.
+        if self.redundancy.is_some() && self.minter.has_store() {
+            return Err(Error::NotExposed(
+                "a redundancy.v1 candidate takes random 32-bit runs (core §4.3): \
+                 ServiceBuilder::run_store is refused beside ServiceBuilder::redundancy"
+                    .to_owned(),
+            ));
+        }
         if let Some(r) = &self.redundancy {
             let external = governed
                 .iter()
@@ -1047,8 +1081,24 @@ impl ServiceBuilder {
             &self.arbitrated,
             &addr,
         )?;
+        // Core §8.2's posture: an owner's session runs without
+        // timestamping, a candidate of a governed interface excepted. Not
+        // a refusal: the session then stamps what the runtime gives no
+        // timestamp, so the runtime gives every write its own (S2).
+        if self.minter.session_timestamping() && self.redundancy.is_none() {
+            tracing::warn!(
+                address = %addr,
+                "this owner's session runs with timestamping enabled, which stamps every put and \
+                 delete it is not given a timestamp for: each write is given the owner's, so its \
+                 GET answers carry it (core §8.2 asks an owner's session to run without \
+                 timestamping)"
+            );
+        }
         // O3: `unavailable` answered for the optional operations not served.
         let ops = crate::operation::Ops::start(&self).await?;
+        // Core §4.3, §3.3: the run, taken here if no write took it yet, so
+        // the first descriptor states it.
+        let run = self.minter.run();
         let served = Arc::new(Served {
             session: self.session.clone(),
             inputs: Mutex::new(Inputs {
@@ -1056,6 +1106,7 @@ impl ServiceBuilder {
                 minted: self.minted.is_some(),
                 host: self.host.clone(),
                 instance: self.instance.clone(),
+                run,
                 impls: self.impls.clone(),
                 roles: self.roles.clone(),
                 config: self.config.clone(),
@@ -1063,6 +1114,10 @@ impl ServiceBuilder {
             current: Mutex::new(Arc::new(RwLock::new(Arc::from(Vec::new())))),
             putting: Mutex::new(()),
         });
+        // A run change within the instance puts the descriptor stating it
+        // first (§3.3).
+        self.minter
+            .listen(Arc::downgrade(&served) as std::sync::Weak<dyn crate::state::RunListener>);
         let mut svc = Service {
             _guard: self.redundancy.clone().map(RedundancyGuard),
             alive: BTreeMap::new(),
@@ -1109,7 +1164,8 @@ impl ServiceBuilder {
             }
         }
         // 3. The descriptor, then the contracts.
-        let (q, current) = svc.serve_descriptor(&svc.instance.clone()).await?;
+        let run = svc.minter.run();
+        let (q, current) = svc.serve_descriptor(&svc.instance.clone(), run).await?;
         svc.served.set_current(current);
         svc.descriptor_q = Some(q);
         for s in &svc.impls {
@@ -1422,6 +1478,7 @@ impl Service {
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
         Ok(Writer::declare_gated(
             &self.session,
+            &self.minter,
             key.into_keyexpr(),
             &r,
             values,
@@ -1429,8 +1486,7 @@ impl Service {
         )
         .await?
         .bounded(budget)
-        .metered(meter)
-        .clocked(&self.minter))
+        .metered(meter))
     }
 
     /// A [`StateWriter`] on a member of an exposed state resource, for
@@ -1455,6 +1511,7 @@ impl Service {
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
         let w = Writer::declare_gated(
             &self.session,
+            &self.minter,
             key.into_keyexpr(),
             &r,
             values,
@@ -1566,7 +1623,7 @@ impl Service {
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
         Ok(
-            EventWriter::new(&self.session, key.to_string(), &r, values)?
+            EventWriter::new(&self.session, &self.minter, key.to_string(), &r, values)?
                 .bounded(s.budget(&r))
                 .gated(s.gate.clone()),
         )
@@ -1719,8 +1776,11 @@ impl Service {
     /// then the old ones are undeclared. A watcher sees one or two live
     /// instance tokens, never none.
     ///
-    /// The spec's SHOULD of a new session, so that timestamps' id changes
-    /// too (§4.3), is the caller's: the runtime never owns the session.
+    /// The new instance writes under a new run (core §1.5, §4.3), which its
+    /// descriptor states: that descriptor is put first, then every write
+    /// goes under the run, the re-puts below included. The spec's SHOULD of
+    /// a new session, so that the table's timestamps' id changes too
+    /// (§1.5), is the caller's: the runtime never owns the session.
     ///
     /// Refused for a service implementing `config.v1` through
     /// [`ServiceBuilder::config_v1`]: a new instance is a restart of its
@@ -1728,10 +1788,14 @@ impl Service {
     /// service, from the startup values ([`crate::config_v1`]).
     ///
     /// A service implementing `alarms.v1` through [`ServiceBuilder::alarms`]
-    /// puts every alarm it holds again first, before the new descriptor and
-    /// tokens (`alarms.v1` §2.9), and an author of `desired.v1` documents
-    /// every document it keeps, and every delete within its window
-    /// (`desired.v1` §2.11).
+    /// puts every alarm it holds again from the new instance, after its
+    /// descriptor and before its tokens (`alarms.v1` §2.9), and an author of
+    /// `desired.v1` documents every document it keeps, and every delete
+    /// within its window (`desired.v1` §2.11). Such a service's new epoch
+    /// is refused while the clock guard holds ([`Error::ClockAhead`]),
+    /// nothing changed. A re-put that fails otherwise returns its error
+    /// with the old instance kept, writing under the new run, which its
+    /// descriptor is put again stating (§3.3).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
         if self.config_v1.is_some() {
             return Err(Error::Contract(
@@ -1740,18 +1804,16 @@ impl Service {
                     .to_owned(),
             ));
         }
-        // alarms.v1 §2.9: each alarm kept put again from the new instance,
-        // before its new instance token.
-        if let Some(a) = &self.alarms {
-            a.reput_all().await?;
-        }
-        // desired.v1 §2.11: so is each document an author keeps, and each
-        // delete within its window. A target keeps its acts and its report:
-        // the process that applied them runs on.
-        for a in &self.desired_authors {
-            a.reput_all().await?;
+        // The re-puts below are state writes, which the clock guard refuses
+        // (core §4.3, "Ahead"): refused here instead, before the new
+        // instance's run, descriptor or electors move.
+        if (self.alarms.is_some() || !self.desired_authors.is_empty()) && self.minter.is_ahead() {
+            return Err(Error::ClockAhead);
         }
         let next = mint();
+        // Core §1.5, §4.3: the new instance's run, which its descriptor
+        // states before anything is written under it.
+        let run = self.minter.next_run();
         // redundancy.v1 §2.9 (text 0.2, F-209): every elector told of the
         // new id before its tokens, a standby's included, and held, so that
         // no takeover or step-down runs through the re-mint.
@@ -1759,7 +1821,29 @@ impl Service {
             Some(r) => r.remint(&next).await,
             None => Vec::new(),
         };
-        let (q, current) = self.serve_descriptor(&next).await?;
+        let (q, current) = self.serve_descriptor(&next, run).await?;
+        self.minter.begin(run);
+        self.served.set_run(run);
+        // alarms.v1 §2.9: each alarm kept put again from the new instance,
+        // under its run, before its new instance token. desired.v1 §2.11:
+        // so is each document an author keeps, and each delete within its
+        // window. A target keeps its acts and its report: the process that
+        // applied them runs on.
+        let reput = async {
+            if let Some(a) = &self.alarms {
+                a.reput_all().await?;
+            }
+            for a in &self.desired_authors {
+                a.reput_all().await?;
+            }
+            Ok::<_, Error>(())
+        };
+        if let Err(e) = reput.await {
+            // The old instance writes on under the new run: its descriptor
+            // states it (§3.3).
+            let _ = self.served.publish();
+            return Err(e);
+        }
         let token = self.token(instance_key(&self.addr, &next)?).await?;
         let alive = self.declare_alive(&next).await?;
         // A serving governed interface's token, make-before-break too.
@@ -1970,12 +2054,13 @@ impl Service {
     }
 
     /// Declares the descriptor's queryable on `instance`'s key and puts the
-    /// descriptor there (§3.3).
+    /// descriptor there, stating `run` (§3.3).
     async fn serve_descriptor(
         &self,
         instance: &InstanceId,
+        run: zenkey_model::wire::Run,
     ) -> Result<(Queryable<()>, Arc<RwLock<Arc<[u8]>>>)> {
-        let bytes: Arc<[u8]> = self.served.encode(instance)?.into();
+        let bytes: Arc<[u8]> = self.served.encode_with(instance, run)?.into();
         let key = instance_key(&self.addr, instance)?.into_keyexpr();
         let current = Arc::new(RwLock::new(Arc::clone(&bytes)));
         let shared = Arc::clone(&current);
@@ -2015,6 +2100,8 @@ struct Inputs {
     minted: bool,
     host: Option<String>,
     instance: InstanceId,
+    /// The run the instance writes under (§3.3, §4.3).
+    run: zenkey_model::wire::Run,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
     config: ServiceConfig,
@@ -2034,8 +2121,15 @@ pub(crate) struct Served {
 }
 
 impl Served {
-    /// The descriptor of `instance`, encoded and checked.
+    /// The descriptor of `instance`, encoded and checked, stating the run
+    /// the inputs hold.
     fn encode(&self, instance: &InstanceId) -> Result<Vec<u8>> {
+        let run = self.inputs.lock().expect("not poisoned").run;
+        self.encode_with(instance, run)
+    }
+
+    /// The descriptor of `instance` stating `run`, encoded and checked.
+    fn encode_with(&self, instance: &InstanceId, run: zenkey_model::wire::Run) -> Result<Vec<u8>> {
         let i = self.inputs.lock().expect("not poisoned");
         let zid = self.session.zid().to_string();
         let id = descriptor::Identity {
@@ -2043,9 +2137,15 @@ impl Served {
             minted: i.minted,
             host: i.host.as_deref(),
             zid: &zid,
+            run,
         };
         let d = descriptor::build(&id, instance, &i.impls, &i.roles, &i.config);
         descriptor::encode_checked(&d, &i.impls)
+    }
+
+    /// The run its descriptor states from now on, put at the next change.
+    fn set_run(&self, run: zenkey_model::wire::Run) {
+        self.inputs.lock().expect("not poisoned").run = run;
     }
 
     /// The bytes the current queryable answers.
@@ -2078,6 +2178,17 @@ impl Served {
             .timestamp(self.session.new_timestamp())
             .wait()
             .map_err(zenoh)
+    }
+}
+
+/// A run change within the instance (core §4.3): the descriptor states it,
+/// and is put before anything is written under it (§3.3).
+impl crate::state::RunListener for Served {
+    fn run_changed(&self, run: zenkey_model::wire::Run) {
+        self.set_run(run);
+        if let Err(e) = self.publish() {
+            tracing::warn!(run = %run, "the descriptor stating a new run was not put: {e}");
+        }
     }
 }
 

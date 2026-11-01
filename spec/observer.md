@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.14 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.15 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.72 ([`core.md`](core.md)) |
+| **Written against** | core 0.73 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -606,10 +606,15 @@ and merge, a selector over several owners and "Observing S1" stay in core
 ### 4.1 A seed
 
 - **A tool's merge lasts.** A tool keeps core §4.2's merge for as long as
-  it follows, across two timestamp ids too. A live sample whose stamp is
-  older than what its key holds is not kept after the seed either. A
-  consumer orders by core §4.3's consumer rule instead (core §4.2).
-  `[Sc: state.md §7]`
+  it follows. Within one run it orders by seq, plain or serial as the
+  key's kind says (core §4.3). Across two runs it keeps the later arrival,
+  since nothing orders them. A live sample older than what its key holds
+  is not kept after the seed either. A consumer orders by core §4.3's
+  consumer rule instead (core §4.2).
+  `[F: seed/inband.json, seed/merge.json]` `[Sc: state.md §7, §13]`
+  - **A sample with no envelope** is ordered by its Zenoh timestamp, as
+    core §4.2 says, across two timestamp ids too. Beside an in-band stamp
+    it is unordered, and the tool keeps the later arrival.
   - **A bound on the merge.** A tool that bounds what it holds counts each
     time the bound forgets a key, and reports the count. A forgotten key holds
     nothing, so the merge keeps the key's next value whatever its stamp.
@@ -711,14 +716,19 @@ cannot tell under `Latest` which replier answered.
 
 ### 4.4 Whose stamp
 
-- **A tool's S1 check.** A tool attributes a state stamp
-  to its owner by comparing the stamp's id with the owner's `meta.zid`
-  (core §3.3; S1, core §4.2, "Observing S1"), by value (below). Without
+- **A tool's S1 check.** An in-band stamp is the owner's, since only the
+  owner writes its payload (core §4.2, "Observing S1"). What a tool checks
+  is the Zenoh timestamps core §4.3's table keeps. On those resources it
+  attributes a stamp to its owner by comparing the stamp's id with the
+  owner's `meta.zid` (core §3.3; S1), by value (below). Without
   `meta.zid`, a stamp's clock is unattributable, never foreign.
-  `[Sc: profiles/timing/scenarios.md §4, §5]`
-  - **A foreign stamp is a finding** whatever else the tool read: an owner
-    that is its own router stamps with that router's id, which is its own
-    `meta.zid`.
+  `[Sc: state.md §1]` `[Sc: profiles/timing/scenarios.md §4, §5]`
+  - **Outside the table,** a router's stamp, or the reader's own session's,
+    is expected on an owner's sample, and is never a finding. So is no
+    stamp at all.
+  - **A foreign stamp is a finding** on a resource the table lists,
+    whatever else the tool read: an owner that is its own router stamps
+    with that router's id, which is its own `meta.zid`.
   - **An owner's stamp is clean** only when the tool counted at least one
     router's own answer ("Who answered", §4.2), and `meta.zid` is none of
     the zids it knows to be routers. Those are the routers its session is
@@ -1136,14 +1146,17 @@ exists so that nobody pulls a camera's frames by accident.
 
 ### 8.3 A tool that reports a timestamp names who stamped it
 
-A state sample's stamp carries its clock's id (core §4.1, §4.3).
-- **The owner's own stamp.** It is the owner's when S1 holds, and its id
-  then matches the owner's session, which the descriptor's `meta.zid`
-  names where present. Two zids compare by value, never by their text
-  (§4.4).
-- **A router's stamp.** A router stamps what arrives unstamped, and so
-  does a reader's own session whose HLC is enabled (core §4.1).
-- **No stamp.** A stream sample may carry none.
+A Zenoh timestamp carries its clock's id (core §4.1).
+- **An in-band stamp** is the owner's run and seq (core §4.3). It orders,
+  and has no time: a tool shows it as a run and a seq, never as a time.
+- **The owner's own timestamp.** On a resource core §4.3's table lists,
+  a timestamp is the owner's when S1 holds. Its id then matches the
+  owner's session, which the descriptor's `meta.zid` names where present.
+  Two zids compare by value, never by their text (§4.4).
+- **A router's timestamp.** A router stamps what arrives unstamped, and
+  so does a reader's own session whose HLC is enabled (core §4.1). An
+  owner's sample outside the table arrives so, or with none.
+- **No timestamp.** A sample outside the table may carry none.
 
 A tool says whose clock a time, an age or a latency is on.
 `[Sc: state.md §1]` `[Sc: profiles/timing/scenarios.md §4, §5]`
@@ -1197,7 +1210,8 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `conformance/keys.json` | §8.1 |
 | `conformance/envelope/carries.json` | §7.3, the envelope first |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
-| `scenarios/state.md` §1, §7, §11, §12 | §4.1 (§7 step 2: a tool's merge for as long as it follows), §4.3, §8.1, §8.3 |
+| `conformance/seed/` (`inband.json`, `merge.json`) | §4.1 |
+| `scenarios/state.md` §1, §7, §11, §12, §13 | §4.1 (§7 steps 4 and 5: a tool's merge across two runs, after its seed and inside it; §13 a stream key's serial order), §4.3, §4.4 (§1), §8.1, §8.3 |
 | `scenarios/security.md` §3 | §4.2 |
 | `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
 | `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2) |

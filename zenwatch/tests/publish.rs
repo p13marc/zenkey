@@ -67,11 +67,12 @@ async fn subscribe(
         session
             .declare_subscriber(selector.to_string())
             .callback(move |s| {
-                seen.lock().unwrap().push((
-                    s.key_expr().as_str().to_string(),
-                    s.kind(),
-                    s.payload().to_bytes().to_vec(),
-                ));
+                // An owner's put carries its zk2c envelope (core §4.3,
+                // §7.5): its record is the document.
+                let (key, kind) = (s.key_expr().as_str().to_string(), s.kind());
+                let read = zenkey::inband::read(s);
+                let record = read.sample().payload().to_bytes().to_vec();
+                seen.lock().unwrap().push((key, kind, record));
             })
             .await
             .unwrap()

@@ -105,7 +105,7 @@ async fn record(s: &zenoh::Session, selector: &str) -> (zenoh::pubsub::Subscribe
                 at: Instant::now(),
                 key: x.key_expr().as_str().to_owned(),
                 delete: x.kind() == SampleKind::Delete,
-                payload: x.payload().to_bytes().into_owned(),
+                payload: common::record(&x),
                 stamp: x.timestamp().copied(),
             });
         })
@@ -178,7 +178,7 @@ async fn get_state(s: &zenoh::Session, address: &str) -> Vec<Current> {
             },
             SampleKind::Put => Current::Value {
                 key,
-                sample: Box::new(sample),
+                sample: Box::new(common::strip(sample)),
             },
         });
     }

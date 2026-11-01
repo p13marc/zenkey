@@ -119,7 +119,7 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 
 ## §4 Clock ahead (§2.5)
 
-**Setup.** `spec/scenarios/state.md` §7's step 3: an owner, `lab/ahead`,
+**Setup.** `spec/scenarios/state.md` §7's step 6: an owner, `lab/ahead`,
 implementing `health.v1`, its clock 2 s ahead of R1, watches a
 router-stamped heartbeat key as its clock reference (core §4.3). S
 subscribes to `zk2/lab/ahead/health.v1/**`, and G GETs as the

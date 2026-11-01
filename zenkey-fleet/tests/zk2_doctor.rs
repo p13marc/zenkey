@@ -821,9 +821,9 @@ async fn an_archive_serving_unconfirmed_keys_is_unaligned() {
 // ─── state-stamp-foreign: state.md §1 (deep) ────────────────────────────────
 
 /// state.md §1 under `deep`: the runtime's owner answers its state with its
-/// own session's stamp (S1, S2), which is clean against the router this run
-/// verified (§4.2, 0.17); an owner answering a state GET unstamped is the
-/// finding.
+/// in-band stamp (S1, S2), the resource off core §4.3's table, which is
+/// clean with no Zenoh timestamp; an owner answering a state GET with no
+/// zk2c envelope, no in-band stamp, is the finding.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
     let (_r, ep) = router(true).await;
@@ -859,7 +859,7 @@ async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
         .expect("a put");
 
     // The offender: a descriptor naming its session, and a state queryable
-    // that answers unstamped.
+    // that answers with no envelope.
     let instance = "00000000000000f5";
     let mut d = descriptor("h5/fake", instance, json!([entry(&netif)]));
     d["meta"] = json!({"zid": raw.zid().to_string()});
@@ -886,7 +886,7 @@ async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
     deep.deep = true;
     let r = doctor(&bus(&tool, &tool, ""), &deep).await;
     let f = found(&r, CheckId::StateStampForeign, "h5/fake tc.netif.v1");
-    assert!(f.evidence.contains("unstamped"), "{f:?}");
+    assert!(f.evidence.contains("with no zk2c envelope"), "{f:?}");
     let c = verdict(&r, CheckId::StateStampForeign);
     assert!(
         !c.findings

@@ -521,6 +521,7 @@ congestion = "block"
                 format: "zk2-descriptor/0.1".into(),
                 service: addr.to_string(),
                 instance: instance.to_string(),
+                run: None,
                 interfaces: vec![InterfaceEntry {
                     iface: iface.to_string(),
                     contract: revision.fingerprint().to_string(),

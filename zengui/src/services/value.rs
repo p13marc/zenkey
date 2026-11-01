@@ -223,6 +223,7 @@ pub(crate) fn replies(
         // A delete is a tombstone (#765): an owner's `reply_del`, kept as
         // one rather than as a put whose payload is empty.
         let delete = a.is_delete();
+        let inband = a.inband().map(zenkey_fleet::report::InbandStamp::from);
         let zenkey_fleet::Answer::Value(payload) = a.answer else {
             errors += 1;
             continue;
@@ -246,6 +247,7 @@ pub(crate) fn replies(
             encoding: a.encoding.unwrap_or_default(),
             attachment: a.attachment,
             delete,
+            inband,
             stamp,
             provenance,
         });

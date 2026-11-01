@@ -196,20 +196,32 @@ pub async fn open_in_namespace(
 }
 
 /// [`open_in_namespace`] for a session that **owns** keys: a mock owner's
-/// (`zenctl gen`, `zenctl serve`; #825). An owner's session timestamps
-/// what it puts, as a real owner's does: a resource that declares
-/// `history` is written through zenoh's advanced publisher, which zenoh
-/// refuses on a session without `timestamping`, and a state's stamp is the
-/// owner's (core §4.1, S1). So timestamping is on, unless the config file
-/// states it; everything else is [`open_in_namespace`]'s.
+/// (`zenctl gen`, `zenctl serve`; #825). An owner's session runs with
+/// timestamping off (core §8.2, "Session posture"): the runtime stamps its
+/// values in band (§4.3, §7.5), and sets a Zenoh timestamp itself on the
+/// resources §4.3's table lists, so a session that stamped would give
+/// every other put one too. A resource that declares `history` numbers its
+/// samples instead (§2.5). The exception is a `governed` owner, a candidate
+/// of an interface `redundancy.v1` governs, whose session's timestamping
+/// that profile's §2.10 asks for. A config file that states the setting is
+/// obeyed either way; everything else is [`open_in_namespace`]'s.
 pub async fn open_owner_in_namespace(
     namespace: &str,
     file: Option<&Path>,
     connect: &[String],
     listen: &[String],
     scouting: Option<bool>,
+    governed: bool,
 ) -> Result<Session, OpenFailure> {
-    open_namespaced(namespace, file, connect, listen, scouting, Posture::Owner).await
+    open_namespaced(
+        namespace,
+        file,
+        connect,
+        listen,
+        scouting,
+        Posture::Owner { governed },
+    )
+    .await
 }
 
 /// Open a tool's **watch session** for the deployment in `namespace` (#830;
@@ -519,8 +531,9 @@ enum Posture {
     /// caller sets it, so a file that sets one too is a second source.
     Namespaced,
     /// A mock owner in a namespace (#825): [`Posture::Namespaced`], with
-    /// timestamping on unless the file states it.
-    Owner,
+    /// timestamping off unless the file states it, or on for a candidate
+    /// of a `governed` interface (core §8.2, `redundancy.v1` §2.10).
+    Owner { governed: bool },
 }
 
 fn build_config(
@@ -558,7 +571,7 @@ fn build_config_as(
                          (tooling guide §8.1); remove the namespace from the file, or \
                          use --base to name the deployment"
                     ),
-                    Posture::Namespaced | Posture::Owner => format!(
+                    Posture::Namespaced | Posture::Owner { .. } => format!(
                         "sets a session namespace ({ns}) — the namespace has \
                          one source, the caller's (--namespace, alias --base); \
                          remove it from the file"
@@ -619,10 +632,13 @@ fn build_config_as(
             &TOOL_INTERESTS_TIMEOUT.as_millis().to_string(),
         )?;
     }
-    // An owner's session stamps what it puts (#825): a stated choice
-    // stands, as every stated key does.
-    if posture == Posture::Owner && !stated.states("timestamping/enabled") {
-        set(&mut config, "timestamping/enabled", "true")?;
+    // An owner's session stamps nothing of its own (core §8.2), but a
+    // candidate's does (`redundancy.v1` §2.10): a stated choice stands, as
+    // every stated key does.
+    if let Posture::Owner { governed } = posture
+        && !stated.states("timestamping/enabled")
+    {
+        set(&mut config, "timestamping/enabled", &governed.to_string())?;
     }
     Ok(config)
 }
@@ -972,30 +988,47 @@ mod tests {
         std::fs::remove_file(path).ok();
     }
 
-    /// A mock owner's session timestamps what it puts (#825): a resource
-    /// with `history` needs it, and a real owner's has it. A file that
-    /// states the setting is obeyed; an explorer's and a resolved verb's
-    /// sessions are left as zenoh has them.
+    /// A mock owner's session stamps nothing of its own (core §8.2): its
+    /// values carry their in-band stamps, and §4.3's table its runtime's
+    /// own timestamps. A file that states the setting is obeyed; an
+    /// explorer's and a resolved verb's sessions are left as zenoh has
+    /// them.
     #[test]
-    fn an_owner_posture_turns_timestamping_on() {
+    fn an_owner_posture_turns_timestamping_off() {
         let ts = |posture, file: Option<&Path>| {
             build_config_as(file, &[], &[], None, posture)
                 .unwrap()
                 .get_json("timestamping/enabled")
                 .unwrap()
         };
-        assert_eq!(ts(Posture::Owner, None), "true");
+        let owner = Posture::Owner { governed: false };
+        assert_eq!(ts(owner, None), "false");
         assert_ne!(ts(Posture::Namespaced, None), "true");
         assert_ne!(ts(Posture::Explorer, None), "true");
+        let on = temp_config(
+            "owner-timestamping-on.json5",
+            "{ timestamping: { enabled: true } }",
+        );
+        assert_eq!(ts(owner, Some(&on)), "true", "the file's word stands");
+    }
+
+    /// A candidate of a governed interface is the exception (core §8.2):
+    /// `redundancy.v1` §2.10 asks its session to stamp. A file that states
+    /// the setting is obeyed there too.
+    #[test]
+    fn a_governed_owner_posture_turns_timestamping_on() {
+        let ts = |file: Option<&Path>| {
+            build_config_as(file, &[], &[], None, Posture::Owner { governed: true })
+                .unwrap()
+                .get_json("timestamping/enabled")
+                .unwrap()
+        };
+        assert_eq!(ts(None), "true");
         let off = temp_config(
-            "owner-timestamping-off.json5",
+            "candidate-timestamping-off.json5",
             "{ timestamping: { enabled: false } }",
         );
-        assert_eq!(
-            ts(Posture::Owner, Some(&off)),
-            "false",
-            "the file's word stands"
-        );
+        assert_eq!(ts(Some(&off)), "false", "the file's word stands");
     }
 
     /// A tool's session waits two minutes for its routers to finish a
@@ -1009,7 +1042,12 @@ mod tests {
                 .get_json("routing/interests/timeout")
                 .unwrap()
         };
-        for posture in [Posture::Explorer, Posture::Namespaced, Posture::Owner] {
+        for posture in [
+            Posture::Explorer,
+            Posture::Namespaced,
+            Posture::Owner { governed: false },
+            Posture::Owner { governed: true },
+        ] {
             assert_eq!(wait(posture, None), "120000", "{posture:?}");
         }
         let stated = temp_config(

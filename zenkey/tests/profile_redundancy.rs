@@ -474,7 +474,7 @@ async fn spy(ep: &str, address: &str, iface: &IfaceId) -> Spy {
                     at: Instant::now(),
                     key: x.key_expr().as_str().to_owned(),
                     delete: x.kind() == SampleKind::Delete,
-                    payload: String::from_utf8_lossy(&x.payload().to_bytes()).into_owned(),
+                    payload: String::from_utf8_lossy(&common::record(&x)).into_owned(),
                     stamp: x.timestamp().copied(),
                 });
             })
@@ -1680,7 +1680,7 @@ impl Follower {
         let data = reader
             .declare_subscriber(format!("zk2/{LEDGER}/ledger.v1/state/balance"))
             .callback(move |x: Sample| {
-                let payload = String::from_utf8_lossy(&x.payload().to_bytes()).into_owned();
+                let payload = String::from_utf8_lossy(&common::record(&x)).into_owned();
                 Self::take(&h, &v, &d, x.timestamp(), payload);
             })
             .await
@@ -1726,7 +1726,7 @@ impl Follower {
         let mut got = None;
         while let Ok(r) = replies.recv_async().await {
             if let Ok(s) = r.result() {
-                let payload = String::from_utf8_lossy(&s.payload().to_bytes()).into_owned();
+                let payload = String::from_utf8_lossy(&common::record(s)).into_owned();
                 let by = s
                     .timestamp()
                     .map(|t| t.get_id().to_string())
@@ -1767,12 +1767,15 @@ async fn s9_a_consumer_following_the_incumbent_during_a_split() {
     let _p = p_session
         .declare_subscriber(format!("zk2/{LEDGER}/ledger.v1/state/balance"))
         .callback(move |x: Sample| {
-            if let Some(ts) = x.timestamp()
-                && po.lock().unwrap().accept(x.key_expr().as_str(), ts)
+            // Core §4.3's consumer rule: by seq within a run, another
+            // run's value accepted.
+            let mark = zenkey::inband::read(x.clone()).mark();
+            if let Some(m) = mark
+                && po.lock().unwrap().accept_mark(x.key_expr().as_str(), m)
             {
                 pv.lock()
                     .unwrap()
-                    .push(String::from_utf8_lossy(&x.payload().to_bytes()).into_owned());
+                    .push(String::from_utf8_lossy(&common::record(&x)).into_owned());
             }
         })
         .await
@@ -2431,4 +2434,181 @@ async fn a_profiles_owner_is_refused_on_a_governed_interface() {
         refused.err()
     );
     claim.close().await.unwrap();
+}
+
+// --- runs and seqs (core §4.3, #976) -------------------------------------------------
+
+/// Every stream sample S hears under `zk2/lab/gauge/gauge.v1/**`: its key
+/// and its in-band stamp.
+type Seqs = Arc<Mutex<Vec<(String, zenkey::model::wire::Stamp)>>>;
+
+/// Core `state.md` §13 step 3: a candidate serves and publishes a stream
+/// key at seqs 0, 1 and 2, steps down, takes over again within the same
+/// instance, its run unchanged as its descriptor says, and publishes the
+/// key once more, at seq 3. Likewise a templated stream member whose
+/// writer is dropped and made again within the run publishes at the seq
+/// after its last, never at 0 (core §4.3's MUST NOT).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_stream_keys_seq_continues_across_a_takeover() {
+    use zenkey::redundancy::ManualLock;
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let seqs: Seqs = Arc::default();
+    let into = Arc::clone(&seqs);
+    let _sub = tool
+        .declare_subscriber("zk2/lab/gauge/gauge.v1/**")
+        .callback(move |x: Sample| {
+            if let Some(s) = common::inband(&x) {
+                into.lock()
+                    .unwrap()
+                    .push((x.key_expr().as_str().to_owned(), s));
+            }
+        })
+        .await
+        .unwrap();
+    let claim = session(&ep, None).await;
+    let reader = session(&ep, None).await;
+    let gauge = common::imp("gauge.v1");
+    let iface = gauge.iface().clone();
+    let mut b = ServiceBuilder::new(&claim, ServiceConfig::new("lab/gauge".parse().unwrap()));
+    b.implement(gauge).unwrap();
+    let none = Bindings::new();
+    let level = b
+        .declare_writer(&iface, "stream/level", &none)
+        .await
+        .unwrap();
+    b.expose(&iface, "stream/axis/{axis}").unwrap();
+    let lock = Arc::new(ManualLock::new(true));
+    let red = b
+        .redundancy(
+            RedundancyStartup::new(reader.clone())
+                .with_retry(RETRY)
+                .with_lock(Arc::clone(&lock) as Arc<dyn Lock>),
+        )
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    tokio::time::timeout(SETTLE, red.until(&iface, Role::Serving))
+        .await
+        .expect("it serves");
+    let run = svc.minter().run();
+    eventually("S subscribes", || async { level.matching().await.unwrap() }).await;
+    const LEVEL: &str = "zk2/lab/gauge/gauge.v1/stream/level";
+    const AXIS: &str = "zk2/lab/gauge/gauge.v1/stream/axis/x";
+    let heard = |key: &'static str, n: usize| {
+        let seqs = Arc::clone(&seqs);
+        async move {
+            eventually(&format!("{n} samples of {key}"), || async {
+                seqs.lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(k, _)| k == key)
+                    .count()
+                    >= n
+            })
+            .await;
+            seqs.lock()
+                .unwrap()
+                .iter()
+                .filter(|(k, _)| k == key)
+                .map(|(_, s)| (s.run, s.seq.get()))
+                .collect::<Vec<_>>()
+        }
+    };
+    for v in ["0", "1", "2"] {
+        level.put(v).await.unwrap();
+    }
+    assert_eq!(
+        heard(LEVEL, 3).await,
+        [(run, 0), (run, 1), (run, 2)],
+        "seqs 0, 1 and 2 of the run"
+    );
+
+    // A step-down, then a takeover within the same instance.
+    let instance = svc.instance().clone();
+    lock.set(false);
+    red.lock_changed();
+    tokio::time::timeout(SETTLE, red.until(&iface, Role::Standby))
+        .await
+        .expect("it stands by");
+    assert!(
+        level.put("standby").await.is_err(),
+        "a standby writes nothing"
+    );
+    lock.set(true);
+    red.lock_changed();
+    tokio::time::timeout(SETTLE, red.until(&iface, Role::Serving))
+        .await
+        .expect("it serves again");
+    assert_eq!(svc.instance(), &instance, "the same instance");
+    assert_eq!(svc.minter().run(), run, "its run unchanged");
+    let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+    assert_eq!(d["run"], run.hex(), "as its descriptor says");
+    eventually("S subscribes again", || async {
+        level.matching().await.unwrap()
+    })
+    .await;
+    level.put("3").await.unwrap();
+    assert_eq!(
+        heard(LEVEL, 4).await[3],
+        (run, 3),
+        "seq 3 of the run, never 0"
+    );
+
+    // A templated member's writer dropped and made again within the run.
+    let x: Bindings = [("axis".to_owned(), vec!["x".to_owned()])].into();
+    let axis = svc.writer(&iface, "stream/axis/{axis}", &x).await.unwrap();
+    eventually("S hears the member", || async {
+        axis.matching().await.unwrap()
+    })
+    .await;
+    axis.put("a").await.unwrap();
+    axis.put("b").await.unwrap();
+    drop(axis);
+    let axis = svc.writer(&iface, "stream/axis/{axis}", &x).await.unwrap();
+    eventually("S hears the member again", || async {
+        axis.matching().await.unwrap()
+    })
+    .await;
+    axis.put("c").await.unwrap();
+    assert_eq!(
+        heard(AXIS, 3).await,
+        [(run, 0), (run, 1), (run, 2)],
+        "the member's seq continues, never restarted"
+    );
+    drop((axis, level));
+    svc.close().await.unwrap();
+    for s in [claim, reader] {
+        s.close().await.unwrap();
+    }
+}
+
+/// Core §4.3: a candidate of a governed interface draws 32-bit runs, so a
+/// run store beside `redundancy()` is refused at its start, nothing
+/// declared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_candidate_with_a_run_store_is_refused() {
+    let (_r1, ep) = router(None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let prepared = prepare(&ep, Opts::ledger("A", 0x1)).await.unwrap();
+    let mut prepared = prepared;
+    prepared
+        .builder
+        .run_store(Arc::new(zenkey::run::FileRunStore::new(
+            dir.path().join("a.run"),
+        )))
+        .unwrap();
+    let g = client(&ep).await;
+    let refused = prepared.start().await.err().expect("refused");
+    assert!(
+        refused.to_string().contains("random 32-bit runs"),
+        "{refused}"
+    );
+    assert!(
+        presence::liveliness_keys(&g, &format!("zk2/{LEDGER}/@zk/**"), T)
+            .await
+            .unwrap()
+            .is_empty(),
+        "nothing declared"
+    );
+    assert!(!dir.path().join("a.run").exists(), "no run taken");
 }

@@ -192,7 +192,7 @@ async fn s1_the_re_put_cadence() {
     assert_eq!(o.intent.refresh_period(), None, "ttl 0, no re-put");
 
     // 1. One put of `up`, then 5 s; 4. `note` once, alongside.
-    let first = status.put("up").await.unwrap();
+    let first = status.put("up").await.unwrap().time;
     o.note.put("n").await.unwrap();
     let t0 = Instant::now();
     until(t0, Duration::from_secs(5)).await;
@@ -211,14 +211,16 @@ async fn s1_the_re_put_cadence() {
     }
     for r in &ups {
         assert_eq!((r.value.as_str(), r.delete), ("up", false), "unchanged");
-        assert_eq!(r.encoding, "text/plain");
+        // The record of an envelope, whose sample's Encoding is
+        // `zenoh/bytes` (core §7.2's exception).
+        assert_eq!(r.encoding, "zenoh/bytes");
         assert_eq!(
             r.stamp.unwrap().get_id().to_string(),
             owner_zid,
             "the owner's own stamp (S1)"
         );
     }
-    assert_eq!(ups[0].stamp, Some(first), "the first is the put itself");
+    assert_eq!(ups[0].stamp, first, "the first is the put itself");
     assert_eq!(
         snapshot(&notes).len(),
         1,
@@ -226,7 +228,7 @@ async fn s1_the_re_put_cadence() {
     );
 
     // 2. `down`: the change starts a new interval, and `up` is gone.
-    let change = status.put("down").await.unwrap();
+    let change = status.put("down").await.unwrap().time.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
     let after = since(&log, change);
     assert!(after.len() >= 2, "the change and a re-put: {after:#?}");
@@ -243,7 +245,7 @@ async fn s1_the_re_put_cadence() {
     .await;
 
     // 5. A delete, then nothing.
-    let deleted = status.delete().await.unwrap();
+    let deleted = status.delete().await.unwrap().time.unwrap();
     tokio::time::sleep(Duration::from_millis(2200)).await;
     let tail = since(&log, deleted);
     assert_eq!(tail.len(), 1, "the delete alone: {tail:#?}");
@@ -251,7 +253,7 @@ async fn s1_the_re_put_cadence() {
 
     // 6. A put, then the writer closes: its puts hold the refresher off,
     // and it is due 0.95 s later, so nothing follows the put.
-    let again = status.put("up").await.unwrap();
+    let again = status.put("up").await.unwrap().time.unwrap();
     drop(status);
     tokio::time::sleep(Duration::from_millis(2200)).await;
     let tail = since(&log, again);
@@ -274,7 +276,7 @@ async fn s1_the_re_put_cadence() {
         .await
         .unwrap();
     assert!(w.is_refreshing());
-    let last = w.put("up").await.unwrap();
+    let last = w.put("up").await.unwrap().time.unwrap();
     o.svc.close().await.unwrap();
     tokio::time::sleep(Duration::from_millis(2200)).await;
     let tail = since(&log, last);

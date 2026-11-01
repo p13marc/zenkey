@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — an owner stamps in band: `--run-file`, S1 and S2 read in band (#976, A3)
+
+Core 0.73 orders an owner's values by the run and seq of its zk2c
+envelope (§4.3, §7.5), and keeps a Zenoh timestamp on §4.3's table alone.
+An owner's session runs with timestamping off (§8.2).
+
+| Before | Now | Notes |
+|---|---|---|
+| `gen` and `serve`'s session: timestamping on, unless `--zenoh-config` states it | off, unless `--zenoh-config` states it; on for a candidate of an interface `redundancy.v1` governs | §8.2's posture; a `history` resource's publisher numbers its samples instead (§2.5) |
+| — | `gen --run-file PATH`, `serve --run-file PATH`: each instance takes its next 16-bit run from the record, made durable before it writes | without it, each instance draws a random 32-bit run; refused beside a governed interface, exit 2 |
+| `get state --format json` rows: `timestamp` | `inband` too, `{"run": "0003", "seq": 12}`, and `timestamp` only where the reply carried one | additive; the table's detail line says "stamped in band: run 0003, seq 12", and `watch`'s samples carry it too, their head line "in band run 0003, seq 12" |
+| `check conform`'s `state-stamp`: every mutation and reply stamped by the owner's own clock | stamped in band; on core §4.3's table, a Zenoh timestamp whose clock is `meta.zid` too | off the table, a router's Zenoh timestamp or none is not judged; `state-get` likewise |
+| `doctor --deep`'s `state-stamp-foreign`: each reply judged by its Zenoh clock | a reply off the table clean on its in-band stamp; on the table judged by its Zenoh clock, a missing one a finding; a reply with no envelope a finding | |
+| `why`'s answer: "stamped <time> by <clock> (…)" | "stamped in band (run r, seq s)", then the Zenoh timestamp where one rides the reply; the last-known rung alike | |
+
 ## Unreleased (`main`, zk2) — the watch after a window: the longer of `--lease` and `--wait-before-close` (#935, F-320)
 
 Observer text 0.6 settles §5.2 (zk2py round 85's F-320): after a window,

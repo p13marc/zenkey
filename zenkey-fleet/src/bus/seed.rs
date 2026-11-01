@@ -20,9 +20,10 @@
 //!   `history` — streams among them, which no state GET reaches. Under a
 //!   verbatim chunk a late *publisher* is never found (§2.5), and a
 //!   publisher that is gone took its cache with it;
-//! - **replies and live samples merge per key by the owner's stamp**
-//!   (one merge for both phases, kept for as long as the subscription
-//!   follows: observer §4.1): the newer wins whichever path brought it, a
+//! - **replies and live samples merge per key by the owner's in-band
+//!   stamp** (core §4.3; one merge for both phases, kept for as long as
+//!   the subscription follows: observer §4.1): the newer wins whichever
+//!   path brought it, the later arrival across two runs, a
 //!   `reply_del` is a deletion with its stamp, and one mutation both paths
 //!   carried is kept once. The merge holds one entry per key, bounded at
 //!   [`crate::DEFAULT_MAX_KEYS`] by last admission; a key it forgets holds
@@ -258,16 +259,19 @@ impl futures_core::Stream for SeededSubscriber {
 ///   dropped, never mistaken for an absence.
 /// - Stamped beats unstamped; unstamped against unstamped passes through,
 ///   the later arrival replacing the earlier. An owner stamps every
-///   mutation (S1), so an unstamped sample is no conforming owner's: a
-///   foreign key's, from a session with no HLC through no router that
-///   stamps, ranked below every stamp as `Latest` ranks an unstamped reply.
+///   mutation in band (S1), so a sample with neither stamp is no
+///   conforming owner's: an `@stream` sample's, or a foreign key's, from a
+///   session with no HLC through no router that stamps, ranked below every
+///   stamp as `Latest` ranks an unstamped reply.
 ///
 /// - A sample carrying a zk2c envelope (core §7.5) is ordered by its run
-///   and seq ([`SampleView::mark`], `zenkey_model::seed::admits_mark`):
-///   within one run the higher seq is newer and an equal seq is the same
-///   value, kept once; across two runs, or beside a Zenoh-stamped value,
-///   nothing orders them and the later arrival is kept. A refused
-///   envelope is delivered undecodable and moves nothing.
+///   and seq ([`SampleView::mark`], `zenkey_model::seed::admits_mark_in`):
+///   within one run the newer seq is kept and an equal seq is the same
+///   value, kept once, a state's seqs compared as integers and a stream
+///   key's by serial order, across its wrap (core §4.3); across two runs,
+///   or beside a Zenoh-stamped value, nothing orders them and the later
+///   arrival is kept. A refused envelope is delivered undecodable and
+///   moves nothing.
 ///
 /// Every suppression is counted ([`SeedCoverage::superseded`] at the
 /// boundary, [`Merge::superseded`] for the merge's life).
@@ -341,9 +345,11 @@ impl Merge {
     }
 
     /// Whether `view` is kept over what its key holds, by its mark: an
-    /// in-band stamp within one run by seq, across runs (or two wires) the
-    /// later arrival, a Zenoh timestamp by zenoh's order
-    /// (`zenkey_model::seed::admits_mark`, core §7.5). A refused envelope
+    /// in-band stamp within one run by seq, plain for a state's and serial
+    /// for a stream key's (core §4.3, `zenkey_model::seed::Order::of_key`),
+    /// across runs (or two wires) the later arrival, a Zenoh timestamp by
+    /// zenoh's order (`zenkey_model::seed::admits_mark_in`, core §7.5;
+    /// observer §4.1). A refused envelope
     /// is never ordered: it is delivered, so a reader shows it
     /// undecodable, and moves nothing its key holds.
     pub(crate) fn admit(&self, view: &SampleView) -> bool {
@@ -354,7 +360,8 @@ impl Merge {
         let incoming = view.mark();
         let mut table = self.latest.lock().expect("merge lock");
         let held = table.keys.get(view.key.as_str()).map(|e| e.held);
-        let admit = zenkey_model::seed::admits_mark(held.unwrap_or_default(), incoming);
+        let order = zenkey_model::seed::Order::of_key(&view.key);
+        let admit = zenkey_model::seed::admits_mark_in(order, held.unwrap_or_default(), incoming);
         if !admit {
             self.superseded.fetch_add(1, Relaxed);
             if let Some(l) = &self.ledger {

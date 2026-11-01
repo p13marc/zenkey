@@ -4,6 +4,40 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-11-01: editorial: §2.5's fault stamp read under core 0.73's session posture, no rule changed (#976)
+
+Core 0.73 orders state by an owner's run and seq, carried in band. It
+asks an owner's session to run without timestamping (its §8.2, "Session
+posture"). §2.5 said that a session with its HLC enabled stamps the
+fault, and that a deployment's clock is its HLC. Neither describes an
+owner under 0.73.
+
+**Editorial: §2.5, "The routers and the fault's stamp".**
+- **Before:** a session with its HLC enabled stamps every put, so the
+  fault carries a stamp from the owner's clock.
+- **Now:** an owner's session runs without timestamping (core §8.2). So
+  the fault carries a stamp only where the owner sets one, as the
+  reference does. A fault left unstamped arrives under a router's stamp,
+  or none.
+- **"An owner that sets the stamp itself":** its clock is "its wall clock
+  with a bump (core §4.3), which stamps its status too". It was "in a
+  deployment that clock is its HLC".
+
+**Editorial: `scenarios.md` §4's setup** cites `spec/scenarios/state.md`
+§7's step 6, where it cited step 3. Core 0.73's `state.md` moves "Ahead"
+there, unchanged, after the runs' steps.
+
+**Written against core 0.73,** where it said 0.23: the text now cites
+core §8.2's session posture, which 0.73 adds. The index's row follows.
+
+**Deliberately not changed.**
+- **No rule.** §2.5's MAY to set the fault's stamp stands. Core 0.73's
+  table lists a fault among the resources that may carry a Zenoh
+  timestamp, for that MAY.
+- **"A simulated offset is not a drift"** stays: it says what a session
+  with an HLC does, which is still zenoh's.
+- **No fixture, scenario step, section number or label.**
+
 ## 0.6 — 2026-10-30: editorial: round 86's F-327, no rule changed (#935)
 
 zk2py round 86 (PR #959) read 0.5 cold, beside core 0.62 and

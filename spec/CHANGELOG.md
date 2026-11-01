@@ -3,6 +3,202 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.73 — 2026-11-01: state ordered by run and seq, carried in band (#976)
+
+Epic #975, zk2c, replaces the per-put HLC stamp with an owner's run and
+sequence number, carried in band. 0.72 defined the envelope that carries
+them (§7.5), and adopted it in no rule. This version is #976's flip,
+chunk A3: an owner writes the envelope, and its run and seq order a key's
+values. A Zenoh timestamp stays only where a profile reads a time from
+it. `observer.md` moves to text 0.15 beside it
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)). `health.v1` 0.7,
+`timing.v1` 0.8 and `redundancy.v1` 0.9 follow, each editorially.
+
+**Changed: §4.3, retitled "Runs and sequence numbers (S7)".** It was
+"Clocks (S7)".
+- **Added, a MUST: the in-band stamp.** An owner writes each put on a
+  `stream`, `state`, `@state` or `events` key, and each delete of a state
+  member, with §7.5's envelope. The sample's `Encoding` is `zenoh/bytes`.
+- **`@stream` keeps its wire.** Its frames would be copied into an
+  envelope, or out of one, which loses §7.4's zero-copy path. So do
+  operations, the descriptor and bundles.
+- **The run.** It is an instance's ordering epoch, of 16 or 32 bits. A
+  16-bit run is a counter in a record the owner keeps. A 32-bit run is a
+  random draw, taken with no record, with a spent counter and by a
+  `redundancy.v1` candidate.
+- **Added, a MUST NOT: no reuse.** An owner never writes under a run that
+  it, or another instance of its service, wrote under before.
+- **A new run** is taken by each new instance. Within an instance it is
+  taken before the seq would wrap, and MAY be taken at any other time. A
+  run that changes within an instance mints no new instance.
+- **The seq, for state and events,** is one count per run over every
+  state mutation and event occurrence, from 0. **Added, a MUST NOT:** it
+  never wraps. Before it would pass 16,777,215, the owner takes a new run
+  and puts its descriptor stating it.
+- **The seq of a stream key** is its own, and wraps modulo 2^24. **Added,
+  a MUST NOT:** an owner never restarts it within a run, even where it
+  declares the key's publisher again.
+- **Two orders.** A stream key's seqs compare by serial arithmetic over
+  24 bits, unordered at exactly 2^23. A state or event key's compare as
+  integers.
+- **Changed, the consumer rule.** A consumer orders each state key's
+  values by seq within one run, and accepts a value under another run. It
+  ordered by time within one timestamp id, and accepted another id. A
+  value with no envelope is still ordered so, by its Zenoh timestamp.
+- **Nothing orders two runs.** A reader compares two runs for equality
+  alone.
+- **The residual risk,** restated over runs. Inside a seed, a consumer
+  and a tool now both hold the reply that arrived last, until the key's
+  next value. Where two instances answer, `Latest` keeps the reply with
+  the greater Zenoh timestamp, else the last to arrive.
+- **Added: the table of Zenoh timestamps kept.** These resources keep one
+  beside the in-band stamp, each for a time a profile reads:
+  - a state whose contract declares `freshness.ttl_s` above 0;
+  - a `desired.v1` desired resource;
+  - a state that is a `telemetry.v1` metric resource;
+  - a stream that declares a `timing.v1` lifespan;
+  - a `health.v1` fault, where its owner sets one;
+  - every put of a `redundancy.v1` candidate.
+- **Removed, three rules.** The MUST that a session serving state enables
+  its HLC. The MUST NOT to stamp at or below the last timestamp issued,
+  the catch-up. The MUST to start a new epoch with no source for it.
+- **Kept as definitions:** catch-up and a new epoch, which `alarms.v1`,
+  `desired.v1` and `redundancy.v1` cite. Minting, the tick and "Ahead"
+  stay, for the table's timestamps. A profile that orders them across a
+  restart says how, as `desired.v1` §2.11 does.
+
+**Changed: S1–S3 and S7, §4.2.**
+- **S1:** every state mutation carries its in-band stamp, a put in its
+  envelope and a delete in its attachment. On a resource §4.3's table
+  lists, the owner MUST also set a Zenoh timestamp. It said: "a timestamp
+  the owner set".
+- **S2:** a reply carries the in-band stamp, as the bytes the mutation
+  put, and a `reply_del` as the delete's attachment. The owner's reply
+  MUST also carry the mutation's Zenoh timestamp, where it carried one.
+- **S3:** a `reply_del` carries "the deletion's stamps (S2)", where it
+  carried "the deletion's timestamp".
+- **S7's row:** "a run is never reused, and a seq never wraps within it".
+  It said: "clocks are bounded both ways".
+- **A re-put** carries a new seq, and on a table resource a Zenoh
+  timestamp minted above the last.
+- **The merge** keeps the newer by in-band stamp, by seq within one run.
+  Across two runs, a consumer keeps what §4.3's consumer rule accepts. A
+  tool keeps the later arrival (observer §4.1).
+- **A sample with no envelope** is an `@stream` sample, a foreign key's,
+  or one that broke S1. It keeps today's order by Zenoh timestamp, and
+  beside an in-band stamp it is unordered. One with neither stamp ranks
+  below every stamped one.
+- **"Observing S1"** is rewritten. An in-band stamp is the owner's. A
+  tester checks the Zenoh timestamps through a router that stamps nothing
+  and one that stamps.
+
+**Changed: §1.5, §2.5, §3.3, §4.1, §4.4, §7.2, §7.5, §8.2, §8.5, §12.**
+- **§1.5.** An owner mints a new instance id "whenever its counters
+  reset". The clause "or its state's ordering restarts (§4.3)" goes. A new
+  instance writes under a new run. The SHOULD of a new session is now for
+  the table's Zenoh timestamps.
+- **§2.5.** An owner's advanced publisher always numbers its samples:
+  zenoh-ext refuses a cache with neither a number nor an HLC.
+  `miss_detection_ms` adds the heartbeat. Without it, a subscriber still
+  detects a gap between two samples, but not a lost last one.
+- **§3.3, `run`.** Added, a MUST: an owner states its run, in lowercase
+  hexadecimal, 4 digits or 8, and puts its descriptor again before it
+  writes under a new one. A checker reads `run` as optional. D002 gains
+  "`run` is not 4 or 8 lowercase hex digits". `descriptor.schema.json`
+  gains an optional string `run`, with no pattern, so a bad run is D002
+  and not D000.
+- **§4.1** gains four facts. A router stamps only puts. A given timestamp
+  is sent, on a session without timestamping too. Timestamping is on by
+  default for a router and off for a peer and a client. `Latest` keeps
+  the last to arrive among unstamped replies.
+- **§4.4.** An archive keeps a put's bytes, its envelope included.
+  "Older" is by seq within one run. A put of another run is recorded, the
+  residual risk as an archive meets it.
+- **§7.2.** The predefined-`Encoding` MUST excepts a sample that carries
+  §7.5's envelope, which is `zenoh/bytes`.
+- **§7.5.** "No rule adopts it yet" becomes "§4.3 adopts it".
+- **§8.2, "Session posture".** Added, a MUST NOT: an owner sets no Zenoh
+  timestamp on a put or delete of a data key, except on a resource §4.3's
+  table lists.
+  - Added, a SHOULD: its session runs with timestamping disabled. A
+    `redundancy.v1` candidate is the exception.
+  - Added, a SHOULD: a deployment runs a router that forwards puts onto a
+    constrained face with timestamping disabled. Such a router runs no
+    storage manager, and is no clock guard's reference.
+- **§8.5** points to it.
+- **§12.** The constrained table's "Clock (S7)" row goes. §4.3 asks no
+  HLC of any owner, and "Ahead" reads as at full.
+
+**Added: Appendix B's facts.** Each is read in zenoh 1.10.1's source:
+- a router stamps only a `PushBody::Put` (`dispatcher/pubsub.rs`);
+- timestamping's defaults (`zenoh-config`'s `defaults.rs`);
+- a session with an HLC stamps puts and deletes, and a given timestamp is
+  sent, a reply's included (`api/session.rs`, `api/queryable.rs`);
+- `Latest` keeps the last unstamped reply to arrive (`api/session.rs`);
+- an advanced publisher's cache with neither numbering nor an HLC is
+  refused (zenoh-ext's `advanced_publisher.rs`);
+- SourceInfo costs 21 to 25 bytes (zenoh-codec's `zenoh/mod.rs`);
+- the storage manager refuses to start without timestamping.
+
+**Decided here, where the design left it open.**
+- **A run within an instance MAY change at other times.** The runtime
+  bounds the stream keys whose seqs it keeps, and takes a new run past
+  the bound. "Only before its seq would wrap" would forbid that.
+- **A stream key's seq is a MUST NOT.** The design wrote it as a fact. It
+  has a scenario, §13, so it is stated as a rule.
+- **An `@stream` envelope's seqs are serial,** should a reader meet one.
+  An `@stream` key is a stream key, and the order follows the kind.
+- **The descriptor fixtures are six,** where the design named two. One
+  file cannot hold two values of `run`, so `d002-run-length` and
+  `d002-run-case` are two. `ok-run-wide` pins 8 digits, and
+  `d000-run-type` and `d000-run-null` a number and `null`.
+
+**Why.** The per-put HLC stamp was 26 bytes on every mutation, and a
+timestamp orders badly across a restart. A run names the restart in
+band, and a seq orders within it, in 6 bytes, 8 with a 32-bit run. The
+catch-up existed to keep a restart's stamps above the last. A new run
+makes that moot, since nothing orders two runs.
+
+**The evidence.**
+- **`conformance/seed/inband.json`,** new, hand-written and never
+  blessed: 22 order pairs and 16 cases. They cover plain and serial
+  order, the 2^23 tie, two runs, two widths of one value, a Zenoh
+  timestamp beside an in-band stamp, and a tool's and a consumer's merge.
+  Checked by `zenkey-model/tests/conformance.rs`'s `seed_inband`.
+- **`conformance/seed/merge.json`** is kept. Its description now says its
+  stamps are Zenoh timestamps, on samples with no envelope.
+- **`conformance/descriptors/`** gains `ok-run`, `ok-run-wide`,
+  `d002-run-length`, `d002-run-case`, `d000-run-type` and
+  `d000-run-null`.
+- **`scenarios/state.md`** is rewritten for runs: §1 through a router that
+  stamps nothing and one that stamps, §2, §4, §7 the runs, §9 an archive
+  across two runs, §10 by seq, and a new §13, a stream key's seq wrapping.
+- **`scenarios/types.md` §1** expects `zenoh/bytes` on each sample, which
+  carries the envelope, and its record encoded as its type says.
+- Appendix C indexes them, Appendix E describes `inband.json`, and
+  `conformance/README.md` lists it.
+
+**Deliberately not changed.**
+- **S4's `Latest`.** It stays until a later version answers a GET without
+  it.
+- **The clock guard.** "Ahead" keeps its SHOULDs and its MUST to stop
+  writing state, re-puts included.
+- **No profile rule.** `freshness.v1`, `desired.v1`, `alarms.v1`,
+  `telemetry.v1`, `config.v1` and `arbitration.v1` cite S1, S2, catch-up
+  and a new epoch, which still resolve. The three profiles that cited the
+  HLC rule or S7's id follow editorially.
+- **`observer.md` §7.3,** which already reads the envelope first.
+- **The envelope's bytes,** §7.5's layouts, forms and refusals.
+
+**The index.** [`RULES.md`](RULES.md) lists 182 rules, 18 citing none,
+7 of them MUSTs. The two removed MUSTs, the catch-up and the new epoch,
+cited none. The glossary gains "Run", "Seq", "In-band stamp" and "Zenoh
+timestamp", and "Stamp" goes: 56 terms.
+
+**The figures.** This text's mean goes from 16.23 to 16.17 words, with
+no sentence over 50 and no tag. `scenarios/state.md` goes from 15.32 to
+14.18. `spec/.prose-baseline.json` is lowered to them.
+
 ## 0.72 — 2026-10-31: the zk2c envelope defined, and no rule adopts it yet (#976)
 
 Epic #975, zk2c, replaces the per-put HLC stamp with an owner's run and

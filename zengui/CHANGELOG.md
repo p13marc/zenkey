@@ -4,6 +4,18 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the Inspector shows an in-band stamp (#976, A3)
+
+Since core 0.73 an owner orders its values by the run and seq it writes in
+its zk2c envelope (§4.3, §7.5), and sets a Zenoh timestamp only on the
+resources §4.3's table lists. Its session runs with timestamping off
+(§8.2), so a state off the table arrives with its in-band stamp alone.
+
+| Before | Now | Notes |
+|---|---|---|
+| a value's stamp chip: "stamped by the owner's clock (S1)", "stamped by another clock (O7)", "stamp unattributable (O7)" or "unstamped" | a value carrying an envelope shows "`<run>·<seq>` (in band)", the owner's run and seq; the Zenoh stamp's chip and its "stamp … · clock …" line only where a Zenoh timestamp rides the value; "unstamped" only for one with neither | observer §8.3: an in-band stamp orders and has no time, so it is shown as a run and a seq, never a time. The owner GET's row, an archive's last-known row, and a raw, history, event or recorded reply alike |
+| the tree across an owner's restart: a new epoch's values, on a clock behind, older by the merge, not shown, and counted superseded | the later arrival across two runs, then by seq within the new run: the tree shows rev 11, then rev 12 | core §4.2, observer §4.1, `state.md` §7 step 4: nothing orders two runs. A value of the old run still in transit can then show after the new run's first, until the key's next value (§4.3's residual risk). A stream key's seqs are merged by serial order, across their wrap (`state.md` §13) |
+
 ## Unreleased (`main`, zk2) — a seeded watch's merge lasts, and says what its bound forgot (#926)
 
 | Before | Now | Notes |

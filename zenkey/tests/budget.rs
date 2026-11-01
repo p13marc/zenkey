@@ -658,7 +658,7 @@ async fn watcher(consumer: &zenoh::Session) -> Watcher {
     let h = Arc::clone(&heard);
     let data = consumer
         .declare_subscriber("zk2/lab/budget/budget.v1/stream/load/*")
-        .callback(move |s| h.lock().unwrap().push(seq(&s.payload().to_bytes())))
+        .callback(move |s| h.lock().unwrap().push(seq(&common::record(&s))))
         .await
         .unwrap();
     Watcher {

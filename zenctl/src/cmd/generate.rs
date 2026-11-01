@@ -50,6 +50,7 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         duration,
         seed,
         dry_run,
+        run_file,
         i_know,
         contracts,
         ns: _,
@@ -83,6 +84,8 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         }
         out
     };
+    let governed = super::serve::governed(&revisions);
+    let run_store = super::serve::run_store(run_file, &governed)?;
     let spec = GenSpec {
         address,
         revisions,
@@ -94,6 +97,7 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         seed,
         tool: "zenctl gen".into(),
         elect: None,
+        run_store,
     };
     let plan: GenPlan = zenkey_fleet::gen_plan(&spec)?;
 
@@ -104,15 +108,16 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         return Ok(());
     }
 
-    // An owner's session, timestamping on as a real owner's is (#825): a
-    // session a retrieval opened above is a reader's, and is not reused.
+    // An owner's session, timestamping off as an owner's is (core §8.2),
+    // on for a candidate: a session a retrieval opened above is a
+    // reader's, and is not reused.
     if let Some(reader) = session.take() {
         let _ = reader.close().await;
     }
-    let session = dep.owner_session().await?;
+    let session = dep.owner_session(!governed.is_empty()).await?;
     super::serve::guard_address(&session, &spec.address, &dep, i_know).await?;
     let mut spec = spec;
-    spec.elect = super::serve::elect(&dep, &spec.revisions).await?;
+    spec.elect = super::serve::elect(&dep, &governed).await?;
     let report = zenkey_fleet::run_gen(&session, &spec, &plan, |instance| {
         eprintln!(
             "up: {} as instance {instance}, in {}, for {}s",

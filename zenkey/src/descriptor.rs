@@ -23,6 +23,8 @@ pub(crate) struct Identity<'a> {
     pub(crate) host: Option<&'a str>,
     /// The session's zid, stated as `meta.zid` (§3.3).
     pub(crate) zid: &'a str,
+    /// The run the instance writes under, stated as `run` (§3.3, §4.3).
+    pub(crate) run: zenkey_model::wire::Run,
 }
 
 /// The descriptor's `profiles` (§3.3): the `uses` of the contracts
@@ -118,6 +120,7 @@ pub(crate) fn build(
         format: FORMAT.to_owned(),
         service: id.addr.to_string(),
         instance: instance.to_string(),
+        run: Some(id.run.hex()),
         interfaces,
         capabilities: held.iter().cloned().collect(),
         requires,

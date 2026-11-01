@@ -4,6 +4,33 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-11-01: editorial: §2.6's owner session read under core 0.73's session posture, no rule changed (#976)
+
+Core 0.73 orders state by an owner's run and seq, carried in band. It
+drops its rule that a session serving state enables its HLC, and asks an
+owner's session to run without timestamping (its §8.2, "Session
+posture"). Its §4.3 lists a stream that declares a lifespan among the
+resources that keep a Zenoh timestamp, for this text's §2.6.
+
+**Editorial: §2.6, "The owner stamps", its first sub-bullet.**
+- **Before:** "Core §4.3 asks the HLC only of a session that serves
+  state: a stream-only owner's session may have none."
+- **Now:** "Core §8.2 asks an owner's session to run without
+  timestamping. So its samples carry the stamp the owner sets, a
+  router's, or none."
+
+**Written against core 0.73,** where it said 0.55: the text now cites
+core §8.2's session posture. The index's row follows.
+
+**Deliberately not changed.**
+- **No rule.** The owner still stamps each sample of a resource that
+  declares a lifespan, from its own session's clock. "Without an HLC
+  too" already said how: `Session::new_timestamp()`, its wall clock with
+  its zid. The reference's writer does so.
+- **No fixture, scenario, section number or label.** The scenarios set
+  the owner's HLC on or off as each step says, which the posture's SHOULD
+  leaves to a test.
+
 ## 0.7 — 2026-10-31: editorial: round 88's F-348, F-350 and F-351 rewritten, no rule changed (#935)
 
 zk2py round 88 (#609) read 0.6 cold and found that it changed no rule. It
