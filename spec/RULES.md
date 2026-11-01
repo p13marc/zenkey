@@ -52,12 +52,12 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 62 |
-| [Consumer](#consumer) | 15 |
+| [Consumer](#consumer) | 17 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 16 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 55, 24 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 56, 24 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 46 |
-| Every rule, once | 192 |
+| Every rule, once | 195 |
 | [Rule ids](#rule-ids) | 79 |
 
 ## Owner
@@ -275,6 +275,13 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
+
+### [core §8.5 Constrained faces](core.md#85-constrained-faces)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.5](core.md#85-constrained-faces) | A consumer across a constrained face SHOULD subscribe to each concrete resource it reads by its exact key, and to a template by its literal prefix up to the first parameter. | `[Sc: constrained.md §7]` |
+| [§8.5](core.md#85-constrained-faces) | A consumer across a constrained face SHOULD NOT use a selector wider than what it reads. | `[Sc: constrained.md §7]` |
 
 ### [core §11.1 Grant shapes](core.md#111-grant-shapes)
 
@@ -554,6 +561,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§7.4](observer.md#74-shared-memory) | A tool SHOULD check the limit at start: the `RLIMIT_MEMLOCK` that core §7.4 asks a deployment to set to at least the pool plus 2 MiB. | none cited |
+
+### [observer §7.5 Subscribing across a face](observer.md#75-subscribing-across-a-face)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§7.5](observer.md#75-subscribing-across-a-face) | A tool across a constrained face SHOULD subscribe as core §8.5 says, by the scopes the contracts in hand give for the addresses it reads. | `[Sc: constrained.md §7]` |
 
 ## Implementation: the static rules
 

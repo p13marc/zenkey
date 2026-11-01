@@ -3,6 +3,73 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.76 — 2026-11-01: keys across a face (#980)
+
+Epic #975, zk2c, makes the wire bandwidth-first. #989 measured today's wire
+on zenoh-modem's simulated radio. Its largest miss was a stream put
+carrying its whole key as text: 85 B a telemetry put under a far reader's
+`zk2/**`, against 35 B under exact keys. This version is #980's C1b. It
+adds no mechanism. In zenoh 1.10.1 a put toward the far side can count
+only on the prefixes the far side's own subscriptions declared, so the
+rule is how a far consumer subscribes. C1a, the deployment catalog, and C1c, the tools
+taking it, are later chunks.
+
+**Added: §8.5, "Keys across the face".**
+- **The rule.** A consumer across a constrained face SHOULD subscribe to
+  each concrete resource it reads by its exact key, and to a template by
+  its literal prefix up to the first parameter. It SHOULD NOT use a
+  selector wider than what it reads. `[Sc: constrained.md §7]`
+- **A template's selector** is its key with each parameter a wildcard,
+  and an event's ULID chunk too. Its literal prefix is what zenoh
+  declares.
+- **Why SHOULDs.** They buy bytes, not correctness: a wide selector still
+  delivers every sample.
+- **Whom it binds.** The reference's `Consumer::selectors` already
+  subscribes so, one selector per bound provider. So the rule binds a
+  wildcard binding, and mostly tools, whose half is `observer.md` §7.5.
+- **What no subscription shortens:** a reply, which carries its whole key
+  through every router.
+
+**Added: Appendix B, "Keys across a face".** Six facts, read in zenoh
+1.10.1's source, each with its file and line:
+1. a put rides the deepest key expression either end declared on the face
+   for a prefix of its key, the far side's before the router's;
+2. a session declares its publisher's key, and its subscriber's and its
+   queryable's non-wild prefixes, on its own face only;
+3. a router declares a prefix toward a face only while it propagates a
+   subscriber, a queryable or a token there, and only toward a
+   north-bound face or one that asked in an interest;
+4. a prefix the router declares invalidates no cached route;
+5. a reply always carries its key as text;
+6. a lost `DeclareKeyExpr` is never sent again.
+
+Facts 4 and 5 have draft upstream reports, not filed, as r4 decided:
+`docs/zk2/upstream/router-prefix-keeps-cached-routes.md` and
+`replies-carry-their-key-as-text.md`.
+
+**Added: `scenarios/constrained.md` §7,** run by the reference
+(`zenkey/tests/constrained.rs`, `s7_keys_across_the_face`). A far client
+of the owner's router, through a byte-counting TCP proxy, subscribes by a
+stream's exact key, by a template's literal prefix, then by `zk2/**`.
+- **Measured:** 45–46 B a put by exact key, with none of its text; 49 B
+  under the template's prefix, carrying `/x`; 82 B under `zk2/**`. The
+  difference is the key's 35 B after `zk2`, and its length's byte.
+- **A reply** to the far client's GET carried its whole key, though the
+  far client had subscribed to it exactly.
+
+**Deliberately not changed.**
+- **No wire and no key form.** Keys stay text, so the catalog shortens no
+  key.
+- **No MUST,** under §12's constrained modifier or otherwise: a wide
+  selector loses no sample.
+- **No router setting.** No router setting declares a key expression on
+  a face, so `zenctl acl gen --face-policy` has nothing to emit for keys.
+- **A lost declaration's repair** stays link ARQ's, and the heartbeat's
+  re-subscription, which #988 and #978 bring.
+- **§7 runs in process,** one router and a proxy, where #980's design memo
+  placed it in #989's lab. A router-declared prefix lost on a lossy link,
+  its fourth step, needs that lab, and stays fact 6's measurement.
+
 ## 0.77 — 2026-11-01: Appendix B's zenoh defaults labelled as 1.10.1's (#1011)
 
 zenoh-modem builds on a zenoh fork, `zm-1.10.2-r1`, whose

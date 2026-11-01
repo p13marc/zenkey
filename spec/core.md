@@ -2303,6 +2303,28 @@ facts.
   A named key's frames are queued, not dropped, and every request
   waits behind them. The reference generator compiles a face policy into
   these denies and the downsampling rules (`zenctl acl gen --face-policy`).
+- **Keys across the face.** A put toward a face rides the deepest key
+  expression declared on that face for a prefix of its key. The rest of
+  its key travels as text. No router declares a publisher's key toward
+  the far side, and a prefix a router declares itself serves only routes
+  computed after it. So the prefixes a put toward the far side can count
+  on are those its own subscriptions declared (Appendix B).
+  - A consumer across a constrained face SHOULD subscribe to each concrete
+    resource it reads by its exact key, and to a template by its literal
+    prefix up to the first parameter.
+  - A consumer across a constrained face SHOULD NOT use a selector wider
+    than what it reads.
+  - **A template's selector** is its key with each parameter a wildcard,
+    and an event's ULID chunk too. Its literal prefix is what is declared.
+  - **What it buys.** Each put toward such a consumer carries a scope id
+    of 1 or 2 bytes, plus the member's chunks under a template. Under
+    `zk2/**` it carries every chunk after `zk2` as text.
+  - **What no subscription shortens.** A reply carries its whole key as
+    text through every router: an S4 reply, a re-read and a call's reply
+    alike.
+  - **A tool's half** is [`observer.md`](observer.md) §7.5.
+
+  `[Sc: constrained.md §7]`
 - **A far router in a south region needs declarations sent toward it.**
   It learns of queryables only from the declarations the near router
   sends it. So a deployment MUST grant the far side's principal
@@ -3789,6 +3811,76 @@ Appendix B. These are the ones the rules above cite:
 - Under `allow`, allow rules are not evaluated, and access control works by
   inclusion.
 
+**Keys across a face** (§8.5, observer §7.5). Read in zenoh 1.10.1's
+`src/`, each with its file and line:
+1. **A put toward a face** rides the deepest key expression either end
+   declared on that face for a prefix of its key, and sends the rest as
+   text. Where neither end declared one, it carries the whole key.
+   - The route's key is `Resource::get_best_key`'s
+     (`net/routing/dispatcher/resource.rs:740`). A data route calls it
+     toward a client (`hat/broker/pubsub.rs:268`) and toward a peer
+     (`hat/peer/pubsub.rs:258`).
+   - A declaration the far side made wins over the router's own at the
+     same resource: `get_wire_expr` reads `remote_expr_id` before
+     `local_expr_id` (`resource.rs:742–758`).
+   - A scope id is a varint, 1 byte below 128 and 2 below 16,384
+     (zenoh-codec's `core/wire_expr.rs:42`).
+2. **A session declares a key expression on its own face** for three
+   things:
+   - its publisher's whole key (`api/builders/publisher.rs:484`);
+   - its subscriber's non-wild prefix (`api/builders/subscriber.rs:215`);
+   - its queryable's non-wild prefix (`api/builders/queryable.rs:231`).
+
+   Each goes through `Session::declare_prefix` (`api/session.rs:1491`).
+   A non-wild prefix ends before the chunk holding the first `*`
+   (zenoh-keyexpr's `get_nonwild_prefix`). So a publisher's declaration
+   shortens only the first hop, from the owner to its router.
+3. **A router declares a prefix toward a face** only while it propagates
+   a subscriber, a queryable or a token there. It does so only toward a
+   north-bound face, or one whose remote asked for key expressions in an
+   interest (`Resource::decl_key`, `resource.rs:661–729`). No router
+   propagates a publisher, so none declares a stream's key toward the far
+   side. Under link.v1's two attachments the far side is south or a
+   client, and its own declarations are the prefixes that exist there.
+4. **Cached routes.** A prefix the far side declares disables the cached
+   data and query routes of its resource and its matches (`register_expr`,
+   `resource.rs:1005`). So does a subscriber's registration
+   (`dispatcher/pubsub.rs:72`). A prefix the router declares itself
+   (`decl_key`) disables none. A put whose route was computed before that
+   declaration keeps its text for the route's life.
+   - Seen on zenoh-modem's simulated radio: config.v1's re-puts carried
+     their key's text all run, put before the router declared their scope
+     ([`wire-baseline`](../docs/zk2/measurements/wire-baseline/README.md),
+     W2 finding 4).
+   - The draft upstream report, not filed:
+     [`router-prefix-keeps-cached-routes.md`](../docs/zk2/upstream/router-prefix-keeps-cached-routes.md).
+5. **A reply always carries its key as text.** A router rewrites each
+   reply's key expression to the whole key, with no scope
+   (`dispatcher/queries.rs:582–590`). Its comment reads "TODO: consider to
+   optimize keyexpr for 2.0". No declaration shortens an S4 reply, a
+   re-read or a call's reply across a router.
+   - The draft upstream report, not filed:
+     [`replies-carry-their-key-as-text.md`](../docs/zk2/upstream/replies-carry-their-key-as-text.md).
+6. **A lost `DeclareKeyExpr` is never sent again.** The far router then
+   drops every put on that scope, and logs "Route data with unknown
+   scope" for each (`dispatcher/pubsub.rs:249`).
+   - Measured on zenoh-modem's simulated radio: 25 of 25 health puts were
+     dropped over 12 minutes (the wire baseline's "A declaration lost in
+     the setup is never repaired").
+   - A far-side prefix at the same resource heals the puts, by fact 1. It
+     does not heal a queryable whose declaration was lost.
+
+Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §7
+(`zenkey/tests/constrained.rs`), through a TCP proxy toward a far client:
+- a stream put crossed in 45–46 B under its exact key, with none of its
+  key's text;
+- the same put crossed in 82 B under `zk2/**`. That is its key's 35 B
+  after `zk2`, and a byte of length, more;
+- a templated member's put crossed in 49 B under the template's literal
+  prefix, carrying `/x`;
+- a GET's reply carried its whole key, though the far client had
+  subscribed to it exactly.
+
 **Measured for the rules above**, each with the rule it serves:
 - **State's and events' QoS** (§2.4): spike S5 lost 10,917 of 100,000
   values put with `drop` on their way to a storage.
@@ -4061,7 +4153,7 @@ section each was written against, whose pointer leads on.
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion |
-| `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
+| `scenarios/constrained.md` | §1.6, R7, §8.5, §12; §7 keys across a face, and Appendix B |
 | `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7); a stalled reader, and a tool's window over one (§1); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead |
