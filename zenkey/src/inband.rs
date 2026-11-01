@@ -18,7 +18,7 @@
 //! Zenoh timestamp stays on it: a profile that reads *time* (freshness's
 //! age, timing's lifespan, desired's author order, redundancy's fencing)
 //! keeps reading it, and an enveloped sample without one has no time. Its
-//! *order* is its in-band stamp ([`mark`]).
+//! *order* is its in-band stamp ([`Read::mark`]).
 //!
 //! The consumer ([`crate::consumer`]), its state GET, the archive and the
 //! profile readers read every data sample through [`read`].
