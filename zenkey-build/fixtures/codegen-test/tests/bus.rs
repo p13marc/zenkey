@@ -627,3 +627,91 @@ async fn packed_records_round_trip_through_the_generated_code() {
     let e = server.reserved.put(&refused).await.unwrap_err();
     assert!(e.to_string().contains("value"), "{e}");
 }
+
+/// The deployment catalog through the generated code (core §7.6, §8.6;
+/// #980 C1c): an owner given one states its id and writes its packed
+/// `time` fields from its epoch, and a tool given the same catalog reads
+/// the instant back, where one reading under none, from 0, is off by the
+/// epoch. The catalog is given before any resource is exposed, and once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_time_field_counts_from_the_catalogs_epoch() {
+    use zenkey::model::catalog::Catalog;
+    use zenkey_codegen_test::zk2::packed_v1;
+    use zenkey_codegen_test::zk2::packed_v1::types::Clock;
+
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../examples/zk2/zenoh-modem/catalog.json");
+    let catalog = Catalog::parse_bytes(&std::fs::read(file).unwrap()).unwrap();
+    let epoch = catalog.epoch();
+    assert_ne!(epoch, 0, "the example's epoch is the zk2 epoch");
+    let (_r, ep) = router().await;
+    let (owner, reader) = (client(&ep).await, client(&ep).await);
+
+    let mut late = ServiceBuilder::new(&owner, ServiceConfig::new(addr("lab/late")));
+    packed_v1::Server::declare(&mut late).await.unwrap();
+    let e = late.catalog(catalog.clone()).err().unwrap().to_string();
+    assert!(e.contains("give the catalog first"), "{e}");
+    drop(late);
+
+    let mut b = ServiceBuilder::new(&owner, ServiceConfig::new(addr("lab/packed")));
+    b.catalog(catalog.clone()).unwrap();
+    let e = b.catalog(catalog.clone()).err().unwrap().to_string();
+    assert!(e.contains("already"), "{e}");
+    let server = packed_v1::Server::declare(&mut b).await.unwrap();
+    assert_eq!(server.clock.inner().deployment_epoch(), epoch);
+    let svc = b.start().await.unwrap();
+    assert_eq!(svc.deployment_epoch(), epoch);
+    let d: zenkey::model::descriptor::Descriptor =
+        serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+    assert_eq!(
+        d.stated_catalog(),
+        Some(catalog.id()),
+        "§3.3: the id stated"
+    );
+
+    let tool = |held: Option<&Catalog>| {
+        let c = zenkey::consumer::Consumer::for_tool(
+            &reader,
+            packed_v1::contract(),
+            &["lab/packed"],
+            &Default::default(),
+        )
+        .unwrap();
+        let c = match held {
+            Some(h) => c.with_catalog(h),
+            None => c,
+        };
+        packed_v1::Consumer::from_inner(c).unwrap()
+    };
+    let (with, without) = (tool(Some(&catalog)), tool(None));
+    let heard: Arc<Mutex<Vec<Clock>>> = Arc::default();
+    let unheld: Arc<Mutex<Vec<Clock>>> = Arc::default();
+    let (h, u) = (Arc::clone(&heard), Arc::clone(&unheld));
+    let _a = with
+        .subscribe_clock(move |r| h.lock().unwrap().push(r.value.unwrap()))
+        .await
+        .unwrap();
+    let _b = without
+        .subscribe_clock(move |r| u.lock().unwrap().push(r.value.unwrap()))
+        .await
+        .unwrap();
+    // 2027-01-15, after both epochs.
+    let clock = Clock {
+        at: 1_800_000_000_000,
+        at_ms: 1_800_000_000_123,
+        valid: true,
+    };
+    eventually("both tools hear the clock", || async {
+        server.clock.put(&clock).await.unwrap();
+        (!heard.lock().unwrap().is_empty() && !unheld.lock().unwrap().is_empty()).then_some(())
+    })
+    .await;
+    assert_eq!(heard.lock().unwrap()[0], clock, "read under the catalog");
+    let off = &unheld.lock().unwrap()[0];
+    assert_eq!(
+        off.at,
+        clock.at - epoch * 1000,
+        "read from 0: off by the epoch"
+    );
+    assert_eq!(off.at_ms, clock.at_ms - epoch * 1000);
+}

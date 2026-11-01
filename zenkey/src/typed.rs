@@ -26,6 +26,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 use zenkey_model::authoring::Encoding as WireEncoding;
+use zenkey_model::catalog::EPOCH_WITHOUT_CATALOG;
 use zenkey_model::contract::{Body, Data, Operation, Replies as RepliesKind, Resource};
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, data_key};
 use zenkey_model::schema::TypeId;
@@ -90,12 +91,14 @@ fn decode_sample<C: Codec>(
     sample: &Sample,
     contract: Option<WireEncoding>,
     tag: Option<zenkey_model::wire::Tag>,
+    epoch: i64,
 ) -> std::result::Result<C::Value, String> {
     let enc = sample.encoding().to_string();
-    C::decode_record(
+    C::decode_record_in(
         &sample.payload().to_bytes(),
         wire_of(Some(&enc), contract),
         tag,
+        epoch,
     )
 }
 
@@ -130,6 +133,8 @@ pub struct Writer<C, A = Nothing> {
     inner: crate::writer::Writer,
     wire: Option<WireEncoding>,
     attachment_wire: Option<WireEncoding>,
+    /// Its service's deployment epoch (core §7.6, §8.6).
+    epoch: i64,
     _codec: PhantomData<fn() -> (C, A)>,
 }
 
@@ -139,6 +144,7 @@ impl<C: Codec, A: Codec> Writer<C, A> {
         let d = check_data::<C, A>(r)?;
         tag_check::<C>(inner.tag(), r)?;
         Ok(Self {
+            epoch: inner.deployment_epoch(),
             inner,
             wire: d.encoding,
             attachment_wire: d.attachment_encoding,
@@ -176,7 +182,7 @@ impl<C: Codec, A: Codec> Writer<C, A> {
     /// Puts a value. It is encoded before the future starts, so the value
     /// need not outlive the call.
     pub fn put(&self, value: &C::Value) -> impl Future<Output = Result<()>> + Send + use<'_, C, A> {
-        let bytes = C::encode(value, self.wire).map_err(Error::Payload);
+        let bytes = C::encode_in(value, self.wire, self.epoch).map_err(Error::Payload);
         async move { self.inner.put(bytes?).await }
     }
 
@@ -186,7 +192,7 @@ impl<C: Codec, A: Codec> Writer<C, A> {
         value: &C::Value,
         attachment: &A::Value,
     ) -> impl Future<Output = Result<()>> + Send + use<'_, C, A> {
-        let bytes = C::encode(value, self.wire)
+        let bytes = C::encode_in(value, self.wire, self.epoch)
             .and_then(|v| Ok((v, A::encode(attachment, self.attachment_wire)?)))
             .map_err(Error::Payload);
         async move {
@@ -206,6 +212,8 @@ impl<C: Codec, A: Codec> Writer<C, A> {
 pub struct StateWriter<C> {
     inner: crate::state::StateWriter,
     wire: Option<WireEncoding>,
+    /// Its service's deployment epoch (core §7.6, §8.6).
+    epoch: i64,
     _codec: PhantomData<fn() -> C>,
 }
 
@@ -215,6 +223,7 @@ impl<C: Codec> StateWriter<C> {
         let d = check_data::<C, Nothing>(r)?;
         tag_check::<C>(inner.tag(), r)?;
         Ok(Self {
+            epoch: inner.deployment_epoch(),
             inner,
             wire: d.encoding,
             _codec: PhantomData,
@@ -254,7 +263,7 @@ impl<C: Codec> StateWriter<C> {
         &self,
         value: &C::Value,
     ) -> impl Future<Output = Result<Stamped>> + Send + use<'_, C> {
-        let bytes = C::encode(value, self.wire).map_err(Error::Payload);
+        let bytes = C::encode_in(value, self.wire, self.epoch).map_err(Error::Payload);
         async move { self.inner.put(bytes?).await }
     }
 
@@ -274,6 +283,8 @@ impl<C: Codec> StateWriter<C> {
 pub struct EventWriter<C> {
     inner: crate::writer::EventWriter,
     wire: Option<WireEncoding>,
+    /// Its service's deployment epoch (core §7.6, §8.6).
+    epoch: i64,
     _codec: PhantomData<fn() -> C>,
 }
 
@@ -283,6 +294,7 @@ impl<C: Codec> EventWriter<C> {
         let d = check_data::<C, Nothing>(r)?;
         tag_check::<C>(inner.tag(), r)?;
         Ok(Self {
+            epoch: inner.deployment_epoch(),
             inner,
             wire: d.encoding,
             _codec: PhantomData,
@@ -315,7 +327,7 @@ impl<C: Codec> EventWriter<C> {
         &self,
         value: &C::Value,
     ) -> impl Future<Output = Result<String>> + Send + use<'_, C> {
-        let bytes = C::encode(value, self.wire).map_err(Error::Payload);
+        let bytes = C::encode_in(value, self.wire, self.epoch).map_err(Error::Payload);
         async move { self.inner.put(bytes?).await }
     }
 
@@ -325,7 +337,7 @@ impl<C: Codec> EventWriter<C> {
         value: &C::Value,
         at: SystemTime,
     ) -> impl Future<Output = Result<String>> + Send + use<'_, C> {
-        let bytes = C::encode(value, self.wire).map_err(Error::Payload);
+        let bytes = C::encode_in(value, self.wire, self.epoch).map_err(Error::Payload);
         async move { self.inner.put_at(bytes?, at).await }
     }
 
@@ -356,9 +368,9 @@ pub struct Received<T> {
     pub inband: Option<zenkey_model::wire::Stamp>,
 }
 
-fn received<C: Codec>(d: Delivery, wire: Option<WireEncoding>) -> Received<C::Value> {
+fn received<C: Codec>(d: Delivery, wire: Option<WireEncoding>, epoch: i64) -> Received<C::Value> {
     Received {
-        value: decode_sample::<C>(&d.sample, wire, d.tag),
+        value: decode_sample::<C>(&d.sample, wire, d.tag, epoch),
         provider: d.provider,
         resource: d.resource,
         values: d.values,
@@ -387,9 +399,10 @@ where
     F: Fn(Received<C::Value>) + Send + Sync + 'static,
 {
     let wire = consumer_data::<C>(consumer, resource)?;
+    let epoch = consumer.deployment_epoch();
     consumer
         .subscribe(resource, move |d: Delivery| {
-            callback(received::<C>(d, wire))
+            callback(received::<C>(d, wire, epoch))
         })
         .await
 }
@@ -406,7 +419,7 @@ pub async fn replay<C: Codec>(
         .replay(resource, retention, timeout)
         .await?
         .into_iter()
-        .map(|d| received::<C>(d, wire))
+        .map(|d| received::<C>(d, wire, consumer.deployment_epoch()))
         .collect())
 }
 
@@ -530,7 +543,12 @@ pub async fn get_answer<C: Codec>(
             .into_iter()
             .map(|c| match c {
                 crate::state::Current::Value { key, sample } => Current::Value {
-                    value: decode_sample::<C>(&sample, wire, tags.get(&key).copied()),
+                    value: decode_sample::<C>(
+                        &sample,
+                        wire,
+                        tags.get(&key).copied(),
+                        consumer.deployment_epoch(),
+                    ),
                     key,
                     sample,
                 },
@@ -612,9 +630,14 @@ pub async fn last_known<C: Codec>(
         // A packed record by the tag its envelope carried (core §7.6).
         let tag = l.tag;
         LastKnown {
-            value: l
-                .value
-                .map(|b| C::decode_record(&b, wire_of(enc.as_deref(), wire), tag)),
+            value: l.value.map(|b| {
+                C::decode_record_in(
+                    &b,
+                    wire_of(enc.as_deref(), wire),
+                    tag,
+                    consumer.deployment_epoch(),
+                )
+            }),
             origin: l.origin,
             timestamp: l.timestamp,
             inband: l.inband,
@@ -631,7 +654,7 @@ fn op_check<Req: Codec, Resp: Codec, Sum: Codec>(op: &Operation, at: &str) -> Re
 }
 
 fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>) -> Result<C::Value> {
-    decode_sample::<C>(&a.sample, wire, None).map_err(|e| {
+    decode_sample::<C>(&a.sample, wire, None, EPOCH_WITHOUT_CATALOG).map_err(|e| {
         Error::Payload(format!(
             "the reply on {} does not decode as its declared type: {e}",
             a.key()

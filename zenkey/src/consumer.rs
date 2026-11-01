@@ -288,6 +288,9 @@ pub struct Consumer {
     /// How long a re-read of a diverged collection waits for its replies
     /// (`freshness.v2` §2.5; core §8.1: timeouts are the caller's).
     reread_timeout: Duration,
+    /// The deployment epoch its typed reads count packed `time` fields
+    /// from, in seconds (core §7.6, §8.6): its service's catalog's, else 0.
+    epoch: i64,
 }
 
 /// How long a re-read waits unless [`Consumer::with_reread_timeout`] says
@@ -401,6 +404,7 @@ impl Consumer {
             declaring: None,
             refused: None,
             reread_timeout: REREAD_TIMEOUT,
+            epoch: zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
         })
     }
 
@@ -411,6 +415,29 @@ impl Consumer {
     pub fn with_reread_timeout(mut self, timeout: Duration) -> Self {
         self.reread_timeout = timeout;
         self
+    }
+
+    /// Reads packed records' `time` fields under `epoch`, the deployment
+    /// epoch in seconds (core §7.6, §8.6). A service's consumer reads under
+    /// its catalog's ([`crate::ServiceBuilder::catalog`]), the deployment's
+    /// word for every provider it binds.
+    #[must_use]
+    pub fn with_deployment_epoch(mut self, epoch: i64) -> Self {
+        self.epoch = epoch;
+        self
+    }
+
+    /// Reads under `catalog`'s epoch ([`Consumer::with_deployment_epoch`]): a tool's,
+    /// given the deployment's catalog.
+    #[must_use]
+    pub fn with_catalog(self, catalog: &zenkey_model::catalog::Catalog) -> Self {
+        self.with_deployment_epoch(catalog.epoch())
+    }
+
+    /// The deployment epoch its typed reads count `time` fields from.
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.epoch
     }
 
     /// A consumer for a tool, which has no service of its own: `contract`

@@ -17,11 +17,12 @@ use std::marker::PhantomData;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use zenkey_model::authoring::Encoding as WireEncoding;
+use zenkey_model::catalog::EPOCH_WITHOUT_CATALOG;
 use zenkey_model::envelope::Detail;
 use zenkey_model::schema::TypeId;
 use zenkey_model::wire::Tag;
 
-use crate::packed::{DEFAULT_EPOCH, PackedRecord};
+use crate::packed::PackedRecord;
 
 /// What kind of contract type a codec carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +74,29 @@ pub trait Codec: Send + Sync + 'static {
     ) -> Result<Self::Value, String> {
         let _ = tag;
         Self::decode(bytes, wire)
+    }
+    /// Encodes a value whose writer counts `time` fields from `epoch`, the
+    /// deployment epoch in seconds (core §7.6, §8.6): only a packed type's
+    /// record holds one, and every other codec encodes as
+    /// [`Codec::encode`] does.
+    fn encode_in(
+        value: &Self::Value,
+        wire: Option<WireEncoding>,
+        epoch: i64,
+    ) -> Result<Vec<u8>, String> {
+        let _ = epoch;
+        Self::encode(value, wire)
+    }
+    /// [`Codec::decode_record`], its `time` fields counted from `epoch`
+    /// (core §7.6, §8.6).
+    fn decode_record_in(
+        bytes: &[u8],
+        wire: Option<WireEncoding>,
+        tag: Option<Tag>,
+        epoch: i64,
+    ) -> Result<Self::Value, String> {
+        let _ = epoch;
+        Self::decode_record(bytes, wire, tag)
     }
     /// Whether a value of this codec is one of type `ty`, the contract's:
     /// the kinds match ([`CodecKind::carries`]), and for a packed type its
@@ -128,38 +152,61 @@ impl<T: Serialize + DeserializeOwned + Send + 'static> Codec for Json<T> {
 
 /// A generated packed type (core §7.6, [`crate::packed`]): its record, the
 /// layout's bits and pad, which the writer seals in §7.5's envelope with
-/// the type's tag in CH. Its `time` fields are read and written under
-/// [`DEFAULT_EPOCH`] until a catalog carries the deployment's (#980).
+/// the type's tag in CH. Its `time` fields count from the deployment epoch
+/// its writer or reader is given ([`Codec::encode_in`],
+/// [`Codec::decode_record_in`]): the catalog's, where its service holds
+/// one ([`crate::ServiceBuilder::catalog`]), else 0, the Unix epoch (core
+/// §8.6). [`Codec::encode`] and [`Codec::decode`] read them under 0.
 pub struct Packed<T>(PhantomData<fn() -> T>);
 
-impl<T: PackedRecord> Codec for Packed<T> {
-    type Value = T;
-    const KIND: CodecKind = CodecKind::Packed;
-    fn encode(value: &T, _: Option<WireEncoding>) -> Result<Vec<u8>, String> {
-        value
-            .encode(Some(DEFAULT_EPOCH))
-            .map(|r| r.bytes)
-            .map_err(|r| format!("packed:{}: {r}", T::NAME))
-    }
-    /// A record read under the type's own tag, which checks no tag CH
-    /// carried. A packed type travels only in an envelope (E044), and every
-    /// typed read of one (a subscription, S4's GET, an archive's
-    /// last-known) decodes by [`Codec::decode_record`] with the tag the
-    /// envelope carried; this is for bytes a caller already admitted by it
-    /// (`zenkey::inband::admit`).
-    fn decode(bytes: &[u8], _: Option<WireEncoding>) -> Result<T, String> {
-        T::decode(T::TAG, bytes, Some(DEFAULT_EPOCH))
-            .map_err(|r| format!("packed:{}: {r}", T::NAME))
-    }
-    fn decode_record(bytes: &[u8], _: Option<WireEncoding>, tag: Option<Tag>) -> Result<T, String> {
+impl<T: PackedRecord> Packed<T> {
+    fn record(tag: Option<Tag>, bytes: &[u8], epoch: i64) -> Result<T, String> {
         let Some(tag) = tag else {
             return Err(format!(
                 "packed:{}: a packed record travels in an envelope, and this one came in none",
                 T::NAME
             ));
         };
-        T::decode(tag.get(), bytes, Some(DEFAULT_EPOCH))
+        T::decode(tag.get(), bytes, Some(epoch)).map_err(|r| format!("packed:{}: {r}", T::NAME))
+    }
+}
+
+impl<T: PackedRecord> Codec for Packed<T> {
+    type Value = T;
+    const KIND: CodecKind = CodecKind::Packed;
+    fn encode(value: &T, wire: Option<WireEncoding>) -> Result<Vec<u8>, String> {
+        Self::encode_in(value, wire, EPOCH_WITHOUT_CATALOG)
+    }
+    /// A record read under the type's own tag, which checks no tag CH
+    /// carried. A packed type travels only in an envelope (E044), and every
+    /// typed read of one (a subscription, S4's GET, an archive's
+    /// last-known) decodes by [`Codec::decode_record_in`] with the tag the
+    /// envelope carried; this is for bytes a caller already admitted by it
+    /// (`zenkey::inband::admit`).
+    fn decode(bytes: &[u8], _: Option<WireEncoding>) -> Result<T, String> {
+        T::decode(T::TAG, bytes, Some(EPOCH_WITHOUT_CATALOG))
             .map_err(|r| format!("packed:{}: {r}", T::NAME))
+    }
+    fn decode_record(
+        bytes: &[u8],
+        wire: Option<WireEncoding>,
+        tag: Option<Tag>,
+    ) -> Result<T, String> {
+        Self::decode_record_in(bytes, wire, tag, EPOCH_WITHOUT_CATALOG)
+    }
+    fn encode_in(value: &T, _: Option<WireEncoding>, epoch: i64) -> Result<Vec<u8>, String> {
+        value
+            .encode(Some(epoch))
+            .map(|r| r.bytes)
+            .map_err(|r| format!("packed:{}: {r}", T::NAME))
+    }
+    fn decode_record_in(
+        bytes: &[u8],
+        _: Option<WireEncoding>,
+        tag: Option<Tag>,
+        epoch: i64,
+    ) -> Result<T, String> {
+        Self::record(tag, bytes, epoch)
     }
     fn carries(ty: Option<&TypeId>) -> bool {
         matches!(ty, Some(TypeId::Packed { name, .. }) if name == T::NAME)

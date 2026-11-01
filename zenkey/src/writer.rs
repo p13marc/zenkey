@@ -179,13 +179,17 @@ pub(crate) struct PackedType {
     name: String,
     tag: Tag,
     layout: Arc<Layout>,
+    /// The deployment epoch its `time` fields count from, in seconds: the
+    /// service's catalog's, else 0 (core §7.6, §8.6).
+    epoch: i64,
 }
 
 impl PackedType {
-    /// `r`'s packed type, read from `contract`'s artifact; `None` for a
-    /// type of another kind. A packed type whose layout does not read, or
-    /// whose tag is not CH's four bits, is refused, [`Error::Contract`].
-    pub(crate) fn of(contract: &Contract, r: &Resource) -> Result<Option<Self>> {
+    /// `r`'s packed type, read from `contract`'s artifact, its `time`
+    /// fields counted from `epoch`; `None` for a type of another kind. A
+    /// packed type whose layout does not read, or whose tag is not CH's
+    /// four bits, is refused, [`Error::Contract`].
+    pub(crate) fn of(contract: &Contract, r: &Resource, epoch: i64) -> Result<Option<Self>> {
         let d = data(r)?;
         let TypeId::Packed { name, .. } = &d.type_ else {
             return Ok(None);
@@ -201,11 +205,16 @@ impl PackedType {
             name: name.clone(),
             tag,
             layout: Arc::new(layout),
+            epoch,
         }))
     }
 
     pub(crate) fn tag(&self) -> Tag {
         self.tag
+    }
+
+    pub(crate) fn epoch(&self) -> i64 {
+        self.epoch
     }
 
     /// Its layout's admission of a record (core §7.6): refused,
@@ -431,6 +440,16 @@ impl Writer {
     #[must_use]
     pub fn tag(&self) -> Tag {
         self.packed.as_ref().map_or(Tag::NONE, PackedType::tag)
+    }
+
+    /// The deployment epoch its packed records' `time` fields count from,
+    /// in seconds: its service's catalog's, else 0 (core §7.6, §8.6).
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.packed.as_ref().map_or(
+            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+            PackedType::epoch,
+        )
     }
 
     /// Admits a record before anything is minted or published: a packed
@@ -813,6 +832,16 @@ impl EventWriter {
     #[must_use]
     pub fn tag(&self) -> Tag {
         self.packed.as_ref().map_or(Tag::NONE, PackedType::tag)
+    }
+
+    /// The deployment epoch its packed records' `time` fields count from,
+    /// in seconds: its service's catalog's, else 0 (core §7.6, §8.6).
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.packed.as_ref().map_or(
+            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+            PackedType::epoch,
+        )
     }
 
     /// The record's `Encoding`, as the contract's type says (§7.2). Every

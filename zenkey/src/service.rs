@@ -69,6 +69,7 @@ use crate::qos;
 use crate::state::{ClockGuard, DEFAULT_WINDOW, Minter, StateWriter, Store};
 use crate::telemetry::{Epochs, Meter, Metric};
 use crate::writer::{EventWriter, Writer};
+use zenkey_model::catalog::{Catalog, EPOCH_WITHOUT_CATALOG};
 
 /// One implemented interface, and what this instance does with it.
 #[derive(Debug, Clone)]
@@ -97,11 +98,13 @@ pub(crate) struct ImplState {
 impl ImplState {
     /// The packed type every writer of `r` seals and admits its records by
     /// (core §7.6), when `r`'s type is one.
+    /// Its `time` fields count from `epoch`, the service's catalog's.
     fn packed(
         &self,
         r: &zenkey_model::contract::Resource,
+        epoch: i64,
     ) -> Result<Option<crate::writer::PackedType>> {
-        crate::writer::PackedType::of(self.imp.contract(), r)
+        crate::writer::PackedType::of(self.imp.contract(), r, epoch)
     }
 
     /// The budget every writer of `r` keeps (§2.7).
@@ -190,6 +193,9 @@ pub struct ServiceBuilder {
     /// interface the consumer holds (§2.3), which [`ServiceBuilder::start`]
     /// reads the declaration over.
     arbitrated: BTreeMap<String, Arc<zenkey_model::contract::Contract>>,
+    /// The deployment catalog it was given (core §8.6), once
+    /// [`ServiceBuilder::catalog`] gave it one.
+    catalog: Option<Arc<Catalog>>,
 }
 
 /// Why a profile's owner the runtime implements is refused on a governed
@@ -311,7 +317,43 @@ impl ServiceBuilder {
             arbitrated: BTreeMap::new(),
             refused: Vec::new(),
             redundancy: None,
+            catalog: None,
         }
+    }
+
+    /// Gives the service the deployment catalog it writes under (core
+    /// §8.6): its descriptor states the catalog's id (§3.3), and its packed
+    /// records' `time` fields count from the catalog's epoch, where they
+    /// count from 0 without one (§7.6). Its consumers read under the same
+    /// epoch, the deployment's word. Refused once a resource is exposed,
+    /// since a writer counts its times from the epoch it was declared
+    /// under, and refused when it was given one already.
+    pub fn catalog(&mut self, catalog: Catalog) -> Result<&mut Self> {
+        if let Some(held) = &self.catalog {
+            return Err(Error::Contract(format!(
+                "the service was given catalog {} already: a service writes under one (core §8.6)",
+                held.id()
+            )));
+        }
+        if self.impls.iter().any(|s| !s.exposed.is_empty()) {
+            return Err(Error::Contract(format!(
+                "catalog {}: given after a resource was exposed, whose writers count their \
+                 `time` fields from the epoch they were declared under: give the catalog first \
+                 (core §8.6)",
+                catalog.id()
+            )));
+        }
+        self.catalog = Some(Arc::new(catalog));
+        Ok(self)
+    }
+
+    /// The deployment epoch its `time` fields count from, in seconds: its
+    /// catalog's, else 0 (core §7.6, §8.6).
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.catalog
+            .as_ref()
+            .map_or(EPOCH_WITHOUT_CATALOG, |c| c.epoch())
     }
 
     /// Takes part in `redundancy.v1`'s election for every governed
@@ -676,7 +718,7 @@ impl ServiceBuilder {
                 "{iface} {resource:?} is not state"
             )));
         }
-        let packed = s.packed(&r)?;
+        let packed = s.packed(&r, self.deployment_epoch())?;
         self.expose(iface, resource)?;
         self.state_ifaces.insert(iface.clone());
         let gate = self.gate_of(iface);
@@ -1005,7 +1047,7 @@ impl ServiceBuilder {
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
         let meter = s.meter(&r, values, &self.epochs);
-        let packed = s.packed(&r)?;
+        let packed = s.packed(&r, self.deployment_epoch())?;
         let gate = s.gate.clone();
         self.expose(iface, resource)?;
         Ok(Writer::declare_gated(
@@ -1033,7 +1075,7 @@ impl ServiceBuilder {
         let s = find(&self.impls, iface)?;
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
-        let packed = s.packed(&r)?;
+        let packed = s.packed(&r, self.deployment_epoch())?;
         let gate = s.gate.clone();
         self.expose(iface, resource)?;
         Ok(
@@ -1157,6 +1199,7 @@ impl ServiceBuilder {
                 host: self.host.clone(),
                 instance: self.instance.clone(),
                 run,
+                catalog: self.catalog.as_ref().map(|c| c.id()),
                 impls: self.impls.clone(),
                 roles: self.roles.clone(),
                 config: self.config.clone(),
@@ -1197,6 +1240,7 @@ impl ServiceBuilder {
             minter: self.minter,
             store: self.store,
             closed: self.closed,
+            catalog: self.catalog,
         };
         // 1. (continued) The state queryables, with the other resources.
         for iface in &self.state_ifaces {
@@ -1469,6 +1513,8 @@ pub struct Service {
     /// Set by [`Service::close`], dropped with the service: either stops
     /// its state writers' refreshers (`freshness.v1` §2.4).
     closed: tokio::sync::watch::Sender<bool>,
+    /// The deployment catalog it writes under (core §8.6).
+    catalog: Option<Arc<Catalog>>,
 }
 
 impl Service {
@@ -1476,6 +1522,22 @@ impl Service {
     #[must_use]
     pub fn address(&self) -> &Addr {
         &self.addr
+    }
+
+    /// The deployment catalog it writes under (core §8.6), when its builder
+    /// was given one ([`ServiceBuilder::catalog`]).
+    #[must_use]
+    pub fn catalog(&self) -> Option<&Catalog> {
+        self.catalog.as_deref()
+    }
+
+    /// The deployment epoch its `time` fields count from, in seconds: its
+    /// catalog's, else 0 (core §7.6, §8.6).
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.catalog
+            .as_ref()
+            .map_or(EPOCH_WITHOUT_CATALOG, |c| c.epoch())
     }
 
     /// How its system was minted, for a minted address (`hostid.v1`); `None`
@@ -1532,7 +1594,7 @@ impl Service {
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
-        let packed = s.packed(&r)?;
+        let packed = s.packed(&r, self.deployment_epoch())?;
         Ok(Writer::declare_gated(
             &self.session,
             &self.minter,
@@ -1567,7 +1629,7 @@ impl Service {
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
-        let packed = s.packed(&r)?;
+        let packed = s.packed(&r, self.deployment_epoch())?;
         let w = Writer::declare_gated(
             &self.session,
             &self.minter,
@@ -1686,7 +1748,7 @@ impl Service {
             EventWriter::new(&self.session, &self.minter, key.to_string(), &r, values)?
                 .bounded(s.budget(&r))
                 .gated(s.gate.clone())
-                .packed(s.packed(&r)?),
+                .packed(s.packed(&r, self.deployment_epoch())?),
         )
     }
 
@@ -1743,7 +1805,9 @@ impl Service {
         )?
         // timing.v1 §2.6: ε, the binding's.
         .with_clock_bound(b.clock_bound_ms.map(std::time::Duration::from_millis))
-        .with_declaring(declaring))
+        .with_declaring(declaring)
+        // Core §8.6: the deployment's epoch, its catalog's.
+        .with_deployment_epoch(self.deployment_epoch()))
     }
 
     fn exposed(&self, iface: &IfaceId, resource: &str) -> Result<zenkey_model::contract::Resource> {
@@ -2230,6 +2294,8 @@ struct Inputs {
     instance: InstanceId,
     /// The run the instance writes under (§3.3, §4.3).
     run: zenkey_model::wire::Run,
+    /// The catalog it writes under, stated as `catalog` (§3.3, §8.6).
+    catalog: Option<zenkey_model::catalog::CatalogId>,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
     config: ServiceConfig,
@@ -2266,6 +2332,7 @@ impl Served {
             host: i.host.as_deref(),
             zid: &zid,
             run,
+            catalog: i.catalog,
         };
         let d = descriptor::build(&id, instance, &i.impls, &i.roles, &i.config);
         descriptor::encode_checked(&d, &i.impls)

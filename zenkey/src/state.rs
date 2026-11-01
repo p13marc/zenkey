@@ -1326,6 +1326,13 @@ impl StateWriter {
         self.writer.tag()
     }
 
+    /// The deployment epoch its packed records' `time` fields count from,
+    /// in seconds (core §7.6, §8.6).
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.writer.deployment_epoch()
+    }
+
     /// Re-puts the member's current value now, unchanged, under a fresh
     /// stamp: a confirmation out of turn (`alarms.v1` §2.9's re-mint). It
     /// takes the value under the member's lock, so it never puts an older

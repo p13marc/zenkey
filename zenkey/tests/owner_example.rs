@@ -2593,3 +2593,61 @@ async fn the_owner_example_sends_freshness_v2_heartbeats() {
     );
     o.stop().await;
 }
+
+/// Core §3.3, §8.6 (#980 C1c): an owner given the deployment catalog
+/// (`--catalog`, here zenoh-modem's) states its id in its descriptor, and
+/// one given none leaves the member out.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_states_its_catalog() {
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let contract = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/interop.v1.toml");
+    let file =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/zenoh-modem/catalog.json");
+    let catalog =
+        zenkey::model::catalog::Catalog::parse_bytes(&std::fs::read(&file).unwrap()).unwrap();
+    let (contract, file) = (contract.display().to_string(), file.display().to_string());
+    for (given, stated) in [(true, Some(catalog.id())), (false, None)] {
+        let mut args = vec!["--connect", ep.as_str()];
+        if given {
+            args.extend(["--catalog", file.as_str()]);
+        }
+        args.extend(["ex/owner", contract.as_str()]);
+        let running = spawn_owner(&args);
+        assert_eq!(line(&running.lines).await, format!("connected {ep}"));
+        let ready = line(&running.lines).await;
+        let instance = ready
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap_or_else(|e| panic!("{ready}: {e}"));
+        // The descriptor queryable may reach the tool's router a moment
+        // after the ready line.
+        let addr: zenkey::model::grammar::Addr = "ex/owner".parse().unwrap();
+        let d = common::eventually_some("the descriptor", || async {
+            presence::descriptor(&tool, &addr, &instance, T)
+                .await
+                .ok()?
+                .into_descriptor()
+                .ok()
+        })
+        .await;
+        assert_eq!(d.stated_catalog(), stated, "given a catalog: {given}");
+        assert_eq!(
+            d.catalog.is_some(),
+            given,
+            "the member left out without one"
+        );
+        running.stop().await;
+    }
+
+    // A catalog that does not read stops the owner, naming the refusal.
+    let bad = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(bad.path(), br#"{"format":"zk2-catalog/1"}"#).unwrap();
+    let bad = bad.path().display().to_string();
+    let running = spawn_owner(&["--connect", &ep, "--catalog", &bad, "ex/owner", &contract]);
+    assert_eq!(line(&running.lines).await, format!("connected {ep}"));
+    let e = running.task.await.unwrap().unwrap_err();
+    assert!(e.contains("refused [member]"), "{e}");
+}
