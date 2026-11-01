@@ -3511,8 +3511,77 @@ def family_readings(root: Path) -> list[Result]:
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
-        + _round95_readings(root) + _round96_readings(root)
+        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round96_k1_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.83 (#609, round 96's extension; #981 K1): its entry; the
+    sentences F-451 to F-454 quote, as they read; and zk2py's readings of
+    what they leave open, through :mod:`zk2py.frame`, :mod:`zk2py.compat`
+    and the contract linter. No session is opened."""
+    from . import compat, frame, packed
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    core, tim = flat("core.md"), flat("profiles/timing/v1.md")
+    log = (spec / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.83's entry, frames defined",
+         [any(line.startswith("## 0.83 ") and "frames defined" in line for line in log)], [True]),
+    ]
+    # F-451: a field renamed that carries a deadband.
+    doc = {"types": {"R": {"fields": [{"name": "level", "type": "int", "minimum": 0, "maximum": 1000}]}}}
+    ren = {"types": {"R": {"fields": [{"name": "depth", "type": "int", "minimum": 0, "maximum": 1000}]}}}
+    a_ = frame.Layout(packed.lint(doc).types["R"], frame.declaration(
+        {"deadband": {"level": {"delta": "4", "max_records": 5}}}))
+    b_ = frame.Layout(packed.lint(ren).types["R"], frame.declaration(
+        {"deadband": {"depth": {"delta": "4", "max_records": 5}}}))
+    v = compat.Verdict()
+    compat._frame_rules(v, {"frame": a_.decl.canonical()}, {"frame": b_.decl.canonical()})
+    out.append(("F-451: §9.8's deadband row and its tag sentence, §7.7's names left out, §9.5's deadband by name; "
+                "zk2py's reading: a renamed field's deadband is deadband_changed, its tag unmoved",
+                missing(core, "| A deadband added, removed or changed | breaking: what an omitted field holds moves, "
+                              "either way | `deadband_changed` |",
+                        "Each breaking change above, and each of the layout, moves the frame's tag (§7.7).",
+                        "Names are left out, so a field renamed keeps the tag.",
+                        "`deadband` is an object by field name of `{\"delta\", \"max_records\"}`")
+                + [a_.tag == b_.tag, v.cls], [True, "breaking"]))
+    # F-452: E050 reads a timing value alone; timing.v1 judges an invalid declaration's none.
+    text = """[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["timing.v1"]
+[schemas]
+packed = ["schemas/packed/frames.json"]
+[resources."frames/s"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000 }
+annotations = { "timing.deadline_ms" = 20000, "timing.period_ms" = "x" }
+"""
+    c = load_contract(spec / "conformance" / "contracts" / "zk2py-f452.toml", text=text)
+    out.append(("F-452: E050 reads each timing value alone, timing.v1 §2.2 judges none of an invalid declaration; "
+                "zk2py's reading: a valid deadline below the span beside an invalid period is E050",
+                missing(core, "It reads a `timing.*` value as `timing.v1` §2.2 does, and one that does not read "
+                              "gives none.")
+                + missing(tim, "A reader MUST NOT judge a period, a deadline or a lifespan of a resource whose "
+                               "declaration is invalid")
+                + [c.codes], [["E050"]]))
+    out.append(("F-453: timing.v1 §2.2 says no core lint reads an annotation's value; core E050 reads timing.*",
+                missing(tim, "The core has no code for it: W105 is about keys, and no core lint reads an annotation's "
+                             "value.")
+                + missing(core, "| E050 | timing a frame resource cannot keep (`timing.v1` §2.3)"), []))
+    out.append(("F-454: §7.7's owner and reader rules cite scenarios/frames.md, which spec/ does not hold",
+                missing(core, "`[Sc: frames.md §1]`", "`[Sc: frames.md §4]`", "`[Sc: frames.md §2, §5, §6]`")
+                + [(spec / "scenarios" / "frames.md").exists()], [False]))
+    return out
 
 
 def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:

@@ -5376,6 +5376,62 @@ class. It now follows `freshness.v2` (owner, consumer and tool) and
 Round 96 found F-442 to F-450, nine, none a blocker. See "At core 0.82
 and freshness.v2 0.1" in `SPEC-FINDINGS.md`.
 
+### Extended to core 0.83: frames, K1's static rules (round 96)
+
+Main moved to baa15f11 before round 96 went up. **Core 0.83** (#981 K1)
+defines frames: §7.7, form 5 in §7.5 with `key_kind`, §4.3's seq per
+record, authoring draft 4's `frame` with E046 to E050 and cascade 8,
+§9.5's `frame` member and §9.8's rows. With it come `timing.v1` 0.9 §2.3
+and `arbitration.v1` 0.6's `framed` check. The branch was rebased on it,
+cleanly. zk2py diffed every keyword sentence of `core.md` between 0.82
+and 0.83. None is gone, the nineteen new ones are §7.7's, and §7.5's list
+gains `key_kind`. **No rule changed beyond what the changelogs state.**
+
+**Its walk of `RULES.md` at 0.83:**
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 70 | 53 | 3 | 14 |
+| consumer | 20 | 15 | 0 | 5 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 60 | 54 | 2 | 4 |
+| static, in every class | 61 | 59 | 0 | 2 |
+
+- **224 rows walked of `RULES.md`'s 223, none without a verdict.** A row
+  under two classes is walked in each.
+- **§7.7's seven static rules are met** by `frame`.
+- **Its six owner rules are n/a**, and two of its three reader rules: K2
+  and K3 bring the readers and the owners. zk2py's owner refuses a
+  contract with a frame resource before it declares anything, and every
+  packed reading counts a frame undecodable, `no_reading`. The third
+  reader rule, never an unknown or absent field as a value, is met:
+  no zk2py reader shows a frame's field.
+
+**What it changed in zk2py:**
+- **`zk2c`**: form 5 defined on a put, refused as a delete's attachment;
+  `key_kind` for a frame on a key whose kind token is not `stream`, read
+  from the key alone; `reads`, `carries.json`'s.
+- **`frame`** (§7.7), on `packed`'s fields: the declaration and its
+  defaults, the frame form and its tag, the count's and the offset's
+  widths, the body written (`records`, `unknown`, `missing`, §7.6's
+  `value` and `range`, `order`) and read (`tag`, then `length`, `code` and
+  `order` as the fields are read, `length` and `pad`), every value written
+  back.
+- **The linter**: `frame` a resource's own, E046 to E050 in cascade 8's
+  order, and `frame` in the canonical form of a frame resource alone;
+  `compat`: `frame_toggled`, `frame_changed`, `deadband_changed` and
+  `keyframe_changed` (F-451).
+- **`arbitration`**: check 6 counts no frame resource, check 9 `framed`.
+- **The runner:** a `frame` family, 120 cases; the envelope's form 5 and
+  `reads`, 141; `contracts` 136, `compat` 134, `arbitration` 124.
+  **`readings`: 827. `just py-conformance`: 4786 of 4786.**
+
+**Not run:** frames on a bus. No owner writes one at 0.83, and
+`scenarios/frames.md`, which §7.7 cites, does not exist yet (F-454).
+
+The extension found F-451 to F-454, four, none a blocker. See "At core
+0.83" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -5514,6 +5570,8 @@ impl/python/
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     heartbeat.py      §7.5      the heartbeat: the tag, the collections, the body written and read, the digest
                                 (round 96)
+    frame.py          §7.7      frames: the declaration, the frame form and its tag, the body written and read
+                                over packed's fields (round 96, core 0.83)
     freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96)
     freshness_v2_scenarios.py freshness.v2 scenarios-v2.md §1–§7 in three pairings: zk2py's owner and readers, the
                                 Rust owner with zk2py's, zk2py's owner with zenctl watch and get state (round 96)

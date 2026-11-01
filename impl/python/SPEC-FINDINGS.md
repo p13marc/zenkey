@@ -23978,3 +23978,128 @@ them: they stay open. F-436 was not re-run this round.
   each, and every pairing of scenarios-v2.md §1–§7 passes under it.
 - **Open:** F-436 (not re-run), F-437 to F-441, and F-442 to F-450.
   F-365 stays open as #965's.
+
+## At core 0.83 (#981 K1)
+
+Round 96 was extended to core 0.83 (main baa15f11, #981 K1, frames
+defined), read cold: its changelog entry first, then core §7.7 whole,
+§7.5's form 5 and `key_kind`, §4.3's per-record seq, §9.1's `frame`,
+§9.2's E046 to E050 and cascade 8, §9.5's `frame` member, §9.8's frame
+rows and §12's static list, with `timing.v1` 0.9 §2.3 and
+`arbitration.v1` 0.6 §2.2. Its evidence: `frame/`'s two files, form 5 in
+`envelope/vectors.json`, `carries.json`'s `reads`, the contract fixtures
+`e000-frame-defaults`, `e023-frame-unresolved`, `e046` to `e050` and
+`ok-frame`, `compat/frame/`'s fourteen cases, and `declarations.json`'s
+four new cases. K1 states only static rules zk2py can check. The owner's
+and the reader's rules over a key's frames are K2's and K3's, and zk2py
+neither writes nor reads a frame on a bus.
+
+**The rules changed.** zk2py diffed every keyword sentence of `core.md`
+between 1d1ce925 (0.82) and baa15f11 (0.83). None is gone: §7.5's refusal
+list gains `key_kind`, and its write-back sentence gains `carries.json` as
+evidence. The nineteen new ones are §7.7's owner, reader and static rules,
+which the entry lists. `observer.md` is unchanged. `timing.v1` 0.9 and
+`arbitration.v1` 0.6 change what their entries state. **No rule changed
+beyond what the changelogs state.**
+
+### F-451 · ambiguity · §9.8: a deadband on a renamed field
+
+> §9.8, "Frames": "| A deadband added, removed or changed | breaking: what
+> an omitted field holds moves, either way | `deadband_changed` |" and
+> "Each breaking change above, and each of the layout, moves the frame's
+> tag (§7.7)."
+>
+> §7.7, the frame's tag: "Names are left out, so a field renamed keeps the
+> tag." §9.5: "`deadband` is an object by field name of `{"delta",
+> "max_records"}`".
+
+- **The ambiguity.** Rename a field that carries a deadband. The frame
+  form lists deadbands by position, so its tag stays. The canonical form
+  keys them by name, so its `deadband` member changes.
+  - Read by the canonical form, the deadband is "changed": breaking,
+    though §9.8 says every breaking change above moves the tag, and this
+    one does not.
+  - Read by the frame form, nothing about the deadband moved. Only the
+    packed rules' rename applies, which is review.
+  `compat/frame/record-field-renamed` renames a field with no deadband, so
+  it does not decide.
+- **What zk2py does:** it compares the canonical `frame` members, so the
+  renamed field's deadband is `deadband_changed`, breaking. Its readings
+  show the two tags equal.
+- **Fix:** say which. "A deadband added, removed or changed, its field's
+  name aside" makes the rename review. Otherwise drop the tag sentence's
+  "each" for this row.
+- **Changes:** a classification rule.
+
+### F-452 · ambiguity · E050: a timing value read alone
+
+> §9.2, cascade 8: "E050 waits for the values it reads: none of them
+> E048's. It reads a `timing.*` value as `timing.v1` §2.2 does, and one
+> that does not read gives none."
+>
+> `timing.v1` §2.2: "A reader MUST NOT judge a period, a deadline or a
+> lifespan of a resource whose declaration is invalid".
+
+- **The ambiguity.** In `timing.v1` §2.2, one value that does not read
+  makes the whole declaration invalid, and no deadline is judged. E050
+  reads each value alone. A valid `timing.deadline_ms` below the span,
+  beside a `timing.period_ms` of `"x"`, is then E050, though `timing.v1`
+  judges no deadline of that resource and its tracker never runs.
+  "As `timing.v1` §2.2 does" can be read either way: each value by §2.2's
+  rule for one value, or the declaration as §2.2 reads it.
+- **What zk2py does:** each value alone. Its readings show that contract
+  refused, E050.
+- **Fix:** "a `timing.*` value that does not read, or any of a
+  declaration `timing.v1` §2.2 reads invalid, gives none". Or keep the
+  per-value reading, and say so.
+- **Changes:** which contracts load.
+
+### F-453 · contradiction · `timing.v1` §2.2 (0.9): "no core lint reads an annotation's value"
+
+> `timing.v1` 0.9 §2.2: "A contract linter SHOULD warn of one. The core
+> has no code for it: W105 is about keys, and no core lint reads an
+> annotation's value."
+>
+> Core 0.83's E050: "timing a frame resource cannot keep (`timing.v1`
+> §2.3): a `timing.deadline_ms` below its span; …; a `timing.lifespan_ms`".
+>
+> `arbitration.v1` 0.6's entry: "Its last sentence said no core lint
+> reads an annotation's value. Core E050 now reads `timing.*` on a frame
+> resource, so it says no core lint reads `arbitration.policy`."
+
+- **The contradiction.** E050 reads `timing.deadline_ms`,
+  `timing.period_ms` and `timing.lifespan_ms`, the very values §2.2
+  speaks of. `arbitration.v1` 0.6 mended its own copy of the sentence.
+  `timing.v1` 0.9, the text E050 cites, kept it.
+- **What zk2py does:** its linter is E050 as core states it.
+- **Fix:** "The core has no code for an invalid value: W105 is about keys,
+  and E050 reads a value only on a frame resource (core §7.7)."
+- **Changes:** a sentence of `timing.v1` §2.2.
+
+### F-454 · gap · §7.7: evidence that does not exist
+
+> Core §7.7: "An owner MUST give a frame the seq of its record 0 … `[Sc:
+> frames.md §1]`", "… `[Sc: frames.md §4]`", "… `[Sc: frames.md §2, §5,
+> §6]`", eight citations in all, and twelve in `RULES.md`.
+>
+> `frame/README.md`: "Their evidence is the scenarios' `frames.md` and a
+> reader's fixture, which come with the readers and the owners."
+
+- **The gap.** `spec/scenarios/` holds no `frames.md`. Every one of
+  §7.7's owner and reader MUSTs cites it as its evidence, and
+  `RULES.md`'s index carries the citations. A runner cannot run any of
+  them, and an index reader cannot follow them.
+- **What zk2py does:** its walk gives those rows n/a. Its owner refuses a
+  contract with a frame resource, and every packed reading counts a frame
+  undecodable (`no_reading`). Neither is the rule, and neither breaks it.
+- **Fix:** cite nothing until K2 and K3 bring the scenarios, or mark the
+  evidence "to come". Core §0's tags name what exists.
+- **Changes:** the evidence tags, and `RULES.md`.
+
+### Counts at core 0.83
+
+454 entries.
+- **New: F-451 to F-454,** four: two ambiguities (F-451, F-452), a
+  contradiction (F-453) and a gap (F-454). None is a blocker.
+- **Open:** F-436 (not re-run), F-437 to F-454. F-365 stays open as
+  #965's.
