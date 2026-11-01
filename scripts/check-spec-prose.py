@@ -10,7 +10,8 @@ recorded baseline, so the figures only go down. #935's targets are a mean of
 `docs/guide/`; a text that has not reached them is held at its baseline.
 
 What it reads: every `.md` file under `spec/`, and under `docs/guide/` once
-that exists. Per file it reports three figures.
+that exists, but `spec/CLAUDE.md`, which is guidance for an agent working
+in that directory and no text of the spec. Per file it reports three figures.
 
   * **mean**: words per sentence, over the sentences outside fenced code
     blocks, tables and headings.
@@ -300,7 +301,9 @@ def files():
         base = ROOT / tree
         if base.is_dir():
             for path in sorted(base.rglob("*.md")):
-                yield path.relative_to(ROOT).as_posix(), path
+                rel = path.relative_to(ROOT).as_posix()
+                if rel != "spec/CLAUDE.md":
+                    yield rel, path
 
 
 def main(argv) -> int:
