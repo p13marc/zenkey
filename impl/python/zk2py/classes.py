@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.73), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 93, and the mend after #926 part 5).
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.75), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 94, and the mend after #926 part 5).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
 verdict, with what shows it, and on standard error the counts and every
@@ -496,13 +496,37 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "descriptors family"),
     ("static", "core §5.1", "A request type SHOULD NOT repeat a template", MET,
      "contracts family (W102)"),
-    ("static", "core §7.1", "The name MUST be unique across the listed", MET,
+    # core 0.75 (#979 B1): §7.1's uniqueness split by kind, and a packed
+    # type's place.
+    ("static", "core §7.1", "The name MUST be unique across the listed JSON Schema files", MET,
      "contracts family (E024)"),
+    ("static", "core §7.1", "The name MUST be unique across the listed packed files", MET,
+     "schemas.SchemaSet._resolve_packed, E023 and E024 (contracts family: e024-packed-ambiguous, e023-packed) "
+     "(round 94, core 0.75)"),
+    ("static", "core §7.1", "A packed type MUST be the `type` of a stream, a state or an event", MET,
+     "contract's E044, per reference that resolved (contracts family: e044-packed-place, ok-packed) "
+     "(round 94, core 0.75)"),
     # core 0.72 (#976): §7.5's two static rules.
     ("static", "core §7.5", "An implementation MUST refuse an envelope for the first of these", MET,
      "zk2c.parse, in §7.5's order, each token (envelope family, vectors.json) (round 93, core 0.72)"),
     ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
      "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
+    # core 0.75 (#979 B1): §7.6's six static rules.
+    ("static", "core §7.6", "An implementation MUST compute a fixed-point code, and the value it reads back", MET,
+     "packed.encode and decode over fractions.Fraction, ties to even (packed family: the Ties and Sensor writes) "
+     "(round 94, core 0.75)"),
+    ("static", "core §7.6", "An implementation that writes a record MUST write the type's tag", MET,
+     "packed.seal: CH's tag bits the layout form's tag (packed family: every accepted write sealed and read back) "
+     "(round 94, core 0.75)"),
+    ("static", "core §7.6", "An implementation that writes a record MUST write the bits above", MET,
+     "packed.Record.write (packed family: every write's bits, pad and bytes) (round 94, core 0.75)"),
+    ("static", "core §7.6", "An implementation MUST NOT write a record for a value that has no code", MET,
+     "packed.encode's refusals, vectors.json's tokens (packed family) (round 94, core 0.75)"),
+    ("static", "core §7.6", "An implementation that reads a record of a packed type MUST refuse it", MET,
+     "packed.Record.read, in §7.6's order (packed family: every read, through the envelope too) "
+     "(round 94, core 0.75)"),
+    ("static", "core §7.6", "That rest MUST hold at least one bit", MET,
+     "packed.Record.read (packed family: Grow's 0b and 0bb0, Link reading LinkV2) (round 94, core 0.75)"),
     ("static", "core §9.1", "A contract MUST NOT need later TOML", MET,
      "contracts family (the five e000-toml11 cases)"),
     ("static", "core §9.2", "An implementation MUST report, for each fixture, exactly", MET,
@@ -513,6 +537,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "contracts family (E024)"),
     ("static", "core §9.4", "The id MUST be unique among the listed", MET,
      "contracts family (e024-identical)"),
+    # core 0.75 (#979 B1): a packed file's stem and id.
+    ("static", "core §9.4", "A stem MUST be unique among the listed packed files", MET,
+     "schemas.SchemaSet.load and _load_packed: E024 for a taken packed stem, and for an id a JSON Schema or packed "
+     "file took (contracts family; readings) (round 94, core 0.75)"),
     ("static", "core §9.4", "Otherwise it resolves as a path relative to", MET,
      "contracts family (E032: e032-ref-outside)"),
     ("static", "core §9.4", "The pointer MUST resolve", MET,

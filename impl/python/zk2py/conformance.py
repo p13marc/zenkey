@@ -140,6 +140,22 @@ def family_bundles(root: Path) -> list[Result]:
     built = bundle.build(seed)
     ok = built == (d / "valid.bundle.json").read_bytes()
     out.append(("build seed.toml == valid.bundle.json", ok, "" if ok else f"got {built[:200]!r}…"))
+    # bundles/ (0.75): "the packed ones from contracts/ok-packed.toml". The
+    # valid one is that build, byte for byte, and its tampered twin differs
+    # from it in one packed document alone.
+    import json as _json
+
+    okp = load_contract(root / "contracts" / "ok-packed.toml", spec_dir=root.parent)
+    built = bundle.build(okp)
+    ok = built == (d / "packed.bundle.json").read_bytes()
+    out.append(("build contracts/ok-packed.toml == packed.bundle.json", ok, "" if ok else f"got {built[:200]!r}…"))
+    good = _json.loads(built)
+    twin = _json.loads((d / "schema-hash-packed.bundle.json").read_bytes())
+    moved = sorted(k for k in good["schemas"] if good["schemas"][k] != twin["schemas"].get(k))
+    same = good["contract"] == twin["contract"] and set(good["schemas"]) == set(twin["schemas"])
+    out.append(("schema-hash-packed.bundle.json is packed.bundle.json with one packed document changed",
+                same and len(moved) == 1 and twin["schemas"][moved[0]]["kind"] == "packed",
+                f"contract equal: {same}, documents changed: {moved}"))
     return out
 
 
@@ -236,7 +252,10 @@ def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
     if family == "contract":
         contracts = [load_contract(d / f"{n}.toml", spec_dir=root.parent) for n in ("old", "new")]
     else:
+        # compat/README.md (0.75): a transitive revision is "a protobuf
+        # directory or a .json, packed where type is packed:".
         kind = case.split("/")[1] if family == "payload" else (
+            "packed" if want["type"].startswith("packed:") else
             "jsonschema" if (d / "v1.json").exists() else "protobuf")
         names = ["old", "new"] if family == "payload" else [*want["history"], want["candidate"]]
         if kind == "protobuf":
@@ -3430,8 +3449,229 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
-        + _mend_after_round93_readings(root)
+        + _mend_after_round93_readings(root) + _round94_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.75, the ``packed`` type kind (#609, round 94; #979 B1): each
+    sentence round 94's findings F-423 to F-432 quote, as it reads, and the
+    reading zk2py takes of each, shown through :mod:`zk2py.packed` and the
+    lints. No session is opened.
+
+    - **F-423**: a value outside an ``int``'s range is refused ``range``, even
+      where the field declares ``out_of_range``; the name is written as given.
+    - **F-424**: a fixed-point value's range is its codes': below the minimum
+      by half a resolution rounds to code 0, above the maximum at an even last
+      code too, and at an odd last code is refused.
+    - **F-425**: a writer's string reads as a JSON number's text, an exponent
+      included; ``+0.5``, ``.5`` and ``1.`` do not read.
+    - **F-426**: a JSON number reads by its double's shortest text.
+    - **F-427**: an integer is a JSON number with no fraction and no exponent.
+    - **F-428**: JSON Schema files load before packed ones.
+    - **F-429**: a type whose name is not a type name is not read further.
+    - **F-430**: a count is from 0 to 2^64 − 1.
+    - **F-431**, **F-432**: the glossary's static rules and RULES.md's §7.6
+      reading entry, as they read.
+    - **F-433**: observer §7.3's decoding MUST, beside §7.6's epoch.
+    - Beside them, not a finding: reserved names take the top codes in
+      §7.6's order whichever are declared, so ``error`` alone is all ones."""
+    import tempfile
+
+    from . import jcs, packed
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, rules, readme = flat("core.md"), flat("RULES.md"), flat("README.md")
+
+    def rec(*fields: Any) -> packed.Record:
+        return packed.record({"types": {"T": {"fields": list(fields)}}}, "T")
+
+    def write(r: packed.Record, value: Any, epoch: int | None = None) -> Any:
+        try:
+            return r.write_bits(value, epoch)
+        except packed.Refused as e:
+            return {"refused": e.token}
+
+    level = rec({"name": "v", "type": "int", "minimum": -40, "maximum": 85, "reserved": ["out_of_range"]})
+    temp = rec({"name": "v", "type": "fixed", "minimum": "-40", "maximum": "85", "resolution": "0.1"})
+    half = rec({"name": "v", "type": "fixed", "minimum": "0", "maximum": "10", "resolution": "0.5"})
+    odd = rec({"name": "v", "type": "fixed", "minimum": "0", "maximum": "9.5", "resolution": "0.5"})
+    count = rec({"name": "v", "type": "counter", "width": 7})
+    small = rec({"name": "v", "type": "int", "minimum": 0, "maximum": 5})
+    out: list[tuple[str, Any, Any]] = [
+        ("#979 B1: core 0.75 with its entry", entry("CHANGELOG.md", "0.75", "the `packed` type kind"), []),
+        ("F-423: §7.6's out_of_range sentence as it reads; zk2py refuses 86 where out_of_range is declared, and "
+         "writes the name as given (vectors.json's reading)",
+         [missing(core, "A writer whose value is outside the range writes `out_of_range`, where the field "
+                        "declares it."),
+          write(level, {"v": 86}), write(level, {"v": "out_of_range"})],
+         [[], {"refused": "range"}, "1111111"]),
+        ("F-424: §7.6's MUST NOT as it reads; a fixed-point value's range is its codes': -40.05 is code 0, 10.25 "
+         "code 20, 9.75 refused where 9.5 is the maximum",
+         [missing(core, "An implementation MUST NOT write a record for a value that has no code: a value outside "
+                        "its range, a name that is not declared, or an instant outside the epoch's 2^32 seconds."),
+          write(temp, {"v": "-40.05"}), write(half, {"v": "10.25"}), write(odd, {"v": "9.75"})],
+         [[], "00000000000", "10100", {"refused": "range"}]),
+        ("F-425: the writer's sentence as it reads; a writer's string reads as a JSON number's text: 5e-1 is 0.5, "
+         "and +0.5, .5, 1. and 43,5 are refused value; an unknown member and a field not given are vectors.json's",
+         [missing(core, "A writer takes the same object, a fixed-point value as a string or a number."),
+          [write(half, {"v": x}) for x in ("5e-1", "+0.5", ".5", "1.", "43,5")],
+          write(half, {"v": "1", "w": 1}), write(half, {})],
+         [[], ["00001", *[{"refused": "value"}] * 4], {"refused": "unknown"}, {"refused": "missing"}]),
+        ("F-426: a JSON number reads by its double's shortest text: 0.2500000000000000000000000001 as a number is "
+         "the tie 0.25, code 0; as a string, just above it, code 1",
+         [write(half, jcs.loads('{"v": 0.2500000000000000000000000001}')),
+          write(half, {"v": "0.2500000000000000000000000001"})],
+         ["00000", "00001"]),
+        ("F-427: §7.6's integers as they read; 5.0 for an int's maximum is E038, and a writer's 5.0 for an int is "
+         "refused value",
+         [missing(core, "| `int` | `minimum`, `maximum`: integers; `reserved` |"),
+          [c for c, _ in packed.lint({"types": {"T": {"fields": [
+              {"name": "v", "type": "int", "minimum": 0, "maximum": 5.0}]}}}).findings],
+          write(small, jcs.loads('{"v": 5.0}'))],
+         [[], ["E038"], {"refused": "value"}]),
+    ]
+
+    # F-428: one document listed under both kinds, JSON Schema first.
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "a.json").write_text('{"description": "x"}')
+        (Path(tmp) / "b.json").write_text('{"description": "x"}')
+        c = load_contract(Path(tmp) / "m.v1.toml", text='[interface]\nname = "m"\nmajor = 1\nminor = 0\n'
+                          '[schemas]\njsonschema = ["a.json"]\npacked = ["b.json"]\n'
+                          '[resources.s]\nkind = "state"\ntype = { raw = "text/plain" }\n')
+        codes = c.codes
+    out.append(("F-428: §9.4's stems and ids as they read; one document under both kinds is E024 alone, the "
+                "JSON Schema file loading first",
+                [missing(core, "A stem MUST be unique among the listed packed files, and an id among the listed "
+                               "JSON Schema and packed files (E024). A later file whose stem or id is taken is not "
+                               "loaded."), codes],
+                [[], ["E024"]]))
+    out.append(("F-429: cascade 7's sentence as it reads; a type named lower holding a bad field is E038 once",
+                [missing(core, "a type whose name is not a type name is E038, and defines no type."),
+                 [c for c, _ in packed.lint({"types": {"lower": {"fields": [{"type": "nope"}]}}}).findings]],
+                [[], ["E038"]]))
+    out.append(("F-430: §7.6's counter as it reads; a count of -1 or 2^64 is refused range",
+                [missing(core, "a count c is written as c modulo 2^`width`. A width below 64 is a declared loss."),
+                 write(count, {"v": -1}), write(count, {"v": 2 ** 64}), write(count, {"v": 2 ** 64 - 1})],
+                [[], {"refused": "range"}, {"refused": "range"}, "1111111"]))
+    out.append(("F-431: the glossary's Static rule names §1's, §7.5's and §9's, where §0, §12 and RULES.md name "
+                "§7.6's too",
+                [missing(readme, "Those are §1's, §7.5's, §9's, the contract rules",
+                         "A rule of any of those sections, §1, §7.5 and §9 included, that names a role is that "
+                         "role's"),
+                 missing(core, "They are the rules of §1, §7.5, §7.6 and §9 that name no role",
+                         "The static rules are those of §1, §7.5, §7.6 and §9"),
+                 missing(rules, "§1's, §7.5's, §7.6's and §9's.")],
+                [[], [], []]))
+    out.append(("F-432: RULES.md's §7.6 reading entry ends at \"in this order.\" with no list length, beside §7.5's "
+                "\"(6 items)\"",
+                missing(rules, "An implementation that reads a record of a packed type MUST refuse it for the first "
+                               "of these that applies, in this order. | `[F: packed/vectors.json]` |",
+                        "An implementation MUST refuse an envelope for the first of these that applies, in this "
+                        "order: (6 items)"), []))
+    obs = flat("observer.md")
+    out.append(("F-433: observer §7.3's decoding MUST names protobuf, jsonschema and raw, and §7.6's epoch is "
+                "carried nowhere",
+                [missing(obs, "Such a tool MUST decode each payload by its declared type: `protobuf` (proto2 and "
+                              "proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and a "
+                              "`raw` type by its media type only."),
+                 missing(core, "Writer and reader each hold it as an input. This version carries it nowhere.")],
+                [[], []]))
+    # -- review-bot on PR #1014 ------------------------------------------------
+    # 1. A field not optional after a marker: E045 keeps it out of a clean
+    #    type, and a Record built without the lints refuses it missing, before
+    #    any bit, though a marker written 0 would end the record before it.
+    after = {"types": {"T": {"fields": [{"name": "a", "type": "bool"}, "...", {"name": "b", "type": "bool"}]}}}
+    try:
+        packed.record(after, "T")
+        clean: Any = "clean"
+    except ValueError:
+        clean = "not clean"
+    bare = packed.Record("T", [packed.Field("a", "bool"), packed.MARKER, packed.Field("b", "bool")])
+    out.append(("review-bot on PR #1014, 1: a field not optional after a marker is E045 and no clean type; a "
+                "Record built without the lints refuses it missing, and an unknown member first",
+                [[c for c, _ in packed.lint(after).findings], clean, write(bare, {"a": True}),
+                 write(bare, {"a": True, "c": 1})],
+                [["E045"], "not clean", {"refused": "missing"}, {"refused": "unknown"}]))
+    # 2. A writer's decimal is read with work the declaration bounds.
+    import time as _time
+
+    huge = ["1e999999999999999999999999999", "9" * 200_000, 10 ** 5000, "-1e-99999999999999999999",
+            "0." + "0" * 200_000 + "1", "0.25" + "0" * 200_000 + "1", "0.25" + "0" * 200_000, "0e99999999999999"]
+    began = _time.monotonic()
+    got = [write(half, {"v": x}) for x in huge]
+    took = _time.monotonic() - began
+    out.append(("review-bot on PR #1014, 2: a writer's decimal past the declaration's reach is refused range "
+                "before any arithmetic, and one with digits past its ties is truncated with a sticky digit, "
+                "exactly: a tie followed by 200,000 zeros and a 1 rounds up, the same tie with only zeros to even",
+                [got, took < 2.0],
+                [[{"refused": "range"}, {"refused": "range"}, {"refused": "range"}, "00000", "00000", "00001",
+                  "00000", "00000"], True]))
+    # 3. JSON's true and false are no integer, though Python's bool is an int.
+    clock = rec({"name": "v", "type": "time"})
+    flag = rec({"name": "v", "type": "bool"})
+    out.append(("review-bot on PR #1014, 3: true given to an int, a counter, a time or a fixed field is refused "
+                "value, and 1 given to a bool",
+                [write(small, {"v": True}), write(count, {"v": True}), write(clock, {"v": False}, 0),
+                 write(half, {"v": True}), write(flag, {"v": 1}), jcs.is_json_integer(True)],
+                [{"refused": "value"}] * 5 + [False]))
+    # 4. E044 per reference: an attachment's type and an operation's four
+    #    types; a stream's, a state's, an event's and an explicit state's
+    #    type are not.
+    placed = load_contract(root / "contracts" / "m.v1.toml", text="""[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+packed = ["schemas/packed/sensor.json"]
+[resources.s]
+kind = "stream"
+type = "packed:Sensor"
+[resources.st]
+kind = "state"
+type = "packed:Status"
+attachment = "packed:Status"
+[resources.ex]
+kind = "state"
+explicit = true
+type = "packed:Status"
+[resources.ev]
+kind = "event"
+type = "packed:Sensor"
+attachment = "packed:Status"
+rate = "low"
+retention = "1d"
+[resources.op]
+kind = "operation"
+request = "packed:Sensor"
+response = "packed:Status"
+error = "packed:Status"
+summary = "packed:Status"
+replies = "many"
+""")
+    out.append(("review-bot on PR #1014, 4: E044 on a state's and an event's attachment and on an operation's "
+                "request, response, error and summary; none on a stream's, a state's, an explicit state's or an "
+                "event's type",
+                sorted(d.message.split(":")[0] + ":" + d.message.split(":")[1] for d in placed.diagnostics
+                       if d.code == "E044"),
+                ["ev: attachment", "op: error", "op: request", "op: response", "op: summary", "st: attachment"]))
+    # Not a finding: reserved names in §7.6's order, whichever are declared.
+    err = rec({"name": "v", "type": "int", "minimum": 0, "maximum": 2, "reserved": ["out_of_range", "error"]})
+    out.append(("§7.6 \"from all ones down, in that order\": error alone above out_of_range takes all ones",
+                [err.field("v").width, err.field("v").reserved_codes(), write(err, {"v": "error"})],
+                [3, {"error": 7, "out_of_range": 6}, "111"]))
+    return out
 
 
 def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -4259,8 +4499,9 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
          "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
          # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5 joins the
-         # static sections, and §4.2's merge is by the in-band stamp.
-         missing(core, "They are the rules of §1, §7.5 and §9 that name no role",
+         # static sections, and §4.2's merge is by the in-band stamp. Under
+         # core 0.75 (round 94, #979 B1): §7.6 joins them too.
+         missing(core, "They are the rules of §1, §7.5, §7.6 and §9 that name no role",
                  "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
                  "so that a caller or tool following the steps would report the contract unavailable",
                  "or at the timeout the caller or tool gave it (§8.1).",
@@ -4295,8 +4536,11 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "A verb the sentence leaves out is shown in brackets. They sit where it is left out.",
                  # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5
                  # among the static sections, and the glossary's Epoch over
-                 # runs, 0.73 having removed the new epoch's MUST.
-                 "A rule of those sections, §1, §7.5 and §9 included, that names a role is listed under that role.")
+                 # runs, 0.73 having removed the new epoch's MUST. Under core
+                 # 0.75 (round 94, #979 B1) the index lists §7.6's too and
+                 # names no section in the sentence.
+                 "§1's, §7.5's, §7.6's and §9's.",
+                 "A rule of those sections that names a role is listed under that role.")
          + missing(readme, "Each new instance writes under a new run",
                    "A rule of any of those sections, §1, §7.5 and §9 included, that names a role is that role's")
          + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
@@ -4847,7 +5091,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("A request type SHOULD NOT repeat a template parameter (W102).", "repeat a template parameter. `"),
         ("**The `Encoding` of the owner's reply** MUST say which:", "**The reply's `Encoding`**"),
         ("or a value in a protobuf one, MUST NOT be sent by an owner.", "protobuf one, MUST NOT be sent. "),
-        ("The name MUST be unique across the listed files (E024).", "unique across the listed files. |"),
+        # core 0.75 (round 94, #979 B1): the uniqueness split by kind
+        ("The name MUST be unique across the listed JSON Schema files (E024).", "unique across the listed files. |"),
         ("**A deployment's batch SHOULD take at most a third of the lease to cross the face.**",
          "**A batch SHOULD take"),
         ("**A deployment SHOULD deny `@stream` keys across the face**", "**`@stream` keys SHOULD be denied"),
@@ -6781,11 +7026,81 @@ def family_envelope(root: Path) -> list[Result]:
     return out
 
 
+def family_packed(root: Path) -> list[Result]:
+    """``packed/vectors.json`` (core §7.6, 0.75, #979 B1), through zk2py's own
+    lint, layout, writer and reader (:mod:`zk2py.packed`): the shared
+    ``schema`` lint-clean; each layout's form, sha256, tag, items and bit
+    bounds; each write's bits, pad and bytes, or the writer's refusal; each
+    read's JSON reading, or the first refusal in §7.6's order. Every
+    accepted write is sealed in §7.5's envelope under the type's tag, parsed
+    back, and read under the tag CH carries, to ``reads_as`` or its value."""
+    from . import packed, zk2c
+
+    data = _load_json(root / "packed" / "vectors.json")
+    unknown = set(data) - {"description", "schema", "layouts", "writes", "reads"}
+    out: list[Result] = [("packed: the file holds layouts, writes and reads", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    linted = packed.lint(data["schema"], "packed/vectors.json")
+    out.append(_check("packed: the shared schema is lint-clean (§9.2 E038 to E045)",
+                      [c for c, _ in linted.findings], []))
+    types = linted.types
+    for c in data["layouts"]:
+        r = types[c["type"]]
+        lo, hi = r.bit_bounds()
+        got = {"form": r.layout_form(), "sha256": r.layout_sha256(), "tag": r.tag, "items": r.item_layout(),
+               "min_bits": lo, "max_bits": hi}
+        out.append(_check(f"packed: layout {c['type']}", got, c["expect"]))
+    for i, c in enumerate(data["writes"]):
+        r, epoch = types[c["type"]], c.get("epoch")
+        name = f"packed: write {i} {c['type']}: {c['note']}"
+        try:
+            bits = r.write_bits(c["value"], epoch)
+            record = r.write(c["value"], epoch)
+            got: dict[str, Any] = {"hex": record.hex(), "bits": bits, "pad": -len(bits) % 8}
+        except packed.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(name, got, c["expect"]))
+        if "refused" in got:
+            continue
+        want = c.get("reads_as", c["value"])
+        sealed = packed.seal(r, c["value"], run=0x0102, seq=7, epoch=epoch)
+        env, back = packed.open_put(r, sealed, epoch)
+        out.append(_check(f"{name}: sealed under tag {r.tag} and read back",
+                          {"tag": env.tag, "ch": sealed[0], "value": back},
+                          {"tag": r.tag, "ch": r.tag, "value": want}))
+        under: list[Any] = []
+        for other in (t for t in range(16) if t != r.tag):
+            try:
+                r.read(other, record, epoch)
+                under.append("read")
+            except packed.Refused as e:
+                under.append(e.token)
+        out.append(_check(f"{name}: refused under each of the 15 other tags", under, ["tag"] * 15))
+    for i, c in enumerate(data["reads"]):
+        r = types[c["type"]]
+        try:
+            got = {"value": r.read(c["tag"], bytes.fromhex(c["hex"]), c.get("epoch"))}
+        except packed.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"packed: read {i} {c['type']} tag {c['tag']} {c['hex'] or '(empty)'}: {c['note']}",
+                          got, c["expect"]))
+        # The same record in an envelope whose CH carries the case's tag: the
+        # parser reports the tag, and the reader checks it (§7.5, §7.6).
+        payload = zk2c.write("mutation", 16, 1, 0, c["tag"], bytes.fromhex(c["hex"]))
+        try:
+            env, value = packed.open_put(r, payload, c.get("epoch"))
+            enveloped: dict[str, Any] = {"value": value}
+        except (packed.Refused, zk2c.Refused) as e:
+            enveloped = {"refused": e.token}
+        out.append(_check(f"packed: read {i} through the envelope", enveloped, c["expect"]))
+    return out
+
+
 #: Every entry of spec/conformance/ that a family reads. Appendix E lists
 #: the fixture formats; an entry no family reads fails ``layout``, so a new
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
-                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope"}
+                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -6818,6 +7133,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "budget": family_budget,
     "seed": family_seed,
     "envelope": family_envelope,
+    "packed": family_packed,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,

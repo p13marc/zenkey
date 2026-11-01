@@ -17,7 +17,7 @@ from typing import Any
 
 from . import jcs
 from .lexical import GATE_NAME, IDENT, is_interface_id, is_interface_name, parse_interface_id
-from .schemas import JSON, SchemaSet
+from .schemas import JSON, PACKED, SchemaSet
 from .shape import Checker, load_schema
 from .templates import REST, Template, TemplateError, overlap, parse_template
 
@@ -293,7 +293,8 @@ class _Loader:
 
         sch = doc.get("schemas", {})
         self.schemas = SchemaSet.load(self.c.path.parent, sch.get("jsonschema", []),
-                                      sch.get("protobuf", []), sch.get("proto_include"))
+                                      sch.get("protobuf", []), sch.get("proto_include"),
+                                      sch.get("packed", []))
         self.c.schemas = self.schemas
         for f in self.schemas.findings:
             self.diag(f.code, f.message)
@@ -483,6 +484,13 @@ class _Loader:
                     if mp is not None and mp not in tpl.single_chunk_params():
                         self.diag("E025", f"{text}: media_param {mp!r} is not a single-chunk parameter", text)
         self.c.types[text] = resolved
+        # §7.1 (0.75): "A packed type MUST be the type of a stream, a state or
+        # an event, never an explicit stream's (E044). It is never an
+        # attachment or an operation's type either." Per reference, on a
+        # reference that resolved.
+        for f, obj in resolved.items():
+            if obj["kind"] == PACKED and (f != "type" or kind == "operation" or token == "@stream"):
+                self.diag("E044", f"{text}: {f}: a packed type with no envelope to carry it", text)
 
         if kind == "operation":
             # E018 / E033 on resolved values (§9.3, 0.5).
