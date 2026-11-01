@@ -53,6 +53,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
+from . import zk2c
 
 REPO = Path(__file__).resolve().parents[3]
 DIR = REPO / "impl" / "python" / "interop" / "arbitration"
@@ -349,7 +350,7 @@ class Bus:
         self.stamped: list[tuple[int, str, str, str | None]] = []
 
         def data(sample: Any) -> None:
-            t, k, body = time.monotonic_ns(), str(sample.key_expr), sample.payload.to_bytes().decode()
+            t, k, body = time.monotonic_ns(), str(sample.key_expr), zk2c.payload_of(sample).decode()
             with self.lock:
                 self.seen.append((t, k, body))
                 if k.endswith("/stream/cmd"):

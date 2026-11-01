@@ -124,8 +124,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._plan refuses before anything is declared (presence_scenarios §2)"),
     ("owner", "core §3.3", "The owner's descriptor MUST NOT raise it", MET,
      "owner.Owner._plan refuses a stated bound outside 1 to the contract's (round 89; readings)"),
-    ("owner", "core §3.3", "An owner MUST state its run there, and MUST put its descriptor again", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner states no run"),
+    ("owner", "core §3.3", "An owner MUST state its run there, and MUST put its descriptor again", MET,
+     "owner.Owner._descriptor's run (run_hex), put again before the first write under a new run: _next_inband  "
+     "puts it first at the wrap, and a re-mint's first descriptor states its new run (state_pairings §1, §7  "
+     "step 3; descriptors family, D002) (round 93, core 0.73)"),
     ("owner", "core §3.3", "One member is used: an owner SHOULD state", MET,
      "owner.Owner._descriptor's meta.zid, unless a test turns it off (state_zid)"),
     ("owner", "core §3.3", "An owner SHOULD write `meta.zid` as zenoh writes", MET,
@@ -138,28 +140,39 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._put_descriptor and its queryable (presence_scenarios §2)"),
     # core 0.73 (#976): S1 and S2 carry the in-band stamp, and a Zenoh
     # timestamp only on §4.3's table.
-    ("owner", "core §4.2", "Owner: every state mutation, put and delete, MUST carry its in-band stamp", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner writes no envelope"),
-    ("owner", "core §4.2", "On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner stamps every mutation, the table's or not"),
-    ("owner", "core §4.2", "Owner: a GET reply MUST carry the in-band stamp", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner writes no envelope"),
-    ("owner", "core §4.2", "The owner's reply MUST also carry the mutation's Zenoh timestamp", NOT_MET,
-     "not yet (round 93, core 0.73)"),
+    ("owner", "core §4.2", "Owner: every state mutation, put and delete, MUST carry its in-band stamp", MET,
+     "owner.Owner.set_state and the re-puts write §7.5's mutation envelope, delete_state a delete envelope as  "
+     "its attachment (state_pairings §1, §2) (round 93, core 0.73)"),
+    ("owner", "core §4.2", "On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp", MET,
+     "owner.keeps_timestamp, §4.3's table read from the contract, and Owner.mint on each such mutation  "
+     "(state_pairings §1 expected 5) (round 93, core 0.73)"),
+    ("owner", "core §4.2", "Owner: a GET reply MUST carry the in-band stamp", MET,
+     "owner.Owner.answer_state: a reply as the bytes the mutation put, a reply_del with the delete's  "
+     "attachment (state_pairings §1 expected 2, §2) (round 93, core 0.73)"),
+    ("owner", "core §4.2", "The owner's reply MUST also carry the mutation's Zenoh timestamp", MET,
+     "owner.Owner.answer_state: the held Zenoh timestamp, where the mutation carried one (state_pairings §1  "
+     "expected 5) (round 93, core 0.73)"),
     ("owner", "core §4.2", "It MUST answer a selector over them with", MET,
      "owner.Owner.state_answer, reply_del within the window (state_scenarios §10)"),
-    ("owner", "core §4.2", "Owner: for a key it deleted within the", NOT_MET,
-     "not yet (round 93, core 0.73): a reply_del carries the deletion's stamps (S2), its envelope among them"),
+    ("owner", "core §4.2", "Owner: for a key it deleted within the", MET,
+     "owner.Owner.delete_state and its tombstone window, the reply_del with the deletion's stamps  "
+     "(state_pairings §2, §10) (round 93, core 0.73)"),
     # core 0.73 (#976) removed the HLC MUST, the catch-up's MUST NOT and the
     # new epoch's MUST, and added these four.
-    ("owner", "core §4.3", "An owner MUST write each put on a `stream`, `state`, `@state` or `events` key", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner writes no envelope"),
-    ("owner", "core §4.3", "An owner MUST NOT write under a run that it", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner has no run"),
-    ("owner", "core §4.3", "An owner MUST NOT let that seq wrap", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner has no seq"),
-    ("owner", "core §4.3", "An owner MUST NOT restart a stream key's seq within a run", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner has no seq"),
+    ("owner", "core §4.3", "An owner MUST write each put on a `stream`, `state`, `@state` or `events` key", MET,
+     "owner.enveloped: set_state, delete_state, the re-puts, publish on a stream key and occur on an event  "
+     "key, each under zenoh/bytes; an @stream sample keeps its wire (state_pairings §1, §13) (round 93, core  "
+     "0.73)"),
+    ("owner", "core §4.3", "An owner MUST NOT write under a run that it", MET,
+     "owner.Owner.take_run: the record's counter, durable before any write under it; else a 32-bit draw, drawn  "
+     "again while it equals a run this owner used (state_pairings §7 steps 1, 2); F-417 asks what a draw can  "
+     "promise of another instance's runs (round 93, core 0.73)"),
+    ("owner", "core §4.3", "An owner MUST NOT let that seq wrap", MET,
+     "owner.Owner._next_inband takes a new run before 16,777,216, its descriptor put first (state_pairings §7  "
+     "step 3) (round 93, core 0.73)"),
+    ("owner", "core §4.3", "An owner MUST NOT restart a stream key's seq within a run", MET,
+     "owner.Owner._next_stream_inband: each key's seq per run, kept across a step-down and takeover and a  "
+     "member's publisher declared again (remove_member) (state_pairings §13 step 3) (round 93, core 0.73)"),
     ("owner", "core §4.3", "An owner SHOULD NOT stamp beyond its router's", MET,
      "owner.Owner's heartbeat and clock guard (freshness_scenarios §2, health_scenarios §4)"),
     ("owner", "core §4.3", "The owner SHOULD detect drift against a reference", MET,
@@ -205,7 +218,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("owner", "core §6", "An owner SHOULD keep a re-mint's overlap below", MET,
      "owner.Owner.new_epoch undeclares the old at once (presence_scenarios §3)"),
     ("owner", "core §7.2", "An owner MUST set Zenoh's predefined `Encoding` for", MET,
-     "owner._value_encoding and every publisher's encoding"),
+     "owner._value_encoding and every publisher's encoding, for every sample but those §7.5's envelope  "
+     "carries, which go under zenoh/bytes (§4.3; state_pairings §1); an @stream sample, a reply value and a  "
+     "refusal keep their predefined Encoding"),
     ("owner", "core §7.2", "It MUST NOT add a schema suffix to", MET,
      "owner's encodings carry no suffix; envelope.PROTOBUF_ENCODING alone does"),
     ("owner", "core §7.4", "A generated `@stream` publisher SHOULD accept SHM buffers", NA,
@@ -222,10 +237,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._bring_up (presence_scenarios §1)"),
     ("owner", "core §8.2", "A state's value is not a declaration, so", MET,
      "owner.Owner._put_held before the tokens (presence_scenarios §1)"),
-    ("owner", "core §8.2", "An owner MUST NOT set a Zenoh timestamp on a put or a delete of a data key", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner stamps every put"),
-    ("owner", "core §8.2", "The owner's session SHOULD run with timestamping disabled", NOT_MET,
-     "not yet (round 93, core 0.73): zk2py's owner enables timestamping"),
+    ("owner", "core §8.2", "An owner MUST NOT set a Zenoh timestamp on a put or a delete of a data key", MET,
+     "owner.Owner: a Zenoh timestamp only on §4.3's table (_table), its session's timestamping off; a test  "
+     "rig's hlc=True or publish(timestamp=) excepted (state_pairings §1 expected 3); F-414 asks what an HLC's  "
+     "stamp is (round 93, core 0.73)"),
+    ("owner", "core §8.2", "The owner's session SHOULD run with timestamping disabled", MET,
+     "owner.Owner.open_session writes timestamping/enabled false, a router's too, but for a redundancy.v1  "
+     "candidate (redundancy.v1 §2.10) and a test rig's hlc=True (round 93, core 0.73)"),
     ("owner", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
      "owner.Owner, a complete queryable per bundle (live_interop's retrieval)"),
     ("owner", "core §12", "An owner's descriptor MUST fit one fragment (Appendix", NA,
@@ -251,14 +269,20 @@ WALK: list[tuple[str, str, str, str, str]] = [
     # core 0.69 split the merge's MUST into three sentences (F-401): the
     # second and the third are rows of their own under consumer.
     # core 0.73 (#976): by the in-band stamp, within one run by seq.
-    ("consumer", "core §4.2", "It MUST keep the newer by its in-band stamp", NOT_MET,
-     "not yet (round 93, core 0.73): seed.Merge orders by the Zenoh timestamp"),
-    ("consumer", "core §4.2", "Across two runs, a consumer MUST instead keep what", NOT_MET,
-     "not yet (round 93, core 0.73)"),
-    ("consumer", "core §4.3", "A consumer MUST order each state key's values by seq within one run", NOT_MET,
-     "not yet (round 93, core 0.73): seed.Merge orders by the Zenoh timestamp"),
-    ("consumer", "core §4.3", "A consumer MUST accept a value under a run other than its held value's", NOT_MET,
-     "not yet (round 93, core 0.73)"),
+    ("consumer", "core §4.2", "It MUST keep the newer by its in-band stamp", MET,
+     "seed.LateJoiner's seed.Merge, rule S7: seed.relation over each arrival's seed.Mark, its in-band stamp  "
+     "first (seed family, inband.json; state_pairings §7, §10) (round 93, core 0.73)"),
+    ("consumer", "core §4.2", "Across two runs, a consumer MUST instead keep what", MET,
+     "seed.relation: across two runs unordered, so a consumer keeps a value under another run, its seed's  "
+     "replies included (inband.json; state_pairings §7 steps 4, 5) (round 93, core 0.73)"),
+    ("consumer", "core §4.3", "A consumer MUST order each state key's values by seq within one run", MET,
+     "seed.LateJoiner, a consumer's: by seq within one run from the first value it receives, its seed's  "
+     "replies included (inband.json; state_pairings §7); desired.TargetRole keeps desired.v1 §2.6's stricter  "
+     "order, as §4.3's MAY lets a profile; owner.Owner.subscribe_role carries a stream alone in zk2py (round  "
+     "93, core 0.73)"),
+    ("consumer", "core §4.3", "A consumer MUST accept a value under a run other than its held value's", MET,
+     "seed.relation: another run, or one width against the other, unordered, so accepted (inband.json;  "
+     "state_pairings §7 steps 1 to 5, the owner zk2py's or the Rust owner example) (round 93, core 0.73)"),
     ("consumer", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "every zk2py service is an owner.Owner, which holds one (presence_scenarios §1)"),
     ("consumer", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
@@ -301,8 +325,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "seed.LateJoiner, a tool's: one per-key merge of both paths, bounded at seed.MAX_KEYS; the alarms, health and "
      "config readers merge their recordings and GETs through seed.merged (round 91)"),
     # core 0.73 (#976): the merge's second sentence, by the in-band stamp.
-    ("observer", "core §4.2", "It MUST keep the newer by its in-band stamp", NOT_MET,
-     "not yet (round 93, core 0.73): seed.Merge orders by the Zenoh timestamp"),
+    ("observer", "core §4.2", "It MUST keep the newer by its in-band stamp", MET,
+     "seed.LateJoiner, a tool's: seed.relation within one run by seq, plain or serial as the key's kind says,  "
+     "for as long as it follows; seed.merged for the alarms, health and config readers (inband.json;  "
+     "state_pairings §7, §10, §13) (round 93, core 0.73)"),
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
     ("observer", "core §5.2", "It MUST refuse", MET,
@@ -403,10 +429,15 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "whose contract is not in hand (F-406), but zk2py has no tool that holds a contract per key and decodes "
      "protobuf or a JSON Schema type field by field, so types.md §2 is not run"),
     # observer 0.14 (#976): the envelope first.
-    ("observer", "observer §7.3", "A tool that shows or judges a payload MUST read a sample on a zk2 data key", NOT_MET,
-     "not yet (round 93, observer 0.14): no zk2py reader reads an envelope"),
-    ("observer", "observer §7.3", "The tool MUST NOT decode or sniff a refused envelope's bytes", NOT_MET,
-     "not yet (round 93, observer 0.14)"),
+    ("observer", "observer §7.3", "A tool that shows or judges a payload MUST read a sample on a zk2 data key", MET,
+     "zk2c.carries and zk2c.read_sample, in every reader of a data sample: seed.LateJoiner, live.get_state,  "
+     "freshness.Subscriber (and so the alarms, health and config readers), echo_tool, timing_live,  "
+     "desired_live, arbitration_live, redundancy_live, telemetry_scenarios' reader, owner.Owner.subscribe_role  "
+     "(envelope family, carries.json) (round 93, observer 0.14)"),
+    ("observer", "observer §7.3", "The tool MUST NOT decode or sniff a refused envelope's bytes", MET,
+     "zk2c.Read: a refused envelope's record is None, its token named (Read.undecodable); echo_tool's row says  "
+     "undecodable and sniffs nothing; seed.LateJoiner counts it in undecodable and merges nothing (readings)  "
+     "(round 93, observer 0.14)"),
     ("observer", "observer §7.3", "A tool that shows a payload it cannot decode MUST", NOT_MET,
      "no zk2py tool shows a payload by its declared type: echo_tool sniffs each one, its type not held (0.12); the "
      "profiles' readers show no payload they cannot decode, an undecodable one being their judgement's own answer "
@@ -459,10 +490,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("static", "core §7.1", "The name MUST be unique across the listed", MET,
      "contracts family (E024)"),
     # core 0.72 (#976): §7.5's two static rules.
-    ("static", "core §7.5", "An implementation MUST refuse an envelope for the first of these", NOT_MET,
-     "not yet (round 93, core 0.72): zk2py parses no envelope"),
-    ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", NOT_MET,
-     "not yet (round 93, core 0.72)"),
+    ("static", "core §7.5", "An implementation MUST refuse an envelope for the first of these", MET,
+     "zk2c.parse, in §7.5's order, each token (envelope family, vectors.json) (round 93, core 0.72)"),
+    ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
+     "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
     ("static", "core §9.1", "A contract MUST NOT need later TOML", MET,
      "contracts family (the five e000-toml11 cases)"),
     ("static", "core §9.2", "An implementation MUST report, for each fixture, exactly", MET,
@@ -501,8 +532,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §2", "Unattributable silence is Unestablished, never Established(no)", MET,
      "live.o3_verdict, judgement (observer_scenarios; F-362)"),
     # observer 0.15 (#976): within one run by seq, across two runs the later arrival.
-    ("observer", "observer §4.1", "A tool keeps core §4.2's merge for as long as it follows", NOT_MET,
-     "not yet (round 93, observer 0.15): seed.Merge orders by the Zenoh timestamp"),
+    ("observer", "observer §4.1", "A tool keeps core §4.2's merge for as long as it follows", MET,
+     "seed.LateJoiner, a tool's: within one run by seq, plain or serial, the later arrival across two runs, a  "
+     "sample with no envelope by its Zenoh timestamp, after the seed as inside it (inband.json, merge.json;  "
+     "state_pairings §7, §13) (round 93, observer 0.15)"),
     ("observer", "observer §4.1", "A tool that bounds what it holds counts each time the bound forgets a key, and "
      "reports the count", MET,
      "seed.Merge and freshness.Subscriber, each bounded at seed.MAX_KEYS, the least recent key forgotten whole and "
@@ -535,10 +568,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §8.3", "A tool says whose clock a time, an age or a latency is on", MET,
      "timing_tool, live.attribute_stamp (readings; F-362)"),
     # observer 0.15 (#976): stated without a keyword.
-    ("observer", "observer §4.4", "What a tool checks is the Zenoh timestamps core §4.3's table keeps", NOT_MET,
-     "not yet (round 93, observer 0.15)"),
-    ("observer", "observer §8.3", "a tool shows it as a run and a seq, never as a time", NOT_MET,
-     "not yet (round 93, observer 0.15): no zk2py tool reads an in-band stamp"),
+    ("observer", "observer §4.4", "What a tool checks is the Zenoh timestamps core §4.3's table keeps", MET,
+     "live.s1_check(on_table=False) answers not asked outside the table, whatever the stamp; live_interop's  "
+     "0.16 run reads a table resource (round 93, observer 0.15)"),
+    ("observer", "observer §8.3", "a tool shows it as a run and a seq, never as a time", MET,
+     "zk2c.InBand's text and seed.Mark's, echo_tool's envelope {run, seq}: a run and a seq, never a time  "
+     "(round 93, observer 0.15)"),
 ]
 
 

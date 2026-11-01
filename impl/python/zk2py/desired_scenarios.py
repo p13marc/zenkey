@@ -39,6 +39,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import zk2c
 from .alarms_scenarios import Report, _wait
 
 REPO = Path(__file__).resolve().parents[3]
@@ -204,13 +205,13 @@ class Bus:
         ts = smp.timestamp
         with self.lock:
             self.got.append((time.monotonic(), str(smp.key_expr), "delete" if smp.kind == self.zenoh.SampleKind.DELETE
-                             else "put", smp.payload.to_bytes(), None if ts is None else str(ts), ts))
+                             else "put", zk2c.payload_of(smp), None if ts is None else str(ts), ts))
 
     def _s2(self, smp: Any) -> None:
         ts = smp.timestamp
         with self.lock:
             self.got2.append((time.monotonic(), str(smp.key_expr), "delete" if smp.kind == self.zenoh.SampleKind.DELETE
-                              else "put", smp.payload.to_bytes(), None if ts is None else str(ts)))
+                              else "put", zk2c.payload_of(smp), None if ts is None else str(ts)))
 
     def _token(self, smp: Any) -> None:
         with self.lock:

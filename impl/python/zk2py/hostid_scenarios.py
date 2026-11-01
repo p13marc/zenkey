@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import hostid
+from . import hostid, zk2c
 from .contract import load_contract
 
 REPO = Path(__file__).resolve().parents[3]
@@ -147,9 +147,9 @@ class Bus:
         self.tokens: list[tuple[str, str]] = []
         self._subs = [
             self.tool.declare_subscriber("zk2/**", zenoh.handlers.Callback(
-                lambda s: self.received.append((str(s.key_expr), s.payload.to_bytes())))),
+                lambda s: self.received.append((str(s.key_expr), zk2c.payload_of(s))))),
             self.tool.declare_subscriber("zk2/*/*/@zk/instance/*", zenoh.handlers.Callback(
-                lambda s: self.received.append((str(s.key_expr), s.payload.to_bytes())))),
+                lambda s: self.received.append((str(s.key_expr), zk2c.payload_of(s))))),
         ]
         # Observer §3.7 (0.37): the tool's token subscription on its watch
         # session, never beside its presence reads.

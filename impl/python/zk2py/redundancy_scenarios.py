@@ -51,6 +51,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import zk2c
 from .alarms_scenarios import Report, _wait
 
 REPO = Path(__file__).resolve().parents[3]
@@ -442,7 +443,7 @@ class Watcher:
         with self.lock:
             self.data.append((time.monotonic(), str(smp.key_expr),
                               "delete" if smp.kind == self.zenoh.SampleKind.DELETE else "put",
-                              smp.payload.to_bytes(), None if ts is None else str(ts)))
+                              zk2c.payload_of(smp), None if ts is None else str(ts)))
 
     def token_times(self, kind: str, prefix: str, after: float = 0.0) -> list[float]:
         with self.lock:

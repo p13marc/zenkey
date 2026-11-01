@@ -76,6 +76,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import zk2c
 from .alarms_scenarios import Report, _wait
 
 REPO = Path(__file__).resolve().parents[3]
@@ -554,7 +555,7 @@ def section1(report: Report) -> None:
 
         puts: list[bytes] = []
         sub, placed = live.watch_or_beside(tool, SELECTOR, zenoh.handlers.Callback(on_token), history=True)
-        dsub = tool.declare_subscriber(INSTANCES, zenoh.handlers.Callback(lambda s: puts.append(s.payload.to_bytes())))
+        dsub = tool.declare_subscriber(INSTANCES, zenoh.handlers.Callback(lambda s: puts.append(zk2c.payload_of(s))))
         time.sleep(0.2)
         h = Holder(ep, f"{system}/{svc}", contracts=[BRINGUP])
         owners.append(h)

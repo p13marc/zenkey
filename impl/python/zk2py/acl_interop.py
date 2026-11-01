@@ -32,6 +32,7 @@ import tempfile
 import threading
 import time
 from typing import Any
+from . import zk2c
 
 PASSWORD = "pw-{}"
 USERS = {"own-h1": "h1tc", "own-h2": "h2tc", "consumer": "dash", "caller": "ctl", "caller-blind": "blind",
@@ -115,7 +116,7 @@ class World:
 
         got = self.samples.setdefault(name, [])
         self._entities.append(self.sessions[pid].declare_subscriber(selector, zenoh.handlers.Callback(
-            lambda s: got.append((str(s.key_expr), s.payload.to_bytes())))))
+            lambda s: got.append((str(s.key_expr), zk2c.payload_of(s))))))
 
     def start_owners(self) -> None:
         from . import live
@@ -277,11 +278,16 @@ def _deny_full(report, repo, gen, workdir) -> None:
         stamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
         d = live.get_descriptor(w.sessions["tool"], h1.instance_key)
         hdoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
-        by_tool = live.s1_check(w.sessions["tool"], hdoc, stamp)
-        by_caller = live.s1_check(w.sessions["caller"], hdoc, stamp)
-        report.check(run, "S1 from a tool (observer §4.4, 0.16): the Tool, with the admin read, judges h1 (a client of R1) "
-                          "clean; the caller, without it, verifies no router and reports S1 unobservable (observer §4.4, 0.17)",
-                     by_tool[0] == "clean" and by_caller[0] == "unobservable", f"tool {by_tool}; caller {by_caller}")
+        # observer §4.4 (0.15, round 93): the check reads the table's Zenoh
+        # timestamps, and state/health is off core §4.3's table: not asked by
+        # either, whatever its admin read (live_interop's 0.16 run reads a
+        # table resource, where the admin read decides).
+        by_tool = live.s1_check(w.sessions["tool"], hdoc, stamp, on_table=False)
+        by_caller = live.s1_check(w.sessions["caller"], hdoc, stamp, on_table=False)
+        report.check(run, "S1 from a tool (observer §4.4, 0.15): state/health is off core §4.3's table, so neither the "
+                          "Tool nor the caller asks S1 of it, and no Zenoh timestamp is a finding there",
+                     by_tool[0] == "not_asked" and by_caller[0] == "not_asked" and st.replies
+                     and st.replies[0].inband is not None, f"tool {by_tool}; caller {by_caller}")
         # observer §7.2, O3 judged from outside (0.16, 0.17), under the grants: the
         # tool is told its grants by the deployment's §11.1 input
         # (acl.may_call), and reads presence for the owner.

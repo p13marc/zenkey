@@ -619,8 +619,13 @@ class Target:
         if "*" in key or "$" in key:
             return  # R6
         ts = sample.timestamp
+        from . import zk2c
+
+        read = zk2c.read_sample(sample)
+        if read.refused:
+            return  # observer §7.3 (0.14): undecodable, never a version
         self._receive(_sample(desired.OWNER, sample.kind == zenoh.SampleKind.DELETE,
-                              None if ts is None else str(ts), sample.payload.to_bytes()))
+                              None if ts is None else str(ts), read.record if read.record is not None else b""))
 
     def _receive(self, s: desired.Sample) -> None:
         with self.lock:

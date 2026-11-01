@@ -45,6 +45,27 @@ follows a subscription.
   an error reply, Appendix B) seeds possibly incompletely; an owner absent
   at the GET seeds nothing, which is silence; a seed is current state, never
   last-known.
+
+**Runs and seqs (core 0.73, observer 0.15, #976).** Since core 0.73 an
+owner's values are ordered by the in-band stamp its envelope carries
+(§4.3, §7.5): "It MUST keep the newer by its in-band stamp: within one run,
+by seq (§4.3). Across two runs, a consumer MUST instead keep what §4.3's
+consumer rule accepts." Every arrival is read envelope first
+(:func:`zk2py.zk2c.read_sample`, observer §7.3), and merged by its
+:class:`Mark`, its in-band stamp and its Zenoh timestamp
+(:func:`relation`, ``conformance/seed/inband.json``):
+- **within one run** by seq: plain for a state or event key, serial over 24
+  bits for a stream key (unordered at exactly 2^23);
+- **across two runs** unordered: "nothing orders two runs", so a tool keeps
+  the later arrival (observer §4.1) and a consumer accepts a value under a
+  run other than its held value's (§4.3's consumer rule);
+- **a sample with no envelope** is ordered among such samples by its Zenoh
+  timestamp, as above (``merge.json``), and beside an in-band stamp it is
+  unordered; one with neither stamp ranks below every stamped one;
+- **a refused envelope** is undecodable, its refusal named, and never
+  merged (``undecodable``): its bytes are never read as a payload.
+
+What every reader merges is the envelope's record, never its bytes.
 """
 
 from __future__ import annotations
@@ -55,6 +76,8 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Iterable
+
+from . import zk2c
 
 GET_TIMEOUT_S = 1.0
 
@@ -109,16 +132,125 @@ class Stamp:
         return f"{self.time}/{self.id}"
 
 
+@dataclass(frozen=True)
+class Mark:
+    """What orders one arrival (core §4.2, 0.73): its in-band stamp
+    (:class:`zk2py.zk2c.InBand`, from its envelope) and its Zenoh timestamp
+    (:class:`Stamp`), either or both None."""
+
+    inband: zk2c.InBand | None = None
+    zenoh: Stamp | None = None
+
+    @classmethod
+    def of(cls, x: Any) -> "Mark":
+        """A :class:`Mark` from a mark, a Zenoh :class:`Stamp`, an in-band
+        stamp, or None."""
+        if isinstance(x, Mark):
+            return x
+        if isinstance(x, zk2c.InBand):
+            return cls(x, None)
+        if x is None:
+            return cls()
+        return cls(None, x)
+
+    @property
+    def stamped(self) -> bool:
+        return self.inband is not None or self.zenoh is not None
+
+    def __str__(self) -> str:
+        """An in-band stamp shown as a run and a seq, never as a time
+        (observer §8.3, text 0.15)."""
+        if self.inband is not None:
+            return str(self.inband)
+        return "no stamp" if self.zenoh is None else f"zenoh {self.zenoh}"
+
+
+def serial(kind: str) -> bool:
+    """Core §4.3: a stream key's seqs compare by serial arithmetic over 24
+    bits; a state or event key's as integers."""
+    return kind in ("stream", "@stream")
+
+
+def kind_of(key: str) -> str:
+    """The kind token of a key as a session hears it, or ``""`` for a key
+    the grammar does not parse as a zk2 data key."""
+    p = zk2c.data_key(key)
+    return p.get("token", "") if p is not None and p.get("form") == "data" else ""
+
+
+def inband_order(a: zk2c.InBand, b: zk2c.InBand, kind: str) -> str:
+    """``less``, ``equal``, ``greater`` or ``unordered`` for ``a`` against
+    ``b`` (``inband.json``'s ``order``). Two runs, or one value at two
+    widths, are unordered (core §4.3: "Nothing orders two runs"). Within one
+    run, plain order, or serial order for a stream: "s′ is newer when
+    (s′ − s) mod 2^24 is from 1 to 2^23 − 1, and older when it is above
+    2^23. At exactly 2^23 they are unordered"."""
+    if not a.same_run(b):
+        return "unordered"
+    if not serial(kind):
+        return "less" if a.seq < b.seq else "greater" if a.seq > b.seq else "equal"
+    d = (b.seq - a.seq) % 2**24
+    if d == 0:
+        return "equal"
+    if d == 2**23:
+        return "unordered"
+    return "less" if d < 2**23 else "greater"
+
+
+def relation(a: Any, b: Any, kind: str = "state", consumer: bool = False) -> str:
+    """How arrival ``a`` stands to a held ``b`` (core §4.2, §4.3, 0.73;
+    observer §4.1, text 0.15): ``less``, ``equal``, ``greater`` or
+    ``unordered``. ``inband.json``: "An arrival with an in-band stamp is
+    ordered by it, whatever Zenoh timestamp it also carries. One with a
+    Zenoh timestamp alone is ordered among those as merge.json says for a
+    tool, and for a consumer by time within one id, a value under another
+    id accepted. An in-band stamp and a Zenoh timestamp alone are
+    unordered, either way round. … An arrival with neither stamp is kept on
+    a key that holds nothing or only such arrivals, and never over a
+    stamped one." """
+    a, b = Mark.of(a), Mark.of(b)
+    if a.inband is not None and b.inband is not None:
+        return inband_order(a.inband, b.inband, kind)
+    if a.inband is not None or b.inband is not None:
+        other = b if a.inband is not None else a
+        if other.zenoh is not None:
+            return "unordered"
+        return "greater" if a.inband is not None else "less"
+    if a.zenoh is not None and b.zenoh is not None:
+        if consumer and a.zenoh.id != b.zenoh.id:
+            return "unordered"
+        if consumer:
+            return "less" if a.zenoh.time < b.zenoh.time else "greater" if a.zenoh.time > b.zenoh.time else "equal"
+        return compare(a.zenoh, b.zenoh)
+    if a.zenoh is not None or b.zenoh is not None:
+        return "greater" if a.zenoh is not None else "less"
+    return "unordered"  # neither stamp: "no order but their arrival, so the later replaces the earlier"
+
+
+def replaces(a: Any, b: Any, kind: str = "state", consumer: bool = False) -> bool:
+    """Whether arrival ``a`` replaces a held ``b``: "A tool keeps a newer or
+    an unordered arrival, never an equal or an older one, and a consumer
+    accepts likewise" (``inband.json``)."""
+    return relation(a, b, kind, consumer) in ("greater", "unordered")
+
+
 @dataclass
 class Entry:
-    """A key's merged value: a put (``payload``) or a deletion, with the
-    stamp that decided it and the path that brought it."""
+    """A key's merged value: a put (``payload``, the envelope's record) or a
+    deletion, with the stamps that decided it and the path that brought
+    it. ``stamp`` is its Zenoh timestamp; ``inband`` its in-band stamp
+    (core §4.3, 0.73)."""
 
     deleted: bool
     payload: bytes
     encoding: str
     stamp: Stamp | None
     via: str            # "live" or "reply"
+    inband: zk2c.InBand | None = None
+
+    @property
+    def mark(self) -> Mark:
+        return Mark(self.inband, self.stamp)
 
 
 @dataclass
@@ -136,6 +268,11 @@ class Applied:
     #: follows, observer §4.1), or S7's consumer rule (a consumer's, from its
     #: first value on, its seed's replies included: core §4.3, 0.68)
     rule: str = "merge"
+    #: its in-band stamp (core §4.3, 0.73), or None
+    inband: zk2c.InBand | None = None
+    #: core §7.5's token where its envelope was refused (outcome
+    #: ``undecodable``): never merged, its bytes never read (observer §7.3)
+    refusal: str | None = None
 
 
 @dataclass
@@ -164,15 +301,17 @@ def compare(a: Stamp | None, b: Stamp | None) -> str:
     return "less" if ka < kb else "greater" if ka > kb else "equal"
 
 
-def kept(arrivals: list[tuple[Stamp | None, str]]) -> list[bool]:
-    """One key's arrivals, in arrival order, each (stamp or None, kind):
-    whether each replaces what the key holds (merge.json's ``cases``). The
-    kind never decides."""
-    held: Stamp | None = None
+def kept(arrivals: list[tuple[Any, str]], kind: str = "state", consumer: bool = False) -> list[bool]:
+    """One key's arrivals, in arrival order, each (its mark, a Zenoh
+    :class:`Stamp`, an in-band stamp or None; the sample's kind): whether
+    each replaces what the key holds, for a tool or, with ``consumer``, by
+    §4.3's consumer rule (``merge.json``'s and ``inband.json``'s ``cases``).
+    ``kind`` is the key's kind token; the sample's kind never decides."""
+    held: Any = None
     holding = False
     out = []
-    for stamp, _kind in arrivals:
-        k = (not holding) or newer(stamp, held)
+    for stamp, _sample in arrivals:
+        k = (not holding) or replaces(stamp, held, kind, consumer)
         out.append(k)
         if k:
             held, holding = stamp, True
@@ -228,26 +367,29 @@ def consumer_kept(arrivals: Iterable[Stamp | None]) -> list[bool]:
     return out
 
 
-def newest(arrivals: Iterable[Stamp | None]) -> int | None:
+def newest(arrivals: Iterable[Any], kind: str = "state") -> int | None:
     """The index of the arrival a tool's merge holds at the end, over one
     key's arrivals in arrival order (core §4.2; observer §4.1), or None for
     none. A reader that records what arrived and merges when it reads calls
-    this, so the merge is §4.2's: by time, then by id as ``Latest``
-    compares, an unstamped sample below every stamped one."""
+    this, so the merge is §4.2's: by the in-band stamp within one run, the
+    later arrival across two (0.73), and among samples with no envelope by
+    time, then by id as ``Latest`` compares, an unstamped sample below
+    every stamped one. Each arrival is its :class:`Mark`, its Zenoh
+    :class:`Stamp`, or None."""
     at = None
-    for i, k in enumerate(kept([(x, "put") for x in arrivals])):
+    for i, k in enumerate(kept([(x, "put") for x in arrivals], kind)):
         if k:
             at = i
     return at
 
 
-def merged(arrivals: Iterable[tuple[Any, ...]]) -> tuple[Any, ...] | None:
+def merged(arrivals: Iterable[tuple[Any, ...]], kind: str = "state") -> tuple[Any, ...] | None:
     """What a tool's merge holds at the end over one key's arrivals, in
-    arrival order, each a tuple whose first item is its :class:`Stamp` or
-    None (core §4.2; observer §4.1): the arrival :func:`newest` names, or
-    None for none."""
+    arrival order, each a tuple whose first item is its :class:`Mark`, its
+    :class:`Stamp` or None (core §4.2; observer §4.1): the arrival
+    :func:`newest` names, or None for none."""
     xs = list(arrivals)
-    at = newest([x[0] for x in xs])
+    at = newest([x[0] for x in xs], kind)
     return None if at is None else xs[at]
 
 
@@ -283,18 +425,17 @@ class Merge:
         self.last_forgotten: str | None = None
 
     def apply(self, key: str, entry: Entry) -> str:
-        """``kept``, ``same`` or ``dropped`` for one arrival."""
+        """``kept``, ``same`` or ``dropped`` for one arrival: by its in-band
+        stamp within one run, plain or serial as the key's kind says, a
+        run other than the held value's kept (a tool's later arrival, a
+        consumer's other run), and a sample with no envelope by its Zenoh
+        timestamp (core §4.2, §4.3, 0.73; observer §4.1, text 0.15)."""
         held = self.held.get(key)
-        if held is None:
-            replaces = True
-        elif self.rule == "S7":
-            replaces = follows(entry.stamp, held.stamp)
-        else:
-            replaces = newer(entry.stamp, held.stamp)
-        if replaces:
+        rel = "greater" if held is None else relation(entry.mark, held.mark, kind_of(key), self.rule == "S7")
+        if rel in ("greater", "unordered"):
             self.held[key] = entry
             outcome = "kept"
-        elif entry.stamp is not None and held.stamp is not None and entry.stamp.key() == held.stamp.key():
+        elif rel == "equal":
             outcome = "same"
         else:
             outcome = "dropped"
@@ -344,6 +485,9 @@ class LateJoiner:
         #: the per-key merge: S7's for a consumer, §4.2's for a tool
         self.merge = Merge("S7" if consumer else "merge", max_keys)
         self.applied: list[Applied] = []
+        #: arrivals whose envelope was refused, (key, via, token): undecodable
+        #: (observer §7.3, text 0.14), never merged
+        self.undecodable: list[tuple[str, str, str]] = []
         self.seed = Seed()
         self.sub: Any = None
         self._done = threading.Event()
@@ -397,37 +541,54 @@ class LateJoiner:
             self.seed.complete = not self.seed.errors
             return True
         if what == "sample":
-            self._merge_locked(str(arg.key_expr), "live", arg.kind == zenoh.SampleKind.DELETE,
-                               arg.payload.to_bytes(), str(arg.encoding), arg.timestamp)
+            self._sample_locked(arg, "live")
         elif what == "reply":
             if arg.ok is None:
                 self.seed.errors.append(f"{arg.err.encoding}: {arg.err.payload.to_bytes()!r}")
             else:
-                s = arg.ok
                 self.seed.replies += 1
-                self._merge_locked(str(s.key_expr), "reply", s.kind == zenoh.SampleKind.DELETE,
-                                   s.payload.to_bytes(), str(s.encoding), s.timestamp)
+                self._sample_locked(arg.ok, "reply")
         else:  # "merge": a session-free arrival, its fields given
             self._merge_locked(*arg)
         return False
 
-    def _merge_locked(self, key: str, via: str, deleted: bool, payload: bytes, encoding: str, ts: Any) -> None:
+    def _sample_locked(self, s: Any, via: str) -> None:
+        """A zenoh sample read envelope first (observer §7.3, 0.14): the
+        record merged by its in-band stamp; a refused envelope undecodable,
+        its refusal named, never merged."""
+        import zenoh
+
+        att = s.attachment
+        self._merge_locked(str(s.key_expr), via, s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(),
+                           str(s.encoding), s.timestamp, None if att is None else att.to_bytes())
+
+    def _merge_locked(self, key: str, via: str, deleted: bool, payload: bytes, encoding: str, ts: Any,
+                      attachment: bytes | None = None) -> None:
         if self.consumer and "*" in key:
             return  # R6
         stamp = Stamp.of(ts)
-        # A consumer by S7 from its first value on, its seed's replies
-        # included (core §4.3, 0.68); a tool by §4.2's merge for as long as
-        # it follows (observer §4.1, 0.10). Neither turns at the GET's end.
-        outcome = self.merge.apply(key, Entry(deleted, payload, encoding, stamp, via))
-        self.applied.append(Applied(key, via, deleted, stamp, outcome, self.merge.rule))
+        read = zk2c.read_delete(key, encoding, attachment) if deleted else zk2c.read_put(key, encoding, payload)
+        if read.refused:
+            # observer §7.3: "A refused envelope is undecodable, and the tool
+            # names the refusal"; a consumer is handed nothing of it.
+            self.undecodable.append((key, via, read.refusal))
+            self.applied.append(Applied(key, via, deleted, stamp, "undecodable", self.merge.rule, None,
+                                        read.refusal))
+            return
+        record = b"" if deleted else (read.record if read.record is not None else payload)
+        # A consumer by §4.3's consumer rule from its first value on, its
+        # seed's replies included; a tool by §4.2's merge for as long as it
+        # follows (observer §4.1). Neither turns at the GET's end.
+        outcome = self.merge.apply(key, Entry(deleted, record, encoding, stamp, via, read.stamp))
+        self.applied.append(Applied(key, via, deleted, stamp, outcome, self.merge.rule, read.stamp))
 
     # -- the two paths, and the GET's end ------------------------------------
 
     def _merge(self, key: str, via: str, deleted: bool, payload: bytes, encoding: str, ts: Any,
-               drain: bool = True) -> None:
+               drain: bool = True, attachment: bytes | None = None) -> None:
         """A session-free arrival: a sample (``via`` ``live``) or a reply,
-        its fields given."""
-        self._arrive(("merge", (key, via, deleted, payload, encoding, ts)), drain)
+        its fields given, read envelope first."""
+        self._arrive(("merge", (key, via, deleted, payload, encoding, ts, attachment)), drain)
 
     def _sample(self, sample: Any) -> None:
         self._arrive(("sample", sample))

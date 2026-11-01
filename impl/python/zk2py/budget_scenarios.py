@@ -36,6 +36,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from . import zk2c
 
 REPO = Path(__file__).resolve().parents[3]
 BUDGET = REPO / "impl" / "python" / "interop" / "budget" / "budget.v1.toml"
@@ -233,7 +234,7 @@ def section1(report: Report) -> None:
         last = [time.monotonic()]
 
         def on_sample(s: Any) -> None:
-            i = int.from_bytes(s.payload.to_bytes()[:4], "big")
+            i = int.from_bytes(zk2c.payload_of(s)[:4], "big")
             got.append(i)
             last[0] = time.monotonic()
             time.sleep(7.0 if stuck is not None and i == stuck else 0.002)
@@ -406,7 +407,7 @@ def section2(report: Report) -> None:
         lv = consumer.liveliness().declare_subscriber(owner.instance_key, zenoh.handlers.Callback(
             lambda s: events.append((str(s.kind), time.monotonic()))), history=True)
         sub = consumer.declare_subscriber(key, zenoh.handlers.Callback(
-            lambda s: got.append((int(s.payload.to_bytes()), time.monotonic()))))
+            lambda s: got.append((int(zk2c.payload_of(s)), time.monotonic()))))
         counter = [0]
 
         def puts() -> None:
@@ -487,7 +488,7 @@ def section3(report: Report) -> None:
             put()
         time.sleep(0.3)
         sub = ext.declare_advanced_subscriber(consumer, key, zenoh.handlers.Callback(
-            lambda s: heard.append(int(s.payload.to_bytes()))))
+            lambda s: heard.append(int(zk2c.payload_of(s)))))
         listener = sub.sample_miss_listener(zenoh.handlers.Callback(lambda m: misses.append(m.nb)))
         while not heard and n[0] < 200:
             put()

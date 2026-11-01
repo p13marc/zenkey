@@ -320,6 +320,8 @@ class Arrival:
     stamp: Any            # a zk2py.seed.Stamp, or None
     stamp_ns: int | None  # as zenoh reads it (§2.11, 0.2)
     via: str = "subscription"
+    #: core §4.3 (0.73): its in-band stamp, or None
+    inband: Any = None
 
 
 class Reader:
@@ -348,6 +350,8 @@ class Reader:
         #: why the view stands on nothing, when no complete read came back
         self.unseeded: str | None = None
         self.arrivals: list[Arrival] = []
+        #: arrivals whose envelope was refused, (key, token): undecodable (observer §7.3)
+        self.undecodable: list[tuple[str, str]] = []
         self.tokens: list[tuple[int, str, str]] = []  # (t_ns, put|delete, instance)
         self.presence = presence
         self.entities: list[Any] = []
@@ -402,19 +406,30 @@ class Reader:
             self.seeded_ns = t
         return True
 
-    def record(self, key: str, payload: bytes, attachment: Any, ts: Any, via: str) -> None:
+    def record(self, key: str, payload: bytes, attachment: Any, ts: Any, via: str, encoding: str = "") -> None:
+        """One arrival, read envelope first (observer §7.3, text 0.14): the
+        record is the payload; a refused envelope is undecodable, kept
+        apart in ``undecodable`` and never read as a sample."""
+        from . import zk2c
+
         t = time.monotonic_ns()
         att = None if attachment is None else attachment.to_bytes()
+        read = zk2c.read_put(key, encoding, payload)
+        if read.refused:
+            with self.lock:
+                self.undecodable.append((key, read.refusal))
+            return
         with self.lock:
-            self.arrivals.append(Arrival(t, key, payload, att, seed.Stamp.of(ts),
-                                         None if ts is None else stamp_ns_of(ts), via))
+            self.arrivals.append(Arrival(t, key, read.record if read.record is not None else payload, att,
+                                         seed.Stamp.of(ts), None if ts is None else stamp_ns_of(ts), via,
+                                         read.stamp))
 
     def subscribe(self, selector: str) -> None:
         import zenoh
 
         def got(sample: Any) -> None:
             self.record(str(sample.key_expr), sample.payload.to_bytes(), sample.attachment, sample.timestamp,
-                        "subscription")
+                        "subscription", str(sample.encoding))
 
         self.entities.append(self.session.declare_subscriber(selector, zenoh.handlers.Callback(got)))
 
@@ -508,7 +523,7 @@ class Reader:
         owner's stamps (§2.11)."""
         got = self.of("", since_ns, key=key)
         if merged:
-            flags = seed.kept([(a.stamp, "put") for a, _ in got])
+            flags = seed.kept([(seed.Mark(a.inband, a.stamp), "put") for a, _ in got])
             got = [x for x, k in zip(got, flags) if k]
         ok = [(a, c) for a, c in got if c.conformance == tm.CONFORMS]
         return self._pairs(ok, self.decls[rid].unit, bases)
@@ -1375,7 +1390,7 @@ def section9(report: Report, mode: Any, contract: Any, tool: Path | None = None)
         for r in replies:
             if r.ok is not None:
                 s = r.ok
-                R.record(str(s.key_expr), s.payload.to_bytes(), s.attachment, s.timestamp, "get")
+                R.record(str(s.key_expr), s.payload.to_bytes(), s.attachment, s.timestamp, "get", str(s.encoding))
                 held.append(seed.Stamp.of(s.timestamp))
         time.sleep(0.2)
         o.put("total", 15)
