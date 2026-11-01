@@ -69,6 +69,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable
 
+from . import zk2c
 from . import timing as tm
 
 REPO = Path(__file__).resolve().parents[3]
@@ -192,7 +193,7 @@ class Bus:
 
         def got(sample: Any) -> None:
             with self.lock:
-                self.seen.append((time.monotonic_ns(), str(sample.key_expr), sample.payload.to_bytes()))
+                self.seen.append((time.monotonic_ns(), str(sample.key_expr), zk2c.payload_of(sample)))
 
         self.sub = s.declare_subscriber(f"{BASE}/**", zenoh.handlers.Callback(got))
 

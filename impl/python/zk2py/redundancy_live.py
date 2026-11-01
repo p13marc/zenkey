@@ -968,7 +968,12 @@ class Follower:
     def _sample(self, sample: Any) -> None:
         ts = sample.timestamp
         sid = None if ts is None else str(ts).split("/", 1)[1]
-        data = sample.payload.to_bytes()
+        from . import zk2c
+
+        read = zk2c.read_sample(sample)
+        if read.refused:
+            return  # observer §7.3 (0.14): undecodable, never a value
+        data = read.record if read.record is not None else b""
         with self.lock:
             if self._accepts(sid):
                 self.value = data

@@ -1637,7 +1637,7 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
 # -- observer §4.4, a tool's S1 check (0.16 to 0.18) --------------------------------
 
 def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str | None,
-             timeout: float = GET_TIMEOUT_S, trust: bool = False) -> tuple[str, str]:
+             timeout: float = GET_TIMEOUT_S, trust: bool = False, on_table: bool = True) -> tuple[str, str]:
     """Observer §4.4, "A tool's S1 check" (0.16 to 0.18). "A tool attributes a state
     reply's stamp by comparing its id with the owner's meta.zid (core §3.3), by
     value":
@@ -1656,7 +1656,18 @@ def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str |
 
     Without ``meta.zid`` the stamp is ``unattributable`` (observer §4.4). The counted
     answers are the ``@/*/router`` answers that "Who answered" verifies.
-    ``trust`` is 0.12's operator alternative. Returns (verdict, why)."""
+    ``trust`` is 0.12's operator alternative. Returns (verdict, why).
+
+    **Only on core §4.3's table** (observer §4.4, text 0.15): "What a tool
+    checks is the Zenoh timestamps core §4.3's table keeps … Outside the
+    table, a router's stamp, or the reader's own session's, is expected on
+    an owner's sample, and is never a finding. So is no stamp at all."
+    ``on_table`` False is such a resource: not this check's, whatever the
+    stamp (an in-band stamp is the owner's, since only the owner writes its
+    payload)."""
+    if not on_table:
+        return "not_asked", ("outside core §4.3's table: an in-band stamp is the owner's, and a router's stamp, the "
+                             "reader's own or none is expected there, never a finding (observer §4.4)")
     meta = descriptor.get("meta")
     zid = _zid_value(meta.get("zid") if isinstance(meta, dict) else None)
     if zid is None:
@@ -1928,11 +1939,22 @@ def replay_events(session: zenoh.Session, selector: str, retention_s: int,
 class StateReply:
     key: str
     deleted: bool                # a reply_del (S2, S3)
-    payload: bytes
+    payload: bytes               # the envelope's record (observer §7.3, 0.14), or the bytes with none
     encoding: str
     stamp: str | None            # Zenoh's "<ntp64>/<id hex>" text
     stamp_id: str | None         # the id half: the HLC that issued it (§4.1)
     stamp_ns: int | None = None  # the stamp's time, ns since the UNIX epoch
+    #: core §4.3 (0.73): the in-band stamp its envelope (a reply_del's
+    #: attachment) carries, or None
+    inband: Any = None
+    #: core §7.5's token where its envelope was refused: undecodable
+    #: (observer §7.3), its ``payload`` empty, never read as a payload
+    refusal: str | None = None
+    #: the bytes as they arrived, the envelope included (S2: "a reply as
+    #: the bytes the mutation put")
+    raw: bytes = b""
+    #: a reply_del's attachment as it arrived
+    attachment: bytes | None = None
 
 
 @dataclass
@@ -1973,11 +1995,19 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
         if "*" in key:
             continue
         ts = s.timestamp
+        from . import zk2c
+
+        read = zk2c.read_sample(s)
+        raw = s.payload.to_bytes()
+        att = None if s.attachment is None else s.attachment.to_bytes()
+        deleted = s.kind == zenoh.SampleKind.DELETE
         out.replies.append(StateReply(
-            key, s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(), str(s.encoding),
+            key, deleted, b"" if deleted or read.refused else (read.record if read.record is not None else raw),
+            str(s.encoding),
             None if ts is None else str(ts),
             None if ts is None else str(ts).split("/", 1)[1],
-            None if ts is None else ts.get_time_as_ntp64().as_nanos()))
+            None if ts is None else ts.get_time_as_ntp64().as_nanos(),
+            read.stamp, read.refusal, raw, att))
     return out
 
 

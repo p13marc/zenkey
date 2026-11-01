@@ -50,6 +50,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from . import zk2c
 from .arbitration_scenarios import Proc
 
 REPO = Path(__file__).resolve().parents[3]
@@ -273,7 +274,7 @@ class _Heard:
     def _got(self, s: Any) -> None:
         ts = s.timestamp
         with self._lock:
-            self.rows.append((str(s.key_expr), s.payload.to_bytes(), str(ts) if ts is not None else None))
+            self.rows.append((str(s.key_expr), zk2c.payload_of(s), str(ts) if ts is not None else None))
 
     def distinct(self) -> list[tuple[str, bytes, str | None]]:
         with self._lock:

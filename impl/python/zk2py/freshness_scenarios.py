@@ -165,10 +165,12 @@ def section1(report: Report) -> None:
         got = _since(s.of(STATUS), t1)
         gaps = _gaps(got)
         report.check(sec, "step 1: at least 4 re-puts of up in the 5 s after the first, no two deliveries more "
-                          "than 1 s apart (ttl/2, with 200 ms of jitter); every one up, text/plain, stamped by the "
-                          "owner's zid, each stamp above the one before",
+                          "than 1 s apart (ttl/2, with 200 ms of jitter); every one up, in its envelope under "
+                          "zenoh/bytes, each a new seq (core §4.2, §4.3, 0.73), stamped by the owner's zid, each "
+                          "stamp above the one before",
                      len(got) >= 5 and max(gaps) <= 1.0 + JITTER_S and all(r.payload == b"up" for r in got)
-                     and all(r.encoding == "text/plain" for r in got)
+                     and all(r.encoding == "zenoh/bytes" and r.inband is not None for r in got)
+                     and all(b.inband.seq > a.inband.seq for a, b in zip(got, got[1:]))
                      and all(_zid(r.stamp_id) == zid for r in got)
                      and all(b.stamp_ns > a.stamp_ns for a, b in zip(got, got[1:])),
                      f"{len(got)} deliveries, largest gap {max(gaps, default=0):.3f} s, "

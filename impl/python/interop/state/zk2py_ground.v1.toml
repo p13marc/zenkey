@@ -1,0 +1,43 @@
+# zk2py's contract for spec/scenarios/state.md at core 0.73 (#609, round 93):
+# the common setup's state template `plans/{vehicle}`, which declares no
+# `freshness.ttl_s`, so core §4.3's table does not list it; §1's `status`,
+# whose `freshness.ttl_s` 60 puts it on the table; §13's plain streams `pose`
+# and `heading`, and a templated one, `track/{id}`; and `poke`, since the
+# Rust `consume` example reads one state and calls one operation. It must
+# load with no finding at all.
+[interface]
+name    = "zk2py_ground"
+major   = 1
+minor   = 0
+summary = "state.md's plans and status, and §13's streams"
+uses    = ["freshness.v1"]
+
+[resources."plans/{vehicle}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { vehicle = "string" }
+cardinality = 16
+
+[resources.status]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources.pose]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.heading]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources."track/{id}"]
+kind        = "stream"
+type        = { raw = "text/plain" }
+params      = { id = "string" }
+cardinality = 4
+
+[resources.poke]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }

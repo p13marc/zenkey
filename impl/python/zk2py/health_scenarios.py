@@ -50,6 +50,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import zk2c
 from . import freshness as fr
 from . import health as h
 
@@ -642,6 +643,9 @@ class StandInArchive:
                 continue
             smp = rep.ok
             with self.lock:
+                # core §4.4 (0.73): "A put's bytes are kept as the owner wrote
+                # them, its envelope included, and a reply gives them back
+                # verbatim."
                 self.held[str(smp.key_expr)] = (None if smp.kind == zenoh.SampleKind.DELETE
                                                 else smp.payload.to_bytes(), str(smp.encoding), smp.timestamp, True)
 
@@ -713,7 +717,7 @@ def section6(report: Report) -> None:
                 continue
             smp = rep.ok
             att = json.loads(smp.attachment.to_bytes()) if smp.attachment is not None else {}
-            st = h.decode_status(smp.payload.to_bytes())
+            st = h.decode_status(zk2c.payload_of(smp))
             shown.append({"level": h.NAMES.get(st["level"]) if st else None, "stamp": str(smp.timestamp),
                           "confirmed": att.get("confirmed")})
         # The archive's answer joins the reading as last-known: it plays no part.

@@ -109,6 +109,12 @@ class Report:
         self.undecided.append((run, name, detail))
         print(f"INCONCLUSIVE [{run}] {name}: {detail}", flush=True)
 
+    def note(self, run: str, text: str) -> None:
+        self.info(run, text)
+
+    def outcome(self, pairing: str, number: str, word: str) -> None:
+        self.info(f"{pairing} §{number}", word)
+
     def info(self, run: str, text: str) -> None:
         print(f"info [{run}] {text}", flush=True)
 
@@ -684,12 +690,23 @@ def _state_and_calls(report: Report, run: str, session, system: str, svc: str, o
                  f"{[(r.key, r.payload, r.deleted) for r in st.replies]} {st.errors}")
     if ok:
         r = st.replies[0]
-        who = live.attribute_stamp(r.stamp_id, owner_doc)
-        report.check(run, "the value is stamped by the owner (S1, S2): attributed by the descriptor's meta.zid "
-                          "(§3.3, 0.10)", who == "owner",
-                     f"{who}: stamp {r.stamp}, meta {owner_doc.get('meta')}")
-        report.check(run, "the value carries its media type as its Encoding (§7.2)", r.encoding == "text/plain",
-                     r.encoding)
+        # Core 0.73 (#976; round 93): the owner's stamp is in band, its run
+        # the descriptor's, and state/health is off §4.3's table, so the
+        # reply carries no Zenoh timestamp the owner set; an envelope's
+        # sample is zenoh/bytes, its record the type's (§7.2's exception).
+        report.check(run, "the value carries the owner's in-band stamp (S1, S2), under the descriptor's run (§3.3, "
+                          "§4.3, 0.73)",
+                     r.inband is not None and r.inband.run_hex() == owner_doc.get("run"),
+                     f"{r.inband}, run {owner_doc.get('run')}")
+        # Off §4.3's table no Zenoh timestamp is the owner's to set (§8.2).
+        # An owner that is its own router, with a router's timestamping on
+        # (zenoh's default), stamps every put from its HLC, and its reply
+        # carries that stamp (S2): F-414 asks whether that is the owner
+        # "setting" one.
+        who = live.attribute_stamp(r.stamp_id, owner_doc) if r.stamp is not None else "none"
+        report.info(run, f"state/health's reply carries Zenoh timestamp {r.stamp} ({who}); off §4.3's table")
+        report.check(run, "the value's sample carries the envelope, its Encoding zenoh/bytes (§7.2, §4.3, 0.73)",
+                     r.encoding == "zenoh/bytes", r.encoding)
     sel = live.get_state(session, f"{base}/state/*")
     report.check(run, "a state selector answers every matching live key (S2)",
                  [r.key for r in sel.replies] == [key], str([r.key for r in sel.replies]))
@@ -781,7 +798,8 @@ def run_python_owner(report: Report, consume: Path) -> None:
             session.close()
 
         # The Rust consumer, as a client of zk2py's router.
-        stamp = str(owner._held[f"zk2/{system}/{svc}/zk2py_echo.v1/state/health"].stamp)
+        # core 0.73: off §4.3's table, the reply carries no Zenoh timestamp,
+        # and the Rust consumer prints "-" for it
         key = f"zk2/{system}/{svc}/zk2py_echo.v1/state/health"
         for op, want in (("@op/echo", "call value ping"),
                          ("@op/refuse", "call refused app "),
@@ -790,8 +808,9 @@ def run_python_owner(report: Report, consume: Path) -> None:
                                capture_output=True, text=True, timeout=60)
             lines = p.stdout.splitlines()
             ok = (p.returncode == 0 and len(lines) == 3 and lines[0] == f"present {system}/{svc}"
-                  and lines[1] == f"state {key} {stamp} ok" and lines[2].startswith(want))
-            report.check(run, f"the Rust consumer reads zk2py's owner: present, the stamped state, {op}",
+                  and lines[1] == f"state {key} - ok" and lines[2].startswith(want))
+            report.check(run, f"the Rust consumer reads zk2py's owner: present, the state (no Zenoh timestamp off the "
+                              f"table), {op}",
                          ok, f"exit {p.returncode}, {lines}, stderr {p.stderr.strip()[-200:]!r}")
     finally:
         owner.close()
@@ -912,94 +931,6 @@ def _r1(timestamping: bool = True, adminspace: bool = False, drop_future: bool =
                                                     "permissions": {"read": True, "write": False}}))
     r1 = zenoh.open(conf)
     return r1, f"tcp/127.0.0.1:{port}", str(r1.zid())
-
-
-def run_python_s1(report: Report) -> None:
-    """state.md §1 (0.7): the owner and the consumer are clients of R1,
-    whose timestamping is on; the control is an unstamped put through R1."""
-    import zenoh
-
-    from . import live
-    from .contract import load_contract
-    from .owner import Owner as PyOwner
-
-    system, svc = "py-site", "stamps"
-    run = f"zk2py owner {system}/{svc} ← zk2py_echo.v1.toml (state.md §1, through R1)"
-    r1, r1_endpoint, r1_zid = _r1()
-    try:
-        consumer = live.open_client(r1_endpoint)
-        third = live.open_client(r1_endpoint)
-        owner = PyOwner(system, svc, [load_contract(REPO / ECHO)], connect=r1_endpoint)
-        key = f"zk2/{system}/{svc}/zk2py_echo.v1/state/health"
-        samples: list[Any] = []
-        control: list[Any] = []
-        sub = consumer.declare_subscriber(key, zenoh.handlers.Callback(samples.append))
-        csub = consumer.declare_subscriber(f"zk2/{system}/control/x", zenoh.handlers.Callback(control.append))
-        try:
-            time.sleep(0.3)
-            owner.start()
-            owner_zid = str(owner.session.zid())
-            time.sleep(0.3)
-            samples.clear()  # the value held at start; the steps begin here
-            owner.set_state(key, b"v1")
-            stamp_v2 = owner.set_state(key, b"v2")
-            time.sleep(0.3)
-            st = live.get_state(consumer, key)
-            owner.delete_state(key)
-            third.put(f"zk2/{system}/control/x", b"unstamped")
-            time.sleep(0.5)
-            stamps = [smp.timestamp for smp in samples]
-            ids = [None if t is None else str(t).split("/", 1)[1] for t in stamps]
-            report.check(run, "every sample, the delete included, carries the owner session's zid, not R1's",
-                         len(samples) == 3 and all(i == owner_zid for i in ids) and owner_zid != r1_zid,
-                         f"{[(str(x.kind), x.payload.to_bytes()) for x in samples]}, ids {ids}, "
-                         f"owner {owner_zid}, R1 {r1_zid}")
-            ntp = [t.get_time_as_ntp64().as_nanos() for t in stamps if t is not None]
-            report.check(run, "each timestamp is greater than the previous one", ntp == sorted(set(ntp))
-                         and len(ntp) == 3, str(ntp))
-            report.check(run, "the GET after v2 returns v2 with v2's timestamp (S2)",
-                         len(st.replies) == 1 and st.replies[0].payload == b"v2"
-                         and st.replies[0].stamp == str(stamp_v2),
-                         f"{[(r.payload, r.stamp) for r in st.replies]} vs {stamp_v2}")
-            cid = [None if x.timestamp is None else str(x.timestamp).split("/", 1)[1] for x in control]
-            report.check(run, "the control: an unstamped put through R1 arrives with R1's zid",
-                         cid == [r1_zid], f"{cid} vs {r1_zid}")
-            # observer §4.4 (0.10): a tool attributes a stamp by the descriptor's
-            # meta.zid, read from the bus.
-            d = live.get_descriptor(consumer, owner.instance_key)
-            doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
-            mine = [live.attribute_stamp(i, doc) for i in ids]
-            theirs = [live.attribute_stamp(i, doc) for i in cid]
-            report.check(run, "by the descriptor's meta.zid, a tool attributes the three samples to the owner, "
-                              "and the control's stamp as foreign (§3.3, 0.10)",
-                         mine == ["owner"] * 3 and theirs == ["foreign"], f"{mine} {theirs}")
-            # Step 3 (0.8, F-73): only the order is observable from
-            # outside; the tick is not.
-            v3 = owner.set_state(key, b"v3")
-            v4 = owner.set_state(key, b"v4")
-            d = v4.get_time_as_ntp64().as_nanos() - v3.get_time_as_ntp64().as_nanos()
-            report.check(run, "v3, v4 back to back: v4's timestamp is greater than v3's (§4.3)",
-                         d > 0, f"{d} ns")
-            # The tick, "with a clock the implementation controls": a clock
-            # reading behind the last stamp, so the next is that plus 1 ns,
-            # zk2py's tick (§4.3).
-            behind = v4.get_time_as_ntp64().as_nanos() - 5_000_000_000
-            owner.clock = lambda: zenoh.Timestamp(
-                zenoh.NTP64(behind // 1_000_000_000, behind % 1_000_000_000), v4.get_id())
-            v5 = owner.set_state(key, b"v5")
-            owner.clock = None
-            tick = v5.get_time_as_ntp64().as_nanos() - v4.get_time_as_ntp64().as_nanos()
-            report.check(run, "a clock reading 5 s behind the record: the next stamp is the record plus one "
-                              "tick (§4.3, a clock zk2py controls)",
-                         tick == 1 and v5.get_id() == v4.get_id(), f"{tick} ns")
-        finally:
-            sub.undeclare()
-            csub.undeclare()
-            owner.close()
-            third.close()
-            consumer.close()
-    finally:
-        r1.close()
 
 
 def run_python_bringup(report: Report) -> None:
@@ -1794,8 +1725,12 @@ def run_python_016(report: Report) -> None:
         tool = live.open_client(r1_endpoint)
         try:
             echo = load_contract(REPO / ECHO)
-            client_owner = PyOwner("py-site", "s1-client", [echo], connect=r1_endpoint)
-            router_owner = PyOwner("py-site", "s1-router", [echo], router_connect=r1_endpoint)
+            # observer §4.4 (0.15): S1's check reads the Zenoh timestamps core
+            # §4.3's table keeps, so it reads zk2py_ground.v1's status
+            # (freshness.ttl_s 60), on the table, beside echo (round 93).
+            ground = load_contract(REPO / "impl/python/interop/state/zk2py_ground.v1.toml")
+            client_owner = PyOwner("py-site", "s1-client", [echo, ground], connect=r1_endpoint)
+            router_owner = PyOwner("py-site", "s1-router", [echo, ground], router_connect=r1_endpoint)
             for o in (client_owner, router_owner):
                 o.start()
                 owners.append(o)
@@ -1804,7 +1739,7 @@ def run_python_016(report: Report) -> None:
             for name, o in (("client", client_owner), ("router", router_owner)):
                 d = live.get_descriptor(tool, o.instance_key)
                 doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
-                st = live.get_state(tool, f"zk2/py-site/{o.service}/zk2py_echo.v1/state/health")
+                st = live.get_state(tool, f"zk2/py-site/{o.service}/zk2py_ground.v1/state/status")
                 stamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
                 readings[name] = (doc, stamp, live.s1_check(tool, doc, stamp))
             doc, stamp, (verdict, why) = readings["client"]
@@ -1821,16 +1756,16 @@ def run_python_016(report: Report) -> None:
             # session's HLC, so its state carries that session's id.
             other = live.open_client(r1_endpoint)
             try:
-                foreign = PyOwner("py-site", "s1-foreign", [echo], connect=r1_endpoint)
+                foreign = PyOwner("py-site", "s1-foreign", [echo, ground], connect=r1_endpoint)
                 foreign.start()
                 owners.append(foreign)
                 foreign.clock = other.new_timestamp
-                foreign.set_state("zk2/py-site/s1-foreign/zk2py_echo.v1/state/health", b"stamped-elsewhere")
+                foreign.set_state("zk2/py-site/s1-foreign/zk2py_ground.v1/state/status", b"stamped-elsewhere")
                 foreign.clock = None
                 time.sleep(0.3)
                 d = live.get_descriptor(tool, foreign.instance_key)
                 fdoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
-                st = live.get_state(tool, "zk2/py-site/s1-foreign/zk2py_echo.v1/state/health")
+                st = live.get_state(tool, "zk2/py-site/s1-foreign/zk2py_ground.v1/state/status")
                 fstamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
                 f_admin = live.s1_check(tool, fdoc, fstamp)
                 other_zid = str(other.zid())
@@ -3289,366 +3224,6 @@ def run_python_config(report: Report, exe: Path) -> None:
     report.rows.extend(sub.rows)
 
 
-def run_python_seed(report: Report, exe: Path) -> None:
-    """Core §4.2, "A late joiner's seed" (0.26), over the owner example's
-    state, its writes driven over its stdin (``put``, ``delete``), through
-    a router R1 of the runner's:
-    - a put made between the late joiner's subscription and its GET is kept;
-    - a stale reply loses to a newer live put. The owner example answers a
-      GET at once, so the runner holds the GET open (target ``All`` waits for
-      every queryable): a queryable of its own on the same keys, answering
-      nothing, ends its part 1.5 s later. Its replies, ``Latest``'s, are
-      delivered at the GET's end (§4.1), and a put made meanwhile arrives
-      first;
-    - a delete reaches the merge as a deletion, through the owner's
-      ``reply_del``;
-    - a GET that runs to its timeout (the owner stopped) is possibly
-      incomplete."""
-    import signal
-
-    import zenoh
-
-    from . import live
-    from . import seed as sd
-
-    r1, ep, _ = _r1()
-    tool, helper = live.open_client(ep), live.open_client(ep)
-    rusts: list[Owner] = []
-    extra: list[Any] = []
-    try:
-        run = "core 0.26 §4.2: a late joiner's seed over the owner example's state (budget.v1 items/{item})"
-        rust = Owner(exe, "lab/st", [REPO / BUDGET_V1], connect=ep)
-        rusts.append(rust)
-        if not report.check(run, "it starts behind R1", rust.wait_for("ready ", 120) is not None,
-                            str(rust.stderr[-1:])):
-            return
-        base = "zk2/lab/st/budget.v1/state/items"
-        pre = [rust.command(f"{v} budget.v1 state/items/{{item}} {k}") for v, k in
-               (("put", "a"), ("put", "b"), ("delete", "b"))]
-        held_open: list[Any] = []
-
-        def slow(query: Any) -> None:
-            held_open.append(query)
-            threading.Timer(1.5, query.drop).start()
-
-        extra.append(helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(slow), complete=False))
-        time.sleep(0.3)
-        lj = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
-        lj.subscribe()
-        time.sleep(0.3)
-        put_c = rust.command("put budget.v1 state/items/{item} c")  # between the subscription and the GET
-        time.sleep(0.3)
-        lj.get()
-        time.sleep(0.4)
-        put_a = rust.command("put budget.v1 state/items/{item} a")  # after the owner answered, before the GET ends
-        ended = lj.wait()
-        time.sleep(0.3)
-        v = lj.view()
-        arrivals = {k.rsplit("/", 1)[1]: [(x.via, x.outcome) for x in lj.applied if x.key == k]
-                    for k in sorted({x.key for x in lj.applied})}
-        report.check(run, "the owner example's writes: a and b put, b deleted, before the late joiner",
-                     [x.split(" ")[0] if x else x for x in pre] == ["put", "put", "deleted"], str(pre))
-        c = v.get(f"{base}/c")
-        report.check(run, "a put made between the subscription and the GET is kept, once: its live sample and its "
-                          "reply carry one stamp",
-                     bool(put_c) and c is not None and not c.deleted
-                     and sorted(o for _, o in arrivals.get("c", [])) == ["kept", "same"],
-                     f"{put_c!r}; c {c}; arrivals {arrivals.get('c')}")
-        a = v.get(f"{base}/a")
-        report.check(run, "a stale reply loses to a newer live put: a's reply, made before the owner's newer put "
-                          "and delivered at the GET's end, is dropped, and a holds the live put's stamp",
-                     bool(put_a) and a is not None and a.via == "live"
-                     and [o for via, o in arrivals.get("a", []) if via == "reply"] == ["dropped"],
-                     f"{put_a!r}; a {a}; arrivals {arrivals.get('a')}")
-        b = v.get(f"{base}/b")
-        report.check(run, "a delete reaches the merge as a deletion: b, deleted before the late joiner came, is the "
-                          "owner's reply_del, merged as a deletion with its stamp",
-                     b is not None and b.deleted and b.via == "reply", f"b {b}")
-        report.check(run, "the seed ran to its final reply, with no error reply: complete",
-                     ended and lj.seed.complete, f"ended {ended}, errors {lj.seed.errors}")
-        lj.close()
-        rust.proc.send_signal(signal.SIGSTOP)
-        try:
-            ljt = sd.seed(tool, f"{base}/*", timeout=1.0)
-        finally:
-            rust.proc.send_signal(signal.SIGCONT)
-        report.check(run, "the owner example stopped (SIGSTOP): the GET runs to its timeout, ends with an error "
-                          "reply, and the seed is reported possibly incomplete",
-                     ljt.seed.ended and not ljt.seed.complete and bool(ljt.seed.errors),
-                     f"errors {ljt.seed.errors}, replies {ljt.seed.replies}")
-        ljt.close()
-    finally:
-        for e in extra:
-            try:
-                e.undeclare()
-            except Exception:  # noqa: BLE001 - closing anyway
-                pass
-        for o in rusts:
-            o.close()
-        tool.close()
-        helper.close()
-        r1.close()
-
-
-def run_python_s7(report: Report, exe: Path) -> None:
-    """``state.md`` §7 step 2 (S7, core §4.3; 0.68, F-382, F-383) with the owner
-    example as the owner and zk2py's late joiners as the consumer and the
-    tool: the owner example puts ``items/a`` of ``budget.v1``, both seed it,
-    and it restarts with no record, a new instance on a new session, its
-    clock 5 s behind (``--clock-offset-ms -5000``, its documented "clock's
-    simulated offset"), and puts ``items/a`` again. "The consumer sees a new
-    timestamp id, accepts rev 11, and restarts its ordering": zk2py's
-    consumer orders by S7 from its first value (:func:`zk2py.seed.follows`),
-    and its tool's late joiner, by §4.2's merge for as long as it follows
-    (observer §4.1), is the control. After it the new instance puts a third
-    time, "rev 12", within 5 s of the first, the premise core 0.70 states
-    (F-408): the consumer accepts it, and the tool keeps the old epoch's.
-    Then :func:`run_python_s7_inside`."""
-    from . import live
-    from . import seed as sd
-    from .checks import premise
-
-    r1, ep, _ = _r1()
-    tool = live.open_client(ep)
-    rusts: list[Owner] = []
-    joiners: list[Any] = []
-    try:
-        run = "core 0.68 S7: state.md §7 step 2, a new epoch behind, after a late joiner's seed (budget.v1 items/a)"
-        first = Owner(exe, "lab/s7", [REPO / BUDGET_V1], connect=ep)
-        rusts.append(first)
-        if not report.check(run, "the owner example starts behind R1", first.wait_for("ready ", 120) is not None,
-                            str(first.stderr[-1:])):
-            return
-        base = "zk2/lab/s7/budget.v1/state/items"
-        put10 = first.command("put budget.v1 state/items/{item} a")
-        w10 = time.monotonic()  # the first put's answer, on the runner's clock (state.md §7's premise, 0.70)
-        time.sleep(0.3)
-        lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
-        lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=5.0)
-        joiners += [lc, lt]
-        for j in joiners:
-            j.start()
-        seeded = all(j.wait() for j in joiners)
-        s10 = lc.view().get(f"{base}/a")
-        report.check(run, "both late joiners seed items/a from the owner example's GET",
-                     bool(put10) and seeded and s10 is not None and lt.view().get(f"{base}/a") is not None,
-                     f"{put10!r}; consumer {s10}")
-        first.close()
-        rusts.remove(first)
-        second = Owner(exe, "lab/s7", [REPO / BUDGET_V1], connect=ep, flags=["--clock-offset-ms", "-5000"])
-        rusts.append(second)
-        if not report.check(run, "it restarts with no record, --clock-offset-ms -5000",
-                            second.wait_for("ready ", 120) is not None, str(second.stderr[-1:])):
-            return
-        put11 = second.command("put budget.v1 state/items/{item} a")
-        time.sleep(0.6)
-        news = [x for x in lc.applied if x.key == f"{base}/a" and x.via == "live"
-                and s10 is not None and x.stamp is not None and x.stamp.id != s10.stamp.id]
-        report.check(run, "the new instance's put carries a new timestamp id, its time below the old one's",
-                     bool(news) and s10 is not None and news[0].stamp.time < s10.stamp.time,
-                     f"{put11!r}; old {s10.stamp if s10 else None}, new {[str(x.stamp) for x in news]}")
-        got = lc.view().get(f"{base}/a")
-        report.check(run, "expected 2: the consumer accepts it, by S7's consumer rule from its first value",
-                     bool(news) and got is not None and got.stamp == news[0].stamp
-                     and [(x.outcome, x.rule) for x in news] == [("kept", "S7")],
-                     f"held {got.stamp if got else None}; {[(x.outcome, x.rule) for x in news]}")
-        # "After rev 11 the owner writes rev 12. Rev 11 and rev 12 come within
-        # 5 s of rev 10" (state.md §7, its late joiners; core 0.70, F-408):
-        # the new instance's second put.
-        put12 = second.command("put budget.v1 state/items/{item} a")
-        elapsed = time.monotonic() - w10
-        time.sleep(0.6)
-        third = [x for x in lc.applied if x.key == f"{base}/a" and x.via == "live"
-                 and news and x.stamp is not None and x.stamp.id == news[0].stamp.id][1:]
-        s12 = third[0].stamp if third else None
-        met, why = premise(-5.0, s10.stamp if s10 else None, news[0].stamp if news else None, s12, elapsed)
-        report.check(run, "state.md §7 (0.70): its late joiners' premise, the second and third puts come within 5 s "
-                          "of the first", met, why)
-        got = lc.view().get(f"{base}/a")
-        report.check(run, "expected 2: the consumer restarts its ordering under the new id: it accepts the third put",
-                     bool(put12) and s12 is not None and got is not None and got.stamp == s12
-                     and [(x.outcome, x.rule) for x in third] == [("kept", "S7")],
-                     f"{put12!r}; held {got.stamp if got else None}; {[(x.outcome, x.rule) for x in third]}")
-        held = lt.view().get(f"{base}/a")
-        name = ("expected 2: the tool's late joiner, §4.2's merge for as long as it follows (observer §4.1), keeps "
-                "the old epoch's later time over both of the new instance's puts")
-        if met:
-            report.check(run, name, s10 is not None and held is not None and held.stamp == s10.stamp,
-                         f"held {held.stamp if held else None}; {[(x.via, x.outcome) for x in lt.applied]}")
-        else:
-            report.inconclusive(run, name, f"its premise failed above: {why}; held {held.stamp if held else None}")
-    finally:
-        for j in joiners:
-            j.close()
-        for o in rusts:
-            o.close()
-        tool.close()
-        r1.close()
-
-
-def run_python_s7_both(report: Report, exe: Path) -> None:
-    """``live_interop --only s7``: :func:`run_python_s7`, then
-    :func:`run_python_s7_inside`."""
-    run_python_s7(report, exe)
-    run_python_s7_inside(report, exe)
-
-
-def run_python_s7_inside(report: Report, exe: Path) -> None:
-    """``state.md`` §7 step 2's new epoch *inside* a late joiner's seed
-    (core 0.68, F-382; round 91's F-393; core 0.69's "Inside the seed",
-    round 92), over the owner example: it puts ``items/a``, a second zk2py
-    session holds a non-complete queryable on the items so that each late
-    joiner's GET stays open after the owner example has answered, and the
-    owner example restarts with no record and puts ``items/a`` again. Then
-    the GET ends, and the new instance puts ``items/a`` a third time. Run
-    with the new clock 5 s behind (``--clock-offset-ms -5000``) and on the
-    host's clock, as the step says. "`Latest` consolidation … delivers at
-    query completion" (core §4.1), so the first instance's reply reaches
-    each late joiner after the new instance's live put:
-    - the consumer, by S7 from its first value, holds the reply, the old
-      epoch's, until the third put, which it accepts;
-    - the tool, by the merge, keeps the later time: the old epoch's with the
-      clock behind, the new epoch's two puts on the host's clock."""
-    for offset_ms in (-5000, 0):
-        _run_python_s7_inside(report, exe, offset_ms)
-
-
-def _run_python_s7_inside(report: Report, exe: Path, offset_ms: int) -> None:
-    import zenoh
-
-    from . import live
-    from . import seed as sd
-    from .checks import HeldQueries, premise
-
-    r1, ep, _ = _r1()
-    tool, helper = live.open_client(ep), live.open_client(ep)
-    rusts: list[Owner] = []
-    joiners: list[Any] = []
-    held_q: HeldQueries | None = None
-    q: Any = None
-    word = "5 s behind" if offset_ms else "on the host's clock"
-    try:
-        run = f"core 0.69 S7: state.md §7 step 2, a new epoch {word} inside a late joiner's seed"
-        first = Owner(exe, "lab/s7i", [REPO / BUDGET_V1], connect=ep)
-        rusts.append(first)
-        if not report.check(run, "the owner example starts behind R1", first.wait_for("ready ", 120) is not None,
-                            str(first.stderr[-1:])):
-            return
-        base = "zk2/lab/s7i/budget.v1/state/items"
-        put10 = first.command("put budget.v1 state/items/{item} a")
-        w10 = time.monotonic()  # the first put's answer, on the runner's clock (F-408)
-        held_q = HeldQueries(limit=30.0)
-        q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(held_q.take), complete=False)
-        time.sleep(0.5)
-        lc = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=30.0)
-        lt = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=30.0)
-        joiners += [lc, lt]
-        for j in joiners:
-            j.start()
-        time.sleep(1.0)  # the owner example answers both GETs
-        report.check(run, "both GETs stay open on the second queryable, nothing delivered yet",
-                     bool(put10) and not any(j.seed.ended or j.applied for j in joiners),
-                     f"{put10!r}; {[(j.seed.ended, len(j.applied)) for j in joiners]}")
-        first.close()
-        rusts.remove(first)
-        flags = ["--clock-offset-ms", str(offset_ms)] if offset_ms else []
-        second = Owner(exe, "lab/s7i", [REPO / BUDGET_V1], connect=ep, flags=flags)
-        rusts.append(second)
-        if not report.check(run, f"it restarts with no record, {word}",
-                            second.wait_for("ready ", 120) is not None, str(second.stderr[-1:])):
-            return
-        put11 = second.command("put budget.v1 state/items/{item} a")
-        time.sleep(0.6)
-        lives = [[a for a in j.applied if a.via == "live"] for j in joiners]
-        report.check(run, "the new instance's put arrives live inside both seeds, before any reply",
-                     bool(put11) and all(len(x) == 1 for x in lives) and not any(j.seed.ended for j in joiners)
-                     and not any(a.via == "reply" for j in joiners for a in j.applied),
-                     f"{put11!r}; {[[str(a.stamp) for a in x] for x in lives]}")
-        held_q.release()  # "Then the second queryable lets the GET end" (state.md §7, 0.69)
-        ended = all(j.wait(40.0) for j in joiners)
-        replies = [[a for a in j.applied if a.via == "reply"] for j in joiners]
-        new = lives[0][0].stamp if lives[0] else None
-        old = replies[0][0].stamp if replies[0] else None
-        report.check(run, "the GET ends and the first instance's reply arrives last, under the old id, its time "
-                          + ("above" if offset_ms else "below") + " the new put's",
-                     ended and all(len(x) == 1 for x in replies) and new is not None and old is not None
-                     and old.id != new.id and ((old.time > new.time) if offset_ms else (old.time < new.time)),
-                     f"ended {ended}; old {old}, new {new}")
-        got = lc.view().get(f"{base}/a")
-        report.check(run, "core §4.2, §4.3 (0.69): the consumer accepts the reply under the old id, which arrived "
-                          "last: it holds the old epoch's value, whatever the two times (F-393)",
-                     got is not None and old is not None and got.stamp == old
-                     and [(a.via, a.outcome) for a in lc.applied] == [("live", "kept"), ("reply", "kept")],
-                     f"held {got.stamp if got else None}; {[(a.via, a.outcome) for a in lc.applied]}")
-        held = lt.view().get(f"{base}/a")
-        want = old if offset_ms else new
-        report.check(run, "observer §4.1 (0.10): the tool keeps the merge: the later time, the "
-                          + ("old" if offset_ms else "new") + " epoch's",
-                     held is not None and want is not None and held.stamp == want,
-                     f"held {held.stamp if held else None}; {[(a.via, a.outcome) for a in lt.applied]}; "
-                     f"{lt.bound_note()}")
-        # "Then the second queryable lets the GET end, and the owner writes
-        # rev 12" (state.md §7, 0.69): the new instance's third put.
-        put12 = second.command("put budget.v1 state/items/{item} a")
-        elapsed = time.monotonic() - w10
-        time.sleep(0.6)
-        third = [a for a in lc.applied if a.via == "live"][1:]
-        s12 = third[0].stamp if third else None
-        got = lc.view().get(f"{base}/a")
-        report.check(run, "state.md §7 (0.70): in both runs the consumer then holds the old epoch's value, until the "
-                          "new instance's next put, which it accepts",
-                     bool(put12) and s12 is not None and new is not None and s12.id == new.id
-                     and s12.time > new.time and got is not None and got.stamp == s12
-                     and [(a.outcome, a.rule) for a in third] == [("kept", "S7")],
-                     f"{put12!r}; held {got.stamp if got else None}; {[(a.outcome, a.rule) for a in third]}")
-        held = lt.view().get(f"{base}/a")
-        lastt = [(a.via, a.outcome) for a in lt.applied][2:]
-        later = s12 is not None and old is not None and s12.time > old.time
-        gap = None if s12 is None or old is None else round((s12.time - old.time) / 2**32, 3)
-        detail = (f"held {held.stamp if held else None}; {lastt}; the third put {elapsed:.3f} s after the first, "
-                  f"its time {gap} s from the first's")
-        # The merge's rule, whatever the window: the later time by the stamps
-        # (observer §4.1).
-        report.check(run, "observer §4.1: the tool keeps the later time by the stamps after the third put",
-                     held is not None and (s12 if later else old) is not None
-                     and held.stamp == (s12 if later else old)
-                     and lastt == [("live", "kept" if later else "dropped")], detail)
-        # The step's premise, stated since core 0.70 (F-408): a run past it
-        # fails on it, and its clock-behind outcome is not asserted.
-        met, why = premise(offset_ms / 1000, old, new, s12, elapsed)
-        report.check(run, "state.md §7 (0.70): its premise, the second and third puts come within 5 s of the first",
-                     met, why)
-        step = "state.md §7 (0.70): the tool keeps the later time: "
-        if not offset_ms:
-            report.check(run, step + "the new instance's two puts on the host's clock",
-                         held is not None and s12 is not None and held.stamp == s12
-                         and lastt == [("live", "kept")], detail)
-        elif met:
-            report.check(run, step + "the old epoch's with the clock behind, the third put dropped",
-                         held is not None and old is not None and held.stamp == old
-                         and lastt == [("live", "dropped")], detail)
-        else:
-            report.inconclusive(run, step + "the old epoch's with the clock behind",
-                                f"its premise failed above: {why}; {detail}")
-    finally:
-        # Released and undeclared whatever happened above, so that an early
-        # return leaves no GET open (review-bot on PR #973).
-        if held_q is not None:
-            held_q.release()
-        if q is not None:
-            try:
-                q.undeclare()
-            except Exception:  # noqa: BLE001 - closing anyway
-                pass
-        for j in joiners:
-            j.close()
-        for o in rusts:
-            o.close()
-        helper.close()
-        tool.close()
-        r1.close()
-
-
 DEFAULT_ZENCTL = REPO / "target" / "debug" / "zenctl"
 
 
@@ -3661,6 +3236,15 @@ def _run_security4(report: Report, zenctl: Path) -> None:
     if not zenctl.is_file():
         report.info("security.md §4", f"{zenctl} not found: §4 runs on zk2py's block alone")
     run_section4(report, REPO, zenctl if zenctl.is_file() else None)
+
+
+def _state_pairing(report: Report, pairing: str, section: str) -> None:
+    """``state.md``'s sections at core 0.73 (#976), which
+    :mod:`zk2py.state_pairings` runs in each pairing (round 93): §1 with
+    zk2py's owner (``s1``), §7 with the owner example (``s7``, ``seed``)."""
+    from . import state_pairings as sp
+
+    sp.SECTIONS[section](report, pairing)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -3680,14 +3264,15 @@ def main(argv: list[str] | None = None) -> int:
     python_runs = {
         "rust-behind-r1": lambda r: run_rust_behind_r1(r, args.owner),
         "owner": lambda r: run_python_owner(r, args.consume), "refusal": run_python_refusal,
-        "s1": run_python_s1, "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
+        "s1": lambda r: _state_pairing(r, "py-py", "1"), "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
         "o1": run_python_o1, "fanout": run_python_fanout, "tool-rules": run_python_tool_rules,
         "0.16": run_python_016, "hostid": lambda r: run_python_hostid(r, args.owner),
         "freshness": lambda r: run_python_freshness(r, args.owner, args.consume),
         "health": lambda r: run_python_health(r, args.owner, args.consume),
         "budget": lambda r: run_python_budget(r, args.owner),
-        "seed": lambda r: run_python_seed(r, args.owner),
-        "s7": lambda r: run_python_s7_both(r, args.owner),
+        # state.md at core 0.73 (round 93): zk2py.state_pairings' rust-py
+        "seed": lambda r: _state_pairing(r, "rust-py", "7"),
+        "s7": lambda r: _state_pairing(r, "rust-py", "7"),
         "config": lambda r: run_python_config(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
         "security4": lambda r: _run_security4(r, args.zenctl),

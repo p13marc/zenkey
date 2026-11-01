@@ -22501,3 +22501,267 @@ Two should-fixes and two nits, taken on the same branch:
 **`just py-conformance`: 3709 of 3709** (`readings` 752). **Live:**
 `config_scenarios` zk2py, zk2py and Rust, zk2py **51 of 51** each;
 `state.md` §7 step 2 zk2py, zk2py **24 of 24** and Rust, zk2py **30 of 30**.
+
+## At core 0.73 and observer.md 0.15 (#976)
+
+Round 93 read, cold, on main a8bda1fa: core 0.73's §1.5, §2.5, §3.3, §4
+(all of it), §7.2, §7.5, §8.2 and §12; `observer.md` 0.15's §4 and §7.3;
+`scenarios/state.md`, `scenarios/types.md` §1; the changed paragraphs of
+`health.v1` 0.7, `timing.v1` 0.8, `redundancy.v1` 0.8 and 0.9 and
+`desired.v1` 0.12; `RULES.md`'s new and changed entries; and the glossary's
+new terms (Run, Seq, In-band stamp, Zenoh timestamp). It read the
+changelog entries of core 0.71 to 0.73 and `observer.md` 0.13 to 0.15
+first. The black boxes were rebuilt from main at core 0.73, and their
+source was never read.
+
+Since the mend pass (88cc5a79), `spec/` changed in #992 and #976's A1 to
+A3: `core.md`, `observer.md`, `RULES.md`, `README.md`, both changelogs,
+`descriptor.schema.json`, `conformance/envelope/` (new), `seed/inband.json`
+(new), `seed/merge.json`'s description, six descriptor fixtures,
+`scenarios/state.md` and `types.md`, and the four profiles' texts,
+changelogs and two of their scenarios. `examples/zk2/` did not change.
+
+### The rules changed
+
+zk2py extracted every sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT,
+MAY, REQUIRED or RECOMMENDED from 88cc5a79 and a8bda1fa, by section, in
+`core.md`, `observer.md` and the four profiles, and diffed the two sets.
+- **Core, with a keyword:** §1.5's MUST (its clause on ordering out) and
+  its SHOULD (for the table's Zenoh timestamps); §3.3's run MUST; S1 to S3
+  and S7; §4.2's merge; §4.3's three removed rules and its four added (the
+  in-band stamp, no reuse, no wrap, a stream key's seq) with the MAY of a
+  new run at any time and the consumer rule over runs; §4.4's older by seq;
+  §7.2's exception; §7.5's two; §8.2's MUST NOT and two SHOULDs; §12's
+  "Clock (S7)" row out. Each is in the 0.72 or 0.73 entry.
+- **Observer:** §7.3's MUST and MUST NOT (0.14). §4.1, §4.4 and §8.3
+  changed without a keyword, as 0.15 says.
+- **Profiles:** `redundancy.v1` §2.10's citation, `health.v1` §2.5's MAY
+  reworded, each as its entry says.
+
+**No rule changed beyond what the changelogs state.** One scenario did:
+`desired.v1` scenarios §6 (F-421).
+
+### What zk2py implements of the changes
+
+See README, "Core 0.71 to 0.73 and `observer.md` 0.13 to 0.15". In short:
+`zk2c` parses and writes §7.5's envelope and reads every data sample
+through it; the owner writes it under runs and seqs, states `run`, and
+sets a Zenoh timestamp only on §4.3's table, its session without
+timestamping; the merge orders by `seed.Mark`. **`just py-conformance`:
+3878 of 3878** (`envelope` 108, `seed` 67, `descriptors` 54, `readings`
+759). **Live:** `state_pairings` **107 of 107** over the three pairings;
+`state_scenarios` §3, §11 and §12 **12 of 12**, with the Rust owner **7 of
+7**, with zenctl's readers **13 of 13**; `freshness_scenarios` 23 of 23,
+`health_scenarios` 29 of 29, `redundancy_scenarios` 105 of 105 and
+`alarms_scenarios` 80 of 80 beside them.
+
+### F-414 · ambiguous · core §8.2 (0.73): what "set a Zenoh timestamp" covers
+
+> "**Session posture.** An owner MUST NOT set a Zenoh timestamp on a put or
+> a delete of a data key, except on a resource §4.3's table lists."
+>
+> "**The owner's session** SHOULD run with timestamping disabled, zenoh's
+> default for a client and a peer (§4.1). A session with it enabled stamps
+> every put and delete it is not given a timestamp for."
+>
+> §4.3: "Only these resources carry a Zenoh timestamp the owner sets … |
+> Every put of a `redundancy.v1` candidate | … | by the candidate session's
+> HLC".
+
+- **The readings:**
+  - **(a)** "set" is the owner's own act, a timestamp it gives a put. A
+    stamp its session's HLC adds is the SHOULD's, so an owner whose
+    session stamps (a router's default) misses a SHOULD and breaks no MUST;
+  - **(b)** any Zenoh timestamp its session puts on the sample is one the
+    owner sets, as §4.3's table counts a candidate's HLC stamps. Then every
+    owner but a candidate MUST run without timestamping, and the SHOULD
+    adds nothing.
+- **Seen:** the owner example run as its own router stamps its off-table
+  state from its own zid, and its reply carries that stamp, as S2 asks
+  "where the mutation carried one". Under (a) that is a missed SHOULD,
+  under (b) a broken MUST NOT. Observer §4.4 makes neither a finding off
+  the table, so no tool can tell.
+- **Took:** zk2py meets both: its sessions run without timestamping but
+  a candidate's.
+- **Fix:** say which, for instance "An owner MUST NOT set a Zenoh
+  timestamp, nor run a session that stamps, on …", or "… set one itself;
+  its session's timestamping is the SHOULD below".
+- **Changes:** what a runner may assert of an owner that is its own router
+  (`live_interop`'s first runs report it, never assert it). No verdict.
+
+### F-415 · gap · core §3.3 (0.73): "Each put of it carries the owner's timestamp"
+
+> "One `complete` queryable on the instance key answers with one reply …
+> no attachment and no timestamp (S1–S2 bind state, and a descriptor is
+> not state). Each put of it (below) carries the owner's timestamp."
+
+- **The gap.** Before 0.73 an owner's session had its HLC, which stamped
+  each descriptor put. Under §8.2's posture the session runs without
+  timestamping, so a descriptor put carries a timestamp only where the
+  owner sets one. No rule asks it to, §4.3's table does not list a
+  descriptor, and §8.2's MUST NOT does not bind one (an instance key is no
+  data key).
+- **The readings:** (a) a rule stated without a keyword: the owner sets a
+  timestamp on each descriptor put; (b) a fact of the old posture, stale.
+- **Took (a):** zk2py's owner stamps each descriptor put from its minting
+  clock. The owner example's descriptor puts arrive stamped too.
+- **Fix:** "Each put of it carries a Zenoh timestamp the owner sets", or
+  drop the sentence.
+- **Changes:** wording. A test of an owner under (b).
+
+### F-416 · gap · core §4.3 (0.73): "durable before the first mutation"
+
+> "**A 16-bit run** is a counter in a record the owner keeps. The record is
+> durable before the first mutation under each run it issues."
+>
+> "**No reuse.** An owner MUST NOT write under a run that it, or another
+> instance of its service, wrote under before."
+
+- **The gap.** A mutation is a state's put or delete (S1). A stream sample
+  is written under the run too, with its own seq. An owner whose first
+  write under run n is a stream sample, and that crashes before n is
+  durable, restarts from n − 1 and takes n again: the MUST NOT forbids
+  that, and the durability sentence allows it.
+- **Took:** zk2py's record is durable when the run is taken, before any
+  write under it.
+- **Fix:** "The record is durable before the first sample written under
+  each run it issues."
+- **Changes:** wording only.
+
+### F-417 · cannot be implemented as written · core §4.3 (0.73): no reuse against a random draw
+
+> "**No reuse.** An owner MUST NOT write under a run that it, or another
+> instance of its service, wrote under before."
+>
+> "**A 32-bit run** is drawn at random. An owner draws one when it keeps
+> no record, when its counter is spent at 0xFFFF, and when it is a
+> candidate of a governed interface … It draws again while the run equals
+> one it used."
+
+- **Why it cannot be met as written.** An owner with no record cannot know
+  the runs its earlier instances drew, and no owner knows another
+  instance's: two candidates of one service each draw. "It draws again
+  while the run equals one it used" covers only what the current process
+  remembers. So the MUST NOT holds only by chance, about 2^-32 per pair of
+  draws.
+- **The readings:** (a) strict, which no draw guarantees; (b) a random
+  32-bit draw is taken to meet it, the residual chance accepted.
+- **Took (b),** as the reference must: zk2py draws, and redraws against the
+  runs its process used.
+- **Fix:** "A run drawn at random meets it; the chance of a repeat is
+  accepted", or bound the MUST NOT to the runs a record or the process
+  holds.
+- **Changes:** wording. zk2py's verdict is met under (b).
+
+### F-418 · gap · scenarios/types.md §1 (0.73): "The owner's writer names that predefined `Encoding`"
+
+> "- Each sample carries core §7.5's envelope, so its `Encoding` is
+> `zenoh/bytes` (core §7.2).
+> - Each record is encoded as its type says: protobuf, CBOR and
+>   `image/jpeg`. The owner's writer names that predefined `Encoding`."
+
+- **The gap.** The bus shows `zenoh/bytes`, and core §7.2 asks nothing of
+  a writer's interface. What a tester checks for "names" is not said, and
+  nothing on the wire carries the predefined `Encoding` (§7.5 leaves it no
+  place).
+- **The readings:** (a) a note on how the reference's writer is called,
+  no expected outcome; (b) the predefined `Encoding` travels with the
+  sample, which §7.5's layout rules out.
+- **Took (a):** zk2py's owner keeps each record's predefined `Encoding`
+  and puts `zenoh/bytes`.
+- **Fix:** drop the sentence, or "Each record holds the bytes of its
+  type's predefined `Encoding`".
+- **Changes:** wording; zk2py does not run `types.md` (no renderer).
+
+### F-419 · index · spec/RULES.md (0.73): "An owner MUST NOT let that seq wrap."
+
+> `RULES.md`, owner, §4.3: "An owner MUST NOT let that seq wrap."
+>
+> Core §4.3: "**State and events.** An owner keeps one seq per run for all
+> its state mutations and event occurrences … **No wrap.** An owner MUST
+> NOT let that seq wrap." Two bullets on: "**Streams.** Each stream key's
+> seq is its own … and wraps modulo 2^24."
+
+- **What misleads.** The entry cuts the sentence from what "that seq"
+  names, and leaves out its run-in label. Read in the index, it forbids
+  any seq to wrap, a stream key's included, which the entry two rows below
+  and §4.3 make wrap. The header's brackets cover a pronoun's noun, not a
+  demonstrative's.
+- **Fix:** "An owner MUST NOT let that seq [its one seq for state and
+  events] wrap."
+- **Changes:** wording (the index). No verdict: zk2py's walk keys the rule
+  by its own sentence.
+
+### F-420 · contradiction · core §4.2 S7 (0.73): "a seq never wraps within it"
+
+> S7: "**Owner:** a run is never reused, and a seq never wraps within it
+> (§4.3)."
+>
+> §4.3: "**Streams.** Each stream key's seq is its own. It starts at 0 at
+> the key's first sample in a run, adds 1 at each sample, and wraps modulo
+> 2^24."
+>
+> `state.md` §13 step 1: "The owner publishes `pose` at seqs 16,777,214,
+> 16,777,215, 0 and 1 of one run: the key's seq wraps."
+
+- **The contradiction.** S7's row says no seq wraps within a run. §4.3
+  and §13 make a stream key's wrap within one. `RULES.md`'s rule-id row
+  repeats S7's sentence.
+- **Took:** S7 means the one seq over state and events, as §4.3's MUST NOT
+  says. zk2py wraps a stream key's seq and never the other.
+- **Fix:** "a run is never reused, and its seq for state and events never
+  wraps within it (§4.3)".
+- **Changes:** wording only.
+
+### F-421 · changelog · desired.v1 0.12: scenarios §6 changed, and the entry does not say so
+
+> The 0.12 entry: "**Editorial: §2.11, 'Its stamps,'** cites
+> `scenarios.md` §6, where it cited core `state.md` §7. §6's step 1
+> restarts the author with its clock 5 s behind, and its Expected 1 has the
+> re-put's stamp above the last one the author issued." Then: "No fixture,
+> section number or label."
+>
+> `scenarios.md` §6 at 0.12, step 1: "… a fresh zid (core §1.5). Its clock
+> is 5 s behind." Expected 1: "… under the same id (§2.11). The put's stamp
+> is above the author's last one. Its clock is behind (§2.11)."
+
+- **What the entry leaves out.** Against 88cc5a79 both sentences are new
+  in 0.12. The entry describes §6 as already holding them, and lists no
+  change to the scenarios. A step's setup and an Expected outcome changed,
+  so a runner of §6 now restarts its author 5 s behind and checks the
+  stamp. That is more than a citation. And "Its clock is behind (§2.11)."
+  is setup inside an Expected item, no outcome.
+- **Fix:** an entry line: "**Scenarios §6** gains its author's clock 5 s
+  behind at step 1, and Expected 1 the re-put's stamp above the last one
+  it issued", and the Expected item's last sentence moved to the step.
+- **Changes:** a test: zk2py's `desired_scenarios` §6 restarts its author
+  on the host's clock, and is not re-run this round.
+
+### Its walk again
+
+`RULES.md` at a8bda1fa holds 182 rules. The 181 rows of the classes zk2py
+claims and of the static rules are walked, none without a verdict.
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 62 | 51 | 3 | 8 |
+| consumer | 15 | 12 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 55 | 51 | 2 | 2 |
+| static | 36 | 34 | 0 | 2 |
+
+Beyond the index: sixteen observer rules stated without a keyword, all
+met. An index entry that misleads: F-419. No entry mislabels a role, and
+none gives evidence its text does not cite.
+
+### Counts at core 0.73 and observer.md 0.15
+
+421 entries.
+- **Open: F-414 to F-421,** eight. None is a blocker.
+  - **Ambiguous:** F-414 (§8.2's "set").
+  - **Gap, three:** F-415 (§3.3's descriptor put), F-416 (§4.3's record
+    before the first mutation), F-418 (`types.md` §1's writer).
+  - **Cannot be implemented as written:** F-417 (no reuse against a draw).
+  - **Contradiction:** F-420 (S7's seq that never wraps).
+  - **Index:** F-419. **Changelog:** F-421.
+- **F-365** stays open as #965's.

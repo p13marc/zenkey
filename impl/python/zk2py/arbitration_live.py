@@ -338,7 +338,12 @@ class Actuator:
         import zenoh
 
         key = str(sample.key_expr)
-        payload = sample.payload.to_bytes()
+        from . import zk2c
+
+        read = zk2c.read_sample(sample)
+        if read.refused:
+            return  # observer §7.3 (0.14), core §7.5: undecodable, no arrival
+        payload = read.record if read.record is not None else b""
         delete = sample.kind == zenoh.SampleKind.DELETE
         wall = time.time_ns()
         ts = sample.timestamp

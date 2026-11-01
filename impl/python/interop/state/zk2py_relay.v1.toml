@@ -1,0 +1,27 @@
+# zk2py's governed interface for spec/scenarios/state.md §13 step 3 at core
+# 0.73 (#609, round 93): a candidate of redundancy.v1 under an external
+# election, so that one instance steps down and takes over again as its
+# lock goes and comes back, its run unchanged, and publishes `entries`
+# before and after. It must load with no finding at all.
+[interface]
+name    = "zk2py_relay"
+major   = 1
+minor   = 0
+summary = "a governed stream for state.md §13's takeover"
+uses    = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "external" }
+
+[resources.entries]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.level]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.poke]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }

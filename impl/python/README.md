@@ -4710,21 +4710,149 @@ Not met: the owner's three SHOULDs and observer §7.3's two MUSTs.
 
 No new finding: none open.
 
+## Core 0.71 to 0.73 and `observer.md` 0.13 to 0.15: the zk2c envelope, runs and seqs (round 93)
+
+#992 and #976's three steps changed the rules since the mend pass:
+- **Core 0.71, `observer.md` 0.13** (#992) restate a fact: a read on a
+  token's own session can answer that token, not always.
+  `redundancy.v1` 0.8's §2.5 step 1 follows. No rule changed.
+- **Core 0.72** (#976 A1) defines §7.5's **zk2c envelope**, CH, a 16- or
+  32-bit run, a 24-bit seq and the record, with two static rules: its
+  refusals in order, and its round trip.
+- **`observer.md` 0.14** (#976 A2): a tool reads a stream, state or event
+  sample under `zenoh/bytes` as that envelope first, never sniffing a
+  refused one.
+- **Core 0.73, `observer.md` 0.15** (#976 A3): an owner writes the envelope
+  on every stream, state, `@state` and event put and every state delete,
+  under a run and a seq that now order a key's values (§4.3, S1–S3, S7,
+  §4.2's merge, §3.3's `run`, §8.2's session posture). A Zenoh timestamp
+  stays only on §4.3's table. `health.v1` 0.7, `timing.v1` 0.8,
+  `redundancy.v1` 0.9 and `desired.v1` 0.12 follow, editorially.
+
+zk2py diffed every RFC 2119 sentence of `core.md`, `observer.md` and the
+four profiles against the mend pass's, by section. **No rule changed beyond
+what the changelogs state.** One scenario did: `desired.v1` scenarios §6
+gained its clock 5 s behind and a stamp expectation, which the 0.12 entry
+does not say (F-421).
+
+### The classes zk2py claims
+
+Unchanged since round 89: the **owner**, **consumer**, **caller** and
+**observer** classes, each at the full level. Not the deployment class. The
+profiles' classes, by role, are round 89's table above.
+
+### Its walk of `RULES.md` at a8bda1fa
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 62 | 51 | 3 | 8 |
+| consumer | 15 | 12 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 55 | 51 | 2 | 2 |
+| static, in every class | 36 | 34 | 0 | 2 |
+
+- **181 rows walked, none without a verdict.** The three removed §4.3
+  verdicts (the HLC MUST, the catch-up's MUST NOT, the new epoch's MUST)
+  are gone. §1.5's SHOULD, S2 and §4.2's merge are re-keyed to 0.73's
+  sentences, and S1 and S3 moved under unchanged keys. The 20 new rows
+  were "not yet" in the mend commit, and each is met now.
+- **Beyond the index:** sixteen observer rules stated without a keyword,
+  all met. Two are new: §4.4's check of the table's Zenoh timestamps alone,
+  and §8.3's in-band stamp shown as a run and a seq.
+- **Not met:** the owner's three SHOULDs (§1.4's canonical form, §1.5's new
+  session at a re-mint, §3.3's 1 KB), and observer §7.3's two decoding
+  MUSTs, in the echo tool. Unchanged.
+
+### What round 93 changed in zk2py
+
+- **`zk2c`** (core §7.5, observer §7.3): the envelope's header, parse (the
+  six refusals in order, each with its token), write, and which sample
+  carries one (`carries`). `read_sample` reads a data sample envelope first:
+  its record, its in-band stamp, or the refusal it names, a refused one's
+  bytes never handed on. Every reader of a data sample reads through it:
+  the late joiner, S4's GET, `freshness.Subscriber` (and so the alarms,
+  health and config readers), the echo tool (a row's `envelope` run and seq,
+  its `undecodable`), the timing, desired, arbitration and redundancy
+  consumers, telemetry's reader, and a role's subscription.
+- **The owner** (core §4.3, §3.3, §8.2): an envelope on every stream,
+  state, `@state` and event put, and a delete envelope as each state
+  delete's attachment, under `zenoh/bytes`. A 16-bit run from
+  `run_record`, durable before any write under it, else a 32-bit draw, and
+  for a candidate. One seq per run over state and events, and a new run,
+  its descriptor first, before 16,777,216 (`set_next_seq`). Each stream key's
+  seq its own, wrapping, kept across a takeover and a member removed and
+  added (`remove_member`). The descriptor states `run`. A Zenoh timestamp
+  only on §4.3's table (`keeps_timestamp`), and timestamping off but for a
+  candidate. S2's replies are the bytes the mutation put, and a
+  `reply_del` carries the delete's attachment.
+- **The merge** (core §4.2, §4.3, observer §4.1): `seed.Mark`, the in-band
+  stamp and the Zenoh timestamp, and `seed.relation`. Within one run by seq,
+  plain or serial by the key's kind. Across two runs unordered: a tool
+  keeps the later arrival, a consumer accepts. A sample with no envelope is
+  ordered by its Zenoh timestamp as before, unordered beside an in-band one.
+- **The descriptor checker:** D002 for a `run` that is not 4 or 8 lowercase
+  hex digits.
+- **S1's check** (observer §4.4): `live.s1_check(on_table=False)` asks
+  nothing off the table. `live_interop`'s 0.16 run reads a table resource.
+- **`state_pairings`**: `state.md`'s §1, §2, §7, §10 and §13 at 0.73, in the
+  three pairings. `state_scenarios` runs them for zk2py, its §3 and §12 with
+  `--owner rust` too, and the old §7 and §10 code is gone, with
+  `live_interop`'s `s1`, `s7` and `seed` runs, which now call it.
+
+**`readings`: 759, up from 752.** **`just py-conformance`: 3878 of 3878**,
+the new `envelope` family's 108 among them, `seed`'s 67 with `inband.json`'s
+22 orders and 16 cases (9 for a consumer too), and `descriptors`' 54.
+
+**Live, `state.md` whole**, by pairing (owner, readers):
+
+| § | zk2py, zk2py | Rust, zk2py | zk2py, Rust (`zenctl`, `consume`) |
+|---|---|---|---|
+| 1 | passed, both routers | passed, both routers | passed, both routers |
+| 2 | passed | passed | passed (`zenctl get state`) |
+| 3 | passed | passed | passed (`zenctl doctor`) |
+| 4, 5, 6, 9 | not runnable: an archive | not runnable: an archive | not runnable: an archive |
+| 7 | passed, steps 1 to 6 | passed, steps 1 to 6 | steps 1–3 and 6 passed (`zenctl watch`); 4–5 not runnable: no black box seeds |
+| 8 | not runnable: a union storage | not runnable | not runnable |
+| 10 | passed | not runnable: the owner example cannot hold a GET | not runnable: no black box seeds |
+| 11 | passed | no owner: as zk2py, zk2py | not runnable: no black box merges |
+| 12 | passed, 200 rounds | passed, 200 rounds | passed, `zenctl doctor` and `storage list`, 200 rounds each |
+| 13 | passed | passed (`--standby`, `--timing`) | step 3 passed (`zenctl watch`); 1–2 not runnable: no black box merges |
+
+`state_pairings`: **107 of 107**. `state_scenarios` §3, §11, §12: **12 of 12**
+(zk2py), **7 of 7** (`--owner rust`), **13 of 13** (zenctl's readers).
+`live_interop --only 0.16`: **7 of 7**; one Rust-owner run over
+`zk2py_echo.v1` **39 of 39**. Beside them, with the owners writing the
+envelope: `freshness_scenarios` **23 of 23**, `health_scenarios` **29 of
+29**, `redundancy_scenarios` **105 of 105**, and `alarms_scenarios` (the
+owner example) **80 of 80**.
+
+**Not re-run this round:** the other profiles' live suites (config,
+telemetry, desired, timing, arbitration, budget, link, hostid, presence,
+observer, security, acl), whose owners now write the envelope and whose
+readers read it through `zk2c`. Their checks of a sample's `Encoding` or
+Zenoh timestamp off §4.3's table may still say 0.70's. `freshness_scenarios`
+§1's did, and `health_scenarios` §6's stand-in archive kept records where
+core §4.4 keeps the owner's bytes; both are mended. `desired_scenarios` §6
+restarts its author on the host's clock, where 0.12's scenario puts it 5 s
+behind (F-421), and its §7 archive is an owner that would wrap what it
+holds in an envelope of its own.
+
+Round 93 found F-414 to F-421, eight, none a blocker. See "At core 0.73
+and observer.md 0.15" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
-  - archives and alignment (core §4.4, observer §4.5);
-  - deletes and tombstones (S3);
-  - clocks beyond minting: state.md §7's steps 1 and 3 (the catch-up, and
-    the ahead bound, which freshness and health scenarios run) are not run
-    under state.md's names;
+  - archives and alignment (core §4.4, observer §4.5), so `state.md`
+    §4, §5, §6 and §9, and §8's union storage;
   - O6's summaries and retries (O4). Call metadata (O7) is sent by the
     client (`live.call(attachment=…)`) and read by the owner
     (`OpCall.metadata()`), for `config.v1`'s attribution;
   - serving roles (§6);
   - constrained faces (§8.5);
-  - the scenarios other than presence.md, retrieval.md, grammar.md §1
-    and parts of state.md and operations.md. types.md §2 needs a renderer, which zk2py
+  - the scenarios other than presence.md, retrieval.md, grammar.md §1,
+    state.md (all but its archives' §4, §5, §6, §9 and §8's union storage,
+    round 93) and parts of operations.md. types.md §2 needs a renderer, which zk2py
     does not have: observer §7.3's honest rendering is untested here;
   - §11's History, Archive and union-storage grants, the namespace, and
     §8.5's face declarations toward a far router in a south region: the
@@ -4817,6 +4945,8 @@ impl/python/
     history.py        §9.7      the history check
     descriptor.py     §3.3      the D codes
     cbor.py, envelope.py §5.2   the error envelope
+    zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
+                                envelope first (round 93)
     compat.py         §9.7 §9.8 the classifier, retention identity
     conformance.py              the runner
     classes.py        §12       the classes zk2py claims, and its walk of spec/RULES.md (round 89)
@@ -4891,8 +5021,10 @@ impl/python/
     arbitration_scenarios.py arbitration.v1 scenarios.md §1–§11 in every pairing with the Rust commanders and
                                 actuators (black boxes), §10 with both tools, zk2py's and `zenctl arbitration`,
                                 F-268's control, core 0.56's open measured
-    state_scenarios.py §4.2, observer §4 scenarios/state.md §3 and §12 on a router process, §7 step 2 (after and inside
-                                the seed) and §10 against zk2py's owner, and §11's open cases
+    state_scenarios.py §4.2, observer §4 scenarios/state.md §3 and §12 on a router process (zk2py's owner or, with
+                                --owner rust, the owner example), §11's open cases, and state_pairings' sections
+    state_pairings.py §4, §7.5 scenarios/state.md §1, §2, §7, §10 and §13 at core 0.73, in three pairings: zk2py's
+                                owner and readers, the Rust owner with zk2py's, zk2py's owner with zenctl and consume
     echo_tool.py      observer §8.1 §8.2 a generic watcher: the samples a selector delivers, and its scope, what it watches
                                 and the verbatim kinds it excludes, in its report and on stderr; NDJSON rows with the
                                 scope on stderr alone; each payload sniffed, its row saying which case and where it
@@ -4921,7 +5053,8 @@ impl/python/
                       operations/ zk2py_frozen.v1, operations.md §5's frozen server;
                       desired/ also configs.v1 and zk2py_configured.v1, desired.v1 scenarios §12's author
                       and the role of zk2py's config.v1 owner; classes/ zk2py_replica.v1, three operations
-                      for the owner rules round 89's walk found (§5.1, §5.2, O6)
+                      for the owner rules round 89's walk found (§5.1, §5.2, O6); state/ zk2py_ground.v1,
+                      state.md's plans, status and streams at 0.73, and zk2py_relay.v1, §13's governed stream
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.

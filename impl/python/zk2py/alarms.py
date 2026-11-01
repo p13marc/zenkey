@@ -1668,16 +1668,18 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             o = subscriber.observation(key)
             obs.append(o if lost_at is None else fr.Subscription(o.listened_ns, False, o.last))
             for x in subscriber.of(key):
-                if x.stamp is not None:
-                    cands.append((sd.Stamp.of(x.stamp), x.kind, x.payload, x.stamp_id))
+                # core §4.2 (0.73): by the in-band stamp, the Zenoh one beside
+                if (x.stamp is not None or x.inband is not None) and x.refusal is None:
+                    cands.append((sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.kind, x.payload, x.stamp_id))
         if seed is not None:
             r = replies.get(key)
             if r is None:
                 g = fr.GetReading(None)
             else:
                 g = fr.GetReading("delete" if r.deleted else "put", r.stamp_ns, r.stamp_id, r.stamp, r.payload)
-                if r.stamp is not None:
-                    cands.append((sd.Stamp.of(r.stamp), "delete" if r.deleted else "put", r.payload, r.stamp_id))
+                if (r.stamp is not None or r.inband is not None) and r.refusal is None:
+                    cands.append((sd.Mark(r.inband, sd.Stamp.of(r.stamp)), "delete" if r.deleted else "put",
+                                  r.payload, r.stamp_id))
             if lost_at is None or seed.asked_ns >= lost_at:
                 obs.append(g.observation(trust))
         latest, prev, doc, sid = None, False, None, None

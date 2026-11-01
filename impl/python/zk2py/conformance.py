@@ -3429,8 +3429,109 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_readings(root) + _observer_02_readings(root) + _observer_04_readings(root) \
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
-        + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root)
+        + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.71 to 0.73 and ``observer.md`` 0.13 to 0.15 (#609, round 93;
+    #992, #976): each text at its version with its entry, then what zk2py
+    implements beyond the envelope's and the seed's fixtures:
+
+    - core §4.3's table, read from a contract (:func:`zk2py.owner.keeps_timestamp`):
+      a state declaring ``freshness.ttl_s`` above 0 and a stream declaring a
+      ``timing.v1`` lifespan keep a Zenoh timestamp, a plain state or
+      stream none; a ``redundancy.v1`` candidate's every put;
+    - which keys an owner writes the envelope on (:func:`zk2py.owner.enveloped`):
+      ``@stream`` keeps its wire;
+    - observer §7.3's envelope step: a refused envelope undecodable, its
+      refusal named, never sniffed (:func:`zk2py.zk2c.read_put`,
+      :func:`zk2py.echo_tool.row_of`), and never merged by a late joiner
+      (:class:`zk2py.seed.LateJoiner`, session-free);
+    - observer §4.4: S1's check is the table's (:func:`zk2py.live.s1_check`);
+    - observer §8.3: an in-band stamp shown as a run and a seq.
+
+    No session is opened."""
+    import re
+
+    from . import echo_tool, live, owner as ow, seed as sd, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs = flat("core.md"), flat("observer.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Written against\*\* \| core (\d+)\.(\d+) ", obs)
+    against = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("#976 A3: core 0.73 or later, observer.md 0.15 or later written against core 0.73 or later, each with its "
+         "entry, and 0.71, 0.72, 0.13 and 0.14 entered",
+         [core_v >= (0, 73), obs_v >= (0, 15), against >= (0, 73)]
+         + entry("CHANGELOG.md", "0.73", "run and seq") + entry("CHANGELOG.md", "0.72", "zk2c envelope")
+         + entry("CHANGELOG.md", "0.71", "own session") + entry("observer-CHANGELOG.md", "0.15", "in-band")
+         + entry("observer-CHANGELOG.md", "0.14", "zk2c envelope") + entry("observer-CHANGELOG.md", "0.13", "own session"),
+         [True, True, True]),
+    ]
+    repo = spec.parent
+    ground = load_contract(repo / "impl/python/interop/state/zk2py_ground.v1.toml")
+    pace = load_contract(repo / "impl/python/interop/timing/pace.v1.toml")
+    table = {f"{ground.interface} {r['token']}/{r['template']}": ow.keeps_timestamp(ground, r)
+             for r in ground.canonical["resources"] if r["kind"] != "operation"}
+    table.update({f"{pace.interface} {r['token']}/{r['template']}": ow.keeps_timestamp(pace, r)
+                  for r in pace.canonical["resources"]})
+    out.append(("core §4.3's table (0.73): status (freshness.ttl_s 60) and pace.v1's cmd (a lifespan) keep a Zenoh "
+                "timestamp; plans, the plain streams and pace.v1's axis none",
+                table, {"zk2py_ground.v1 state/plans/{vehicle}": False, "zk2py_ground.v1 state/status": True,
+                        "zk2py_ground.v1 stream/pose": False, "zk2py_ground.v1 stream/heading": False,
+                        "zk2py_ground.v1 stream/track/{id}": False, "pace.v1 stream/axis/{axis}": False,
+                        "pace.v1 stream/cmd": True}))
+    out.append(("core §4.3 (0.73): an owner writes the envelope on stream, state, @state and events keys, and an "
+                "@stream sample keeps its wire",
+                [ow.enveloped(k) for k in ("zk2/g/s/i.v1/stream/x", "zk2/g/s/i.v1/state/x", "zk2/g/s/i.v1/@state/x",
+                                           "zk2/g/s/i.v1/events/x/01j9zk6q6x5m2f4a8c0d3e7b9h",
+                                           "zk2/g/s/i.v1/@stream/x", "zk2/g/s/i.v1/@op/x",
+                                           "zk2/g/s/@zk/instance/0123456789abcdef")],
+                [True, True, True, True, False, False, False]))
+    key = "zk2/g/svc/zk2py_guard.v1/state/level"
+    refused = zk2c.read_put(key, "zenoh/bytes", b'{"a":1}')
+    good = zk2c.read_put(key, "zenoh/bytes", zk2c.mutation(zk2c.InBand(16, 3, 9), b'{"a":1}'))
+    out.append(("observer §7.3 (0.14): a state sample under zenoh/bytes with no envelope is refused (JSON's `{` is "
+                "form 3), its record None and its refusal named; an envelope's record is the payload",
+                [(refused.refused, refused.record, refused.refusal), (good.record, str(good.stamp)),
+                 zk2c.read_put(key, "application/json", b'{"a":1}').record],
+                [(True, None, "form"), (b'{"a":1}', "run 0003 seq 9"), b'{"a":1}']))
+    row = echo_tool.row_of(key, False, 7, "zenoh/bytes", b'{"a":1}')
+    ok_row = echo_tool.row_of(key, False, 13, "zenoh/bytes", zk2c.mutation(zk2c.InBand(32, 0xA1, 2), b"hi"))
+    out.append(("observer §7.3 (0.14) in echo_tool: a refused envelope's row says undecodable, naming the refusal, "
+                "and sniffs nothing; an envelope's row shows its run and seq (observer §8.3) and sniffs its record",
+                [row["sniffed"], "form" in (row["undecodable"] or ""), ok_row["envelope"], ok_row["undecodable"],
+                 ok_row["sniffed"] is not None],
+                [None, True, {"run": "000000a1", "seq": 2, "shown": "run 000000a1 seq 2"}, None, True]))
+    lj = sd.LateJoiner(None, f"{key}", consumer=False)
+    lj._merge(key, "live", False, b'"not an envelope"', "zenoh/bytes", None)
+    lj._merge(key, "live", False, zk2c.mutation(zk2c.InBand(16, 1, 4), b"v"), "zenoh/bytes", None)
+    lj._merge(key, "live", True, b"", "zenoh/bytes", None, attachment=b"\x20\x00\x01\x00")
+    lj._merge(key, "live", True, b"", "zenoh/bytes", None, attachment=zk2c.deletion(zk2c.InBand(16, 1, 5)))
+    v = lj.view().get(key)
+    out.append(("core §4.2 and observer §7.3 (0.73, 0.14): a late joiner merges no refused envelope, a put's or a "
+                "delete's, each counted undecodable with its token; it merges the record by its in-band stamp",
+                [lj.undecodable, None if v is None else (v.deleted, str(v.inband)),
+                 [(a.outcome, a.refusal) for a in lj.applied]],
+                [[(key, "live", "sample_kind"), (key, "live", "short")], (True, "run 0001 seq 5"),
+                 [("undecodable", "sample_kind"), ("kept", None), ("undecodable", "short"), ("kept", None)]]))
+    out.append(("observer §4.4 (0.15): S1's check reads the table's Zenoh timestamps; off it, not asked, whatever "
+                "the stamp",
+                live.s1_check(None, {"meta": {"zid": "1"}}, None, on_table=False)[0], "not_asked"))
+    return out
 
 
 def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -3508,15 +3609,20 @@ def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    "counts the keys the bound forgot", "**Decode order** for a tool is:", "§7.3's last rung"), []),
         ("F-408, F-410, F-411, F-413: state.md §7 step 2's premise in both bullets, §4.3's bullet inside a seed, "
          "\"In both runs\", RULES.md's header; the old forms gone",
+         # Re-read under core 0.73 (round 93, #976): state.md §7 orders by
+         # runs, so no step rests on a clock and the premise is gone
+         # (state.md §7's note: "A restart takes a new run, which a consumer
+         # accepts whatever its clock"); §4.3's bullet and step 5 are over
+         # runs.
          [state.count("Rev 11 and rev 12 come within 5 s of rev 10.")]
-         + missing(core, "An old epoch's value can arrive after the new epoch's for as long as the GET is open, not "
+         + missing(core, "An old run's value can arrive after the new run's for as long as the GET is open, not "
                          "only in transit.",
-                   "It holds it until the key's next value.")
-         + missing(state, "In both runs it then holds rev 10, until rev 12, which it accepts.")
+                   "until the key's next value.")
+         + missing(state, "It holds rev 10 until rev 12, which it accepts.")
          + missing(rules, "A verb the sentence leaves out is shown in brackets. They sit where it is left out.")
          + present(core, "the risk lasts the GET", "whatever the two times")
          + present(state, "It holds rev 10 both times")
-         + present(rules, "So does a verb the sentence omits"), [2]),
+         + present(rules, "So does a verb the sentence omits"), [0]),
     ]
 
     # -- F-406: a payload whose declared type the tool does not hold ----------
@@ -3737,19 +3843,25 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
          [True, True, True]),
         ("F-382 and F-383: a consumer by S7 from its first value, its seed's replies included, an id other than "
          "the held value's accepted, a tool's merge lasting and bounded; 0.67's sentences gone",
+         # Re-read under core 0.73 and observer 0.15 (round 93, #976): the
+         # consumer rule by seq within one run, another run accepted, from
+         # the first value on, its seed's replies included; a tool's merge
+         # lasting, within one run by seq. The same shape as 0.68's, over
+         # runs where it was over timestamp ids (the changelogs' 0.73 and
+         # 0.15 entries).
          missing(core,
-                 "A consumer MUST order each key's values by time within one timestamp id, from the first value it "
+                 "A consumer MUST order each state key's values by seq within one run, from the first value it "
                  "receives, a late joiner's seed replies included (§4.2).",
-                 "It MUST accept a value under an id other than the one its held value carries, and order by time "
-                 "within that id from then on.",
+                 "A consumer MUST accept a value under a run other than its held value's, and order by seq within "
+                 "that run from then on.",
                  "A profile MAY order a consumer's values more strictly.",
                  # Re-read under core 0.69 and observer 0.11 (round 92): F-401
                  # split the merge's MUST, F-403 reworded "no end to state" and
                  # F-398 the bound, each the same rule as 0.68 stated it.
-                 "Across two timestamp ids, a consumer MUST instead keep what §4.3's consumer rule accepts.",
-                 "So a consumer has no instant at which its merge ends")
-         + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows, "
-                   "across two timestamp ids too.",
+                 "Across two runs, a consumer MUST instead keep what §4.3's consumer rule accepts.",
+                 "A consumer orders by §4.3's consumer rule from its first value on, its seed's replies included.")
+         + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows. Within "
+                   "one run it orders by seq, plain or serial as the key's kind says (core §4.3).",
                    # Re-read under core 0.70 and observer 0.12 (the mend after
                    # #926 part 5): F-407 says the bound counts each forgetting.
                    "A tool that bounds what it holds counts each time the bound forgets a key, and reports the "
@@ -3942,28 +4054,32 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          # Re-read under core 0.70 (the mend after #926 part 5): F-410
          # reworded §4.3's bullet and F-411 state.md's "both times", each the
          # same rule as 0.69 stated it.
-         missing(core, "**Inside a seed.** An old epoch's value can arrive after the new epoch's for as long as the "
-                       "GET is open, not only in transit.",
-                 "So a consumer holds the reply's value, whether its time or the live samples' is later. It holds it "
-                 "until the key's next value.",
-                 "Where two instances answer, it receives only the reply `Latest` kept, the one with the greater "
-                 "stamp.")
+         # Re-read under core 0.73 (round 93, #976): over runs, a consumer
+         # and a tool both hold the reply that arrived last; Latest keeps
+         # the greater Zenoh timestamp, else the last to arrive.
+         missing(core, "**Inside a seed.** An old run's value can arrive after the new run's for as long as the GET "
+                       "is open, not only in transit.",
+                 "So a consumer and a tool both hold the reply's value over a value of the new run heard live, until "
+                 "the key's next value.",
+                 "It keeps the one with the greater Zenoh timestamp where a reply carries one, else the last to "
+                 "arrive (§4.1).")
          + missing(state, "**Inside the seed.**",
-                   "The consumer accepts rev 11, then the reply, which carries the old id. In both runs it then holds "
-                   "rev 10, until rev 12, which it accepts.",
-                   "The tool keeps the later time: rev 10 with the clock behind, and rev 11, then rev 12, on the "
-                   "host's clock."), []),
+                   "The consumer accepts rev 11, then the reply, which carries the old run. It holds rev 10 until rev "
+                   "12, which it accepts.",
+                   "The tool keeps the later arrival too: it holds rev 10, the reply that arrived last, until rev "
+                   "12."), []),
         ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
          "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
-         missing(core, "They are the rules of §1 and §9 that name no role",
+         # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5 joins the
+         # static sections, and §4.2's merge is by the in-band stamp.
+         missing(core, "They are the rules of §1, §7.5 and §9 that name no role",
                  "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
                  "so that a caller or tool following the steps would report the contract unavailable",
                  "or at the timeout the caller or tool gave it (§8.1).",
-                 "It MUST keep the newer by the owner's stamp (S1, S2). Across two timestamp ids, a consumer MUST "
-                 "instead keep what §4.3's consumer rule accepts.",
-                 "Across them a consumer and a tool order differently (below).",
-                 "So a consumer has no instant at which its merge ends",
-                 "Across two ids, a consumer holds a value under the id of the last value it received")
+                 "It MUST keep the newer by its in-band stamp: within one run, by seq (§4.3). Across two runs, a "
+                 "consumer MUST instead keep what §4.3's consumer rule accepts.",
+                 "A consumer orders by §4.3's consumer rule from its first value on, its seed's replies included. So "
+                 "it keeps a value under a run other than its held value's. A tool keeps the later arrival")
          + present(core, "They are §1's, §9's", "A holder on the caller's own session", "at the caller's timeout",
                    "and keep the newer by the owner's stamp (S1, S2), or, for a consumer",
                    "there a consumer and a tool part", "has no end to state", "keeps the one whose value arrived last"),
@@ -3989,9 +4105,12 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "It is listed beside a rule it excepts. A row's MAY is in the rule ids.",
                  # Re-read under core 0.70 (the mend after #926 part 5): F-413's rewrite.
                  "A verb the sentence leaves out is shown in brackets. They sit where it is left out.",
-                 "A rule of those sections, §1 and §9 included, that names a role is listed under that role.")
-         + missing(readme, "With neither, §4.3 requires a new instance whose session has a fresh, unpinned zid",
-                   "A rule of any of those sections, §1 and §9 included, that names a role is that role's")
+                 # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5
+                 # among the static sections, and the glossary's Epoch over
+                 # runs, 0.73 having removed the new epoch's MUST.
+                 "A rule of those sections, §1, §7.5 and §9 included, that names a role is listed under that role.")
+         + missing(readme, "Each new instance writes under a new run",
+                   "A rule of any of those sections, §1, §7.5 and §9 included, that names a role is that role's")
          + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
          + present(readme, "With no record of its last stamp, §4.3 requires a fresh zid"), []),
     ]
@@ -4522,7 +4641,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # The sentences 0.66 and 0.8 made name their role: each new form in
     # place, each old form gone (round 89 compared them pair by pair).
     core_pairs = [
-        ("The owner SHOULD do so in a new session", "- It SHOULD do so in a new session"),
+        # core 0.73 (round 93, #976): "mint it", for the table's Zenoh timestamps
+        ("The owner SHOULD mint it in a new session", "- It SHOULD do so in a new session"),
         ("An owner's counter that crosses a face where neither is visible SHOULD",
          "- A counter that crosses a face where neither is visible"),
         ("**A contract's state and events** SHOULD keep `reliable` and `block`.",
@@ -5335,7 +5455,10 @@ def _observer_04_readings(root: Path) -> list[tuple[str, Any, Any]]:
         # sniffing since observer 0.12 (the mend after #926 part 5), still
         # no scope
         ("observer 0.4 §8.2: zk2py's echo tool's NDJSON row is a sample's alone, no scope in it",
-         sorted(row), ["bytes", "declared_type", "delete", "encoding", "key", "kind", "sniffed", "zk2"]),
+         # and, since observer 0.14 (round 93), its envelope's run and seq,
+         # and a refusal named
+         sorted(row), ["bytes", "declared_type", "delete", "encoding", "envelope", "key", "kind", "sniffed",
+                       "undecodable", "zk2"]),
         ("observer 0.4 §8.2: its standard error line states what it watched and every kind it excludes, "
          "whatever the format",
          [all(k in echo_tool.scope_line(sc) for k in ("@stream", "@state", "@op", "@adv", "@zk")),
@@ -6388,17 +6511,38 @@ def family_seed(root: Path) -> list[Result]:
     """``seed/`` (core §4.2, 0.27): a late joiner's merge, every file, an
     unknown one failing. ``merge.json``: two stamps -> their order, and one
     key's arrivals -> which are kept."""
-    from . import seed
+    from . import seed, zk2c
 
     out: list[Result] = []
+
+    def zstamp(x: Any):
+        return None if x is None else seed.Stamp(int(x["time"]), x["id"])
+
+    def inband(x: Any):
+        return None if x is None else zk2c.InBand(int(x["width"]), int(x["run"]), int(x["seq"]))
+
     for path in sorted((root / "seed").iterdir()):
+        if path.name == "inband.json":
+            # core §4.2, §4.3 (0.73): a key's values by their in-band stamps.
+            data = _load_json(path)
+            for c in data["order"]:
+                out.append(_check(f"seed: inband order: {c['note']}",
+                                  seed.inband_order(inband(c["a"]), inband(c["b"]), c["kind"]), c["expect"]))
+            for c in data["cases"]:
+                marks = [(seed.Mark(inband(a.get("stamp")), zstamp(a.get("zenoh"))), a["sample"])
+                         for a in c["arrivals"]]
+                want = c["expect"]
+                out.append(_check(f"seed: inband merge (tool): {c['note']}",
+                                  seed.kept(marks, c["kind"]), want["tool_kept"]))
+                if want.get("consumer_accepts") is not None:
+                    out.append(_check(f"seed: inband merge (consumer): {c['note']}",
+                                      seed.kept(marks, c["kind"], consumer=True), want["consumer_accepts"]))
+            continue
         if path.name != "merge.json":
             out.append((f"seed/{path.name}", False, "an unknown fixture file: the runner does not read it"))
             continue
         data = _load_json(path)
-
-        def stamp(x: Any):
-            return None if x is None else seed.Stamp(int(x["time"]), x["id"])
+        stamp = zstamp
 
         for c in data["order"]:
             out.append(_check(f"seed: order: {c['note']}", seed.compare(stamp(c["a"]), stamp(c["b"])), c["expect"]))
@@ -6408,11 +6552,52 @@ def family_seed(root: Path) -> list[Result]:
     return out
 
 
+def family_envelope(root: Path) -> list[Result]:
+    """``envelope/`` (core §7.5, 0.72; observer §7.3, text 0.14), every file,
+    an unknown one failing. ``vectors.json``: a header byte -> CH's three
+    fields, and an envelope's bytes with the kind of sample that carries them
+    -> the parse, or the first refusal's token; every accepted case, and
+    every header byte, written back to the same bytes. ``carries.json``: a
+    key as a session hears it and the sample's Encoding -> whether the
+    sample carries an envelope."""
+    from . import zk2c
+
+    out: list[Result] = []
+    for path in sorted((root / "envelope").iterdir()):
+        data = _load_json(path)
+        if path.name == "vectors.json":
+            for c in data["headers"]:
+                b = int(c["byte"], 16)
+                h = zk2c.header(b)
+                ch = zk2c.FORMS.index(h["form"]) * 32 + (16 if h["run_width"] == 32 else 0) + h["tag"]
+                out.append(_check(f"envelope: header {c['byte']}: {c['note']}", h, c["expect"]))
+                out.append(_check(f"envelope: header {c['byte']} writes back", f"{ch:02x}", c["byte"]))
+            for c in data["cases"]:
+                raw = bytes.fromhex(c["hex"])
+                try:
+                    e = zk2c.parse(raw, c["sample"])
+                except zk2c.Refused as r:
+                    got: Any = {"refused": r.token}
+                else:
+                    got = {"form": e.form, "run_width": e.width, "run": e.run, "seq": e.seq, "tag": e.tag,
+                           "record": None if e.record is None else e.record.hex()}
+                    back = zk2c.write(e.form, e.width, e.run, e.seq, e.tag, e.record)
+                    out.append(_check(f"envelope: {c['sample']} {c['hex']} writes back", back.hex(), c["hex"]))
+                out.append(_check(f"envelope: {c['sample']} {c['hex'] or '(empty)'}: {c['note']}", got, c["expect"]))
+        elif path.name == "carries.json":
+            for c in data["cases"]:
+                out.append(_check(f"envelope: carries {c['key']} {c['encoding']}: {c['note']}",
+                                  zk2c.carries(c["key"], c["encoding"]), c["expect"]))
+        else:
+            out.append((f"envelope/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
 #: Every entry of spec/conformance/ that a family reads. Appendix E lists
 #: the fixture formats; an entry no family reads fails ``layout``, so a new
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
-                 "history", "descriptors", "errors", "compat", "budget", "seed"}
+                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -6444,6 +6629,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "compat": family_compat,
     "budget": family_budget,
     "seed": family_seed,
+    "envelope": family_envelope,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,

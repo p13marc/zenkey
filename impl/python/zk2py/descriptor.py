@@ -34,6 +34,7 @@ the fixtures (SPEC-FINDINGS F-04, F-05).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -41,6 +42,9 @@ from . import jcs
 from .contract import Contract
 from .lexical import FINGERPRINT, GATE_NAME, IDENT, INSTANCE_ID, is_interface_id, is_plain_chunk
 from .shape import Checker, load_schema
+
+#: core §3.3 (0.73): a run, "4 digits for a 16-bit run, and 8 for a 32-bit one".
+RUN = re.compile(r"[0-9a-f]{4}|[0-9a-f]{8}")
 
 FORMAT = "zk2-descriptor/0.1"
 
@@ -67,6 +71,10 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
     if len(service) != 2 or not all(is_plain_chunk(c) for c in service):
         codes.append("D002")
     if INSTANCE_ID.fullmatch(doc["instance"]) is None:
+        codes.append("D002")
+    # Core §3.3 (0.73): "Any other spelling than 4 or 8 lowercase hex digits
+    # is D002"; a descriptor that states no run is checked as any other.
+    if "run" in doc and RUN.fullmatch(doc["run"]) is None:
         codes.append("D002")
 
     caps = doc.get("capabilities", [])

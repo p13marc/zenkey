@@ -135,6 +135,8 @@ class Reader:
         #: samples on a wildcard key (core R6) and delete samples: no arrival
         self.discarded: list[str] = []
         self.deletes: list[str] = []
+        #: samples whose envelope was refused, (key, token): undecodable (observer §7.3)
+        self.undecodable: list[tuple[str, str]] = []
         #: descriptors held, by instance
         self.descriptors: dict[str, dict[str, Any]] = {}
         #: when each instance's first descriptor reached the reader, and how
@@ -329,7 +331,16 @@ class Reader:
         stamp_ns = None if ts is None else ts.get_time_as_ntp64().as_nanos()
         stamp_id = None if ts is None else str(ts.get_id())
         stamp = None if ts is None else tm.Stamp(wall - stamp_ns, stamp_id)
-        payload = sample.payload.to_bytes()
+        from . import zk2c
+
+        read = zk2c.read_sample(sample)
+        if read.refused:
+            # observer §7.3 (0.14), core §7.5: a refused envelope is
+            # undecodable, never a value, and no arrival
+            with self.lock:
+                self.undecodable.append((key, read.refusal))
+            return
+        payload = read.record if read.record is not None else sample.payload.to_bytes()
         with self.lock:
             v = res.lifespan.judge(stamp)
             expired = v.verdict == tm.EXPIRED

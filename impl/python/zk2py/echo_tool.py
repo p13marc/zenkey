@@ -104,21 +104,39 @@ def scope_line(scope: dict[str, Any]) -> str:
     return f"echo: watching {', '.join(scope['watched']) or 'no kind'}; {scope['says']}"
 
 
-def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | None = None) -> dict[str, Any]:
+def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | None = None,
+           attachment: bytes | None = None) -> dict[str, Any]:
     """One sample's row, the same in the JSON document's ``samples`` and as
     an NDJSON line: its key, whether it is zk2, its kind token (``None``
     for a key that is not zk2, a fact and not an error, observer §8.1);
     ``declared_type``, what the tool says of a payload whose declared type
     it does not hold, which case and where it stopped resolving the key;
     and ``sniffed``, a put's payload sniffed (observer §7.3, 0.12), ``None``
-    for a delete, which has none, or when no payload was handed in."""
-    from . import keys
+    for a delete, which has none, or when no payload was handed in.
+
+    **The envelope first** (observer §7.3, text 0.14). A sample on a zk2
+    stream, state or event key under ``zenoh/bytes`` is read as core §7.5's
+    envelope: ``envelope`` is its in-band stamp, a run and a seq, never a
+    time (observer §8.3, 0.15), and what is sniffed is its record. A
+    refused envelope is ``undecodable``, its refusal named, and its bytes
+    are never sniffed."""
+    from . import keys, zk2c
 
     parsed = keys.parse(key)
+    read = None
+    if payload is not None or delete:
+        read = zk2c.read_delete(key, encoding, attachment) if delete else zk2c.read_put(key, encoding, payload)
+    stamp = None if read is None or read.stamp is None else {
+        "run": read.stamp.run_hex(), "seq": read.stamp.seq, "shown": str(read.stamp)}
+    sniffed = None
+    if not delete and payload is not None and not (read is not None and read.refused):
+        sniffed = decoding.sniff(read.record if read is not None and read.record is not None else payload, encoding)
     return {"key": key, "zk2": parsed is not None,
             "kind": parsed.get("token") if parsed and parsed.get("form") == "data" else None,
             "delete": delete, "bytes": size, "encoding": encoding, "declared_type": decoding.unheld(key),
-            "sniffed": None if delete or payload is None else decoding.sniff(payload, encoding)}
+            "envelope": stamp,
+            "undecodable": None if read is None or not read.refused else read.undecodable(),
+            "sniffed": sniffed}
 
 
 #: What the report's notes say of every payload (observer §7.3, 0.12).
@@ -215,8 +233,9 @@ def watch(session: Any, selector: str, window_s: float, count: int = 0,
 
     def received(s: Any) -> None:
         payload = s.payload.to_bytes()
+        att = None if s.attachment is None else s.attachment.to_bytes()
         rows.offer(row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(payload), str(s.encoding),
-                          payload))
+                          payload, att))
 
     sub = session.declare_subscriber(selector, zenoh.handlers.Callback(received))
     if listening is not None:

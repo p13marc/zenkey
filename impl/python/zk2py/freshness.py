@@ -416,11 +416,16 @@ class Received:
     kind: str               # "put" or "delete"
     arrival_ns: int         # its monotonic clock
     receipt_utc_ns: int     # its UTC clock, for a measurement
-    payload: bytes
+    payload: bytes          # the envelope's record (observer §7.3, 0.14), or the bytes with none
     encoding: str
     stamp_ns: int | None
     stamp_id: str | None
     stamp: str | None
+    #: core §4.3 (0.73): its in-band stamp, or None
+    inband: Any = None
+    #: core §7.5's token where its envelope was refused (undecodable,
+    #: observer §7.3): its ``payload`` empty, never read as one
+    refusal: str | None = None
 
 
 class Subscriber:
@@ -481,7 +486,13 @@ class Subscriber:
         text = None if ts is None else str(ts)
         sid = None if text is None else text.split("/", 1)[1]
         kind = "delete" if sample.kind == zenoh.SampleKind.DELETE else "put"
-        rec = Received(kind, arrival, utc, sample.payload.to_bytes(), str(sample.encoding), stamp_ns, sid, text)
+        from . import zk2c
+
+        read = zk2c.read_sample(sample)
+        record = b"" if kind == "delete" or read.refused else (
+            read.record if read.record is not None else sample.payload.to_bytes())
+        rec = Received(kind, arrival, utc, record, str(sample.encoding), stamp_ns, sid, text,
+                       read.stamp, read.refusal)
         with self.lock:
             self._record(key, rec)
         if self.trust is not None and kind == "put" and stamp_ns is not None and sid is not None:
@@ -551,6 +562,8 @@ class GetReading:
     #: the reply's ``Encoding``, which picks a held JSON Schema type's wire
     #: (observer §7.3; :func:`zk2py.decoding.wire_of`)
     encoding: str = ""
+    #: core §4.3 (0.73): the reply's in-band stamp, or None
+    inband: Any = None
 
     def observation(self, trust: ClockTrust, now_utc_ns: int | None = None) -> Get:
         if self.reply is None:
@@ -573,8 +586,12 @@ def get_reading(session: Any, key: str, timeout: float = 1.0) -> GetReading:
         return GetReading(None)
     r = mine[-1]
     if r.deleted:
-        return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp)
-    return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload, r.encoding)
+        return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
+    if r.refusal is not None:
+        # observer §7.3 (0.14): a refused envelope is undecodable; its bytes
+        # are never read, so the reading holds an empty payload.
+        return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, b"", r.encoding, r.inband)
+    return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload, r.encoding, r.inband)
 
 
 # -- a tool's verdict on a service's resources (§5, scenarios §6) ------------------

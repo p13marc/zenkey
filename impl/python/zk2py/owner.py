@@ -54,8 +54,34 @@ unstable setting, the one opt-in of §0 this owner takes (round 89, F-369).
 
 The session is a zenoh *router* listening on a loopback port, or, with
 ``connect``, a client of a router: the second is what ``state.md §1`` and
-``presence.md §1–§2`` need. Timestamping (the HLC) is enabled, as §4.3
-requires of "a session that serves state".
+``presence.md §1–§2`` need.
+
+**Runs and seqs (core 0.73, #976).** Every put on a ``stream``, ``state``,
+``@state`` or ``events`` key carries core §7.5's envelope, its sample's
+``Encoding`` ``zenoh/bytes``, and every delete of a state member carries a
+delete envelope as its attachment (§4.3). An ``@stream`` sample keeps its
+wire, and so do operations, the descriptor and bundles.
+- **The run.** Each instance writes under a run of its own, stated in its
+  descriptor's ``run`` (§3.3). With ``run_record`` it is a 16-bit counter
+  in that file, written durably before the run's first mutation; with none,
+  with the counter spent at 0xFFFF, or for a candidate of a governed
+  interface (``redundancy.v1``), a 32-bit random draw, drawn again while it
+  equals a run this owner used. A re-mint takes a new run; a takeover does
+  not.
+- **The seq.** One count per run over every state mutation and event
+  occurrence, from 0; before it would pass 16,777,215 the owner takes a new
+  run, puts its descriptor stating it, and writes on from 0. Each stream
+  key's seq is its own, from 0 at its first sample in a run, wrapping
+  modulo 2^24, never restarted within the run, a member's publisher
+  declared again included (:meth:`Owner.set_next_seq` sets the next state
+  seq, for ``state.md`` §7 step 3).
+- **The Zenoh timestamp** is set only on §4.3's table (:func:`keeps_timestamp`):
+  a state declaring ``freshness.ttl_s`` above 0, a ``desired.v1`` desired
+  resource, a ``telemetry.v1`` metric state, a stream declaring a
+  ``timing.v1`` lifespan, a ``health.v1`` fault where its owner sets one,
+  and every put of a ``redundancy.v1`` candidate, whose session runs its
+  HLC (§8.2's exception). Every other session runs with timestamping
+  disabled (§8.2, "Session posture"), unless a test rig asks for ``hlc``.
 """
 
 from __future__ import annotations
@@ -71,7 +97,7 @@ from typing import Any
 
 import zenoh
 
-from . import bundle, envelope, freshness, templates
+from . import bundle, envelope, freshness, templates, zk2c
 from .contract import Contract
 from .lexical import parse_interface_id
 from .slug import slug
@@ -166,10 +192,49 @@ def free_loopback_port() -> int:
 
 @dataclass
 class _Held:
-    payload: bytes | None        # None: deleted (a tombstone)
-    encoding: str
-    stamp: zenoh.Timestamp
+    payload: bytes | None        # None: deleted (a tombstone); the record
+    encoding: str                # the record's Encoding (§7.2)
+    stamp: zenoh.Timestamp | None  # the Zenoh timestamp, on §4.3's table only
     at: float                    # monotonic time of the mutation
+    #: core §4.3 (0.73): the mutation's in-band stamp, and the bytes it put
+    #: (its envelope, or a delete's attachment), which S2's reply carries
+    inband: zk2c.InBand | None = None
+    wire: bytes | None = None
+
+
+def keeps_timestamp(c: Contract, r: dict[str, Any]) -> bool:
+    """Core §4.3's table (0.73): whether resource ``r`` of ``c`` carries a
+    Zenoh timestamp its owner sets beside the in-band stamp. A
+    ``redundancy.v1`` candidate's every put is the table's too, by its
+    session's HLC (:attr:`Owner.candidate`); a ``health.v1`` fault carries
+    one where its owner sets one (its §2.5), which :meth:`Owner.publish`
+    leaves to the caller."""
+    from . import timing
+
+    ann = r["annotations"]
+    if r["kind"] == "state":
+        if freshness.horizon("state", ann).horizon == "within":
+            return True
+        if "desired.target_param" in ann:
+            return True
+        if "telemetry.kind" in ann and "telemetry.v1" in c.canonical["uses"]:
+            return True
+    if r["kind"] == "stream":
+        d = timing.declaration("stream", ann)
+        if d.declaration == timing.DECLARED and d.lifespan_ms is not None:
+            return True
+    return False
+
+
+#: core §4.3: the kinds an owner writes the envelope on (``@stream`` keeps
+#: its wire).
+ENVELOPED = ("stream", "state", "@state", "events")
+
+
+def enveloped(key: str) -> bool:
+    """Whether an owner writes ``key``'s samples in §7.5's envelope."""
+    p = zk2c.data_key(key)
+    return p is not None and p.get("form") == "data" and p.get("token") in ENVELOPED
 
 
 def _template_key(template: str) -> str:
@@ -351,12 +416,12 @@ class Owner:
                  router_connect: str | None = None, hostid: Any = None,
                  hostid_ephemeral: bool | None = None, meta_host: str | None = None,
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
-                 initial: dict[str, bytes] | None = None, hlc: bool = True,
+                 initial: dict[str, bytes] | None = None, hlc: bool | None = None,
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
                  tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
                  params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None,
                  lease_ms: int | None = None, namespace: str | None = None,
-                 interface_tokens_after_s: float | None = 0.0):
+                 interface_tokens_after_s: float | None = 0.0, run_record: Any = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -407,11 +472,19 @@ class Owner:
         - ``budget``: False lets a test owner break §2.7's rule on purpose:
           by default a put of a new live member beyond the bound, or an
           event occurrence beyond its rate, raises :class:`BudgetExceeded`.
-        - ``hlc``: False runs a client's session without its HLC, a test
-          rig only: core §4.3 asks every serving session for one. Its puts
-          then leave with the stamps the owner gives them, so an offset
-          ``clock`` reaches the router dated ahead (health.v1 scenarios §4,
-          the [moved clock] tier, 0.2).
+        - ``hlc``: whether its session runs zenoh's timestamping. By default
+          it does not (core §8.2, 0.73: "The owner's session SHOULD run
+          with timestamping disabled"), but for a candidate of a governed
+          interface, whose every put the candidate session's HLC stamps
+          (``redundancy.v1`` §2.10, §8.2's exception). True is a test rig's
+          (``state.md`` §1's second router, timing.v1's stamped steps).
+          Without it, a put leaves with the stamp the owner gives it, so an
+          offset ``clock`` reaches the router dated ahead (health.v1
+          scenarios §4).
+        - ``run_record``: a file holding its 16-bit run counter (core §4.3,
+          0.73), the last run it issued; each start, and each re-mint,
+          takes the next and writes it durably before any mutation under
+          it. None, or a counter spent at 0xFFFF, draws a 32-bit run.
         - ``initial``: state values held at start, by key relative to the
           address (``health.v1/state/status``), put with the others before
           the tokens (§8.2 "State values"; a MUST for health.v1's status,
@@ -511,7 +584,6 @@ class Owner:
         #: guards the refresher's start against close() (review of PR #807)
         self._refresher_lock = threading.Lock()
         self.initial = dict(initial or {})
-        self.hlc = hlc
         self.cardinality = {k: dict(v) for k, v in (cardinality or {}).items()}
         self.budget = budget
         #: core S3: the tombstone window, "60 s, unless the deployment
@@ -554,6 +626,24 @@ class Owner:
         self._docs: dict[str, bytes] = {}
         #: core §8.1's member tokens held, (iface, member) -> (key, token)
         self._member_tokens: dict[tuple[str, str], tuple[str, Any]] = {}
+        #: redundancy.v1: a candidate of a governed interface draws 32-bit
+        #: runs and runs its session's HLC (core §4.3, §8.2's exception)
+        self.candidate = any("redundancy.v1" in c.canonical["uses"] for c in contracts)
+        self.hlc = self.candidate if hlc is None else hlc
+        #: core §4.3 (0.73): the run record, the run written under now, the
+        #: runs this owner used, the next state-and-event seq, and each
+        #: stream key's next seq in the run
+        self.run_record = run_record
+        self.run: tuple[int, int] | None = None   # (width, value)
+        self.runs_used: list[tuple[int, int]] = []
+        self._seq = 0
+        self._stream_seq: dict[str, int] = {}
+        self._seq_lock = threading.RLock()
+        #: samples a role's subscription heard whose envelope was refused,
+        #: (key, token): undecodable (observer §7.3), never handed on
+        self.undecodable: list[tuple[str, str]] = []
+        #: every resource by key, (contract, resource), for the table
+        self._resource_of: dict[str, tuple[Any, dict[str, Any]]] = {}
 
     # -- core §8.1: member tokens (timing.v1 scenarios §2, round 76) -------
 
@@ -625,6 +715,96 @@ class Owner:
             last = self._last
             if last is None or last.get_time_as_ntp64().as_nanos() < ntp.as_nanos():
                 self._last = zenoh.Timestamp(ntp, self.session.new_timestamp().get_id())
+
+    # -- core §4.3 (0.73): runs and seqs ---------------------------------
+
+    def take_run(self) -> tuple[int, int]:
+        """A new run (core §4.3): the record's counter plus one, written
+        durably first, or a 32-bit draw with no record, with the counter
+        spent at 0xFFFF ("and leaves the record as it is"), and for a
+        candidate. "It draws again while the run equals one it used." The
+        seqs start again at 0."""
+        import os
+
+        with self._seq_lock:
+            run: tuple[int, int] | None = None
+            if self.run_record is not None and not self.candidate:
+                path = os.fspath(self.run_record)
+                last = None
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        last = int(json.load(f)["run"])
+                except FileNotFoundError:
+                    last = None
+                nxt = 0 if last is None else last + 1
+                if nxt <= 0xFFFF:
+                    tmp = f"{path}.tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump({"run": nxt}, f)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp, path)
+                    run = (16, nxt)
+            if run is None:
+                while True:
+                    run = (32, secrets.randbits(32))
+                    if run not in self.runs_used:
+                        break
+            self.run = run
+            self.runs_used.append(run)
+            self._seq = 0
+            self._stream_seq = {}
+            return run
+
+    def run_hex(self) -> str:
+        """The run as the descriptor states it (core §3.3)."""
+        assert self.run is not None
+        return zk2c.InBand(self.run[0], self.run[1], 0).run_hex()
+
+    def set_next_seq(self, n: int) -> None:
+        """The next state-and-event seq (``state.md`` §7 step 3: "The test
+        sets the owner's next seq")."""
+        with self._seq_lock:
+            if not 0 <= n <= zk2c.SEQ_MAX:
+                raise ValueError("a seq is 24 bits")
+            self._seq = n
+
+    def _next_inband(self) -> zk2c.InBand:
+        """The in-band stamp of the next state mutation or event occurrence:
+        "Before it would pass 16,777,215, the owner takes a new run and puts
+        its descriptor stating it. Then it writes under the new run from
+        seq 0" (core §4.3)."""
+        with self._seq_lock:
+            if self.run is None:
+                self.take_run()
+            if self._seq > zk2c.SEQ_MAX:
+                self.take_run()
+                self._put_descriptor()
+            assert self.run is not None
+            ib = zk2c.InBand(self.run[0], self.run[1], self._seq)
+            self._seq += 1
+            return ib
+
+    def _next_stream_inband(self, key: str) -> zk2c.InBand:
+        """A stream key's next in-band stamp: its own seq, from 0 at its
+        first sample in the run, wrapping modulo 2^24, never restarted
+        within the run (core §4.3)."""
+        with self._seq_lock:
+            if self.run is None:
+                self.take_run()
+            assert self.run is not None
+            seq = self._stream_seq.get(key, 0)
+            self._stream_seq[key] = (seq + 1) % 2**24
+            return zk2c.InBand(self.run[0], self.run[1], seq)
+
+    def _table(self, key: str) -> bool:
+        """Whether ``key``'s resource carries a Zenoh timestamp the owner
+        sets (core §4.3's table): a candidate's every put, or
+        :func:`keeps_timestamp`."""
+        if self.candidate:
+            return True
+        cr = self._resource_of.get(key) or self._member_of.get(key)
+        return cr is not None and keeps_timestamp(*cr)
 
     # -- §8.2 step 2: the exposure plan ----------------------------------
 
@@ -727,6 +907,9 @@ class Owner:
         if self.session is None:
             self.open_session()
         try:
+            # core §4.3 (0.73): "A new run is taken by each new instance",
+            # before its descriptor states it and before its first mutation.
+            self.take_run()
             self._bring_up(plan)
         except Exception:
             self.close()
@@ -749,9 +932,12 @@ class Owner:
             if self.router_connect:
                 conf.insert_json5("connect/endpoints", json.dumps([self.router_connect]))
         conf.insert_json5("scouting/multicast/enabled", "false")
-        # §4.3: "A session that serves state MUST enable Zenoh's HLC."
-        # Only a client test rig turns it off (``hlc``).
-        conf.insert_json5("timestamping/enabled", "true" if self.hlc or not self.connect else "false")
+        # Core §8.2 (0.73), "Session posture": "The owner's session SHOULD
+        # run with timestamping disabled"; a candidate of a governed
+        # interface enables it (redundancy.v1 §2.10), and so does a test
+        # rig that asks (``hlc``). A router's default is on, so it is
+        # written out either way.
+        conf.insert_json5("timestamping/enabled", "true" if self.hlc else "false")
         if self.lease_ms is not None:
             conf.insert_json5("transport/link/tx/lease", str(int(self.lease_ms)))
         if self.namespace is not None:
@@ -818,10 +1004,11 @@ class Owner:
                 enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                     "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
                     if r["type"]["kind"] == "jsonschema" else "application/protobuf"
-                pub = s.declare_publisher(key, encoding=enc, **qos_of(r))
+                pub = s.declare_publisher(key, encoding=zk2c.ENCODING if enveloped(key) else enc, **qos_of(r))
                 self._entities.append(pub)
                 self._publishers[key] = pub
                 self._encodings[key] = enc
+                self._resource_of[key] = (c, r)
                 h = freshness.horizon(r["kind"], r["annotations"])
                 if r["kind"] == "state" and h.horizon == "within":
                     self.horizons[key] = h
@@ -1077,7 +1264,18 @@ class Owner:
         # Declared first, assigned after: a declaration that raises leaves
         # the owner on its old id, with nothing of the new one declared.
         with self._writes:
-            entities, doc, tokens = self._declare_instance(self._plan_made, new)
+            # Core §1.5, §4.3 (0.73): "A new instance writes under a new
+            # run", which its first descriptor states. A declaration that
+            # raises leaves the old run too.
+            with self._seq_lock:
+                before = (self.run, self._seq, dict(self._stream_seq))
+                self.take_run()
+            try:
+                entities, doc, tokens = self._declare_instance(self._plan_made, new)
+            except Exception:
+                with self._seq_lock:
+                    self.run, self._seq, self._stream_seq = before[0], before[1], before[2]
+                raise
             self.instance, self._instance_entities, self.descriptor = new, entities, doc
             self._iface_tokens = tokens
         for e in old_entities:
@@ -1108,6 +1306,8 @@ class Owner:
             "format": "zk2-descriptor/0.1",
             "service": f"{self.system}/{self.service}",
             "instance": self.instance if instance is None else instance,
+            # core §3.3 (0.73): "An owner MUST state its run there".
+            **({"run": self.run_hex()} if self.run is not None else {}),
             "interfaces": [{
                 "iface": c.interface, "contract": c.fingerprint, "minor": c.minor or 0,
                 "token": c.interface not in self.tokenless,
@@ -1141,10 +1341,12 @@ class Owner:
 
     # -- state mutations (S1–S3) ------------------------------------------
 
-    def set_state(self, key: str, payload: bytes) -> zenoh.Timestamp:
-        """Put a state value, stamped by the owner (S1). Every change starts
-        the re-put interval again (freshness.v1 §2.4). A put after
-        :meth:`close_writer` is a new writer's."""
+    def set_state(self, key: str, payload: bytes) -> Any:
+        """Put a state value, its in-band stamp in its envelope (S1, core
+        §4.3, 0.73), with a Zenoh timestamp on §4.3's table. Returns that
+        timestamp, or the in-band stamp where the table keeps none. Every
+        change starts the re-put interval again (freshness.v1 §2.4). A put
+        after :meth:`close_writer` is a new writer's."""
         with self._writes:
             self._refuse_standby_write(key)
             if self.ahead:
@@ -1156,14 +1358,21 @@ class Owner:
                 live = [k for k, h in self._held.items() if h.payload is not None
                         and self._member_of.get(k, (None, None))[1] is self._member_of[key][1]]
                 self._check_budget(key, len(live))
-            stamp = self.mint()
+            # S1 (0.73): its in-band stamp in its envelope, and a Zenoh
+            # timestamp on §4.3's table alone (§8.2's MUST NOT).
             enc = self._encodings[key]
-            self._publishers[key].put(payload, encoding=enc, timestamp=stamp)
-            self._held[key] = _Held(payload, enc, stamp, time.monotonic())
+            stamp = self.mint() if self._table(key) else None
+            ib, wire = None, payload
+            if enveloped(key):
+                ib = self._next_inband()
+                wire = zk2c.mutation(ib, payload)
+            self._publishers[key].put(wire, encoding=zk2c.ENCODING if ib is not None else enc,
+                                      **({"timestamp": stamp} if stamp is not None else {}))
+            self._held[key] = _Held(payload, enc, stamp, time.monotonic(), ib, wire)
             self.closed_writers.discard(key)
-            return stamp
+            return stamp if stamp is not None else ib
 
-    def delete_state(self, key: str, elapsed_s: float = 0.0) -> zenoh.Timestamp:
+    def delete_state(self, key: str, elapsed_s: float = 0.0) -> Any:
         """Delete a state key, stamped (S1); answered with ``reply_del`` within
         the tombstone window (S3). "A deleted member is not re-put".
 
@@ -1175,10 +1384,41 @@ class Owner:
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
-            stamp = self.mint()
-            self._publishers[key].delete(timestamp=stamp)
-            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s))
-            return stamp
+            # S1 (0.73): a delete's in-band stamp is its attachment.
+            stamp = self.mint() if self._table(key) else None
+            ib, att = None, None
+            if enveloped(key):
+                ib = self._next_inband()
+                att = zk2c.deletion(ib)
+            kw: dict[str, Any] = {}
+            if stamp is not None:
+                kw["timestamp"] = stamp
+            if att is not None:
+                kw["attachment"] = att
+            self._publishers[key].delete(**kw)
+            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s),
+                                    ib, att)
+            return stamp if stamp is not None else ib
+
+    def remove_member(self, key: str) -> None:
+        """A templated member removed (``state.md`` §13 step 3): its
+        publisher undeclared, so that its next put declares it again. Its
+        stream seq is kept: "An owner MUST NOT restart a stream key's seq
+        within a run, even where it declares the key's publisher again"
+        (core §4.3, 0.73)."""
+        with self._writes:
+            if key not in self._member_of:
+                raise KeyError(f"{key}: no templated member of this owner")
+            pub = self._publishers.pop(key, None)
+            self._encodings.pop(key, None)
+            self._member_of.pop(key, None)
+            if pub is not None:
+                try:
+                    pub.undeclare()
+                except Exception:  # noqa: BLE001 - withdrawn when the session closes
+                    pass
+                if pub in self._entities:
+                    self._entities.remove(pub)
 
     def _member_publisher(self, key: str) -> None:
         """A publisher for a member of a templated state resource, declared
@@ -1207,7 +1447,8 @@ class Owner:
                     enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                         "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
                         if r["type"]["kind"] == "jsonschema" else "application/protobuf"
-                    pub = self.session.declare_publisher(key, encoding=enc, **qos_of(r))
+                    pub = self.session.declare_publisher(key, encoding=zk2c.ENCODING if enveloped(key) else enc,
+                                                         **qos_of(r))
                     self._entities.append(pub)
                     self._publishers[key], self._encodings[key] = pub, enc
                     # freshness.v1 §2.4 applies to every member of a state
@@ -1297,13 +1538,17 @@ class Owner:
             # only once it is put: one that raises publishes nothing, and
             # its member keeps its rate (§2.7).
             qos = qos_of(r)
+            # Core §4.3 (0.73): an occurrence carries §7.5's envelope, its seq
+            # the owner's one count over state and events, under zenoh/bytes.
+            wire, enc = zk2c.mutation(self._next_inband(), payload), zk2c.ENCODING
+            ts = {"timestamp": self.mint()} if self.candidate else {}
             if r["reliability"] == "reliable":
-                self.session.put(key, payload, encoding=enc, congestion_control=qos["congestion_control"],
-                                 priority=qos["priority"], express=qos["express"])
+                self.session.put(key, wire, encoding=enc, congestion_control=qos["congestion_control"],
+                                 priority=qos["priority"], express=qos["express"], **ts)
             else:
                 pub = self.session.declare_publisher(key, encoding=enc, **qos)
                 try:
-                    pub.put(payload)
+                    pub.put(wire, **ts)
                 finally:
                     try:
                         pub.undeclare()
@@ -1391,17 +1636,29 @@ class Owner:
                     # "the owner re-puts the member's current value,
                     # unchanged: the same payload, Encoding and attachment",
                     # under "a fresh timestamp the owner set" (core S1, §4.3).
-                    stamp = self.mint()
-                    self._publishers[key].put(held.payload, encoding=held.encoding, timestamp=stamp)
-                    self._held[key] = _Held(held.payload, held.encoding, stamp, time.monotonic())
-                    self.reputs.append((key, stamp))
+                    # Core §4.2 (0.73): "A re-put is a mutation … It
+                    # carries a new seq (S1)", and on the table a Zenoh
+                    # timestamp minted above every one the owner issued.
+                    stamp = self.mint() if self._table(key) else None
+                    ib, wire = None, held.payload
+                    if enveloped(key):
+                        ib = self._next_inband()
+                        wire = zk2c.mutation(ib, held.payload)
+                    self._publishers[key].put(wire, encoding=zk2c.ENCODING if ib is not None else held.encoding,
+                                              **({"timestamp": stamp} if stamp is not None else {}))
+                    self._held[key] = _Held(held.payload, held.encoding, stamp, time.monotonic(), ib, wire)
+                    self.reputs.append((key, stamp if stamp is not None else ib))
 
     def publish(self, key: str, payload: bytes, timestamp: zenoh.Timestamp | None = None,
                 attachment: bytes | None = None) -> None:
-        """Put a stream sample on its declared publisher, with the
-        resource's Encoding (§7.2), stamped ``timestamp`` when given (else
-        by the session, core §4.1), and with ``attachment`` when given (its
-        bytes as the resource's attachment encoding writes them, §7.2)."""
+        """Put a stream sample on its declared publisher: on a ``stream``
+        key in §7.5's envelope under its own seq, its Encoding
+        ``zenoh/bytes``, and on an ``@stream`` key as itself, with the
+        resource's Encoding (§7.2, §4.3, 0.73); stamped ``timestamp`` when
+        given (a test's, or a ``health.v1`` fault's, its owner's choice),
+        else on §4.3's table by the owner, else not at all (§8.2); and with
+        ``attachment`` when given (its bytes as the resource's attachment
+        encoding writes them, §7.2)."""
         self._refuse_standby_write(key)
         if key not in self._publishers:
             self._member_publisher(key)
@@ -1416,10 +1673,20 @@ class Owner:
                 self._check_budget(key, len(live))
             self._stream_last[key] = now
         kw: dict[str, Any] = {"encoding": self._encodings[key]}
+        if timestamp is None and self._table(key):
+            # Core §4.3's table (0.73): a stream declaring a timing.v1
+            # lifespan keeps a Zenoh timestamp, which the owner stamps
+            # (timing.v1 §2.6), as does a candidate's every put.
+            timestamp = self.mint()
         if timestamp is not None:
             kw["timestamp"] = timestamp
         if attachment is not None:
             kw["attachment"] = attachment
+        if enveloped(key):
+            # Core §4.3: a stream key's own seq, in §7.5's envelope, under
+            # zenoh/bytes; an @stream sample keeps its wire.
+            payload = zk2c.mutation(self._next_stream_inband(key), payload)
+            kw["encoding"] = zk2c.ENCODING
         self._publishers[key].put(payload, **kw)
 
     # -- the consumer's side (§3.2) ---------------------------------------
@@ -1439,7 +1706,14 @@ class Owner:
         def received(sample: zenoh.Sample) -> None:
             key = str(sample.key_expr)
             if "*" not in key:
-                sink(key, sample.payload.to_bytes())
+                # Observer §7.3 (0.14) and core §4.3 (0.73): the envelope's
+                # record is the payload; a refused one is undecodable, never
+                # handed on, and counted.
+                read = zk2c.read_sample(sample)
+                if read.refused:
+                    self.undecodable.append((key, read.refusal))
+                    return
+                sink(key, read.record if read.record is not None else b"")
             elif discarded is not None:
                 discarded(key)
 
@@ -1474,10 +1748,19 @@ class Owner:
         """Send an answer :meth:`state_answer` made, and, for a held query,
         end it (its final reply)."""
         for key, held in answer:
+            # S2 (0.73): "a reply as the bytes the mutation put, a reply_del
+            # as the delete's attachment", and the mutation's Zenoh
+            # timestamp where it carried one.
+            kw: dict[str, Any] = {} if held.stamp is None else {"timestamp": held.stamp}
             if held.payload is not None:
-                query.reply(key, held.payload, encoding=held.encoding, timestamp=held.stamp)
+                if held.inband is not None:
+                    query.reply(key, held.wire, encoding=zk2c.ENCODING, **kw)
+                else:
+                    query.reply(key, held.payload, encoding=held.encoding, **kw)
             else:
-                query.reply_del(key, timestamp=held.stamp)
+                if held.inband is not None:
+                    kw["attachment"] = held.wire
+                query.reply_del(key, **kw)
         if finish:
             query.drop()
 

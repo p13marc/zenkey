@@ -540,7 +540,8 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
     arrivals: list[tuple[Any, bool, bytes]] = []
     if subscriber is not None:
         observations.append(subscriber.observation(status_key))
-        arrivals += [(sd.Stamp.of(x.stamp), x.kind == "delete", x.payload) for x in subscriber.of(status_key)]
+        arrivals += [(sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.kind == "delete", x.payload)
+                     for x in subscriber.of(status_key) if x.refusal is None]
     checks = None
     if get:
         st = live.get_state(tool, f"zk2/{address}/{IFACE}/state/**", timeout=timeout)
@@ -550,7 +551,7 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
             x = mine[-1]
             got = (fr.GetReading("delete", x.stamp_ns, x.stamp_id, x.stamp) if x.deleted
                    else fr.GetReading("put", x.stamp_ns, x.stamp_id, x.stamp, x.payload))
-            arrivals.append((sd.Stamp.of(x.stamp), x.deleted, x.payload))
+            arrivals.append((sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.deleted, x.payload))
         else:
             got = fr.GetReading(None)
         info["status_reading"] = got

@@ -1401,8 +1401,16 @@ class ConfigOwner:
 
             s = self.owner.session
             assert s is not None
-            self._entities.append(s.declare_subscriber(self.desired_key, zenoh.handlers.Callback(
-                lambda smp: self._on_desired(smp.payload.to_bytes()))))
+            from . import zk2c
+
+            def heard(smp: Any) -> None:
+                # observer §7.3 (0.14): the envelope's record; a refused
+                # envelope, or a delete, carries no document
+                rec = zk2c.record_of(smp)
+                if rec is not None:
+                    self._on_desired(rec)
+
+            self._entities.append(s.declare_subscriber(self.desired_key, zenoh.handlers.Callback(heard)))
             for r in live.get_state(s, self.desired_key).replies:
                 if not r.deleted:
                     self._on_desired(r.payload)
@@ -1537,8 +1545,13 @@ class ConfigOwner:
         if "*" in key or "$" in key:
             return  # desired.v1 §2.5, core R6
         ts = sample.timestamp
+        from . import zk2c
+
+        read = zk2c.read_sample(sample)
+        if read.refused:
+            return  # observer §7.3 (0.14): undecodable, never a document
         self._fed_receive(sample.kind == zenoh.SampleKind.DELETE, None if ts is None else str(ts),
-                          sample.payload.to_bytes())
+                          read.record if read.record is not None else b"")
 
     def _fed_receive(self, deleted: bool, stamp: str | None, payload: bytes) -> None:
         from . import desired
@@ -1851,11 +1864,12 @@ def read(session: Any, address: str, *, subscriber: Any = None, presence: bool =
         arrivals: list[tuple[Any, bool, bytes, str]] = []
         if subscriber is not None:
             observations.append(subscriber.observation(key))
-            arrivals += [(sd.Stamp.of(x.stamp), x.kind == "delete", x.payload, x.encoding) for x in subscriber.of(key)]
+            arrivals += [(sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.kind == "delete", x.payload, x.encoding)
+                         for x in subscriber.of(key) if x.refusal is None]
         g = fr.get_reading(session, key, timeout=timeout)
         observations.append(g.observation(trust))
         if g.reply in ("put", "delete"):
-            arrivals.append((sd.Stamp.of(g.stamp), g.reply == "delete", g.payload, g.encoding))
+            arrivals.append((sd.Mark(g.inband, sd.Stamp.of(g.stamp)), g.reply == "delete", g.payload, g.encoding))
         held = sd.merged(arrivals)
         fresh = fr.judge("state", HORIZON, observations).verdict == fr.FRESH
         docv = None
