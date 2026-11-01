@@ -432,6 +432,7 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
         let lens = Lens::new("prod", None, &contracts).offline(&contracts);
         let record = br#"{"namespaces":["default"]}"#;
         let envelope = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: Stamp {
                 run: Run::U16(7),

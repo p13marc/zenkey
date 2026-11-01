@@ -34,6 +34,7 @@ fn stamp(run: Run, seq: u32) -> Stamp {
 /// A mutation's bytes: `CH · run · seq · record`.
 fn enveloped(run: Run, seq: u32, record: &str) -> Vec<u8> {
     Envelope {
+        form: zenkey::model::wire::Form::Mutation,
         tag: Tag::NONE,
         stamp: stamp(run, seq),
         record: record.as_bytes(),
@@ -262,6 +263,7 @@ fn plan(revision: u64) -> Vec<u8> {
 /// A mutation whose record is `record`'s bytes.
 fn sealed(run: Run, seq: u32, record: &[u8]) -> Vec<u8> {
     Envelope {
+        form: zenkey::model::wire::Form::Mutation,
         tag: Tag::NONE,
         stamp: stamp(run, seq),
         record,

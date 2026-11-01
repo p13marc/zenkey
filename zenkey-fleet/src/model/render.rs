@@ -499,6 +499,7 @@ mod tests {
             (None, cbor.as_slice()),
             (Some("application/cbor"), cbor.as_slice()),
         ] {
+            form: zenkey_model::wire::Form::Mutation,
             let r = render_with(&rev, key, Member::Type, encoding, bytes);
             assert_eq!(
                 r.rendered,

@@ -79,6 +79,7 @@ fn sealed(key: &str, at: Instant, seq: u32, delete: bool) -> SampleView {
     } else {
         v.payload = zenoh::bytes::ZBytes::from(
             Envelope {
+                form: zenkey_model::wire::Form::Mutation,
                 tag: Tag::NONE,
                 stamp,
                 record: &[1, 2, 3],

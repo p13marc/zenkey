@@ -89,6 +89,7 @@ impl Stamped {
     #[must_use]
     pub fn seal_tagged(&self, tag: wire::Tag, record: &[u8]) -> Vec<u8> {
         wire::Envelope {
+            form: wire::Form::Mutation,
             tag,
             stamp: self.stamp,
             record,

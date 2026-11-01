@@ -1265,6 +1265,223 @@ fn envelope_vectors() {
     }
 }
 
+/// The heartbeat fixtures' revisions, from `layouts.json`'s authoring
+/// texts, as layouts by name.
+fn heartbeat_layouts() -> BTreeMap<String, zenkey_model::heartbeat::Layout> {
+    let doc = read_json(&spec().join("conformance/heartbeat/layouts.json"));
+    doc["contracts"]
+        .as_object()
+        .expect("contracts")
+        .iter()
+        .map(|(name, text)| {
+            let loaded = load_str(text.as_str().expect("text"), &spec(), None);
+            let c = loaded
+                .contract
+                .unwrap_or_else(|| panic!("{name}: {:?}", loaded.report));
+            (name.clone(), zenkey_model::heartbeat::Layout::of(&c))
+        })
+        .collect()
+}
+
+/// `spec/conformance/heartbeat/layouts.json` (core §7.5, 0.80; #978 F1): a
+/// revision → its fingerprint, the heartbeat's tag, and its collections in
+/// map order with their cardinalities, live-count widths and horizons.
+/// Written by an independent reading of the text, checked, never blessed.
+#[test]
+fn heartbeat_layout_vectors() {
+    let doc = read_json(&spec().join("conformance/heartbeat/layouts.json"));
+    let layouts = heartbeat_layouts();
+    let cases = doc["layouts"].as_array().expect("layouts");
+    assert_eq!(cases.len(), layouts.len(), "a layout per contract");
+    for case in cases {
+        let name = case["contract"].as_str().expect("contract");
+        let l = &layouts[name];
+        let got = json!({
+            "contract": name,
+            "fingerprint": l.fingerprint.to_string(),
+            "tag": l.tag.get(),
+            "collections": l.collections.iter().map(|c| json!({
+                "resource": c.resource(),
+                "cardinality": c.cardinality,
+                "live_bits": c.live_bits(),
+                "ttl_s": c.ttl.as_secs(),
+            })).collect::<Vec<_>>(),
+        });
+        assert_eq!(case, &got, "{name}");
+    }
+}
+
+/// A heartbeat value as `bodies.json` writes it: the time, and each
+/// section by its collection's resource.
+fn heartbeat_value(
+    hb: &zenkey_model::heartbeat::Heartbeat,
+    l: &zenkey_model::heartbeat::Layout,
+) -> Value {
+    use zenkey_model::heartbeat::{Members, Time};
+    let time = match hb.time {
+        Time::Unknown => Value::Null,
+        Time::At { secs, ms } => json!({"s": secs, "ms": ms}),
+    };
+    let mut sections = serde_json::Map::new();
+    for (c, s) in l.collections.iter().zip(&hb.sections) {
+        let Some(s) = s else { continue };
+        let v = match &s.members {
+            Members::One { vouched } => json!({"digest": s.digest.to_string(), "vouched": vouched}),
+            m => json!({
+                "digest": s.digest.to_string(),
+                "live": m.live(),
+                "vouched": m.vouched(),
+                "form": m.form(),
+            }),
+        };
+        sections.insert(c.resource(), v);
+    }
+    json!({"time": time, "sections": sections})
+}
+
+/// `bodies.json`'s value read back into a heartbeat: the writer's choice
+/// of form where the value names none ([`Members::templated`]).
+fn heartbeat_of(
+    v: &Value,
+    l: &zenkey_model::heartbeat::Layout,
+) -> zenkey_model::heartbeat::Heartbeat {
+    use zenkey_model::heartbeat::{Digest, Heartbeat, Members, Section, Time};
+    let time = match &v["time"] {
+        Value::Null => Time::Unknown,
+        t => Time::At {
+            secs: t["s"].as_u64().expect("s") as u32,
+            ms: t["ms"].as_u64().expect("ms") as u16,
+        },
+    };
+    let sections = l
+        .collections
+        .iter()
+        .map(|c| {
+            let s = v["sections"].get(c.resource())?;
+            let digest = Digest::from_u32(
+                u32::from_str_radix(s["digest"].as_str().expect("digest"), 16).expect("hex"),
+            );
+            let members = if c.is_templated() {
+                let live = s["live"].as_u64().expect("live");
+                let ranks: Vec<u64> = s["vouched"]
+                    .as_array()
+                    .expect("vouched")
+                    .iter()
+                    .map(|r| r.as_u64().expect("rank"))
+                    .collect();
+                match s.get("form").and_then(Value::as_str) {
+                    None => Members::templated(live, ranks),
+                    Some("list") => Members::List { live, ranks },
+                    Some("bitmap") => {
+                        Members::Bitmap((0..live).map(|i| ranks.contains(&i)).collect())
+                    }
+                    Some(other) => panic!("form {other}"),
+                }
+            } else {
+                Members::One {
+                    vouched: s["vouched"].as_bool().expect("vouched"),
+                }
+            };
+            Some(Section { digest, members })
+        })
+        .collect();
+    Heartbeat { time, sections }
+}
+
+/// `spec/conformance/heartbeat/bodies.json` (core §7.5, 0.80; #978 F1): a
+/// layout and a value → the body's bits, pad and bytes, the list written
+/// only where it is shorter; a layout and bytes → the value, or the
+/// refusal, the first in §7.5's order. Every body read writes back to its
+/// bytes. Written by an independent reading of the text, checked, never
+/// blessed.
+#[test]
+fn heartbeat_body_vectors() {
+    use zenkey_model::heartbeat::Heartbeat;
+    let doc = read_json(&spec().join("conformance/heartbeat/bodies.json"));
+    let layouts = heartbeat_layouts();
+    let hex = |b: &[u8]| -> String { b.iter().map(|x| format!("{x:02x}")).collect() };
+    let writes = doc["writes"].as_array().expect("writes");
+    assert!(!writes.is_empty());
+    for case in writes {
+        let note = &case["note"];
+        let l = &layouts[case["layout"].as_str().expect("layout")];
+        let r = heartbeat_of(&case["value"], l).record(l).expect("writes");
+        let got = json!({"bits": r.bit_string(), "pad": r.pad(), "hex": hex(&r.bytes)});
+        assert_eq!(case["expect"], got, "{note}");
+    }
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    let mut refused = std::collections::BTreeSet::new();
+    for case in reads {
+        let note = &case["note"];
+        let l = &layouts[case["layout"].as_str().expect("layout")];
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match Heartbeat::parse(&bytes, l) {
+            Ok(hb) => {
+                assert_eq!(
+                    hb.write(l).expect("writes back"),
+                    bytes,
+                    "{note}: writes back"
+                );
+                heartbeat_value(&hb, l)
+            }
+            Err(r) => {
+                refused.insert(r.token());
+                json!({"refused": r.token()})
+            }
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+    assert_eq!(
+        refused.into_iter().collect::<Vec<_>>(),
+        ["code", "pad", "short", "trailing"],
+        "every refusal pinned"
+    );
+}
+
+/// `spec/conformance/heartbeat/digests.json` (core §7.5, 0.80; #978 F1): a
+/// collection's live members → each one's value and their digest. Written
+/// by an independent reading of the text, checked, never blessed.
+#[test]
+fn heartbeat_digest_vectors() {
+    use zenkey_model::heartbeat::Digest;
+    use zenkey_model::wire::{Run, Seq, Stamp};
+    let doc = read_json(&spec().join("conformance/heartbeat/digests.json"));
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let note = &case["note"];
+        let members: Vec<(String, Stamp)> = case["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .map(|m| {
+                let run = m["run"].as_u64().expect("run");
+                let run = match m["run_width"].as_u64() {
+                    Some(16) => Run::U16(run as u16),
+                    Some(32) => Run::U32(run as u32),
+                    w => panic!("{note}: width {w:?}"),
+                };
+                let seq = Seq::new(m["seq"].as_u64().expect("seq") as u32).expect("a seq");
+                (
+                    m["key"].as_str().expect("key").to_owned(),
+                    Stamp { run, seq },
+                )
+            })
+            .collect();
+        let values: Vec<String> = members
+            .iter()
+            .map(|(k, s)| format!("{:08x}", Digest::member(k, *s)))
+            .collect();
+        let digest = Digest::of(members.iter().map(|(k, s)| (k.as_str(), *s)));
+        assert_eq!(
+            case["expect"],
+            json!({"values": values, "digest": digest.to_string()}),
+            "{note}"
+        );
+    }
+}
+
 /// `spec/conformance/packed/vectors.json` (core §7.6, 0.75; #979 B1): each
 /// type's layout form, its sha256 and tag, each item's width and start, and
 /// the shortest and longest record; a value → its bits, pad and bytes, or

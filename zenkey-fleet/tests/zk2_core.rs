@@ -711,6 +711,7 @@ async fn each_kind_decodes_or_renders_honestly() {
     }
     // A record that is not its declared type: the type, and the reason.
     let garbage = zenkey_model::wire::Envelope {
+        form: zenkey_model::wire::Form::Mutation,
         tag: zenkey_model::wire::Tag::NONE,
         stamp: zenkey_model::wire::Stamp {
             run: zenkey_model::wire::Run::U16(0),

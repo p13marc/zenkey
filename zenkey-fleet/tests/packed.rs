@@ -166,6 +166,7 @@ async fn a_tool_shows_a_packed_record_as_its_fields() {
     // A record whose envelope carries another tag, through the right
     // revision: refused by its tag.
     let forged = Envelope {
+        form: zenkey_model::wire::Form::Mutation,
         tag: Tag::new(5).unwrap(),
         stamp: Stamp {
             run: Run::U16(1),
@@ -233,6 +234,7 @@ fn a_time_field_is_shown_under_the_epoch_assumed() {
         )
         .unwrap();
     let bytes = Envelope {
+        form: zenkey_model::wire::Form::Mutation,
         tag: Tag::new(clock.tag()).unwrap(),
         stamp: Stamp {
             run: Run::U16(1),

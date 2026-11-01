@@ -1176,6 +1176,7 @@ mod tests {
             br#"{"up":true}"#,
         );
         assert_eq!(today.conformance, Conformance::Valid);
+            form: zenkey_model::wire::Form::Mutation,
     }
 
     /// A `.zrec` keeps a sample's bytes as they came (#976's A2): a
@@ -1261,6 +1262,7 @@ mod tests {
         let ok = lens.check(
             key,
             Member::Type,
+            form: zenkey_model::wire::Form::Mutation,
             Some("application/json"),
             br#"{"up":true}"#,
         );

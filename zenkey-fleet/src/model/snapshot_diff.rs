@@ -391,6 +391,7 @@ mod tests {
             seq: Seq::new(seq).unwrap(),
         };
         let bytes = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp,
             record,

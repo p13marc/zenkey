@@ -2988,6 +2988,7 @@ async fn echo_renders_an_enveloped_samples_record() {
         loop {
             seq += 1;
             let envelope = Envelope {
+                form: zenkey_model::wire::Form::Mutation,
                 tag: Tag::NONE,
                 stamp: Stamp {
                     run: WireRun::U16(1),
