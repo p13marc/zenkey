@@ -44,6 +44,7 @@ pub fn declared(ty: &Value) -> String {
     let name = ty["name"].as_str().unwrap_or_default();
     match ty["kind"].as_str() {
         Some("jsonschema") => format!("json:{name}"),
+        Some("packed") => format!("packed:{name}"),
         Some("raw") => ty["media_type"].as_str().unwrap_or_default().to_owned(),
         _ => name.to_owned(),
     }
@@ -155,6 +156,17 @@ pub fn decode(bundle: &Bundle, ty: &Value, encoding: Option<&str>, bytes: &[u8])
                 },
             }
         }
+        // A packed record is read under its envelope's tag, and its time
+        // fields from the deployment's epoch (core §7.6): this decoder is
+        // handed neither, so it shows no value it could not check.
+        // `crate::packed::Layout::read` is the reader that is (B2 wires it).
+        Some("packed") => Rendered::Undecodable {
+            declared: declared(ty),
+            size,
+            reason: "a packed record is read with its envelope's tag, which this decoder is not \
+                     given"
+                .to_owned(),
+        },
         _ => Rendered::Undecodable {
             declared: ty.to_string(),
             size,

@@ -13,6 +13,11 @@
 //!   in a bundle it resolves by the file stem of its path, so stems are
 //!   unique per contract, and so are ids: two listed files with one JCS
 //!   form would be one artifact under one name (spec §9.4, 0.6).
+//! - **Packed** (core §7.6, §9.4, 0.75): every listed file is one
+//!   artifact, read and hashed as a JSON Schema file is. `packed:<Name>`
+//!   names a `types` entry unique across the listed packed files, and
+//!   `packed:<stem>#<Name>` one in the file of that stem. Its declarations
+//!   are linted by [`crate::packed`] (E038 to E045).
 //! - **Raw:** a media type (`image/jpeg`) or family (`video/*`), with no
 //!   artifact.
 //!
@@ -36,6 +41,9 @@ use crate::diag::{Diagnostic, Report};
 pub enum SchemaKind {
     Protobuf,
     JsonSchema,
+    /// A packed file (core §7.6): strict JSON, carried as
+    /// [`ArtifactData::Json`].
+    Packed,
 }
 
 impl SchemaKind {
@@ -44,6 +52,7 @@ impl SchemaKind {
         match self {
             Self::Protobuf => "protobuf",
             Self::JsonSchema => "jsonschema",
+            Self::Packed => "packed",
         }
     }
 }
@@ -62,7 +71,7 @@ pub struct Artifact {
 pub enum ArtifactData {
     /// An encoded `FileDescriptorSet`.
     Protobuf(Vec<u8>),
-    /// A JSON Schema document.
+    /// A JSON Schema document, or a packed one.
     Json(Value),
 }
 
@@ -100,6 +109,11 @@ pub enum TypeId {
         name: String,
         schema: String,
     },
+    /// A packed type (core §7.6): a `types` entry of a packed artifact.
+    Packed {
+        name: String,
+        schema: String,
+    },
     Raw {
         media_type: String,
         media_param: Option<String>,
@@ -112,12 +126,17 @@ impl TypeId {
         match self {
             Self::Protobuf { .. } => "protobuf",
             Self::JsonSchema { .. } => "jsonschema",
+            Self::Packed { .. } => "packed",
             Self::Raw { .. } => "raw",
         }
     }
     #[must_use]
     pub fn is_json(&self) -> bool {
         matches!(self, Self::JsonSchema { .. })
+    }
+    #[must_use]
+    pub fn is_packed(&self) -> bool {
+        matches!(self, Self::Packed { .. })
     }
 }
 
@@ -134,15 +153,23 @@ struct JsonFile {
     artifact: String,
 }
 
+struct PackedFile {
+    stem: String,
+    doc: crate::packed::PackedDoc,
+    artifact: String,
+}
+
 /// The compiled schemas of one contract.
 pub struct SchemaSet {
     artifacts: BTreeMap<String, Artifact>,
     proto: Vec<ProtoFile>,
     json: Vec<JsonFile>,
+    packed: Vec<PackedFile>,
     /// Set when a listed file failed to load, so unresolved references of
     /// that kind are not reported twice.
     proto_failed: bool,
     json_failed: bool,
+    packed_failed: bool,
 }
 
 /// The well-known types, by the file that defines them.
@@ -179,12 +206,117 @@ impl SchemaSet {
             artifacts: BTreeMap::new(),
             proto: Vec::new(),
             json: Vec::new(),
+            packed: Vec::new(),
             proto_failed: false,
             json_failed: false,
+            packed_failed: false,
         };
         set.load_proto(dir, sec, report);
         set.load_json(dir, sec, report);
+        set.load_packed(dir, sec, report);
         set
+    }
+
+    /// Packed files (core §7.6, §9.4): read as JSON Schema files are, then
+    /// linted by [`crate::packed::PackedDoc::read`]. A stem is unique among
+    /// the packed files, and an id among the JSON Schema and packed files,
+    /// both E024.
+    fn load_packed(&mut self, dir: &Path, sec: &SchemasSection, report: &mut Report) {
+        for f in &sec.packed {
+            let at = format!("schemas.packed {f:?}");
+            let doc = match std::fs::read_to_string(dir.join(f)) {
+                Ok(text) => match crate::strict::parse_json(&text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        report.push(Diagnostic::error(
+                            "E029",
+                            at,
+                            format!("is not valid JSON: {e}"),
+                        ));
+                        self.packed_failed = true;
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    report.push(Diagnostic::error(
+                        "E029",
+                        at,
+                        format!("cannot be read: {e}"),
+                    ));
+                    self.packed_failed = true;
+                    continue;
+                }
+            };
+            if let Some(n) = unsafe_integer(&doc) {
+                report.push(Diagnostic::error(
+                    "E028",
+                    at.clone(),
+                    format!("{n} is outside ±(2^53−1), so the artifact has no portable id"),
+                ));
+            }
+            let stem = file_stem(f);
+            if self.packed.iter().any(|p| p.stem == stem) {
+                report.push(Diagnostic::error(
+                    "E024",
+                    at,
+                    format!(
+                        "a second listed packed file has the stem {stem:?}; stems are unique per contract"
+                    ),
+                ));
+                continue;
+            }
+            let art = Artifact {
+                kind: SchemaKind::Packed,
+                name: stem.clone(),
+                data: ArtifactData::Json(doc.clone()),
+            };
+            let id = art.id();
+            let taken = self
+                .json
+                .iter()
+                .map(|j| (&j.artifact, &j.stem))
+                .chain(self.packed.iter().map(|p| (&p.artifact, &p.stem)))
+                .find(|(a, _)| **a == id);
+            if let Some((_, first)) = taken {
+                report.push(Diagnostic::error(
+                    "E024",
+                    at,
+                    format!("the same document as {first:?} (one id); list it once"),
+                ));
+                continue;
+            }
+            let read = crate::packed::PackedDoc::read(&doc);
+            for x in &read.findings {
+                let place = if x.at.is_empty() {
+                    at.clone()
+                } else {
+                    format!("{at} {}", x.at)
+                };
+                report.push(Diagnostic::error(x.code, place, x.message.clone()));
+            }
+            self.artifacts.insert(id.clone(), art);
+            self.packed.push(PackedFile {
+                stem,
+                doc: read,
+                artifact: id,
+            });
+        }
+    }
+
+    /// The layout of a packed type this set resolved, when its declaration
+    /// has no finding.
+    #[must_use]
+    pub fn packed_layout(&self, t: &TypeId) -> Option<&crate::packed::Layout> {
+        let TypeId::Packed { name, schema } = t else {
+            return None;
+        };
+        self.packed
+            .iter()
+            .find(|p| &p.artifact == schema)?
+            .doc
+            .types
+            .get(name)?
+            .as_ref()
     }
 
     fn load_proto(&mut self, dir: &Path, sec: &SchemasSection, report: &mut Report) {
@@ -364,6 +496,8 @@ impl SchemaSet {
             TypeRef::Named(s) => {
                 if let Some(rest) = s.strip_prefix("json:") {
                     self.resolve_json(s, rest, at, report)
+                } else if let Some(rest) = s.strip_prefix("packed:") {
+                    self.resolve_packed(s, rest, at, report)
                 } else {
                     self.resolve_proto(s, at, report)
                 }
@@ -409,6 +543,49 @@ impl SchemaSet {
                     "E024",
                     at,
                     format!("{full:?} is defined in {stems:?}; qualify it as json:<stem>#{name}"),
+                ));
+                None
+            }
+        }
+    }
+
+    fn resolve_packed(
+        &self,
+        full: &str,
+        rest: &str,
+        at: &str,
+        report: &mut Report,
+    ) -> Option<TypeId> {
+        let (stem, name) = match rest.split_once('#') {
+            Some((stem, name)) => (Some(stem), name),
+            None => (None, rest),
+        };
+        let found: Vec<&PackedFile> = self
+            .packed
+            .iter()
+            .filter(|p| stem.is_none_or(|s| p.stem == s) && p.doc.types.contains_key(name))
+            .collect();
+        match found.as_slice() {
+            [p] => Some(TypeId::Packed {
+                name: name.to_owned(),
+                schema: p.artifact.clone(),
+            }),
+            [] => {
+                if !self.packed_failed {
+                    report.push(Diagnostic::error(
+                        "E023",
+                        at,
+                        format!("{full:?}: no listed packed file defines types/{name}"),
+                    ));
+                }
+                None
+            }
+            many => {
+                let stems: Vec<&str> = many.iter().map(|p| p.stem.as_str()).collect();
+                report.push(Diagnostic::error(
+                    "E024",
+                    at,
+                    format!("{full:?} is defined in {stems:?}; qualify it as packed:<stem>#{name}"),
                 ));
                 None
             }
@@ -514,7 +691,7 @@ impl SchemaSet {
                     .as_object()?;
                 Some(props.keys().cloned().collect())
             }
-            TypeId::Raw { .. } => None,
+            TypeId::Packed { .. } | TypeId::Raw { .. } => None,
         }
     }
 

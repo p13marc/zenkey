@@ -216,6 +216,9 @@ pub enum TypeView<'a> {
     Raw,
     /// A protobuf message.
     Protobuf,
+    /// A packed record (core §7.6), which this profile's reader does not
+    /// read yet: it carries no metric kind.
+    Packed,
 }
 
 impl TypeView<'_> {
@@ -434,7 +437,7 @@ pub fn carries(ty: &TypeView<'_>, kind: MetricKind) -> bool {
     }
     match ty {
         TypeView::Raw => kind == MetricKind::Binary,
-        TypeView::Protobuf | TypeView::Json { root: None, .. } => false,
+        TypeView::Protobuf | TypeView::Packed | TypeView::Json { root: None, .. } => false,
         TypeView::Json {
             root: Some(root), ..
         } => {
@@ -556,6 +559,7 @@ fn view<'a>(t: &'a TypeId, root: Option<&'a Value>) -> TypeView<'a> {
         TypeId::JsonSchema { name, schema } => TypeView::Json { name, schema, root },
         TypeId::Raw { .. } => TypeView::Raw,
         TypeId::Protobuf { .. } => TypeView::Protobuf,
+        TypeId::Packed { .. } => TypeView::Packed,
     }
 }
 
@@ -588,7 +592,7 @@ pub fn root_schema(
             let stem = base.strip_suffix(".json").unwrap_or(base);
             doc = artifacts
                 .values()
-                .filter(|a| a.name == stem)
+                .filter(|a| a.kind == crate::schema::SchemaKind::JsonSchema && a.name == stem)
                 .find_map(json)?;
         }
         let target = if pointer.is_empty() {

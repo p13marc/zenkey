@@ -63,6 +63,10 @@ fn type_id(v: &Value, at: &str) -> Result<TypeId, BundleError> {
             name: name()?,
             schema: schema()?,
         }),
+        "packed" => Ok(TypeId::Packed {
+            name: name()?,
+            schema: schema()?,
+        }),
         "raw" => Ok(TypeId::Raw {
             media_type: text(m, "media_type", at)?.to_owned(),
             media_param: de(m, "media_param", at)?,
@@ -179,6 +183,7 @@ fn artifact(listed: &Value, b: &Bundle, i: usize) -> Result<(String, Artifact), 
             (SchemaKind::Protobuf, ArtifactData::Protobuf(bytes))
         }
         "jsonschema" => (SchemaKind::JsonSchema, ArtifactData::Json(data.clone())),
+        "packed" => (SchemaKind::Packed, ArtifactData::Json(data.clone())),
         other => return Err(shape(&at, format!("unknown schema kind {other:?}"))),
     };
     Ok((id.to_owned(), Artifact { kind, name, data }))

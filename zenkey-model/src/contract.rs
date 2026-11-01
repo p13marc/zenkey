@@ -895,6 +895,22 @@ fn resolve_data(
         Some(template),
         cx,
     );
+    // §7.1 (0.75): a packed record needs the envelope's tag, which an
+    // explicit stream's samples and an attachment never carry.
+    if kind == Kind::Stream && explicit && type_.as_ref().is_some_and(TypeId::is_packed) {
+        cx.report.push(Diagnostic::error(
+            "E044",
+            at,
+            "type: a packed type on an explicit stream, whose samples carry no envelope",
+        ));
+    }
+    if attachment.as_ref().is_some_and(TypeId::is_packed) {
+        cx.report.push(Diagnostic::error(
+            "E044",
+            at,
+            "attachment: a packed type as an attachment, which carries no envelope",
+        ));
+    }
     let base = cx.base.clone();
     // W103 is judged on resolved types only: a type that is missing (E015)
     // or does not resolve (E023, E024) says nothing about its kind.
@@ -1034,6 +1050,22 @@ fn resolve_op(
     let response = resolve_type(spec.response.as_ref(), "response", at, None, cx);
     let error = resolve_type(spec.error.as_ref(), "error", at, None, cx);
     let summary = resolve_type(spec.summary.as_ref(), "summary", at, None, cx);
+    // §7.1 (0.75): an operation's request, reply and error carry no
+    // envelope, so no reader could check a packed record's tag.
+    for (what, t) in [
+        ("request", &request),
+        ("response", &response),
+        ("error", &error),
+        ("summary", &summary),
+    ] {
+        if t.as_ref().is_some_and(TypeId::is_packed) {
+            cx.report.push(Diagnostic::error(
+                "E044",
+                at,
+                format!("{what}: a packed type on an operation, which carries no envelope"),
+            ));
+        }
+    }
     let base = cx.base.clone();
     let replies =
         pick(spec.replies.as_ref(), kd, &base, |b| b.replies.as_ref()).unwrap_or(Replies::One);

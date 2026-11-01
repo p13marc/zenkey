@@ -1,8 +1,10 @@
-//! The authoring format, draft 2 (`examples/zk2/README.md`, r3.3): the
+//! The authoring format, draft 3 (`examples/zk2/README.md`, r3.3): the
 //! TOML shape a contract file has, before any validation or defaulting.
 //! Draft 2 is draft 1 plus one spelling, `cardinality = "unbounded"`
-//! ([`Cardinality`], core 0.57, #937); the canonical form did not change,
-//! so its `format` tag is still `zk2-contract/draft-1`.
+//! ([`Cardinality`], core 0.57, #937). Draft 3 adds `[schemas] packed`
+//! and the `packed:` references (core 0.75, §7.6, #979). Neither changed
+//! the canonical form of a contract that does not use what it adds, so
+//! its `format` tag is still `zk2-contract/draft-1`.
 //!
 //! `spec/contract.schema.json` is generated from these types (schemars) and
 //! committed. A test fails when the two drift.
@@ -109,6 +111,10 @@ pub struct SchemasSection {
     /// JSON Schema 2020-12 files (the zk2 subset), definitions under `$defs`.
     #[serde(default)]
     pub jsonschema: Vec<String>,
+    /// Packed files (core §7.6, draft 3): strict JSON, types under `types`,
+    /// referenced as `packed:<Name>` or `packed:<stem>#<Name>`.
+    #[serde(default)]
+    pub packed: Vec<String>,
 }
 
 /// The fields `[defaults]` may set (r3.3 D2).
@@ -367,7 +373,8 @@ pub enum RequireCardinality {
 }
 
 /// A type reference: `"pkg.Message"`, `"json:Name"`, `"json:stem#Name"`,
-/// or `{ raw = "<media type>", media_param = "<param>" }`.
+/// `"packed:Name"`, `"packed:stem#Name"`, or
+/// `{ raw = "<media type>", media_param = "<param>" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum TypeRef {

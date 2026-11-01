@@ -5,7 +5,7 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
 - **`zenkey-model/`** (MIT, unpublished: the maintainer's call, #585, #929) is zk2's session-free
   half (#608): keys, templates, §1.3's kind selectors and what a selector
   cannot see (`grammar::blind_spots`, #614 FL4), the authoring format
-  (draft 2: draft 1 plus `cardinality = "unbounded"`, the no-ceiling
+  (draft 3: draft 2 plus `[schemas] packed` and `packed:` references, core 0.75; draft 2: draft 1 plus `cardinality = "unbounded"`, the no-ceiling
   value's name, resolved to 4294967295 so no fingerprint moved, and the
   canonical form's tag still `zk2-contract/draft-1`; #937) and its lints
   with stable codes (`diag::CODES`; E013's message ends with what to
@@ -249,7 +249,7 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   carries, no ε and governance from every revision held, and that it has
   listened from its stream subscriptions' declaration; text 0.4, #935:
   inline history out, no rule changed; text 0.5: round 88's F-349
-  rewritten), and `wire` (#976 A1): core §7.5's zk2c envelope, `Header`/`Form`/`Tag`/`Run`/`Seq`/`Stamp`, `Envelope::parse`/`write` for a put's mutation and `DeleteStamp::parse`/`write` for a delete's attachment, `Refusal::token` the fixtures' tokens; and (#976 A2) `carries`/`enveloped_key` (a stream, state or event key under `zenoh/bytes`, namespace in front or none), `read_put` → `Reading`, `read_delete`, `Refusal::reason`, with `seed::Mark`/`versus`/`admits_mark`/`consumer_accepts` ordering by seq within a run, nothing across runs or wires; and (#976 A3, core 0.73) `enveloped_kind`, `Run::hex`/`from_hex` (a descriptor's `run`, 4 or 8 lowercase hex digits) and `seed::Order`/`versus_in`/`admits_mark_in`; `descriptor::Descriptor` has an optional `run` (never `null`, D002 when misspelt, `stated_run`).
+  rewritten), and `wire` (#976 A1): core §7.5's zk2c envelope, `Header`/`Form`/`Tag`/`Run`/`Seq`/`Stamp`, `Envelope::parse`/`write` for a put's mutation and `DeleteStamp::parse`/`write` for a delete's attachment, `Refusal::token` the fixtures' tokens; and (#976 A2) `carries`/`enveloped_key` (a stream, state or event key under `zenoh/bytes`, namespace in front or none), `read_put` → `Reading`, `read_delete`, `Refusal::reason`, with `seed::Mark`/`versus`/`admits_mark`/`consumer_accepts` ordering by seq within a run, nothing across runs or wires; and (#976 A3, core 0.73) `enveloped_kind`, `Run::hex`/`from_hex` (a descriptor's `run`, 4 or 8 lowercase hex digits) and `seed::Order`/`versus_in`/`admits_mark_in`; `descriptor::Descriptor` has an optional `run` (never `null`, D002 when misspelt, `stated_run`). `packed` (#979 B1, core 0.75 §7.6): `PackedDoc::read` (E038–E045, cascade 7), `Layout` (`slots`, `min_bits`/`max_bits`, `form`, `sha256_hex`, `tag`), and the interpreted codec `Layout::write`/`read` over `serde_json::Value` with `WriteRefusal`/`ReadRefusal` tokens, fixed point exact over `num-bigint` (`Decimal`, a JSON float read by its shortest text): the source of truth B2's generated code matches. `TypeId::Packed`/`SchemaKind::Packed` (its artifact `ArtifactData::Json`), `SchemaSet::packed_layout`; `compat::compare_packed`; `decode` renders a packed record `Undecodable` (no tag in hand); zenkey-build refuses one until B2.
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2

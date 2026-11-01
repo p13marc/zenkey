@@ -36,3 +36,8 @@ protox = "0.9"
 # to ASCII identifiers and integers within ±(2^53−1), so every JCS
 # implementation — this one and Python's `rfc8785` — agrees on them.
 serde_json_canonicalizer = "0.3"
+# Packed records' fixed point (core §7.6): exact decimal arithmetic with no
+# bound on a declaration's digits. Already in the tree through der-parser.
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
