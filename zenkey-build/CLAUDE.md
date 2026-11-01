@@ -2,16 +2,10 @@
 
 Claude Code loads this file when working in `zenkey-build/`; the root `CLAUDE.md` is the index.
 
-## What this repo is
+## v1
 
-- `zenkey-build/` — the **codegen crate** (MIT, crates.io): consumers call
-  `zenkey_build::Config::new().registry_dir("registry").generate()` from their
-  build script; registry lints (RFC 08 §5) and the deprecation-ledger check fail
-  the *consumer's* build. Generates `Subject`/`ProcedureId` enums, parsers,
-  `AnySubject` dispatch, `REGISTRIES`, `is_registered_telemetry`, and — when
-  the registry declares `[[blob]]` entries (v1.8) — an app-level `blob`
-  module (deduped `Tier` enum across all declaring producers, typed key
-  builders, the probe form).
+v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch's
+`CLAUDE.md` describes it. Nothing below applies to it.
 
 ## zk2
 

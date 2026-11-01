@@ -2,12 +2,10 @@
 
 Claude Code loads this file when working in `zenkey/`; the root `CLAUDE.md` is the index.
 
-## What this repo is
+## v1
 
-- `zenkey/` — the **runtime crate** (MIT, crates.io): typed key grammar, origin
-  minting, `AppProfile`, slugs, QoS profiles, registry slices. Keys are built
-  through types, never `format!`. **App-neutral: no bundled registry, no app
-  constants.**
+v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
+`CLAUDE.md` describes it. Nothing below applies to it.
 
 ## zk2
 
