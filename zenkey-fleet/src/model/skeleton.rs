@@ -768,6 +768,7 @@ response = { raw = "text/plain" }
             service: address.into(),
             instance: format!("{instance:016x}"),
             run: None,
+            catalog: None,
             interfaces: revisions
                 .iter()
                 .map(|(r, token)| zenkey_model::descriptor::InterfaceEntry {

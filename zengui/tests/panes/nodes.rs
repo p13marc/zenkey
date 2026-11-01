@@ -158,6 +158,7 @@ fn descriptor(service: &str, instance: &str, profiles: &[&str]) -> Descriptor {
         service: service.into(),
         instance: instance.into(),
         run: None,
+        catalog: None,
         interfaces: Vec::new(),
         capabilities: Vec::new(),
         requires: Vec::new(),

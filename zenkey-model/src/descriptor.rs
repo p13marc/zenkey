@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::canonical::Fingerprint;
+use crate::catalog::CatalogId;
 use crate::chunk::{is_ident, is_lower_hex, is_plain_chunk};
 use crate::contract::Contract;
 use crate::diag::{Diagnostic, Report};
@@ -49,6 +50,17 @@ pub struct Descriptor {
     )]
     #[schemars(with = "String")]
     pub run: Option<String>,
+    /// The id of the deployment catalog the instance writes under (core
+    /// §3.3, §8.6), as 8 lowercase hex digits. An owner given a catalog
+    /// states it, and one with none leaves it out; a checker reads it as
+    /// optional, and any other spelling is D002. Never `null`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "some_string"
+    )]
+    #[schemars(with = "String")]
+    pub catalog: Option<String>,
     /// The interfaces this instance implements.
     pub interfaces: Vec<InterfaceEntry>,
     /// The capabilities this instance holds, naming the `capability:` gates
@@ -214,6 +226,15 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             "D002",
             "run",
             format!("{run:?} is not 4 or 8 lowercase hex digits"),
+        ));
+    }
+    if let Some(catalog) = d.catalog.as_deref()
+        && CatalogId::from_hex(catalog).is_none()
+    {
+        report.push(Diagnostic::error(
+            "D002",
+            "catalog",
+            format!("{catalog:?} is not 8 lowercase hex digits"),
         ));
     }
     for (i, c) in d.capabilities.iter().enumerate() {
@@ -445,6 +466,13 @@ impl Descriptor {
     #[must_use]
     pub fn stated_run(&self) -> Option<Run> {
         self.run.as_deref().and_then(Run::from_hex)
+    }
+
+    /// The catalog the descriptor names (core §3.3, §8.6), `None` when it
+    /// names none or spells it otherwise than 8 lowercase hex digits (D002).
+    #[must_use]
+    pub fn stated_catalog(&self) -> Option<CatalogId> {
+        self.catalog.as_deref().and_then(CatalogId::from_hex)
     }
 
     /// The resources of `contract` this instance exposes (§3.3): the

@@ -721,6 +721,7 @@ fn deployment(
                 service: address.into(),
                 instance: instance.to_string(),
                 run: None,
+                catalog: None,
                 interfaces: vec![InterfaceEntry {
                     iface: iface.to_string(),
                     contract: revision.fingerprint().to_string(),
@@ -969,6 +970,7 @@ impl World {
                 service: RF0.into(),
                 instance: RF0_INSTANCE.into(),
                 run: None,
+                catalog: None,
                 interfaces: vec![InterfaceEntry {
                     iface: zenkey_model::config::IFACE.into(),
                     contract: format!("sha256:{}", zenkey::config_v1::FINGERPRINT),
@@ -1021,6 +1023,7 @@ impl World {
                     service: CATALOG.into(),
                     instance: id.into(),
                     run: None,
+                    catalog: None,
                     interfaces: vec![InterfaceEntry {
                         iface: rev.iface().to_string(),
                         contract: rev.fingerprint().to_string(),
@@ -1118,6 +1121,7 @@ impl World {
                 service: RUDDER.into(),
                 instance: RUDDER_INSTANCE.into(),
                 run: None,
+                catalog: None,
                 interfaces: vec![InterfaceEntry {
                     iface: rudder.iface().to_string(),
                     contract: rudder.fingerprint().to_string(),

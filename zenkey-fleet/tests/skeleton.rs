@@ -98,6 +98,7 @@ fn catalog(instances: &[Inst<'_>]) -> Catalog {
                 service: i.address.into(),
                 instance: id.to_string(),
                 run: None,
+                catalog: None,
                 interfaces: entries
                     .iter()
                     .map(|(iface, contract, token)| InterfaceEntry {

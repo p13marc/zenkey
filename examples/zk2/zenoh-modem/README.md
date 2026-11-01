@@ -25,6 +25,10 @@ Its seam crates are on crates.io for out-of-tree backends.
   v1's are in [`link.md`](link.md), a sketch now superseded by the profile
   [`link.v1`](../../../spec/profiles/link/v1.md) (#769), whose Appendix B gives the two faces.
 - What `modem-contract` becomes is in [`contract-crate.md`](contract-crate.md).
+- [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
+  provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
+  `health.v1` at their current revisions, and dates times from 2026-01-01. A new revision goes in
+  with `zk2 catalog add`, which writes the catalog's successor.
 
 **The verdict.** Every v1 entry maps or is deleted for a stated reason, and the constrained-face
 story needs no `@zk` traffic across the radio. Of r3.2's nine claims, six hold, some needing a
