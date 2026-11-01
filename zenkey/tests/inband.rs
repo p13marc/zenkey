@@ -1,10 +1,11 @@
-//! The zk2c envelope read beside today's wire (core §7.5; #976's A2): no
-//! writer sends one yet, so these suites put envelopes from a raw session,
-//! under `zenoh/bytes` on a state key, and show what the runtime's readers
-//! make of them. A client session stamps nothing and the router stamps
-//! every put it routes (core §4.1), so each sample here also carries a
-//! Zenoh timestamp later than the last: the order shown is the in-band
-//! one, never the router's.
+//! The zk2c envelope as the runtime's readers read it (core §4.3, §7.5;
+//! #976): these suites put envelopes from a raw session, under
+//! `zenoh/bytes` on a state key, so each case can hold any run and seq,
+//! and show what the readers make of them. A client session stamps
+//! nothing and the router stamps every put it routes (core §4.1), so each
+//! sample here also carries a Zenoh timestamp later than the last: the
+//! order shown is the in-band one, never the router's (observer §4.4: off
+//! §4.3's table, a router's stamp is expected).
 
 mod common;
 
@@ -88,8 +89,8 @@ fn text(d: &Delivery) -> String {
 }
 
 /// The consumer delivers an envelope's record, with its run and seq; a
-/// sample of today's wire as it was; and a refused envelope never, counted
-/// undecodable.
+/// sample with no envelope as it arrived; and a refused envelope never,
+/// counted undecodable.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_consumer_delivers_the_record_and_counts_a_refused_envelope() {
     let (_r, ep) = router(None).await;
@@ -251,6 +252,166 @@ async fn a_state_get_reads_enveloped_replies() {
         Some("form"),
         "form 7, a snapshot, is reserved"
     );
+}
+
+/// A plan's record: the test contract's type is `text/plain`.
+fn plan(revision: u64) -> Vec<u8> {
+    format!("plan {revision}").into_bytes()
+}
+
+/// A mutation whose record is `record`'s bytes.
+fn sealed(run: Run, seq: u32, record: &[u8]) -> Vec<u8> {
+    Envelope {
+        tag: Tag::NONE,
+        stamp: stamp(run, seq),
+        record,
+    }
+    .write()
+}
+
+type Plans = zenkey::codec::Raw;
+
+/// The typed GET keeps what orders each key (core §4.3's consumer rule, a
+/// late joiner's seed replies included): `typed::get_answer` holds each
+/// key's in-band stamp beside its decoded record, a `reply_del`'s from its
+/// attachment, and the keys whose envelope was refused; `typed::get` is
+/// the same answer's keys alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_typed_get_keeps_each_keys_in_band_stamp() {
+    use zenkey::typed::{self, Current as Typed, StateGet};
+    let (_r, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let reader = client(&ep).await;
+    let vehicle = |n: u32| format!("zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-0{n}");
+    let _q = owner
+        .declare_queryable("zk2/ground/fleet-mgr/mission_plan.v1/state/**")
+        .callback(move |q| {
+            q.reply(vehicle(1), sealed(Run::U32(0xdead_beef), 10, &plan(7)))
+                .encoding(Encoding::ZENOH_BYTES)
+                .wait()
+                .unwrap();
+            q.reply_del(vehicle(2))
+                .attachment(
+                    DeleteStamp {
+                        stamp: stamp(Run::U32(0xdead_beef), 11),
+                    }
+                    .write(),
+                )
+                .wait()
+                .unwrap();
+            q.reply(vehicle(3), vec![0xe0, 0, 0])
+                .encoding(Encoding::ZENOH_BYTES)
+                .wait()
+                .unwrap();
+        })
+        .await
+        .unwrap();
+    let consumer = tool(&reader);
+    let answer = eventually_some("the owner answers", || async {
+        let a = typed::get_answer::<Plans>(&consumer, PLANS, None, T)
+            .await
+            .unwrap();
+        (a.current.len() + a.undecodable.len() == 3).then_some(a)
+    })
+    .await;
+    assert!(answer.complete);
+    let value = answer
+        .current
+        .iter()
+        .find(|c| c.key() == vehicle(1))
+        .unwrap();
+    let Typed::Value { value: decoded, .. } = value else {
+        panic!("{value:?}")
+    };
+    assert_eq!(decoded.as_ref().unwrap(), &plan(7), "the record, decoded");
+    assert_eq!(
+        answer.mark(value),
+        Some(zenkey::model::seed::Mark::InBand(stamp(
+            Run::U32(0xdead_beef),
+            10
+        ))),
+        "ordered by its run and seq, never by the router's stamp"
+    );
+    let deleted = answer
+        .current
+        .iter()
+        .find(|c| c.key() == vehicle(2))
+        .unwrap();
+    assert!(matches!(deleted, Typed::Deleted { .. }), "{deleted:?}");
+    assert_eq!(
+        answer.mark(deleted),
+        Some(zenkey::model::seed::Mark::InBand(stamp(
+            Run::U32(0xdead_beef),
+            11
+        )))
+    );
+    assert_eq!(
+        answer.undecodable.get(&vehicle(3)).map(|r| r.token()),
+        Some("form")
+    );
+    // A consumer orders the seed's replies by them (§4.2, §4.3).
+    let mut order = ValueOrder::new();
+    assert!(order.accept_mark(&vehicle(1), answer.mark(value).unwrap()));
+    assert!(!order.accept_mark(
+        &vehicle(1),
+        zenkey::model::seed::Mark::InBand(stamp(Run::U32(0xdead_beef), 9))
+    ));
+    match typed::get::<Plans>(&consumer, PLANS, None, T)
+        .await
+        .unwrap()
+    {
+        StateGet::Answered(v) => assert_eq!(v.len(), 2, "{v:?}"),
+        StateGet::Silent => panic!("the owner answered"),
+    }
+}
+
+/// The typed last-known read carries the archive's in-band stamp beside
+/// its decoded record (S5), what orders it, never a time (observer §8.3).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_typed_last_known_carries_the_in_band_stamp() {
+    let (_r, ep) = router(None).await;
+    let raw = client(&ep).await;
+    let s = client(&ep).await;
+    let reader = client(&ep).await;
+    let _arch = Archive::start(
+        &s,
+        ArchiveConfig {
+            service: config("vehicle-01/archive"),
+            records: vec![recorded()],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+            watch: None,
+        },
+    )
+    .await
+    .unwrap();
+    let consumer = tool(&reader);
+    let values: zenkey::model::template::Bindings =
+        [("vehicle".to_owned(), vec!["vehicle-01".to_owned()])].into();
+    let lk = eventually_some("the plan is recorded", || async {
+        raw.put(ORIGIN, sealed(Run::U16(3), 9, &plan(4)))
+            .encoding(Encoding::ZENOH_BYTES)
+            .await
+            .unwrap();
+        zenkey::typed::last_known::<Plans>(
+            &consumer,
+            &common::addr("vehicle-01/archive"),
+            &common::addr("ground/fleet-mgr"),
+            PLANS,
+            &values,
+            T,
+        )
+        .await
+        .unwrap()
+    })
+    .await;
+    assert_eq!(lk.origin, ORIGIN);
+    assert_eq!(lk.inband, Some(stamp(Run::U16(3), 9)));
+    assert_eq!(
+        lk.mark(),
+        Some(zenkey::model::seed::Mark::InBand(stamp(Run::U16(3), 9)))
+    );
+    assert_eq!(lk.value.unwrap().unwrap(), plan(4), "the record");
 }
 
 fn recorded() -> Recorded {

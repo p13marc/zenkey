@@ -104,7 +104,11 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `s7_late_joiners_across_runs_inside_the_seed`). `archive` is a
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
-  current (`LastKnown::inband` and `mark()`, its in-band stamp, A3).
+  current (`LastKnown::inband` and `mark()`, its in-band stamp, A3; the
+  typed reads alike since A4: `typed::LastKnown::inband`/`mark()`, and
+  `typed::get_answer` → `typed::StateAnswer` keeping each key's in-band
+  stamp, which `typed::get` and codegen's `get_*` drop, a generated
+  consumer reaching it through `inner()`).
   `inband` (#976 A2) reads every data sample as core §4.3 writes it: an envelope's record as the payload and its run and seq as `Delivery::inband`/`StateAnswer::inband` (`mark()`, `ValueOrder::accept_mark`, the one way in since A4 removed `ValueOrder::accept`); a refused one undecodable, never delivered (`Subscription::undecodable`); a sample with no envelope (an `@stream` sample, a foreign key's, one that broke §4.3) read as it arrived and ordered by its Zenoh timestamp (core §4.2); the archive orders by it, refusing an outdated put only within a run.
   Operations (#621, FH): `operation` serves a `complete` queryable that
   refuses fan-out (O2) and answers `unavailable` with its cause before any
