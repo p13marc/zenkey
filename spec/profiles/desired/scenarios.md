@@ -290,8 +290,8 @@ record holds that delete.
 1. Before its new instance token (a SHOULD; before G's GET, a MUST), S
    receives a put on `D` holding v1's content, unchanged, under a stamp
    whose id is the author's new zid, and a delete of `D2` under the same
-   id (§2.11). The put's stamp is above the author's last one. Its
-   clock is behind (§2.11). G's GET holds that put for `D` and a `reply_del` for `D2`,
+   id (§2.11). The put's stamp is above the author's last one, though
+   its clock is behind (§2.11). G's GET holds that put for `D` and a `reply_del` for `D2`,
    each stamped by the new instance, whose `meta.zid` is their id. The
    target adopts the re-put without an act: `Run` receives nothing, and S
    receives on `Rp` a report with `observed` and `in_force` the re-put's

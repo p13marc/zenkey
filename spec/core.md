@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.73** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.74** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -601,7 +601,8 @@ each document, checked against the fixture contract. `[F: descriptors/]`
 **The GET.** One `complete` queryable on the instance key answers with one
 reply: the current descriptor's bytes, with `Encoding` `application/json`,
 no attachment and no timestamp (S1–S2 bind state, and a descriptor is not
-state). Each put of it (below) carries the owner's timestamp. A caller GETs
+state). Each put of it (below) carries a Zenoh timestamp the owner sets.
+A caller GETs
 with consolidation `None`, as §8.4 does, takes the first reply, and waits
 for it as long as it chooses (§8.1). `[Sc: presence.md §2]`
 
@@ -878,7 +879,7 @@ and reports these codes. `[F: descriptors/]`
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
 | S6 | **Consumer:** current state is the owner's answer. A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or presence shows it absent. That silence is not a verdict about the key (O5). The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
-| S7 | **Owner:** a run is never reused, and a seq never wraps within it (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7]` |
+| S7 | **Owner:** a run is never reused, and its seq for state and events never wraps within it (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7]` |
 
 **A re-put is a mutation.** A put that repeats a member's current
 value, as an owner refreshing it under
@@ -993,9 +994,10 @@ time a profile reads (the table below).
   §7.5's width bit says. Two runs of different widths are two runs,
   whatever their values.
   - **No reuse.** An owner MUST NOT write under a run that it, or another
-    instance of its service, wrote under before. `[Sc: state.md §7]`
+    instance of its service, wrote under before. A random run (below)
+    meets it. The chance of a repeat is accepted. `[Sc: state.md §7]`
   - **A 16-bit run** is a counter in a record the owner keeps. The record
-    is durable before the first mutation under each run it issues. It
+    is durable before the first sample written under each run it issues. It
     moves with the service, since a move changes no key (§1.5). An owner
     that cannot keep such a record draws 32-bit runs.
   - **A 32-bit run** is drawn at random. An owner draws one when it keeps
@@ -1013,7 +1015,8 @@ time a profile reads (the table below).
   - **State and events.** An owner keeps one seq per run for all its
     state mutations and event occurrences. It starts at 0, and adds 1 at
     each. So a key's mutations carry increasing seqs, with gaps.
-  - **No wrap.** An owner MUST NOT let that seq wrap. Before it would pass
+  - **No wrap.** An owner MUST NOT let its seq for state and events wrap.
+    Before it would pass
     16,777,215, the owner takes a new run and puts its descriptor stating
     it. Then it writes under the new run from seq 0. `[Sc: state.md §7]`
   - **Streams.** Each stream key's seq is its own. It starts at 0 at the
@@ -1943,7 +1946,9 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
     `[Sc: profiles/health/scenarios.md §1]`
 
 **Session posture.** An owner MUST NOT set a Zenoh timestamp on a put or
-a delete of a data key, except on a resource §4.3's table lists.
+a delete of a data key, except on a resource §4.3's table lists. A
+timestamp its session adds falls under the posture below. So does one
+the owner sets where its session would add one anyway.
 `[Sc: state.md §1]`
 - **The owner's session** SHOULD run with timestamping disabled, zenoh's
   default for a client and a peer (§4.1). A session with it enabled stamps

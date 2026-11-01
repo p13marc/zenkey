@@ -1,6 +1,6 @@
 {
   "spec/CHANGELOG.md": {
-    "mean": 16.98,
+    "mean": 16.94,
     "over": 30,
     "tags": 0
   },
@@ -30,7 +30,7 @@
     "tags": 0
   },
   "spec/core.md": {
-    "mean": 16.17,
+    "mean": 16.16,
     "over": 0,
     "tags": 0
   },
@@ -95,12 +95,12 @@
     "tags": 0
   },
   "spec/profiles/desired/CHANGELOG.md": {
-    "mean": 22.61,
+    "mean": 22.31,
     "over": 27,
     "tags": 0
   },
   "spec/profiles/desired/scenarios.md": {
-    "mean": 14.68,
+    "mean": 14.64,
     "over": 0,
     "tags": 0
   },
@@ -265,7 +265,7 @@
     "tags": 0
   },
   "spec/scenarios/types.md": {
-    "mean": 12.79,
+    "mean": 12.12,
     "over": 0,
     "tags": 0
   }

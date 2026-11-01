@@ -3,6 +3,51 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.74 — 2026-11-01: round 93's answers: the session's stamps, a random run, and the seq that never wraps (#976)
+
+zk2py round 93 (PR #1005) read 0.71 to 0.73 and `observer.md` 0.13 to 0.15
+cold. Its findings are F-414 to F-421. This version answers seven of them;
+`desired.v1` 0.13 answers F-421
+([`profiles/desired/CHANGELOG.md`](profiles/desired/CHANGELOG.md)).
+`observer.md` is unchanged.
+
+**§8.2, what an owner sets (F-414, ambiguous).** The MUST NOT read either
+as the owner's own act, or as any stamp its session puts on a sample.
+- **Now:** a timestamp the owner's session adds is not one the owner
+  sets. It is the session's posture, the SHOULD below. So is one the
+  owner sets where its session would add one anyway, as the reference
+  does on a session that stamps.
+- **The rule's scope is reading (a)**, which the reference already met.
+  An owner that is its own router breaks the SHOULD, never the MUST NOT.
+
+**§3.3, the descriptor's put (F-415, a gap).** "Carries the owner's
+timestamp" was true while every owner's session stamped. It now says the
+owner sets one, since an instance key is no data key and §8.2's MUST NOT
+does not bind it. The reference stamps each descriptor put from its
+session's clock.
+
+**§4.3, the run.**
+- **The record (F-416, a gap):** durable before the first sample written
+  under each run, where it said the first mutation. A stream sample is
+  written under the run too.
+- **No reuse (F-417, cannot be met as written):** no owner knows what an
+  earlier process drew. A run drawn at random now meets the rule, the
+  chance of a repeat accepted.
+
+**The seq that never wraps (F-419, F-420).** §4.3's MUST NOT said "that
+seq", which `RULES.md` cut from its noun, and S7's row said "a seq". Both
+read as covering a stream key's seq, which wraps. Both now say "its seq
+for state and events".
+
+**`scenarios/types.md` §1 (F-418, a gap).** "The owner's writer names
+that predefined `Encoding`" said nothing a tester could see. It now says
+each record holds the bytes of its type's predefined `Encoding`, which
+nothing on the wire names.
+
+**Deliberately not changed.** No MUST, SHOULD or MAY was added or
+removed. §8.2's and §4.3's rules keep their keywords; F-414 and F-417
+settle their scope. No fixture changed.
+
 ## 0.73 — 2026-11-01: state ordered by run and seq, carried in band (#976)
 
 Epic #975, zk2c, replaces the per-put HLC stamp with an owner's run and
