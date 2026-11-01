@@ -30,6 +30,7 @@ pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
         bytes: bandwidth,
         per_key,
         loss,
+        face: crate::cli::AcrossFaceArgs { across_face },
         latency,
         contracts: _,
         ns: _,
@@ -38,19 +39,37 @@ pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
     // statistic, and the aggregate table has no column to print it in.
     let per_key = per_key || latency;
     let namespace = dep.namespace().to_owned();
+    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::Samples)?;
+    let typed = selector.is_some();
     let selector = zk2::wire_selector(selector.as_deref(), &namespace)?;
+    // Across a face, the scope the contracts give (core §8.5); the report
+    // names it as one selector, its parts joined.
+    let watched = match &face {
+        Some(face) => face.narrow(std::slice::from_ref(&selector), typed)?,
+        None => vec![selector],
+    };
+    let selector = watched.join(" + ");
     let window = super::positive_secs("--for", for_secs)?;
 
-    // The lens before the window: presence and the revisions it names.
+    // The lens before the window: presence and the revisions it names, but
+    // across a face, where no descriptor crosses (observer §7.5).
     let store = zk2::store(&dep, &contracts);
-    let ns_session = dep.session().await?;
-    let catalog = zk2::read_lens(&dep, &ns_session, &store).await;
+    let catalog = match &face {
+        Some(face) => {
+            eprintln!("{}", face.note(&watched));
+            None
+        }
+        None => {
+            let ns_session = dep.session().await?;
+            zk2::read_lens(&dep, &ns_session, &store).await
+        }
+    };
 
     let session = dep.link().session().await?;
     let monitor = zenkey_fleet::Monitor::start(
         &session,
         zenkey_fleet::MonitorSpec {
-            selectors: vec![selector.clone()],
+            selectors: watched,
             ..Default::default()
         },
     )

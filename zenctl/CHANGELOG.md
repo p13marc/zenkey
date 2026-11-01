@@ -6,6 +6,24 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `--across-face`: a raw observer's scope across a constrained face (#980, C1b)
+
+Core 0.76 §8.5: a put toward a face rides the deepest key expression
+declared on it for a prefix of its key, and on a constrained face only the
+far side's own subscriptions declare one. Under `<ns>/zk2/**` each put
+carries its key's text after `zk2`; under its exact key, a 1- or 2-byte
+scope (`spec/scenarios/constrained.md` §7: 82 B a put against 45–46 B).
+Observer text 0.16 §7.5 asks a tool there to subscribe by the scopes the
+contracts in hand give.
+
+| Before | Now | Notes |
+|---|---|---|
+| `echo`, `record` (and `record --on`), `rate`, `field`, `timeline`, `snapshot`, `watchdog` across a face: `<ns>/zk2/**`, or a selector typed | `--across-face SYSTEM/SERVICE`, repeatable: one selector per resource of the contracts in hand under each address, a concrete resource's exact key and a template's key with every parameter a wildcard (an event's ULID chunk too); never `<ns>/zk2/**` | each address taken, at the deployment's word, to implement every contract in hand (R7). The default keeps the ambient kinds, `--explicit` adds the explicit resources, `snapshot` takes state alone, and no operation is ever subscribed. One stderr line says it before the verb starts |
+| a selector typed beside it | narrowed to that scope: each of the face's selectors it includes, or the selector itself where it is the narrower | one reaching none of the face's resources is refused, exit 2. `rate`'s and `field`'s reports name the scope as one `selector`, its parts joined by ` + ` |
+| the lens across a face: a presence read, complete and empty, every key unresolved | no presence read: each key resolves through `--contracts` alone | as `telemetry --across-face` reads it |
+| — | refused, exit 2, before any session: `--across-face` with no `--contracts`, an address with a wildcard, and under `watchdog` and `record --on` a rule that reads presence or the doctor (`instance-gone`, `doctor`, `alert-firing`) or whose selector reaches none of the face's | `tests/cmd/across-face.trycmd` |
+| without `--across-face` | unchanged | |
+
 ## Unreleased (`main`, zk2) — the readers finish core 0.73: records compared, in-band stamps kept (#976, A4)
 
 No rule changed. What a reader shows of an enveloped sample now follows

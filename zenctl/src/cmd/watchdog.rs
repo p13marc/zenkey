@@ -54,11 +54,48 @@ pub(crate) fn follows_presence(rule: &Condition) -> bool {
     )
 }
 
+/// Refuses, exit 2, what a rule cannot read across a constrained face
+/// (core §8.5, observer §7.5; #980 C1b): presence and the doctor, which
+/// read `@zk` and do not cross, and a selector that reaches none of the
+/// scope's selectors, which would watch nothing there.
+pub(crate) fn refuse_across_face(rules: &[Condition], scope: &[String], verb: &str) -> Result<()> {
+    for rule in rules {
+        if matches!(
+            rule,
+            Condition::DoctorCheck { .. }
+                | Condition::InstanceGone { .. }
+                | Condition::AlertFiring { .. }
+        ) {
+            return Err(crate::exit::unaskable!(
+                "{verb} --across-face: `{rule}` reads presence or the doctor, which do not cross \
+                 a constrained face (core §8.5): drop the rule, or ask it on the face's own side"
+            ));
+        }
+        let Some(sel) = rule.selector() else {
+            continue;
+        };
+        let reaches = zenoh::key_expr::KeyExpr::new(sel).is_ok_and(|k| {
+            scope
+                .iter()
+                .any(|s| zenoh::key_expr::KeyExpr::new(s.as_str()).is_ok_and(|f| k.intersects(&f)))
+        });
+        if !reaches {
+            return Err(crate::exit::unaskable!(
+                "{verb} --across-face: `{rule}` watches {sel}, which reaches none of the \
+                 selectors across the face ({})",
+                scope.join(" + ")
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
     let crate::cli::WatchdogArgs {
         rules,
+        face: crate::cli::AcrossFaceArgs { across_face },
         every,
         count,
         clocks_synced,
@@ -73,6 +110,35 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         .map(|r| Condition::parse(r))
         .collect::<std::result::Result<_, _>>()
         .map_err(anyhow::Error::from)?;
+    // Across a face the rules' selectors are narrowed to the scope the
+    // contracts give (core §8.5), and watched in their place.
+    let face = zk2::FaceScope::of(
+        &across_face,
+        &contracts,
+        dep.namespace(),
+        zk2::Reads::Samples,
+    )?;
+    let across = match &face {
+        Some(face) => {
+            refuse_across_face(&rules, face.selectors(), "watchdog")?;
+            let mut typed: Vec<String> = Vec::new();
+            for sel in rules.iter().filter_map(Condition::selector) {
+                if !typed.iter().any(|t| t == sel) {
+                    typed.push(sel.to_owned());
+                }
+            }
+            if typed.is_empty() {
+                return Err(crate::exit::unaskable!(
+                    "watchdog --across-face: no rule watches a selector, so there is no scope to \
+                     narrow"
+                ));
+            }
+            let scope = face.narrow(&typed, true)?;
+            eprintln!("{}", face.note(&scope));
+            Some(scope)
+        }
+        None => None,
+    };
 
     let raw = dep.link().session().await?;
     // The deployment's own session, beside the raw one: opened for every run,
@@ -109,7 +175,8 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     let mut out = std::io::stdout();
     // The engine yields transitions and returns the summary (#397), so the
     // write happens where its error can be answered for (#360).
-    let mut run = zenkey_fleet::watchdog(&bus, &store, &contracts, &spec).pin();
+    let mut run =
+        zenkey_fleet::watchdog_across(&bus, &store, &contracts, &spec, across.as_deref()).pin();
     let interrupted = loop {
         let next = tokio::select! {
             t = run.sip() => t,

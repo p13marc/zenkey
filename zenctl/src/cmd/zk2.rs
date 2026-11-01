@@ -16,8 +16,10 @@ use zenkey_fleet::{
     BundleStore, Catalog, ContractSet, ContractState, PresenceScope, ResolvedTarget, Revision,
 };
 use zenkey_model::canonical::Fingerprint;
-use zenkey_model::grammar::{AMBIENT, KindToken, kind_selector};
-use zenkey_model::template::Bindings;
+use zenkey_model::contract::Resource;
+use zenkey_model::grammar::{AMBIENT, Addr, GRAMMAR, IfaceId, KindToken, kind_selector};
+use zenkey_model::template::{Bindings, Segment};
+use zenoh::key_expr::{KeyExpr, OwnedKeyExpr};
 
 use crate::bus::Deployment;
 use crate::cli::{ContractArgs, RevisionSpec};
@@ -370,6 +372,217 @@ impl Reads {
             Reads::State => &[KindToken::ExplicitState],
         }
     }
+
+    /// Whether a resource of kind `token` delivers what a verb that reads
+    /// this way reads: every data kind a sample, `state` and `@state` a
+    /// GET's answer; an operation never.
+    fn takes(self, token: KindToken) -> bool {
+        match self {
+            Reads::Samples => token != KindToken::Op,
+            Reads::State => matches!(token, KindToken::State | KindToken::ExplicitState),
+        }
+    }
+
+    /// What a verb that reads this way subscribes to or asks, in words.
+    fn what(self) -> &'static str {
+        match self {
+            Reads::Samples => "stream, state or event",
+            Reads::State => "state",
+        }
+    }
+}
+
+/// A raw observer's scope across a constrained face (core §8.5, observer
+/// §7.5; #980 C1b), built from `--across-face` and the contracts in hand
+/// before any session opens.
+///
+/// No descriptor crosses a face, so each address is taken, at the
+/// deployment's word, to implement every contract in hand (core R7), as
+/// `telemetry --across-face` takes it. The scope is one selector per
+/// resource under each address: a concrete resource's exact key, and a
+/// template's key with every parameter a wildcard, an event's ULID chunk
+/// too. Each subscription then declares the deepest prefix of its keys
+/// there is, and a put toward the tool rides it, where under `<ns>/zk2/**`
+/// it would carry its key's text after `zk2` (core Appendix B).
+#[derive(Debug, Clone)]
+pub struct FaceScope {
+    addresses: Vec<Addr>,
+    selectors: Vec<String>,
+}
+
+impl FaceScope {
+    /// The scope `--across-face` asks for, or `None` when it was not given.
+    /// Refused, exit 2: an address that is not `SYSTEM/SERVICE` with each a
+    /// plain chunk, no contract in hand, or no resource of a kind the verb
+    /// reads.
+    pub fn of(
+        across: &[String],
+        contracts: &ContractSet,
+        namespace: &str,
+        reads: Reads,
+    ) -> Result<Option<FaceScope>> {
+        if across.is_empty() {
+            return Ok(None);
+        }
+        let mut addresses: Vec<Addr> = Vec::new();
+        for a in across {
+            let addr: Addr = a.parse().map_err(|e| {
+                unaskable!(
+                    "--across-face {a}: {e}. Name one service, SYSTEM/SERVICE, each a plain \
+                     chunk: a wildcard would subscribe wider than what this tool reads \
+                     (core §8.5)"
+                )
+            })?;
+            if !addresses.contains(&addr) {
+                addresses.push(addr);
+            }
+        }
+        if contracts.is_empty() {
+            return Err(unaskable!(
+                "--across-face builds its scope from the contracts in hand, since no descriptor \
+                 crosses a face (observer §7.5): give --contracts"
+            ));
+        }
+        let mut selectors: Vec<String> = Vec::new();
+        for addr in &addresses {
+            for revision in contracts.iter() {
+                for r in &revision.contract().resources {
+                    if !reads.takes(r.token) {
+                        continue;
+                    }
+                    let s = resource_selector(addr, revision.iface(), r)?;
+                    let s = zenkey_fleet::with_namespace(namespace, &s);
+                    if !selectors.contains(&s) {
+                        selectors.push(s);
+                    }
+                }
+            }
+        }
+        if selectors.is_empty() {
+            return Err(unaskable!(
+                "--across-face: the contracts in hand declare no {} resource to read",
+                reads.what()
+            ));
+        }
+        Ok(Some(FaceScope {
+            addresses,
+            selectors,
+        }))
+    }
+
+    /// One selector per resource the contracts give under each address.
+    pub fn selectors(&self) -> &[String] {
+        &self.selectors
+    }
+
+    /// The addresses across the face, as `--across-face` named them.
+    pub fn addresses(&self) -> String {
+        self.addresses
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// `scope` narrowed to the face's selectors, in order, each once: a
+    /// face selector that a scope selector includes, or the scope selector
+    /// itself where it is the narrower or only overlaps one. So no
+    /// selector is wider than what was asked, and none is `<ns>/zk2/**`
+    /// (core §8.5).
+    ///
+    /// With `typed`, the scope is what the user typed, and a selector of it
+    /// that reaches none of the face's resources is refused, exit 2. The
+    /// default scope's explicit selectors reach nothing when the contracts
+    /// declare no explicit resource, and that is no refusal; a scope that
+    /// reaches nothing at all is.
+    pub fn narrow(&self, scope: &[String], typed: bool) -> Result<Vec<String>> {
+        let mut out: Vec<String> = Vec::new();
+        for t in scope {
+            let tk = KeyExpr::new(t.as_str()).map_err(|e| {
+                unaskable!(
+                    "{t}: across a face a selector is a key expression, {}",
+                    crate::errors::without_source_locations(&e.to_string())
+                )
+            })?;
+            let mut reached = false;
+            for f in &self.selectors {
+                let fk = KeyExpr::new(f.as_str()).map_err(|e| anyhow::anyhow!("{f}: {e}"))?;
+                let pick = if tk.includes(&fk) {
+                    f
+                } else if tk.intersects(&fk) {
+                    t
+                } else {
+                    continue;
+                };
+                reached = true;
+                if !out.contains(pick) {
+                    out.push(pick.clone());
+                }
+            }
+            if typed && !reached {
+                return Err(unaskable!(
+                    "{t} reaches none of the resources the contracts in hand give for {} across \
+                     the face: type a selector under one of them, or none",
+                    self.addresses()
+                ));
+            }
+        }
+        if out.is_empty() {
+            return Err(unaskable!(
+                "{} reaches none of the resources the contracts in hand give for {} across the \
+                 face{}",
+                scope.join(" + "),
+                self.addresses(),
+                if typed {
+                    ""
+                } else {
+                    ": they are explicit kinds, which --explicit names"
+                }
+            ));
+        }
+        Ok(out)
+    }
+
+    /// The line a raw observer says on stderr before it starts.
+    pub fn note(&self, selectors: &[String]) -> String {
+        format!(
+            "across a constrained face to {}: {} selector(s) from the contracts in hand, each a \
+             resource's exact key or a template's literal prefix, never `zk2/**` (core §8.5); \
+             no presence is read, so keys resolve through --contracts alone",
+            self.addresses(),
+            selectors.len()
+        )
+    }
+}
+
+/// The selector of `r` under `addr`, base-relative: its exact key for a
+/// concrete resource, and for a template its key with each parameter a
+/// wildcard (`*`, a rest parameter `**`), an event's ULID chunk too.
+/// Built from the grammar's chunks, never `format!`, as
+/// [`kind_selector`] is, then canonized (a rest parameter before an
+/// event's ULID).
+fn resource_selector(addr: &Addr, iface: &IfaceId, r: &Resource) -> Result<String> {
+    let iface = iface.to_string();
+    let mut chunks: Vec<&str> = vec![
+        GRAMMAR,
+        addr.system.as_str(),
+        addr.service.as_str(),
+        &iface,
+        r.token.as_str(),
+    ];
+    for seg in r.template.segments() {
+        chunks.push(match seg {
+            Segment::Literal(l) => l.as_str(),
+            Segment::Param(_) => "*",
+            Segment::Rest(_) => "**",
+        });
+    }
+    if r.token == KindToken::Events {
+        chunks.push("*");
+    }
+    let key = OwnedKeyExpr::autocanonize(chunks.join("/"))
+        .map_err(|e| anyhow::anyhow!("a resource of {iface} makes no key expression: {e}"))?;
+    Ok(key.to_string())
 }
 
 /// The wire selectors `--explicit` adds (#924): each explicit kind named on
@@ -399,13 +612,18 @@ pub fn explicit_selectors(namespace: &str, reads: Reads) -> Vec<String> {
 /// *default*, and beside `prod/zk2/host-a/**` it would add every service's
 /// explicit traffic, the very pull §1.3's guard exists to prevent. Who
 /// types a selector names the explicit kind under it themselves.
+///
+/// Across a constrained face (`face`, from `--across-face`), that scope is
+/// narrowed to the resources the contracts in hand give
+/// ([`FaceScope::narrow`]), never `<ns>/zk2/**` (core §8.5, observer §7.5).
 pub fn wire_scope(
     typed: &[String],
     explicit: bool,
     namespace: &str,
     reads: Reads,
+    face: Option<&FaceScope>,
 ) -> Result<Vec<String>> {
-    wire_scope_through(typed, explicit, namespace, reads, |s| {
+    wire_scope_through(typed, explicit, namespace, reads, face, |s| {
         wire_selector(Some(s), namespace)
     })
 }
@@ -413,6 +631,23 @@ pub fn wire_scope(
 /// [`wire_scope`] with the verb's own seam for a typed selector: `record`'s
 /// hint also says what `replay --namespace` moves.
 pub fn wire_scope_through(
+    typed: &[String],
+    explicit: bool,
+    namespace: &str,
+    reads: Reads,
+    face: Option<&FaceScope>,
+    seam: impl FnMut(&str) -> Result<String>,
+) -> Result<Vec<String>> {
+    let scope = scope_through(typed, explicit, namespace, reads, seam)?;
+    match face {
+        Some(face) => face.narrow(&scope, !typed.is_empty()),
+        None => Ok(scope),
+    }
+}
+
+/// [`wire_scope_through`] on the bus as the tool finds it, before any face
+/// narrows it.
+fn scope_through(
     typed: &[String],
     explicit: bool,
     namespace: &str,
@@ -569,10 +804,10 @@ mod tests {
     fn explicit_adds_each_explicit_kind_by_name_beside_the_default() {
         let samples = Reads::Samples;
         assert_eq!(
-            wire_scope(&[], false, "prod", samples).unwrap(),
+            wire_scope(&[], false, "prod", samples, None).unwrap(),
             ["prod/zk2/**"]
         );
-        let all = wire_scope(&[], true, "prod", samples).unwrap();
+        let all = wire_scope(&[], true, "prod", samples, None).unwrap();
         assert_eq!(
             all,
             [
@@ -582,11 +817,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            wire_scope(&[], true, "", samples).unwrap(),
+            wire_scope(&[], true, "", samples, None).unwrap(),
             ["zk2/**", "zk2/*/*/*/@stream/**", "zk2/*/*/*/@state/**"]
         );
         assert_eq!(
-            wire_scope(&[], true, "acme/fleet-a", Reads::State).unwrap(),
+            wire_scope(&[], true, "acme/fleet-a", Reads::State, None).unwrap(),
             ["acme/fleet-a/zk2/**", "acme/fleet-a/zk2/*/*/*/@state/**"]
         );
 
@@ -621,18 +856,18 @@ mod tests {
     fn explicit_beside_a_typed_selector_is_refused() {
         let typed = ["prod/zk2/host-a/**".to_owned()];
         let refused =
-            wire_scope(&typed, true, "prod", Reads::Samples).expect_err("refused beside it");
+            wire_scope(&typed, true, "prod", Reads::Samples, None).expect_err("refused beside it");
         assert_eq!(crate::exit::code_for(&refused), crate::exit::NO_VERDICT);
         let words = refused.to_string();
         assert!(words.contains("prod/zk2/host-a/**"), "{words}");
         assert!(words.contains("/*/*/@stream/**"), "{words}");
-        let refused = wire_scope(&typed, true, "prod", Reads::State).expect_err("refused");
+        let refused = wire_scope(&typed, true, "prod", Reads::State, None).expect_err("refused");
         assert!(refused.to_string().contains("/*/*/@state/**"), "{refused}");
         assert_eq!(
-            wire_scope(&typed, false, "prod", Reads::Samples).unwrap(),
+            wire_scope(&typed, false, "prod", Reads::Samples, None).unwrap(),
             typed
         );
-        assert!(wire_scope(&["zk2/$*/x".into()], false, "", Reads::Samples).is_err());
+        assert!(wire_scope(&["zk2/$*/x".into()], false, "", Reads::Samples, None).is_err());
     }
 
     /// The line a raw observer says before it starts (O5): the verbatim
@@ -646,7 +881,7 @@ mod tests {
              `*`/`**` never match one"
         );
         assert_eq!(
-            scope_note(&wire_scope(&[], true, "prod", Reads::Samples).unwrap()),
+            scope_note(&wire_scope(&[], true, "prod", Reads::Samples, None).unwrap()),
             " — @stream, @state named by a selector; @op, @zk, @adv excluded: no selector \
              names them, and `*`/`**` never match one"
         );
@@ -663,5 +898,125 @@ mod tests {
             named_verbatim(&["@op".into(), "@zk".into(), "@adv".into()]),
             ["@stream", "@state"]
         );
+    }
+
+    /// A contract with one resource of each kind, in a directory of its own.
+    fn hop_contracts() -> (tempfile::TempDir, ContractSet) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("hop.v1.toml"),
+            "[interface]\nname = \"hop\"\nmajor = 1\nminor = 0\n\
+             [resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+             [resources.\"axis/{axis}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+             params = { axis = \"string\" }\ncardinality = 4\n\
+             [resources.frame]\nkind = \"stream\"\nexplicit = true\n\
+             type = { raw = \"text/plain\" }\n\
+             [resources.alarm]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+             rate = \"low\"\nretention = \"7d\"\n\
+             [resources.go]\nkind = \"operation\"\nrequest = { raw = \"text/plain\" }\n\
+             response = { raw = \"text/plain\" }\n",
+        )
+        .unwrap();
+        let (set, problems) = ContractSet::load_path(dir.path());
+        assert!(problems.is_empty(), "{problems:?}");
+        (dir, set)
+    }
+
+    fn sorted(mut v: Vec<String>) -> Vec<String> {
+        v.sort();
+        v
+    }
+
+    /// Across a face (core §8.5, observer §7.5; #980 C1b), the scope is one
+    /// selector per resource the contracts give under the address: a
+    /// concrete resource's exact key, a template's key with its parameter a
+    /// wildcard, an event's ULID chunk too, and no operation. The default
+    /// scope keeps the ambient ones, `--explicit` the explicit ones beside
+    /// them, and never `<ns>/zk2/**`.
+    #[test]
+    fn across_a_face_the_scope_is_the_contracts_resources() {
+        let (_dir, set) = hop_contracts();
+        let face = FaceScope::of(&["v/hop".into()], &set, "prod", Reads::Samples)
+            .unwrap()
+            .expect("asked");
+        let key = |rest: &str| format!("prod/zk2/v/hop/hop.v1/{rest}");
+        assert_eq!(
+            sorted(face.selectors().to_vec()),
+            sorted(vec![
+                key("stream/level"),
+                key("state/axis/*"),
+                key("@stream/frame"),
+                key("events/alarm/*"),
+            ])
+        );
+        let ambient = wire_scope(&[], false, "prod", Reads::Samples, Some(&face)).unwrap();
+        assert_eq!(
+            sorted(ambient.clone()),
+            sorted(vec![
+                key("stream/level"),
+                key("state/axis/*"),
+                key("events/alarm/*")
+            ])
+        );
+        assert!(!ambient.iter().any(|s| s.ends_with("**")), "{ambient:?}");
+        let all = wire_scope(&[], true, "prod", Reads::Samples, Some(&face)).unwrap();
+        assert_eq!(sorted(all), sorted(face.selectors().to_vec()));
+
+        // A state reader takes the state alone.
+        let state = FaceScope::of(&["v/hop".into()], &set, "prod", Reads::State)
+            .unwrap()
+            .expect("asked");
+        assert_eq!(
+            wire_scope(&[], true, "prod", Reads::State, Some(&state)).unwrap(),
+            [key("state/axis/*")]
+        );
+        // Not asked, nothing changes.
+        assert!(
+            FaceScope::of(&[], &set, "prod", Reads::Samples)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// A selector typed beside `--across-face` is narrowed: the face's
+    /// selectors it includes, or itself where it is the narrower. One that
+    /// reaches none of the face's resources is refused, and so are a
+    /// wildcard address and a scope with no contract in hand (exit 2).
+    #[test]
+    fn across_a_face_a_typed_selector_is_narrowed_or_refused() {
+        let (_dir, set) = hop_contracts();
+        let face = FaceScope::of(&["v/hop".into()], &set, "prod", Reads::Samples)
+            .unwrap()
+            .expect("asked");
+        let key = |rest: &str| format!("prod/zk2/v/hop/hop.v1/{rest}");
+        let narrowed = face
+            .narrow(&["prod/zk2/v/hop/hop.v1/stream/**".into()], true)
+            .unwrap();
+        assert_eq!(narrowed, [key("stream/level")]);
+        let member = key("state/axis/x");
+        assert_eq!(
+            face.narrow(std::slice::from_ref(&member), true).unwrap(),
+            [member]
+        );
+        let refused = face
+            .narrow(&["prod/zk2/elsewhere/svc/**".into()], true)
+            .expect_err("reaches nothing");
+        assert!(refused.to_string().contains("reaches none"), "{refused}");
+        assert!(refused.downcast_ref::<crate::exit::Unaskable>().is_some());
+
+        let wildcard = FaceScope::of(&["*/hop".into()], &set, "prod", Reads::Samples)
+            .expect_err("a wildcard address");
+        assert!(
+            wildcard.to_string().contains("--across-face */hop"),
+            "{wildcard}"
+        );
+        let none = FaceScope::of(
+            &["v/hop".into()],
+            &ContractSet::new(),
+            "prod",
+            Reads::Samples,
+        )
+        .expect_err("no contract");
+        assert!(none.to_string().contains("give --contracts"), "{none}");
     }
 }

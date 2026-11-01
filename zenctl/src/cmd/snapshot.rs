@@ -46,6 +46,7 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     let SnapshotArgs {
         selectors,
         explicit,
+        face: crate::cli::AcrossFaceArgs { across_face },
         out,
         max_replies,
         no_presence,
@@ -66,7 +67,14 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     // before the session, because nothing the fleet answers changes it.
     let mode = super::output_mode(&out, overwrite)?;
     let namespace = dep.namespace().to_owned();
-    let asked = zk2::wire_scope(&selectors, explicit, &namespace, zk2::Reads::State)?;
+    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::State)?;
+    let asked = zk2::wire_scope(
+        &selectors,
+        explicit,
+        &namespace,
+        zk2::Reads::State,
+        face.as_ref(),
+    )?;
     // Only state answers a GET (spec §1.3): each selector narrowed to its
     // state keys, and one that reaches none named, never silently dropped.
     let mut gets = Vec::new();
@@ -92,7 +100,12 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     }
 
     let store = zk2::store(&dep, &contracts);
-    let catalog = if no_presence {
+    // Across a face no presence is read: no descriptor crosses, and
+    // --contracts resolves every key (observer §7.5).
+    if let Some(face) = &face {
+        eprintln!("{}", face.note(&gets));
+    }
+    let catalog = if no_presence || face.is_some() {
         None
     } else {
         let ns_session = dep.session().await?;

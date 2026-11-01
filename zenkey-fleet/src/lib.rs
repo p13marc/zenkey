@@ -229,11 +229,12 @@ pub mod tape;
 
 pub use judge::condition::{
     AlarmRead, CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome,
-    WatchdogSpec, WindowExamples, watchdog,
+    WatchdogSpec, WindowExamples, watchdog, watchdog_across,
 };
 pub use judge::expect::{ExpectAim, ExpectSpec, run_expect};
 pub use judge::field::{
     DeclaredPaths, FieldObservation, FieldSpec, KeyFieldContext, KeyFields, PathStats, run_field,
+    run_field_over,
 };
 pub use judge::probe::run_probe;
 /// The traits [`watchdog`] is driven through (#397), re-exported so a

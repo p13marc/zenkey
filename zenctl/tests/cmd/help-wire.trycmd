@@ -378,6 +378,9 @@ Options:
       --explicit
           Also watch the deployment's explicit kinds, each named on its own: `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`. The three are the deployment's whole data plane apart from its operations and control keys (O5). Opt-in, never the default: an explicit kind is kept off every wildcard because it is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's explicit traffic to the scope you typed, so name the kind under your own prefix instead (`<ns>/zk2/<system>/*/*/@stream/**`)
 
+      --across-face <SYSTEM/SERVICE>
+          A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
+
       --fmt <FMT>
           kcat-style format string: %k wire key, %K the key relative to the namespace, %A address, %i interface, %r resource (`<kind>/<template>`, when a contract resolved it), %t declared type, %v value, %e encoding, %l payload bytes, %n counter, %T timestamp, %a attachment (empty when none arrived), %q QoS axes (priority/congestion/reliability, +express — the wire's actual axes, #120), %S source zid:eid#sn (empty when the publisher attaches no SourceInfo), %{a.b.c} a decoded payload field by dot-path, %% literal percent
 
@@ -575,6 +578,9 @@ Options:
       --latency
           Also report observed pub→sub latency per key (implies --per-key): arrival wall-clock minus publisher HLC — contains clock skew, and is labeled as such; negative values are the skew evidence (#119). Unstamped samples are counted, never treated as zero, and each stamper is named as the owner's clock (its descriptor's `meta.zid`), another's, or unattributable (O7)
 
+      --across-face <SYSTEM/SERVICE>
+          A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -663,6 +669,9 @@ Options:
           - error:   Fail on error-severity findings only
           - warning: Fail on warnings or errors
 
+      --across-face <SYSTEM/SERVICE>
+          A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -736,6 +745,9 @@ Arguments:
 Options:
       --explicit
           Also watch the deployment's explicit kinds, each named on its own: `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`. The three are the deployment's whole data plane apart from its operations and control keys (O5). Opt-in, never the default: an explicit kind is kept off every wildcard because it is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's explicit traffic to the scope you typed, so name the kind under your own prefix instead (`<ns>/zk2/<system>/*/*/@stream/**`)
+
+      --across-face <SYSTEM/SERVICE>
+          A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
 
   -o, --out <FILE>
           Output file. An existing file is refused (exit 2) unless --overwrite: a capture is the one artifact this verb exists to keep
@@ -942,6 +954,9 @@ Options:
       --explicit
           Also watch the deployment's explicit kinds, each named on its own: `<ns>/zk2/*/*/*/@stream/**` and `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`. The three are the deployment's whole data plane apart from its operations and control keys (O5). Opt-in, never the default: an explicit kind is kept off every wildcard because it is high rate or large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's explicit traffic to the scope you typed, so name the kind under your own prefix instead (`<ns>/zk2/<system>/*/*/@stream/**`)
 
+      --across-face <SYSTEM/SERVICE>
+          A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
+
       --for <SECS>
           The passive window, seconds. Not with --from: a capture's span is in its rows
 
@@ -1035,6 +1050,9 @@ Arguments:
 Options:
       --explicit
           Also take the deployment's explicit state, `<ns>/zk2/*/*/*/@state/**`, beside the default `<ns>/zk2/**`, so every state key is asked, `@state` included (#924). `@stream` is not added: a stream answers no GET (spec §1.3). Opt-in, never the default: an explicit kind is kept off every wildcard because it is large (core §1.3). Not with a SELECTOR (exit 2): it would add every service's `@state` to the scope you typed, so name it under your own prefix instead (`<ns>/zk2/<system>/*/*/@state/**`)
+
+      --across-face <SYSTEM/SERVICE>
+          A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
 
   -o, --out <FILE>
           Output file. Refused (exit 2) when nobody answered: a file of silence would read as an empty deployment. An existing file is refused too (exit 2), before any session, unless --overwrite
@@ -1449,6 +1467,9 @@ Usage: zenctl watchdog [OPTIONS] --rule <RULE>
 Options:
       --rule <RULE>
           One rule (repeatable): `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`, `invalid-payload <SEL>` (a payload that does not decode as its declared type, or fails its JSON Schema), `qos-mismatch <SEL>` (a sample whose priority, congestion control or express differs from its resource's, spec §2.4), `instance-gone <SYSTEM/SERVICE>` (`*` in either position: each address the pattern matches is up while an instance token is held, and gone when none is with a complete read behind it, read from the live presence projection, §8.1 — under a wildcard only an address seen held can go, and an exact address is watched from the start; the rule fires while any address is gone, zenwatch's rule notifying per address from the same reading; v1's origin-down), `doctor <CHECK-ID>`, `alert-firing <SEL> [info|warning|critical]` (alarms.v1 §2.15: an alarm firing at or above the floor, default warning, under a base-relative selector `zk2/…` that reaches alarm keys; ok only when every owner in scope is known whole and none fires, unobservable otherwise, never ok), `dropped`. Selectors are wire keys (this session is in no namespace), but alert-firing's, which is read in the namespace; the rules that read the deployment read it through a second session in its namespace (`--namespace`): the lens and the doctor once per tick, beside the drain, presence as it moves, the alarms by a subscription seeded by S4's GET and re-read each tick
+
+      --across-face <SYSTEM/SERVICE>
+          A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
 
       --every <SECS>
           Seconds between evaluations — the one period flag (#307)

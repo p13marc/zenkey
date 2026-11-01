@@ -45,6 +45,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     let crate::cli::RecordArgs {
         selectors,
         explicit: crate::cli::ExplicitArgs { explicit },
+        face: crate::cli::AcrossFaceArgs { across_face },
         out,
         for_secs,
         count,
@@ -61,7 +62,23 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     // Before anything else that could take time: an existing capture is
     // refused unless --overwrite (#514), and no session opens to find out.
     let mode = super::output_mode(&out, overwrite)?;
-    let selectors = selectors_of(&selectors, explicit, dep.namespace())?;
+    // The contracts are read by the rules `--on` judges, and across a face
+    // by the scope itself; a plain capture keeps payloads as bytes.
+    let contracts = if on.is_empty() && across_face.is_empty() {
+        zenkey_fleet::ContractSet::new()
+    } else {
+        zk2::load_contracts(&contracts)?
+    };
+    let face = zk2::FaceScope::of(
+        &across_face,
+        &contracts,
+        dep.namespace(),
+        zk2::Reads::Samples,
+    )?;
+    let selectors = selectors_of(&selectors, explicit, dep.namespace(), face.as_ref())?;
+    if let Some(face) = &face {
+        eprintln!("{}", face.note(&selectors));
+    }
     if on.is_empty() {
         return run_inner(&selectors, &out, mode, for_secs, count, &dep).await;
     }
@@ -73,7 +90,6 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
             "--on needs --pre <SECS>: a trigger capture is the retained window"
         ));
     };
-    let contracts = super::zk2::load_contracts(&contracts)?;
     let triggered = Triggered {
         contracts,
         rules: on,
@@ -91,6 +107,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
             PreambleMode::None => None,
         },
         clocks_synced,
+        across_face: face.is_some(),
     };
     run_triggered(&selectors, &out, mode, triggered, &dep).await
 }
@@ -101,8 +118,14 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
 /// `--explicit` its explicit kinds by name. A typed zk2 selector outside
 /// the namespace gets a one-line hint: selectors are wire keys, and
 /// `replay --namespace` moves only what sits under the capture's namespace.
-fn selectors_of(typed: &[String], explicit: bool, namespace: &str) -> Result<Vec<String>> {
-    zk2::wire_scope_through(typed, explicit, namespace, zk2::Reads::Samples, |s| {
+/// Across a face, the scope the contracts give ([`zk2::FaceScope`]).
+fn selectors_of(
+    typed: &[String],
+    explicit: bool,
+    namespace: &str,
+    face: Option<&zk2::FaceScope>,
+) -> Result<Vec<String>> {
+    zk2::wire_scope_through(typed, explicit, namespace, zk2::Reads::Samples, face, |s| {
         let s = super::raw_selector(s)?;
         if let Some(hint) = off_namespace_hint(s, namespace) {
             eprintln!("{hint}");
@@ -220,6 +243,9 @@ struct Triggered {
     max_samples: Option<u64>,
     preamble: Option<PreambleSemantics>,
     clocks_synced: bool,
+    /// The capture's selectors are a face's scope (core §8.5): the rules'
+    /// own are not watched beside them, and no presence is read.
+    across_face: bool,
 }
 
 async fn run_triggered(
@@ -238,6 +264,9 @@ async fn run_triggered(
         .map(|r| Condition::parse(r))
         .collect::<std::result::Result<_, _>>()
         .map_err(anyhow::Error::from)?;
+    if t.across_face {
+        super::watchdog::refuse_across_face(&rules, selectors, "record --on")?;
+    }
 
     let session = dep.link().session().await?;
     // The rules that read the deployment — the doctor, an address's
@@ -275,6 +304,7 @@ async fn run_triggered(
         preamble: t.preamble,
         max_samples: t.max_samples,
         max_replies: zenkey_fleet::DEFAULT_MAX_REPLIES,
+        across_face: t.across_face,
     };
 
     eprintln!(
@@ -389,8 +419,11 @@ mod tests {
     /// selector under a namespace is hinted, a wire key is not.
     #[test]
     fn the_default_is_the_namespaces_zk2_data_and_a_relative_selector_is_hinted() {
-        assert_eq!(selectors_of(&[], false, "prod").unwrap(), ["prod/zk2/**"]);
-        assert_eq!(selectors_of(&[], false, "").unwrap(), ["zk2/**"]);
+        assert_eq!(
+            selectors_of(&[], false, "prod", None).unwrap(),
+            ["prod/zk2/**"]
+        );
+        assert_eq!(selectors_of(&[], false, "", None).unwrap(), ["zk2/**"]);
         let hint = off_namespace_hint("zk2/**", "prod").expect("hinted");
         assert!(hint.contains(r#"did you mean "prod/zk2/**"?"#), "{hint}");
         for (sel, ns) in [
@@ -401,7 +434,7 @@ mod tests {
         ] {
             assert_eq!(off_namespace_hint(sel, ns), None, "{sel} under {ns:?}");
         }
-        assert!(selectors_of(&["zk2/$*/x".into()], false, "").is_err());
+        assert!(selectors_of(&["zk2/$*/x".into()], false, "", None).is_err());
     }
 
     /// #924: `--explicit` captures the explicit kinds by name beside the
@@ -410,7 +443,7 @@ mod tests {
     /// capture names both.
     #[test]
     fn explicit_names_both_explicit_kinds_and_the_header_says_so() {
-        let all = selectors_of(&[], true, "prod").unwrap();
+        let all = selectors_of(&[], true, "prod", None).unwrap();
         assert_eq!(
             all,
             [
@@ -430,7 +463,7 @@ mod tests {
             " — @stream, @state named by a selector; @op, @zk, @adv excluded: no selector \
              names them, and `*`/`**` never match one"
         );
-        let refused = selectors_of(&["prod/zk2/host-a/**".into()], true, "prod")
+        let refused = selectors_of(&["prod/zk2/host-a/**".into()], true, "prod", None)
             .expect_err("--explicit beside a selector");
         assert_eq!(crate::exit::code_for(&refused), crate::exit::NO_VERDICT);
         assert!(refused.to_string().contains("--explicit"), "{refused}");

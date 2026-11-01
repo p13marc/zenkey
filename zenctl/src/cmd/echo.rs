@@ -42,6 +42,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     let EchoArgs {
         selector,
         explicit: crate::cli::ExplicitArgs { explicit },
+        face: crate::cli::AcrossFaceArgs { across_face },
         fmt,
         raw,
         hex: hex_payload,
@@ -52,19 +53,23 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         ns: _,
     } = cli;
     let namespace = dep.namespace().to_owned();
+    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::Samples)?;
     let selectors = zk2::wire_scope(
         selector.as_slice(),
         explicit,
         &namespace,
         zk2::Reads::Samples,
+        face.as_ref(),
     )?;
 
     // The data plane in no namespace: every key as the wire carries it.
     let session = dep.link().session().await?;
     let store = zk2::store(&dep, &contracts);
     // The deployment in its namespace, for the lens — unless nothing is to
-    // be decoded, which asks nothing of it.
-    let feed = if raw || no_decode {
+    // be decoded, which asks nothing of it, or the scope is across a face,
+    // where no descriptor crosses and --contracts resolves every key
+    // (observer §7.5).
+    let feed = if raw || no_decode || face.is_some() {
         None
     } else {
         let ns_session = dep.session().await?;
@@ -88,6 +93,9 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         monitor.watch(s).await?;
     }
 
+    if let Some(face) = &face {
+        eprintln!("{}", face.note(&selectors));
+    }
     let ndjson = crate::render::Mode::of(dep.format()).machine();
     // What the scope cannot reach is said in every format: on standard
     // error, beside an NDJSON stream of rows that has no place for it

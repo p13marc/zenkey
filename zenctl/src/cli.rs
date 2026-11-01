@@ -180,6 +180,25 @@ pub(crate) struct ExplicitArgs {
     pub(crate) explicit: bool,
 }
 
+/// `--across-face`, a raw observer's scope across a constrained face (core
+/// §8.5, observer §7.5; #980 C1b): one struct, flattened into every raw
+/// observer, so its words cannot drift between them.
+#[derive(Args, Clone)]
+pub(crate) struct AcrossFaceArgs {
+    /// A service across a constrained face, SYSTEM/SERVICE, repeatable. The
+    /// scope is then built from the contracts in hand (--contracts, the
+    /// deployment's word, since no descriptor crosses): under each address,
+    /// each concrete resource by its exact key and each template by its key
+    /// with every parameter a wildcard. Never `<ns>/zk2/**`, under which
+    /// every put would carry its key's text across the face (core §8.5). A
+    /// selector given beside it, typed or a rule's, is narrowed to that
+    /// scope, and --explicit, where the verb has it, adds the explicit
+    /// resources. No presence is read: keys resolve through --contracts
+    /// alone.
+    #[arg(long = "across-face", value_name = "SYSTEM/SERVICE")]
+    pub(crate) across_face: Vec<String>,
+}
+
 #[derive(Parser)]
 #[command(
     name = "zenctl",
@@ -279,6 +298,8 @@ pub(crate) struct EchoArgs {
     pub(crate) selector: Option<String>,
     #[command(flatten)]
     pub(crate) explicit: ExplicitArgs,
+    #[command(flatten)]
+    pub(crate) face: AcrossFaceArgs,
     /// kcat-style format string: %k wire key, %K the key relative to the
     /// namespace, %A address, %i interface, %r resource (`<kind>/<template>`,
     /// when a contract resolved it), %t declared type, %v value, %e
@@ -2533,6 +2554,8 @@ pub(crate) struct RateArgs {
     #[arg(long)]
     pub(crate) latency: bool,
     #[command(flatten)]
+    pub(crate) face: AcrossFaceArgs,
+    #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
@@ -2560,6 +2583,8 @@ pub(crate) struct FieldArgs {
     #[arg(long, value_enum, value_name = "SEVERITY")]
     pub(crate) fail_on: Option<FailOn>,
     #[command(flatten)]
+    pub(crate) face: AcrossFaceArgs,
+    #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
@@ -2578,6 +2603,8 @@ pub(crate) struct RecordArgs {
     pub(crate) selectors: Vec<String>,
     #[command(flatten)]
     pub(crate) explicit: ExplicitArgs,
+    #[command(flatten)]
+    pub(crate) face: AcrossFaceArgs,
     /// Output file. An existing file is refused (exit 2) unless
     /// --overwrite: a capture is the one artifact this verb exists to keep.
     #[arg(long, short = 'o', value_name = "FILE")]
@@ -2671,6 +2698,8 @@ pub(crate) struct TimelineArgs {
     pub(crate) selectors: Vec<String>,
     #[command(flatten)]
     pub(crate) explicit: ExplicitArgs,
+    #[command(flatten)]
+    pub(crate) face: AcrossFaceArgs,
     /// The passive window, seconds. Not with --from: a capture's span is in
     /// its rows.
     #[arg(long = "for", value_name = "SECS", required_unless_present = "from")]
@@ -2683,7 +2712,8 @@ pub(crate) struct TimelineArgs {
     /// projection, so the same window rendered live and from its file is
     /// identical. Keys are read under the capture's stated namespace, and
     /// resolved through `--contracts` alone: a file names no owner.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["selectors", "for_secs", "explicit"])]
+    #[arg(long, value_name = "FILE",
+          conflicts_with_all = ["selectors", "for_secs", "explicit", "across_face"])]
     pub(crate) from: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
@@ -2714,6 +2744,8 @@ pub(crate) struct SnapshotArgs {
     /// (`<ns>/zk2/<system>/*/*/@state/**`).
     #[arg(long)]
     pub(crate) explicit: bool,
+    #[command(flatten)]
+    pub(crate) face: AcrossFaceArgs,
     /// Output file. Refused (exit 2) when nobody answered: a file of
     /// silence would read as an empty deployment. An existing file is
     /// refused too (exit 2), before any session, unless --overwrite.
@@ -2963,6 +2995,11 @@ pub(crate) struct WatchdogArgs {
     /// S4's GET and re-read each tick.
     #[arg(long = "rule", value_name = "RULE", required = true)]
     pub(crate) rules: Vec<String>,
+    // Across a constrained face the rules' selectors are narrowed to the
+    // contracts' scope, and a rule that reads presence or the doctor is
+    // refused, exit 2: neither crosses a face (`cmd/watchdog.rs`).
+    #[command(flatten)]
+    pub(crate) face: AcrossFaceArgs,
     /// Seconds between evaluations — the one period flag (#307).
     #[arg(long, value_name = "SECS", default_value_t = 5.0)]
     pub(crate) every: f64,
