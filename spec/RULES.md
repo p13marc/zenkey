@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 63 |
+| [Owner](#owner) | 64 |
 | [Consumer](#consumer) | 17 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 17 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 57, 25 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 54 |
-| Every rule, once | 206 |
+| Every rule, once | 207 |
 | [Rule ids](#rule-ids) | 79 |
 
 ## Owner
@@ -130,9 +130,10 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [S1](core.md#42-rules-for-owners-and-consumers) | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). | `[Sc: state.md §1]` |
 | [S1](core.md#42-rules-for-owners-and-consumers) | On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. | `[Sc: state.md §1, §2]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner] MUST answer a selector over them [its interfaces' `state/**` and `@state/**`] with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead that member's last confirmation, as §4.3's table says. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner] MUST answer a selector over them [its interfaces' `state/**` and `@state/**`] with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
 | [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). | `[Sc: state.md §2, §6]` |
 
 ### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
@@ -368,7 +369,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.1](core.md#81-tokens) | These [the tokenless set's interfaces] SHOULD be the interfaces every service of the deployment implements: `health.v1` ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) and the rest of a framework set. | `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]` |
+| [§8.1](core.md#81-tokens) | These [the tokenless set's interfaces] SHOULD be the interfaces every service of the deployment implements: `health.v1` ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13), `freshness.v2` ([`profiles/freshness/v2.md`](profiles/freshness/v2.md) §3) and the rest of a framework set. | `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]` |
 
 ### [core §8.2 Start-up order](core.md#82-start-up-order)
 

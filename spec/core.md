@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.81** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.82** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -886,7 +886,7 @@ and reports these codes. `[F: descriptors/]`
 | # | Rule | Evidence |
 |---|---|---|
 | S1 | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
-| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
+| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead that member's last confirmation, as §4.3's table says. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
 | S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it. | `[Sc: state.md §2, §6]` |
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
@@ -901,6 +901,13 @@ also carries a Zenoh timestamp minted above every one the owner issued
 (§4.3). The owner's GET answers carry those stamps from then on (S2). A
 reply represents the member's latest put, not its latest change.
 `[Sc: profiles/freshness/scenarios.md §1]`
+
+**A heartbeat is no mutation.** Under
+[`freshness.v2`](profiles/freshness/v2.md) an owner puts no member again
+to confirm it: its heartbeat (§7.5) vouches for it, and moves no seq of
+its state. A reply then represents the member's latest put, stamped with
+its last confirmation (§4.3's table).
+`[Sc: profiles/freshness/scenarios-v2.md §1, §3]`
 
 **A late joiner's seed.** A consumer or a tool that wants an
 owner's current state and every change after it, a **late joiner**, seeds
@@ -1078,11 +1085,13 @@ time a profile reads (the table below).
 - **The Zenoh timestamps kept.** Only these resources carry a Zenoh
   timestamp the owner sets, beside the in-band stamp. Each is kept for the
   time a profile reads from it. A state among them carries one on each
-  mutation and reply (S1, S2), and a stream as its profile says.
+  mutation and reply (S1, S2), a stream as its profile says, and a state
+  `freshness.v2` confirms on its replies alone.
 
   | Resource | Read for | Carried as |
   |---|---|---|
-  | A state whose contract declares `freshness.ttl_s` above 0 | a reply's age ([`freshness.v1`](profiles/freshness/v1.md) §2.4, §2.6) | S1, S2 |
+  | A state whose contract declares `freshness.ttl_s` above 0, and does not use `freshness.v2` | a reply's age ([`freshness.v1`](profiles/freshness/v1.md) §2.4, §2.6) | S1, S2 |
+  | A state whose contract declares `freshness.ttl_s` above 0, and uses `freshness.v2` | a reply's age, from its last confirmation ([`freshness.v2`](profiles/freshness/v2.md) §2.4, §2.6) | on its replies alone: the later of its last mutation's time and the last heartbeat's that vouched for it (S2), never on a put |
   | A `desired.v1` desired resource | the order of an author's versions ([`desired.v1`](profiles/desired/v1.md) §2.4, §2.6, §2.11) | S1, S2 |
   | A state that is a `telemetry.v1` metric resource | a rate's time base ([`telemetry.v1`](profiles/telemetry/v1.md) §2.11) | S1, S2 |
   | A stream that declares a `timing.v1` lifespan | a sample's age ([`timing.v1`](profiles/timing/v1.md) §2.6) | that section says |
@@ -1796,8 +1805,7 @@ bytes. `[F: envelope/vectors.json]`
 **The heartbeat.** A **heartbeat** is a put an owner sends for one
 interface it serves, its **covered interface**. It vouches for the members of that interface's
 state that are still current, without putting their values again. This
-version defines its bytes and how they are read. No rule yet says who
-sends one, how often, on which key, or what a reader concludes from it.
+section defines its bytes and how they are read.
 
 - **CH's tag** is the low 4 bits of the last byte of the covered
   revision's fingerprint (§9.5). An implementation that writes a
@@ -1808,6 +1816,8 @@ sends one, how often, on which key, or what a reader concludes from it.
   matches it 1 time in 16.
 - **Its run and seq** are its key's. They count as any stream key's do
   (§4.3), so a gap in the seqs is a heartbeat lost.
+- **Who sends one** is [`freshness.v2`](profiles/freshness/v2.md)'s to
+  say: its key, its period, and what a reader concludes from it.
 
 **The collections.** A heartbeat's body is read by its covered
 revision's collections.
@@ -2130,8 +2140,9 @@ Liveliness tokens carry no payload; everything is in the key.
     no interface token. These SHOULD be the interfaces every service of the
     deployment implements: `health.v1`
     ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1`
-    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) and
-    the rest of a framework set.
+    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13),
+    `freshness.v2` ([`profiles/freshness/v2.md`](profiles/freshness/v2.md)
+    §3) and the rest of a framework set.
   - The owner's descriptor marks each such interface `"token": false`
     (§3.3).
   - It never names `archive.v1` (§4.4), nor an interface
@@ -2376,6 +2387,10 @@ facts.
   face, and the far side's only word on that service's health
   ([`profiles/health/v1.md`](profiles/health/v1.md) §2.8). A face
   that closes it leaves health unobservable there.
+  - **A heartbeat that crosses** is liveness evidence too: one put per
+    covered interface each period, never downsampled
+    ([`freshness.v2`](profiles/freshness/v2.md) §2.9,
+    [`link.v1`](profiles/link/v1.md) §2.8, §2.12).
 - **Attachment decides what crosses.**
   - A router-to-router link carries every declaration of both sides. A
     `@zk` deny on it hides presence from the far side, but the denied
@@ -3896,6 +3911,10 @@ Appendix B. These are the ones the rules above cite:
   (`api/queryable.rs`, `_reply_sample`). A reply given none carries none.
   `Session::new_timestamp()` reads the HLC where there is one, and else
   the wall clock with the session's zid (`api/session.rs`).
+- A link carries each priority in a transmission queue of its own,
+  batched apart (`zenoh-transport`'s `common/pipeline.rs`, `stage_in` by
+  priority). So two puts of different priorities can arrive in the other
+  order, which `freshness.v2` §2.5's second heartbeat absorbs.
 - A put's `reliability` is unstable API. `PublisherBuilder::reliability`
   and `PublicationBuilder::reliability` exist only under the `unstable`
   feature. Without it a put is sent `Reliability::DEFAULT`, which is

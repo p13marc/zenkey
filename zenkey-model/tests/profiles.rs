@@ -47,6 +47,7 @@ const KNOWN: &[(&str, &str)] = &[
     ("health", "rollups.json"),
     ("health", "codes.json"),
     ("freshness", "clock-trust.json"),
+    ("freshness", "apply.json"),
     ("health", "clock.json"),
     ("config", "window.json"),
     ("config", "validation.json"),
@@ -1759,10 +1760,30 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
         .collect()
 }
 
+/// One inline revision: its resources, or `{uses, resources}` (0.11: a
+/// revision that uses `freshness.v2` has a heartbeat).
+fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
+    match rev.get("resources") {
+        Some(rs) => {
+            let v2 = rev["uses"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|u| u.as_str() == Some(zenkey_model::freshness::PROFILE_V2));
+            if v2 {
+                d.heartbeats.insert(iface.to_owned());
+            }
+            d.add_revision(iface.to_owned(), link_resources(rs));
+        }
+        None => d.add_revision(iface.to_owned(), link_resources(rev)),
+    }
+}
+
 /// A case's deployment, as `link/conformance/` writes it: `implements`, and
 /// the interfaces inline or loaded from `contracts`. An interface inline is
-/// one revision's resources, or `{revisions: [[...], ...]}` (0.3, F-119);
-/// two contracts of one interface id are two revisions of it.
+/// one revision's resources, `{uses, resources}`, or `{revisions: [...]}`
+/// of either (0.3, F-119); two contracts of one interface id are two
+/// revisions of it.
 fn link_deployment(case: &Value) -> Option<link::Deployment> {
     let implements = case.get("implements")?;
     let mut d = link::Deployment {
@@ -1791,10 +1812,10 @@ fn link_deployment(case: &Value) -> Option<link::Deployment> {
         match rs.get("revisions") {
             Some(revs) => {
                 for rev in revs.as_array().expect("revisions") {
-                    d.add_revision(iface.clone(), link_resources(rev));
+                    link_revision(&mut d, iface, rev);
                 }
             }
-            None => d.add_revision(iface.clone(), link_resources(rs)),
+            None => link_revision(&mut d, iface, rs),
         }
     }
     Some(d)
@@ -4688,5 +4709,147 @@ fn arbitration_conclusions() {
     }
     if bless() {
         write_json(&path, &doc);
+    }
+}
+
+// --- freshness.v2 ---------------------------------------------------------
+
+/// A stamp as `freshness/conformance/apply.json` writes it, `null` none.
+fn apply_stamp(v: &Value) -> Option<zenkey_model::wire::Stamp> {
+    if v.is_null() {
+        return None;
+    }
+    let run = v["run"].as_u64().expect("run");
+    let run = match v["run_width"].as_u64().expect("run_width") {
+        16 => zenkey_model::wire::Run::U16(run as u16),
+        32 => zenkey_model::wire::Run::U32(run as u32),
+        w => panic!("run_width {w}"),
+    };
+    Some(zenkey_model::wire::Stamp {
+        run,
+        seq: zenkey_model::wire::Seq::new(v["seq"].as_u64().expect("seq") as u32).expect("a seq"),
+    })
+}
+
+/// `freshness/conformance/apply.json` (`freshness.v2` §2.5, #978's F3): a
+/// subscriber's view over the core's heartbeat layouts, its puts, deletes,
+/// reads and heartbeats in order → what each heartbeat confirmed, and the
+/// collections due a read, the gap and each key's last confirmation.
+/// Written by an independent reading of the text, checked, never blessed.
+#[test]
+fn freshness_v2_apply() {
+    use zenkey_model::freshness::{Applied, SectionRead, View};
+    let layouts: BTreeMap<String, zenkey_model::heartbeat::Layout> = {
+        let doc = read_json(&repo_root().join("spec/conformance/heartbeat/layouts.json"));
+        doc["contracts"]
+            .as_object()
+            .expect("contracts")
+            .iter()
+            .map(|(name, text)| {
+                let loaded = zenkey_model::contract::load_str(
+                    text.as_str().expect("text"),
+                    &repo_root().join("spec"),
+                    None,
+                );
+                let c = loaded
+                    .contract
+                    .unwrap_or_else(|| panic!("{name}: {:?}", loaded.report));
+                (name.clone(), zenkey_model::heartbeat::Layout::of(&c))
+            })
+            .collect()
+    };
+    let doc = read_json(&profiles().join("freshness/conformance/apply.json"));
+    let ms = |v: &Value| Mono::after(Duration::from_millis(v.as_u64().expect("at")));
+    for case in doc["cases"].as_array().expect("cases") {
+        let note = case["note"].as_str().expect("note");
+        let layout = layouts[case["layout"].as_str().expect("layout")].clone();
+        let mut view: View<Mono> = View::new(layout.clone());
+        for f in case["follows"].as_array().expect("follows") {
+            assert!(view.follow_resource(f.as_str().unwrap()), "{note}: {f}");
+        }
+        for (i, step) in case["steps"].as_array().expect("steps").iter().enumerate() {
+            let what = format!("{note}, step {i}");
+            if let Some(p) = step.get("put") {
+                view.put(
+                    p["key"].as_str().unwrap(),
+                    apply_stamp(&p["stamp"]),
+                    ms(&step["at"]),
+                );
+            } else if let Some(d) = step.get("delete") {
+                view.delete(
+                    d["key"].as_str().unwrap(),
+                    apply_stamp(&d["stamp"]),
+                    ms(&step["at"]),
+                );
+            } else if let Some(r) = step.get("read") {
+                let index = layout
+                    .index_of(r["collection"].as_str().unwrap())
+                    .expect("a collection");
+                let live: Vec<(String, Option<zenkey_model::wire::Stamp>)> = r["live"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|m| {
+                        (
+                            m["key"].as_str().unwrap().to_owned(),
+                            apply_stamp(&m["stamp"]),
+                        )
+                    })
+                    .collect();
+                view.reread(
+                    index,
+                    live.iter().map(|(k, s)| (k.as_str(), *s)),
+                    ms(&r["asked"]),
+                    ms(&step["at"]),
+                );
+            } else if let Some(h) = step.get("heartbeat") {
+                let tag = zenkey_model::wire::Tag::new(h["tag"].as_u64().unwrap() as u8).unwrap();
+                let stamp = apply_stamp(&h["stamp"]).expect("a heartbeat's stamp");
+                let text = h["body"].as_str().unwrap();
+                let body: Vec<u8> = (0..text.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("hex"))
+                    .collect();
+                let got = match view.apply(tag, stamp, &body, ms(&step["at"])) {
+                    Applied::Revision => json!({"revision": true}),
+                    Applied::Refused(r) => json!({"refused": r.token()}),
+                    Applied::Older => json!({"older": true}),
+                    Applied::Read { gap, sections } => {
+                        let by: serde_json::Map<String, Value> = layout
+                            .collections
+                            .iter()
+                            .zip(sections)
+                            .map(|(c, s)| {
+                                (
+                                    c.resource(),
+                                    match s {
+                                        SectionRead::Confirmed(keys) => json!({"confirmed": keys}),
+                                        other => json!(other.as_str()),
+                                    },
+                                )
+                            })
+                            .collect();
+                        json!({"read": {"gap": gap, "sections": by}})
+                    }
+                };
+                assert_eq!(step["expect"], got, "{what}");
+            } else if let Some(c) = step.get("check") {
+                let due: Vec<String> = view
+                    .reread_due()
+                    .into_iter()
+                    .map(|i| layout.collections[i].resource())
+                    .collect();
+                assert_eq!(c["reread_due"], json!(due), "{what}: reread_due");
+                assert_eq!(c["gap"], json!(view.gap()), "{what}: gap");
+                for (k, at) in c["confirmed"].as_object().unwrap() {
+                    let got = view
+                        .confirmed(k)
+                        .map(|m| m.since_origin().as_millis() as u64);
+                    assert_eq!(*at, json!(got), "{what}: {k}'s confirmation");
+                }
+            } else {
+                panic!("{what}: an unknown step {step}");
+            }
+        }
     }
 }
