@@ -556,6 +556,11 @@ async fn listen(
                     {
                         return;
                     }
+                    // Core §7.5: a refused zk2c envelope is undecodable,
+                    // never an arrival, as the runtime's arbitration reads it.
+                    if crate::model::inband::refusal(&sample).is_some() {
+                        return;
+                    }
                     q.send(Delivery::Sample {
                         key: sample.key_expr().as_str().to_owned(),
                         delete: sample.kind() == SampleKind::Delete,

@@ -89,7 +89,9 @@ impl WhyTarget {
 pub struct KeyReply {
     /// The key it came on, base-relative.
     pub key: String,
-    /// `None` for a deletion (`reply_del`, or a delete sample).
+    /// `None` for a deletion (`reply_del`, or a delete sample). As they
+    /// came: a zk2c envelope (core §7.5) is stripped where they are
+    /// rendered ([`crate::model::render::render_with`]).
     pub bytes: Option<Vec<u8>>,
     pub encoding: Option<String>,
     pub stamp: Option<Stamp>,

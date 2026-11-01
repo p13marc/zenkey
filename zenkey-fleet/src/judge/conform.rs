@@ -5500,6 +5500,7 @@ mod tests {
                 complete: true,
                 replies,
                 discarded: 0,
+                envelopes: Default::default(),
             }))
         };
         o.alarms = read(vec![

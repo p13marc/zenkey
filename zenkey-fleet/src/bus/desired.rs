@@ -815,9 +815,18 @@ async fn reports_get(
                         if key.contains('*') || sample.kind() == SampleKind::Delete {
                             continue;
                         }
+                        // The envelope first (core §7.5): a report is its
+                        // record, a refused envelope unreadable, its stamp
+                        // still the Zenoh one, the report's time.
+                        let read = match crate::model::inband::read(sample.clone()) {
+                            crate::model::inband::Read::Refused { refusal, .. } => {
+                                Err(dm::Unreadable::Json(refusal.reason()))
+                            }
+                            r => dm::decode(&r.sample().payload().to_bytes()),
+                        };
                         replies_out.push(ReportReply {
                             key: key.to_owned(),
-                            read: dm::decode(&sample.payload().to_bytes()),
+                            read,
                             stamp: sample.timestamp().map(|ts| Stamped {
                                 time: ts.get_time().to_system_time(),
                                 clock: ts.get_id().to_string(),

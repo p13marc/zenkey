@@ -18,6 +18,12 @@
 //! 7. the bytes decode as the declared type ([`Rendered`]), and for a JSON
 //!    Schema type, the value satisfies it ([`Conformance`]).
 //!
+//! Before any rung reads a payload, a sample carrying a zk2c envelope has
+//! it stripped (core §7.5, observer §7.3's "the envelope first",
+//! [`crate::model::inband`]): its record is what rung 7 decodes and the
+//! structural ladder sniffs, and a refused envelope is undecodable with
+//! its refusal named, whatever rung the key stopped at.
+//!
 //! Session-free, so a `.zrec` resolves through the same lens as live
 //! traffic: a capture read with `--contracts` and no presence resolves each
 //! interface by the one revision held offline, and says it did.
@@ -32,6 +38,7 @@ use zenkey_model::grammar::{Addr, IfaceId, ZkKey};
 use zenkey_model::template::{Bindings, resolve};
 
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Contracts, Revision, zid_value};
+use crate::model::inband;
 use crate::model::render::Member;
 use crate::model::structural::{structural, structural_value};
 use crate::report::{
@@ -371,6 +378,30 @@ impl<'a> Lens<'a> {
     ) -> Checked {
         let resolution = self.resolve(wire);
         let key = self.relative(wire).unwrap_or(wire);
+        // The envelope first (core §7.5, observer §7.3): its record is the
+        // payload every rung below reads, on its contract's `encoding`; a
+        // refused one is undecodable, never sniffed.
+        let payload = match member {
+            Member::Type => inband::payload(wire, encoding, bytes),
+            _ => inband::Payload::Plain(bytes),
+        };
+        let (bytes, encoding) = match payload {
+            inband::Payload::Refused(refusal) => {
+                let rendering = refused_rendering(
+                    resolution.resolved.as_ref(),
+                    key,
+                    member,
+                    bytes.len(),
+                    refusal,
+                );
+                return Checked {
+                    conformance: inband::refused_conformance(&rendering),
+                    rendering,
+                    identity: resolution.identity,
+                };
+            }
+            p => (p.bytes().expect("not refused"), p.encoding(encoding)),
+        };
         match &resolution.resolved {
             Some(r) => {
                 let (rendering, conformance) =
@@ -497,6 +528,42 @@ fn control(k: &ZkKey) -> (Option<String>, &'static str) {
         ZkKey::Contract { .. } => (None, "contract"),
         ZkKey::Data { addr, .. } => (Some(addr.to_string()), "data"),
     }
+}
+
+/// A refused envelope's rendering (core §7.5): undecodable, as the
+/// resource's declared type when the key resolved to one that declares
+/// `member`, else as the envelope its key and Encoding declared.
+fn refused_rendering(
+    resolved: Option<&Resolved>,
+    key: &str,
+    member: Member,
+    size: usize,
+    refusal: zenkey_model::wire::Refusal,
+) -> PayloadRendering {
+    let Some(r) = resolved else {
+        return inband::refused_rendering(key, size, None, None, refusal);
+    };
+    let resource = r.resource();
+    let declared = decode::type_of(
+        r.revision.bundle(),
+        resource.token.as_str(),
+        resource.template.as_str(),
+        member.as_str(),
+    )
+    .map(decode::declared);
+    inband::refused_rendering(
+        &r.key,
+        size,
+        Some(ResolvedResource {
+            iface: r.iface.to_string(),
+            fingerprint: r.revision.fingerprint().to_string(),
+            resource: r.resource_name(),
+            member: member.as_str().to_owned(),
+            values: r.values.clone(),
+        }),
+        declared,
+        refusal,
+    )
 }
 
 /// Rung 7 through a resolved resource: decode the member, then check the
@@ -985,6 +1052,165 @@ mod tests {
                 .resolved
                 .is_some(),
             "one revision held offline resolves without presence"
+        );
+    }
+
+    /// The envelope first (core §7.5, observer §7.3; #976's A2): a state
+    /// sample under `zenoh/bytes` carries a zk2c envelope, told by its key
+    /// and Encoding alone. Its record renders as the resource's type and
+    /// is checked against it, read on the contract's `encoding`; a refused
+    /// one is undecodable with its refusal named, resolved or not, never
+    /// sniffed; the same bytes under their predefined Encoding read as
+    /// today.
+    #[test]
+    fn an_enveloped_record_renders_as_its_type_and_a_refused_one_is_undecodable() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let rev = status();
+        let fp = rev.fingerprint().to_string();
+        let mut set = ContractSet::new();
+        set.insert(rev);
+        let cat = catalog(&fp, None);
+        let lens = Lens::new("prod", Some(&cat), &set);
+        let wire = "prod/zk2/lab/m/m.v1/state/status/eth0";
+        let envelope = Envelope {
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U16(7),
+                seq: Seq::new(1).expect("a seq"),
+            },
+            record: br#"{"up":true}"#,
+        }
+        .write();
+        let ok = lens.check(wire, Member::Type, Some("zenoh/bytes"), &envelope);
+        assert_eq!(ok.conformance, Conformance::Valid);
+        assert_eq!(ok.rendering.size, br#"{"up":true}"#.len(), "the record's");
+        assert!(
+            matches!(&ok.rendering.rendered,
+                Rendered::Value { declared, value } if declared == "json:Status" && value == &json!({"up": true})),
+            "{:?}",
+            ok.rendering.rendered
+        );
+        let bad = Envelope {
+            record: br#"{"up":1}"#,
+            ..Envelope::parse(&envelope).expect("an envelope")
+        }
+        .write();
+        assert!(matches!(
+            lens.check(wire, Member::Type, Some("zenoh/bytes"), &bad)
+                .conformance,
+            Conformance::Invalid { .. }
+        ));
+        // Today's bytes under zenoh/bytes: an envelope refused, never the
+        // document they would sniff as.
+        let refused = lens.check(wire, Member::Type, Some("zenoh/bytes"), br#"{"up":true}"#);
+        let Rendered::Undecodable { declared, reason } = &refused.rendering.rendered else {
+            panic!("{:?}", refused.rendering.rendered);
+        };
+        assert_eq!(declared, "json:Status");
+        assert!(reason.starts_with("zk2c envelope refused: "), "{reason}");
+        assert!(matches!(
+            &refused.conformance,
+            Conformance::Undecodable { reason: r, .. } if r == reason
+        ));
+        assert!(refused.rendering.resource.is_some(), "the key resolved");
+        // Unresolved (no presence read): still refused, as the envelope.
+        let blind = Lens::new("prod", None, &set);
+        let unresolved = blind.check(wire, Member::Type, Some("zenoh/bytes"), b"{}");
+        assert!(
+            matches!(&unresolved.rendering.rendered,
+                Rendered::Undecodable { declared, .. } if declared == "zk2c envelope"),
+            "{:?}",
+            unresolved.rendering.rendered
+        );
+        assert_eq!(
+            unresolved.identity.unresolved,
+            Some(Unresolved::PresenceNotRead),
+            "the identity still says where resolution stopped"
+        );
+        // An unresolved envelope's record falls to the structural ladder.
+        let sniffed = blind.check(wire, Member::Type, Some("zenoh/bytes"), &envelope);
+        assert!(
+            matches!(&sniffed.rendering.rendered,
+                Rendered::Structural { value: Some(v), .. } if v == &json!({"up": true})),
+            "{:?}",
+            sniffed.rendering.rendered
+        );
+        // Its predefined Encoding: today's wire.
+        let today = lens.check(
+            wire,
+            Member::Type,
+            Some("application/json"),
+            br#"{"up":true}"#,
+        );
+        assert_eq!(today.conformance, Conformance::Valid);
+    }
+
+    /// A `.zrec` keeps a sample's bytes as they came (#976's A2): a
+    /// recording of an enveloped sample replays through the same lens,
+    /// its record rendered as its type, with no version bump.
+    #[test]
+    fn a_recorded_enveloped_sample_replays_through_the_lens() {
+        use crate::tape::record::{ZREC_VERSION, ZrecItem, ZrecReader, ZrecWriter};
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let rev = status();
+        let mut set = ContractSet::new();
+        set.insert(rev);
+        let lens = Lens::new("prod", None, &set).offline(&set);
+        let wire = "prod/zk2/lab/m/m.v1/state/status/eth0";
+        let envelope = Envelope {
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U32(70_000),
+                seq: Seq::new(9).expect("a seq"),
+            },
+            record: br#"{"up":false}"#,
+        }
+        .write();
+        let view = crate::SampleView {
+            key: wire.into(),
+            payload: zenoh::bytes::ZBytes::from(envelope.clone()),
+            encoding: "zenoh/bytes".into(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::Data,
+            congestion_control: zenoh::qos::CongestionControl::Block,
+            reliability: zenoh::qos::Reliability::Reliable,
+            express: false,
+            source: None,
+            received: std::time::Instant::now(),
+        };
+        let header = crate::ZrecHeader {
+            zrec: ZREC_VERSION,
+            selectors: vec!["prod/zk2/**".into()],
+            base: "prod".into(),
+            captured_at: "2026-11-01T00:00:00Z".into(),
+            excluded: None,
+            preamble: None,
+            pre_roll: None,
+        };
+        let mut sink = Vec::new();
+        let mut w = ZrecWriter::new(&mut sink, &header).expect("a writer");
+        w.write_sample(&view).expect("a row");
+        let _ = w.finish().expect("finished");
+        let mut reader = ZrecReader::new(sink.as_slice()).expect("a reader");
+        let Some(Ok(ZrecItem::Sample { row, .. })) = reader.next() else {
+            panic!("a row");
+        };
+        assert_eq!(row.payload, envelope, "the bytes as they came");
+        let checked = lens.check(
+            &row.key,
+            Member::Type,
+            row.encoding.as_deref(),
+            &row.payload,
+        );
+        assert_eq!(checked.conformance, Conformance::Valid);
+        assert!(
+            matches!(&checked.rendering.rendered,
+                Rendered::Value { value, .. } if value == &json!({"up": false})),
+            "{:?}",
+            checked.rendering.rendered
         );
     }
 

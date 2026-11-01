@@ -846,6 +846,21 @@ impl TelemetryBook {
     /// the member's last conforming sample. Returns the pair it made, when it
     /// made one.
     pub fn sample(&mut self, metric: &Arc<MetricResource>, s: MetricSample) -> Option<PairSeen> {
+        self.sample_enveloped(metric, s, None)
+    }
+
+    /// [`TelemetryBook::sample`] for a sample whose zk2c envelope says
+    /// `envelope` (core §7.5, [`crate::model::inband`]): `s.payload` is
+    /// then its record, and a state member is merged by its run and seq
+    /// (`zenkey_model::seed::admits_mark`), its time still the owner's
+    /// Zenoh stamp. A refused envelope is a sample that could not be read
+    /// (undecodable), never merged.
+    pub fn sample_enveloped(
+        &mut self,
+        metric: &Arc<MetricResource>,
+        s: MetricSample,
+        envelope: crate::model::inband::Envelope,
+    ) -> Option<PairSeen> {
         if !self.members.contains_key(&s.key) && self.members.len() >= MAX_MEMBERS {
             self.refused += 1;
             return None;
@@ -862,13 +877,19 @@ impl TelemetryBook {
             .as_ref()
             .filter(|_| state)
             .map(|t| tm::stamp_ns(t.get_time().as_u64()));
+        if let Some(Err(_)) = envelope {
+            entry.samples += 1;
+            entry.unobservable += 1;
+            entry.unobservable_why = Some(tm::Unasked::Undecodable);
+            return None;
+        }
         if state {
-            let incoming = s.stamp.as_ref().map(crate::bus::seed::stamp_of);
-            if !zenkey_model::seed::admits(entry.merged, incoming) {
+            let incoming = crate::model::inband::mark_of(envelope, s.stamp.as_ref());
+            if !zenkey_model::seed::admits_mark(entry.merged, incoming) {
                 entry.not_kept += 1;
                 return None;
             }
-            entry.merged = entry.merged.after(incoming);
+            entry.merged = entry.merged.after_mark(incoming);
         }
         if s.delete {
             entry.deletes += 1;

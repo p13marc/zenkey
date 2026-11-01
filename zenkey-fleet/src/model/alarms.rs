@@ -280,12 +280,17 @@ pub struct AlarmSample {
 
 impl AlarmSample {
     /// A sample as the fleet's sample view carries it (a live delivery, or
-    /// a `.zrec` row), its key already base-relative.
+    /// a `.zrec` row), its key already base-relative: a zk2c envelope's
+    /// record as its payload (core §7.5), which [`AlarmBook::sample_enveloped`]
+    /// reads beside [`crate::SampleView::envelope`]. A refused envelope's
+    /// payload is its bytes as they came, which that never decodes.
     pub fn of_view(view: &crate::bus::monitor::SampleView, key: String, via: AlarmVia) -> Self {
         AlarmSample {
             key,
             delete: view.kind == zenoh::sample::SampleKind::Delete,
-            payload: view.payload.to_bytes().into_owned(),
+            payload: view
+                .record()
+                .map_or_else(|_| view.payload.to_bytes().into_owned(), |b| b.into_owned()),
             stamp: view.timestamp,
             at: view.received,
             wall: SystemTime::now(),
@@ -309,9 +314,16 @@ pub struct SeedEnd {
 pub struct SeedRead {
     pub asked_at: Instant,
     pub complete: bool,
+    /// Each reply: a zk2c envelope's record as its payload when it carried
+    /// one, its bytes as they came otherwise.
     pub replies: Vec<AlarmSample>,
     /// Replies on a non-concrete key, discarded (R6).
     pub discarded: u64,
+    /// What each key answered under a zk2c envelope said (core §7.5): its
+    /// in-band stamp, what orders it, or why the envelope was refused, its
+    /// reply then undecodable, never read as a document. `S4`'s `Latest`
+    /// answers a key once.
+    pub envelopes: BTreeMap<String, Result<zenkey_model::wire::Stamp, zenkey_model::wire::Refusal>>,
 }
 
 /// An archive's last-known document of one alarm key (core §4.4, S6).
@@ -688,6 +700,20 @@ impl AlarmBook {
     /// owner's stamp (core §4.2), and, when it is the key's latest, read as
     /// §2.6 says. Returns the key's transition, when it made one.
     pub fn sample(&mut self, s: AlarmSample) -> Option<AlarmTransition> {
+        self.sample_enveloped(s, None)
+    }
+
+    /// [`AlarmBook::sample`] for a sample whose zk2c envelope says
+    /// `envelope` (core §7.5, [`crate::model::inband`]): `s.payload` is
+    /// then its record, merged by its run and seq
+    /// (`zenkey_model::seed::admits_mark`), its stamp still its time. A
+    /// refused envelope is never merged: the key's latest, unreadable, its
+    /// refusal the reason, never decoded as a document.
+    pub fn sample_enveloped(
+        &mut self,
+        s: AlarmSample,
+        envelope: crate::model::inband::Envelope,
+    ) -> Option<AlarmTransition> {
         if !self.scope.selects_key(&s.key) {
             return None;
         }
@@ -727,8 +753,12 @@ impl AlarmBook {
             reported: None,
         });
         entry.arrived = entry.arrived.max(s.at);
-        let incoming = s.stamp.as_ref().map(crate::bus::seed::stamp_of);
-        let admitted = zenkey_model::seed::admits(entry.merged, incoming);
+        let refused = match envelope {
+            Some(Err(r)) => Some(r),
+            _ => None,
+        };
+        let incoming = crate::model::inband::mark_of(envelope, s.stamp.as_ref());
+        let admitted = refused.is_some() || zenkey_model::seed::admits_mark(entry.merged, incoming);
         if s.via == AlarmVia::Get {
             entry.got = Some(GotReply {
                 asked_at: s.at,
@@ -739,11 +769,16 @@ impl AlarmBook {
         if !admitted {
             return None;
         }
-        entry.merged = entry.merged.after(incoming);
+        if refused.is_none() {
+            entry.merged = entry.merged.after_mark(incoming);
+        }
         if s.via == AlarmVia::Subscription {
             entry.sub_last = Some((s.at, s.delete));
         }
-        let doc = (!s.delete).then(|| am::decode(&s.payload));
+        let doc = (!s.delete).then(|| match refused {
+            Some(r) => Err(Invalid::Json(r.reason())),
+            None => am::decode(&s.payload),
+        });
         let t = match &doc {
             None => entry.track.apply(am::Sample::Delete),
             Some(Ok(a)) => entry.track.apply(am::Sample::Put(a)),
@@ -812,10 +847,14 @@ impl AlarmBook {
     /// [`AlarmBook::seeded`]. Returns every transition it made.
     pub fn seed(&mut self, read: SeedRead, now: Instant, wall: SystemTime) -> Vec<AlarmTransition> {
         self.seeding();
+        let envelopes = read.envelopes;
         let mut out: Vec<AlarmTransition> = read
             .replies
             .into_iter()
-            .filter_map(|r| self.sample(r))
+            .filter_map(|r| {
+                let envelope = envelopes.get(&r.key).copied();
+                self.sample_enveloped(r, envelope)
+            })
             .collect();
         out.extend(self.seeded(
             SeedEnd {
@@ -1549,6 +1588,64 @@ mod tests {
         assert_eq!(r.rederives().reason, Reason::Strict);
     }
 
+    /// The merge over the zk2c envelope (core §7.5; #976's A2): within one
+    /// run an equal seq is kept once and a lower one is older; another run
+    /// is kept, the later arrival; a refused envelope is unreadable, never
+    /// decoded nor merged, so the run's next seq after it is still newer.
+    #[test]
+    fn an_enveloped_alarm_merges_by_run_and_seq() {
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let at = |run: u16, seq: u32| {
+            Some(Ok(Stamp {
+                run: Run::U16(run),
+                seq: Seq::new(seq).unwrap(),
+            }))
+        };
+        let mut b = book(true);
+        let t0 = Instant::now();
+        b.subscribed(t0);
+        b.presence_read(&presence(true, Some(ZID)), t0);
+        let live = |payload| put(t0, 10, payload, AlarmVia::Subscription);
+        let t = b
+            .sample_enveloped(live(doc("warning", "firing", 1)), at(1, 5))
+            .unwrap();
+        assert_eq!(t.change, AlarmChange::Raised);
+        assert!(
+            b.sample_enveloped(
+                put(t0, 10, doc("warning", "firing", 1), AlarmVia::Get),
+                at(1, 5)
+            )
+            .is_none(),
+            "an equal seq is the same value, kept once"
+        );
+        assert!(
+            b.sample_enveloped(live(doc("critical", "firing", 2)), at(1, 4))
+                .is_none(),
+            "a lower seq within the run is older"
+        );
+        let t = b
+            .sample_enveloped(live(doc("critical", "firing", 2)), at(2, 1))
+            .unwrap();
+        assert_eq!(t.change, AlarmChange::Escalated, "another run: kept");
+        let refused = zenkey_model::wire::Envelope::parse(b"").unwrap_err();
+        let t = b
+            .sample_enveloped(live(doc("warning", "firing", 3)), Some(Err(refused)))
+            .unwrap();
+        assert_eq!(
+            t.change,
+            AlarmChange::Unreadable,
+            "never read as a document"
+        );
+        let t = b
+            .sample_enveloped(live(doc("critical", "firing", 2)), at(2, 2))
+            .unwrap();
+        assert_ne!(
+            t.change,
+            AlarmChange::Unreadable,
+            "the refusal moved nothing"
+        );
+    }
+
     /// §2.14: firing from a fresh document of the present instance; an
     /// earlier instance's put not asked; no `meta.zid`, unattributable and
     /// read on; absent once a complete read misses the owner.
@@ -1801,6 +1898,7 @@ mod tests {
                 complete: true,
                 replies,
                 discarded: 0,
+                envelopes: Default::default(),
             },
             asked_at,
             wall(),
@@ -2125,6 +2223,7 @@ mod tests {
                 complete: true,
                 replies: vec![put(t0, 10, doc("warning", "firing", 1), AlarmVia::Get)],
                 discarded: 0,
+                envelopes: Default::default(),
             },
             t0,
             wall(),

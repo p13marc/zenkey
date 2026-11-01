@@ -180,6 +180,61 @@ impl SampleView {
         }
     }
 
+    /// What its zk2c envelope says (core §7.5, [`crate::model::inband`]):
+    /// `None` for a sample that carries none, else its in-band stamp (a
+    /// put's from its payload, a delete's from its attachment) or why its
+    /// envelope was refused. The view keeps its bytes as they arrived.
+    pub fn envelope(&self) -> crate::model::inband::Envelope {
+        let delete = self.kind == SampleKind::Delete;
+        if !delete && !zenkey_model::wire::carries(&self.key, &self.encoding) {
+            return None;
+        }
+        let attachment = self.attachment.as_ref().map(|a| a.to_bytes());
+        crate::model::inband::read_parts(
+            &self.key,
+            delete,
+            Some(&self.encoding),
+            self.payload.to_bytes(),
+            attachment.as_deref(),
+        )
+        .1
+    }
+
+    /// Its in-band stamp, when it carried an envelope.
+    pub fn inband(&self) -> Option<zenkey_model::wire::Stamp> {
+        self.envelope()?.ok()
+    }
+
+    /// Why its envelope was refused: undecodable, never read as today's
+    /// payload, nor ordered.
+    pub fn refusal(&self) -> Option<zenkey_model::wire::Refusal> {
+        self.envelope()?.err()
+    }
+
+    /// What orders it among its key's samples: its in-band stamp, else its
+    /// Zenoh timestamp (`zenkey_model::seed::Mark`). `None` for a refused
+    /// envelope, never ordered, and for a sample that carried neither.
+    pub fn mark(&self) -> Option<zenkey_model::seed::Mark> {
+        crate::model::inband::mark_of(self.envelope(), self.timestamp.as_ref())
+    }
+
+    /// The payload every later step reads: an envelope's record, the bytes
+    /// of any other sample, or why its envelope was refused. A delete's is
+    /// its (empty) payload.
+    pub fn record(&self) -> Result<std::borrow::Cow<'_, [u8]>, zenkey_model::wire::Refusal> {
+        let attachment = self.attachment.as_ref().map(|a| a.to_bytes());
+        match crate::model::inband::read_parts(
+            &self.key,
+            self.kind == SampleKind::Delete,
+            Some(&self.encoding),
+            self.payload.to_bytes(),
+            attachment.as_deref(),
+        ) {
+            (_, Some(Err(r))) => Err(r),
+            (bytes, _) => Ok(bytes),
+        }
+    }
+
     /// The wire's actual QoS axes, as one value — what the lens compares
     /// against a resource's declared QoS (spec §2.4), and what a replay
     /// publishes a recorded row with.

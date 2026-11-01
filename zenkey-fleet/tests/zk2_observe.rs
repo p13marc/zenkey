@@ -705,8 +705,11 @@ async fn invalid_payload_and_qos_mismatch_fire_and_clear() {
             let until = tokio::time::Instant::now() + Duration::from_millis(1600);
             while tokio::time::Instant::now() < until {
                 if phase == 1 {
+                    // Raw, under its type's predefined Encoding (core
+                    // §7.2), so it reads as JSON and not as a zk2c envelope.
                     let _ = owners
                         .put(BW0, r#"{"not_stats":1}"#)
+                        .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
                         .priority(zenoh::qos::Priority::RealTime)
                         .await;
                 } else {

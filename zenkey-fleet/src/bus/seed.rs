@@ -250,8 +250,8 @@ impl futures_core::Stream for SeededSubscriber {
 /// - Stamps compare as zenoh's `Latest` compares replies (§4.1): by time,
 ///   which within one timestamp id is the owner's order (§4.3); on equal
 ///   times by the id's bytes, little-endian, as zenoh's `Timestamp`
-///   compares them ([`stamp_of`]). Two ids for one key inside one seed are
-///   §4.3's residual risk, not resolved here.
+///   compares them ([`crate::model::inband::stamp_of`]). Two ids for one
+///   key inside one seed are §4.3's residual risk, not resolved here.
 /// - Equal stamps are one mutation: the second copy is suppressed.
 /// - A deletion (a live delete, or a `reply_del` with the deletion's stamp,
 ///   S3) is a sample like any other, and merges the same way: never
@@ -261,6 +261,13 @@ impl futures_core::Stream for SeededSubscriber {
 ///   mutation (S1), so an unstamped sample is no conforming owner's: a
 ///   foreign key's, from a session with no HLC through no router that
 ///   stamps, ranked below every stamp as `Latest` ranks an unstamped reply.
+///
+/// - A sample carrying a zk2c envelope (core §7.5) is ordered by its run
+///   and seq ([`SampleView::mark`], `zenkey_model::seed::admits_mark`):
+///   within one run the higher seq is newer and an equal seq is the same
+///   value, kept once; across two runs, or beside a Zenoh-stamped value,
+///   nothing orders them and the later arrival is kept. A refused
+///   envelope is delivered undecodable and moves nothing.
 ///
 /// Every suppression is counted ([`SeedCoverage::superseded`] at the
 /// boundary, [`Merge::superseded`] for the merge's life).
@@ -310,15 +317,6 @@ pub(crate) struct MergeLedger {
     pub(crate) evicted: std::sync::atomic::AtomicU64,
 }
 
-/// A zenoh timestamp as the merge compares it: its NTP64 time, and its id's
-/// 128-bit value (`zenkey_model::seed::Stamp`, whose order is zenoh's).
-pub(crate) fn stamp_of(ts: &zenoh::time::Timestamp) -> zenkey_model::seed::Stamp {
-    zenkey_model::seed::Stamp {
-        time: ts.get_time().as_u64(),
-        id: u128::from_le_bytes(ts.get_id().to_le_bytes()),
-    }
-}
-
 impl Merge {
     /// A merge bounded at `max_keys` keys, its counts also added to
     /// `ledger` when one is given.
@@ -342,12 +340,21 @@ impl Merge {
         self.evicted.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Whether `view` is kept over what its key holds, by its mark: an
+    /// in-band stamp within one run by seq, across runs (or two wires) the
+    /// later arrival, a Zenoh timestamp by zenoh's order
+    /// (`zenkey_model::seed::admits_mark`, core §7.5). A refused envelope
+    /// is never ordered: it is delivered, so a reader shows it
+    /// undecodable, and moves nothing its key holds.
     pub(crate) fn admit(&self, view: &SampleView) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
+        if view.refusal().is_some() {
+            return true;
+        }
+        let incoming = view.mark();
         let mut table = self.latest.lock().expect("merge lock");
         let held = table.keys.get(view.key.as_str()).map(|e| e.held);
-        let incoming = view.timestamp.as_ref().map(stamp_of);
-        let admit = zenkey_model::seed::admits(held.unwrap_or_default(), incoming);
+        let admit = zenkey_model::seed::admits_mark(held.unwrap_or_default(), incoming);
         if !admit {
             self.superseded.fetch_add(1, Relaxed);
             if let Some(l) = &self.ledger {
@@ -366,7 +373,7 @@ impl Merge {
         }
         table.admitted += 1;
         let entry = Entry {
-            held: held.unwrap_or_default().after(incoming),
+            held: held.unwrap_or_default().after_mark(incoming),
             admitted: table.admitted,
         };
         table.keys.insert(view.key.clone(), entry);
@@ -560,6 +567,7 @@ mod tests {
     /// disagree are among them (`2` and `100`, two real zids).
     #[test]
     fn the_merge_orders_stamps_as_zenoh_does() {
+        use crate::model::inband::stamp_of;
         use zenoh::time::{NTP64, Timestamp, TimestampId};
         let ids = [
             "1",

@@ -27,7 +27,11 @@ pub type Replier = Option<zenoh::config::ZenohId>;
 /// A newer stamp wins; a stamped value beats an unstamped one; between two
 /// unstamped values, or two carrying the same stamp, the first seen is kept
 /// — and the loser is counted in `superseded`, never silently forgotten
-/// (O6 applied to a fold).
+/// (O6 applied to a fold). A value carrying a zk2c envelope is stamped by
+/// its run and seq (core §7.5, [`SampleView::mark`]): within a run the
+/// higher seq wins; across runs, or beside a Zenoh stamp, nothing orders
+/// them and the later arrival wins, as a tool's merge keeps it; a refused
+/// envelope carries no stamp.
 pub fn fold_latest(
     values: Vec<(SampleView, Replier)>,
 ) -> (BTreeMap<String, (SampleView, Replier)>, u64) {
@@ -39,8 +43,9 @@ pub fn fold_latest(
                 kept.insert(view.key.clone(), (view, replier));
             }
             Some((cur, _)) => {
-                let newer = match (cur.timestamp, view.timestamp) {
-                    (Some(a), Some(b)) => b > a,
+                use zenkey_model::seed::{Versus, versus};
+                let newer = match (cur.mark(), view.mark()) {
+                    (Some(a), Some(b)) => matches!(versus(a, b), Versus::Newer | Versus::Unordered),
                     (None, Some(_)) => true,
                     _ => false,
                 };

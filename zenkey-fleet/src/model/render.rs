@@ -28,6 +28,7 @@ use zenkey_model::grammar::{IfaceId, ZkKey};
 use zenkey_model::template::resolve;
 
 use crate::model::catalog::{Catalog, ContractState, Contracts, Revision};
+use crate::model::inband::{self, Payload};
 use crate::model::structural::{structural, structural_value};
 use crate::report::{PayloadRendering, Rendered, ResolvedResource, Unresolved};
 
@@ -61,6 +62,11 @@ impl Member {
 /// Renders a sample through the catalog: the key's provider and interface
 /// pick the revision its descriptors name, and `contracts` holds it or
 /// says why not. `encoding` is the sample's `Encoding` as zenoh spells it.
+///
+/// The envelope first (core §7.5, observer §7.3): a sample of a type
+/// member carrying a zk2c envelope renders its record, and a refused one is
+/// undecodable, its refusal named, never sniffed
+/// ([`crate::model::inband`]).
 pub fn render(
     catalog: &Catalog,
     contracts: &dyn Contracts,
@@ -69,7 +75,8 @@ pub fn render(
     encoding: Option<&str>,
     bytes: &[u8],
 ) -> PayloadRendering {
-    let fallback = |why| structural_rendering(key, why, bytes);
+    let payload = read(key, member, encoding, bytes);
+    let fallback = |why| fallback_rendering(key, why, payload, bytes.len());
     let (addr, iface) = match zenkey_model::grammar::parse(key) {
         Ok(ZkKey::Data { addr, iface, .. }) => (addr, iface),
         Ok(_) => {
@@ -95,7 +102,14 @@ pub fn render(
         }
     };
     match contracts.state(&iface, &fp) {
-        Some(ContractState::Held(revision)) => render_with(&revision, key, member, encoding, bytes),
+        Some(ContractState::Held(revision)) => render_read(
+            &revision,
+            key,
+            member,
+            payload.encoding(encoding),
+            payload,
+            bytes.len(),
+        ),
         None => fallback(Unresolved::ContractNotHeld {
             fingerprint: fp.to_string(),
         }),
@@ -112,7 +126,8 @@ pub fn render(
 
 /// Renders a sample through one revision in hand (§7.2): the key resolves
 /// to a resource by the most-literal-first rule (D1), the member names the
-/// type, and `zenkey_model::decode` decodes or renders it honestly.
+/// type, and `zenkey_model::decode` decodes or renders it honestly. The
+/// envelope first, as [`render`] reads it.
 pub fn render_with(
     revision: &Revision,
     key: &str,
@@ -120,8 +135,52 @@ pub fn render_with(
     encoding: Option<&str>,
     bytes: &[u8],
 ) -> PayloadRendering {
+    let payload = read(key, member, encoding, bytes);
+    render_read(
+        revision,
+        key,
+        member,
+        payload.encoding(encoding),
+        payload,
+        bytes.len(),
+    )
+}
+
+/// A payload of `member` on `key`, its envelope read (a type member's
+/// alone: an attachment and an operation's members carry none).
+fn read<'a>(key: &str, member: Member, encoding: Option<&str>, bytes: &'a [u8]) -> Payload<'a> {
+    match member {
+        Member::Type => inband::payload(key, encoding, bytes),
+        _ => Payload::Plain(bytes),
+    }
+}
+
+/// What a payload that resolved no type renders as: the structural ladder
+/// over its bytes (an envelope's record), a refused envelope undecodable.
+fn fallback_rendering(
+    key: &str,
+    why: Unresolved,
+    payload: Payload<'_>,
+    size: usize,
+) -> PayloadRendering {
+    match payload {
+        Payload::Refused(refusal) => inband::refused_rendering(key, size, None, None, refusal),
+        p => structural_rendering(key, why, p.bytes().expect("not refused")),
+    }
+}
+
+/// [`render_with`] over a payload already read: `size` is the bytes' as
+/// they arrived, which a refused envelope's rendering states.
+fn render_read(
+    revision: &Revision,
+    key: &str,
+    member: Member,
+    encoding: Option<&str>,
+    payload: Payload<'_>,
+    size: usize,
+) -> PayloadRendering {
     let fingerprint = revision.fingerprint().to_string();
-    let fallback = |why| structural_rendering(key, why, bytes);
+    let fallback = |why| fallback_rendering(key, why, payload, size);
     let (iface, kind, chunks) = match zenkey_model::grammar::parse(key) {
         Ok(ZkKey::Data {
             iface,
@@ -169,6 +228,25 @@ pub fn render_with(
             member: member.as_str().to_owned(),
         });
     };
+    let resource = ResolvedResource {
+        iface: iface.to_string(),
+        fingerprint,
+        resource,
+        member: member.as_str().to_owned(),
+        values,
+    };
+    let bytes = match payload {
+        Payload::Refused(refusal) => {
+            return inband::refused_rendering(
+                key,
+                size,
+                Some(resource),
+                Some(decode::declared(ty)),
+                refusal,
+            );
+        }
+        p => p.bytes().expect("not refused"),
+    };
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
     // the contract speaks next (§7.2's order).
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
@@ -176,13 +254,7 @@ pub fn render_with(
     PayloadRendering {
         key: key.to_owned(),
         size: bytes.len(),
-        resource: Some(ResolvedResource {
-            iface: iface.to_string(),
-            fingerprint,
-            resource,
-            member: member.as_str().to_owned(),
-            values,
-        }),
+        resource: Some(resource),
         rendered,
     }
 }
@@ -370,26 +442,53 @@ mod tests {
     }
 
     /// The key picks the resource and its parameters; the contract's
-    /// encoding speaks when the sample says nothing (`zenoh/bytes`).
+    /// encoding speaks when the sample says nothing: a zk2c envelope's
+    /// record, under `zenoh/bytes` (core §7.5, observer §7.3), and a
+    /// sample whose Encoding is unknown. The predefined Encoding speaks
+    /// for itself (§7.2).
     #[test]
     fn a_json_schema_type_decodes_through_the_contract() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
         let rev = status();
         let mut cbor = Vec::new();
         ciborium::into_writer(&json!({"up": true}), &mut cbor).expect("cbor");
-        let r = render_with(
-            &rev,
-            "zk2/lab/m/m.v1/state/status/eth0",
-            Member::Type,
-            Some("zenoh/bytes"),
-            &cbor,
+        let envelope = Envelope {
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U16(1),
+                seq: Seq::new(2).expect("a seq"),
+            },
+            record: &cbor,
+        }
+        .write();
+        let key = "zk2/lab/m/m.v1/state/status/eth0";
+        for (encoding, bytes) in [
+            (Some("zenoh/bytes"), envelope.as_slice()),
+            (None, cbor.as_slice()),
+            (Some("application/cbor"), cbor.as_slice()),
+        ] {
+            let r = render_with(&rev, key, Member::Type, encoding, bytes);
+            assert_eq!(
+                r.rendered,
+                Rendered::Value {
+                    declared: "json:Status".into(),
+                    value: json!({"up": true})
+                },
+                "{encoding:?}"
+            );
+            assert_eq!(r.size, cbor.len(), "the record's size");
+        }
+        // Today's bytes under zenoh/bytes: an envelope refused, never
+        // decoded as the CBOR they are.
+        let refused = render_with(&rev, key, Member::Type, Some("zenoh/bytes"), &cbor);
+        assert!(
+            matches!(&refused.rendered,
+                Rendered::Undecodable { declared, reason }
+                    if declared == "json:Status" && reason.starts_with("zk2c envelope refused: ")),
+            "{:?}",
+            refused.rendered
         );
-        assert_eq!(
-            r.rendered,
-            Rendered::Value {
-                declared: "json:Status".into(),
-                value: json!({"up": true})
-            }
-        );
+        let r = render_with(&rev, key, Member::Type, Some("zenoh/bytes"), &envelope);
         let res = r.resource.expect("resolved");
         assert_eq!(res.resource, "state/status/{dev}");
         assert_eq!(res.values["dev"], ["eth0"]);

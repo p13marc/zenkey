@@ -141,9 +141,10 @@ fn bound(
 }
 
 /// The structural form of a row's payload, when it has one: the sniff the
-/// explorers render with (JSON, then CBOR, then text).
+/// explorers render with (JSON, then CBOR, then text), over a zk2c
+/// envelope's record (core §7.5), never over a refused one's bytes.
 pub(crate) fn structural_of(row: &SnapshotRow) -> Option<serde_json::Value> {
-    crate::model::structural::structural_value(&row.payload()?)
+    crate::model::inband::structural_value(&row.key, row.encoding.as_deref(), &row.payload()?)
 }
 
 /// What moved between two rows of one key — `None` when nothing did.

@@ -194,18 +194,21 @@ pub async fn get(
             continue;
         };
         let stamp = stamped(sample);
-        let bytes = (sample.kind() == SampleKind::Put).then(|| sample.payload().to_bytes());
+        // The envelope first (core §7.5): a document is its record, a
+        // refused envelope undecodable with its refusal named.
+        let bytes = (sample.kind() == SampleKind::Put)
+            .then(|| crate::model::inband::record_of(sample).map_err(|r| r.reason()));
         let docs = out.services.entry(addr).or_default();
         match resource.as_slice() {
             [v] if v == cm::VIEW => {
                 docs.view = Some(Replied {
-                    value: bytes.map(|b| decode(&b)),
+                    value: bytes.map(|b| b.and_then(|b| decode(&b))),
                     stamp,
                 });
             }
             [s] if s == cm::STATUS => {
                 docs.status = Some(Replied {
-                    value: bytes.map(|b| decode(&b)),
+                    value: bytes.map(|b| b.and_then(|b| decode(&b))),
                     stamp,
                 });
             }
@@ -548,7 +551,11 @@ async fn replay(
         if sample.kind() != SampleKind::Put || sample.key_expr().as_str().contains('*') {
             continue;
         }
-        match decode::<ConfigChangeEvent>(&sample.payload().to_bytes()) {
+        let Ok(bytes) = crate::model::inband::record_of(sample) else {
+            out.undecodable += 1;
+            continue;
+        };
+        match decode::<ConfigChangeEvent>(&bytes) {
             Ok(e) if e.token == token => out.events.push(e),
             Ok(_) => {}
             Err(_) => out.undecodable += 1,

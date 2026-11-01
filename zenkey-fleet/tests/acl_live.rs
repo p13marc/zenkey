@@ -367,7 +367,10 @@ async fn get(
     (values, errors)
 }
 
-/// A queryable answering on `key` with `payload`, on its own key.
+/// A queryable answering on `key` with `payload`, on its own key, under a
+/// predefined Encoding (core §7.2): under zenoh's default, `zenoh/bytes`, a
+/// reply on a zk2 state key would carry a zk2c envelope (§7.5), and the
+/// runtime's consumer would not deliver it.
 async fn serve(
     s: &zenoh::Session,
     key: &str,
@@ -376,7 +379,10 @@ async fn serve(
     let k = key.to_owned();
     s.declare_queryable(key.to_owned())
         .callback(move |q| {
-            let _ = q.reply(k.clone(), payload).wait();
+            let _ = q
+                .reply(k.clone(), payload)
+                .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+                .wait();
         })
         .await
         .expect("a queryable")
