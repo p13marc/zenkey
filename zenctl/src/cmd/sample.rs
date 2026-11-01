@@ -21,7 +21,12 @@ pub const TOMBSTONE: &str = "<tombstone — a deletion, not an empty value>";
 /// `echo`'s sample and `get`'s reply alike.
 pub struct Line {
     pub identity: KeyIdentity,
+    /// The payload as it arrived: a zk2c envelope's bytes whole (core
+    /// §7.5), which the lens strips where it reads them.
     pub bytes: Vec<u8>,
+    /// The wire key and the sample's `Encoding`, which tell an envelope.
+    key: String,
+    encoding: Option<String>,
     /// `None` on a deletion, which carries nothing to decode (#115).
     pub checked: Option<(PayloadRendering, Conformance)>,
     pub attachment: Option<PayloadRendering>,
@@ -58,26 +63,41 @@ impl Line {
             delete,
         } = p;
         if structural_only {
-            return Line {
-                identity: lens.identity(key),
-                checked: (!delete).then(|| {
+            // The envelope first (core §7.5, observer §7.3): its record is
+            // sniffed, a refused one never is.
+            use zenkey_fleet::model::inband;
+            let read = inband::payload(key, encoding, &bytes);
+            let checked = (!delete).then(|| match read {
+                inband::Payload::Refused(refusal) => {
+                    let r = inband::refused_rendering(key, bytes.len(), None, None, refusal);
+                    let c = inband::refused_conformance(&r);
+                    (r, c)
+                }
+                p => {
+                    let record = p.bytes().expect("not refused");
                     (
                         PayloadRendering {
                             key: key.to_owned(),
-                            size: bytes.len(),
+                            size: record.len(),
                             resource: None,
                             rendered: Rendered::Structural {
                                 why: Unresolved::DecodeNotAsked,
-                                value: zenkey_fleet::structural_value(&bytes),
-                                text: zenkey_fleet::structural(&bytes),
+                                value: zenkey_fleet::structural_value(record),
+                                text: zenkey_fleet::structural(record),
                             },
                         },
                         Conformance::NotChecked {
                             reason: Unresolved::DecodeNotAsked.words(),
                         },
                     )
-                }),
+                }
+            });
+            return Line {
+                identity: lens.identity(key),
+                checked,
                 attachment: None,
+                key: key.to_owned(),
+                encoding: encoding.map(str::to_owned),
                 bytes,
             };
         }
@@ -86,6 +106,8 @@ impl Line {
                 identity: lens.identity(key),
                 checked: None,
                 attachment: None,
+                key: key.to_owned(),
+                encoding: encoding.map(str::to_owned),
                 bytes,
             };
         }
@@ -97,6 +119,8 @@ impl Line {
             identity: c.identity,
             checked: Some((c.rendering, c.conformance)),
             attachment,
+            key: key.to_owned(),
+            encoding: encoding.map(str::to_owned),
             bytes,
         }
     }
@@ -132,8 +156,13 @@ impl Line {
             Rendered::Opaque { media_type } => {
                 serde_json::Value::String(format!("<{media_type}, {} B>", r.size))
             }
+            // The record's text, never a refused envelope's bytes sniffed.
             Rendered::Undecodable { .. } => {
-                serde_json::Value::String(zenkey_fleet::structural(&self.bytes))
+                serde_json::Value::String(zenkey_fleet::model::inband::structural_text(
+                    &self.key,
+                    self.encoding.as_deref(),
+                    &self.bytes,
+                ))
             }
         })
     }

@@ -330,12 +330,17 @@ mod tests {
 
     /// A sample as the monitor hands it over, its payload empty and its
     /// stamp the one `get`'s tombstone reply carries: a deletion or, for
-    /// contrast, an empty put.
+    /// contrast, an empty put, under its type's predefined Encoding (core
+    /// §7.2), since a put under `zenoh/bytes` carries a zk2c envelope
+    /// (§7.5).
     fn sample(kind: SampleKind) -> zenkey_fleet::SampleView {
         zenkey_fleet::SampleView {
             key: ETH0.into(),
             payload: zenoh::bytes::ZBytes::new(),
-            encoding: "zenoh/bytes".into(),
+            encoding: match kind {
+                SampleKind::Put => "application/json".into(),
+                SampleKind::Delete => "zenoh/bytes".into(),
+            },
             kind,
             timestamp: Some(zenoh::time::Timestamp::new(
                 zenoh::time::NTP64(1 << 32),
@@ -401,6 +406,64 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
         let put = shown(&sample(SampleKind::Put), &lens);
         assert!(put.contains("\n  <0 bytes>  (structural: "), "{put}");
         assert!(!put.contains(TOMBSTONE), "an empty put is a value: {put}");
+    }
+
+    /// The envelope first (core §7.5, observer §7.3; #976's A2): `echo` of a
+    /// state sample under `zenoh/bytes` renders its zk2c envelope's record
+    /// as the contract's type, in every human shape and in the row, `--raw`
+    /// sniffing the record; a refused envelope is undecodable, its refusal
+    /// named, never sniffed.
+    #[test]
+    fn an_enveloped_sample_renders_its_record() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let (contracts, problems) = zenkey_fleet::ContractSet::load_path(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../examples/zk2/tcgui/tc.netif.v1.toml"),
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let lens = Lens::new("prod", None, &contracts).offline(&contracts);
+        let record = br#"{"namespaces":["default"]}"#;
+        let envelope = Envelope {
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U16(7),
+                seq: Seq::new(3).expect("a seq"),
+            },
+            record,
+        }
+        .write();
+        let mut s = sample(SampleKind::Put);
+        s.key = "prod/zk2/host-a/tc/tc.netif.v1/state/namespaces".into();
+        s.encoding = "zenoh/bytes".into();
+        s.payload = zenoh::bytes::ZBytes::from(envelope.clone());
+        let shown = shown(&s, &lens);
+        assert!(
+            shown.contains(r#"{"namespaces":["default"]}"#),
+            "the record, never the envelope's bytes: {shown}"
+        );
+        assert!(shown.contains("json:Namespaces"), "{shown}");
+        let line = line_of(&s, &lens, false);
+        let row = row(&line, &s);
+        assert_eq!(
+            row.value,
+            Some(serde_json::json!({"namespaces": ["default"]}))
+        );
+        assert_eq!(row.verdict.as_deref(), Some("valid"));
+        // Today's bytes under zenoh/bytes: an envelope refused.
+        s.payload = zenoh::bytes::ZBytes::from(record.to_vec());
+        let shown = shown_refused(&s, &lens);
+        assert!(shown.contains("zk2c envelope refused: "), "{shown}");
+        assert!(
+            !shown.contains(r#"["default"]"#),
+            "a refused envelope is never sniffed: {shown}"
+        );
+    }
+
+    fn shown_refused(s: &zenkey_fleet::SampleView, lens: &Lens<'_>) -> String {
+        let mut out = shown(s, lens);
+        let line = line_of(s, lens, false);
+        out.push_str(&row(&line, s).to_line());
+        out
     }
 
     /// The pipe round trip, meta lines included (#235's symmetry, kept): the

@@ -2718,9 +2718,21 @@ async fn publishing_owner(bus: &Bus, extra: Value, state: bool) -> (Service, Tas
 /// at `priority`: what P3 forbids, and what the raw observers must name.
 async fn intruder(bus: &Bus, key: &'static str, value: &'static str, priority: Priority) -> Task {
     let principal = client(&bus.endpoint, None).await;
+    // On a zk2 key, the predefined Encoding of tc.netif.v1's JSON types
+    // (core §7.2): under zenoh's default, `zenoh/bytes`, the put would carry
+    // a zk2c envelope (§7.5) and read as a refused one.
+    let encoding = if key.contains("zk2/") {
+        zenoh::bytes::Encoding::APPLICATION_JSON
+    } else {
+        zenoh::bytes::Encoding::default()
+    };
     Task(tokio::spawn(async move {
         loop {
-            let _ = principal.put(key, value).priority(priority).await;
+            let _ = principal
+                .put(key, value)
+                .encoding(encoding.clone())
+                .priority(priority)
+                .await;
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }))
@@ -2823,6 +2835,83 @@ async fn echo_decodes_zk2_and_names_foreign_and_undecodable_apart() {
     assert_eq!(bad["typed"], false);
     assert!(bad["decode_error"].is_string(), "{bad}");
     assert_eq!(bad["value"], "not json");
+}
+
+/// The envelope first (core §7.5, observer §7.3; #976's A2), through
+/// `echo` on the raw bus: a put under `zenoh/bytes` on the owner's stream
+/// carries a zk2c envelope, and its record renders as the declared type,
+/// checked valid; today's bytes under `zenoh/bytes` are an envelope
+/// refused, undecodable with the refusal named, never sniffed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn echo_renders_an_enveloped_samples_record() {
+    use zenkey_model::wire::{Envelope, Run as WireRun, Seq, Stamp, Tag};
+    const ETH2: &str = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth2";
+    const ETH3: &str = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth3";
+    const RECORD: &str =
+        r#"{"namespace":"default","interface":"eth2","stats":{"rx_bytes":1,"tx_bytes":1}}"#;
+    let mut bus = Bus::bare(None).await;
+    let (owner, task) = publishing_owner(&bus, json!({}), false).await;
+    bus.services.push(owner);
+    bus.keep(task);
+    let principal = client(&bus.endpoint, None).await;
+    bus.keep(Task(tokio::spawn(async move {
+        let mut seq = 0u32;
+        loop {
+            seq += 1;
+            let envelope = Envelope {
+                tag: Tag::NONE,
+                stamp: Stamp {
+                    run: WireRun::U16(1),
+                    seq: Seq::new(seq).expect("a seq"),
+                },
+                record: RECORD.as_bytes(),
+            }
+            .write();
+            let bytes = zenoh::bytes::Encoding::ZENOH_BYTES;
+            let _ = principal.put(ETH2, envelope).encoding(bytes.clone()).await;
+            let _ = principal.put(ETH3, RECORD).encoding(bytes).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })));
+    wait_for(&bus, &["host-a/tc"]).await;
+
+    let selector = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/*";
+    let row = |r: &Run, key: &str, verdict: &str| -> Option<Value> {
+        r.stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|l| l["key"] == key && l["verdict"] == verdict)
+    };
+    let run = bus
+        .until(
+            &["echo", selector, "--count", "40", "--format", "ndjson"],
+            |r| {
+                r.code == 0
+                    && row(r, ETH2, "valid").is_some()
+                    && row(r, ETH3, "undecodable").is_some()
+            },
+        )
+        .await;
+    exits(&run, 0);
+    let enveloped = row(&run, ETH2, "valid").expect("the enveloped row");
+    assert_eq!(enveloped["type"], "json:BandwidthUpdate", "{enveloped}");
+    assert_eq!(enveloped["typed"], true);
+    assert_eq!(
+        enveloped["value"]["interface"], "eth2",
+        "the record: {enveloped}"
+    );
+    let refused = row(&run, ETH3, "undecodable").expect("the refused row");
+    assert_eq!(refused["type"], "json:BandwidthUpdate", "{refused}");
+    assert!(
+        refused["decode_error"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("zk2c envelope refused: ")),
+        "{refused}"
+    );
+    assert!(
+        !refused["value"].to_string().contains("eth2"),
+        "a refused envelope is never sniffed: {refused}"
+    );
 }
 
 /// `rate` and `field` over the same raw window: rate groups its keys by zk2
@@ -7748,8 +7837,13 @@ async fn telemetry_hears_a_decrease_put_right_after_its_listening_line() {
     let o = meter_owner_with(&bus.owners, false).await;
     let (listening, t) = telemetry_of_drops(&bus).await;
     listening.await.expect("T says it listens");
+    // Raw, under meter.v1's `json:Count` Encoding (core §7.2).
     for n in ["10", "7"] {
-        bus.owners.put(DROPS, n).await.expect("a put");
+        bus.owners
+            .put(DROPS, n)
+            .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+            .await
+            .expect("a put");
     }
     let run = t.await.expect("the telemetry run");
     exits(&run, 1);
@@ -7906,8 +8000,14 @@ async fn telemetry_could_not_tell_beside_an_undecodable_sample() {
     let o = meter_owner_with(&bus.owners, false).await;
     let (listening, t) = telemetry_of(&bus, LEVEL).await;
     listening.await.expect("T says it listens");
+    // Raw, under meter.v1's `json:Level` Encoding (core §7.2): `1e400` is
+    // undecodable as JSON, not a refused zk2c envelope.
     for v in ["-70.5", "1e400"] {
-        bus.owners.put(LEVEL, v).await.expect("a put");
+        bus.owners
+            .put(LEVEL, v)
+            .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+            .await
+            .expect("a put");
     }
     let run = t.await.expect("the telemetry run");
     exits(&run, 2);
@@ -7962,12 +8062,15 @@ async fn telemetry_could_not_tell_of_a_member_under_an_invalid_declaration() {
     // Across a face the window opens on the subscriptions' declaration, with
     // no read after them: give the router a moment to hold them.
     tokio::time::sleep(Duration::from_millis(500)).await;
+    // Each under its type's predefined Encoding (core §7.2).
     bus.owners
         .put("zk2/lab/meter/meter.v1/stream/level", "-70.5")
+        .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
         .await
         .expect("a put");
     bus.owners
         .put("zk2/lab/meter/odd.v1/stream/blob", "12")
+        .encoding(zenoh::bytes::Encoding::APPLICATION_OCTET_STREAM)
         .await
         .expect("a put");
     let run = t.await.expect("the telemetry run");
@@ -8090,6 +8193,7 @@ async fn across_a_face_on_the_line(selector: &str) -> (Vec<usize>, Option<String
         listening.await.expect("T says it listens");
         vehicle_session
             .put(DROPS, i.to_string())
+            .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
             .await
             .expect("a put");
         let run = t.await.expect("the telemetry run");
