@@ -10,11 +10,17 @@
 //! never were (spec §1.5). A key outside its file's namespace keeps its wire
 //! spelling, and only lines up with the same wire key on the other side.
 //!
-//! The value facet goes through the same two-level comparison the History
+//! The value facet compares records (observer §7.3: a zk2c envelope's
+//! record is the payload every later step reads, [`SnapshotRow::record`]),
+//! never envelopes: a re-put carries a new seq with the same record (core
+//! §4.2, "A re-put is a mutation"), and two deployments' owners write under
+//! two runs. It goes through the same two-level comparison the History
 //! pane runs ([`crate::model::diff`]) — structural where both sides have a
 //! structural form, bytes otherwise, and which one ran is never hidden. The
 //! other facets (conformance, holder) are compared whole and reported only
-//! where they differ.
+//! where they differ; the stamps, the Zenoh timestamp and the in-band
+//! stamp, only where nothing else moved and the two sides are one
+//! deployment ([`DiffOpts::stamps_alone`]).
 
 use std::collections::BTreeMap;
 
@@ -30,11 +36,12 @@ pub struct DiffOpts {
     /// Differing keys listed — added, removed and changed together — before
     /// the rest are counted (`SnapshotDiff::truncated`).
     pub max_keys: usize,
-    /// Whether a stamp that moved with nothing else moving is a change.
-    /// True for two moments of one deployment — a re-put of the same value
-    /// is a fact worth a row; false for two deployments, whose clocks never
-    /// agreed to begin with, which [`diff_snapshots`] decides by the two
-    /// namespaces.
+    /// Whether a stamp, Zenoh or in band, that moved with nothing else
+    /// moving is a change. True for two moments of one deployment — a
+    /// re-put of the same value is a fact worth a row; false for two
+    /// deployments, whose clocks never agreed to begin with and whose owners
+    /// write under runs of their own, which [`diff_snapshots`] decides by
+    /// the two namespaces.
     pub stamps_alone: bool,
 }
 
@@ -156,34 +163,34 @@ fn key_change(key: &str, a: &SnapshotRow, b: &SnapshotRow, opts: DiffOpts) -> Op
         conformance: None,
         holder: None,
         timestamp: (a.timestamp.clone(), b.timestamp.clone()),
+        inband: (a.inband.clone(), b.inband.clone()),
     };
     let mut moved = false;
 
-    // The value facet. A deletion against a value (or vice versa) is a
-    // change of kind, reported as a byte diff of nothing against something
-    // rather than as field changes that never existed.
-    if a.delete != b.delete || a.bytes != b.bytes {
+    // The value facet, over records. A deletion against a value (or vice
+    // versa) is a change of kind, reported as a byte diff of nothing against
+    // something rather than as field changes that never existed.
+    let (record_a, record_b) = (a.record(), b.record());
+    if a.delete != b.delete || record_a != record_b {
         moved = true;
+        let bytes = || {
+            byte_diff(
+                record_a.as_deref().unwrap_or_default(),
+                record_b.as_deref().unwrap_or_default(),
+            )
+        };
         match (structural_of(a), structural_of(b)) {
             (Some(va), Some(vb)) => {
                 let d = value_diff(&va, &vb, opts.max_changes);
                 if d.is_empty() {
                     // Byte-different, structurally identical (whitespace, key
                     // order): the byte view is the only one that can show it.
-                    change.bytes = Some(byte_diff(
-                        &a.payload().unwrap_or_default(),
-                        &b.payload().unwrap_or_default(),
-                    ));
+                    change.bytes = Some(bytes());
                 } else {
                     change.value = Some(d);
                 }
             }
-            _ => {
-                change.bytes = Some(byte_diff(
-                    &a.payload().unwrap_or_default(),
-                    &b.payload().unwrap_or_default(),
-                ));
-            }
+            _ => change.bytes = Some(bytes()),
         }
     }
     if a.conformance != b.conformance {
@@ -199,8 +206,9 @@ fn key_change(key: &str, a: &SnapshotRow, b: &SnapshotRow, opts: DiffOpts) -> Op
     // A stamp that moved with nothing else moving is a re-put of the same
     // value: a fact worth a row, because "the value did not change" and
     // "nobody put it" are different claims — unless the two sides are two
-    // deployments (`stamps_alone`).
-    if opts.stamps_alone && a.timestamp != b.timestamp {
+    // deployments (`stamps_alone`). Off §4.3's table a re-put moves the
+    // in-band stamp alone (core §4.2).
+    if opts.stamps_alone && (a.timestamp != b.timestamp || a.inband != b.inband) {
         moved = true;
     }
     moved.then_some(change)
@@ -242,6 +250,7 @@ mod tests {
             encoding: Some("application/json".into()),
             timestamp: None,
             stamper: None,
+            inband: None,
             source_zid: None,
             conformance: Conformance::NotChecked {
                 reason: "presence was not read".into(),
@@ -370,6 +379,107 @@ mod tests {
             "3 removed + 2 changed + 3 added = 8, 3 listed"
         );
         assert!(d.differs());
+    }
+
+    /// A row whose reply carried a zk2c envelope: `record` sealed under
+    /// `run` and `seq`, its in-band stamp kept beside it.
+    fn sealed(key: &str, run: u16, seq: u32, record: &[u8]) -> SnapshotRow {
+        use base64::Engine as _;
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let stamp = Stamp {
+            run: Run::U16(run),
+            seq: Seq::new(seq).unwrap(),
+        };
+        let bytes = Envelope {
+            tag: Tag::NONE,
+            stamp,
+            record,
+        }
+        .write();
+        SnapshotRow {
+            bytes: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+            encoding: Some("zenoh/bytes".into()),
+            inband: Some(stamp.into()),
+            ..row(key, b"")
+        }
+    }
+
+    /// A re-put of the same record carries a new seq (core §4.2): the
+    /// envelopes differ, the records do not, so the value facet stays
+    /// quiet and the row reads as a re-stamp, its in-band pair dating it.
+    #[test]
+    fn a_re_put_of_the_same_record_is_a_re_stamp() {
+        let key = "zk2/lab/m/m.v1/state/a";
+        let a = snap(vec![sealed(key, 1, 4, br#"{"x":1}"#)]);
+        let b = snap(vec![sealed(key, 1, 9, br#"{"x":1}"#)]);
+        let d = diff_snapshots(&a, &b, DiffOpts::default());
+        assert_eq!(d.changed.len(), 1, "{d:?}");
+        let c = &d.changed[0];
+        assert!(c.value.is_none() && c.bytes.is_none(), "{c:?}");
+        assert_eq!(
+            (
+                c.inband.0.as_ref().map(|s| s.seq),
+                c.inband.1.as_ref().map(|s| s.seq)
+            ),
+            (Some(4), Some(9))
+        );
+        // A record that moved is a value change, read as the record.
+        let moved = snap(vec![sealed(key, 1, 10, br#"{"x":2}"#)]);
+        let d = diff_snapshots(&a, &moved, DiffOpts::default());
+        let c = &d.changed[0];
+        assert_eq!(c.value.as_ref().unwrap().changes[0].path(), "x");
+        // Unmoved, nothing differs.
+        assert!(!diff_snapshots(&a, &a, DiffOpts::default()).differs());
+    }
+
+    /// Two deployments' owners write under runs of their own: the same
+    /// record under two runs is unchanged between them, as two clocks are.
+    #[test]
+    fn two_namespaces_with_two_runs_read_unchanged() {
+        let a = snap_in(
+            "prod",
+            vec![sealed("prod/zk2/lab/m/m.v1/state/a", 1, 4, b"{\"x\":1}")],
+        );
+        let b = snap_in(
+            "staging",
+            vec![sealed(
+                "staging/zk2/lab/m/m.v1/state/a",
+                7,
+                900,
+                b"{\"x\":1}",
+            )],
+        );
+        let d = diff_snapshots(&a, &b, DiffOpts::default());
+        assert!(!d.differs(), "{d:?}");
+        assert_eq!(d.unchanged, 1);
+    }
+
+    /// A refused envelope is never decoded (observer §7.3): two of them
+    /// compare as bytes, and one against a record is a byte change.
+    #[test]
+    fn a_refused_envelope_compares_as_bytes() {
+        use base64::Engine as _;
+        let key = "zk2/lab/m/m.v1/state/a";
+        let refused = SnapshotRow {
+            bytes: Some(base64::engine::general_purpose::STANDARD.encode([0xe0, 0, 0])),
+            encoding: Some("zenoh/bytes".into()),
+            ..row(key, b"")
+        };
+        assert!(
+            !diff_snapshots(
+                &snap(vec![refused.clone()]),
+                &snap(vec![refused.clone()]),
+                DiffOpts::default()
+            )
+            .differs()
+        );
+        let d = diff_snapshots(
+            &snap(vec![refused]),
+            &snap(vec![sealed(key, 1, 1, b"{}")]),
+            DiffOpts::default(),
+        );
+        let c = &d.changed[0];
+        assert!(c.bytes.is_some() && c.value.is_none(), "{c:?}");
     }
 
     /// A deletion on one side is a change of kind, reported through the

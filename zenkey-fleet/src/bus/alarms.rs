@@ -31,7 +31,8 @@
 //!    deployment's word stands for them (§2.11);
 //! 3. S4's GET of the scope's alarms (`bus::query::state_get`: target
 //!    `All`, consolidation `Latest`), every reply merged with the live
-//!    deliveries by the owner's stamp, in the [`AlarmBook`];
+//!    deliveries by the owner's in-band stamp (core §4.2, §4.3: by seq
+//!    within a run, the later arrival across two), in the [`AlarmBook`];
 //! 4. when asked, every archive's last-known documents of the scope
 //!    (core §4.4, an explicit read, never current, S6): what they hold is
 //!    shown, and the owners their keys name are in scope (§2.15, F-131).

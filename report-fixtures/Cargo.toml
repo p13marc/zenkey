@@ -17,6 +17,8 @@ license.workspace = true
 # The in-tree engine, by path, as every member takes it.
 zenkey-fleet = { path = "../zenkey-fleet" }
 serde_json = { workspace = true }
+# The enveloped `.zsnap` rows' bytes (#976 A4), as a file spells them.
+base64 = { workspace = true }
 # The ACL plan's contract (#612, FJ7), loaded from its authoring text so the
 # plan is the planner's own. The model crate is session-free: it requests no
 # feature of zenkey-fleet and pulls no zenoh session.

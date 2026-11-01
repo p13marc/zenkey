@@ -1,5 +1,5 @@
-//! A payload read beside today's wire (core §7.5, observer §7.3's "the
-//! envelope first"; #976's A2): the fleet's one place that tells a sample
+//! A payload read as core §4.3 writes it (core §7.5, observer §7.3's "the
+//! envelope first"; #976): the fleet's one place that tells a sample
 //! carrying a zk2c envelope, strips it, says what orders it, and says what
 //! a refused one renders as.
 //!
@@ -10,8 +10,14 @@
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (delete_stamp)
 //! every other sample
-//!     → read as today (Payload::Plain)
+//!     → read with no envelope (Payload::Plain)
 //! ```
+//!
+//! A sample with no envelope is one core §4.3 writes so (an `@stream`
+//! sample, an operation's, a descriptor's, a bundle's), a foreign key's
+//! (§1.7), or one whose owner broke §4.3; core §4.2 orders it by its Zenoh
+//! timestamp among samples with no envelope, and beside an in-band stamp it
+//! is unordered.
 //!
 //! The decision is `zenkey_model::wire`'s, by the key and the Encoding
 //! alone (a namespace in front or none), and the order of two marks
@@ -22,10 +28,11 @@
 //! read, here. A raw zenoh sample in a bus reader is read by [`read`], the
 //! runtime's `zenkey::inband::read`, which makes the same decisions.
 //!
-//! A sample's Zenoh timestamp stays its time where a profile reads one
-//! (freshness's age, timing's lifespan, desired's author order), and its
-//! wire size what the traffic statistics count. Its *order* is its in-band
-//! stamp ([`mark`]).
+//! A sample's Zenoh timestamp stays its time on a resource core §4.3's
+//! table lists, where a profile reads one (freshness's age, timing's
+//! lifespan, desired's author order; [`on_the_table`]), and its wire size
+//! what the traffic statistics count. Its *order* is its in-band stamp
+//! ([`mark`]).
 
 use std::borrow::Cow;
 
@@ -154,35 +161,90 @@ pub fn mark(inband: Option<wire::Stamp>, zenoh: Option<&zenoh::time::Timestamp>)
     Mark::of(inband, zenoh.map(stamp_of))
 }
 
-/// Replies of one read, newest first, as indices into `marks` (each
-/// reply's [`mark`], in arrival order): within one run of in-band stamps by
-/// seq, among Zenoh stamps by zenoh's order, each run and the Zenoh-stamped
-/// a group ranked by its first arrival, since nothing orders two of them
-/// (core §7.5), and the unstamped (a refused envelope among them) last, in
-/// arrival order. A total order, so a sort by it never breaks.
-pub fn newest_first(marks: &[Option<Mark>]) -> Vec<usize> {
-    use std::cmp::Ordering;
-    // `Some(None)`: the Zenoh-stamped; `Some(Some(run))`: one run.
-    let group = |m: &Option<Mark>| match m {
-        Some(Mark::InBand(s)) => Some(Some(s.run)),
-        Some(Mark::Zenoh(_)) => Some(None),
-        None => None,
-    };
-    let mut firsts = Vec::new();
-    for g in marks.iter().filter_map(group) {
-        if !firsts.contains(&g) {
-            firsts.push(g);
+/// What [`newest_first`] groups a reply by: what orders two of its seqs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Group<'a> {
+    /// The Zenoh-stamped: a sample with no envelope.
+    Zenoh,
+    /// One run of a state or event key: one seq per run for all of them,
+    /// compared as integers.
+    Plain(wire::Run),
+    /// One stream key in one run: its seq is its own, in serial order.
+    Serial(wire::Run, &'a str),
+}
+
+impl<'a> Group<'a> {
+    fn of(key: &'a str, mark: Option<Mark>) -> Option<Self> {
+        match mark? {
+            Mark::Zenoh(_) => Some(Group::Zenoh),
+            Mark::InBand(s) => Some(match zenkey_model::seed::Order::of_key(key) {
+                zenkey_model::seed::Order::Serial => Group::Serial(s.run, key),
+                zenkey_model::seed::Order::Plain => Group::Plain(s.run),
+            }),
         }
     }
-    let rank = |g| firsts.iter().position(|f| *f == g);
-    let mut order: Vec<usize> = (0..marks.len()).collect();
-    order.sort_by(|&i, &j| match (group(&marks[i]), group(&marks[j])) {
+}
+
+/// `seq`'s signed serial offset from `origin`, two seqs of one stream key
+/// in one run (core §4.3, "Serial order"): from −2^23 to 2^23 − 1.
+fn serial_offset(origin: wire::Seq, seq: wire::Seq) -> i64 {
+    const SPACE: i64 = 1 << 24;
+    let d = i64::from(seq.get().wrapping_sub(origin.get()) & wire::Seq::MAX.get());
+    if d >= SPACE / 2 { d - SPACE } else { d }
+}
+
+/// Replies of one read, newest first, as indices into `replies` (each
+/// reply's key and [`mark`], in arrival order).
+///
+/// - **In band** (core §4.3): a state or event key's within one run by seq,
+///   as integers, since an owner keeps one seq per run for all of them; a
+///   stream key's within one run by serial order, each stream key its own
+///   group, since its seq is its own and wraps (an `@adv` history
+///   included, observer §4.1).
+/// - **With no envelope**: among Zenoh stamps by zenoh's order (core §4.2).
+/// - **Across groups**: each run (each stream key's, for a stream), and the
+///   Zenoh-stamped, ranked by its first arrival, since nothing orders two
+///   of them; the unstamped (a refused envelope among them) last, in
+///   arrival order.
+///
+/// A total order, so a sort by it never breaks. A stream key's group is
+/// sorted by each seq's signed serial offset from the group's first
+/// arrival, which agrees with serial order while the group spans less than
+/// half the seq space, 2^23 seqs: two seqs exactly 2^23 apart, which serial
+/// order leaves unordered, the later of the two placed oldest. A read's
+/// replies of one stream key span far less (an `@adv` cache is bounded).
+pub fn newest_first(replies: &[(&str, Option<Mark>)]) -> Vec<usize> {
+    use std::cmp::Ordering;
+    let groups: Vec<Option<Group<'_>>> = replies.iter().map(|(k, m)| Group::of(k, *m)).collect();
+    // Each group in its first arrival's order, with that arrival's seq: a
+    // stream key's origin for its serial offsets.
+    let mut firsts: Vec<(Group<'_>, Option<wire::Seq>)> = Vec::new();
+    for (g, (_, m)) in groups.iter().zip(replies) {
+        if let Some(g) = g
+            && !firsts.iter().any(|(f, _)| f == g)
+        {
+            let origin = match m {
+                Some(Mark::InBand(s)) => Some(s.seq),
+                _ => None,
+            };
+            firsts.push((*g, origin));
+        }
+    }
+    let rank = |g: &Group<'_>| firsts.iter().position(|(f, _)| f == g);
+    let origin = |g: &Group<'_>| firsts.iter().find(|(f, _)| f == g).and_then(|(_, o)| *o);
+    let mut order: Vec<usize> = (0..replies.len()).collect();
+    order.sort_by(|&i, &j| match (&groups[i], &groups[j]) {
         (None, None) => Ordering::Equal,
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (Some(gi), Some(gj)) if gi != gj => rank(gi).cmp(&rank(gj)),
-        _ => match (marks[i], marks[j]) {
-            (Some(Mark::InBand(a)), Some(Mark::InBand(b))) => b.seq.cmp(&a.seq),
+        (Some(g), Some(_)) => match (replies[i].1, replies[j].1) {
+            (Some(Mark::InBand(a)), Some(Mark::InBand(b))) => match (g, origin(g)) {
+                (Group::Serial(..), Some(o)) => {
+                    serial_offset(o, b.seq).cmp(&serial_offset(o, a.seq))
+                }
+                _ => b.seq.cmp(&a.seq),
+            },
             (Some(Mark::Zenoh(a)), Some(Mark::Zenoh(b))) => b.cmp(&a),
             _ => Ordering::Equal,
         },
@@ -509,7 +571,7 @@ mod tests {
             structural_value(key, Some("zenoh/bytes"), br#"{"a":1}"#),
             None
         );
-        // Its predefined Encoding reads as today.
+        // Its predefined Encoding reads as a sample with no envelope.
         assert_eq!(
             structural_text(key, Some("application/json"), br#"{"a":1}"#),
             r#"{"a":1}"#
@@ -529,12 +591,61 @@ mod tests {
     #[test]
     fn replies_sort_newest_first_within_a_run_and_by_arrival_across_runs() {
         use zenkey_model::seed::Stamp as Zs;
-        let ib = |run, seq| Some(Mark::InBand(stamp(run, seq)));
-        let zn = |time| Some(Mark::Zenoh(Zs { time, id: 1 }));
-        let marks = [ib(1, 2), zn(5), None, ib(2, 9), ib(1, 7), zn(9), ib(2, 1)];
+        const KEY: &str = "zk2/h/s/i.v1/state/x";
+        let ib = |run, seq| (KEY, Some(Mark::InBand(stamp(run, seq))));
+        let zn = |time| (KEY, Some(Mark::Zenoh(Zs { time, id: 1 })));
+        let marks = [
+            ib(1, 2),
+            zn(5),
+            (KEY, None),
+            ib(2, 9),
+            ib(1, 7),
+            zn(9),
+            ib(2, 1),
+        ];
         // Run 1 first (seq 7, 2), then the Zenoh-stamped (9, 5), then run 2
         // (9, 1), the unstamped last.
         assert_eq!(newest_first(&marks), [4, 0, 5, 1, 3, 6, 2]);
+        // State keys of one run share its seq, compared as integers.
+        let other = ("zk2/h/s/i.v1/state/y", Some(Mark::InBand(stamp(1, 5))));
+        assert_eq!(newest_first(&[ib(1, 2), other, ib(1, 7)]), [2, 1, 0]);
+    }
+
+    /// A stream key's seqs sort by serial order (core §4.3), across their
+    /// wrap: plain order would put seq 1 below 16,777,215.
+    #[test]
+    fn a_stream_keys_replies_sort_by_serial_order_across_the_wrap() {
+        const KEY: &str = "zk2/h/s/i.v1/stream/pos";
+        let ib = |seq| (KEY, Some(Mark::InBand(stamp(1, seq))));
+        let top = wire::Seq::MAX.get();
+        let marks = [ib(top - 1), ib(0), ib(top), ib(1)];
+        assert_eq!(newest_first(&marks), [3, 1, 2, 0]);
+        // An explicit stream's key sorts so too, should one carry an
+        // envelope.
+        const EXPLICIT: &str = "zk2/h/s/i.v1/@stream/pos";
+        let ex = |seq| (EXPLICIT, Some(Mark::InBand(stamp(1, seq))));
+        assert_eq!(newest_first(&[ex(top), ex(1)]), [1, 0]);
+    }
+
+    /// Two stream keys of one run each keep their own seq (core §4.3), so
+    /// each is a group of its own, ranked by its first arrival: never
+    /// interleaved by seqs that do not compare.
+    #[test]
+    fn two_stream_keys_of_one_run_sort_apart() {
+        let a = |seq| ("zk2/h/s/i.v1/stream/a", Some(Mark::InBand(stamp(1, seq))));
+        let b = |seq| ("zk2/h/s/i.v1/stream/b", Some(Mark::InBand(stamp(1, seq))));
+        let marks = [a(5), b(100), a(6), b(101), a(4)];
+        assert_eq!(newest_first(&marks), [2, 0, 4, 3, 1]);
+    }
+
+    #[test]
+    fn a_serial_offset_is_signed_within_half_the_seq_space() {
+        let seq = |s| wire::Seq::new(s).unwrap();
+        let top = wire::Seq::MAX.get();
+        assert_eq!(serial_offset(seq(top), seq(1)), 2);
+        assert_eq!(serial_offset(seq(1), seq(top)), -2);
+        assert_eq!(serial_offset(seq(0), seq((1 << 23) - 1)), (1 << 23) - 1);
+        assert_eq!(serial_offset(seq(0), seq(1 << 23)), -(1 << 23));
     }
 
     #[test]
@@ -543,7 +654,7 @@ mod tests {
         let att = wire::DeleteStamp { stamp: stamp(2, 9) }.write();
         assert_eq!(delete_stamp(key, Some(&att)), Some(stamp(2, 9)));
         assert_eq!(stamp_any(key, &att), Some(stamp(2, 9)));
-        // An archive's own attachment is read as today.
+        // An archive's own attachment is no envelope (core §4.4).
         assert_eq!(delete_stamp(key, Some(b"archive")), None);
         assert_eq!(delete_stamp(key, None), None);
     }

@@ -54,8 +54,9 @@
 //! serving)`.
 //!
 //! **Faults carry the owner's clock as their stamp**: [`Minter`]'s clock,
-//! which is the session's HLC that core §4.3 requires of a serving session
-//! (§4.1, 0.23), offset by [`Minter::simulate_offset`] in a test. A router
+//! the session's `new_timestamp()`, the wall clock on a session without
+//! timestamping, as an owner's runs (core §4.3, "Minting"; §8.2), offset
+//! by [`Minter::simulate_offset`] in a test. A router
 //! re-stamps a fault dated beyond its HLC delta, as a `clock_ahead` fault
 //! from a clock ahead is, and drops it under
 //! `timestamping.drop_future_timestamp` (§2.5): both are measured in

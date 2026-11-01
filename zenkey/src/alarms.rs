@@ -74,9 +74,11 @@
 //! its `freshness.ttl_s`: a deployment's later minor, or a test's copy with
 //! a short horizon.
 //!
-//! **The owner's clock** is [`Minter`]'s, the session's HLC that core §4.3
-//! requires of a serving session, to the millisecond: the clock its stamps
-//! carry.
+//! **The owner's clock** is [`Minter`]'s, to the millisecond: the
+//! session's `new_timestamp()`, which is the wall clock on a session
+//! without timestamping, as an owner's runs (core §4.3, "Minting"; §8.2).
+//! An alarm's state carries `freshness.ttl_s`, so its Zenoh timestamps are
+//! on core §4.3's table and carry the same clock.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

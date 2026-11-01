@@ -6,6 +6,18 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the readers finish core 0.73: records compared, in-band stamps kept (#976, A4)
+
+No rule changed. What a reader shows of an enveloped sample now follows
+observer §7.3 (the record is the payload) and §8.3 (an in-band stamp is
+a run and a seq).
+
+| Before | Now | Notes |
+|---|---|---|
+| `snapshot` rows (`.zsnap` v2): `timestamp`, `stamper` | `inband` too, `{"run": "0003", "seq": 12}`, where the reply carried an envelope; a deletion's from its `reply_del`'s attachment | additive and omitted when none; `.zsnap` stays at version 2, and a file written before reads as before |
+| `snapshot diff`: two enveloped values compared by their bytes, so a re-put (a new seq) or two deployments' runs read as a value change | compared by their records; a re-put of the same record reads "re-stamped in band (run 0003, seq 4 → run 0003, seq 9), same value" | a `changed` row carries an `inband` pair when either side had one; across two namespaces a stamp that moved alone is still no change |
+| `timeline`: a sample with no HLC in the `unstamped` lane, an enveloped one included | an enveloped sample in its resource's lane, its row's `inband` `{"run": "0003", "seq": 12}`, its lane's `inband` count; the `unstamped` lane holds only a sample with neither stamp | the table shows "in band run 0003, seq 12" beside the HLC, never in its place; the HLC axis is unchanged, a sample with no HLC excluded and counted, its note now "N sample(s) with no HLC are not on this axis" |
+
 ## Unreleased (`main`, zk2) — an owner stamps in band: `--run-file`, S1 and S2 read in band (#976, A3)
 
 Core 0.73 orders an owner's values by the run and seq of its zk2c

@@ -50,6 +50,41 @@ keys compared relative to each file's namespace (a: "acme", b: "staging"); two d
 
 ```
 
+**Core 0.73's wire** (#976 A4): every reply rides in its owner's zk2c
+envelope, its run and seq the row's `inband`, a deletion's from the
+`reply_del`'s attachment, which the row keeps alone. A diff compares
+**records**, never envelopes: `eth0`'s record moved and reads as the record
+does, while `namespaces` was put again unchanged — a re-put carries a new
+seq (core §4.2) — and reads as a re-stamp, its pair of in-band stamps
+dating it. `eth9`'s tombstone did not move.
+
+```console
+$ zenctl snapshot diff tests/cmd/fixtures/inband-a.zsnap tests/cmd/fixtures/inband-b.zsnap
+? 1
+{"a":{"answered":3,"asked":1,"base":"acme","collected_at":"2026-11-01T00:00:00Z","collection_span_s":0.5,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"b":{"answered":3,"asked":1,"base":"acme","collected_at":"2026-11-01T00:01:00Z","collection_span_s":0.5,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"notes":[{"cite":"tooling guide §5","text":"a: span 0.50s at 2026-11-01T00:00:00Z, b: span 0.50s at 2026-11-01T00:01:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":1}
+{"inband":[{"run":"0003","seq":5},{"run":"0003","seq":10}],"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":false,"old":true,"op":"changed","path":"is_up"}],"truncated":0}}
+{"inband":[{"run":"0003","seq":4},{"run":"0003","seq":9}],"key":"zk2/host-a/tc/tc.netif.v1/state/namespaces","row":"changed","timestamp":[null,null]}
+a: span 0.50s at 2026-11-01T00:00:00Z, b: span 0.50s at 2026-11-01T00:01:00Z — each side was collected over its span, not at an instant (tooling guide §5)
+
+```
+
+The table names the re-stamp by its run and seq, never a time (observer
+§8.3): `namespaces` is off core §4.3's table and carries no Zenoh
+timestamp at all.
+
+```console
+$ zenctl snapshot diff tests/cmd/fixtures/inband-a.zsnap tests/cmd/fixtures/inband-b.zsnap --format table
+? 1
+a: 3 key(s), span 0.50s at 2026-11-01T00:00:00Z in namespace "acme" (acme/zk2/*/*/*/state/**)
+b: 3 key(s), span 0.50s at 2026-11-01T00:01:00Z in namespace "acme" (acme/zk2/*/*/*/state/**)
+0 added, 0 removed, 2 changed, 1 unchanged
+  ~  zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0  value: 1 change(s) (is_up: true → false)
+  ~  zk2/host-a/tc/tc.netif.v1/state/namespaces               re-stamped in band (run 0003, seq 4 → run 0003, seq 9), same value
+DIFFERENT
+a: span 0.50s at 2026-11-01T00:00:00Z, b: span 0.50s at 2026-11-01T00:01:00Z — each side was collected over its span, not at an instant (tooling guide §5)
+
+```
+
 **2 — the question could not be asked.** A file that will not read is the
 reserved non-verdict, never a 1 claiming the two differ — the same split
 `check schema` guards.

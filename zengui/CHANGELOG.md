@@ -4,6 +4,18 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the History shows the in-band stamp, and diffs records (#976, A4)
+
+No rule changed: observer §7.3 reads an envelope's record as the payload,
+and §8.3 shows an in-band stamp as a run and a seq.
+
+| Before | Now | Notes |
+|---|---|---|
+| a History row's head: its time alone, `hlc …` or `arrival +…` | the time, then "`<run>·<seq>` (in band)" where the sample carried an envelope | the Inspector's chips' spelling; never in the time's place |
+| the History diff of two enveloped samples with no structural form compared their envelopes' bytes, so the seq always differed | compares their records ("compared as bytes, not as fields" over the records); a record that did not move under a new seq reads "re-stamped in band (0003·4 → 0003·9), same value: a re-put (core §4.2)", for structural values too | the snapshot comparison alike |
+| the snapshot comparison: holder and Zenoh stamper lines | "stamped in band `<run>·<seq>` — the owner's run and seq: its order, never a time (core §4.3)" first, where the row kept one (`.zsnap` rows' `inband`, a deletion's included) | the newest sample compared with the row's record |
+| — | the shots scene `inspector-history-inband` (tall, 1440×2000): `host-a/tc`'s eth0 in its owner's envelope, put again unchanged each tick | |
+
 ## Unreleased (`main`, zk2) — the Inspector shows an in-band stamp (#976, A3)
 
 Since core 0.73 an owner orders its values by the run and seq it writes in

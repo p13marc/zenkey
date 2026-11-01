@@ -60,8 +60,20 @@ pub struct HistoryEntry {
     pub len: usize,
     /// The sample's declared encoding, verbatim.
     pub encoding: String,
-    /// The payload itself, retained by refcount.
+    /// The payload itself, retained by refcount: the bytes as they arrived,
+    /// a zk2c envelope's included ([`HistoryEntry::record`] is the value).
     pub payload: zenoh::bytes::ZBytes,
+    /// Where the record starts in [`HistoryEntry::payload`]: past a zk2c
+    /// envelope's run and seq (core §7.5), else 0 — a payload with no
+    /// envelope, and a refused one, which is never decoded and can only be
+    /// compared as the bytes it is.
+    pub record_at: usize,
+    /// The owner's run and seq, when the sample carried a zk2c envelope
+    /// (core §4.3): a put's from its payload, a delete's from its
+    /// attachment, a snapshot row's as the file kept it. It orders the
+    /// key's values and has no time: shown as a run and a seq (observer
+    /// §8.3).
+    pub inband: Option<zenkey_fleet::report::InbandStamp>,
     /// The wire's actual QoS axes (#120) — all `Copy`, always stamped.
     pub priority: zenoh::qos::Priority,
     pub congestion_control: zenoh::qos::CongestionControl,
@@ -105,6 +117,7 @@ impl HistoryEntry {
                 &view.key, encoding, &bytes,
             ))
         };
+        let inband = view.inband();
         HistoryEntry {
             seq,
             received: view.received,
@@ -114,6 +127,12 @@ impl HistoryEntry {
             len,
             encoding: view.encoding.clone(),
             payload: view.payload.clone(),
+            record_at: if is_delete {
+                0
+            } else {
+                inband.map_or(0, |s| s.envelope_bytes())
+            },
+            inband: inband.map(zenkey_fleet::report::InbandStamp::from),
             priority: view.priority,
             congestion_control: view.congestion_control,
             reliability: view.reliability,
@@ -160,8 +179,19 @@ impl HistoryEntry {
         // The HLC rides as the string the file carries; the view above
         // could not carry it typed, and the panel only ever prints it.
         entry.timestamp = row.timestamp.clone();
+        // A deletion's in-band stamp came in its attachment, which the row
+        // does not keep: the row's own word for it (core §4.3), else what
+        // the bytes carry (a file written before rows kept it).
+        entry.inband = row.inband.clone().or(entry.inband);
         entry.qos_recorded = false;
         entry
+    }
+
+    /// The value as observer §7.3 reads it: a zk2c envelope's record, the
+    /// payload every later step decodes, renders or compares; the bytes as
+    /// they arrived otherwise. Borrowed where the payload is contiguous.
+    pub fn record(&self) -> std::borrow::Cow<'_, [u8]> {
+        zenkey_fleet::model::inband::after(self.payload.to_bytes(), self.record_at)
     }
 
     /// What this entry costs the ring's byte budget.
@@ -571,6 +601,7 @@ mod tests {
             encoding: Some("application/json".into()),
             timestamp: Some("7f3b/ab12".into()),
             stamper: Some(StamperWire::Unattributable { id: "ab12".into() }),
+            inband: None,
             source_zid: None,
             conformance: Conformance::NotChecked {
                 reason: "no presence read".into(),
@@ -581,6 +612,8 @@ mod tests {
         };
         let e = HistoryEntry::from_snapshot_row(&row);
         assert_eq!(e.value, Some(serde_json::json!({"value": 41.0})));
+        assert!(e.inband.is_none(), "no envelope, no in-band stamp");
+        assert_eq!(&*e.record(), br#"{"value":41.0}"#);
         assert_eq!(e.timestamp.as_deref(), Some("7f3b/ab12"));
         assert_eq!(e.len, 14);
         assert!(!e.is_delete);
@@ -594,5 +627,53 @@ mod tests {
         let e = HistoryEntry::from_snapshot_row(&gone);
         assert!(e.is_delete);
         assert_eq!(e.preview, "<delete>");
+    }
+
+    /// Under core 0.73's wire (#976 A4) a snapshot row's bytes are its
+    /// owner's envelope: the entry's record is what follows the run and
+    /// seq, its value is the record's, and a deletion keeps the in-band
+    /// stamp the row kept for it, its attachment being gone.
+    #[test]
+    fn an_enveloped_snapshot_row_is_its_record() {
+        use zenkey_fleet::report::{Conformance, Holder, InbandStamp, KeyGroup, KeyIdentity};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let stamp = Stamp {
+            run: Run::U16(3),
+            seq: Seq::new(12).unwrap(),
+        };
+        let row = zenkey_fleet::SnapshotRow {
+            key: "zk2/host-a/tc/tc.netif.v1/state/namespaces".into(),
+            identity: KeyIdentity {
+                group: KeyGroup::NotZk2,
+                values: Default::default(),
+                unresolved: None,
+            },
+            delete: false,
+            // `00 0003 00000c` then {"value":41.0}: a mutation, run 0003,
+            // seq 12 (core §7.5).
+            bytes: Some("AAADAAAMeyJ2YWx1ZSI6NDEuMH0=".into()),
+            encoding: Some("zenoh/bytes".into()),
+            timestamp: None,
+            stamper: None,
+            inband: Some(stamp.into()),
+            source_zid: None,
+            conformance: Conformance::Valid,
+            holder: Holder::Unattributed {
+                reason: "presence not read".into(),
+            },
+        };
+        let e = HistoryEntry::from_snapshot_row(&row);
+        assert_eq!(&*e.record(), br#"{"value":41.0}"#);
+        assert_eq!(e.value, Some(serde_json::json!({"value": 41.0})));
+        assert_eq!(e.inband, Some(InbandStamp::from(stamp)));
+        let gone = zenkey_fleet::SnapshotRow {
+            delete: true,
+            bytes: None,
+            encoding: None,
+            ..row
+        };
+        let e = HistoryEntry::from_snapshot_row(&gone);
+        assert!(e.is_delete);
+        assert_eq!(e.inband, Some(InbandStamp::from(stamp)), "the row's word");
     }
 }

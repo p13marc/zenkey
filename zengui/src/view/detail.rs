@@ -1769,6 +1769,8 @@ mod tests {
             len: 2,
             encoding: "application/json".into(),
             payload: zenoh::bytes::ZBytes::from("{}"),
+            record_at: 0,
+            inband: None,
             priority,
             congestion_control: congestion,
             reliability: zenoh::qos::Reliability::Reliable,

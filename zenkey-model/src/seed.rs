@@ -1,6 +1,35 @@
-//! A late joiner's merge (core §4.2, 0.26; the open cases decided in 0.27,
-//! #752): per key, which arriving sample a late joiner keeps, whichever
-//! path — S4's GET or its subscription — brought it.
+//! A late joiner's merge (core §4.2, §4.3): per key, which arriving
+//! sample a late joiner keeps, whichever path — S4's GET or its
+//! subscription — brought it.
+//!
+//! **In-band stamps** (core §4.3): an owner's sample carries a zk2c
+//! envelope (core §7.5, [`crate::wire::carries`]), and is ordered by its
+//! envelope's run and seq, never by a Zenoh timestamp it may also carry on
+//! a resource §4.3's table lists ([`Mark::of`]). [`versus_in`] compares two
+//! marks of one key, in the [`Order`] its kind picks:
+//!
+//! ```text
+//! held        incoming    versus_in
+//! run r · s   run r · s'  Plain (state, events): s' > s Newer, s' = s Same, s' < s Older
+//!                         Serial (a stream key): d = (s' − s) mod 2^24;
+//!                           d = 0 Same, 1 ≤ d < 2^23 Newer, d > 2^23 Older, d = 2^23 Unordered
+//! run r       run r'≠r    Unordered: nothing orders two runs, two widths of one value included
+//! Zenoh       in-band     Unordered, either way round: a sample with no envelope beside one
+//! Zenoh t·i   Zenoh t'·i' the Stamp order below
+//! ```
+//!
+//! An equal seq is the same value: S2's reply is the stored bytes. An
+//! unordered arrival is accepted wherever an older one is refused: a
+//! tool's merge keeps the later arrival ([`admits_mark_in`], observer
+//! §4.1), a consumer takes it as §4.3 takes another run
+//! ([`consumer_accepts`]), and an archive records it, refusing an outdated
+//! put only within a run. [`versus`], [`admits_mark`] and
+//! [`in_band_order`] are the plain order's, which state keeps: a
+//! consumer's rule and an archive read state alone.
+//!
+//! **A sample with no envelope** (core §4.2) — an `@stream` sample, a
+//! foreign key's (§1.7), or one whose owner broke §4.3 — is ordered among
+//! samples with no envelope by its Zenoh timestamp:
 //!
 //! ```text
 //! Stamp { time, id }        an NTP64 time, and the 128-bit id of the HLC
@@ -11,46 +40,22 @@
 //! admits(held, incoming)    whether the sample replaces what the key holds
 //! ```
 //!
-//! **The rule** is the reference's (`zenkey-fleet`'s seeded subscription),
-//! which is zenoh's `Latest` consolidation (§4.1) read as a merge:
+//! That rule is zenoh's `Latest` consolidation (§4.1) read as a merge:
 //!
 //! - a stamped sample is kept when the key holds nothing, an unstamped
 //!   sample, or a lower stamp; an equal stamp is the same mutation, kept
 //!   once; a higher one held makes it stale;
-//! - an unstamped sample — a foreign key's (§1.7), from a session with no
-//!   HLC through no router that stamps — ranks below every stamped one, as
-//!   `Latest` ranks an unstamped reply lowest: kept when the key holds
-//!   nothing or only unstamped samples, the later arrival replacing the
-//!   earlier, and never over a stamped one.
+//! - an unstamped sample — an `@stream` sample or a foreign key's, from a
+//!   session with no HLC through no router that stamps — ranks below every
+//!   stamped one, an in-band stamp included, as `Latest` ranks an
+//!   unstamped reply lowest: kept when the key holds nothing or only
+//!   unstamped samples, the later arrival replacing the earlier, and never
+//!   over a stamped one.
 //!
 //! A deletion (a live delete, or a `reply_del` with its stamp) merges as a
 //! put does: the kind never decides. Pure: the fixtures in
-//! `spec/conformance/seed/` pin it, and a tool hands its samples' stamps
-//! over as values.
-//!
-//! **In-band stamps** (core §4.3, 0.73; #976): a sample that carries a
-//! zk2c envelope (core §7.5, [`crate::wire::carries`]) is ordered by its
-//! envelope's run and seq, never by a Zenoh timestamp it may also carry
-//! ([`Mark::of`]). [`versus_in`] compares two marks of one key, in the
-//! [`Order`] its kind picks:
-//!
-//! ```text
-//! held        incoming    versus_in
-//! run r · s   run r · s'  Plain (state, events): s' > s Newer, s' = s Same, s' < s Older
-//!                         Serial (a stream key): d = (s' − s) mod 2^24;
-//!                           d = 0 Same, 1 ≤ d < 2^23 Newer, d > 2^23 Older, d = 2^23 Unordered
-//! run r       run r'≠r    Unordered: nothing orders two runs, two widths of one value included
-//! Zenoh       in-band     Unordered, either way round: a sample with no envelope beside one
-//! Zenoh t·i   Zenoh t'·i' the Stamp order above
-//! ```
-//!
-//! An equal seq is the same value: S2's reply is the stored bytes. An
-//! unordered arrival is accepted wherever an older one is refused: a
-//! tool's merge keeps the later arrival ([`admits_mark_in`]), a consumer
-//! takes it as §4.3 takes another run ([`consumer_accepts`]), and an
-//! archive records it, refusing an outdated put only within a run.
-//! [`versus`], [`admits_mark`] and [`in_band_order`] are the plain order's,
-//! which state keeps: a consumer's rule and an archive read state alone.
+//! `spec/conformance/seed/` pin it (`inband.json`, `merge.json`), and a
+//! tool hands its samples' stamps over as values.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -119,7 +124,7 @@ impl PartialOrd for Stamp {
 /// when it carried one, else its Zenoh timestamp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mark {
-    /// A Zenoh timestamp, on a sample of today's wire.
+    /// A Zenoh timestamp, on a sample with no envelope.
     Zenoh(Stamp),
     /// An envelope's run and seq.
     InBand(wire::Stamp),
@@ -145,7 +150,7 @@ pub enum Versus {
     /// The same mutation, kept once: an equal Zenoh stamp, or an equal seq
     /// within a run.
     Same,
-    /// Older: refused or ignored wherever an older stamp is today.
+    /// Older: refused or ignored wherever an older stamp is.
     Older,
     /// Not comparable: in-band stamps of two runs, or an in-band stamp
     /// beside a Zenoh one. Accepted, as a value under another id is.
@@ -543,7 +548,7 @@ mod tests {
         assert!(admits_mark(Held::default().after_mark(Some(i)), Some(z)));
         assert!(consumer_accepts(Some(z), i));
         assert!(consumer_accepts(Some(i), z));
-        // Two Zenoh stamps keep today's orders: the merge's by time across
+        // Two Zenoh stamps keep core §4.2's orders: the merge's by time across
         // ids, the consumer's by time within one id only.
         let later_other = Mark::Zenoh(s(5, "b").unwrap());
         assert_eq!(versus(z, later_other), Versus::Older);

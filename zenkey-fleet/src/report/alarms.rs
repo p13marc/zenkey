@@ -93,7 +93,8 @@ pub enum AlarmLatest {
     Undecodable,
 }
 
-/// The latest sample of one key by the owner's stamp, as read (§2.6).
+/// The latest sample of one key by the owner's in-band stamp (core §4.3),
+/// as read (§2.6).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AlarmSeen {
     pub latest: AlarmLatest,

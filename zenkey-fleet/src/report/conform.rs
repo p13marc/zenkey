@@ -62,11 +62,14 @@ pub enum CaseId {
     /// A call over a template's wildcard to an operation that forbids
     /// fan-out is refused `fanout_forbidden` before any handler runs (O2).
     FanoutRefused,
-    /// Every state mutation and reply carries the owner's own stamp, its
-    /// clock the descriptor's `meta.zid`, compared by value (S1, 0.11).
+    /// Every state mutation and reply carries its in-band stamp (S1), and,
+    /// on a resource core §4.3's table lists, the owner's own Zenoh
+    /// timestamp too, its clock the descriptor's `meta.zid`, compared by
+    /// value (observer §4.4).
     StateStamp,
     /// The owner answers a GET over the state resource, each reply carrying
-    /// its mutation's timestamp (S2).
+    /// its mutation's in-band stamp, and its Zenoh timestamp where the
+    /// mutation carried one (S2).
     StateGet,
     /// Each member of a stream or state resource that declares
     /// `freshness.ttl_s` confirmed within that horizon, at the window's end

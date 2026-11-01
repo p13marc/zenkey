@@ -238,6 +238,10 @@ pub struct World {
     /// `robot1/teleop`'s `twist_cmd.v1` beside the rest ([`World::timed`],
     /// #908, MC).
     timed: bool,
+    /// The one publisher whose samples ride in their owner's zk2c envelope
+    /// (core §4.3, #976 A4; [`World::sealing`]): run `0003`, a seq per
+    /// tick, under `zenoh/bytes`. Every other feed keeps its plain wire.
+    sealed: Option<&'static str>,
     /// What the last tick published, as [`World::verdicts`] checks it.
     last: Vec<Published>,
 }
@@ -763,8 +767,17 @@ impl World {
             axes,
             metered,
             timed: false,
+            sealed: None,
             last: Vec::new(),
         }
+    }
+
+    /// This world with `key`'s samples in their owner's zk2c envelope
+    /// (#976 A4): run `0003`, seq 40 at the first tick and one more at
+    /// each, under `zenoh/bytes`, the record the feed's payload.
+    pub fn sealing(mut self, key: &'static str) -> World {
+        self.sealed = Some(key);
+        self
     }
 
     /// `addr`'s `health.v1`, as the engine judges a reading of this world
@@ -1545,6 +1558,23 @@ impl World {
                 .find(|p| p.0 == key)
                 .unwrap_or_else(|| panic!("{key} is no publisher of this world"));
             row.1 = bytes;
+        }
+        if let Some(key) = self.sealed {
+            use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+            let row = payloads
+                .iter_mut()
+                .find(|p| p.0 == key)
+                .unwrap_or_else(|| panic!("{key} is no publisher of this world"));
+            row.1 = Envelope {
+                tag: Tag::NONE,
+                stamp: Stamp {
+                    run: Run::U16(3),
+                    seq: Seq::new(40 + n).expect("a seq"),
+                },
+                record: &row.1,
+            }
+            .write();
+            row.2 = "zenoh/bytes";
         }
         let feeds = payloads.len();
         let mut stray = None;

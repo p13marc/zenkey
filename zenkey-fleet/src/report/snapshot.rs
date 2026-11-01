@@ -24,6 +24,7 @@ use super::asked::u64_is_zero;
 use super::diff::{ByteDiff, ValueDiff};
 use super::judgement::Judgement;
 use super::observe::{Conformance, KeyIdentity, LensPresence};
+use super::state::InbandStamp;
 
 /// The first line of a `.zsnap` file (tooling guide §5): what was asked, in
 /// which namespace, when, and — the fact a capture does not need — over
@@ -103,6 +104,13 @@ pub struct SnapshotRow {
     /// is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamper: Option<StamperWire>,
+    /// Its in-band stamp, the owner's run and seq (core §4.3), when the
+    /// reply carried a zk2c envelope: a value's from its payload, a
+    /// deletion's from its attachment, which a row does not keep. What
+    /// orders the key's values, never a time (observer §8.3). Absent on a
+    /// row with no envelope, and in a file written before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inband: Option<InbandStamp>,
     /// The zenoh id of the session that *answered*, where the reply named
     /// its replier (`source_zid`, tooling guide §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,10 +134,28 @@ impl SnapshotRow {
             .decode(self.bytes.as_deref()?)
             .ok()
     }
+
+    /// The value as observer §7.3 reads it: a zk2c envelope's record, the
+    /// payload every later step decodes, renders or compares; the bytes as
+    /// they arrived for a row with no envelope, and for a refused one, which
+    /// is never decoded and can only be compared as bytes. `None` where
+    /// [`payload`](Self::payload) is.
+    pub fn record(&self) -> Option<Vec<u8>> {
+        let bytes = self.payload()?;
+        match crate::model::inband::payload(&self.key, self.encoding.as_deref(), &bytes) {
+            crate::model::inband::Payload::Record { record, .. } => Some(record.to_vec()),
+            crate::model::inband::Payload::Plain(_) | crate::model::inband::Payload::Refused(_) => {
+                Some(bytes)
+            }
+        }
+    }
 }
 
-/// Whose clock stamped a value (the tooling guide's O7; spec §3.3 0.10), on
-/// the wire, tagged `kind`. The stamp's id rides in every variant.
+/// Whose clock set a value's Zenoh timestamp (observer §4.4, §8.3; the
+/// tooling guide's O7), on the wire, tagged `kind`. The stamp's id rides in
+/// every variant. Off core §4.3's table, another clock is expected, never a
+/// finding; the row's in-band stamp is the owner's by construction
+/// ([`SnapshotRow::inband`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StamperWire {
@@ -258,7 +284,8 @@ impl SnapshotDiff {
 
 /// One key present in both snapshots that moved on at least one facet. A
 /// facet pair is present only when that facet differs; `timestamp` is
-/// always carried because the two stamps are what date the change.
+/// always carried because the two stamps are what date the change, and
+/// `inband` whenever either side carried one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KeyChange {
     /// The zk2 key, relative to each file's namespace (a key outside its
@@ -278,6 +305,16 @@ pub struct KeyChange {
     pub holder: Option<(Holder, Holder)>,
     /// `(a, b)` stamps, each absent where the value carried none.
     pub timestamp: (Option<String>, Option<String>),
+    /// `(a, b)` in-band stamps, each absent where the value carried no
+    /// envelope; the pair absent when neither side did. A move within one
+    /// run with the record unchanged is a re-put (core §4.2, "A re-put is a
+    /// mutation").
+    #[serde(default, skip_serializing_if = "neither_inband")]
+    pub inband: (Option<InbandStamp>, Option<InbandStamp>),
+}
+
+fn neither_inband(pair: &(Option<InbandStamp>, Option<InbandStamp>)) -> bool {
+    pair.0.is_none() && pair.1.is_none()
 }
 
 #[cfg(test)]
@@ -402,6 +439,7 @@ mod tests {
             encoding: None,
             timestamp: None,
             stamper: None,
+            inband: None,
             source_zid: None,
             conformance: Conformance::NotChecked {
                 reason: "a deletion".into(),
@@ -428,6 +466,50 @@ mod tests {
             })
         );
         assert_eq!(serde_json::from_value::<SnapshotRow>(v).unwrap(), row);
+
+        // A deletion under a zk2c envelope keeps its in-band stamp, which
+        // its attachment carried and the row does not keep (core §4.3).
+        let stamped = SnapshotRow {
+            inband: Some(InbandStamp {
+                run: "0003".into(),
+                seq: 12,
+            }),
+            ..row
+        };
+        let v = serde_json::to_value(&stamped).unwrap();
+        assert_eq!(v["inband"], json!({"run": "0003", "seq": 12}));
+        assert_eq!(serde_json::from_value::<SnapshotRow>(v).unwrap(), stamped);
+    }
+
+    /// A change's in-band pair is absent when neither side carried one, so
+    /// a diff of rows with no envelope keeps its shape.
+    #[test]
+    fn a_key_change_omits_an_inband_pair_neither_side_carried() {
+        let change = KeyChange {
+            key: "zk2/host-a/tc/tc.netif.v1/state/namespaces".into(),
+            value: None,
+            bytes: None,
+            conformance: None,
+            holder: None,
+            timestamp: (Some("1/aa".into()), Some("2/aa".into())),
+            inband: (None, None),
+        };
+        let v = serde_json::to_value(&change).unwrap();
+        assert!(v.get("inband").is_none(), "{v}");
+        assert_eq!(serde_json::from_value::<KeyChange>(v).unwrap(), change);
+        let moved = KeyChange {
+            inband: (
+                None,
+                Some(InbandStamp {
+                    run: "0003".into(),
+                    seq: 4,
+                }),
+            ),
+            ..change
+        };
+        let v = serde_json::to_value(&moved).unwrap();
+        assert_eq!(v["inband"], json!([null, {"run": "0003", "seq": 4}]));
+        assert_eq!(serde_json::from_value::<KeyChange>(v).unwrap(), moved);
     }
 
     /// A diff of two identical files is clean, and a zero truncation is

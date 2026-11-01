@@ -12,7 +12,7 @@
 //! | [`crate::writer::Writer`] (streams) | [`Writer`] |
 //! | [`crate::state::StateWriter`] | [`StateWriter`] |
 //! | [`crate::writer::EventWriter`] | [`EventWriter`] |
-//! | [`Consumer::subscribe`], [`Consumer::get`], [`Consumer::replay`] | [`subscribe`], [`get`], [`replay`]; [`last_known`] over [`crate::archive`] |
+//! | [`Consumer::subscribe`], [`Consumer::get`], [`Consumer::get_answer`], [`Consumer::replay`] | [`subscribe`], [`get`], [`get_answer`], [`replay`]; [`last_known`] over [`crate::archive`] |
 //! | [`Client::call`], [`Client::call_many`], [`Fleet::call`] | [`call`], [`call_many`], [`fan_out`] |
 //! | [`ServiceBuilder::serve`] | [`serve_one`], [`serve_many`] |
 //!
@@ -428,30 +428,93 @@ pub enum StateGet<T> {
     Silent,
 }
 
+/// A typed state GET's whole answer ([`get_answer`]), as
+/// [`crate::state::StateAnswer`] is the untyped one: the keys decoded,
+/// each key's in-band stamp, the keys whose envelope was refused, and
+/// whether every GET ran to its final reply.
+#[derive(Debug, Clone)]
+pub struct StateAnswer<T> {
+    /// Every key answered, its value or its deletion. Empty is silence. A
+    /// value that carried a zk2c envelope (core §7.5) is its record,
+    /// decoded.
+    pub current: Vec<Current<T>>,
+    /// Whether every GET ran to its final reply with no error reply
+    /// ([`crate::state::StateAnswer::complete`]).
+    pub complete: bool,
+    /// The in-band stamp of each key answered under a zk2c envelope, a
+    /// value's or a deletion's: what orders it ([`StateAnswer::mark`]).
+    pub inband: std::collections::BTreeMap<String, zenkey_model::wire::Stamp>,
+    /// Each key answered with an envelope refused: undecodable, with the
+    /// refusal, and left out of [`StateAnswer::current`].
+    pub undecodable: std::collections::BTreeMap<String, zenkey_model::wire::Refusal>,
+}
+
+impl<T> StateAnswer<T> {
+    /// What orders `current` among its key's values (core §4.3's consumer
+    /// rule, [`crate::state::ValueOrder::accept_mark`]): its in-band stamp,
+    /// else, for a value with no envelope, its Zenoh timestamp. A late
+    /// joiner hands it its seed's replies too (§4.2).
+    #[must_use]
+    pub fn mark(&self, current: &Current<T>) -> Option<zenkey_model::seed::Mark> {
+        zenkey_model::seed::Mark::of(
+            self.inband.get(current.key()).copied(),
+            current.timestamp().as_ref().map(crate::inband::stamp_of),
+        )
+    }
+}
+
+impl<T> From<StateAnswer<T>> for StateGet<T> {
+    fn from(a: StateAnswer<T>) -> Self {
+        if a.current.is_empty() {
+            StateGet::Silent
+        } else {
+            StateGet::Answered(a.current)
+        }
+    }
+}
+
 /// GETs current state from its owners ([`Consumer::get`]), decoded as `C`.
+/// [`get_answer`] keeps each key's in-band stamp, which orders it.
 pub async fn get<C: Codec>(
     consumer: &Consumer,
     resource: &str,
     values: Option<&Bindings>,
     timeout: Duration,
 ) -> Result<StateGet<C::Value>> {
+    get_answer::<C>(consumer, resource, values, timeout)
+        .await
+        .map(StateGet::from)
+}
+
+/// [`get`], with the whole answer ([`Consumer::get_answer`]): each key's
+/// in-band stamp ([`StateAnswer::mark`]), the keys whose envelope was
+/// refused, and whether every GET ran to its final reply.
+pub async fn get_answer<C: Codec>(
+    consumer: &Consumer,
+    resource: &str,
+    values: Option<&Bindings>,
+    timeout: Duration,
+) -> Result<StateAnswer<C::Value>> {
     let wire = consumer_data::<C>(consumer, resource)?;
-    Ok(match consumer.get(resource, values, timeout).await? {
-        crate::state::StateGet::Silent => StateGet::Silent,
-        crate::state::StateGet::Answered(v) => StateGet::Answered(
-            v.into_iter()
-                .map(|c| match c {
-                    crate::state::Current::Value { key, sample } => Current::Value {
-                        key,
-                        value: decode_sample::<C>(&sample, wire),
-                        sample,
-                    },
-                    crate::state::Current::Deleted { key, timestamp } => {
-                        Current::Deleted { key, timestamp }
-                    }
-                })
-                .collect(),
-        ),
+    let a = consumer.get_answer(resource, values, timeout).await?;
+    Ok(StateAnswer {
+        current: a
+            .current
+            .into_iter()
+            .map(|c| match c {
+                crate::state::Current::Value { key, sample } => Current::Value {
+                    key,
+                    value: decode_sample::<C>(&sample, wire),
+                    sample,
+                },
+                crate::state::Current::Deleted { key, timestamp } => {
+                    Current::Deleted { key, timestamp }
+                }
+            })
+            .collect(),
+        complete: a.complete,
+        inband: a.inband,
+        undecodable: a.undecodable,
     })
 }
 
@@ -463,11 +526,29 @@ pub struct LastKnown<T> {
     pub origin: String,
     /// The value, or `None` for a tombstone.
     pub value: Option<std::result::Result<T, String>>,
+    /// Its Zenoh timestamp: on a resource core §4.3's table lists, the
+    /// owner's; elsewhere none, or a router's
+    /// ([`crate::archive::LastKnown::timestamp`]).
     pub timestamp: Option<Timestamp>,
+    /// Its in-band stamp, the run and seq its envelope carried (core
+    /// §4.3): what orders it ([`LastKnown::mark`]).
+    pub inband: Option<zenkey_model::wire::Stamp>,
     /// `{"iface", "contract", "type"}`: the value's type identity (§7.1).
     pub identity: Value,
     /// `false` while alignment has not confirmed the key.
     pub confirmed: bool,
+}
+
+impl<T> LastKnown<T> {
+    /// What orders it among its key's values: its in-band stamp, else its
+    /// Zenoh timestamp ([`crate::archive::LastKnown::mark`]).
+    #[must_use]
+    pub fn mark(&self) -> Option<zenkey_model::seed::Mark> {
+        zenkey_model::seed::Mark::of(
+            self.inband,
+            self.timestamp.as_ref().map(crate::inband::stamp_of),
+        )
+    }
 }
 
 /// Reads one member of a state resource of `provider` from the archive at
@@ -507,6 +588,7 @@ pub async fn last_known<C: Codec>(
                 .map(|b| C::decode(&b, wire_of(enc.as_deref(), wire))),
             origin: l.origin,
             timestamp: l.timestamp,
+            inband: l.inband,
             identity: l.identity,
             confirmed: l.confirmed,
         }

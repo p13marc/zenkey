@@ -47,20 +47,32 @@
 //!
 //! A lane is one resource of one address ([`LaneId::Resource`]), resolved
 //! through a [`Lens`]: the namespace the operator stated, the presence read
-//! whose descriptors name each owner's session zid (`meta.zid`, spec §3.3
-//! 0.10), and the revisions in hand. Each stamp is attributed against that
-//! zid, by value: the owner's clock, another's (a router's), or
+//! whose descriptors name each owner's session zid (`meta.zid`, core
+//! §3.3), and the revisions in hand. Each Zenoh timestamp is attributed
+//! against that zid, by value: the owner's clock, another's (a router's), or
 //! unattributable when nothing names the owner's — never foreign
-//! ([`Provenance`]). The lens is the one input a `.zrec` and live traffic
-//! share, so the same lens gives the same lanes from either.
+//! ([`Provenance`], observer §4.4, §8.3). Off core §4.3's table, a router's
+//! stamp on an owner's sample is expected, never a finding. The lens is the
+//! one input a `.zrec` and live traffic share, so the same lens gives the
+//! same lanes from either.
 //!
-//! An **unstamped** sample has no HLC position, and that is enforced by the
-//! type system rather than by a warning: [`Placed<HlcAxis>`] has exactly one
-//! constructor, [`Placed::<HlcAxis>::new`], which returns
-//! `Err(`[`Unstamped`]`)` for a row without an HLC — so an unstamped row
-//! cannot be *selected onto* the HLC axis at all. It lives in
+//! **In band** (core §4.3, #976 A4): a row also carries the owner's run and
+//! seq when its sample carried a zk2c envelope ([`TimelineRow::inband`]),
+//! read from a live sample's envelope and, from a `.zrec`, from the row's
+//! bytes, Encoding and attachment, so live and replay agree. It orders the
+//! key's values, never a time (observer §8.3), so it places a row on
+//! neither axis, and there is no in-band axis across keys: core §4.3 orders
+//! per key, and nothing orders two runs.
+//!
+//! A sample with **neither stamp** has no HLC position, and that is enforced
+//! by the type system rather than by a warning: [`Placed<HlcAxis>`] has
+//! exactly one constructor, [`Placed::<HlcAxis>::new`], which returns
+//! `Err(`[`Unstamped`]`)` for a row without an HLC — so such a row cannot
+//! be *selected onto* the HLC axis at all. It lives in
 //! [`LaneId::Unstamped`] on the arrival axis, and the HLC report counts the
-//! exclusion ([`HlcOrdering::unstamped_excluded`]).
+//! exclusion ([`HlcOrdering::unstamped_excluded`]). A row stamped in band
+//! alone keeps its resource's lane, and is refused and counted the same
+//! way on the HLC axis.
 //!
 //! # The third provenance
 //!
@@ -83,12 +95,14 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 use std::time::Instant;
 
+use zenkey_model::wire;
+
 use crate::bus::monitor::SampleView;
 use crate::model::lens::Lens;
 use crate::report::{
-    ARRIVAL_CLOCK, AxisLabel, BreakKind, HlcClaim, LaneId, LaneSummary, OrderLabel, Provenance,
-    ProvenanceCounts, RowKind, SN_UNAVAILABLE_REASON, SnLaneReport, TimelineEntry, TimelineReport,
-    TimelineSource,
+    ARRIVAL_CLOCK, AxisLabel, BreakKind, HlcClaim, InbandStamp, LaneId, LaneSummary, OrderLabel,
+    Provenance, ProvenanceCounts, RowKind, SN_UNAVAILABLE_REASON, SnLaneReport, TimelineEntry,
+    TimelineReport, TimelineSource,
 };
 use crate::tape::record::ZrecItem;
 
@@ -120,8 +134,12 @@ pub struct TimelineRow {
     pub lane: LaneId,
     /// Arrival, µs since the window epoch (the observer's monotonic clock).
     pub t_us: u64,
-    /// `None` exactly when the lane is [`LaneId::Unstamped`].
+    /// `None` on [`LaneId::Unstamped`], and on a row stamped in band alone.
     pub hlc: Option<HlcStamp>,
+    /// The owner's run and seq, when the sample carried a zk2c envelope
+    /// (core §4.3). With `hlc` `None` too, the lane is
+    /// [`LaneId::Unstamped`].
+    pub inband: Option<wire::Stamp>,
     /// The publishing entity, `zid:eid`, when `SourceInfo` rode the sample.
     pub source: Option<String>,
     /// That entity's sequence number for this sample.
@@ -146,6 +164,7 @@ impl TimelineRow {
             view.key.clone(),
             t_us,
             hlc,
+            view.inband(),
             view.source.map(|s| format!("{}:{}", s.zid, s.eid)),
             view.source.map(|s| s.sn),
             if view.kind == zenoh::sample::SampleKind::Delete {
@@ -158,14 +177,16 @@ impl TimelineRow {
         )
     }
 
-    /// The one place a lane is decided: unstamped first, then the key's
-    /// group through the lens; and the one place a stamp is attributed,
-    /// against the owner's `meta.zid`.
+    /// The one place a lane is decided: unstamped first (neither an HLC nor
+    /// an in-band stamp), then the key's group through the lens; and the one
+    /// place a Zenoh timestamp is attributed, against the owner's
+    /// `meta.zid`.
     #[allow(clippy::too_many_arguments)]
     pub fn assemble(
         key: String,
         t_us: u64,
         hlc: Option<(u64, String)>,
+        inband: Option<wire::Stamp>,
         source: Option<String>,
         sn: Option<u32>,
         kind: RowKind,
@@ -173,9 +194,10 @@ impl TimelineRow {
         lens: &Lens<'_>,
     ) -> TimelineRow {
         let group = lens.identity(&key).group;
-        let lane = match &hlc {
-            None => LaneId::Unstamped,
-            Some(_) => LaneId::from(&group),
+        let lane = if hlc.is_none() && inband.is_none() {
+            LaneId::Unstamped
+        } else {
+            LaneId::from(&group)
         };
         let hlc = hlc.map(|(ntp64, stamper)| HlcStamp {
             provenance: lens.provenance(group.address(), &stamper),
@@ -187,6 +209,7 @@ impl TimelineRow {
             lane,
             t_us,
             hlc,
+            inband,
             source,
             sn,
             kind,
@@ -258,9 +281,10 @@ pub enum Ingested {
 impl Ingested {
     /// A `.zrec` line as the live path would have seen it (tooling guide §5):
     /// `t` verbatim as the arrival offset, `timestamp` parsed back through
-    /// `uhlc::Timestamp: FromStr`, and the stamper judged through `lens`
-    /// exactly as a live sample is, so live and replay classify
-    /// identically.
+    /// `uhlc::Timestamp: FromStr`, the in-band stamp read from the row's
+    /// bytes, Encoding and (for a delete) attachment as the live sample's
+    /// envelope was, and the stamper judged through `lens` exactly as a
+    /// live sample is, so live and replay classify identically.
     ///
     /// A row without `t` (a hand-piped ndjson row rather than a capture)
     /// sits at 0: it has no pacing, and inventing one would be an ordering
@@ -293,10 +317,18 @@ impl Ingested {
                     .as_deref()
                     .and_then(|s| zenoh::time::Timestamp::from_str(s).ok())
                     .map(|t| (t.get_time().as_u64(), t.get_id().to_string()));
+                let inband = crate::model::inband::stamp(
+                    &row.key,
+                    row.delete,
+                    row.encoding.as_deref(),
+                    &row.payload,
+                    row.attachment.as_deref(),
+                );
                 Ingested::Row(TimelineRow::assemble(
                     row.key.clone(),
                     t_us.unwrap_or(0),
                     hlc,
+                    inband,
                     entity,
                     sn,
                     if row.delete {
@@ -351,7 +383,7 @@ pub struct Unstamped;
 /// use zenkey_fleet::report::{LaneId, RowKind};
 /// let row = TimelineRow {
 ///     key: "plain/key".into(), lane: LaneId::Unstamped, t_us: 1, hlc: None,
-///     source: None, sn: None, kind: RowKind::Put, payload_bytes: 0,
+///     inband: None, source: None, sn: None, kind: RowKind::Put, payload_bytes: 0,
 /// };
 /// let placed: Placed<ArrivalAxis> = Placed::<ArrivalAxis>::new(row);
 /// assert_eq!(placed.row().t_us, 1);
@@ -718,6 +750,7 @@ fn entry(order_by: OrderLabel, row: &TimelineRow, pos: usize) -> TimelineEntry {
         hlc: row.hlc.as_ref().map(HlcStamp::to_wire),
         stamped_by: row.hlc.as_ref().map(|h| h.stamper.clone()),
         provenance: row.hlc.as_ref().map(|h| h.provenance),
+        inband: row.inband.map(InbandStamp::from),
         kind: row.kind,
     }
 }
@@ -731,11 +764,13 @@ fn summarise<A>(
         .map(|(lane, placed)| {
             let mut provenance = ProvenanceCounts::default();
             let mut stampers = BTreeSet::new();
+            let mut inband = 0usize;
             let (mut first, mut last) = (u64::MAX, 0u64);
             for p in placed {
                 let r = row(p);
                 first = first.min(r.t_us);
                 last = last.max(r.t_us);
+                inband += usize::from(r.inband.is_some());
                 if let Some(h) = &r.hlc {
                     stampers.insert(h.stamper.clone());
                     match h.provenance {
@@ -752,6 +787,7 @@ fn summarise<A>(
                 last_t_us: last,
                 stampers,
                 provenance,
+                inband,
             }
         })
         .collect()
@@ -777,6 +813,7 @@ mod tests {
                 Some((ntp64, stamper.into())),
                 None,
                 None,
+                None,
                 RowKind::Put,
                 3,
                 lens,
@@ -786,7 +823,17 @@ mod tests {
 
     fn unstamped(key: &str, t_us: u64) -> TimelineRow {
         with_lens(|lens| {
-            TimelineRow::assemble(key.into(), t_us, None, None, None, RowKind::Put, 3, lens)
+            TimelineRow::assemble(
+                key.into(),
+                t_us,
+                None,
+                None,
+                None,
+                None,
+                RowKind::Put,
+                3,
+                lens,
+            )
         })
     }
 
@@ -916,6 +963,105 @@ mod tests {
             ..stamped(A, 1, 1, "33")
         };
         assert_eq!(Placed::<HlcAxis>::new(lying), Err(Unstamped));
+    }
+
+    fn inband(run: u16, seq: u32) -> wire::Stamp {
+        wire::Stamp {
+            run: wire::Run::U16(run),
+            seq: wire::Seq::new(seq).unwrap(),
+        }
+    }
+
+    /// A row stamped in band alone (core §4.3: off §4.3's table, through a
+    /// router that stamps nothing) keeps its resource's lane on the arrival
+    /// axis, its run and seq on its entry, and has no HLC position: an
+    /// in-band stamp is never a time (observer §8.3).
+    #[test]
+    fn an_inband_row_keeps_its_resources_lane_and_has_no_hlc_position() {
+        let row = with_lens(|lens| {
+            TimelineRow::assemble(
+                A.into(),
+                5,
+                None,
+                Some(inband(3, 12)),
+                None,
+                None,
+                RowKind::Put,
+                3,
+                lens,
+            )
+        });
+        assert!(
+            matches!(&row.lane, LaneId::Resource { token, .. } if token == "stream"),
+            "{row:?}"
+        );
+        assert_eq!(Placed::<HlcAxis>::new(row.clone()), Err(Unstamped));
+        let w = window(vec![stamped(B, 10, 200, "33"), row], vec![]);
+        let by_arrival = timeline(&w, Order::Arrival);
+        assert!(
+            by_arrival.lanes.iter().all(|l| l.lane != LaneId::Unstamped),
+            "{:?}",
+            by_arrival.lanes
+        );
+        assert_eq!(by_arrival.lanes.iter().map(|l| l.inband).sum::<usize>(), 1);
+        assert!(by_arrival.rows.iter().any(|e| matches!(
+            e,
+            TimelineEntry::Sample { key, inband: Some(s), hlc: None, .. }
+                if key == A && s.run == "0003" && s.seq == 12
+        )));
+        let by_hlc = timeline(&w, Order::Hlc);
+        assert_eq!(by_hlc.unstamped_excluded, 1, "no HLC, so not on its axis");
+        assert_eq!(keys(&by_hlc), [(B, 0)]);
+    }
+
+    /// From a `.zrec`, the in-band stamp is read from the row's bytes and
+    /// Encoding, a delete's from its attachment, as the live sample's
+    /// envelope was: live and replay agree.
+    #[test]
+    fn a_zrec_row_reads_its_inband_stamp_from_its_bytes_and_attachment() {
+        let row = |delete: bool, payload: Vec<u8>, attachment: Option<Vec<u8>>| ZrecItem::Sample {
+            row: crate::tape::ingest::IngestRow {
+                key: A.into(),
+                payload,
+                encoding: (!delete).then(|| "zenoh/bytes".into()),
+                qos_axes: None,
+                delete,
+                attachment,
+            },
+            t_us: Some(7),
+            timestamp: None,
+            source: None,
+        };
+        let put = row(
+            false,
+            wire::Envelope {
+                tag: wire::Tag::NONE,
+                stamp: inband(3, 4),
+                record: b"{}",
+            }
+            .write(),
+            None,
+        );
+        let delete = row(
+            true,
+            Vec::new(),
+            Some(
+                wire::DeleteStamp {
+                    stamp: inband(3, 5),
+                }
+                .write(),
+            ),
+        );
+        with_lens(|lens| {
+            for (item, seq) in [(put, 4), (delete, 5)] {
+                let Ingested::Row(r) = Ingested::from_zrec(&item, lens) else {
+                    panic!("a sample line is a row");
+                };
+                assert_eq!(r.inband, Some(inband(3, seq)));
+                assert!(r.hlc.is_none());
+                assert!(matches!(r.lane, LaneId::Resource { .. }), "{r:?}");
+            }
+        });
     }
 
     /// Outside the namespace, or not zk2: a lane of its own, never a

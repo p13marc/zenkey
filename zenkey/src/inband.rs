@@ -1,24 +1,34 @@
-//! A received sample read beside today's wire (core §7.5; #976's A2): the
-//! one place the runtime tells a sample that carries a zk2c envelope,
-//! strips it, and reads what orders it.
+//! A received sample read as core §4.3 writes it (core §7.5, observer
+//! §7.3's "the envelope first"; #976): the one place the runtime tells a
+//! sample that carries a zk2c envelope, strips it, and reads what orders
+//! it.
 //!
 //! ```text
 //! a put on a stream, state or event key, under zenoh/bytes
 //!     → its envelope parsed: the record becomes the payload, the run and
 //!       seq its in-band stamp (Read::Enveloped)
-//!     → or refused: undecodable, never read as today's payload (Read::Refused)
+//!     → or refused: undecodable, never read as a payload with no envelope
+//!       (Read::Refused)
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (Read::Enveloped, the sample unchanged)
 //! every other sample
-//!     → read as today (Read::Plain)
+//!     → read with no envelope (Read::Plain)
 //! ```
+//!
+//! A sample with no envelope is one core §4.3 writes so: an `@stream`
+//! sample, an operation's, a descriptor's or a bundle's, and a foreign
+//! key's (§1.7). Any other was put by an owner that broke §4.3's in-band
+//! rule (S1, for state), and core §4.2 orders it among samples with no
+//! envelope by its Zenoh timestamp ([`Read::mark`]); beside an in-band
+//! stamp it is unordered.
 //!
 //! The decision is `zenkey_model::wire`'s, by the key and the Encoding
 //! alone, and the order of two marks `zenkey_model::seed`'s. A sample's
-//! Zenoh timestamp stays on it: a profile that reads *time* (freshness's
-//! age, timing's lifespan, desired's author order, redundancy's fencing)
-//! keeps reading it, and an enveloped sample without one has no time. Its
-//! *order* is its in-band stamp ([`Read::mark`]).
+//! Zenoh timestamp stays on it: a profile that reads *time* on a resource
+//! core §4.3's table lists (freshness's age, timing's lifespan, desired's
+//! author order, redundancy's fencing) keeps reading it, and an enveloped
+//! sample without one has no time. Its *order* is its in-band stamp
+//! ([`Read::mark`]).
 //!
 //! The consumer ([`crate::consumer`]), its state GET, the archive and the
 //! profile readers read every data sample through [`read`].
@@ -31,7 +41,7 @@ use zenoh::time::Timestamp;
 /// A received sample, read.
 #[derive(Debug, Clone)]
 pub enum Read {
-    /// Not an envelope's sample: read as today.
+    /// A sample with no envelope: read as it arrived.
     Plain(Sample),
     /// An envelope's sample: a put's with its record as its payload, a
     /// delete's unchanged, and the envelope's run and seq.

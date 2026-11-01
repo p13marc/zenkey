@@ -2777,6 +2777,7 @@ fn timeline_sample(
         hlc: hlc.map(|(n, s)| format!("{n}/{s}")),
         stamped_by: hlc.map(|(_, s)| s.to_string()),
         provenance: hlc.map(|_| Provenance::Owner),
+        inband: None,
         kind: RowKind::Put,
     }
 }
@@ -2813,6 +2814,7 @@ pub fn timeline_report_arrival() -> TimelineReport {
                     other: 0,
                     unattributable: 0,
                 },
+                inband: 0,
             },
             LaneSummary {
                 lane: LaneId::Unstamped,
@@ -2821,6 +2823,7 @@ pub fn timeline_report_arrival() -> TimelineReport {
                 last_t_us: 3_000,
                 stampers: Default::default(),
                 provenance: ProvenanceCounts::default(),
+                inband: 0,
             },
         ],
         sn_lane: SnLaneReport::Unavailable {
@@ -2893,6 +2896,7 @@ pub fn timeline_report_hlc() -> TimelineReport {
                 other: 0,
                 unattributable: 0,
             },
+            inband: 0,
         }],
         sn_lane: SnLaneReport::Unavailable {
             reason: SN_UNAVAILABLE_REASON,
@@ -2911,6 +2915,65 @@ pub fn timeline_report_hlc() -> TimelineReport {
                 Some((100, "33")),
             ),
             timeline_sample(OrderLabel::Hlc, 1, lane, TL_A, 1_000, Some((200, "33"))),
+        ],
+    }
+}
+
+/// A window under core 0.73's wire (#976 A4), on the arrival axis: two
+/// samples of one stream resource, each in its owner's envelope (run
+/// `0003`), the first through a router that stamped it (another clock,
+/// expected off core §4.3's table, observer §4.4), the second through none;
+/// both keep their resource's lane, and the in-band stamp is shown as a
+/// run and a seq, never a time (observer §8.3).
+pub fn timeline_report_inband() -> TimelineReport {
+    let lane = timeline_lane();
+    let sample = |pos, key: &str, t_us, hlc: Option<(u64, &str)>, seq| TimelineEntry::Sample {
+        order_by: OrderLabel::Arrival,
+        pos,
+        lane: lane.clone(),
+        key: key.into(),
+        t_us,
+        hlc: hlc.map(|(n, s)| format!("{n}/{s}")),
+        stamped_by: hlc.map(|(_, s)| s.to_string()),
+        provenance: hlc.map(|_| Provenance::Other),
+        inband: Some(InbandStamp {
+            run: "0003".into(),
+            seq,
+        }),
+        kind: RowKind::Put,
+    };
+    TimelineReport {
+        order_by: OrderLabel::Arrival,
+        axis: AxisLabel::Arrival {
+            clock: ARRIVAL_CLOCK,
+        },
+        scopes: vec!["acme/zk2/**".into()],
+        window_s: Some(10.0),
+        source: TimelineSource::Live,
+        lens: timeline_lens(),
+        lanes: vec![LaneSummary {
+            lane: lane.clone(),
+            samples: 2,
+            first_t_us: 1_000,
+            last_t_us: 2_000,
+            stampers: ["44".to_string()].into_iter().collect(),
+            provenance: ProvenanceCounts {
+                owner: 0,
+                other: 1,
+                unattributable: 0,
+            },
+            inband: 2,
+        }],
+        sn_lane: SnLaneReport::Unavailable {
+            reason: SN_UNAVAILABLE_REASON,
+        },
+        unstamped_excluded: 0,
+        dropped: 0,
+        coalesced: 0,
+        keys_evicted: 0,
+        rows: vec![
+            sample(0, TL_A, 1_000, Some((200, "44")), 41),
+            sample(1, TL_A, 2_000, None, 42),
         ],
     }
 }
@@ -2971,6 +3034,7 @@ fn snapshot_row(key: &str, identity: KeyIdentity, bytes: &str, holder: Holder) -
         encoding: Some("application/json".into()),
         timestamp: Some("7f3b2a1c00000001/ab12".into()),
         stamper: Some(StamperWire::Owner { id: "ab12".into() }),
+        inband: None,
         source_zid: Some("ab12".into()),
         conformance: Conformance::Valid,
         holder,
@@ -3143,6 +3207,132 @@ pub fn snapshot_staging() -> Snapshot {
 /// [`snapshot`] against itself: identical on every facet.
 pub fn snapshot_diff_identity() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
+}
+
+/// A row whose reply carried a zk2c envelope (core §4.3, §7.5): `record`
+/// sealed under run `run` (16-bit) and `seq`, its bytes as the file keeps
+/// them and its in-band stamp beside them. Off core §4.3's table, a
+/// plain state carries no Zenoh timestamp.
+fn sealed_row(key: &str, identity: KeyIdentity, run: u16, seq: u32, record: &str) -> SnapshotRow {
+    use base64::Engine as _;
+    use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+    let stamp = Stamp {
+        run: Run::U16(run),
+        seq: Seq::new(seq).expect("a seq"),
+    };
+    let bytes = Envelope {
+        tag: Tag::NONE,
+        stamp,
+        record: record.as_bytes(),
+    }
+    .write();
+    SnapshotRow {
+        encoding: Some("zenoh/bytes".into()),
+        timestamp: None,
+        stamper: None,
+        inband: Some(stamp.into()),
+        ..snapshot_row(
+            key,
+            identity,
+            &base64::engine::general_purpose::STANDARD.encode(bytes),
+            Holder::Live {
+                address: "host-a/tc".into(),
+                answered_by: AnsweredBy::Owner,
+            },
+        )
+    }
+}
+
+/// `host-a/tc` under core 0.73's wire (#976 A4): every reply in its
+/// envelope, run `0003`. `namespaces` is plain state (seq 4); `eth0` is on
+/// core §4.3's table by its ttl, so its owner's Zenoh timestamp rides it
+/// too (seq 5); and `eth9` is a deletion within the window, whose in-band
+/// stamp (seq 6) came in its `reply_del`'s attachment, which the row keeps
+/// as `inband` alone.
+pub fn snapshot_inband() -> Snapshot {
+    let eth = |iface: &str| {
+        state_identity(
+            "host-a/tc",
+            "state/interfaces/{ns}/{iface}",
+            &[("ns", "default"), ("iface", iface)],
+        )
+    };
+    Snapshot {
+        header: zsnap_header("acme", "2026-11-01T00:00:00Z", 0.5, 3, 0),
+        rows: vec![
+            SnapshotRow {
+                timestamp: Some("7f3b2a1c00000001/ab12".into()),
+                stamper: Some(StamperWire::Owner { id: "ab12".into() }),
+                ..sealed_row(
+                    "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0",
+                    eth("eth0"),
+                    3,
+                    5,
+                    r#"{"name":"eth0","is_up":true}"#,
+                )
+            },
+            SnapshotRow {
+                delete: true,
+                bytes: None,
+                encoding: None,
+                conformance: Conformance::NotChecked {
+                    reason: "a deletion carries no value".into(),
+                },
+                ..sealed_row(
+                    "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9",
+                    eth("eth9"),
+                    3,
+                    6,
+                    "",
+                )
+            },
+            sealed_row(
+                "acme/zk2/host-a/tc/tc.netif.v1/state/namespaces",
+                state_identity("host-a/tc", "state/namespaces", &[]),
+                3,
+                4,
+                r#"["default"]"#,
+            ),
+        ],
+    }
+}
+
+/// [`snapshot_inband`] a minute on: `eth0` went down (seq 10, a value
+/// change, read as its record), `namespaces` was put again unchanged (seq
+/// 9: core §4.2's re-put, the envelope's bytes moved and the record did
+/// not), and `eth9`'s deletion stands.
+pub fn snapshot_inband_b() -> Snapshot {
+    let mut b = snapshot_inband();
+    b.header = zsnap_header("acme", "2026-11-01T00:01:00Z", 0.5, 3, 0);
+    for row in &mut b.rows {
+        let (seq, record) = if row.key.ends_with("/eth0") {
+            (10, r#"{"name":"eth0","is_up":false}"#)
+        } else if row.key.ends_with("/namespaces") {
+            (9, r#"["default"]"#)
+        } else {
+            continue;
+        };
+        *row = SnapshotRow {
+            timestamp: row
+                .timestamp
+                .as_ref()
+                .map(|_| "7f3b2a1c00000002/ab12".to_owned()),
+            stamper: row.stamper.clone(),
+            ..sealed_row(&row.key, row.identity.clone(), 3, seq, record)
+        };
+    }
+    b
+}
+
+/// [`snapshot_inband`] against [`snapshot_inband_b`]: a record changed, a
+/// re-put read as one, and a tombstone unchanged, its in-band stamp read
+/// back from the file.
+pub fn snapshot_diff_inband() -> SnapshotDiff {
+    zenkey_fleet::diff_snapshots(
+        &snapshot_inband(),
+        &snapshot_inband_b(),
+        zenkey_fleet::DiffOpts::default(),
+    )
 }
 
 // --- config.v1 (#768, CC) ---------------------------------------------------

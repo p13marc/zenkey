@@ -380,6 +380,7 @@ mod tests {
             encoding: Some("application/json".into()),
             timestamp: Some("7f00...".into()),
             stamper: None,
+            inband: None,
             source_zid: Some("ab12".into()),
             conformance: Conformance::NotChecked {
                 reason: "presence was not read".into(),

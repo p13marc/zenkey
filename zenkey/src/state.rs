@@ -1181,18 +1181,21 @@ impl From<StateAnswer> for StateGet {
     }
 }
 
-/// Orders one owner's values (§4.3, the consumer rule): by time within one
-/// timestamp id, accepting a value under an id other than the one the
-/// key's held value carries, and ordering by time within that id from then
-/// on. Per key. A consumer hands it every value from its first on, a late
-/// joiner's seed replies included (§4.2), so an old epoch's value that
-/// arrives after the new epoch's is accepted too, and the key steps back:
-/// §4.3's residual risk.
+/// Orders one owner's values (core §4.3, the consumer rule), per key, by
+/// their in-band stamp: by seq within one run, accepting a value under a
+/// run other than the one the key's held value carries, and ordering by
+/// seq within that run from then on. A consumer hands it every value from
+/// its first on, a late joiner's seed replies included (§4.2), so an old
+/// run's value that arrives after the new run's is accepted too, and the
+/// key steps back: §4.3's residual risk.
 ///
-/// A value under a zk2c envelope (core §7.5) is ordered by its run and seq
-/// ([`ValueOrder::accept_mark`]): by seq within one run, a value of another
-/// run accepted as another id is, and so is one beside a value held under
-/// a Zenoh timestamp (`zenkey_model::seed::consumer_accepts`).
+/// A value with no envelope, one that broke S1, is ordered by its Zenoh
+/// timestamp: by time within one timestamp id, a value under another id
+/// accepted as under another run, and so is one beside a value held under
+/// an in-band stamp (`zenkey_model::seed::consumer_accepts`). Either way
+/// the mark is the value's own ([`crate::consumer::Delivery::mark`],
+/// [`StateAnswer::mark`]): an enveloped value's Zenoh timestamp is its
+/// time where a profile reads one, never its order.
 #[derive(Debug, Default)]
 pub struct ValueOrder {
     last: BTreeMap<String, Mark>,
@@ -1204,15 +1207,10 @@ impl ValueOrder {
         Self::default()
     }
 
-    /// Whether a value of `key` stamped `ts` is newer than what was applied:
-    /// later within the same id, or the first under a new id. Records it if
-    /// so.
-    pub fn accept(&mut self, key: &str, ts: &Timestamp) -> bool {
-        self.accept_mark(key, Mark::Zenoh(crate::inband::stamp_of(ts)))
-    }
-
-    /// [`ValueOrder::accept`], for a value marked `mark`
-    /// ([`crate::consumer::Delivery::mark`], [`StateAnswer::mark`]).
+    /// Whether a value of `key` marked `mark` is accepted over what was
+    /// applied: a later seq within the held value's run (a later time
+    /// within its timestamp id, for a value with no envelope), or a value
+    /// under another run, another id or the other wire. Records it if so.
     pub fn accept_mark(&mut self, key: &str, mark: Mark) -> bool {
         let newer = zenkey_model::seed::consumer_accepts(self.last.get(key).copied(), mark);
         if newer {

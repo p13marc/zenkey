@@ -538,6 +538,8 @@ fn a_qos_mismatch_is_named_per_axis() {
         len: 2,
         encoding: "application/json".into(),
         payload: zenoh::bytes::ZBytes::from("{}"),
+        record_at: 0,
+        inband: None,
         priority,
         congestion_control: zenoh::qos::CongestionControl::Drop,
         reliability: zenoh::qos::Reliability::BestEffort,

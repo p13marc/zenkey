@@ -242,17 +242,20 @@ impl futures_core::Stream for SeededSubscriber {
     }
 }
 
-/// The late joiner's merge (core §4.2, 0.26; 0.27, #752): one entry per
-/// key, and a sample is admitted only when its stamp is newer than the one
-/// held, whichever path — reply or live — brought either. The decision is
-/// `zenkey_model::seed::admits`, the pure function
-/// `spec/conformance/seed/merge.json` pins:
+/// The late joiner's merge (core §4.2, §4.3): one entry per key, and a
+/// sample is admitted only when its stamp is newer than the one held,
+/// whichever path — reply or live — brought either. The decision is
+/// `zenkey_model::seed`'s pure functions, which
+/// `spec/conformance/seed/inband.json` and `merge.json` pin:
 ///
-/// - Stamps compare as zenoh's `Latest` compares replies (§4.1): by time,
-///   which within one timestamp id is the owner's order (§4.3); on equal
-///   times by the id's bytes, little-endian, as zenoh's `Timestamp`
-///   compares them ([`crate::model::inband::stamp_of`]). Two ids for one
-///   key inside one seed are §4.3's residual risk, not resolved here.
+/// - **In band first.** An owner's sample carries a zk2c envelope (core
+///   §7.5), ordered by its run and seq (below).
+/// - **A sample with no envelope** (an `@stream` sample, a foreign key's,
+///   or one that broke §4.3) is ordered by its Zenoh timestamp, as zenoh's
+///   `Latest` compares replies (§4.1): by time; on equal times by the id's
+///   bytes, little-endian, as zenoh's `Timestamp` compares them
+///   ([`crate::model::inband::stamp_of`]), across two ids too, as a tool
+///   keeps it (observer §4.1).
 /// - Equal stamps are one mutation: the second copy is suppressed.
 /// - A deletion (a live delete, or a `reply_del` with the deletion's stamp,
 ///   S3) is a sample like any other, and merges the same way: never
@@ -278,8 +281,10 @@ impl futures_core::Stream for SeededSubscriber {
 ///
 /// **Kept for as long as the reading follows** (observer §4.1): a tool's
 /// merge spans the seed and every live sample after it, so a live sample
-/// older than what its key holds, a new epoch's on a clock behind among
-/// them, is not kept after the boundary either.
+/// older than what its key holds within its run is not kept after the
+/// boundary either. A value under another run, which nothing orders
+/// against the held one, is kept as the later arrival (observer §4.1), an
+/// old run's value still in transit included (core §4.3's residual risk).
 ///
 /// **Bounded** (tooling guide O6): one entry per key, at most `max_keys`,
 /// the least recently admitted forgotten first, in batches
@@ -490,9 +495,10 @@ fn cache_selector(selector: &str) -> String {
 /// Order of operations is the contract: the subscriber is declared first;
 /// the seed legs (S4's state GET, and the `@adv` history) run after,
 /// concurrently; every delivery — a reply or a live sample — passes one
-/// per-key merge by the owner's stamp, so a mutation published in the seed
+/// per-key merge by the owner's in-band stamp (core §4.3; a Zenoh timestamp
+/// for a sample with no envelope), so a mutation published in the seed
 /// window lands exactly once and a stale reply cannot resurrect or regress
-/// a key. Deletions ride through as tombstone samples
+/// a key within a run. Deletions ride through as tombstone samples
 /// ([`zenoh::sample::SampleKind::Delete`]) — a live delete and a
 /// `reply_del` alike — subject to the same merge, never dropped.
 /// [`SeedItem::SeedComplete`] is sent only once **every** leg has resolved.
