@@ -25,6 +25,7 @@ use zenkey::model::contract::{Contract, load_str};
 use zenkey::model::grammar::IfaceId;
 use zenkey::model::template::Bindings;
 use zenkey::state::StateWriter;
+use zenoh::key_expr::OwnedKeyExpr;
 
 /// The scenarios' contracts, as the runtime's tests keep them.
 pub const RUDDER_TOML: &str = include_str!("../../tests/contracts/rudder.v1.toml");
@@ -231,6 +232,8 @@ impl Commander {
             .and_then(|t| t.period)
             .ok_or("steer.v1's cmd declares no period")?;
         let key = w.key_expr().as_str().to_owned();
+        let owned = OwnedKeyExpr::try_from(key.clone()).map_err(|e| e.to_string())?;
+        let minter = Arc::clone(svc.minter());
         let name = svc.address().service.to_string();
         let (on, raw) = (
             Arc::new(AtomicBool::new(true)),
@@ -245,6 +248,7 @@ impl Commander {
                 Arc::clone(&refused),
                 session.clone(),
             );
+            let (owned, minter) = (owned.clone(), Arc::clone(&minter));
             tokio::spawn(async move {
                 tokio::time::sleep(lead).await;
                 let mut tick = tokio::time::interval(period);
@@ -257,9 +261,14 @@ impl Commander {
                     let put = if raw.load(Ordering::Relaxed) {
                         // Round the writer: a standby's raw samples
                         // (scenarios §11 step 1), `standby <n>`, stamped by
-                        // the session's HLC (text 0.3, F-276).
+                        // the session's HLC (text 0.3, F-276), under the
+                        // envelope its writer would seal (core §4.3, F-422).
+                        let record = format!("standby {n}");
                         session
-                            .put(&key, format!("standby {n}"))
+                            .put(
+                                &key,
+                                minter.mint_stream(&owned, false).seal(record.as_bytes()),
+                            )
                             .await
                             .map_err(|e| e.to_string())
                     } else {

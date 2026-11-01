@@ -486,8 +486,8 @@
 //! every sample its sequence number as text, stamped by the runtime's
 //! writer from the service's clock. `timing offset <ms>` shifts that clock
 //! (§4's skewed owner), and `timing stamp none` puts raw through the
-//! session with no stamp set, its payload a wall clock 10 s old (§5's
-//! unstamped owner). `--no-hlc` leaves the session's HLC off with
+//! session with no stamp set, its payload a wall clock 10 s old under the
+//! envelope (§5's unstamped owner). `--no-hlc` leaves the session's HLC off with
 //! `--connect`, as it is by default since core 0.73 (§8.2), `--standby`
 //! included: an HLC follows the stamps its own session puts (core §4.1),
 //! so an offset would grow under one. Each command is answered by one JSON
@@ -1108,7 +1108,8 @@ arbitration.v1 (spec/profiles/arbitration/v1.md)
   commander hold|resume           stop or start putting, the tokens kept
   commander raw on|off            on: every put raw through the session, round the
                                   writer, stamped by the session's HLC, each sample
-                                  `standby <n>`: a standby's samples (scenarios.md §11)
+                                  `standby <n>` under the envelope: a standby's
+                                  samples (scenarios.md §11)
   commander sent                  {\"commander\": \"sent\", \"sent\": <n>, \"refused\": <n>}
   commander new-epoch             a re-mint, make-before-break (core §8.1)
   commander zid                   the session's zid
