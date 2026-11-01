@@ -586,6 +586,17 @@ fn refused_sample(
             Some(&sample.encoding().to_string()),
             &sample.payload().to_bytes(),
         ),
+        // A heartbeat where a record was read (core §7.5's form 6; #978's
+        // F2): its body, never decoded as the resource's type.
+        Read::Heartbeat { sample, .. } => crate::report::PayloadRendering {
+            key: key.clone(),
+            size: sample.payload().len(),
+            resource: None,
+            rendered: crate::report::Rendered::Undecodable {
+                declared: crate::model::inband::heartbeat_declared(&key),
+                reason: crate::model::inband::HEARTBEAT_AS_RECORD.to_owned(),
+            },
+        },
     };
     watch_sample(
         rev,
