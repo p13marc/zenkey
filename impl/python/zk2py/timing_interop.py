@@ -208,8 +208,12 @@ class Bus:
         with self.lock:
             return [(t, p) for t, k, p in self.seen if k == key and t >= since]
 
-    def owner(self, impl: str, hlc: bool = True) -> Any:
-        o = PyPace(self, hlc) if impl == "py" else RsPace(self, hlc)
+    def owner(self, impl: str, hlc: bool = True, session_hlc: bool = False) -> Any:
+        """``session_hlc``: the owner example's session timestamping on
+        (``--hlc``). Since core 0.73 its session runs without it unless asked
+        (§8.2), where zk2py's owner turns it on with ``hlc`` (the mend after
+        round 93)."""
+        o = PyPace(self, hlc) if impl == "py" else RsPace(self, hlc, session_hlc)
         self.parties.append(o)
         return o
 
@@ -428,9 +432,10 @@ class RsPace:
 
     impl = "rust"
 
-    def __init__(self, bus: Bus, hlc: bool = True) -> None:
+    def __init__(self, bus: Bus, hlc: bool = True, session_hlc: bool = False) -> None:
         self.spawned = time.monotonic_ns()
-        args = [str(BLACKBOX / "owner"), "--connect", bus.endpoint, "--timing"] + ([] if hlc else ["--no-hlc"])
+        args = [str(BLACKBOX / "owner"), "--connect", bus.endpoint, "--timing"] + (
+            ["--hlc"] if session_hlc else [] if hlc else ["--no-hlc"])
         self.box = Lines(args + [ADDRESS])
         ok = _wait(lambda: any(x.startswith("ready ") for _, x in self.box.lines()) or self.box.p.poll() is not None,
                    15.0)
@@ -1015,7 +1020,8 @@ def section5(report: Report, oi: str, ci: str) -> None:
             bus.client().declare_subscriber(CMD, zenoh.handlers.Callback(
                 lambda s: tapped.append(zk2c.read_put(str(s.key_expr), str(s.encoding), s.payload.to_bytes()))))
             time.sleep(0.3)
-            o = bus.owner(oi, hlc=hlc)
+            # step 3's control: "the owner with its session's HLC on"
+            o = bus.owner(oi, hlc=hlc, session_hlc=hlc)
             held = _wait(lambda: c.holds_zid(o.zid), 3.0)
             c.track_presence(False)
             o.stamp("none")

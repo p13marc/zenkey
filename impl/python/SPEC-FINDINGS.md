@@ -22900,14 +22900,25 @@ and S7's row, each as the 0.74 entry says.
   makes of X's samples.
 - **Changes:** the scenario's words, the reference's `commander raw on`,
   and a test. No verdict.
+- **Status: resolved by #1009,** in the reference, reading (a). Its
+  `commander raw on` now seals X's records in the envelope, with a stamp
+  from the service's own minter. On black boxes built from main plus #1009
+  (0b1dd565), §11 passes whole with the owner example's commanders: rs:py
+  and rs:rs, both actuators, both tools, 14 checks that were F-422's.
+  Their known marks are gone (`arbitration_scenarios._known`). This pass
+  did not read #1009's text; whether §11's words changed is #1009's.
 
 ### Beside the findings
 
-- **The owner example's `timing stamp none`** puts its text with no
-  envelope. `timing.v1` scenarios §5's owner "sets no stamp on its puts",
-  which asks for no Zenoh timestamp, not for no envelope, so this is the
-  black box's drive and not the text. `timing_interop` §5 is not run with
-  it, and says why.
+- **The owner example's `timing stamp none`** put its text with no
+  envelope on the black boxes built from a8bda1fa. `timing.v1` scenarios
+  §5's owner "sets no stamp on its puts", which asks for no Zenoh
+  timestamp, not for no envelope, so that was the black box's drive and
+  not the text. `timing_interop` §5 then said why it did not run. #1009
+  seals those records too, and §5 runs whole with the owner example.
+  Step 3's control ("the owner with its session's HLC on") now passes
+  `--hlc`, since the example's session runs without timestamping unless
+  asked (core §8.2).
 - **A forged reply on a wildcard GET** (`acl_interop`, both postures).
   own-h1's queryable on own-h2's state key is blocked: a GET of h2's key
   draws h2's reply alone. A consumer's wildcard GET over `zk2/*/tc/…`
@@ -22956,13 +22967,20 @@ runtime), every suite round 93 did not re-run, after the mends above:
 - `desired_scenarios`, `zenctl desired` as §9's tool: zk2py → zk2py **192
   of 192** watching and **192 of 192** polling; Rust → Rust, zk2py → Rust
   and Rust → zk2py **86 of 86** each, watching and polling;
-- `timing_scenarios` **28 of 28**; `timing_interop` **176 of 176** over
-  the four owner:reader pairings, §5's three steps not run with the owner
-  example as owner (above);
-- `arbitration_scenarios` py:py **83 of 83**: §11's actuators count X's
-  20 puts `not_incumbent` (+20). Its first run over the four pairings
-  was 301 of 329, every failure §11's X (F-422). rs:py, py:rs and rs:rs
-  wait for black boxes whose `commander raw on` writes the envelope;
+- `timing_scenarios` **28 of 28**; `timing_interop` **182 of 182** over
+  the four owner:reader pairings. py:py and py:rs scored 91 of 91 on the
+  a8bda1fa boxes. rs:py and rs:rs scored 91 of 91 on 0b1dd565 (#1009),
+  §5 whole. Their first run there was 86 of 91. Two failures were §5's
+  control without `--hlc` (above). Three were timing that did not come
+  back: §4's Expected 2 in rs→rs, and §6 with `zenctl timing` (cmd's
+  period `not_kept`, two rows). `--only 4 5 6` then passed 40 of 40, and
+  the whole run again 91 of 91;
+- `arbitration_scenarios` **329 of 329** over the four
+  commanders:actuators pairings. py:py scored 83 of 83 on the a8bda1fa
+  boxes; rs:py, py:rs and rs:rs scored 246 of 246 on 0b1dd565, §11's 14
+  former F-422 checks among them. §11's actuators count X's puts
+  `not_incumbent`: +20 or +21, X having put 20 or 21. The first run over
+  the four pairings was 301 of 329, every failure §11's X (F-422);
 - `budget_scenarios` **41 of 41** (§4 to §7 on both owners);
   `live_interop --only budget` **16 of 16**;
 - `link_scenarios` **89 of 89**; `hostid_scenarios` **35 of 35**;
@@ -22979,14 +22997,16 @@ runtime), every suite round 93 did not re-run, after the mends above:
 
 ### New findings
 
-One, F-422: a contradiction between a rule core 0.73 changed (§4.3's
-envelope on every stream put, which observer §7.3's readers refuse
-without) and `arbitration.v1` scenarios §11's expectations of X's raw
-puts. Each rule 0.74 changed could be implemented as written.
+One, F-422. It is a contradiction between a rule core 0.73 changed and
+`arbitration.v1` scenarios §11's expectations of X's raw puts. The rule is
+§4.3's envelope on every stream put, without which observer §7.3's
+readers refuse a sample. #1009 resolved F-422 in the reference, by reading
+(a). Each rule 0.74 changed could be implemented as written.
 
 ### Counts at core 0.74 and desired.v1 0.13
 
 422 entries.
-- **Resolved: F-414 to F-421,** eight.
-- **Open: F-422,** a contradiction, no blocker.
+- **Resolved: F-414 to F-421** (core 0.74, `desired.v1` 0.13), and
+  **F-422** (#1009), nine.
+- **Open:** none from round 93 or this pass.
 - **F-365** stays open as #965's.

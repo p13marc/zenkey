@@ -4902,8 +4902,8 @@ the owner sets.
 | config | zk2py 51/51, owner example 51/51, `live_interop` 97/97 |
 | telemetry | zk2py 57/57, owner example 56/56, with `zenctl telemetry` 164/164 |
 | desired | zk2py → zk2py 192/192 watching and polling; the three pairings with the owner example 86/86 each, both ways |
-| timing | `timing_scenarios` 28/28; `timing_interop` 176/176 over four pairings, §5 not run with the owner example as owner |
-| arbitration | py:py 83/83; rs:py, py:rs and rs:rs wait for black boxes whose `commander raw on` writes the envelope (F-422) |
+| timing | `timing_scenarios` 28/28; `timing_interop` 182/182 over four pairings (the Rust owner's on #1009's black boxes, §5 whole) |
+| arbitration | 329/329 over four pairings: py:py 83/83, and rs:py, py:rs, rs:rs 246/246 on #1009's black boxes |
 | budget | 41/41 on both owners; `live_interop` 16/16 |
 | link | 89/89 |
 | hostid | 35/35; `live_interop` 28/28 |
@@ -4913,12 +4913,15 @@ the owner sets.
 | acl | `live_interop` 31/31 |
 
 The mend found one new finding, **F-422**, a contradiction. In
-`arbitration.v1` scenarios §11, X's "raw" puts carry no envelope under
-core 0.73, so every reader refuses them and no `not_incumbent` count can
-grow. zk2py took reading (a): X keeps the envelope. See "At core 0.74 and
-desired.v1 0.13" in `SPEC-FINDINGS.md`, with two observations beside the
-findings (the owner example's `timing stamp none`, and a forged reply on
-a wildcard GET).
+`arbitration.v1` scenarios §11, X's "raw" puts carried no envelope under
+core 0.73, so every reader refused them and no `not_incumbent` count
+could grow. zk2py took reading (a): X keeps the envelope. #1009 resolved
+it in the reference, whose `commander raw on` and `timing stamp none` now
+seal their records. With those black boxes §11 passes whole, its known
+marks are gone, and `timing_interop` §5 runs with the owner example, its
+control on `--hlc`. See "At core 0.74 and desired.v1 0.13" in
+`SPEC-FINDINGS.md`. The observation of a forged reply on a wildcard GET
+sits beside the findings.
 
 ## What it does not cover
 

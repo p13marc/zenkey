@@ -74,21 +74,12 @@ EXACT = ["lab/safety", "lab/teleop", "lab/autopilot"]
 #: not here fails the run; one here that passes prints XPASS.
 KNOWN: dict[tuple[str, str], str] = {}
 
-#: F-422 (the mend after round 93): §11's X beside the owner example's
-#: commanders. Its ``commander raw on`` puts ``standby <n>`` with no zk2c
-#: envelope, which every reader refuses since core 0.73 (§4.3, observer
-#: §7.3): no sample, so no ``not_incumbent`` count, and the control's X no
-#: arrival. zk2py's X keeps the envelope (F-422's reading (a)). The checks
-#: that read X, in the two pairings whose commanders are the owner example's.
-F422 = ("F-422: the owner example's commander raw on puts no zk2c envelope, a refused sample for every reader "
-        "since core 0.73, so X's puts are never judged not_incumbent")
-F422_CHECKS = ("step 1: X's raw puts carry the payload standby <n>", "Expected 1 (", "beside step 2 (",
-               "beside step 2, the control (")
-
 
 def _known(section: str, name: str) -> str | None:
-    if section.startswith("§11 a governed commander's standby [rs→") and name.startswith(F422_CHECKS):
-        return F422
+    """The open finding a check is known to fail by. F-422's entries for §11's
+    X beside the owner example's commanders went when #1009's `commander raw
+    on` sealed its puts in the envelope, and every one passed (the mend after
+    round 93)."""
     return KNOWN.get((section, name))
 
 
