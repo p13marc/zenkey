@@ -36,7 +36,7 @@ fn heartbeat(layout: &Layout, digest: Digest, vouched: bool, seq: u32) -> Vec<u8
         .collections
         .iter()
         .map(|c| {
-            (c.resource() == STATUS).then(|| Section {
+            (c.resource() == STATUS).then_some(Section {
                 digest,
                 members: Members::One { vouched },
             })
