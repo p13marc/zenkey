@@ -3876,8 +3876,8 @@ Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §7
   key's text;
 - the same put crossed in 82 B under `zk2/**`. That is its key's 35 B
   after `zk2`, and a byte of length, more;
-- a templated member's put crossed in 49 B under the template's literal
-  prefix, carrying `/x`;
+- a templated member's put crossed in 52 B under the template's literal
+  prefix, carrying `/roll`;
 - a GET's reply carried its whole key, though the far client had
   subscribed to it exactly.
 

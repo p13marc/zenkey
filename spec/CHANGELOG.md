@@ -51,8 +51,8 @@ Facts 4 and 5 have draft upstream reports, not filed, as r4 decided:
 (`zenkey/tests/constrained.rs`, `s7_keys_across_the_face`). A far client
 of the owner's router, through a byte-counting TCP proxy, subscribes by a
 stream's exact key, by a template's literal prefix, then by `zk2/**`.
-- **Measured:** 45–46 B a put by exact key, with none of its text; 49 B
-  under the template's prefix, carrying `/x`; 82 B under `zk2/**`. The
+- **Measured:** 45–46 B a put by exact key, with none of its text; 52 B
+  under the template's prefix, carrying `/roll`; 82 B under `zk2/**`. The
   difference is the key's 35 B after `zk2`, and its length's byte.
 - **A reply** to the far client's GET carried its whole key, though the
   far client had subscribed to it exactly.

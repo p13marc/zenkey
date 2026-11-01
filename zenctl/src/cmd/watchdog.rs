@@ -56,9 +56,19 @@ pub(crate) fn follows_presence(rule: &Condition) -> bool {
 
 /// Refuses, exit 2, what a rule cannot read across a constrained face
 /// (core §8.5, observer §7.5; #980 C1b): presence and the doctor, which
-/// read `@zk` and do not cross, and a selector that reaches none of the
-/// scope's selectors, which would watch nothing there.
-pub(crate) fn refuse_across_face(rules: &[Condition], scope: &[String], verb: &str) -> Result<()> {
+/// read `@zk` and do not cross, a selector that is no key expression, and
+/// one that reaches none of the scope's selectors, which would watch
+/// nothing there.
+///
+/// A rule's selector is a wire key, as the scope's are, watched on the
+/// session in no namespace (`--rule`'s help): both carry `namespace` in
+/// front, and a base-relative `zk2/…` one under a namespace is told so.
+pub(crate) fn refuse_across_face(
+    rules: &[Condition],
+    scope: &[String],
+    namespace: &str,
+    verb: &str,
+) -> Result<()> {
     for rule in rules {
         if matches!(
             rule,
@@ -74,16 +84,21 @@ pub(crate) fn refuse_across_face(rules: &[Condition], scope: &[String], verb: &s
         let Some(sel) = rule.selector() else {
             continue;
         };
-        let reaches = zenoh::key_expr::KeyExpr::new(sel).is_ok_and(|k| {
-            scope
-                .iter()
-                .any(|s| zenoh::key_expr::KeyExpr::new(s.as_str()).is_ok_and(|f| k.intersects(&f)))
-        });
+        let k = zenoh::key_expr::KeyExpr::new(sel).map_err(|e| {
+            crate::exit::unaskable!(
+                "{verb} --across-face: `{rule}` watches {sel:?}, which is not a key expression: {}",
+                crate::errors::without_source_locations(&e.to_string())
+            )
+        })?;
+        let reaches = scope
+            .iter()
+            .any(|s| zenoh::key_expr::KeyExpr::new(s.as_str()).is_ok_and(|f| k.intersects(&f)));
         if !reaches {
             return Err(crate::exit::unaskable!(
                 "{verb} --across-face: `{rule}` watches {sel}, which reaches none of the \
-                 selectors across the face ({})",
-                scope.join(" + ")
+                 selectors across the face ({}){}",
+                scope.join(" + "),
+                zk2::wire_key_hint(sel, namespace)
             ));
         }
     }
@@ -120,7 +135,10 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     )?;
     let across = match &face {
         Some(face) => {
-            refuse_across_face(&rules, face.selectors(), "watchdog")?;
+            // The rules' selectors are wire keys, as the face's are: both
+            // carry the namespace in front, so `narrow` compares like with
+            // like.
+            refuse_across_face(&rules, face.selectors(), face.namespace(), "watchdog")?;
             let mut typed: Vec<String> = Vec::new();
             for sel in rules.iter().filter_map(Condition::selector) {
                 if !typed.iter().any(|t| t == sel) {
@@ -135,6 +153,7 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
             }
             let scope = face.narrow(&typed, true)?;
             eprintln!("{}", face.note(&scope));
+            eprintln!("watchdog: watching {}", scope.join(" + "));
             Some(scope)
         }
         None => None,

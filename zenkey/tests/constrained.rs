@@ -259,9 +259,11 @@ async fn s7_keys_across_the_face() {
         .declare_writer(&hop, "stream/level", &Bindings::new())
         .await
         .unwrap();
-    let x: Bindings = [("axis".to_owned(), vec!["x".to_owned()])].into();
+    // A member's chunk long enough that finding it in a put's bytes is no
+    // chance match of the framing's.
+    let roll: Bindings = [("axis".to_owned(), vec!["roll".to_owned()])].into();
     let axis = b
-        .declare_writer(&hop, "stream/axis/{axis}", &x)
+        .declare_writer(&hop, "stream/axis/{axis}", &roll)
         .await
         .unwrap();
     let mode = b
@@ -277,40 +279,41 @@ async fn s7_keys_across_the_face() {
     let template = per_put(&ep, &format!("{axis_prefix}/*"), &axis).await;
     let wide_level = per_put(&ep, "zk2/**", &level).await;
     let wide_axis = per_put(&ep, "zk2/**", &axis).await;
+    // Signed, so a put smaller than expected fails naming both sizes.
+    let size = |bytes: &[u8]| i64::try_from(bytes.len()).expect("a put's size");
     let (e, t, w, wa) = (
-        exact.len(),
-        template.len(),
-        wide_level.len(),
-        wide_axis.len(),
+        size(&exact),
+        size(&template),
+        size(&wide_level),
+        size(&wide_axis),
     );
     eprintln!(
         "constrained.md §7: bytes per put toward the far client: exact key {e}, template \
-         prefix {t}, zk2/** {w} (level) and {wa} (axis/x)"
+         prefix {t}, zk2/** {w} (level) and {wa} (axis/roll)"
     );
 
     // Step 1: the exact key's put carries none of its key's text.
     assert!(!carries(&exact, "stream/level"), "{exact:?}");
     // Step 2: the template's prefix rides a scope; the member is the text.
     assert!(!carries(&template, "stream/axis"), "{template:?}");
-    assert!(carries(&template, "/x"), "{template:?}");
+    assert!(carries(&template, "/roll"), "{template:?}");
     // Step 3: under zk2/**, every chunk after `zk2` is text.
     let after_zk2 = &level_key["zk2".len()..];
     assert!(carries(&wide_level, after_zk2), "{wide_level:?}");
-    assert!(carries(
-        &wide_axis,
-        &format!("{}/x", &axis_prefix["zk2".len()..])
-    ));
+    let axis_after_zk2 = format!("{}/roll", &axis_prefix["zk2".len()..]);
+    assert!(carries(&wide_axis, &axis_after_zk2), "{wide_axis:?}");
     // The puts are alike but for their keys, so the difference is the text
     // and its length's varint, give or take a byte of each link's frame
     // sequence number, a varint from a random start.
-    let text = after_zk2.len();
+    let text = size(after_zk2.as_bytes());
     assert!(
         (text..=text + 3).contains(&(w - e)),
         "zk2/** carries the key's {text} B of text: {w} B against {e} B"
     );
+    let member = size(b"/roll");
     assert!(
-        (2..=5).contains(&(t - e)),
-        "the template's prefix carries /x: {t} B against {e} B"
+        (member..=member + 3).contains(&(t - e)),
+        "the template's prefix carries /roll: {t} B against {e} B"
     );
     assert!(
         t < wa,

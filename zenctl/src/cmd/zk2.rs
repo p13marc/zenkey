@@ -408,6 +408,8 @@ impl Reads {
 pub struct FaceScope {
     addresses: Vec<Addr>,
     selectors: Vec<String>,
+    /// The namespace the selectors carry in front: each is a wire key.
+    namespace: String,
 }
 
 impl FaceScope {
@@ -467,7 +469,13 @@ impl FaceScope {
         Ok(Some(FaceScope {
             addresses,
             selectors,
+            namespace: namespace.to_owned(),
         }))
+    }
+
+    /// The namespace the scope's wire keys carry in front.
+    pub fn namespace(&self) -> &str {
+        &self.namespace
     }
 
     /// One selector per resource the contracts give under each address.
@@ -522,8 +530,9 @@ impl FaceScope {
             if typed && !reached {
                 return Err(unaskable!(
                     "{t} reaches none of the resources the contracts in hand give for {} across \
-                     the face: type a selector under one of them, or none",
-                    self.addresses()
+                     the face: type a selector under one of them, or none{}",
+                    self.addresses(),
+                    wire_key_hint(t, &self.namespace)
                 ));
             }
         }
@@ -553,6 +562,22 @@ impl FaceScope {
             selectors.len()
         )
     }
+}
+
+/// What a selector typed outside the namespace is told, or nothing: a raw
+/// observer's selectors, a rule's included, are wire keys, and a
+/// base-relative `zk2/…` one under a namespace reaches nothing of it.
+pub fn wire_key_hint(selector: &str, namespace: &str) -> String {
+    if namespace.is_empty() || zenkey_fleet::strip_namespace(namespace, selector).is_some() {
+        return String::new();
+    }
+    if selector.split(['/', '?']).next() != Some(GRAMMAR) {
+        return String::new();
+    }
+    format!(
+        " (selectors are wire keys: did you mean {:?}?)",
+        zenkey_fleet::with_namespace(namespace, selector)
+    )
 }
 
 /// The selector of `r` under `addr`, base-relative: its exact key for a
@@ -1018,5 +1043,72 @@ mod tests {
         )
         .expect_err("no contract");
         assert!(none.to_string().contains("give --contracts"), "{none}");
+    }
+
+    /// Across a face a rule's selector is a wire key, as the scope's are
+    /// (review-bot on PR #1017). Under `--namespace prod`, one carrying the
+    /// namespace is taken and narrowed, a base-relative `zk2/…` one is
+    /// refused with the wire key it meant, and one that is no key
+    /// expression is refused as that, never as reaching nothing.
+    #[test]
+    fn across_a_face_a_rules_selector_is_a_wire_key() {
+        use crate::cmd::watchdog::refuse_across_face;
+        use zenkey_fleet::judge::condition::Condition;
+        let (_dir, set) = hop_contracts();
+        let face = FaceScope::of(&["v/hop".into()], &set, "prod", Reads::Samples)
+            .unwrap()
+            .expect("asked");
+        let rule = |r: &str| [Condition::parse(r).unwrap()];
+        let key = |rest: &str| format!("prod/zk2/v/hop/hop.v1/{rest}");
+
+        refuse_across_face(
+            &rule("rate-below prod/zk2/v/hop/** 1"),
+            face.selectors(),
+            face.namespace(),
+            "watchdog",
+        )
+        .expect("a wire key under the namespace");
+        assert_eq!(
+            sorted(face.narrow(&["prod/zk2/v/hop/**".into()], true).unwrap()),
+            sorted(vec![
+                key("stream/level"),
+                key("state/axis/*"),
+                key("events/alarm/*")
+            ])
+        );
+
+        let relative = refuse_across_face(
+            &rule("rate-below zk2/v/hop/** 1"),
+            face.selectors(),
+            face.namespace(),
+            "watchdog",
+        )
+        .expect_err("a base-relative selector reaches nothing on the wire");
+        assert!(
+            relative
+                .to_string()
+                .contains(r#"did you mean "prod/zk2/v/hop/**"?"#),
+            "{relative}"
+        );
+        let narrowed = face
+            .narrow(&["zk2/v/hop/**".into()], true)
+            .expect_err("refused by narrow too");
+        assert!(
+            narrowed.to_string().contains("selectors are wire keys"),
+            "{narrowed}"
+        );
+
+        let invalid = refuse_across_face(
+            &rule("rate-below prod/zk2//hop 1"),
+            face.selectors(),
+            face.namespace(),
+            "watchdog",
+        )
+        .expect_err("no key expression");
+        assert!(
+            invalid.to_string().contains("is not a key expression"),
+            "{invalid}"
+        );
+        assert!(invalid.downcast_ref::<crate::exit::Unaskable>().is_some());
     }
 }

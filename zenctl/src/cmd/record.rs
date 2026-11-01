@@ -265,7 +265,7 @@ async fn run_triggered(
         .collect::<std::result::Result<_, _>>()
         .map_err(anyhow::Error::from)?;
     if t.across_face {
-        super::watchdog::refuse_across_face(&rules, selectors, "record --on")?;
+        super::watchdog::refuse_across_face(&rules, selectors, dep.namespace(), "record --on")?;
     }
 
     let session = dep.link().session().await?;

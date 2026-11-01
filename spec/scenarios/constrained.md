@@ -77,7 +77,7 @@ clients and peers, and the region `ground`. The `@zk` deny is on the face.
 ## §7 Keys across the face (§8.5)
 
 **Setup.** One router, and an owner that is its client. The owner writes
-a stream `…/stream/level`, a templated stream's member `…/stream/axis/x`
+a stream `…/stream/level`, a templated stream's member `…/stream/axis/roll`
 and a state `…/state/mode`. Each step's far client is a client of the
 router through a TCP proxy. The proxy counts what crosses toward it.
 
@@ -90,10 +90,10 @@ router through a TCP proxy. The proxy counts what crosses toward it.
 **Expected.**
 1. Each put rides the scope its subscription declared. It carries none
    of its key's text.
-2. Each put rides the scope, and carries `/x`.
+2. Each put rides the scope, and carries `/roll`.
 3. Each put carries every chunk of its key after `zk2` as text. It is
    larger than step 1's by that text and a byte of length.
 4. The reply carries its whole key as text.
 
-*The reference: 45–46 B a put in step 1, 49 B in step 2, and 82 B in step
+*The reference: 45–46 B a put in step 1, 52 B in step 2, and 82 B in step
 3, its key's 35 B after `zk2` and a byte of length more.*
