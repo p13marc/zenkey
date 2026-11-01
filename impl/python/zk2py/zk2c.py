@@ -48,13 +48,13 @@ from typing import Any
 
 from . import keys
 
-#: core §7.5's forms by code. Three are defined at this version (core 0.81
-#: adds the heartbeat, code 6); the other five are reserved, each refused
-#: (``form``).
+#: core §7.5's forms by code. Four are defined at this version (core 0.81
+#: adds the heartbeat, code 6, and 0.83 the frame, code 5, #981 K1); the
+#: other four are reserved, each refused (``form``).
 FORMS = ("mutation", "delete", "value", "error", "event", "frame", "heartbeat", "snapshot")
-DEFINED = ("mutation", "delete", "heartbeat")
+DEFINED = ("mutation", "delete", "frame", "heartbeat")
 #: the forms a put's payload carries; a delete's attachment carries a delete
-PUT_FORMS = ("mutation", "heartbeat")
+PUT_FORMS = ("mutation", "frame", "heartbeat")
 
 #: core §7.5: "The seq is an unsigned 24-bit integer, from 0 to 16,777,215."
 SEQ_MAX = 2**24 - 1
@@ -124,11 +124,14 @@ def header(byte: int) -> dict[str, Any]:
     return {"form": FORMS[byte >> 5], "run_width": 32 if byte & 0x10 else 16, "tag": byte & 0x0F}
 
 
-def parse(data: bytes, sample: str) -> Envelope:
+def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
     """Core §7.5's parse of ``data`` as the envelope a ``sample`` (``put``:
     its payload; ``delete``: its attachment) carries. Raises
     :class:`Refused` for the first reason that applies, in the text's
-    order."""
+    order. ``key_token``, the kind token "the grammar reads from the key
+    alone", refuses a frame on a key that is not a plain stream's
+    (``key_kind``, core 0.83, after ``sample_kind``); None parses with no
+    key, as ``vectors.json`` does."""
     if sample not in ("put", "delete"):
         raise ValueError(f"no such sample kind: {sample!r}")
     data = bytes(data)
@@ -140,6 +143,8 @@ def parse(data: bytes, sample: str) -> Envelope:
     if (sample == "put") != (h["form"] in PUT_FORMS):
         raise Refused("sample_kind", f"a {h['form']} as a {sample}'s "
                       + ("payload" if sample == "put" else "attachment"))
+    if h["form"] == "frame" and key_token is not None and key_token != "stream":
+        raise Refused("key_kind", f"a frame on a {key_token} key: only a plain stream's carries one (core §7.5)")
     if h["form"] == "delete" and h["tag"] != 0:
         raise Refused("tag", f"a delete whose tag is {h['tag']}")
     run_bytes = h["run_width"] // 8
@@ -216,6 +221,25 @@ def carries(key: str, encoding: str) -> bool:
     return parsed is not None and parsed.get("form") == "data" and parsed.get("token") in CARRYING
 
 
+def key_token(key: str) -> str | None:
+    """The kind token of the zk2 data key a session hears ``key`` as, or
+    None."""
+    p = data_key(key)
+    return p.get("token") if p is not None and p.get("form") == "data" else None
+
+
+def reads(key: str, payload: bytes) -> dict[str, str]:
+    """``carries.json``'s ``reads`` (core 0.83): how a put on ``key`` under
+    ``zenoh/bytes`` reads: ``{"reads": "plain"}`` with no envelope, its
+    form's name, or ``{"refused": token}``, ``key_kind`` among them."""
+    if not carries(key, ENCODING):
+        return {"reads": "plain"}
+    try:
+        return {"reads": parse(payload, "put", key_token(key)).form}
+    except Refused as e:
+        return {"refused": e.token}
+
+
 @dataclass(frozen=True)
 class Read:
     """A data sample read through observer §7.3's first step.
@@ -258,7 +282,7 @@ def read_put(key: str, encoding: str, payload: bytes) -> Read:
     if not carries(key, encoding):
         return Read(False, bytes(payload))
     try:
-        env = parse(payload, "put")
+        env = parse(payload, "put", key_token(key))
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
     return Read(True, env.record, env.stamp, tag=env.tag, form=env.form)

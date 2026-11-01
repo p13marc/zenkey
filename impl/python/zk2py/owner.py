@@ -541,6 +541,13 @@ class Owner:
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
+            # core 0.83 (#981 K1): a frame resource's samples are frames, which
+            # this owner does not write (K3's): refused before anything is
+            # declared, never published as mutations, which have no reading.
+            framed = [r["template"] for r in c.canonical["resources"] if r.get("frame") is not None]
+            if framed:
+                raise OwnerRefused(f"{c.interface}: frame resources {framed}: zk2py's owner writes no frame "
+                                   "(core §7.7, K3)")
         #: freshness.v2 §2.4 (core 0.82): each interface it implements whose
         #: contract uses freshness.v2 and has a collection is covered by a
         #: heartbeat, and it implements the standard contract beside them

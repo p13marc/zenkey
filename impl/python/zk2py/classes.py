@@ -1,4 +1,4 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.82), and its walk of
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.83), and its walk of
 ``spec/RULES.md`` (#609, rounds 89 to 96, the mend after #926 part 5 and the
 mend after round 94).
 
@@ -548,7 +548,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "(round 94, core 0.75)"),
     # core 0.72 (#976): §7.5's two static rules.
     ("static", "core §7.5", "An implementation MUST refuse an envelope for the first of these", MET,
-     "zk2c.parse, in §7.5's order, each token (envelope family, vectors.json) (round 93, core 0.72)"),
+     "zk2c.parse, in §7.5's order, each token, a frame's key_kind on its key (envelope family, vectors.json, "
+     "carries.json's reads) (round 93, core 0.72; round 96, core 0.83)"),
     ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
      "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
     # core 0.81 (#978 F1): the heartbeat's five static rules (round 96).
@@ -565,6 +566,46 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "bodies.json's reads) (round 96, core 0.81)"),
     ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", MET,
      "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
+    # core 0.83 (#981 K1): §7.7's frames. The owner's and the reader's rules are
+    # K2's and K3's: zk2py writes and reads none (round 96).
+    ("owner", "core §7.7", 'An owner MUST give a frame the seq of its record 0', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", "An owner MUST start a key's first frame in a run with a full record", NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'An owner MUST write a full record at least once every', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'In a delta record, an owner MUST include each field with no deadband', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'An owner MUST include the field in any other case', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'An owner MUST mark a record scheduled only when', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST NOT show or use an `unknown` or `absent` field', MET,
+     "no zk2py reader shows or uses a frame's field: a frame is undecodable in packed.read_sample and open_put, every packed reading's (round 96, core 0.83)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST NOT show or use an `unknown` or `absent` field', MET,
+     "no zk2py reader shows or uses a frame's field: a frame is undecodable in packed.read_sample and open_put, every packed reading's (round 96, core 0.83)"),
+    ("static", "core §7.7", "An implementation that writes a frame MUST write its tag in CH's tag bits", MET,
+     "frame.Layout.tag, the frame form's sha256's last byte's low 4 bits (frame family: layouts.json, every write sealed in form 5 under it and parsed back) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation that writes a frame MUST write the bits above for its records', MET,
+     "frame.Layout.write_bits and write (frame family: bodies.json's writes, bits, pad and bytes) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation MUST NOT write a frame of no record, or of more than', MET,
+     "frame.Layout.write_bits refuses records (frame family: bodies.json's writes) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation MUST NOT write a full record that lacks a field', MET,
+     "frame.Layout.write_bits refuses missing, and §7.6's value and range through packed.encode (frame family) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation MUST NOT write an offset at or past the span', MET,
+     'frame.Layout.write_bits refuses range for the offset and order for a record before its predecessor (frame family) (round 96, core 0.83)'),
+    ("static", "core §7.7", 'An implementation that reads a frame MUST refuse it for the first of these', MET,
+     "frame.Layout.read: tag, then length, code and order as the fields are read, then length and pad (frame family: bodies.json's reads) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'Every body an implementation accepts MUST write back to the same bytes', MET,
+     'frame.Layout.write over every value read (frame family: every accepted read written back) (round 96, core 0.83)'),
     # core 0.75 (#979 B1): §7.6's six static rules.
     ("static", "core §7.6", "An implementation MUST compute a fixed-point code, and the value it reads back", MET,
      "packed.encode and decode over fractions.Fraction, ties to even (packed family: the Ties and Sensor writes) "
