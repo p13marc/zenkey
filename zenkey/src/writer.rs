@@ -177,29 +177,35 @@ impl Slot for PubSlot {
 #[derive(Debug, Clone)]
 pub(crate) struct PackedType {
     name: String,
+    tag: Tag,
     layout: Arc<Layout>,
 }
 
 impl PackedType {
     /// `r`'s packed type, read from `contract`'s artifact; `None` for a
-    /// type of another kind. A packed type whose layout does not read is
-    /// refused, [`Error::Contract`].
+    /// type of another kind. A packed type whose layout does not read, or
+    /// whose tag is not CH's four bits, is refused, [`Error::Contract`].
     pub(crate) fn of(contract: &Contract, r: &Resource) -> Result<Option<Self>> {
         let d = data(r)?;
+        let TypeId::Packed { name, .. } = &d.type_ else {
+            return Ok(None);
+        };
+        let refused = |e: String| Error::Contract(format!("{}/{}: {e}", r.token, r.template));
         let layout = contract
             .packed_layout(&d.type_)
-            .map_err(|e| Error::Contract(format!("{}/{}: {e}", r.token, r.template)))?;
-        Ok(layout.map(|l| Self {
-            name: match &d.type_ {
-                TypeId::Packed { name, .. } => name.clone(),
-                _ => unreachable!("a layout is a packed type's"),
-            },
-            layout: Arc::new(l),
+            .map_err(refused)?
+            .ok_or_else(|| refused(format!("packed:{name}: no layout")))?;
+        let tag = Tag::new(layout.tag())
+            .ok_or_else(|| refused(format!("packed:{name}: tag {} past 15", layout.tag())))?;
+        Ok(Some(Self {
+            name: name.clone(),
+            tag,
+            layout: Arc::new(layout),
         }))
     }
 
     pub(crate) fn tag(&self) -> Tag {
-        Tag::new(self.layout.tag()).expect("a 4-bit tag")
+        self.tag
     }
 
     /// Its layout's admission of a record (core §7.6): refused,

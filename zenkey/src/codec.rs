@@ -141,10 +141,12 @@ impl<T: PackedRecord> Codec for Packed<T> {
             .map(|r| r.bytes)
             .map_err(|r| format!("packed:{}: {r}", T::NAME))
     }
-    /// A record read under the type's own tag: one a reader already
-    /// admitted by its tag (`zenkey::inband::admit`, the consumer), or one
-    /// carried with no envelope where none is due. [`Codec::decode_record`]
-    /// checks the tag the envelope carried.
+    /// A record read under the type's own tag, which checks no tag CH
+    /// carried. A packed type travels only in an envelope (E044), and every
+    /// typed read of one (a subscription, S4's GET, an archive's
+    /// last-known) decodes by [`Codec::decode_record`] with the tag the
+    /// envelope carried; this is for bytes a caller already admitted by it
+    /// (`zenkey::inband::admit`).
     fn decode(bytes: &[u8], _: Option<WireEncoding>) -> Result<T, String> {
         T::decode(T::TAG, bytes, Some(DEFAULT_EPOCH))
             .map_err(|r| format!("packed:{}: {r}", T::NAME))

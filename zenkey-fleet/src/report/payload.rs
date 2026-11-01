@@ -57,6 +57,13 @@ pub enum Rendered {
         /// (`nav.v2.Pose`), `json:<name>`, or the raw media type.
         declared: String,
         value: serde_json::Value,
+        /// The deployment epoch, in seconds, a packed record's `time`
+        /// fields were read under because the tool holds none (core §7.6,
+        /// which carries it nowhere yet; #980): those values are right
+        /// only where the deployment's epoch is this one. Absent for every
+        /// other value.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        epoch_assumed: Option<i64>,
     },
     /// A raw type: its media type (for a family like `video/*`, the
     /// concrete one the sample's `Encoding` carries). The bytes are not
@@ -75,6 +82,21 @@ pub enum Rendered {
         /// `<N bytes>`.
         text: String,
     },
+}
+
+impl Rendered {
+    /// What a person reads beside a value whose `time` fields rest on an
+    /// epoch assumed (`epoch_assumed`): one spelling for every frontend.
+    #[must_use]
+    pub fn epoch_note(&self) -> Option<String> {
+        match self {
+            Rendered::Value {
+                epoch_assumed: Some(e),
+                ..
+            } => Some(format!("epoch {e} assumed, #980")),
+            _ => None,
+        }
+    }
 }
 
 /// Why a sample was not decoded through a contract. Tagged `reason`.
@@ -203,6 +225,7 @@ mod tests {
             rendered: Rendered::Value {
                 declared: "json:BandwidthUpdate".into(),
                 value: json!({"rx_bps": 1, "tx_bps": 2}),
+                epoch_assumed: None,
             },
         };
         assert_eq!(

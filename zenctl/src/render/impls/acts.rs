@@ -38,10 +38,18 @@ pub fn unresolved_words(why: &Unresolved) -> String {
 /// stopped the decode.
 pub fn rendered_text(r: &Rendered, size: usize) -> String {
     match r {
-        Rendered::Value { declared, value } => format!(
-            "{declared} {}",
-            serde_json::to_string(value).unwrap_or_default()
-        ),
+        Rendered::Value {
+            declared, value, ..
+        } => {
+            let line = format!(
+                "{declared} {}",
+                serde_json::to_string(value).unwrap_or_default()
+            );
+            match r.epoch_note() {
+                Some(note) => format!("{line}  ({note})"),
+                None => line,
+            }
+        }
         Rendered::Opaque { media_type } => format!("<{media_type}, {size} B>"),
         Rendered::Undecodable { declared, reason } => {
             format!("<{size} B that do not decode as {declared}: {reason}>")

@@ -1428,7 +1428,9 @@ fn rendering<'a>(
     sp: Spacing,
 ) -> Element<'a, Message> {
     let (chip, body): (Element<'a, Message>, Option<String>) = match &p.rendered {
-        Rendered::Value { declared, value } => (
+        Rendered::Value {
+            declared, value, ..
+        } => (
             kit::data_chip(declared.clone()),
             Some(serde_json::to_string_pretty(value).unwrap_or_default()),
         ),

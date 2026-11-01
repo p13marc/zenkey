@@ -678,7 +678,9 @@ async fn each_kind_decodes_or_renders_honestly() {
         &attachment.expect("FrameMeta rides along"),
     );
     match &r.rendered {
-        Rendered::Value { declared, value } => {
+        Rendered::Value {
+            declared, value, ..
+        } => {
             assert_eq!(declared, "camera.v1.FrameMeta");
             assert_eq!(value["width"], 640);
             assert_eq!(value["height"], 480);
@@ -699,7 +701,9 @@ async fn each_kind_decodes_or_renders_honestly() {
     );
     let r = render(&catalog, &store, &key, Member::Type, Some(&enc), &payload);
     match &r.rendered {
-        Rendered::Value { declared, value } => {
+        Rendered::Value {
+            declared, value, ..
+        } => {
             assert_eq!(declared, "detections.v1.Objects");
             assert!(value.as_object().is_some_and(|o| o.len() == 1), "{value}");
         }
@@ -732,6 +736,7 @@ async fn each_kind_decodes_or_renders_honestly() {
         Rendered::Value {
             declared: "json:BandwidthUpdate".into(),
             value: serde_json::json!({"rx_bps": 1, "tx_bps": 2}),
+            epoch_assumed: None,
         }
     );
     let res = r.resource.expect("resolved");
@@ -762,6 +767,7 @@ async fn each_kind_decodes_or_renders_honestly() {
         Rendered::Value {
             declared: "json:FrameMeta".into(),
             value: serde_json::json!({"keyframe": true, "pts_ns": 40}),
+            epoch_assumed: None,
         }
     );
 

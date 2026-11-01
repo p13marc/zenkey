@@ -724,6 +724,7 @@ fn origin_value() -> zenkey_fleet::report::OperationAnswer {
                     "longitudeDeg": -122.3321,
                     "altitudeM": 56.0
                 }),
+                epoch_assumed: None,
             },
         },
     }

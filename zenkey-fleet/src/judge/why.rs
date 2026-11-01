@@ -1631,6 +1631,7 @@ mod tests {
                     encoding: None,
                     timestamp: None,
                     inband: Some(inband(7)),
+                    tag: None,
                     identity: json!({}),
                     confirmed: false,
                 },

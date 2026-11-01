@@ -236,6 +236,24 @@ pub fn decode_in(
     }
 }
 
+/// The deployment epoch [`decode_in`] reads a record of `ty` under when
+/// `cx` states none: [`crate::packed::DEFAULT_EPOCH`] for a packed type
+/// whose layout holds a `time` field, `None` for every other type and
+/// whenever `cx` states one. Such a record's `time` values are right only
+/// where the deployment's epoch is that one (core §7.6 carries it nowhere
+/// yet; #980), so a tool that shows them says so beside them.
+#[must_use]
+pub fn epoch_assumed(bundle: &Bundle, ty: &Value, cx: Context) -> Option<i64> {
+    if cx.epoch.is_some() || ty["kind"] != "packed" {
+        return None;
+    }
+    let layout = crate::packed::layout_in(artifact(bundle, ty)?, ty["name"].as_str()?).ok()?;
+    layout
+        .fields()
+        .any(|f| matches!(f.kind, crate::packed::FieldKind::Time { .. }))
+        .then_some(crate::packed::DEFAULT_EPOCH)
+}
+
 fn artifact<'b>(bundle: &'b Bundle, ty: &Value) -> Option<&'b Value> {
     bundle
         .schemas

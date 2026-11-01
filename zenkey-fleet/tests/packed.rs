@@ -35,8 +35,13 @@ fn sensor() -> serde_json::Value {
 
 fn value_of(r: &Rendered) -> &serde_json::Value {
     match r {
-        Rendered::Value { declared, value } => {
+        Rendered::Value {
+            declared,
+            value,
+            epoch_assumed,
+        } => {
             assert_eq!(declared, "packed:Sensor");
+            assert_eq!(*epoch_assumed, None, "Sensor holds no time field");
             value
         }
         other => panic!("not a value: {other:?}"),
@@ -200,5 +205,61 @@ fn synth_writes_packed_records() {
                 .unwrap();
             assert_eq!(Some(back), a.value, "{}", r.template);
         }
+    }
+}
+
+/// A packed record's `time` fields, read under the epoch a tool assumes
+/// while nothing carries the deployment's (core §7.6, #980): the
+/// rendering says which, so a reader sees the values rest on it.
+#[test]
+fn a_time_field_is_shown_under_the_epoch_assumed() {
+    let c = contract("packed/packed.v1");
+    let layout = |name: &str| {
+        let r = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == name)
+            .unwrap();
+        let zenkey_model::contract::Body::Data(d) = &r.body else {
+            unreachable!()
+        };
+        c.packed_layout(&d.type_).unwrap().unwrap()
+    };
+    let clock = layout("clock");
+    let record = clock
+        .write(
+            &serde_json::json!({"at": 1_700_000_000_000_i64, "at_ms": 1_700_000_000_000_i64, "valid": true}),
+            Some(zenkey_model::packed::DEFAULT_EPOCH),
+        )
+        .unwrap();
+    let bytes = Envelope {
+        tag: Tag::new(clock.tag()).unwrap(),
+        stamp: Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(1).unwrap(),
+        },
+        record: &record.bytes,
+    }
+    .write();
+    let revision = Revision::from_contract(c.clone(), ContractSource::File);
+    let key = "zk2/lab/packed/packed.v1/stream/clock";
+    match render_with(&revision, key, Member::Type, Some("zenoh/bytes"), &bytes).rendered {
+        Rendered::Value {
+            declared,
+            value,
+            epoch_assumed,
+        } => {
+            assert_eq!(declared, "packed:Clock");
+            assert_eq!(value["at"], 1_700_000_000_000_i64);
+            assert_eq!(epoch_assumed, Some(zenkey_model::packed::DEFAULT_EPOCH));
+            let json = serde_json::to_value(Rendered::Value {
+                declared,
+                value,
+                epoch_assumed,
+            })
+            .unwrap();
+            assert_eq!(json["epoch_assumed"], 0, "{json}");
+        }
+        other => panic!("{other:?}"),
     }
 }

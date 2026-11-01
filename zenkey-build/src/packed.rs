@@ -582,7 +582,7 @@ fn emit_type(s: &mut String, name: &str, module: &str, layout: &Layout, record: 
         {
             let _ = writeln!(
                 s,
-                "    /// `{}`'s fixed point, its decimals read once.\n    static FIXED_{}: ::std::sync::LazyLock<::zenkey::packed::Fixed> =\n        ::std::sync::LazyLock::new(|| ::zenkey::packed::Fixed::new({:?}, {:?}, {values}));\n",
+                "    /// `{}`'s fixed point, its decimals read once. The build linted its\n    /// declaration (core §9.2's E038 to E045) and spelt them from the\n    /// decimals it read, so `Fixed::new` reads them back: it never panics.\n    static FIXED_{}: ::std::sync::LazyLock<::zenkey::packed::Fixed> =\n        ::std::sync::LazyLock::new(|| ::zenkey::packed::Fixed::new({:?}, {:?}, {values}));\n",
                 f.f.name,
                 f.index,
                 minimum.to_string(),

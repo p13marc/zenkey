@@ -704,6 +704,9 @@ pub struct LastKnown {
     /// Its in-band stamp, the run and seq its envelope carried (core §4.3):
     /// what orders it.
     pub inband: Option<zenkey_model::wire::Stamp>,
+    /// CH's tag, when it came in an envelope: a packed record is read by it
+    /// (core §7.6), as [`crate::inband::Read::tag`] says.
+    pub tag: Option<zenkey_model::wire::Tag>,
     /// `{"iface", "contract", "type"}`: the value's type identity (§7.1).
     pub identity: Value,
     /// `false` while alignment has not confirmed the key.
@@ -805,7 +808,7 @@ fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
         return None;
     }
     let mark = read.mark();
-    let inband = read.stamp();
+    let (inband, tag) = (read.stamp(), read.tag());
     let s = read.into_sample();
     let att: Value = s
         .attachment()
@@ -818,6 +821,7 @@ fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
         encoding: put.then(|| s.encoding().clone()),
         timestamp: s.timestamp().copied(),
         inband,
+        tag,
         confirmed: att["confirmed"].as_bool().unwrap_or(false),
         identity: json!({"iface": att["iface"], "contract": att["contract"], "type": att["type"]}),
     };

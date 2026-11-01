@@ -265,12 +265,14 @@ fn render_read(
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
     // the contract speaks next (§7.2's order). A packed record is read by
-    // its envelope's tag (core §7.6).
+    // its envelope's tag (core §7.6), its `time` fields under an epoch
+    // assumed and said so (#980).
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
     let cx = decode::Context { tag, epoch: None };
     let rendered = rendered(
         ty,
         decode::decode_in(revision.bundle(), ty, encoding, bytes, cx),
+        decode::epoch_assumed(revision.bundle(), ty, cx),
     );
     PayloadRendering {
         key: key.to_owned(),
@@ -322,16 +324,23 @@ pub fn render_resource(
             member: member.as_str().to_owned(),
             values,
         }),
-        rendered: rendered(ty, decode::decode(revision.bundle(), ty, encoding, bytes)),
+        rendered: rendered(
+            ty,
+            decode::decode(revision.bundle(), ty, encoding, bytes),
+            None,
+        ),
     }
 }
 
-/// The model's decode, as the report spells it.
-fn rendered(ty: &serde_json::Value, d: Decoded) -> Rendered {
+/// The model's decode, as the report spells it, with the epoch a packed
+/// record's `time` fields were read under when none was stated
+/// ([`decode::epoch_assumed`]).
+fn rendered(ty: &serde_json::Value, d: Decoded, epoch_assumed: Option<i64>) -> Rendered {
     match d {
         Decoded::Value(value) => Rendered::Value {
             declared: decode::declared(ty),
             value,
+            epoch_assumed,
         },
         Decoded::Opaque { media_type, .. } => Rendered::Opaque { media_type },
         Decoded::Undecodable {
@@ -362,6 +371,7 @@ pub fn render_detail(
         (Some(ty), Detail::Bytes(bytes)) => rendered(
             ty,
             decode::decode(revision.bundle(), ty, Some("application/protobuf"), bytes),
+            None,
         ),
         (Some(ty), Detail::Value(_)) if ty["kind"] == "raw" => Rendered::Opaque {
             media_type: decode::declared(ty),
@@ -369,6 +379,7 @@ pub fn render_detail(
         (Some(ty), Detail::Value(value)) => Rendered::Value {
             declared: decode::declared(ty),
             value: value.clone(),
+            epoch_assumed: None,
         },
         (None, detail) => {
             let why = Unresolved::NoMember {
@@ -493,7 +504,8 @@ mod tests {
                 r.rendered,
                 Rendered::Value {
                     declared: "json:Status".into(),
-                    value: json!({"up": true})
+                    value: json!({"up": true}),
+                    epoch_assumed: None,
                 },
                 "{encoding:?}"
             );
@@ -641,7 +653,8 @@ mod tests {
             r.rendered,
             Rendered::Value {
                 declared: "json:Status".into(),
-                value: json!({"up": false})
+                value: json!({"up": false}),
+                epoch_assumed: None,
             }
         );
 

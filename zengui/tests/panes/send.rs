@@ -378,6 +378,7 @@ fn the_call_mode_keeps_value_envelope_and_silence_apart() {
                 rendered: Rendered::Value {
                     declared: "nav.v2.Origin".into(),
                     value: serde_json::json!({"latitudeDeg": 47.6}),
+                    epoch_assumed: None,
                 },
             },
         }))),

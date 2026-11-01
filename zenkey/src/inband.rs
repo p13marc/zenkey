@@ -141,6 +141,9 @@ pub fn read(sample: Sample) -> Read {
             tag: Tag::NONE,
         };
     }
+    // `envelope` returned a put's stamp only from `Envelope::parse` of these
+    // bytes, which refuses an empty or short payload (`short`): they hold
+    // CH and the stamp, `stamp.envelope_bytes()` of them.
     let bytes = sample.payload().to_bytes();
     let tag = wire::Header::from_byte(bytes[0]).tag;
     let record = bytes[stamp.envelope_bytes()..].to_vec();
@@ -258,4 +261,35 @@ pub fn stamp(sample: &Sample) -> Option<wire::Stamp> {
 #[must_use]
 pub fn refusal(sample: &Sample) -> Option<Refusal> {
     envelope(sample)?.err()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Read, Undecodable, admit, read};
+    use zenoh::sample::{Sample, SampleBuilder};
+
+    /// An empty or short put on an enveloped key (zenoh's default Encoding,
+    /// `zenoh/bytes`) is refused `short` before anything indexes its bytes,
+    /// and `admit` refuses it whatever layout the reader holds.
+    #[test]
+    fn a_short_put_is_refused_never_read() {
+        let layout = zenkey_model::packed::layout_in(
+            &serde_json::json!({"types": {"T": {"fields": [{"name": "b", "type": "bool"}]}}}),
+            "T",
+        )
+        .unwrap();
+        for payload in [vec![], vec![0x00, 0x01, 0x02]] {
+            let key = zenoh::key_expr::KeyExpr::try_from("zk2/lab/a/packed.v1/stream/x").unwrap();
+            let s: Sample = SampleBuilder::put(key, payload.clone()).into();
+            let r = read(s);
+            assert!(matches!(r, Read::Refused { .. }), "{payload:?}: {r:?}");
+            assert_eq!(r.refusal().map(|r| r.token()), Some("short"), "{payload:?}");
+            for l in [None, Some(&layout)] {
+                assert!(
+                    matches!(admit(&r, l), Err(Undecodable::Envelope(_))),
+                    "{payload:?}"
+                );
+            }
+        }
+    }
 }

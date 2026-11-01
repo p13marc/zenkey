@@ -609,10 +609,12 @@ pub async fn last_known<C: Codec>(
     let found = crate::archive::last_known(consumer.session(), archive, &origin, timeout).await?;
     Ok(found.map(|l| {
         let enc = l.encoding.as_ref().map(ToString::to_string);
+        // A packed record by the tag its envelope carried (core §7.6).
+        let tag = l.tag;
         LastKnown {
             value: l
                 .value
-                .map(|b| C::decode(&b, wire_of(enc.as_deref(), wire))),
+                .map(|b| C::decode_record(&b, wire_of(enc.as_deref(), wire), tag)),
             origin: l.origin,
             timestamp: l.timestamp,
             inband: l.inband,

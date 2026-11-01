@@ -632,7 +632,17 @@ fn check_resolved(
             } else {
                 Conformance::Valid
             };
-            (Rendered::Value { declared, value }, conformance)
+            // A packed record's `time` fields, under an epoch assumed and
+            // said so (core §7.6, #980).
+            let epoch_assumed = decode::epoch_assumed(bundle, ty, cx);
+            (
+                Rendered::Value {
+                    declared,
+                    value,
+                    epoch_assumed,
+                },
+                conformance,
+            )
         }
         decode::Rendered::Opaque { media_type, .. } => (
             Rendered::Opaque {
@@ -1109,7 +1119,7 @@ mod tests {
         assert_eq!(ok.rendering.size, br#"{"up":true}"#.len(), "the record's");
         assert!(
             matches!(&ok.rendering.rendered,
-                Rendered::Value { declared, value } if declared == "json:Status" && value == &json!({"up": true})),
+                Rendered::Value { declared, value, .. } if declared == "json:Status" && value == &json!({"up": true})),
             "{:?}",
             ok.rendering.rendered
         );
