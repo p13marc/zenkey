@@ -376,10 +376,9 @@ pub(crate) fn update(
             // The same revisions as held (every session open reloads them):
             // the store, the lens and every verdict stand, and only the
             // load's own account — its paths and problems — is replaced.
-            let unchanged = dep
-                .contracts
-                .as_ref()
-                .is_some_and(|held| same_revisions(&held.set, &loaded.set));
+            let unchanged = dep.contracts.as_ref().is_some_and(|held| {
+                same_revisions(&held.set, &loaded.set) && held.same_catalogs(&loaded)
+            });
             dep.contracts = Some(loaded);
             if unchanged {
                 dep.recount_contracts();
@@ -660,7 +659,10 @@ pub(crate) fn read_declared(dep: &Deployment) -> Task<Message> {
 /// Load the contracts the settings name (#614, FL6a) — off the update
 /// thread, landing on `ContractsLoaded`.
 pub(crate) fn load_contracts(dep: &Deployment) -> Task<Message> {
-    services::contracts::load(dep.settings.contracts.clone())
+    services::contracts::load(
+        dep.settings.contracts.clone(),
+        dep.settings.catalogs.clone(),
+    )
 }
 
 pub(crate) fn start_monitor(dep: &Deployment) -> Task<Message> {

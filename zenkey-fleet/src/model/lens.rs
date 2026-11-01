@@ -38,6 +38,7 @@ use zenkey_model::grammar::{Addr, IfaceId, ZkKey};
 use zenkey_model::template::{Bindings, resolve};
 
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Contracts, Revision, zid_value};
+use crate::model::deployment::{Catalogs, Epoch, Stated};
 use crate::model::inband;
 use crate::model::render::Member;
 use crate::model::structural::{structural, structural_value};
@@ -55,6 +56,8 @@ pub struct Lens<'a> {
     offline: Option<&'a ContractSet>,
     held: usize,
     generation: u64,
+    /// The deployment catalogs given (`--catalog`, core §8.6).
+    deployment: Option<&'a Catalogs>,
 }
 
 /// A key resolved down to its resource (rungs 1–6).
@@ -120,7 +123,33 @@ impl<'a> Lens<'a> {
             offline: None,
             held: 0,
             generation: 0,
+            deployment: None,
         }
+    }
+
+    /// The deployment catalogs the tool was given (`--catalog`, core
+    /// §8.6): a packed record's `time` fields are then read under the
+    /// epoch in force for its owner ([`Lens::epoch_of`]).
+    pub fn catalogs(mut self, catalogs: &'a Catalogs) -> Lens<'a> {
+        self.deployment = Some(catalogs);
+        self
+    }
+
+    /// The deployment catalogs given, when they were.
+    pub fn deployment_catalogs(&self) -> Option<&'a Catalogs> {
+        self.deployment
+    }
+
+    /// The epoch `addr`'s packed `time` fields count from (core §8.6): the
+    /// catalog its descriptors name, read through the catalogs given; 0
+    /// when they name none; with no descriptor in hand, the catalogs'
+    /// epoch, the deployment's word; else 0, assumed.
+    pub fn epoch_of(&self, addr: &Addr) -> Epoch {
+        let stated = self
+            .catalog
+            .map_or(Stated::Unread, |c| Stated::of(&c.stated_catalogs(addr)));
+        self.deployment
+            .map_or_else(|| Catalogs::default().epoch(stated), |d| d.epoch(stated))
     }
 
     /// Revisions known offline (`--contracts`): without a presence read, an
@@ -419,8 +448,9 @@ impl<'a> Lens<'a> {
         };
         match &resolution.resolved {
             Some(r) => {
+                let epoch = self.epoch_of(&r.address);
                 let (rendering, conformance) =
-                    check_resolved(r, member, encoding, bytes, attachment, tag);
+                    check_resolved(r, member, encoding, bytes, attachment, tag, epoch);
                 Checked {
                     identity: resolution.identity,
                     rendering,
@@ -658,8 +688,8 @@ fn refused_rendering(
 
 /// Rung 7 through a resolved resource: decode the member, then check the
 /// value against its JSON Schema type. A packed record is decoded by the
-/// tag its envelope's CH carried (core §7.6), its layout's refusal its
-/// conformance.
+/// tag its envelope's CH carried (core §7.6), its `time` fields under
+/// `epoch` (§8.6), its layout's refusal its conformance.
 fn check_resolved(
     r: &Resolved,
     member: Member,
@@ -667,6 +697,7 @@ fn check_resolved(
     bytes: &[u8],
     attachment: Option<&[u8]>,
     tag: Option<zenkey_model::wire::Tag>,
+    epoch: Epoch,
 ) -> (PayloadRendering, Conformance) {
     let resource = r.resource();
     let name = r.resource_name();
@@ -689,8 +720,9 @@ fn check_resolved(
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid": the contract speaks next.
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
-    let cx = decode::Context { tag, epoch: None };
-    let (rendered, conformance) = match decode::decode_in(bundle, ty, encoding, bytes, cx) {
+    let (decoded, epoch_assumed) =
+        crate::model::render::decode_under(bundle, ty, encoding, bytes, tag, epoch);
+    let (rendered, conformance) = match decoded {
         decode::Rendered::Value(value) => {
             let declared = decode::declared(ty);
             let conformance = if ty["kind"] == "jsonschema" {
@@ -703,9 +735,8 @@ fn check_resolved(
             } else {
                 Conformance::Valid
             };
-            // A packed record's `time` fields, under an epoch assumed and
-            // said so (core §7.6, #980).
-            let epoch_assumed = decode::epoch_assumed(bundle, ty, cx);
+            // A packed record's `time` fields, under the epoch in force,
+            // or one assumed and said so (core §7.6, §8.6).
             (
                 Rendered::Value {
                     declared,

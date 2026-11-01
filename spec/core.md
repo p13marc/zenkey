@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.83** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.84** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -725,7 +725,7 @@ gate does not name.
 - **`catalog`** is the id of the catalog the instance writes under (§8.6),
   as 8 lowercase hex digits.
   - An owner given a catalog MUST state its id there.
-    `[F: descriptors/ok-catalog, d002-catalog-*]`
+    `[F: descriptors/ok-catalog, d002-catalog-*]` `[Sc: presence.md §2]`
   - An owner with none leaves the member out, and counts its `time`
     fields from 0 (§8.6).
   - A checker reads `catalog` as optional. Any other spelling than 8

@@ -72,6 +72,9 @@ Options:
       --count <N>
           With --transitions: stop after N runs (default: run until interrupted)
 
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: `catalog-missing` judges every running revision against the one its descriptor names, or against every one given where it names none. Without one, `catalog-missing` is not asked: a catalog is a file the deployment provisions, never served. A file that is not a catalog is refused (exit 2)
+
       --namespace <NS>
           The deployment namespace: the session is opened in it.
           
@@ -134,7 +137,7 @@ session opens — exit 2, clap's code, because it is your input.
 ```console
 $ zenctl doctor --check split-brian
 ? 2
-error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew, health-failed, health-degraded, health-stale, health-inconsistent, hostid-duplicate, population-over-bound, config-projection, config-overdue, config-unpersisted, config-desired, alarm-key, alarm-stale, telemetry-declaration, telemetry-sample, desired-refused, desired-behind, desired-last-known, redundancy-vacancy, timing-declaration, arbitration-declaration
+error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew, health-failed, health-degraded, health-stale, health-inconsistent, hostid-duplicate, population-over-bound, config-projection, config-overdue, config-unpersisted, config-desired, alarm-key, alarm-stale, telemetry-declaration, telemetry-sample, desired-refused, desired-behind, desired-last-known, redundancy-vacancy, timing-declaration, arbitration-declaration, catalog-missing
 
 For more information, try '--help'.
 

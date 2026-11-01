@@ -113,6 +113,7 @@ impl ReplayLens {
             contracts: Some(Arc::clone(&self.contracts)),
             generation: 0,
             feed: None,
+            catalogs: Default::default(),
         }
     }
 }

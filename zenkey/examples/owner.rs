@@ -16,7 +16,7 @@
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
-//!     [--timing] [--no-hlc] [--hlc] [--run-file <path>]
+//!     [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
 //!     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
 //!     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
 //!     <address> <contract.toml>...
@@ -677,6 +677,10 @@ pub struct Options {
     /// `--run-file <path>`: the record each instance's 16-bit run is taken
     /// from (core §4.3), else a random 32-bit run.
     pub run_file: Option<PathBuf>,
+    /// `--catalog <path>`: the deployment catalog it writes under (core
+    /// §8.6), its id stated in the descriptor (§3.3) and its epoch the one
+    /// packed `time` fields count from.
+    pub catalog: Option<PathBuf>,
     /// `--arbitrate <entry>,…`: `rudder.v1` implemented, its role `cmd`
     /// bound to the entries in their order and arbitrated
     /// (`arbitration.v1`, #909), unless a contract file implements it.
@@ -734,7 +738,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
-    [--timing] [--no-hlc] [--hlc] [--run-file <path>]
+    [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
@@ -1013,6 +1017,9 @@ timing.v1 (spec/profiles/timing/v1.md)
                                   it on, redundancy.v1 §2.10)
   --run-file <path>               each instance's 16-bit run from this record (core
                                   §4.3), else a random 32-bit run
+  --catalog <path>                the deployment catalog it writes under (core §8.6):
+                                  its id stated in the descriptor, its epoch the one
+                                  packed time fields count from
   --no-hlc                        with --connect, the session's HLC off (the
                                   default, --standby included): the
                                   stamps are the session's wall clock with its
@@ -1162,7 +1169,7 @@ impl Options {
              [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
-             [--timing] [--no-hlc] [--hlc] [--run-file <path>] \
+             [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>] \
              [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] \
              [--watch-connect <endpoint>] [--clock-bound-ms <ms>] \
              [--commander] [--commander-lead-ms <ms>] \
@@ -1215,6 +1222,7 @@ impl Options {
             no_hlc: false,
             hlc: false,
             run_file: None,
+            catalog: None,
             arbitrate: None,
             arbitrate_watch: true,
             watch_connect: None,
@@ -1495,6 +1503,10 @@ impl Options {
                 }
                 [flag, value, tail @ ..] if flag == "--run-file" => {
                     o.run_file = Some(PathBuf::from(value));
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--catalog" => {
+                    o.catalog = Some(PathBuf::from(value));
                     rest = tail;
                 }
                 [flag, value, tail @ ..] if flag == "--arbitrate" => {
@@ -2158,6 +2170,15 @@ impl Ctx<'_> {
         // anything is written.
         if let Some(path) = &opts.run_file {
             b.run_store(Arc::new(zenkey::run::FileRunStore::new(path)))?;
+        }
+        // Core §8.6: the deployment catalog, before any resource is exposed.
+        if let Some(path) = &opts.catalog {
+            let bytes =
+                std::fs::read(path).map_err(|e| format!("--catalog {}: {e}", path.display()))?;
+            let catalog = zenkey::model::catalog::Catalog::parse_bytes(&bytes).map_err(|e| {
+                format!("--catalog {}: refused [{}]: {e}", path.display(), e.token())
+            })?;
+            b.catalog(catalog)?;
         }
         if self
             .first_up

@@ -16,7 +16,7 @@
 //!
 //! * a **noun** is something declared, alive or persisted, and gets a family
 //!   with verbs under it — `service`, `iface`, `schema`, `namespace`,
-//!   `storage`, `acl`, `admin`, `key`, `bench`;
+//!   `storage`, `acl`, `admin`, `key`, `bench`, `catalog`;
 //! * a **wire verb** is an act or an observation on live traffic, and hangs
 //!   off the root — `get`, `call`, `watch`, `echo`, `pub`, `rate`, `field`,
 //!   `record`, `replay`, `timeline`, `snapshot`, `graph`, `compat`, `serve`,
@@ -494,6 +494,14 @@ pub(crate) struct DoctorArgs {
     /// With --transitions: stop after N runs (default: run until interrupted).
     #[arg(long, value_name = "N", requires = "transitions")]
     pub(crate) count: Option<u64>,
+    /// The deployment catalog (core §8.6), repeatable: `catalog-missing`
+    /// judges every running revision against the one its descriptor names,
+    /// or against every one given where it names none. Without one,
+    /// `catalog-missing` is not asked: a catalog is a file the deployment
+    /// provisions, never served. A file that is not a catalog is refused
+    /// (exit 2).
+    #[arg(long = "catalog", value_name = "PATH")]
+    pub(crate) catalog: Vec<PathBuf>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -624,6 +632,17 @@ pub(crate) enum Command {
     /// Measure how a deployment answers its operations.
     #[command(subcommand)]
     Bench(BenchCmd),
+    /// The deployment catalog: a file the deployment provisions.
+    ///
+    /// Core §8.6's catalog, a `zk2-catalog/1` document, given by `--catalog`: the deployment epoch
+    /// a packed record's `time` fields count from, and an index per contract
+    /// revision a later form carries in place of its interface id and
+    /// fingerprint. It is never fetched and never served on the bus, so no
+    /// session is opened. `show` reads it; `check` judges it, against the
+    /// catalog it succeeds and the contracts in hand. `zk2 catalog new|add`
+    /// writes one.
+    #[command(subcommand)]
+    Catalog(CatalogCmd),
 
     // ── Wire verbs: acts and observations on live traffic ─────────────────
     /// Query a raw selector, or read a zk2 state resource (`get state`).
@@ -1698,6 +1717,51 @@ pub(crate) enum BenchCmd {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum CatalogCmd {
+    /// One catalog: its id, its epoch, its lineage and every entry.
+    ///
+    /// Read as core §8.6 reads it, refused naming the refusal's token (exit
+    /// 2). With `--contracts`, each entry says whether that revision is in
+    /// hand. Exactly one `--catalog`.
+    Show(CatalogShowArgs),
+    /// Judge one catalog: refused, no successor, or a revision it lacks.
+    ///
+    /// Exit 1 when the document is refused, when it does not succeed
+    /// `--previous`, or when a revision `--contracts` holds is not in it.
+    /// The checks a deployment makes before it provisions a catalog, and a
+    /// far side makes of the one it holds against its own contracts: the
+    /// document read as core §8.6 reads it; succession (`epoch_moved`,
+    /// `reassigned`, `removed`, `lineage`, the first that applies); and each
+    /// revision in hand, by its index or as missing. Exit 0 when none
+    /// applies, 2 when the file cannot be read or nothing is given. Exactly
+    /// one `--catalog`.
+    Check(CatalogCheckArgs),
+}
+
+/// `catalog show`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct CatalogShowArgs {
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+/// `catalog check`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct CatalogCheckArgs {
+    /// The catalog this one should succeed (core §8.6): its lineage then
+    /// ends with that catalog's id and count, its epoch is that one's, and
+    /// that one's entries are its first, each at its own index.
+    #[arg(long = "previous", value_name = "PATH")]
+    pub(crate) previous: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
+}
+
+#[derive(Subcommand)]
 pub(crate) enum SchemaCmd {
     /// One revision's schema artifacts, and the type each member names.
     ///
@@ -2117,6 +2181,22 @@ pub(crate) struct ContractArgs {
     /// reported on stderr; a path that loads nothing is refused (exit 2).
     #[arg(long = "contracts", value_name = "PATH")]
     pub(crate) contracts: Vec<PathBuf>,
+    /// The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1`
+    /// file the deployment provisions, never fetched from the bus.
+    ///
+    /// An owner's packed `time` fields are then read under the epoch of the
+    /// catalog its descriptor names, read through these (a successor
+    /// included); with no descriptor in hand, across a constrained face or
+    /// from a capture, these state it, the deployment's word. Without one,
+    /// an owner whose descriptor names no catalog counts from 0, and one
+    /// that names a catalog none of these is or succeeds is refused
+    /// (`unknown_catalog`). `gen` and `serve` write under the one given, and
+    /// state its id in their descriptor; the doctor's `catalog-missing`
+    /// judges each running revision against it; `check face` compares the
+    /// one the far side holds with the face policy's `catalog` (link.v2
+    /// §2.19). A file that is not a catalog is refused (exit 2).
+    #[arg(long = "catalog", value_name = "PATH")]
+    pub(crate) catalog: Vec<PathBuf>,
 }
 
 /// `service list`'s flags.
@@ -4070,10 +4150,9 @@ pub(crate) struct CheckFaceArgs {
     /// router's (`link.v2` §2.19, `peer_differs`). Needs a link.v2 policy.
     #[arg(long, value_name = "FAR-CONFIG")]
     pub(crate) peer_config: Option<PathBuf>,
-    /// The deployment catalog the far side holds (JSON): its id against the
-    /// policy's `catalog` (`link.v2` §2.19, `catalog_mismatch`).
-    #[arg(long, value_name = "FILE")]
-    pub(crate) catalog: Option<PathBuf>,
+    // `--catalog`, the deployment catalog the far side holds, is
+    // `ContractArgs`'s (#980 C1c): its id against the policy's `catalog`
+    // (`link.v2` §2.19, `catalog_mismatch`), one at most.
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }

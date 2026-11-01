@@ -486,6 +486,9 @@ pub struct Prefs {
     /// the default. An entry no longer on disk is dropped from the launch
     /// and kept here, for when it comes back.
     pub contracts: Vec<PathBuf>,
+    /// The deployment catalogs the Settings overlay applied last (core
+    /// §8.6, #980 C1c), remembered as `contracts` is.
+    pub catalogs: Vec<PathBuf>,
 }
 
 impl Default for Prefs {
@@ -506,6 +509,7 @@ impl Default for Prefs {
             density: Density::default(),
             namespace: None,
             contracts: Vec::new(),
+            catalogs: Vec::new(),
         }
     }
 }
@@ -653,6 +657,7 @@ mod tests {
             density: Density::Compact,
             namespace: Some("spray".into()),
             contracts: vec!["examples/zk2/walkthrough".into()],
+            catalogs: vec!["examples/zk2/zenoh-modem/catalog.json".into()],
         };
         prefs.save_to(&path).unwrap();
         let (back, note) = Prefs::load_from(&path);

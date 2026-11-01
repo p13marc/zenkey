@@ -370,6 +370,13 @@ pub fn doctor_report() -> DoctorReport {
                 "1 arbitrated role(s) of running consumers, each declaration valid and each \
                  binding of exact entries, none shadowed",
             ),
+            CheckReport::of(
+                CheckId::CatalogMissing,
+                vec![],
+                vec![],
+                "3 running revision(s), each in the catalog it is judged against (catalog \
+                 0a90fd61)",
+            ),
         ],
         unobservable: None,
     }

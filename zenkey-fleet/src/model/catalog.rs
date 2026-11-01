@@ -596,6 +596,7 @@ impl Revision {
                 .map(|r| zenkey::implementation::resource_name(r)),
             members,
             artifacts,
+            catalogs: Vec::new(),
         })
     }
 }
@@ -1257,6 +1258,22 @@ impl Catalog {
             .filter_map(|i| i.descriptor.as_ref()?.descriptor())
             .filter_map(|d| d.meta.get("zid").and_then(|v| v.as_str()))
             .map(zid_value)
+            .collect()
+    }
+
+    /// The catalogs `addr`'s descriptors name (core §3.3, §8.6), one per
+    /// distinct value: `None` for a descriptor that names none. Empty when
+    /// no descriptor of `addr` is in hand.
+    pub fn stated_catalogs(
+        &self,
+        addr: &Addr,
+    ) -> BTreeSet<Option<zenkey_model::catalog::CatalogId>> {
+        self.services
+            .get(addr)
+            .into_iter()
+            .flat_map(|instances| instances.values())
+            .filter_map(|i| i.descriptor.as_ref()?.descriptor())
+            .map(Descriptor::stated_catalog)
             .collect()
     }
 

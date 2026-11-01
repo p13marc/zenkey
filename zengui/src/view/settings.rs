@@ -46,6 +46,8 @@ pub struct SettingsForm {
     /// roots — comma- or space-separated; empty = contracts from the bus
     /// alone (spec §8.4).
     pub contracts: String,
+    /// Deployment catalog files (core §8.6), space-separated; empty = none.
+    pub catalogs: String,
     /// The last apply's outcome, rendered verbatim.
     pub status: Option<Result<String, String>>,
 }
@@ -66,6 +68,12 @@ impl SettingsForm {
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join(" ");
+        self.catalogs = s
+            .catalogs
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
         self.status = None;
     }
 }
@@ -80,6 +88,7 @@ pub struct Tuning {
     pub eager: bool,
     pub admin_declared: bool,
     pub contracts: Vec<PathBuf>,
+    pub catalogs: Vec<PathBuf>,
 }
 
 /// Messages the overlay emits.
@@ -92,6 +101,7 @@ pub enum SettingsMsg {
     EagerToggled(bool),
     AdminDeclaredToggled(bool),
     ContractsChanged(String),
+    CatalogsChanged(String),
     /// Validate the whole form; a valid one becomes a [`Tuning`].
     Apply,
 }
@@ -131,6 +141,7 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         scouting,
         zenoh_config,
         contracts: _,    // controlled below (reloaded on apply)
+        catalogs: _,     // controlled below (reloaded with the contracts)
         timeout_secs: _, // controlled below (live, next query)
         scope,
         selectors,
@@ -264,6 +275,22 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     col = col.push(kit::muted(
         "authoring files, directories of them or .history roots, space-separated — \
          empty = contracts from the bus alone (§8.4)",
+    ));
+    col = col.push(input_row(
+        "CATALOG",
+        "catalog.json",
+        &d.form.catalogs,
+        SettingsMsg::CatalogsChanged,
+        "the deployment catalog, a file the deployment provisions and never \
+         serves (core §8.6): a packed record's time fields are read under the \
+         epoch of the catalog its owner's descriptor names, or under this one \
+         where no descriptor is in hand — applying a change reloads it with the \
+         contracts. Remembered by this window, never written into a shared context."
+            .to_string(),
+    ));
+    col = col.push(kit::muted(
+        "zk2-catalog/1 files, space-separated — empty = none: a time is read from \
+         0 where no descriptor names a catalog, and said assumed where none is in hand",
     ));
 
     col = col.push(

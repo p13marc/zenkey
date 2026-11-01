@@ -39,6 +39,7 @@ Commands:
   config       A running service's configuration, through config.v1
   hostid       This host's system, as hostid.v1 mints it from the machine id
   bench        Measure how a deployment answers its operations
+  catalog      The deployment catalog: a file the deployment provisions
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract
   watch        Subscribe to a zk2 resource and print every sample, decoded
@@ -114,6 +115,7 @@ Commands:
   config       A running service's configuration, through config.v1
   hostid       This host's system, as hostid.v1 mints it from the machine id
   bench        Measure how a deployment answers its operations
+  catalog      The deployment catalog: a file the deployment provisions
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract
   watch        Subscribe to a zk2 resource and print every sample, decoded

@@ -499,6 +499,7 @@ fn launch_settings() -> zengui::config::Settings {
         scouting: None,
         zenoh_config: None,
         contracts: vec![],
+        catalogs: vec![],
         timeout_secs: 5,
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],
@@ -576,6 +577,10 @@ fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
     // The contracts (#614, FL6a) name their blast radius and where they
     // are remembered — never the shared context; no registry row survives.
     assert!(ui.find("CONTRACTS").is_ok(), "settings has contracts");
+    assert!(
+        ui.find("CATALOG").is_ok(),
+        "settings has the catalog (#980 C1c)"
+    );
     assert!(
         ui.find(
             "contracts held offline seed the store, so a revision held here is \

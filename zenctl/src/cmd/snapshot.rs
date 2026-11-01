@@ -43,6 +43,7 @@ const DIFFING: Asking = Asking::new("snapshot diff");
 pub async fn take(cli: SnapshotArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let SnapshotArgs {
         selectors,
         explicit,
@@ -114,6 +115,7 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     let held = store.held().len();
     let lens = Lens::new(&namespace, catalog.as_ref(), &store)
         .offline(&contracts)
+        .catalogs(&catalogs)
         .held(held);
     let session = dep.link().session().await?;
     let spec = SnapshotSpec {

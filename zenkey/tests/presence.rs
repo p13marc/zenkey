@@ -425,6 +425,35 @@ async fn s2_the_descriptor() {
     };
     refused_while_watched(&tool, "p2/tokenless", tokenless(true), "archive.v1").await;
     controlled(&tool, "p2/tokenless", tokenless(false)).await;
+
+    // 7. An owner given the deployment catalog states its id, as 8
+    //    lowercase hex digits, and one given none leaves the member out
+    //    (core §3.3, §8.6; #980 C1c).
+    assert_eq!(d.catalog, None, "step 1's owner was given none");
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/zk2/zenoh-modem/catalog.json");
+    let catalog =
+        zenkey::model::catalog::Catalog::parse_bytes(&std::fs::read(file).unwrap()).unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("p2/catalog"));
+    b.catalog(catalog.clone()).unwrap();
+    b.implement(imp("nav.v2")).unwrap();
+    for res in ["state/pose", "@op/goto", "state/tracks/{track}"] {
+        b.expose(&nav(), res).unwrap();
+    }
+    let given = b.start().await.unwrap();
+    seen(&tool, &given).await;
+    let Found::Descriptor(_, bytes) =
+        presence::descriptor(&tool, given.address(), given.instance(), T)
+            .await
+            .unwrap()
+    else {
+        panic!("no descriptor")
+    };
+    let (d, report) = check(std::str::from_utf8(&bytes).unwrap(), &[&nav_c]);
+    assert!(report.0.is_empty(), "{report}");
+    let d = d.unwrap();
+    assert_eq!(d.catalog.as_deref(), Some(catalog.id().hex().as_str()));
+    assert_eq!(d.stated_catalog(), Some(catalog.id()));
 }
 
 /// A liveliness subscriber to `address`'s tokens through R1, up and known

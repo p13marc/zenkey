@@ -140,9 +140,19 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   type is written against (`PackedRecord`, `Coded<T>` for reserved codes,
   `Open<E>` for an escape, the model's `BitWriter`/`BitReader`/`Fixed`/
   `time_code` helpers), and `codec::Packed<T>` carries one, its `time`
-  fields under `DEFAULT_EPOCH` 0 until #980's catalog carries one
+  fields under the deployment epoch its writer or reader holds
+  (`Codec::encode_in`/`decode_record_in`; `encode`/`decode` read under 0)
   (`Codec::decode_record` by the envelope's tag, `Codec::tag`, a typed
-  writer refusing a type of another tag). Each writer of a packed resource
+  writer refusing a type of another tag). The deployment catalog (#980
+  C1c, core §8.6): `ServiceBuilder::catalog(Catalog)`, refused once a
+  resource is exposed or a catalog was given, states the id as the
+  descriptor's `catalog` (`descriptor::Identity::catalog`) and its epoch is
+  every packed writer's (`PackedType::epoch`, `Writer`/`StateWriter`/
+  `EventWriter::deployment_epoch`, `Service::deployment_epoch`), else 0; a
+  service's consumers read under it (`Consumer::with_deployment_epoch`,
+  `with_catalog` for a tool's); the owner example's `--catalog PATH`
+  (`tests/owner_example.rs`' `the_owner_example_states_its_catalog`), and
+  codegen-test's `a_time_field_counts_from_the_catalogs_epoch`. Each writer of a packed resource
   (`writer::PackedType`, from the contract's artifact) seals with its
   layout's tag in CH (`Stamped::seal_tagged`) and refuses a record its
   layout refuses, `Error::Payload`, nothing published; `inband::admit`

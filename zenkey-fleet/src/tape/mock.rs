@@ -186,17 +186,23 @@ pub(crate) fn config(
 }
 
 /// A mock owner's builder over `session`, its runs taken from `runs` when
-/// one is given (core §4.3): set at once, before anything the builder
-/// declares can take a run.
+/// one is given (core §4.3), and given `catalog` when one is (§8.6): each
+/// set at once, before anything the builder declares can take a run or
+/// count a time.
 pub(crate) fn builder(
     session: &Session,
     config: ServiceConfig,
     runs: Option<&Arc<dyn RunStore>>,
+    catalog: Option<&zenkey_model::catalog::Catalog>,
 ) -> Result<ServiceBuilder> {
     let mut b = ServiceBuilder::new(session, config);
     if let Some(store) = runs {
         b.run_store(Arc::clone(store))
             .map_err(|e| Error::unaskable("--run-file", e.to_string()))?;
+    }
+    if let Some(c) = catalog {
+        b.catalog(c.clone())
+            .map_err(|e| Error::unaskable("--catalog", e.to_string()))?;
     }
     Ok(b)
 }
@@ -433,6 +439,9 @@ pub struct ServeSpec {
     /// `None`: a random 32-bit run per instance. The runtime refuses one
     /// beside `elect`, since a candidate draws 32-bit runs.
     pub run_store: Option<Arc<dyn RunStore>>,
+    /// The deployment catalog the mock owner writes under (core §8.6,
+    /// `--catalog`): its descriptor states the id. `None`: none stated.
+    pub catalog: Option<zenkey_model::catalog::Catalog>,
 }
 
 impl std::fmt::Debug for ServeSpec {
@@ -446,6 +455,7 @@ impl std::fmt::Debug for ServeSpec {
             .field("tool", &self.tool)
             .field("elect", &self.elect)
             .field("run_store", &self.run_store.is_some())
+            .field("catalog", &self.catalog.as_ref().map(|c| c.id()))
             .finish()
     }
 }
@@ -478,6 +488,7 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
         tool,
         elect,
         run_store,
+        catalog,
     } = spec;
     check_roles(std::slice::from_ref(&revision), &bindings)?;
     let contract = revision.contract();
@@ -497,6 +508,7 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
         session,
         config(&address, held.clone(), &bindings, marker(&tool, None)),
         run_store.as_ref(),
+        catalog.as_ref(),
     )?;
     b.implement(implementation(&revision)?)
         .map_err(|e| runtime_error(&revision, e))?;

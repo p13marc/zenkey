@@ -106,6 +106,8 @@ pub struct Loaded {
     /// The contracts known offline: the config's `contracts`, then
     /// `--contracts`.
     pub contracts: ContractSet,
+    /// The deployment catalogs: the config's `catalog` (core §8.6).
+    pub catalogs: zenkey_fleet::Catalogs,
     /// The bus ladders, climbed: the namespace, the transport, the timeout.
     pub bus: BusSettings,
     /// The daemon's own service (#614, FL3), its address already resolved
@@ -146,6 +148,19 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
         )
         .collect();
     let contracts = load_contracts(&sources, &mut problems);
+    // Core §8.6: each catalog read as a reader reads it; a refusal is the
+    // config's problem, by where it was named.
+    let mut held = Vec::new();
+    for (i, path) in cfg.catalog.iter().enumerate() {
+        match zenkey_fleet::Catalogs::load(path) {
+            Ok(c) => held.push(c),
+            Err(message) => problems.push(ConfigProblem {
+                path: format!("catalog[{i}]"),
+                message,
+            }),
+        }
+    }
+    let catalogs = zenkey_fleet::Catalogs::new(held);
     if !problems.is_empty() {
         return Err(refuse(path, &problems));
     }
@@ -172,6 +187,7 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
     Ok(Loaded {
         cfg,
         contracts,
+        catalogs,
         bus,
         publish,
     })

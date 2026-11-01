@@ -158,6 +158,10 @@ pub struct DoctorSpec {
     /// author stamped, by a clock trusted to the HLC delta, before
     /// `desired-behind` finds it (§2.17, text 0.4; #840).
     pub desired_behind: Duration,
+    /// The deployment catalogs given (`--catalog`, core §8.6), which
+    /// `catalog-missing` judges each running revision against. None given:
+    /// it is not asked.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 impl DoctorSpec {
@@ -172,6 +176,7 @@ impl DoctorSpec {
             trust_admin: false,
             clocks_synced: false,
             desired_behind: DEFAULT_DESIRED_BEHIND,
+            catalogs: crate::model::deployment::Catalogs::default(),
         }
     }
 
@@ -979,6 +984,89 @@ fn timing_declaration(p: &Presence<'_>) -> CheckReport {
     )
 }
 
+/// Core §8.6 (#980 C1c): every revision a running instance's descriptor
+/// lists, judged against the deployment's catalog — the one the
+/// descriptor names, read through the catalogs given (a successor reads
+/// only the entries the named one had), or every one given when it names
+/// none. A revision the catalog lacks has no index there, and an instance
+/// naming a catalog no catalog given is or succeeds writes indices and
+/// times a far side holding the given ones refuses (`unknown_catalog`). A
+/// warning: the instance runs, and only what crosses a face is lost. Not
+/// asked without a catalog, which is a file the deployment provisions and
+/// no reader fetches.
+fn catalog_missing(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    use crate::model::deployment::Lack;
+    const C: CheckId = CheckId::CatalogMissing;
+    if spec.catalogs.is_empty() {
+        return CheckReport::not_asked(C);
+    }
+    let undecided = p.undescribed("the revisions it runs are unknown");
+    let mut lacked: BTreeMap<String, (BTreeSet<String>, String)> = BTreeMap::new();
+    let mut running: BTreeSet<(IfaceId, Fingerprint)> = BTreeSet::new();
+    for (a, i, d) in p.served() {
+        let named = d.stated_catalog();
+        for e in &d.interfaces {
+            let (Ok(iface), Ok(fp)) =
+                (IfaceId::from_str(&e.iface), Fingerprint::parse(&e.contract))
+            else {
+                continue;
+            };
+            let why = match spec.catalogs.lacks(named, &iface, &fp) {
+                Lack::Held => {
+                    running.insert((iface, fp));
+                    continue;
+                }
+                Lack::Lacked(ids) => format!(
+                    "catalog {} lacks it, so it has no index a far side holding the catalog can \
+                     read (core §8.6): add it with `zk2 catalog add`, and provision the successor",
+                    ids.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                Lack::NotHeld(id) => format!(
+                    "its descriptor names catalog {id}, which no catalog given is or succeeds, \
+                     so a far side holding them refuses what it writes (unknown_catalog, core \
+                     §8.6)"
+                ),
+            };
+            running.insert((iface.clone(), fp.clone()));
+            let entry = lacked
+                .entry(format!("{a} {iface} {fp}"))
+                .or_insert_with(|| (BTreeSet::new(), why));
+            entry.0.insert(i.to_string());
+        }
+    }
+    let findings = lacked
+        .into_iter()
+        .map(|(subject, (instances, why))| {
+            let instances = instances.into_iter().collect::<Vec<_>>().join(", ");
+            finding(
+                C,
+                DoctorSeverity::Warning,
+                subject,
+                format!("instance {instances}: {why}"),
+            )
+        })
+        .collect();
+    let ids = spec
+        .catalogs
+        .held()
+        .iter()
+        .map(|c| c.id().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{} running revision(s), each in the catalog it is judged against (catalog {ids})",
+            running.len()
+        ),
+    )
+}
+
 /// The doctor's revisions in hand, as `crate::model::catalog::Contracts`:
 /// what [`arbitration_declaration`] reads a role over.
 struct InHand<'o>(&'o BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>);
@@ -1525,6 +1613,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::RedundancyVacancy => redundancy_vacancy(p),
                 CheckId::TimingDeclaration => timing_declaration(p),
                 CheckId::ArbitrationDeclaration => arbitration_declaration(p),
+                CheckId::CatalogMissing => catalog_missing(p, spec),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -6793,6 +6882,86 @@ mod tests {
             ))
             .contains("unavailable")
         );
+    }
+
+    /// `catalog-missing` (core §8.6, #980 C1c): asked only of a run given a
+    /// catalog; a revision the catalog lacks is a warning, as is an instance
+    /// naming a catalog none given is or succeeds; one naming the catalog,
+    /// or none, whose revisions it holds is clean.
+    #[test]
+    fn catalog_missing_judges_each_running_revision_against_the_catalog() {
+        use crate::model::deployment::{Catalogs, DeploymentCatalog};
+        let listed = pace();
+        let lacking = gui(false);
+        let mut catalog = DeploymentCatalog::new(1_767_225_600).unwrap();
+        catalog.push(listed.iface.clone(), fp(&listed)).unwrap();
+        let named = |service: &str, instance: &str, entries: &[serde_json::Value], id: &str| {
+            let DescriptorRead::Served(mut d) = descriptor(service, instance, entries, &[]) else {
+                unreachable!()
+            };
+            d.catalog = Some(id.to_owned());
+            DescriptorRead::Served(d)
+        };
+        let after = observed(
+            &[inst("lab/a", A), inst("lab/b", B), inst("lab/c", A)],
+            vec![
+                (
+                    ("lab/a", A),
+                    named("lab/a", A, &[entry(&listed)], &catalog.id().to_string()),
+                ),
+                (
+                    ("lab/b", B),
+                    descriptor("lab/b", B, &[entry(&listed), entry(&lacking)], &[]),
+                ),
+                (
+                    ("lab/c", A),
+                    named("lab/c", A, &[entry(&listed)], "0badc0de"),
+                ),
+            ],
+        );
+        let o = obs(after, &[&listed, &lacking], &[]);
+        assert_eq!(
+            check(&o, CheckId::CatalogMissing).verdict,
+            Judgement::NotAsked,
+            "no catalog given"
+        );
+        let given = DoctorSpec {
+            catalogs: Catalogs::new(vec![catalog.clone()]),
+            ..spec()
+        };
+        let r = judge(&o, &given)
+            .check(CheckId::CatalogMissing)
+            .unwrap()
+            .clone();
+        assert_eq!(r.verdict, Judgement::Established, "{r:#?}");
+        let subjects: Vec<&str> = r.findings.iter().map(|f| f.subject.as_str()).collect();
+        assert_eq!(
+            subjects,
+            [
+                format!("lab/b {} {}", lacking.iface, fp(&lacking)).as_str(),
+                format!("lab/c {} {}", listed.iface, fp(&listed)).as_str(),
+            ],
+            "{r:#?}"
+        );
+        assert!(
+            r.findings
+                .iter()
+                .all(|f| f.severity == DoctorSeverity::Warning)
+        );
+        assert!(r.findings[0].evidence.contains("lacks it"), "{r:#?}");
+        assert!(r.findings[1].evidence.contains("unknown_catalog"), "{r:#?}");
+        let clean_only = observed(
+            &[inst("lab/a", A)],
+            vec![(
+                ("lab/a", A),
+                named("lab/a", A, &[entry(&listed)], &catalog.id().to_string()),
+            )],
+        );
+        let r = judge(&obs(clean_only, &[&listed], &[]), &given)
+            .check(CheckId::CatalogMissing)
+            .unwrap()
+            .clone();
+        assert!(clean(&r).contains("1 running revision(s)"), "{r:#?}");
     }
 
     /// A scenarios' contract, as the runtime's tests keep it.

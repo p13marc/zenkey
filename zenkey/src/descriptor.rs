@@ -25,6 +25,8 @@ pub(crate) struct Identity<'a> {
     pub(crate) zid: &'a str,
     /// The run the instance writes under, stated as `run` (§3.3, §4.3).
     pub(crate) run: zenkey_model::wire::Run,
+    /// The catalog it was given, stated as `catalog` (§3.3, §8.6).
+    pub(crate) catalog: Option<zenkey_model::catalog::CatalogId>,
 }
 
 /// The descriptor's `profiles` (§3.3): the `uses` of the contracts
@@ -121,7 +123,7 @@ pub(crate) fn build(
         service: id.addr.to_string(),
         instance: instance.to_string(),
         run: Some(id.run.hex()),
-        catalog: None,
+        catalog: id.catalog.map(|c| c.hex()),
         interfaces,
         capabilities: held.iter().cloned().collect(),
         requires,

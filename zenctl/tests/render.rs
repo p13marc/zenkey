@@ -135,6 +135,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ✓  redundancy-vacancy (redundancy.v1 §2.15)        clean — 1 interface(s) redundancy.v1 governs, none without an incumbent in both reads 2.0s apart
 ✓  timing-declaration (timing.v1 §2.2)             clean — 2 timed resource(s) in 1 revision(s) named by descriptors, each declaration one a reader judges
 ✓  arbitration-declaration (arbitration.v1 §2.14)  clean — 1 arbitrated role(s) of running consumers, each declaration valid and each binding of exact entries, none shadowed
+✓  catalog-missing (§8.6)                          clean — 3 running revision(s), each in the catalog it is judged against (catalog 0a90fd61)
 
 "#]]
     );
@@ -2042,6 +2043,77 @@ the id came from the shared file, which no v1 application read: this host's v1 o
     );
 }
 
+/// `zenctl catalog check` (#980 C1c, core §8.6): the id leads, alone on
+/// its line, then the file, the epoch and its instant, the lineage and
+/// the succession, every entry with whether it is in hand, and each
+/// revision in hand the catalog lacks, with what to do about it.
+#[test]
+fn a_catalog_report_leads_with_its_id() {
+    use zenctl::render::{
+        CatalogAncestor, CatalogEntryRow, CatalogMissing, CatalogReport, CatalogSuccession,
+    };
+    let entry = |index, iface: &str, held| CatalogEntryRow {
+        index,
+        iface: iface.into(),
+        contract: format!("sha256:{}", "ab".repeat(32)),
+        held: Some(held),
+    };
+    let r = CatalogReport {
+        path: "catalog.json".into(),
+        refused: None,
+        id: Some("9da7c4a4".into()),
+        epoch: Some(1_767_225_600),
+        epoch_utc: Some("2026-01-01T00:00:00Z".into()),
+        lineage: vec![CatalogAncestor {
+            id: "0a90fd61".into(),
+            entries: 1,
+        }],
+        entries: vec![entry(0, "modem.v3", true), entry(1, "camera.v1", false)],
+        succession: Some(CatalogSuccession {
+            previous: "0a90fd61".into(),
+            verdict: "succeeds".into(),
+            detail: None,
+        }),
+        missing: vec![CatalogMissing {
+            iface: "health.v1".into(),
+            contract: format!("sha256:{}", "cd".repeat(32)),
+        }],
+        judged: true,
+    };
+    assert!(r.finding(), "a revision in hand it lacks");
+    assert_data_eq!(
+        table(&r),
+        str![[r#"
+9da7c4a4
+file      catalog.json
+epoch     1767225600 (2026-01-01T00:00:00Z)
+succeeds  0a90fd61 (1 entries)
+previous  0a90fd61 (succeeds)
+  0  modem.v3   sha256:abababababababababababababababababababababababababababababababab  held
+  1  camera.v1  sha256:abababababababababababababababababababababababababababababababab  not held
+  missing  health.v1  sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&r),
+        str![[r#"
+a revision the catalog lacks has no index a far side can read: append it with `zk2 catalog add` and provision the successor (core §8.6)
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&r),
+        str![[r#"
+{"epoch":1767225600,"epoch_utc":"2026-01-01T00:00:00Z","id":"9da7c4a4","lineage":[{"entries":1,"id":"0a90fd61"}],"notes":[{"text":"a revision the catalog lacks has no index a far side can read: append it with `zk2 catalog add` and provision the successor (core §8.6)"}],"path":"catalog.json","report":"catalog","succession":{"previous":"0a90fd61","verdict":"succeeds"}}
+{"contract":"sha256:abababababababababababababababababababababababababababababababab","held":true,"iface":"modem.v3","index":0,"row":"entry"}
+{"contract":"sha256:abababababababababababababababababababababababababababababababab","held":false,"iface":"camera.v1","index":1,"row":"entry"}
+{"contract":"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","iface":"health.v1","row":"missing"}
+
+"#]]
+    );
+}
+
 /// `check schema` over zk2 (#612, FJ8b): the three verdicts each have
 /// their own word, the violations follow one per line, and nothing to say
 /// is *absent* in the document, not an empty list meaning the same thing.
@@ -2380,6 +2452,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "bench",
         "cache",
         "cache-action",
+        "catalog",
         "compat",
         "config",
         "config-act",

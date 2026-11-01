@@ -23,6 +23,7 @@ use crate::report::DoctorSeverity;
 pub async fn run(cli: crate::cli::FieldArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let crate::cli::FieldArgs {
         selector,
         for_secs,
@@ -66,6 +67,7 @@ pub async fn run(cli: crate::cli::FieldArgs) -> Result<()> {
     let held = store.held().len();
     let lens = Lens::new(&namespace, catalog.as_ref(), &store)
         .offline(&contracts)
+        .catalogs(&catalogs)
         .held(held);
     let session = dep.link().session().await?;
     let spec = zenkey_fleet::FieldSpec {

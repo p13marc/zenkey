@@ -86,6 +86,7 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_reloads_contracts() {
         eager: false,
         admin_declared: false,
         contracts: vec![],
+        catalogs: vec![],
     };
 
     // Shrink, live: the ring re-bounds in place, the trim is counted, and
@@ -234,6 +235,7 @@ fn the_declared_switch_asks_when_on_and_forgets_when_off() {
         eager: false,
         admin_declared: true,
         contracts: vec![],
+        catalogs: vec![],
     };
     let status = |app: &Zengui| {
         app.work

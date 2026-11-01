@@ -565,3 +565,174 @@ impl Render for HostIdReport {
         notes
     }
 }
+
+/// A catalog's lineage item (core §8.6): a catalog it succeeds, and that
+/// one's count of entries.
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogAncestor {
+    pub id: String,
+    pub entries: u16,
+}
+
+/// One entry of a catalog, and whether `--contracts` holds its revision
+/// (absent without `--contracts`).
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogEntryRow {
+    pub index: u16,
+    pub iface: String,
+    pub contract: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub held: Option<bool>,
+}
+
+/// A revision `--contracts` holds that the catalog lacks: `catalog check`'s
+/// finding.
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogMissing {
+    pub iface: String,
+    pub contract: String,
+}
+
+/// Whether the catalog succeeds `--previous` (core §8.6): `succeeds`, or
+/// the first refusal's token.
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogSuccession {
+    pub previous: String,
+    pub verdict: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// What `zenctl catalog show` and `check` read (#980 C1c): one catalog, or
+/// its refusal; with `check`, its succession and the revisions in hand it
+/// lacks.
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogReport {
+    /// The file read.
+    pub path: String,
+    /// The refusal's words, ending with its token, when the document was
+    /// refused (core §8.6's reading): nothing else is then read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The deployment epoch, whole seconds since the Unix epoch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<i64>,
+    /// The epoch as an RFC 3339 instant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub epoch_utc: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lineage: Vec<CatalogAncestor>,
+    #[serde(skip)]
+    pub entries: Vec<CatalogEntryRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub succession: Option<CatalogSuccession>,
+    #[serde(skip)]
+    pub missing: Vec<CatalogMissing>,
+    /// Whether the report is `check`'s, whose findings it carries.
+    #[serde(skip)]
+    pub judged: bool,
+}
+
+impl CatalogReport {
+    /// `check`'s finding: refused, not succeeding, or lacking a revision in
+    /// hand.
+    pub fn finding(&self) -> bool {
+        self.refused.is_some()
+            || self
+                .succession
+                .as_ref()
+                .is_some_and(|s| s.verdict != "succeeds")
+            || !self.missing.is_empty()
+    }
+}
+
+impl Render for CatalogReport {
+    const FAMILY: &'static str = "catalog";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        envelope_of(self)
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for e in &self.entries {
+            out(Row::of("entry", e));
+        }
+        for m in &self.missing {
+            out(Row::of("missing", m));
+        }
+    }
+
+    /// The id first, alone on its line: `zenctl catalog show --format table
+    /// | head -1` is the id.
+    fn table(&self, t: &mut Table) {
+        if let Some(why) = &self.refused {
+            t.line(format!("{}: refused — {why}", self.path));
+        }
+        if let Some(id) = &self.id {
+            t.line(id);
+        }
+        let mut g = Grid::unheaded(2);
+        if self.refused.is_none() {
+            g.row([Cell::text("file"), Cell::text(&self.path)]);
+        }
+        if let (Some(e), Some(utc)) = (self.epoch, &self.epoch_utc) {
+            g.row([Cell::text("epoch"), Cell::text(format!("{e} ({utc})"))]);
+        }
+        for a in &self.lineage {
+            g.row([
+                Cell::text("succeeds"),
+                Cell::text(format!("{} ({} entries)", a.id, a.entries)),
+            ]);
+        }
+        if let Some(s) = &self.succession {
+            // A refusal's words end with its token.
+            let says = match &s.detail {
+                Some(d) => format!("{}: {d}", s.previous),
+                None => format!("{} ({})", s.previous, s.verdict),
+            };
+            g.row([Cell::text("previous"), Cell::text(says)]);
+        }
+        t.grid(g);
+        let mut g = Grid::unheaded(4);
+        for e in &self.entries {
+            g.row([
+                Cell::text(format!("  {}", e.index)),
+                Cell::text(&e.iface),
+                Cell::text(&e.contract),
+                Cell::text(match e.held {
+                    Some(true) => "held",
+                    Some(false) => "not held",
+                    None => "",
+                }),
+            ]);
+        }
+        t.grid(g);
+        let mut g = Grid::unheaded(3);
+        for m in &self.missing {
+            g.row([
+                Cell::text("  missing"),
+                Cell::text(&m.iface),
+                Cell::text(&m.contract),
+            ]);
+        }
+        t.grid(g);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
+        if self.refused.is_none() && self.entries.is_empty() {
+            notes.push(Note::caveat(
+                "the catalog lists no revision: it states an epoch alone",
+            ));
+        }
+        if self.judged && !self.missing.is_empty() {
+            notes.push(Note::caveat(
+                "a revision the catalog lacks has no index a far side can read: append it \
+                 with `zk2 catalog add` and provision the successor (core §8.6)",
+            ));
+        }
+        notes
+    }
+}

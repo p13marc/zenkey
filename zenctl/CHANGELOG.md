@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `--catalog`: the deployment catalog (#980, C1c)
+
+Core 0.79 §8.6: a deployment provisions a catalog, a file stating the
+deployment epoch that §7.6's packed `time` fields count from and an index
+per contract revision. It is never fetched and never served, so a tool
+holds one only when it is given one. No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a packed record's `time` fields read under epoch 0, "(epoch 0 assumed, #980)" beside every one | `--catalog PATH`, repeatable, beside `--contracts`: through the lens (`echo`, `get`, `rate`, `field`, `snapshot`), the epoch of the catalog the owner's descriptor names, read through those given (a successor included); 0 for an owner naming none; with no descriptor in hand, the catalogs' epoch, the deployment's word. `get state` and `watch` read no descriptor, so the catalogs given state it | the note now shows only where nothing stated the epoch. An owner naming a catalog none given is or succeeds is undecodable, `unknown_catalog` named, never dated by a guess. A file that is not a catalog is refused, exit 2 |
+| — | `catalog show --catalog PATH [--contracts …]`: the id, the epoch (and its RFC 3339 instant), the lineage and every entry, each `held` or `not held` with `--contracts` | a new noun; no session |
+| — | `catalog check --catalog PATH [--previous PATH] [--contracts …]`: exit 1 when the document is refused (its token named), when it does not succeed `--previous` (`epoch_moved`, `reassigned`, `removed`, `lineage`), or when a revision in hand is not in it | 0 when none applies, 2 when a file cannot be read or no `--catalog` is given; `tests/cmd/catalog.trycmd` |
+| `schema show` | the revision's index in each `--catalog` (`catalog <id> index <n>`, or `not listed`), `catalogs` in JSON | absent without `--catalog` |
+| `doctor`: thirty-three checks | thirty-four: `catalog-missing` (warning: a running revision the catalog its descriptor names lacks, or every one given lacks where it names none; or a descriptor naming a catalog none given is or succeeds), asked only with `doctor --catalog PATH` | not asked without one |
+| `gen`, `serve`: no catalog | `--catalog PATH`: the mock owner's descriptor states its id, and `gen`'s packed `time` fields count from its epoch (a synthesized time starts there where it is after 2023-11-14) | one at most, else exit 2 |
+
 ## Unreleased (`main`, zk2) — `--across-face`: a raw observer's scope across a constrained face (#980, C1b)
 
 Core 0.78 §8.5: a put toward a face rides the deepest key expression

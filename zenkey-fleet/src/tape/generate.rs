@@ -153,6 +153,10 @@ pub struct GenSpec {
     /// `None`: a random 32-bit run per instance. The runtime refuses one
     /// beside a governed interface, whose candidates draw 32-bit runs.
     pub run_store: Option<Arc<dyn zenkey::run::RunStore>>,
+    /// The deployment catalog the mock owner writes under (core §8.6,
+    /// `--catalog`): its descriptor states the id, and its packed `time`
+    /// fields count from the catalog's epoch. `None`: from 0.
+    pub catalog: Option<zenkey_model::catalog::Catalog>,
 }
 
 impl std::fmt::Debug for GenSpec {
@@ -169,8 +173,15 @@ impl std::fmt::Debug for GenSpec {
             .field("tool", &self.tool)
             .field("elect", &self.elect)
             .field("run_store", &self.run_store.is_some())
+            .field("catalog", &self.catalog.as_ref().map(|c| c.id()))
             .finish()
     }
+}
+
+/// The deployment epoch a mock owner writes under: its catalog's, else 0
+/// (core §7.6, §8.6).
+fn deployment_epoch(catalog: Option<&zenkey_model::catalog::Catalog>) -> i64 {
+    catalog.map_or(zenkey_model::catalog::EPOCH_WITHOUT_CATALOG, |c| c.epoch())
 }
 
 /// An event's cap on occurrences over a run of `duration`: its declared
@@ -460,7 +471,7 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
             ));
         }
     }
-    let synth = Synth::new(spec.seed);
+    let synth = Synth::new(spec.seed).under(deployment_epoch(spec.catalog.as_ref()));
     let secs = spec.duration.as_secs_f64();
     let mut entries = Vec::new();
     for rev in &spec.revisions {
@@ -735,7 +746,7 @@ pub async fn run_gen(
     plan: &GenPlan,
     on_up: impl FnOnce(&str),
 ) -> Result<GenReport> {
-    let synth = Synth::new(spec.seed);
+    let synth = Synth::new(spec.seed).under(deployment_epoch(spec.catalog.as_ref()));
     let held = capabilities(
         spec.revisions
             .iter()
@@ -750,6 +761,7 @@ pub async fn run_gen(
             marker(&spec.tool, Some(spec.seed)),
         ),
         spec.run_store.as_ref(),
+        spec.catalog.as_ref(),
     )?;
     for rev in &spec.revisions {
         b.implement(implementation(rev)?)
@@ -768,6 +780,7 @@ pub async fn run_gen(
         .collect();
     let mut takeover = GenTakeover {
         seed: spec.seed,
+        epoch: deployment_epoch(spec.catalog.as_ref()),
         states: Vec::new(),
     };
     let calls = Arc::new(AtomicU64::new(0));
@@ -1148,13 +1161,15 @@ async fn declare_members(
 /// state's value at tick 0, synthesized when it takes over.
 struct GenTakeover {
     seed: u64,
+    /// The deployment epoch its packed `time` fields count from (§8.6).
+    epoch: i64,
     states: Vec<TakeoverState>,
 }
 
 impl zenkey::redundancy::Takeover for GenTakeover {
     fn taking_over<'a>(&'a self, iface: &'a IfaceId) -> zenkey::call::BoxFuture<'a, ()> {
         Box::pin(async move {
-            let synth = Synth::new(self.seed);
+            let synth = Synth::new(self.seed).under(self.epoch);
             for (i, key, w, rev, r) in &self.states {
                 if i != iface {
                     continue;
@@ -1216,6 +1231,7 @@ mod tests {
             tool: "zenctl gen".into(),
             elect: None,
             run_store: None,
+            catalog: None,
         }
     }
 

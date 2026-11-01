@@ -243,6 +243,8 @@ pub struct Schedule {
     every: Duration,
     timeout: Duration,
     clocks_synced: bool,
+    /// The deployment catalogs (core §8.6), for `catalog-missing`.
+    catalogs: zenkey_fleet::Catalogs,
     prev: Option<Previous>,
     /// The error of the last run, while it stands.
     failed: Option<String>,
@@ -262,12 +264,21 @@ impl Schedule {
                 .map(Duration::from_secs_f64)
                 .unwrap_or(bus_timeout),
             clocks_synced,
+            catalogs: zenkey_fleet::Catalogs::default(),
             cfg: cfg.clone(),
             prev: None,
             failed: None,
             runs: 0,
             last: None,
         }
+    }
+
+    /// The deployment catalogs the config gives (`catalog`, core §8.6):
+    /// `catalog-missing` is asked of them, and not asked without one.
+    #[must_use]
+    pub fn with_catalogs(mut self, catalogs: zenkey_fleet::Catalogs) -> Schedule {
+        self.catalogs = catalogs;
+        self
     }
 
     pub fn every(&self) -> Duration {
@@ -282,6 +293,7 @@ impl Schedule {
         let mut spec = DoctorSpec::new(self.timeout);
         spec.deep = self.cfg.deep;
         spec.clocks_synced = self.clocks_synced;
+        spec.catalogs = self.catalogs.clone();
         spec
     }
 
@@ -813,6 +825,23 @@ mod tests {
             .collect()
     }
 
+    /// The config's `catalog` reaches the spec (core §8.6, #980 C1c):
+    /// `catalog-missing` judges against it, and is not asked without one.
+    #[test]
+    fn the_spec_carries_the_config_s_catalogs() {
+        let c = cfg(None);
+        let none = Schedule::new(&c, Duration::from_secs(2), false).spec();
+        assert!(none.catalogs.is_empty());
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/zk2/zenoh-modem/catalog.json");
+        let held = zenkey_fleet::Catalogs::new(vec![zenkey_fleet::Catalogs::load(&path).unwrap()]);
+        let s = Schedule::new(&c, Duration::from_secs(2), false)
+            .with_catalogs(held)
+            .spec();
+        assert_eq!(s.catalogs.held().len(), 1);
+        assert!(s.checks.contains(&CheckId::CatalogMissing));
+    }
+
     /// The spec a run asks: every check, `deep` and `clocks_synced` as the
     /// config says (#614, FL2).
     #[test]
@@ -867,7 +896,7 @@ mod tests {
         );
         assert!(
             n.message
-                .contains("checks: 33 established, 0 unobservable, 0 not asked"),
+                .contains("checks: 34 established, 0 unobservable, 0 not asked"),
             "{}",
             n.message
         );
@@ -1002,7 +1031,7 @@ mod tests {
             out[0]
                 .notification
                 .message
-                .contains("checks: 33 established"),
+                .contains("checks: 34 established"),
             "{}",
             out[0].notification.message
         );
@@ -1153,7 +1182,7 @@ mod tests {
         assert!(line.contains("routers: not asked"), "{line}");
         assert!(line.contains("health: not asked"), "{line}");
         assert!(
-            line.contains("checks: 1 established, 0 unobservable, 32 not asked"),
+            line.contains("checks: 1 established, 0 unobservable, 33 not asked"),
             "{line}"
         );
         assert!(line.contains("namespace \"prod\""), "{line}");

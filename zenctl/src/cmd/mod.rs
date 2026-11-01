@@ -21,6 +21,7 @@ pub mod arbitration;
 pub mod bench;
 pub mod cache;
 pub mod call;
+pub mod catalog;
 pub mod compat;
 pub mod config;
 pub mod conform;

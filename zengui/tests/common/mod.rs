@@ -68,6 +68,7 @@ pub fn settings() -> Settings {
         scouting: None,
         zenoh_config: None,
         contracts: contract_paths(),
+        catalogs: vec![],
         timeout_secs: 5,
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],

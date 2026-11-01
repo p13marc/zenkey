@@ -19,7 +19,8 @@ use crate::exit::unaskable;
 /// uses it too.
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check schema");
 
-/// `schema show <iface>[@<fingerprint>] [resource] [--full]`.
+/// `schema show <iface>[@<fingerprint>] [resource] [--full]`, and the
+/// revision's index in each `--catalog` (core §8.6).
 ///
 /// No session when `--contracts` settles which revision is meant; exit 2
 /// when no revision can be had (`crate::exit::Unanswered`), and when the
@@ -27,12 +28,22 @@ pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check schema")
 pub async fn show(cli: crate::cli::SchemaShowArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let mut session = None;
     let revision = zk2::revision(&dep, &contracts, &cli.target, &mut session).await?;
     let documents = cli.full || cli.resource.is_some();
-    let view = revision
+    let mut view = revision
         .schema_view(cli.resource.as_deref(), documents)
         .map_err(|e| unaskable!("{e}"))?;
+    // Core §8.6: the revision's index in each catalog given.
+    view.catalogs = catalogs
+        .placed(revision.iface(), revision.fingerprint())
+        .into_iter()
+        .map(|p| zenkey_fleet::report::SchemaCatalogIndex {
+            catalog: p.catalog.to_string(),
+            index: p.index,
+        })
+        .collect();
     crate::render::emit_with(&mut std::io::stdout(), &view, dep.format(), dep.color())
 }
 

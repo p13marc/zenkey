@@ -28,6 +28,7 @@ use zenkey_model::grammar::{IfaceId, ZkKey};
 use zenkey_model::template::resolve;
 
 use crate::model::catalog::{Catalog, ContractState, Contracts, Revision};
+use crate::model::deployment::Epoch;
 use crate::model::inband::{self, Payload};
 use crate::model::structural::{structural, structural_value};
 use crate::report::{PayloadRendering, Rendered, ResolvedResource, Unresolved};
@@ -109,6 +110,7 @@ pub fn render(
             payload.encoding(encoding),
             payload,
             bytes.len(),
+            Epoch::Assumed,
         ),
         None => fallback(Unresolved::ContractNotHeld {
             fingerprint: fp.to_string(),
@@ -127,13 +129,29 @@ pub fn render(
 /// Renders a sample through one revision in hand (§7.2): the key resolves
 /// to a resource by the most-literal-first rule (D1), the member names the
 /// type, and `zenkey_model::decode` decodes or renders it honestly. The
-/// envelope first, as [`render`] reads it.
+/// envelope first, as [`render`] reads it. A packed record's `time` fields
+/// are read under an epoch assumed and said so: [`render_with_in`] reads
+/// them under the epoch in force.
 pub fn render_with(
     revision: &Revision,
     key: &str,
     member: Member,
     encoding: Option<&str>,
     bytes: &[u8],
+) -> PayloadRendering {
+    render_with_in(revision, key, member, encoding, bytes, Epoch::Assumed)
+}
+
+/// [`render_with`], a packed record's `time` fields read under `epoch`, the
+/// epoch in force for the key's owner (core §8.6,
+/// [`crate::model::deployment::Catalogs::epoch`]).
+pub fn render_with_in(
+    revision: &Revision,
+    key: &str,
+    member: Member,
+    encoding: Option<&str>,
+    bytes: &[u8],
+    epoch: Epoch,
 ) -> PayloadRendering {
     let payload = read(key, member, encoding, bytes);
     render_read(
@@ -143,22 +161,33 @@ pub fn render_with(
         payload.encoding(encoding),
         payload,
         bytes.len(),
+        epoch,
     )
 }
 
 /// A record the runtime already read out of its envelope (a consumer's
 /// `Delivery`, a `StateAnswer`'s value), rendered through one revision in
 /// hand: its run and seq and CH's tag in hand, so its bytes are never
-/// stripped twice and a packed type is decoded by its tag (core §7.6).
+/// stripped twice and a packed type is decoded by its tag (core §7.6), its
+/// `time` fields under `epoch` (§8.6).
 pub fn render_record(
     revision: &Revision,
     key: &str,
     record: &[u8],
     stamp: zenkey_model::wire::Stamp,
     tag: zenkey_model::wire::Tag,
+    epoch: Epoch,
 ) -> PayloadRendering {
     let payload = Payload::Record { record, stamp, tag };
-    render_read(revision, key, Member::Type, None, payload, record.len())
+    render_read(
+        revision,
+        key,
+        Member::Type,
+        None,
+        payload,
+        record.len(),
+        epoch,
+    )
 }
 
 /// A payload of `member` on `key`, its envelope read (a type member's
@@ -194,6 +223,7 @@ fn render_read(
     encoding: Option<&str>,
     payload: Payload<'_>,
     size: usize,
+    epoch: Epoch,
 ) -> PayloadRendering {
     let fingerprint = revision.fingerprint().to_string();
     let fallback = |why| fallback_rendering(key, why, payload, size);
@@ -279,15 +309,11 @@ fn render_read(
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
     // the contract speaks next (§7.2's order). A packed record is read by
-    // its envelope's tag (core §7.6), its `time` fields under an epoch
-    // assumed and said so (#980).
+    // its envelope's tag (core §7.6), its `time` fields under the epoch in
+    // force (§8.6), or one assumed and said so.
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
-    let cx = decode::Context { tag, epoch: None };
-    let rendered = rendered(
-        ty,
-        decode::decode_in(revision.bundle(), ty, encoding, bytes, cx),
-        decode::epoch_assumed(revision.bundle(), ty, cx),
-    );
+    let (decoded, epoch_assumed) = decode_under(revision.bundle(), ty, encoding, bytes, tag, epoch);
+    let rendered = rendered(ty, decoded, epoch_assumed);
     PayloadRendering {
         key: key.to_owned(),
         size: bytes.len(),
@@ -344,6 +370,44 @@ pub fn render_resource(
             None,
         ),
     }
+}
+
+/// `zenkey_model::decode` of `ty` under the epoch in force (core §7.6,
+/// §8.6): a record holding a `time` field whose epoch the reader refuses is
+/// undecodable, the refusal its reason, never dated by a guess; any other
+/// is decoded under the epoch given, with the epoch assumed where none was
+/// ([`decode::epoch_assumed`]).
+pub(crate) fn decode_under(
+    bundle: &zenkey_model::bundle::Bundle,
+    ty: &serde_json::Value,
+    encoding: Option<&str>,
+    bytes: &[u8],
+    tag: Option<zenkey_model::wire::Tag>,
+    epoch: Epoch,
+) -> (Decoded, Option<i64>) {
+    let bare = decode::Context { tag, epoch: None };
+    if let Some(reason) = epoch.refusal()
+        && decode::epoch_assumed(bundle, ty, bare).is_some()
+    {
+        let declared = decode::declared(ty);
+        let size = bytes.len();
+        return (
+            Decoded::Undecodable {
+                declared,
+                size,
+                reason,
+            },
+            None,
+        );
+    }
+    let cx = decode::Context {
+        tag,
+        epoch: epoch.given(),
+    };
+    (
+        decode::decode_in(bundle, ty, encoding, bytes, cx),
+        decode::epoch_assumed(bundle, ty, cx),
+    )
 }
 
 /// The model's decode, as the report spells it, with the epoch a packed

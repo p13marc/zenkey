@@ -173,7 +173,14 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
         ns: _,
     } = cli;
     // Everything the command line can be refused for, before a session.
-    let contracts = zk2::load_contracts(&contracts)?;
+    let contracts_given = contracts;
+    let contracts = zk2::load_contracts(&contracts_given)?;
+    // Core §8.6: the one catalog an owner writes under, stated in its
+    // descriptor.
+    let catalog = zk2::load_catalogs(&contracts_given)?
+        .one()
+        .map_err(|e| unaskable!("--catalog: {e}"))?
+        .cloned();
     let bindings = zk2::binds(&binds)?;
     let window = for_secs
         .map(|s| super::positive_secs("--for", s))
@@ -245,6 +252,7 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
             tool: "zenctl serve".into(),
             elect,
             run_store,
+            catalog,
         },
     )
     .await?;

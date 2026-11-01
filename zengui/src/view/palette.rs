@@ -790,6 +790,7 @@ mod tests {
             scouting: None,
             zenoh_config: None,
             contracts: vec![],
+            catalogs: vec![],
             timeout_secs: 5,
             scope: crate::scope::ScopePreset::Everything,
             selectors: vec![],

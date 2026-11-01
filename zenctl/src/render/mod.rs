@@ -50,7 +50,8 @@ mod impls;
 pub use impls::RateView;
 pub use impls::acts::{confirmation_lines, payload_text, sample_lines, summary_lines};
 pub use impls::local::{
-    CacheAction, CacheReport, CachedNamespace, ContextAction, ContextList, ContextRow, ContextShow,
+    CacheAction, CacheReport, CachedNamespace, CatalogAncestor, CatalogEntryRow, CatalogMissing,
+    CatalogReport, CatalogSuccession, ContextAction, ContextList, ContextRow, ContextShow,
     GetReport, HostIdInput, HostIdReport, KeyCanon, KeyOp, KeyRelation, V1Origin,
 };
 pub use impls::observations::TopologyView;

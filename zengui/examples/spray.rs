@@ -490,6 +490,7 @@ impl Spray {
                 tool: "zengui spray".into(),
                 elect: None,
                 run_store: None,
+                catalog: None,
             };
             zenkey_fleet::gen_plan(&spec).map_err(|e| anyhow::anyhow!("{}: {e}", o.address))?;
             specs.push(spec);

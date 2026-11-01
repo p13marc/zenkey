@@ -400,6 +400,9 @@ pub struct Engine<'a> {
     /// The operator's word on the clocks (`freshness.v1` §2.6), for the
     /// doctor's `health-*` checks, scheduled or a rule's.
     pub clocks_synced: bool,
+    /// The deployment catalogs (`catalog`, core §8.6): the scheduled
+    /// doctor's `catalog-missing` judges against them.
+    pub catalogs: &'a zenkey_fleet::Catalogs,
 }
 
 /// Delivery counters shared with the spawned deliveries, and each sink's
@@ -774,9 +777,9 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     // once under `--once`, which is a smoke run. A run in flight is a
     // future the loop selects on beside the drain; a tick that lands while
     // one runs waits for it (`Delay`), never stacks a second sweep.
-    let mut doctor_schedule = e
-        .doctor
-        .map(|cfg| doctor::Schedule::new(cfg, e.timeout, e.clocks_synced));
+    let mut doctor_schedule = e.doctor.map(|cfg| {
+        doctor::Schedule::new(cfg, e.timeout, e.clocks_synced).with_catalogs(e.catalogs.clone())
+    });
     let mut doctor_tick = doctor_schedule.as_ref().map(|s| {
         let start = if e.once {
             tokio::time::Instant::now()
@@ -1179,6 +1182,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             }),
             doctor: cfg.doctor.as_ref(),
             clocks_synced: cfg.clocks_synced,
+            catalogs: &loaded.catalogs,
         },
         stop_signal(),
     )

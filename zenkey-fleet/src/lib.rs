@@ -401,6 +401,13 @@ pub use model::catalog::{
     Observed as ObservedPresence, Revision, namespaces, type_view,
 };
 pub use model::compat::compat;
+// The deployment catalog (core §8.6, #980 C1c): `zenkey_model`'s type,
+// named apart from the lens's presence `Catalog`, the catalogs a tool is
+// given, and the epoch in force for an owner's packed `time` fields.
+pub use model::deployment::{
+    CatalogId, Catalogs, DeploymentCatalog, Epoch as DeploymentEpoch, Lack as CatalogLack,
+    Placed as CatalogPlaced, Stated as CatalogStated,
+};
 pub use model::presence_live::{
     DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, PresenceBasis, PresenceIgnored,
 };
@@ -412,7 +419,8 @@ pub use model::presence_watch::{AddressMove, AddressWatch, covering_scope};
 // as before.
 pub use model::render::{
     Member, render as render_payload, render_detail, render_resource,
-    render_with as render_payload_with, resolved_revision,
+    render_with as render_payload_with, render_with_in as render_payload_with_in,
+    resolved_revision,
 };
 pub use report::{AddressStatus, MemberId, PresenceChange, PresenceSource, PresenceTransition};
 // A deployment namespace on the wire (#612, FJ9): the two spellings a raw
@@ -439,8 +447,9 @@ pub use model::skeleton::{
 // without a session (`model::target`), then made through the runtime's
 // `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).
 pub use bus::consume::{
-    Confirmations, StateRead, WATCH_BUFFER, Watch, get_state, last_known as last_known_state,
-    stamp, watch as watch_resource,
+    Confirmations, StateRead, WATCH_BUFFER, Watch, get_state, get_state_in,
+    last_known as last_known_state, last_known_in as last_known_state_in, stamp,
+    watch as watch_resource, watch_in as watch_resource_in,
 };
 pub use bus::operation::{OperationCall, call as call_operation};
 pub use model::target::{
