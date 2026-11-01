@@ -88,12 +88,12 @@
 //! it asks which session a reader made its reads on
 //! (`spec/scenarios/presence.md` §9, 0.38).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use zenkey_model::descriptor::{self, Descriptor};
-use zenkey_model::grammar::{Addr, InstanceId, ZkKey, instance_key, parse};
+use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey, instance_key, parse};
 use zenoh::query::{ConsolidationMode, Reply};
 
 use crate::error::{Error, Result, zenoh};
@@ -952,6 +952,178 @@ impl Found {
             Self::Nothing => Err(Error::Zenoh("no descriptor reply".to_owned())),
         }
     }
+}
+
+/// How many descriptor GETs [`serving`] keeps in flight at once.
+const DESCRIBE_CONCURRENCY: usize = 64;
+
+/// Who among the services `providers` select serves `iface` now, as core
+/// §8.1 finds a provider (#1015):
+/// - by its interface token, `zk2/<sys>/<svc>/@zk/alive/<iface>/**`;
+/// - or, for an interface in its tokenless set (U22), by an instance token
+///   whose descriptor lists the interface `"token": false` (§3.3). The
+///   descriptor's mark is the owner's tokenless set as its deployment
+///   configured it, so the reader consults no set of its own.
+///
+/// An exact address holding the token needs no more reads. Any other
+/// selection's instance tokens are read too, and the descriptor of each
+/// instance of an address holding no token is asked, at most
+/// [`DESCRIBE_CONCURRENCY`] at once.
+///
+/// Each read waits `timeout`, and no read waits past `deadline` when one
+/// is given: a reading the deadline cuts short asks nothing more and
+/// returns what its reads found, not complete. So a provider an earlier
+/// read found is never lost to the deadline ([`crate::consumer::Consumer::wait_for_provider`]).
+///
+/// It returns what each read established (observer §3.6). A liveliness
+/// read possibly incomplete ([`PresenceRead::complete`]), or a descriptor
+/// not read ([`crate::client::Present::undescribed`]), leaves the result
+/// not complete: a provider missing from it may be there.
+/// - **A read through a session cut off is not made:** the first is the
+///   error [`Error::CutOff`], and a later one ends the reading, not
+///   complete, the tokens already seen kept.
+/// - **A descriptor not read** leaves its address in `undescribed`, the
+///   result not complete, and why in `errors`: a GET that failed (an
+///   error, never a panic: [`descriptor`] returns every failure, and a
+///   task that panicked is read the same), one with no reply (a session
+///   cut off by then answers it at once, with nothing, as it answers a
+///   liveliness read), one whose reply fails its checks, or one the
+///   deadline left unasked.
+pub(crate) async fn serving(
+    session: &zenoh::Session,
+    providers: &[crate::consumer::Provider],
+    iface: &IfaceId,
+    timeout: Duration,
+    deadline: Option<tokio::time::Instant>,
+) -> Result<crate::client::Present> {
+    // The time a read may wait now: `None` once the deadline has come.
+    let budget = || match deadline {
+        None => Some(timeout),
+        Some(d) => Some(timeout.min(d.saturating_duration_since(tokio::time::Instant::now())))
+            .filter(|t| !t.is_zero()),
+    };
+    let mut made = false;
+    let mut complete = true;
+    let mut errors = Vec::new();
+    let mut tokened: BTreeSet<Addr> = BTreeSet::new();
+    let mut instances: BTreeSet<(Addr, InstanceId)> = BTreeSet::new();
+    'reads: for p in providers {
+        let (sys, svc) = p.chunks();
+        let alive = format!("zk2/{sys}/{svc}/@zk/alive/{iface}/**");
+        let instance = format!("zk2/{sys}/{svc}/@zk/instance/*");
+        for selector in [alive, instance] {
+            let Some(wait) = budget() else {
+                complete = false;
+                break 'reads;
+            };
+            let Some(read) = made_read(session, &selector, wait, &mut made).await? else {
+                complete = false;
+                break 'reads;
+            };
+            complete &= read.complete;
+            errors.extend(read.errors);
+            let mut held = false;
+            for key in &read.keys {
+                match parse(key) {
+                    Ok(ZkKey::Alive { addr, .. }) => {
+                        tokened.insert(addr);
+                        held = true;
+                    }
+                    Ok(ZkKey::Instance { addr, instance }) => {
+                        instances.insert((addr, instance));
+                    }
+                    _ => {}
+                }
+            }
+            if held && p.is_exact() {
+                break;
+            }
+        }
+    }
+    let mut tokenless = BTreeSet::new();
+    let mut undescribed = BTreeSet::new();
+    let mut not_read = |addr: Addr, instance: &InstanceId, why: String| {
+        errors.push(format!("the descriptor of {addr} ({instance}): {why}"));
+        undescribed.insert(addr);
+    };
+    let wanted: Vec<_> = instances
+        .into_iter()
+        .filter(|(addr, _)| !tokened.contains(addr))
+        .collect();
+    let mut pending = wanted.into_iter();
+    let mut asked: HashMap<tokio::task::Id, (Addr, InstanceId)> = HashMap::new();
+    let mut tasks = tokio::task::JoinSet::new();
+    loop {
+        while tasks.len() < DESCRIBE_CONCURRENCY {
+            let Some((addr, instance)) = pending.next() else {
+                break;
+            };
+            let Some(wait) = budget() else {
+                not_read(addr, &instance, "not asked: the deadline came".to_owned());
+                continue;
+            };
+            let session = session.clone();
+            let (a, i) = (addr.clone(), instance.clone());
+            let task = tasks.spawn(async move { descriptor(&session, &a, &i, wait).await });
+            asked.insert(task.id(), (addr, instance));
+        }
+        let Some(joined) = tasks.join_next_with_id().await else {
+            break;
+        };
+        let (id, found) = match joined {
+            Ok((id, found)) => (id, found),
+            Err(e) => (e.id(), Err(Error::Zenoh(format!("its task failed: {e}")))),
+        };
+        let Some((addr, instance)) = asked.remove(&id) else {
+            continue;
+        };
+        match found {
+            Ok(Found::Descriptor(d, _)) => {
+                if lists_tokenless(&d, iface) {
+                    tokenless.insert(addr);
+                }
+            }
+            Ok(Found::Invalid(why)) => not_read(addr, &instance, format!("invalid: {why}")),
+            Ok(Found::Nothing) => not_read(addr, &instance, "no reply".to_owned()),
+            Err(e) => not_read(addr, &instance, e.to_string()),
+        }
+    }
+    // An address that another of its instances shows serving is not unknown.
+    undescribed.retain(|a| !tokenless.contains(a));
+    complete &= undescribed.is_empty();
+    tokened.extend(tokenless);
+    Ok(crate::client::Present {
+        providers: tokened.into_iter().collect(),
+        complete,
+        errors,
+        undescribed: undescribed.into_iter().collect(),
+    })
+}
+
+/// [`liveliness_read`] for [`serving`]: `None` for a read not made because
+/// the session was cut off after an earlier read was made.
+async fn made_read(
+    session: &zenoh::Session,
+    selector: &str,
+    timeout: Duration,
+    made: &mut bool,
+) -> Result<Option<PresenceRead>> {
+    match liveliness_read(session, selector, timeout).await {
+        Ok(read) => {
+            *made = true;
+            Ok(Some(read))
+        }
+        Err(Error::CutOff { .. }) if *made => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether `d` lists `iface` as served with no interface token (§3.3,
+/// §8.1). A standby is never tokenless (D012).
+fn lists_tokenless(d: &Descriptor, iface: &IfaceId) -> bool {
+    d.interfaces
+        .iter()
+        .any(|e| !e.token && !e.standby && e.iface.parse::<IfaceId>().is_ok_and(|i| i == *iface))
 }
 
 /// An edge of the data-flow graph (R3): a consumer's role, bound to a

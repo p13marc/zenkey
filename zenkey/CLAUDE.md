@@ -32,7 +32,15 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   zenoh's default (0.68, F-380), and Appendix B says so, read from zenoh
   1.10.1's source), and
   `consumer` reads through a role's bindings: R2 parameter binding, R6's
-  wildcard-key discard, R5's presence wait, R7's *unobservable*; tools
+  wildcard-key discard, R5's presence wait, R7's *unobservable*; its
+  presence (`Consumer::present`/`presence`/`wait_for_provider`/`liveness`,
+  and `Client`'s and `Fleet`'s `present`/`presence`) is
+  `presence::serving`'s: an interface token, or a tokenless interface's
+  instance token and a descriptor marking it `"token": false`, absent only
+  from a complete read, `Liveness::Unobservable` otherwise, a descriptor
+  not read in `Present::undescribed` with why in `errors`, and no read
+  past `wait_for_provider`'s deadline, a round it cuts short keeping what
+  it found (#1015); tools
   consume with `Consumer::for_tool` and read presence with
   `presence::liveliness_read`, which flags a GET that ran to its timeout,
   or whose session was cut off while it ran, as possibly incomplete (§8.1;
