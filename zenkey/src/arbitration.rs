@@ -511,7 +511,7 @@ where
                     );
                     return;
                 }
-                let inband = read.stamp();
+                let (inband, tag) = (read.stamp(), read.tag());
                 let sample = read.into_sample();
                 let mut c = lock(&core);
                 let key = sample.key_expr().as_str().to_owned();
@@ -564,6 +564,7 @@ where
                             arrival,
                             stamp,
                             inband,
+                            tag,
                             lifespan: lifespan.unwrap_or(premise),
                         }),
                     });

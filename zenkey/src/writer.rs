@@ -13,10 +13,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use zenkey_model::authoring::{Encoding as WireEncoding, Kind};
-use zenkey_model::contract::{Body, Data, Resource};
+use zenkey_model::contract::{Body, Contract, Data, Resource};
 use zenkey_model::grammar::KindToken;
+use zenkey_model::packed::Layout;
 use zenkey_model::schema::TypeId;
 use zenkey_model::template::Bindings;
+use zenkey_model::wire::Tag;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::key_expr::OwnedKeyExpr;
 use zenoh::pubsub::Publisher;
@@ -44,7 +46,7 @@ pub fn wire_encoding(ty: &TypeId, encoding: Option<WireEncoding>, values: &Bindi
             _ => Encoding::APPLICATION_JSON,
         },
         // A packed record always travels in §7.5's envelope (core §7.2,
-        // §7.6), whose `Encoding` is `zenoh/bytes`; its writer is #979's B2.
+        // §7.6), whose `Encoding` is `zenoh/bytes` ([`PackedType`]).
         TypeId::Packed { .. } => Encoding::ZENOH_BYTES,
         TypeId::Raw {
             media_type,
@@ -169,6 +171,50 @@ impl Slot for PubSlot {
     }
 }
 
+/// A packed type (core §7.6), as each writer of its resource holds it: CH
+/// carries its layout's tag, and every record is admitted by its layout
+/// before anything is published, as a reader admits it.
+#[derive(Debug, Clone)]
+pub(crate) struct PackedType {
+    name: String,
+    layout: Arc<Layout>,
+}
+
+impl PackedType {
+    /// `r`'s packed type, read from `contract`'s artifact; `None` for a
+    /// type of another kind. A packed type whose layout does not read is
+    /// refused, [`Error::Contract`].
+    pub(crate) fn of(contract: &Contract, r: &Resource) -> Result<Option<Self>> {
+        let d = data(r)?;
+        let layout = contract
+            .packed_layout(&d.type_)
+            .map_err(|e| Error::Contract(format!("{}/{}: {e}", r.token, r.template)))?;
+        Ok(layout.map(|l| Self {
+            name: match &d.type_ {
+                TypeId::Packed { name, .. } => name.clone(),
+                _ => unreachable!("a layout is a packed type's"),
+            },
+            layout: Arc::new(l),
+        }))
+    }
+
+    pub(crate) fn tag(&self) -> Tag {
+        Tag::new(self.layout.tag()).expect("a 4-bit tag")
+    }
+
+    /// Its layout's admission of a record (core §7.6): refused,
+    /// [`Error::Payload`], with nothing published.
+    pub(crate) fn admit(&self, record: &[u8]) -> Result<()> {
+        self.layout.check(self.layout.tag(), record).map_err(|r| {
+            Error::Payload(format!(
+                "packed:{}: refused by its layout, {r}: nothing published",
+                self.name
+            ))
+        })
+    }
+}
+
+
 /// A publisher on one stream or state member, with the contract's QoS and
 /// `Encoding` (§2.4, §7.2). With `history` in the contract it is zenoh-ext's
 /// advanced publisher (§2.5): a cache of that depth, publisher detection,
@@ -221,6 +267,9 @@ pub struct Writer {
     json_typed: bool,
     budget: Option<Arc<Budget>>,
     meter: Option<Meter>,
+    /// Its packed type, when it has one (core §7.6): the tag CH carries,
+    /// and the layout every record is admitted by.
+    packed: Option<PackedType>,
     /// The resource's `timing.v1` values, when it is a timed stream.
     timing: Option<zenkey_model::timing::Declared>,
     /// The service's stamps (core §4.3).
@@ -318,6 +367,7 @@ impl Writer {
             json_typed: matches!(d.type_, TypeId::JsonSchema { .. }),
             budget: None,
             meter: None,
+            packed: None,
             timing: zenkey_model::timing::declaration_of(r).declared().copied(),
             minter: Arc::clone(minter),
             token: r.token,
@@ -358,6 +408,26 @@ impl Writer {
         }
         self.meter = meter;
         self
+    }
+
+    /// Seals and admits its records as its packed type's (core §7.6).
+    pub(crate) fn packed(mut self, packed: Option<PackedType>) -> Self {
+        self.packed = packed;
+        self
+    }
+
+    /// The tag CH carries on its records: its packed type's (core §7.6),
+    /// else 0.
+    #[must_use]
+    pub fn tag(&self) -> Tag {
+        self.packed.as_ref().map_or(Tag::NONE, PackedType::tag)
+    }
+
+    /// Admits a record before anything is minted or published: a packed
+    /// type's by its layout, as its reader admits it (core §7.6), any other
+    /// as it is.
+    pub(crate) fn admit_record(&self, record: &[u8]) -> Result<()> {
+        self.packed.as_ref().map_or(Ok(()), |p| p.admit(record))
     }
 
     /// The governed interface's gate, when its interface is one
@@ -512,6 +582,9 @@ impl Writer {
         let (payload, attachment, pending) = self
             .meter(payload.into(), attachment.map(Into::into))
             .await?;
+        // Core §7.6 (#979): a packed record its layout refuses is refused,
+        // nothing published.
+        self.admit_record(&payload.to_bytes())?;
         let held = self.slot.inner.read().await;
         let Some(inner) = &*held else {
             return Err(self.standby());
@@ -521,10 +594,11 @@ impl Writer {
         // Core §4.3: the envelope under the next stamps, and a Zenoh
         // timestamp only on §4.3's table (timing.v1 §2.6: a lifespan's
         // sample carries its owner's stamp). An `@stream` keeps its wire.
+        // Core §7.6: CH carries a packed record's tag.
         let (payload, ts) = if self.is_enveloped() {
             let stamped = self.mint()?;
             let record = payload.to_bytes();
-            (ZBytes::from(stamped.seal(&record)), stamped.time)
+            (ZBytes::from(stamped.seal_tagged(self.tag(), &record)), stamped.time)
         } else {
             let ts = self.timed.then(|| self.minter.time());
             (payload, ts)
@@ -622,7 +696,7 @@ impl Writer {
         let payload = if self.is_enveloped() {
             let mut stamped = self.minter.mint_stream(&self.owned, false);
             stamped.time = Some(time);
-            ZBytes::from(stamped.seal(payload))
+            ZBytes::from(stamped.seal_tagged(self.tag(), payload))
         } else {
             ZBytes::from(payload.to_vec())
         };
@@ -684,6 +758,8 @@ pub struct EventWriter {
     /// The service's stamps: an occurrence takes the owner's next state and
     /// event seq (core §4.3).
     minter: Arc<crate::state::Minter>,
+    /// Its packed type, when it has one (core §7.6).
+    packed: Option<PackedType>,
 }
 
 impl EventWriter {
@@ -709,7 +785,21 @@ impl EventWriter {
             budget: None,
             gate: None,
             minter: Arc::clone(minter),
+            packed: None,
         })
+    }
+
+    /// Seals and admits its occurrences as its packed type's (core §7.6).
+    pub(crate) fn packed(mut self, packed: Option<PackedType>) -> Self {
+        self.packed = packed;
+        self
+    }
+
+    /// The tag CH carries on its occurrences: its packed type's (core
+    /// §7.6), else 0.
+    #[must_use]
+    pub fn tag(&self) -> Tag {
+        self.packed.as_ref().map_or(Tag::NONE, PackedType::tag)
     }
 
     /// The record's `Encoding`, as the contract's type says (§7.2). Every
@@ -766,6 +856,12 @@ impl EventWriter {
             Some(g) => Some(g.write().await?),
             None => None,
         };
+        let payload: ZBytes = payload.into();
+        // Core §7.6 (#979): a packed record its layout refuses is refused,
+        // nothing published.
+        if let Some(p) = &self.packed {
+            p.admit(&payload.to_bytes())?;
+        }
         if let Some(b) = &self.budget {
             b.admit(&self.prefix, Instant::now())?;
         }
@@ -775,9 +871,8 @@ impl EventWriter {
         // §7.5's envelope; a Zenoh timestamp only where its session stamps
         // (§8.2).
         let stamped = self.minter.mint_event(false);
-        let payload: ZBytes = payload.into();
         self.session
-            .put(&key, stamped.seal(&payload.to_bytes()))
+            .put(&key, stamped.seal_tagged(self.tag(), &payload.to_bytes()))
             .attachment(attachment)
             .encoding(Encoding::ZENOH_BYTES)
             .timestamp(stamped.time)

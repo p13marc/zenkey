@@ -1,0 +1,378 @@
+{
+  "description": "spec/conformance/packed/vectors.json's schema, every type but Wide64, whose bounds no listed artifact may hold (E028): kept equal to it by zenkey/tests/packed.rs",
+  "types": {
+    "Sensor": {
+      "description": "The zk2c report's sensor record: four fixed-point readings, 40 bits",
+      "fields": [
+        {
+          "name": "temperature",
+          "type": "fixed",
+          "minimum": "-40",
+          "maximum": "85",
+          "resolution": "0.1"
+        },
+        {
+          "name": "humidity",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100",
+          "resolution": "0.5"
+        },
+        {
+          "name": "pressure",
+          "type": "fixed",
+          "minimum": "300",
+          "maximum": "1100",
+          "resolution": "0.1"
+        },
+        {
+          "name": "battery",
+          "type": "fixed",
+          "minimum": "2.00",
+          "maximum": "4.20",
+          "resolution": "0.01"
+        }
+      ]
+    },
+    "Status": {
+      "description": "The report's 16-bit word: four fields and no padding",
+      "fields": [
+        {
+          "name": "duty_available",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100.0",
+          "resolution": "0.1"
+        },
+        {
+          "name": "signal_bars",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 5
+        },
+        {
+          "name": "oper",
+          "type": "enum",
+          "values": [
+            "up",
+            "down",
+            "notPresent",
+            "unknown"
+          ]
+        },
+        {
+          "name": "admin",
+          "type": "enum",
+          "values": [
+            "up",
+            "down"
+          ]
+        }
+      ]
+    },
+    "Reserved": {
+      "fields": [
+        {
+          "name": "level",
+          "type": "int",
+          "minimum": -40,
+          "maximum": 85,
+          "reserved": [
+            "out_of_range",
+            "not_available",
+            "error"
+          ]
+        },
+        {
+          "name": "temperature",
+          "type": "fixed",
+          "minimum": "-40",
+          "maximum": "85",
+          "resolution": "0.1",
+          "reserved": [
+            "not_available",
+            "error"
+          ]
+        },
+        {
+          "name": "phase",
+          "type": "enum",
+          "values": [
+            "a",
+            "b",
+            "c"
+          ]
+        }
+      ]
+    },
+    "Counters": {
+      "fields": [
+        {
+          "name": "c1",
+          "type": "counter",
+          "width": 1
+        },
+        {
+          "name": "c7",
+          "type": "counter",
+          "width": 7
+        },
+        {
+          "name": "c33",
+          "type": "counter",
+          "width": 33
+        },
+        {
+          "name": "c64",
+          "type": "counter",
+          "width": 64
+        }
+      ]
+    },
+    "Ties": {
+      "fields": [
+        {
+          "name": "half",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "10",
+          "resolution": "0.5"
+        },
+        {
+          "name": "signed",
+          "type": "fixed",
+          "minimum": "-1",
+          "maximum": "1",
+          "resolution": "0.1"
+        },
+        {
+          "name": "odd_top",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "9.5",
+          "resolution": "0.5"
+        }
+      ]
+    },
+    "Clock": {
+      "fields": [
+        {
+          "name": "at",
+          "type": "time"
+        },
+        {
+          "name": "at_ms",
+          "type": "time",
+          "ms": true
+        },
+        {
+          "name": "valid",
+          "type": "bool"
+        }
+      ]
+    },
+    "Mode": {
+      "fields": [
+        {
+          "name": "mode",
+          "type": "enum",
+          "values": [
+            "off",
+            "on",
+            "auto"
+          ],
+          "escape": true
+        },
+        {
+          "name": "wide",
+          "type": "enum",
+          "values": [
+            "x",
+            "y"
+          ],
+          "escape": true,
+          "width": 4
+        }
+      ]
+    },
+    "Link": {
+      "description": "Optional fields and a marker: revision 1",
+      "fields": [
+        {
+          "name": "rssi",
+          "type": "int",
+          "minimum": -150,
+          "maximum": 0,
+          "optional": true
+        },
+        {
+          "name": "up",
+          "type": "bool"
+        },
+        "..."
+      ]
+    },
+    "LinkV2": {
+      "description": "Link's revision 2: an optional field appended behind the marker, and a marker of its own",
+      "fields": [
+        {
+          "name": "rssi",
+          "type": "int",
+          "minimum": -150,
+          "maximum": 0,
+          "optional": true
+        },
+        {
+          "name": "up",
+          "type": "bool"
+        },
+        "...",
+        {
+          "name": "quality",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 100,
+          "optional": true
+        },
+        "..."
+      ]
+    },
+    "Grow": {
+      "description": "A record whose marker ends on a byte boundary",
+      "fields": [
+        {
+          "name": "a",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "..."
+      ]
+    },
+    "Chain": {
+      "description": "Three groups chained by markers: a marker at 1 over an empty group, where a later group is present",
+      "fields": [
+        {
+          "name": "id",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "...",
+        {
+          "name": "a",
+          "type": "bool",
+          "optional": true
+        },
+        "...",
+        {
+          "name": "b",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 7,
+          "optional": true
+        },
+        "..."
+      ]
+    },
+    "SensorRenamed": {
+      "description": "Sensor with its fields renamed: the same layout form and tag",
+      "fields": [
+        {
+          "name": "r_temperature",
+          "type": "fixed",
+          "minimum": "-40",
+          "maximum": "85",
+          "resolution": "0.1"
+        },
+        {
+          "name": "r_humidity",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100",
+          "resolution": "0.5"
+        },
+        {
+          "name": "r_pressure",
+          "type": "fixed",
+          "minimum": "300",
+          "maximum": "1100",
+          "resolution": "0.1"
+        },
+        {
+          "name": "r_battery",
+          "type": "fixed",
+          "minimum": "2.00",
+          "maximum": "4.20",
+          "resolution": "0.01"
+        }
+      ]
+    },
+    "SensorWide": {
+      "fields": [
+        {
+          "name": "temperature",
+          "type": "fixed",
+          "minimum": "-40",
+          "maximum": "85",
+          "resolution": "0.1"
+        },
+        {
+          "name": "humidity",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100",
+          "resolution": "0.5"
+        },
+        {
+          "name": "pressure",
+          "type": "fixed",
+          "minimum": "300",
+          "maximum": "1200",
+          "resolution": "0.1"
+        },
+        {
+          "name": "battery",
+          "type": "fixed",
+          "minimum": "2.00",
+          "maximum": "4.20",
+          "resolution": "0.01"
+        }
+      ],
+      "description": "Sensor with pressure's maximum moved to 1200: another tag"
+    },
+    "SensorCollide": {
+      "fields": [
+        {
+          "name": "temperature",
+          "type": "fixed",
+          "minimum": "-40",
+          "maximum": "85",
+          "resolution": "0.1"
+        },
+        {
+          "name": "humidity",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100",
+          "resolution": "0.5"
+        },
+        {
+          "name": "pressure",
+          "type": "fixed",
+          "minimum": "300",
+          "maximum": "1100",
+          "resolution": "0.1"
+        },
+        {
+          "name": "battery",
+          "type": "fixed",
+          "minimum": "2.00",
+          "maximum": "4.72",
+          "resolution": "0.01"
+        }
+      ],
+      "description": "Sensor with battery's maximum moved one bit wider, its tag equal to Sensor's"
+    }
+  }
+}

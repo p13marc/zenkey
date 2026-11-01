@@ -2,8 +2,8 @@
 //!
 //! A [`Codec`] names a Rust type and how it is carried: [`Protobuf`] for a
 //! prost message, [`Json`] for a serde type of a JSON Schema type (JSON or
-//! CBOR, as the contract's `encoding` says), [`Raw`] for the bytes of a raw
-//! media type. Generated code picks the codec from the contract; the wire
+//! CBOR, as the contract's `encoding` says), [`Packed`] for a generated
+//! packed type (core §7.6), [`Raw`] for the bytes of a raw media type. Generated code picks the codec from the contract; the wire
 //! encoding is never the caller's choice. The typed handles
 //! ([`crate::typed`]) are generic over it, so the encoding logic lives here
 //! once.
@@ -19,12 +19,17 @@ use serde::de::DeserializeOwned;
 use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::envelope::Detail;
 use zenkey_model::schema::TypeId;
+use zenkey_model::wire::Tag;
+
+use crate::packed::{DEFAULT_EPOCH, PackedRecord};
 
 /// What kind of contract type a codec carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodecKind {
     Protobuf,
     JsonSchema,
+    /// A packed type (core §7.6).
+    Packed,
     Raw,
     /// No type at all: a `summary` the operation does not declare.
     Nothing,
@@ -39,6 +44,7 @@ impl CodecKind {
             (self, ty),
             (Self::Protobuf, Some(TypeId::Protobuf { .. }))
                 | (Self::JsonSchema, Some(TypeId::JsonSchema { .. }))
+                | (Self::Packed, Some(TypeId::Packed { .. }))
                 | (Self::Raw, Some(TypeId::Raw { .. }))
                 | (Self::Nothing, None)
         )
@@ -56,6 +62,29 @@ pub trait Codec: Send + Sync + 'static {
     fn encode(value: &Self::Value, wire: Option<WireEncoding>) -> Result<Vec<u8>, String>;
     /// Decodes a payload; `wire` is the effective encoding ([`wire_of`]).
     fn decode(bytes: &[u8], wire: Option<WireEncoding>) -> Result<Self::Value, String>;
+    /// Decodes an envelope's record whose CH carried `tag` (core §7.5),
+    /// `None` for a payload that came in no envelope. Only a packed type's
+    /// record is read by its tag (§7.6); every other codec decodes as
+    /// [`Codec::decode`] does.
+    fn decode_record(
+        bytes: &[u8],
+        wire: Option<WireEncoding>,
+        tag: Option<Tag>,
+    ) -> Result<Self::Value, String> {
+        let _ = tag;
+        Self::decode(bytes, wire)
+    }
+    /// Whether a value of this codec is one of type `ty`, the contract's:
+    /// the kinds match ([`CodecKind::carries`]), and for a packed type its
+    /// name too.
+    fn carries(ty: Option<&TypeId>) -> bool {
+        Self::KIND.carries(ty)
+    }
+    /// The tag its records carry in CH (core §7.6): a packed type's, `None`
+    /// for every other codec, whose records carry tag 0.
+    fn tag() -> Option<Tag> {
+        None
+    }
     /// The `detail` of an `app` error envelope carrying this value (§5.2).
     fn detail(value: &Self::Value) -> Result<Detail, String> {
         Self::encode(value, None).map(Detail::Bytes)
@@ -94,6 +123,45 @@ impl<T: Serialize + DeserializeOwned + Send + 'static> Codec for Json<T> {
         serde_json::to_value(value)
             .map(Detail::Value)
             .map_err(|e| format!("JSON: {e}"))
+    }
+}
+
+/// A generated packed type (core §7.6, [`crate::packed`]): its record, the
+/// layout's bits and pad, which the writer seals in §7.5's envelope with
+/// the type's tag in CH. Its `time` fields are read and written under
+/// [`DEFAULT_EPOCH`] until a catalog carries the deployment's (#980).
+pub struct Packed<T>(PhantomData<fn() -> T>);
+
+impl<T: PackedRecord> Codec for Packed<T> {
+    type Value = T;
+    const KIND: CodecKind = CodecKind::Packed;
+    fn encode(value: &T, _: Option<WireEncoding>) -> Result<Vec<u8>, String> {
+        value
+            .encode(Some(DEFAULT_EPOCH))
+            .map(|r| r.bytes)
+            .map_err(|r| format!("packed:{}: {r}", T::NAME))
+    }
+    /// A record read under the type's own tag: one a reader already
+    /// admitted by its tag (`zenkey::inband::admit`, the consumer), or one
+    /// carried with no envelope where none is due. [`Codec::decode_record`]
+    /// checks the tag the envelope carried.
+    fn decode(bytes: &[u8], _: Option<WireEncoding>) -> Result<T, String> {
+        T::decode(T::TAG, bytes, Some(DEFAULT_EPOCH)).map_err(|r| format!("packed:{}: {r}", T::NAME))
+    }
+    fn decode_record(bytes: &[u8], _: Option<WireEncoding>, tag: Option<Tag>) -> Result<T, String> {
+        let Some(tag) = tag else {
+            return Err(format!(
+                "packed:{}: a packed record travels in an envelope, and this one came in none",
+                T::NAME
+            ));
+        };
+        T::decode(tag.get(), bytes, Some(DEFAULT_EPOCH)).map_err(|r| format!("packed:{}: {r}", T::NAME))
+    }
+    fn carries(ty: Option<&TypeId>) -> bool {
+        matches!(ty, Some(TypeId::Packed { name, .. }) if name == T::NAME)
+    }
+    fn tag() -> Option<Tag> {
+        Tag::new(T::TAG)
     }
 }
 

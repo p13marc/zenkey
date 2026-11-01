@@ -30,9 +30,12 @@
 //! run and seq as [`Delivery::inband`], what orders it
 //! ([`Delivery::mark`]). One whose envelope is refused is undecodable:
 //! never delivered, and counted ([`Subscription::undecodable`],
-//! [`StateAnswer::undecodable`]). A sample with no envelope, an `@stream`
-//! sample's or a foreign key's, is delivered as it arrived, ordered by its
-//! Zenoh timestamp where it carries one.
+//! [`StateAnswer::undecodable`]). So is a record of a packed type (core
+//! §7.6) its layout refuses under the tag its CH carried
+//! ([`crate::inband::admit`]): another revision's, by its tag or its
+//! length. A sample with no envelope, an `@stream` sample's or a foreign
+//! key's, is delivered as it arrived, ordered by its Zenoh timestamp where
+//! it carries one.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,11 +43,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use zenkey_model::authoring::Kind;
-use zenkey_model::contract::{Contract, Resource};
+use zenkey_model::contract::{Body, Contract, Resource};
 use zenkey_model::freshness::{
     ClockMeasure, ClockTrust, Horizon, Judged, Last, Observation, StampAge,
 };
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
+use zenkey_model::packed::Layout;
 use zenkey_model::seed::Mark;
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
@@ -160,6 +164,9 @@ pub struct Delivery {
     /// orders it, whatever Zenoh timestamp it also carries. `sample`'s
     /// payload is then the envelope's record.
     pub inband: Option<zenkey_model::wire::Stamp>,
+    /// Its envelope's CH tag, when it carried one: a packed record's
+    /// type's (core §7.6), which the consumer admitted it by; 0 otherwise.
+    pub tag: Option<zenkey_model::wire::Tag>,
     /// Its lifespan's judgement at its arrival (`timing.v1` §2.6): live, or
     /// unobservable or not asked with why. An expired sample is never
     /// delivered.
@@ -488,6 +495,7 @@ impl Consumer {
     {
         let r = self.resource(resource)?.clone();
         let name = format!("{}/{}", r.token, r.template);
+        let layout = self.packed_layout(&r)?;
         let seen = Arc::new(Seen::default());
         let plan = timing::Plan::new(
             &r,
@@ -503,12 +511,13 @@ impl Consumer {
         let callback = Arc::new(callback);
         let mut subs = Vec::new();
         for ke in self.selectors(resource)? {
-            let (seen, callback, r, name, engine) = (
+            let (seen, callback, r, name, engine, layout) = (
                 Arc::clone(&seen),
                 Arc::clone(&callback),
                 r.clone(),
                 name.clone(),
                 engine.clone(),
+                layout.clone(),
             );
             let iface = self.contract.iface.clone();
             let providers = self.providers.clone();
@@ -547,11 +556,12 @@ impl Consumer {
                             seen.unresolved.fetch_add(1, Ordering::Relaxed);
                             return;
                         };
-                        // Core §7.5: a refused envelope is undecodable,
-                        // never delivered, never an arrival.
+                        // Core §7.5, §7.6: a refused envelope, or a packed
+                        // record its layout refuses, is undecodable, never
+                        // delivered, never an arrival.
                         let read = crate::inband::read(sample);
-                        let inband = read.stamp();
-                        if let Some(why) = read.refusal() {
+                        let (inband, tag) = (read.stamp(), read.tag());
+                        if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                             seen.undecodable.fetch_add(1, Ordering::Relaxed);
                             tracing::debug!(
                                 key = %read.sample().key_expr(),
@@ -600,6 +610,7 @@ impl Consumer {
                             arrival,
                             stamp,
                             inband,
+                            tag,
                             lifespan,
                         });
                     })
@@ -644,6 +655,7 @@ impl Consumer {
             return Err(Error::Contract(format!("{resource:?} is not an event")));
         }
         let name = format!("{}/{}", r.token, r.template);
+        let layout = self.packed_layout(&r)?;
         let since = std::time::SystemTime::now() - retention;
         // An event has no lifespan (timing.v1 §2.3): one premise for every
         // delivery.
@@ -685,11 +697,11 @@ impl Consumer {
                 let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
                 if let Some(values) = r.template.matches(&refs) {
                     let read = crate::inband::read(sample);
-                    if let Some(why) = read.refusal() {
+                    if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                         tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable occurrence is not replayed");
                         continue;
                     }
-                    let inband = read.stamp();
+                    let (inband, tag) = (read.stamp(), read.tag());
                     let sample = read.into_sample();
                     let stamp = sample.timestamp().copied();
                     out.push(Delivery {
@@ -700,6 +712,7 @@ impl Consumer {
                         arrival: Instant::now(),
                         stamp,
                         inband,
+                        tag,
                         lifespan: premise,
                     });
                 }
@@ -766,8 +779,10 @@ impl Consumer {
                     .collect::<Result<Vec<_>>>()?
             }
         };
+        let layout = self.packed_layout(&r)?;
         let mut out = Vec::new();
         let mut inband = BTreeMap::new();
+        let mut tags = BTreeMap::new();
         let mut undecodable = BTreeMap::new();
         let mut complete = true;
         for ke in selectors {
@@ -790,12 +805,15 @@ impl Consumer {
                     continue;
                 }
                 let read = crate::inband::read(sample);
-                if let Some(why) = read.refusal() {
+                if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                     undecodable.insert(key, why);
                     continue;
                 }
                 if let Some(stamp) = read.stamp() {
                     inband.insert(key.clone(), stamp);
+                }
+                if let Some(tag) = read.tag() {
+                    tags.insert(key.clone(), tag);
                 }
                 let sample = read.into_sample();
                 out.push(match sample.kind() {
@@ -814,8 +832,22 @@ impl Consumer {
             current: out,
             complete,
             inband,
+            tags,
             undecodable,
         })
+    }
+
+    /// The layout of `r`'s type, when it is packed (core §7.6): what admits
+    /// each record read ([`crate::inband::admit`]). A packed type whose
+    /// layout does not read is refused, [`Error::Contract`].
+    fn packed_layout(&self, r: &Resource) -> Result<Option<Arc<Layout>>> {
+        let Body::Data(d) = &r.body else {
+            return Ok(None);
+        };
+        self.contract
+            .packed_layout(&d.type_)
+            .map(|l| l.map(Arc::new))
+            .map_err(|e| Error::Contract(format!("{}/{}: {e}", r.token, r.template)))
     }
 
     /// The bound providers holding this interface's token now (§8.1).

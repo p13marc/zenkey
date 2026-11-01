@@ -1,0 +1,21 @@
+# Another revision of `packed.v1` (packed/packed.v1.toml), for core §7.6's
+# reader: its `sensor` stream and `reading/{unit}` state are typed
+# `SensorCollide`, battery one bit wider, its tag Sensor's, so another length. A consumer compiled against it refuses the owner's
+# records (zenkey/tests/packed.rs).
+[interface]
+name  = "packed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["packed/vectors.json"]
+
+[resources.sensor]
+kind = "stream"
+type = "packed:SensorCollide"
+
+[resources."reading/{unit}"]
+kind        = "state"
+type        = "packed:SensorCollide"
+params      = { unit = "string" }
+cardinality = 8

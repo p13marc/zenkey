@@ -92,6 +92,15 @@ pub(crate) struct ImplState {
 }
 
 impl ImplState {
+    /// The packed type every writer of `r` seals and admits its records by
+    /// (core §7.6), when `r`'s type is one.
+    fn packed(
+        &self,
+        r: &zenkey_model::contract::Resource,
+    ) -> Result<Option<crate::writer::PackedType>> {
+        crate::writer::PackedType::of(self.imp.contract(), r)
+    }
+
     /// The budget every writer of `r` keeps (§2.7).
     fn budget(&self, r: &zenkey_model::contract::Resource) -> Option<Arc<Budget>> {
         self.budgets.get(&resource_name(r)).cloned()
@@ -664,6 +673,7 @@ impl ServiceBuilder {
                 "{iface} {resource:?} is not state"
             )));
         }
+        let packed = s.packed(&r)?;
         self.expose(iface, resource)?;
         self.state_ifaces.insert(iface.clone());
         let gate = self.gate_of(iface);
@@ -677,7 +687,8 @@ impl ServiceBuilder {
         )
         .await?
         .bounded(budget)
-        .metered(meter);
+        .metered(meter)
+        .packed(packed);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -959,6 +970,7 @@ impl ServiceBuilder {
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
         let meter = s.meter(&r, values, &self.epochs);
+        let packed = s.packed(&r)?;
         let gate = s.gate.clone();
         self.expose(iface, resource)?;
         Ok(Writer::declare_gated(
@@ -971,7 +983,8 @@ impl ServiceBuilder {
         )
         .await?
         .bounded(budget)
-        .metered(meter))
+        .metered(meter)
+        .packed(packed))
     }
 
     /// An [`EventWriter`] for an event's member, and exposes the resource.
@@ -985,12 +998,14 @@ impl ServiceBuilder {
         let s = find(&self.impls, iface)?;
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
+        let packed = s.packed(&r)?;
         let gate = s.gate.clone();
         self.expose(iface, resource)?;
         Ok(
             EventWriter::new(&self.session, &self.minter, key.to_string(), &r, values)?
                 .bounded(budget)
-                .gated(gate),
+                .gated(gate)
+                .packed(packed),
         )
     }
 
@@ -1476,6 +1491,7 @@ impl Service {
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
+        let packed = s.packed(&r)?;
         Ok(Writer::declare_gated(
             &self.session,
             &self.minter,
@@ -1486,7 +1502,8 @@ impl Service {
         )
         .await?
         .bounded(budget)
-        .metered(meter))
+        .metered(meter)
+        .packed(packed))
     }
 
     /// A [`StateWriter`] on a member of an exposed state resource, for
@@ -1509,6 +1526,7 @@ impl Service {
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
+        let packed = s.packed(&r)?;
         let w = Writer::declare_gated(
             &self.session,
             &self.minter,
@@ -1519,7 +1537,8 @@ impl Service {
         )
         .await?
         .bounded(budget)
-        .metered(meter);
+        .metered(meter)
+        .packed(packed);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -1625,7 +1644,8 @@ impl Service {
         Ok(
             EventWriter::new(&self.session, &self.minter, key.to_string(), &r, values)?
                 .bounded(s.budget(&r))
-                .gated(s.gate.clone()),
+                .gated(s.gate.clone())
+                .packed(s.packed(&r)?),
         )
     }
 

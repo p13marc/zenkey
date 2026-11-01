@@ -1,0 +1,21 @@
+# Another revision of `packed.v1` (packed/packed.v1.toml), for core §7.6's
+# reader: its `sensor` stream and `reading/{unit}` state are typed
+# `SensorWide`, pressure's maximum moved, so another tag. A consumer compiled against it refuses the owner's
+# records (zenkey/tests/packed.rs).
+[interface]
+name  = "packed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["packed/vectors.json"]
+
+[resources.sensor]
+kind = "stream"
+type = "packed:SensorWide"
+
+[resources."reading/{unit}"]
+kind        = "state"
+type        = "packed:SensorWide"
+params      = { unit = "string" }
+cardinality = 8

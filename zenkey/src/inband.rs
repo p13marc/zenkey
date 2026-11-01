@@ -22,6 +22,12 @@
 //! envelope by its Zenoh timestamp ([`Read::mark`]); beside an in-band
 //! stamp it is unordered.
 //!
+//! A reader that knows the resource's type then admits the record
+//! ([`admit`]): a packed type's (core §7.6) by its layout, under the tag
+//! CH carried, refused by name ([`Undecodable::Record`]) as the model's
+//! `Layout::check` refuses it; a packed record that came in no envelope has
+//! no tag, and is refused as `tag`.
+//!
 //! The decision is `zenkey_model::wire`'s, by the key and the Encoding
 //! alone, and the order of two marks `zenkey_model::seed`'s. A sample's
 //! Zenoh timestamp stays on it: a profile that reads *time* on a resource
@@ -33,8 +39,9 @@
 //! The consumer ([`crate::consumer`]), its state GET, the archive and the
 //! profile readers read every data sample through [`read`].
 
+use zenkey_model::packed::{Layout, ReadRefusal};
 use zenkey_model::seed::{self, Mark};
-use zenkey_model::wire::{self, Reading, Refusal};
+use zenkey_model::wire::{self, Reading, Refusal, Tag};
 use zenoh::sample::{Sample, SampleBuilder, SampleBuilderPut, SampleKind};
 use zenoh::time::Timestamp;
 
@@ -44,8 +51,13 @@ pub enum Read {
     /// A sample with no envelope: read as it arrived.
     Plain(Sample),
     /// An envelope's sample: a put's with its record as its payload, a
-    /// delete's unchanged, and the envelope's run and seq.
-    Enveloped { sample: Sample, stamp: wire::Stamp },
+    /// delete's unchanged, the envelope's run and seq, and CH's tag (a
+    /// packed record's type's, core §7.6; 0 otherwise, and for a delete).
+    Enveloped {
+        sample: Sample,
+        stamp: wire::Stamp,
+        tag: Tag,
+    },
     /// A put whose envelope was refused: undecodable, with the refusal
     /// ([`Refusal::reason`]). The sample is as it arrived, for a caller
     /// that shows it; it is never decoded, nor ordered.
@@ -58,6 +70,15 @@ impl Read {
     pub fn stamp(&self) -> Option<wire::Stamp> {
         match self {
             Read::Enveloped { stamp, .. } => Some(*stamp),
+            Read::Plain(_) | Read::Refused { .. } => None,
+        }
+    }
+
+    /// CH's tag, when the sample carried an envelope.
+    #[must_use]
+    pub fn tag(&self) -> Option<Tag> {
+        match self {
+            Read::Enveloped { tag, .. } => Some(*tag),
             Read::Plain(_) | Read::Refused { .. } => None,
         }
     }
@@ -98,7 +119,7 @@ impl Read {
         match self {
             Read::Refused { .. } => None,
             Read::Plain(s) => Mark::of(None, s.timestamp().map(stamp_of)),
-            Read::Enveloped { sample, stamp } => {
+            Read::Enveloped { sample, stamp, .. } => {
                 Mark::of(Some(*stamp), sample.timestamp().map(stamp_of))
             }
         }
@@ -114,14 +135,82 @@ pub fn read(sample: Sample) -> Read {
         Some(Ok(stamp)) => stamp,
     };
     if sample.kind() == SampleKind::Delete {
-        return Read::Enveloped { sample, stamp };
+        return Read::Enveloped {
+            sample,
+            stamp,
+            tag: Tag::NONE,
+        };
     }
-    let record = sample.payload().to_bytes()[stamp.envelope_bytes()..].to_vec();
+    let bytes = sample.payload().to_bytes();
+    let tag = wire::Header::from_byte(bytes[0]).tag;
+    let record = bytes[stamp.envelope_bytes()..].to_vec();
     let sample = SampleBuilder::<SampleBuilderPut>::try_from(sample)
         .expect("a put")
         .payload(record)
         .into();
-    Read::Enveloped { sample, stamp }
+    Read::Enveloped { sample, stamp, tag }
+}
+
+/// Why a received data sample is undecodable, never delivered nor ordered:
+/// its envelope refused (core §7.5), or its packed record refused by the
+/// layout of the type its reader holds (§7.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Undecodable {
+    Envelope(Refusal),
+    Record(ReadRefusal),
+}
+
+impl Undecodable {
+    /// The fixtures' token: `envelope/vectors.json`'s, or
+    /// `packed/vectors.json`'s.
+    #[must_use]
+    pub fn token(&self) -> &'static str {
+        match self {
+            Undecodable::Envelope(r) => r.token(),
+            Undecodable::Record(r) => r.token(),
+        }
+    }
+
+    /// The reason, in words, naming what refused it.
+    #[must_use]
+    pub fn reason(&self) -> String {
+        match self {
+            Undecodable::Envelope(r) => r.reason(),
+            Undecodable::Record(r) => format!("a packed record refused by its layout, {r}"),
+        }
+    }
+}
+
+impl std::fmt::Display for Undecodable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason())
+    }
+}
+
+/// Admits a read sample as its resource's type reads it, `layout` that
+/// type's when it is packed (core §7.6): a refused envelope is refused;
+/// a packed put's record is checked under the tag its CH carried, by the
+/// layout's checks in §7.6's order (`tag`, `length`, `code`, `extension`,
+/// `pad`); a packed put that came in no envelope has no tag, so `tag`. A
+/// delete carries no record, and every other type's sample is admitted.
+///
+/// # Errors
+/// The [`Undecodable`] refusal.
+pub fn admit(read: &Read, layout: Option<&Layout>) -> Result<(), Undecodable> {
+    if let Some(r) = read.refusal() {
+        return Err(Undecodable::Envelope(r));
+    }
+    let Some(layout) = layout else {
+        return Ok(());
+    };
+    let sample = read.sample();
+    if sample.kind() == SampleKind::Delete {
+        return Ok(());
+    }
+    let tag = read.tag().ok_or(Undecodable::Record(ReadRefusal::Tag))?;
+    layout
+        .check(tag.get(), &sample.payload().to_bytes())
+        .map_err(Undecodable::Record)
 }
 
 /// What a sample's envelope says: `None` for a sample that carries none,
