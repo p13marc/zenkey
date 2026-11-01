@@ -593,3 +593,61 @@ async fn r7_a_stopped_provider_reads_absent_only_from_a_complete_read() {
     let read = c.presence(T).await.unwrap();
     assert!(read.complete && read.providers.is_empty(), "{read:?}");
 }
+
+/// #1015: a presence wait whose deadline cuts a round short returns the
+/// provider an earlier read of that round found. Beside a provider holding
+/// the token, an instance whose descriptor GET is held open (a queryable
+/// that never replies) costs the round its last read, never its find; a
+/// reading with no deadline waits that GET out, and says why the instance
+/// is undescribed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r5_a_wait_cut_short_keeps_what_it_found() {
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let dets_s = client(&ep).await;
+    let ghost_s = client(&ep).await;
+    let (_tok, _tw) = detector(&dets_s, "vehicle-01/tok").await;
+    let ghost = "zk2/vehicle-01/ghost/@zk/instance/00000000000000aa";
+    let held: Arc<Mutex<Vec<zenoh::query::Query>>> = Arc::default();
+    let h = Arc::clone(&held);
+    let _q = ghost_s
+        .declare_queryable(ghost)
+        .callback(move |q| h.lock().unwrap().push(q))
+        .await
+        .unwrap();
+    let _token = ghost_s.liveliness().declare_token(ghost).await.unwrap();
+    eventually("the tool reads both instance tokens", || async {
+        presence::liveliness_keys(&tool, "zk2/vehicle-01/*/@zk/instance/*", T)
+            .await
+            .unwrap()
+            .len()
+            == 2
+    })
+    .await;
+    let c = tool_consumer(&tool, &["vehicle-01/*"]);
+
+    // The ghost's descriptor GET would wait 1 s; the wait has 400 ms.
+    let started = Instant::now();
+    let found = c
+        .wait_for_provider(Duration::from_millis(400))
+        .await
+        .unwrap();
+    assert_eq!(found, Some(addr("vehicle-01/tok")), "kept what it found");
+    assert!(
+        started.elapsed() < Duration::from_millis(900),
+        "within its deadline: {:?}",
+        started.elapsed()
+    );
+    assert!(!held.lock().unwrap().is_empty(), "the descriptor was asked");
+
+    let read = c.presence(Duration::from_millis(300)).await.unwrap();
+    assert_eq!(read.providers, [addr("vehicle-01/tok")]);
+    assert_eq!(read.undescribed, [addr("vehicle-01/ghost")]);
+    assert!(!read.complete, "{read:?}");
+    assert!(
+        read.errors
+            .iter()
+            .any(|e| e.contains("vehicle-01/ghost") && e.ends_with(": no reply")),
+        "{read:?}"
+    );
+}

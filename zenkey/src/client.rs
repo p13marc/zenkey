@@ -562,6 +562,7 @@ impl Client {
             &self.providers,
             &self.contract.iface,
             timeout,
+            None,
         )
         .await
     }
@@ -598,12 +599,14 @@ pub struct Present {
     /// 0.8).
     pub complete: bool,
     /// Every error reply of those reads, as
-    /// [`crate::presence::PresenceRead::errors`] spells them.
+    /// [`crate::presence::PresenceRead::errors`] spells them, then why each
+    /// descriptor in [`Present::undescribed`] was not read, as `the
+    /// descriptor of <system>/<service> (<instance>): <why>`.
     pub errors: Vec<String>,
     /// The addresses holding an instance token and no interface token whose
-    /// descriptor did not answer, or answered one that fails its checks
-    /// (§3.3): whether they serve the interface, tokenless, is unknown.
-    /// Sorted.
+    /// descriptor was not read: its GET failed, had no reply, answered one
+    /// that fails its checks (§3.3) or was not asked before a deadline.
+    /// Whether they serve the interface, tokenless, is unknown. Sorted.
     pub undescribed: Vec<Addr>,
 }
 
@@ -843,6 +846,7 @@ impl Fleet {
             &self.selection,
             &self.contract.iface,
             timeout,
+            None,
         )
         .await
     }

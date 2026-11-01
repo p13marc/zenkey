@@ -38,7 +38,9 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `presence::serving`'s: an interface token, or a tokenless interface's
   instance token and a descriptor marking it `"token": false`, absent only
   from a complete read, `Liveness::Unobservable` otherwise, a descriptor
-  not read in `Present::undescribed` (#1015); tools
+  not read in `Present::undescribed` with why in `errors`, and no read
+  past `wait_for_provider`'s deadline, a round it cuts short keeping what
+  it found (#1015); tools
   consume with `Consumer::for_tool` and read presence with
   `presence::liveliness_read`, which flags a GET that ran to its timeout,
   or whose session was cut off while it ran, as possibly incomplete (§8.1;

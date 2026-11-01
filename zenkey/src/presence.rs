@@ -970,91 +970,122 @@ const DESCRIBE_CONCURRENCY: usize = 64;
 /// instance of an address holding no token is asked, at most
 /// [`DESCRIBE_CONCURRENCY`] at once.
 ///
+/// Each read waits `timeout`, and no read waits past `deadline` when one
+/// is given: a reading the deadline cuts short asks nothing more and
+/// returns what its reads found, not complete. So a provider an earlier
+/// read found is never lost to the deadline ([`crate::consumer::Consumer::wait_for_provider`]).
+///
 /// It returns what each read established (observer §3.6). A liveliness
 /// read possibly incomplete ([`PresenceRead::complete`]), or a descriptor
 /// not read ([`crate::client::Present::undescribed`]), leaves the result
-/// not complete: a provider missing from it may be there. A read through
-/// a session cut off is not made: the first is the error
-/// [`Error::CutOff`], and a later one ends the reading, not complete, the
-/// tokens already seen kept.
+/// not complete: a provider missing from it may be there.
+/// - **A read through a session cut off is not made:** the first is the
+///   error [`Error::CutOff`], and a later one ends the reading, not
+///   complete, the tokens already seen kept.
+/// - **A descriptor not read** leaves its address in `undescribed`, the
+///   result not complete, and why in `errors`: a GET that failed (an
+///   error, never a panic: [`descriptor`] returns every failure, and a
+///   task that panicked is read the same), one with no reply (a session
+///   cut off by then answers it at once, with nothing, as it answers a
+///   liveliness read), one whose reply fails its checks, or one the
+///   deadline left unasked.
 pub(crate) async fn serving(
     session: &zenoh::Session,
     providers: &[crate::consumer::Provider],
     iface: &IfaceId,
     timeout: Duration,
+    deadline: Option<tokio::time::Instant>,
 ) -> Result<crate::client::Present> {
+    // The time a read may wait now: `None` once the deadline has come.
+    let budget = || match deadline {
+        None => Some(timeout),
+        Some(d) => Some(timeout.min(d.saturating_duration_since(tokio::time::Instant::now())))
+            .filter(|t| !t.is_zero()),
+    };
     let mut made = false;
     let mut complete = true;
     let mut errors = Vec::new();
     let mut tokened: BTreeSet<Addr> = BTreeSet::new();
     let mut instances: BTreeSet<(Addr, InstanceId)> = BTreeSet::new();
-    for p in providers {
+    'reads: for p in providers {
         let (sys, svc) = p.chunks();
         let alive = format!("zk2/{sys}/{svc}/@zk/alive/{iface}/**");
-        let Some(read) = made_read(session, &alive, timeout, &mut made).await? else {
-            complete = false;
-            break;
-        };
-        complete &= read.complete;
-        errors.extend(read.errors);
-        let mut held = false;
-        for key in &read.keys {
-            if let Ok(ZkKey::Alive { addr, .. }) = parse(key) {
-                tokened.insert(addr);
-                held = true;
-            }
-        }
-        if held && p.is_exact() {
-            continue;
-        }
         let instance = format!("zk2/{sys}/{svc}/@zk/instance/*");
-        let Some(read) = made_read(session, &instance, timeout, &mut made).await? else {
-            complete = false;
-            break;
-        };
-        complete &= read.complete;
-        errors.extend(read.errors);
-        for key in &read.keys {
-            if let Ok(ZkKey::Instance { addr, instance }) = parse(key) {
-                instances.insert((addr, instance));
+        for selector in [alive, instance] {
+            let Some(wait) = budget() else {
+                complete = false;
+                break 'reads;
+            };
+            let Some(read) = made_read(session, &selector, wait, &mut made).await? else {
+                complete = false;
+                break 'reads;
+            };
+            complete &= read.complete;
+            errors.extend(read.errors);
+            let mut held = false;
+            for key in &read.keys {
+                match parse(key) {
+                    Ok(ZkKey::Alive { addr, .. }) => {
+                        tokened.insert(addr);
+                        held = true;
+                    }
+                    Ok(ZkKey::Instance { addr, instance }) => {
+                        instances.insert((addr, instance));
+                    }
+                    _ => {}
+                }
+            }
+            if held && p.is_exact() {
+                break;
             }
         }
     }
     let mut tokenless = BTreeSet::new();
     let mut undescribed = BTreeSet::new();
+    let mut not_read = |addr: Addr, instance: &InstanceId, why: String| {
+        errors.push(format!("the descriptor of {addr} ({instance}): {why}"));
+        undescribed.insert(addr);
+    };
     let wanted: Vec<_> = instances
         .into_iter()
         .filter(|(addr, _)| !tokened.contains(addr))
         .collect();
     let mut pending = wanted.into_iter();
+    let mut asked: HashMap<tokio::task::Id, (Addr, InstanceId)> = HashMap::new();
     let mut tasks = tokio::task::JoinSet::new();
     loop {
         while tasks.len() < DESCRIBE_CONCURRENCY {
             let Some((addr, instance)) = pending.next() else {
                 break;
             };
+            let Some(wait) = budget() else {
+                not_read(addr, &instance, "not asked: the deadline came".to_owned());
+                continue;
+            };
             let session = session.clone();
-            tasks.spawn(async move {
-                let found = descriptor(&session, &addr, &instance, timeout).await;
-                (addr, found)
-            });
+            let (a, i) = (addr.clone(), instance.clone());
+            let task = tasks.spawn(async move { descriptor(&session, &a, &i, wait).await });
+            asked.insert(task.id(), (addr, instance));
         }
-        let Some(joined) = tasks.join_next().await else {
+        let Some(joined) = tasks.join_next_with_id().await else {
             break;
         };
-        match joined {
-            Ok((addr, Ok(Found::Descriptor(d, _)))) => {
+        let (id, found) = match joined {
+            Ok((id, found)) => (id, found),
+            Err(e) => (e.id(), Err(Error::Zenoh(format!("its task failed: {e}")))),
+        };
+        let Some((addr, instance)) = asked.remove(&id) else {
+            continue;
+        };
+        match found {
+            Ok(Found::Descriptor(d, _)) => {
                 if lists_tokenless(&d, iface) {
                     tokenless.insert(addr);
                 }
             }
-            Ok((addr, _)) => {
-                undescribed.insert(addr);
-            }
-            Err(e) => {
-                complete = false;
-                errors.push(format!("a descriptor GET's task failed: {e}"));
-            }
+            Ok(Found::Invalid(why)) => not_read(addr, &instance, format!("invalid: {why}")),
+            Ok(Found::Nothing) => not_read(addr, &instance, "no reply".to_owned()),
+            Err(e) => not_read(addr, &instance, e.to_string()),
         }
     }
     // An address that another of its instances shows serving is not unknown.

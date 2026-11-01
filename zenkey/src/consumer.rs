@@ -895,6 +895,7 @@ impl Consumer {
             &self.providers,
             &self.contract.iface,
             timeout,
+            None,
         )
         .await
     }
@@ -910,6 +911,8 @@ impl Consumer {
     /// instance token and descriptor (#1015). A read possibly incomplete
     /// that shows no provider, and a read through a session cut off from
     /// every other zenoh node, which is not made, leave the wait going on.
+    /// No read waits past `timeout`, so a round it cuts short still returns
+    /// a provider its earlier reads found.
     pub async fn wait_for_provider(&self, timeout: Duration) -> Result<Option<Addr>> {
         let deadline = tokio::time::Instant::now() + timeout;
         let mut pause = Duration::from_millis(20);
@@ -918,15 +921,23 @@ impl Consumer {
             if left.is_zero() {
                 return Ok(None);
             }
-            let read = self.presence(left.min(Duration::from_secs(1)));
-            match tokio::time::timeout(left, read).await {
-                Ok(Ok(found)) => {
+            // Each read waits at most 1 s and none past the deadline, so a
+            // round the deadline cuts short still returns what it found.
+            let read = crate::presence::serving(
+                &self.session,
+                &self.providers,
+                &self.contract.iface,
+                Duration::from_secs(1),
+                Some(deadline),
+            );
+            match read.await {
+                Ok(found) => {
                     if let Some(first) = found.providers.into_iter().next() {
                         return Ok(Some(first));
                     }
                 }
-                Ok(Err(Error::CutOff { .. })) | Err(_) => {}
-                Ok(Err(e)) => return Err(e),
+                Err(Error::CutOff { .. }) => {}
+                Err(e) => return Err(e),
             }
             let left = deadline.saturating_duration_since(tokio::time::Instant::now());
             tokio::time::sleep(pause.min(left)).await;
@@ -978,6 +989,7 @@ impl Consumer {
                     &[Provider::exact(provider)],
                     &self.contract.iface,
                     timeout,
+                    None,
                 )
                 .await?;
                 if read.providers.contains(provider) {
