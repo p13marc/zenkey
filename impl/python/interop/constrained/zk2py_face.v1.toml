@@ -1,0 +1,37 @@
+# constrained.md §7, keys across the face (core §8.5, 0.78; observer §7.5,
+# text 0.18; #609, round 95): the scenario's stream `level`, templated
+# stream member `axis/roll` and state `mode`, which zk2py's owner writes and
+# a far client reads through a byte-counting proxy. Beside them, two zk2py
+# probes of what a template's selector is: a rest parameter, and an event's
+# ULID chunk. It must load with no finding at all.
+[interface]
+name    = "zk2py_face"
+major   = 1
+minor   = 0
+summary = "zk2py's owner whose puts cross a constrained face"
+
+[resources.level]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources."axis/{axis}"]
+kind        = "stream"
+type        = { raw = "text/plain" }
+params      = { axis = "string" }
+cardinality = 4
+
+[resources."path/{path...}"]
+kind        = "stream"
+type        = { raw = "text/plain" }
+params      = { path = "path" }
+cardinality = 4
+
+[resources.mode]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.alarm]
+kind      = "event"
+type      = { raw = "text/plain" }
+rate      = "burst(100/h)"
+retention = "1h"

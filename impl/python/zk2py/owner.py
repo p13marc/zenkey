@@ -886,6 +886,22 @@ class Owner:
     #: which is E = 0 (core 0.76 §7.6).
     packed_epoch: int | None = None
 
+    #: The deployment catalog this owner was given (core 0.79 §8.6), a
+    #: :class:`zk2py.catalog.Catalog`, set before :meth:`start`, or None. "An
+    #: owner given a catalog counts its `time` fields from the catalog's
+    #: epoch, and states its id in its descriptor (§3.3)."
+    catalog: Any = None
+
+    def writing_epoch(self) -> int:
+        """The epoch this owner's packed ``time`` fields count from: its
+        catalog's, else the one its deployment states, else 0 (core §7.6,
+        §8.6)."""
+        from . import packed
+
+        if self.catalog is not None:
+            return self.catalog.epoch
+        return packed.deployment_epoch(self.packed_epoch)
+
     def encode_packed(self, key: str, value: Any) -> bytes:
         """``value``, the JSON reading of ``key``'s packed type, as its
         record (core §7.6 "Writing", "What a writer takes"), under the
@@ -896,7 +912,7 @@ class Owner:
         rec = self.packed_record(key)
         if rec is None:
             raise OwnerRefused(f"{key}: its type is not packed")
-        return rec.write(value, packed.deployment_epoch(self.packed_epoch))
+        return rec.write(value, self.writing_epoch())
 
     def _table(self, key: str) -> bool:
         """Whether ``key``'s resource carries a Zenoh timestamp the owner
@@ -1413,6 +1429,9 @@ class Owner:
             "instance": self.instance if instance is None else instance,
             # core §3.3 (0.73): "An owner MUST state its run there".
             **({"run": self.run_hex()} if self.run is not None else {}),
+            # core §3.3 (0.79): "An owner given a catalog MUST state its id
+            # there"; one with none leaves the member out.
+            **({"catalog": self.catalog.id} if self.catalog is not None else {}),
             "interfaces": [{
                 "iface": c.interface, "contract": c.fingerprint, "minor": c.minor or 0,
                 "token": c.interface not in self.tokenless,
@@ -1799,8 +1818,20 @@ class Owner:
     def role_keys(self, role: str, iface: str, rid: str) -> list[str]:
         """The key expression of ``rid`` (``<kind token>/<template>``) at
         each provider ``role`` is bound to, through the bindings as resolved
-        at start (R1, 0.20): ``<system>/*`` stays a wildcard over services."""
-        return [f"zk2/{p}/{iface}/{rid}" for p in self.resolved_bindings.get(role, [])]
+        at start (R1, 0.20): ``<system>/*`` stays a wildcard over services.
+
+        A resource named with its parameters (``stream/axis/{axis}``) is
+        subscribed by its template's selector, each parameter a wildcard, so
+        what is declared is its literal prefix (core §8.5, 0.78,
+        :func:`zk2py.face.resource_scope`); a concrete resource by its exact
+        key. A parameter the role binds (R2) is its value, ``self.system``
+        and ``self.service`` resolved, never a wildcard. Nothing wider than
+        ``rid`` is asked."""
+        from . import face
+
+        own = {"self.system": self.system, "self.service": self.service}
+        bound = {k: own.get(v, v) for k, v in self.params.get(role, {}).items()}
+        return [f"zk2/{p}/{iface}/{face.resource_scope(rid, bound)}" for p in self.resolved_bindings.get(role, [])]
 
     def subscribe_role(self, role: str, iface: str, rid: str, sink: Any, discarded: Any = None,
                        record: Any = None, epoch: int | None = None) -> None:

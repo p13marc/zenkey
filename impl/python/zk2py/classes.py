@@ -130,8 +130,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "puts it first at the wrap, and a re-mint's first descriptor states its new run (state_pairings §1, §7  "
      "step 3; descriptors family, D002) (round 93, core 0.73)"),
     # core 0.79 (#980 C1a): the descriptor's catalog.
-    ("owner", "core §3.3", "An owner given a catalog MUST state its id there", NOT_MET,
-     "not yet (round 95, core 0.79): zk2py's owner takes no catalog"),
+    ("owner", "core §3.3", "An owner given a catalog MUST state its id there", MET,
+     "owner.Owner.catalog, a catalog.Catalog: its id in _descriptor's catalog, the member left out without one  "
+     "(constrained_live step 0: GET from the router's side, the id stated, the checker reporting no code;  "
+     "descriptors family, ok-catalog, d002-catalog-*) (round 95, core 0.79)"),
     ("owner", "core §3.3", "One member is used: an owner SHOULD state", MET,
      "owner.Owner._descriptor's meta.zid, unless a test turns it off (state_zid)"),
     ("owner", "core §3.3", "An owner SHOULD write `meta.zid` as zenoh writes", MET,
@@ -302,10 +304,16 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "a zk2py consumer is an owner.Owner service, and the bundles it holds, those of the interfaces it implements, "
      "are each on a complete queryable (live_interop's retrieval); it holds none of an interface it only requires"),
     # core 0.78 (#980 C1b): keys across a face.
-    ("consumer", "core §8.5", "A consumer across a constrained face SHOULD subscribe to each concrete", NOT_MET,
-     "not yet (round 95, core 0.78): constrained.md §7 not run"),
-    ("consumer", "core §8.5", "A consumer across a constrained face SHOULD NOT use a selector wider", NOT_MET,
-     "not yet (round 95, core 0.78): constrained.md §7 not run"),
+    ("consumer", "core §8.5", "A consumer across a constrained face SHOULD subscribe to each concrete", MET,
+     "owner.Owner.role_keys: a concrete resource by its exact key at each bound provider, a template named with  "
+     "its parameters by its selector (face.resource_scope), so its literal prefix is declared (constrained_live  "
+     "step 6: 25 B a level put and 31 B an axis/roll put, §7 steps 1 and 2's own); a wildcard binding (R1)  "
+     "declares zk2/<system> and names no exact key without presence (step 7: 57 B, F-439) (round 95, core  "
+     "0.78)"),
+    ("consumer", "core §8.5", "A consumer across a constrained face SHOULD NOT use a selector wider", MET,
+     "owner.Owner.subscribe_role asks each provider for the resource its caller reads and nothing wider; a  "
+     "rest parameter's selector is */**, never ** (face.template_selector, F-438) (constrained_live steps 6,  "
+     "8a) (round 95, core 0.78)"),
     ("consumer", "core §11.1", "History (§2.5): a consumer's advanced subscriber MUST NOT", NA,
      "zk2py's consumers declare no advanced subscriber (budget_scenarios §3's, a measurement, declares no detection token)"),
     # -- caller --------------------------------------------------------------------------
@@ -363,8 +371,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §8.4", "A caller or tool MUST NOT depend on the encoding", MET,
      "live.retrieve_bundle verifies the hash, never the encoding, for every tool (core 0.68, F-387)"),
     # core 0.79 (#980 C1a): a reader resolving a named id.
-    ("observer", "core §8.6", "A reader MUST refuse each of these", NOT_MET,
-     "not yet (round 95, core 0.79): zk2py reads no catalog"),
+    ("observer", "core §8.6", "A reader MUST refuse each of these", MET,
+     "catalog.resolve: through the named catalog, else the first held whose lineage holds it, below that  "
+     "item's count; unknown_catalog and unknown_index (catalog family, succession.json's reads); echo_tool's  "
+     "--catalog reads its epoch so (readings) (round 95, core 0.79; who a reader is: F-437)"),
     ("observer", "core §11.1", "A generator MUST refuse an input that binds", MET,
      "acl.Principal binds by one name: no input can bind one by both"),
     ("observer", "core §11.1", "Under `deny`, a generator MUST NOT compile an", MET,
@@ -472,8 +482,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §7.4", "A tool SHOULD check the limit at start", MET,
      "live.memlock_said, at the start of timing_tool, arbitration_tool and echo_tool (round 89)"),
     # observer 0.18 (#980 C1b): a tool's half of core §8.5.
-    ("observer", "observer §7.5", "A tool across a constrained face SHOULD subscribe as core §8.5 says", NOT_MET,
-     "not yet (round 95, observer 0.18): constrained.md §7 not run"),
+    ("observer", "observer §7.5", "A tool across a constrained face SHOULD subscribe as core §8.5 says", MET,
+     "echo_tool --across-face SYSTEM/SERVICE with --contracts: face.scopes, each concrete resource's exact key  "
+     "and each template's selector, an event's ULID chunk a wildcard, a subscriber each (constrained_live step  "
+     "5: 25, 31 and 27 B a put, §7 steps 1, 2 and 4's own) (round 95, observer 0.18)"),
     # -- static --------------------------------------------------------------------------
     ("static", "core §1.1", "An implementation MUST refuse to build one, and", MET,
      "keys family"),
@@ -552,12 +564,15 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("static", "core §7.6", "That rest MUST hold at least one bit", MET,
      "packed.Record.read (packed family: Grow's 0b and 0bb0, Link reading LinkV2) (round 94, core 0.75)"),
     # core 0.79 (#980 C1a): §8.6's three static rules.
-    ("static", "core §8.6", "An implementation that reads a catalog MUST refuse it, naming the refusal", NOT_MET,
-     "not yet (round 95, core 0.79): zk2py reads no catalog"),
-    ("static", "core §8.6", "An implementation MUST compute it so", NOT_MET,
-     "not yet (round 95, core 0.79): zk2py computes no catalog id"),
-    ("static", "core §8.6", "A checker of succession MUST refuse a B that does not succeed A", NOT_MET,
-     "not yet (round 95, core 0.79): zk2py checks no succession"),
+    ("static", "core §8.6", "An implementation that reads a catalog MUST refuse it, naming the refusal", MET,
+     "catalog.read, in §8.6's order, each number read by its text (catalog family, documents.json) (round 95,  "
+     "core 0.79)"),
+    ("static", "core §8.6", "An implementation MUST compute it so", MET,
+     "catalog.catalog_id: sha256 of the JCS bytes, its first 4 bytes (catalog family, ids.json) (round 95,  "
+     "core 0.79)"),
+    ("static", "core §8.6", "A checker of succession MUST refuse a B that does not succeed A", MET,
+     "catalog.succession: epoch_moved, reassigned, removed, lineage, one step (catalog family, succession.json)  "
+     "(round 95, core 0.79)"),
     ("static", "core §9.1", "A contract MUST NOT need later TOML", MET,
      "contracts family (the five e000-toml11 cases)"),
     ("static", "core §9.2", "An implementation MUST report, for each fixture, exactly", MET,
@@ -661,6 +676,14 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("static", "core §7.6", "Where none is, E is 0, the Unix epoch", MET,
      "Owner.encode_packed under packed.deployment_epoch(Owner.packed_epoch), 0 where none is stated; zenctl  "
      "watch reads zk2py's clock records as now (packed_live py-rust) (core 0.76's F-433)"),
+    # core 0.79 (#980 C1a): stated without a keyword.
+    ("owner", "core §8.6", "An owner given a catalog counts its `time` fields from the catalog's epoch", MET,
+     "owner.Owner.writing_epoch, the catalog's epoch over packed_epoch, else 0; encode_packed under it  "
+     "(constrained_live step 0; readings) (round 95, core 0.79)"),
+    # observer 0.18 (#980 C1b): stated without a keyword.
+    ("observer", "observer §8.2", "Across a constrained face the three are too wide", MET,
+     "echo_tool --across-face subscribes by observer §7.5's scopes, refused beside a SELECTOR, and its scope  "
+     "names what it excludes (constrained_live step 5; readings) (round 95, observer 0.18)"),
     # core 0.74 (F-415): stated without a keyword; an instance key is no
     # data key, so §8.2's MUST NOT does not bind it.
     ("owner", "core §3.3", "Each put of it (below) carries a Zenoh timestamp the owner sets", MET,
