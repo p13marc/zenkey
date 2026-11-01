@@ -1,0 +1,14 @@
+# core §7.2, §9.2 W103: `encoding` on a packed type is ignored, with a
+# warning. A packed record always travels in an envelope.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/sensor.json"]
+
+[resources.a]
+kind = "stream"
+type = "packed:Sensor"
+encoding = "cbor"

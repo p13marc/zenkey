@@ -36,6 +36,7 @@
       "$ref": "#/$defs/SchemasSection",
       "default": {
         "jsonschema": [],
+        "packed": [],
         "proto_include": null,
         "protobuf": []
       }
@@ -912,6 +913,14 @@
             "type": "string"
           }
         },
+        "packed": {
+          "description": "Packed files (core §7.6, draft 3): strict JSON, types under `types`,\nreferenced as `packed:<Name>` or `packed:<stem>#<Name>`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
         "proto_include": {
           "description": "Include roots for protobuf imports, relative to the contract's\ndirectory. Default: `[\"proto\"]` when that directory exists, else `[\".\"]`.",
           "type": [
@@ -942,7 +951,7 @@
       ]
     },
     "TypeRef": {
-      "description": "A type reference: `\"pkg.Message\"`, `\"json:Name\"`, `\"json:stem#Name\"`,\nor `{ raw = \"<media type>\", media_param = \"<param>\" }`.",
+      "description": "A type reference: `\"pkg.Message\"`, `\"json:Name\"`, `\"json:stem#Name\"`,\n`\"packed:Name\"`, `\"packed:stem#Name\"`, or\n`{ raw = \"<media type>\", media_param = \"<param>\" }`.",
       "anyOf": [
         {
           "type": "string"

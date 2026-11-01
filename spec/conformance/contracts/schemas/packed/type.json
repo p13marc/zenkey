@@ -1,0 +1,21 @@
+{
+  "types": {
+    "A": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "float",
+          "minimum": 0
+        },
+        {
+          "name": "b",
+          "type": "string"
+        },
+        {
+          "name": "c",
+          "type": "bool"
+        }
+      ]
+    }
+  }
+}

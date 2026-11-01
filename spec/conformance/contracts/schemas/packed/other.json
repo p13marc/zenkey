@@ -1,0 +1,12 @@
+{
+  "types": {
+    "Sensor": {
+      "fields": [
+        {
+          "name": "on",
+          "type": "bool"
+        }
+      ]
+    }
+  }
+}

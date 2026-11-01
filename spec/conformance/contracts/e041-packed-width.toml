@@ -1,0 +1,15 @@
+# core §7.6, §9.2 E041: a counter of width 0 and of 65, an int of one value
+# (0 bits), a fixed point needing 67 bits, an enum whose `width` holds fewer
+# codes than it needs, and a closed enum of one value. An int of one value
+# and a reserved code is 1 bit, and a counter of 64 is fine.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/width.json"]
+
+[resources.a]
+kind = "stream"
+type = "packed:A"

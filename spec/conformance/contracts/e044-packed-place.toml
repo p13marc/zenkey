@@ -1,0 +1,30 @@
+# core §7.1, §9.2 E044: a packed type where no envelope carries it. An
+# explicit stream's type, an attachment, and an operation's request and
+# response: one per reference. A packed type on an explicit state is fine.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/sensor.json"]
+
+[resources.raw_video]
+kind = "stream"
+explicit = true
+type = "packed:Sensor"
+
+[resources.annotated]
+kind = "stream"
+type = { raw = "text/plain" }
+attachment = "packed:Status"
+
+[resources.calibrate]
+kind = "operation"
+request = "packed:Sensor"
+response = "packed:Status"
+
+[resources.held]
+kind = "state"
+explicit = true
+type = "packed:Status"

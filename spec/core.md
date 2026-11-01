@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.74** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.75** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -43,7 +43,7 @@ RFC 2119 and RFC 8174, when written in capitals.
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
   bind it, whichever of the roles above it plays. They are the rules of §1,
-  §7.5 and §9 that name no role, and the others §12 lists: those on what a
+  §7.5, §7.6 and §9 that name no role, and the others §12 lists: those on what a
   contract states, those naming their lint code, and §3.3's rule for a
   descriptor checker. Each binds it where it does what the rule governs
   (§12).
@@ -1563,9 +1563,10 @@ has a **type identity**: (kind, name, sha256 of its schema artifact).
 | `protobuf` | proto2 and proto3. Editions are not supported. |
 | `jsonschema` | The zk2 subset of JSON Schema 2020-12 (§7.3) |
 | `raw` | Images, audio, opaque buffers |
+| `packed` | Records of bit fields, sized from declared ranges and resolutions (§7.6) |
 
 `flatbuffer`, `ros2msg` and `cdr` are reserved kinds. Authoring format
-draft 2 has no spelling for them, so a contract declares such payloads as
+draft 3 has no spelling for them, so a contract declares such payloads as
 `raw` with a media type. `[Sc: types.md §2]` What a tool that shows or
 judges a payload decodes, these kinds through a plugin included:
 [`observer.md`](observer.md) §7.3.
@@ -1575,7 +1576,9 @@ judges a payload decodes, these kinds through a plugin included:
 | Spelling | Means |
 |---|---|
 | `"nav.v2.Position"` | a protobuf message, fully qualified, defined in a listed file. The well-known types of §9.4 are always available. |
-| `"json:Status"` | `$defs/Status`. The name MUST be unique across the listed files (E024). |
+| `"packed:Reading"` | `types/Reading` in a listed packed file. The name MUST be unique across the listed packed files (E024). `[F: contracts/e024-packed-ambiguous]` |
+| `"packed:sensor#Reading"` | `types/Reading` in the listed packed file whose stem is `sensor` |
+| `"json:Status"` | `$defs/Status`. The name MUST be unique across the listed JSON Schema files (E024). |
 | `"json:telemetry#Point"` | `$defs/Point` in the listed file whose stem is `telemetry` |
 | `{ raw = "image/jpeg" }` | opaque bytes of a media type |
 | `{ raw = "video/*", media_param = "codec" }` | a raw family. The sample's `Encoding` carries the concrete subtype, and `media_param` names the single-chunk template parameter tied to it. |
@@ -1583,6 +1586,12 @@ judges a payload decodes, these kinds through a plugin included:
 A reference that does not resolve is an error. So is a `$ref` outside the
 listed files.
 `[F: contracts/e023-type, e024-ambiguous, e025-media-param, e029-schema, e032-ref-dangling, e032-ref-outside, ok-json-qualified, ok-protobuf-well-known]`
+
+**Where a packed type goes.** A packed type MUST be the `type` of a
+stream, a state or an event, never an explicit stream's (E044). It is
+never an attachment or an operation's type either. Those travel with no
+envelope, so no reader could check the record's tag.
+`[F: contracts/e044-packed-place, ok-packed]`
 
 ### 7.2 Encodings and rendering
 
@@ -1601,8 +1610,10 @@ listed files.
 - **JSON Schema types** are encoded as JSON (the default) or CBOR, declared
   by `encoding`. Bytes are CBOR byte strings, or base64 in JSON. An
   attachment declares its own `attachment_encoding` by the same rule.
-  Protobuf is always binary, and `encoding` on a protobuf or raw type is
-  ignored, with a warning. `[F: contracts/w103-encoding]`
+  Protobuf is always binary, and `encoding` on a protobuf, packed or raw
+  type is ignored, with a warning. `[F: contracts/w103-encoding]`
+- **A packed record** always travels in an envelope, under the
+  `Encoding` `zenoh/bytes`, which costs no byte (§7.5, §7.6).
 - **Decode order** for a tool, and **Honest rendering**: [`observer.md`](observer.md) §7.3.
 
 ### 7.3 The JSON Schema subset
@@ -1709,7 +1720,7 @@ the most significant, down to 0:
 So CH is the form's code × 32, plus the width bit × 16, plus the tag. With
 tag 0, a mutation's CH is `0x00` with a 16-bit run and `0x10` with a 32-bit
 run. A delete's is `0x20` or `0x30`. And `0x1b` is `000 1 1011`: form 0, a
-32-bit run and tag 11. No type kind defines a tag in this version. A
+32-bit run and tag 11. Only the `packed` kind defines a tag (§7.6). A
 delete carries no record, so its tag is 0.
 
 **The forms.** Each form has one code. This version defines two of them,
@@ -1752,7 +1763,8 @@ reader refuse an attachment that is not an envelope.
 
 **Parsing.** An envelope is parsed without the contract, as a key is
 (§1.1). The parser knows the sample's kind, put or delete, and nothing
-more. So it reports a mutation's tag, and checks it against no type. An
+more. So it reports a mutation's tag, and checks it against no type:
+§7.6's reader does. An
 implementation MUST refuse an envelope for the first of these
 that applies, in this order:
 - no byte at all, so no CH (`short`);
@@ -1765,6 +1777,185 @@ that applies, in this order:
 
 Every envelope an implementation accepts MUST write back to the same
 bytes. `[F: envelope/vectors.json]`
+
+### 7.6 Packed records
+
+A **packed** type's record is a run of bit fields, each as wide as its
+declared codes need. So a record carries little more than its
+information. A packed record always travels in §7.5's envelope, and its
+type defines CH's tag.
+
+**The schema file.** A packed type is declared in a file that
+`[schemas] packed` lists (§9.1, §9.4). The file is strict JSON.
+- **Its top level** is an object holding `types`, and optionally
+  `description`. `types` maps each type's name to its record.
+- **A record** is an object holding `fields`, a list, and optionally
+  `description`. Each item of `fields` is a field, or the extension
+  marker, the string `"..."`.
+- **A field** is an object holding `name` and `type`, and optionally
+  `optional` (a boolean, `false` when absent) and `description`. Its
+  `type` names one of the field types below, and the other members it
+  holds are that type's.
+- **Names.** A type's name is `[A-Z][A-Za-z0-9]*`, a field's
+  `[a-z][a-z0-9_]*`, and an enum's value `[A-Za-z][A-Za-z0-9_]*`.
+
+Anything else in the file is E038.
+`[F: contracts/e038-packed-shape, e043-packed-type]`
+
+**Field types.** n is an enum's number of values, and k the number of
+reserved codes a field declares. ⌈log₂ c⌉ is the fewest bits that hold c
+codes.
+
+| `type` | Members | Width in bits |
+|---|---|---|
+| `int` | `minimum`, `maximum`: integers; `reserved` | ⌈log₂(`maximum` − `minimum` + 1 + k)⌉ |
+| `fixed` | `minimum`, `maximum`, `resolution`: decimal strings; `reserved` | ⌈log₂((`maximum` − `minimum`) / `resolution` + 1 + k)⌉ |
+| `enum` | `values`: names, in order; `escape`: a boolean; `width` | `width`, else ⌈log₂ n⌉, or ⌈log₂(n + 1)⌉ with `escape` |
+| `bool` | none | 1 |
+| `counter` | `width` | `width` |
+| `time` | `ms`: a boolean | 32, or 42 with `ms` |
+
+- **Bounds.** A range is never empty, and neither is an enum or a
+  record (E039). A width is from 1 to 64 bits, and an enum's `width`
+  holds its codes (E041). A name is never repeated: a field's in its
+  record, a value in its enum, a reserved code in its list (E042).
+  `[F: contracts/e039-packed-empty, e041-packed-width, e042-packed-duplicate]`
+- **A decimal string** is `-?(0|[1-9][0-9]*)(\.[0-9]+)?`, read as the
+  exact decimal it writes. A `resolution` is above 0, and divides
+  `maximum` − `minimum` (E040). `[F: contracts/e040-packed-fixed]`
+- **Its shortest form** has no zero at the end of a fraction, no point
+  with no digit after it, and is `0` for zero.
+
+**Codes.** Each field is written as an unsigned integer, its code, in its
+width.
+- **`int`:** a value v is written as v − `minimum`.
+- **`fixed`:** a value x is written as round((x − `minimum`) /
+  `resolution`), rounding a tie to the even integer. The code reads back
+  as `minimum` + code × `resolution`. So a value read is within half a
+  `resolution` of the value written: that bound is part of the
+  declaration.
+- **Exact arithmetic.** An implementation MUST compute a fixed-point
+  code, and the value it reads back, in exact decimal arithmetic, never
+  in binary floating point. `[F: packed/vectors.json]`
+- **Reserved codes.** `reserved` lists some of `not_available`, `error`
+  and `out_of_range`. They take the top codes of the width, from all ones
+  down, in that order. With all three, `not_available` is all ones,
+  `error` the code below it and `out_of_range` the one below that. A
+  writer whose value is outside the range writes `out_of_range`, where
+  the field declares it.
+- **`enum`:** the value at index i of `values` is written as i. With
+  `escape`, the all-ones code is the escape, a value this revision does
+  not name. A reader reads every code from n up as the escape, so a later
+  revision can name more values within the width.
+- **`bool`:** 1 is true and 0 is false.
+- **`counter`:** a count c is written as c modulo 2^`width`. A width
+  below 64 is a declared loss. A reader of a counter that wraps cannot
+  recover its total, and more than one wrap between two readings goes
+  unseen.
+- **`time`:** an instant t, in milliseconds since the Unix epoch, is
+  written as ⌊(t − 1000 × E) / 1000⌋, the seconds since the deployment
+  epoch E, in 32 bits. With `ms`, (t − 1000 × E) modulo 1000 follows in 10
+  bits. Without it, the milliseconds are dropped.
+- **The deployment epoch** E is a whole number of seconds since the Unix
+  epoch. Writer and reader each hold it as an input. This version carries
+  it nowhere.
+- **Unused codes.** A code that is no value and no declared reserved code
+  is unused. So is a millisecond code from 1000 to 1023. An enum with an
+  escape has none.
+
+**The layout.** Fields are written in `fields` order, most significant
+bit first, with no padding between them.
+- **A field** is its code, in its width.
+- **An optional field** starts with a presence bit. It is 1, followed by
+  the code, when the field is present, and 0 alone when it is absent.
+- **The extension marker** is one bit. It is 1 when a field after it is
+  present, and the record goes on. It is 0 when none is, and it ends the
+  record.
+- **After a marker,** every field is optional (E045).
+  `[F: contracts/e045-packed-extension]`
+- **The pad** follows the record's last bit. It is the zero bits up to
+  the next whole byte, fewer than 8.
+
+So the record's length follows from the layout and its presence and
+extension bits. A type with no optional field and no marker has one
+length.
+
+**Growth.** A later revision appends optional fields after its
+predecessor's last marker, and a marker of its own when it may grow
+again. A reader of the earlier revision reads its own fields, meets that
+marker as 1, and ignores what follows. A reader of the later revision
+reads an earlier writer's marker as 0, and its appended fields as absent.
+§9.8 classifies the change.
+
+**The tag.** A type's **layout form** describes its root's wire: the
+fields before its first marker, and that marker. It is a JSON array of
+each root field's form, then `"..."` where the root ends at a marker. A
+field's form is an object with `type`, `width` and `optional`, and:
+- for `int`, `minimum`, `maximum` and `reserved`;
+- for `fixed`, `minimum`, `maximum` and `resolution`, each a decimal
+  string in its shortest form, and `reserved`;
+- for `enum`, `escape`, and `values`, the number of values, when there is
+  no escape;
+- for `time`, `ms`.
+
+`reserved` is a list of the declared names, in the order above. Names and
+descriptions are left out, so a field renamed keeps its tag. The tag is
+the low four bits of the last byte of the sha256 of the form's JCS bytes
+(RFC 8785). An implementation that writes a record MUST write the type's
+tag in CH's tag bits (§7.5). `[F: packed/vectors.json]`
+
+**Writing.** An implementation that writes a record MUST write the bits
+above for its value, then the pad. An implementation MUST NOT write a
+record for a value that has no code: a value outside its range, a name that is not declared,
+or an instant outside the epoch's 2^32 seconds. `[F: packed/vectors.json]`
+
+**Reading.** An implementation that reads a record of a packed type MUST
+refuse it for the first of these that applies, in this order. Each
+refusal is named.
+- CH's tag is not the type's (`tag`).
+- Then, reading the fields in order:
+  - the record ends before a bit the layout needs (`length`);
+  - a field's code is unused (`code`).
+- A marker read as 1 is followed by no present field (`extension`).
+- The record holds a byte after its pad (`length`).
+- A bit of the pad is 1 (`pad`).
+
+`[F: packed/vectors.json]`
+- **A later revision's fields.** Where an implementation's layout ends
+  with a marker read as 1, the rest of the record is a later revision's,
+  which it ignores. That rest MUST hold at least one bit (`length`). The
+  `extension`, `length` and `pad` checks after the fields are then not
+  made.
+  `[F: packed/vectors.json]`
+
+**What the checks catch.** A reader that holds another revision of a
+type, or another type, still matches its tag 1 time in 16.
+- **The length** refuses most of those. A type with no optional field and
+  no marker has one length, so a record of another length is refused.
+- **Optional fields and markers** weaken it. The record's length then
+  depends on its presence bits, which the reader reads by its own
+  layout, so a record of the wrong revision can have a length it
+  accepts.
+- **A marker read as 1** at the end of the reader's layout leaves only a
+  lower bound on the length.
+- **Unused codes and the pad** refuse some more.
+- **Where more is needed,** a reader takes the fingerprint from the
+  owner's descriptor (§3.3), never from the record.
+
+**The JSON reading.** A tool shows a record as a JSON object, with a
+member for each field present:
+- `int`: an integer;
+- `fixed`: a string holding `minimum` + code × `resolution`, in its
+  shortest form;
+- a reserved code of either: its name, a string;
+- `enum`: the value's name, or `null` for the escape;
+- `bool`: `true` or `false`;
+- `counter`: an integer;
+- `time`: an integer, milliseconds since the Unix epoch.
+
+An absent optional field has no member, and neither has a field after a
+marker read as 0. A writer takes the same object, a fixed-point value as
+a string or a number. `[F: packed/vectors.json]`
 
 ---
 
@@ -2144,7 +2335,7 @@ is not TOML is **E000**, reported once, and it stops the load.
 |---|---|
 | `[interface]` | `name`, `major` (an integer, 0 to 2^32−1), `minor` (W104 when absent), `summary`, `uses` (profile ids) |
 | `[defaults]`, `[defaults.<kind>]` | the defaultable fields of Appendix D, plus `annotations`. `<kind>` is an authoring kind: `stream`, `state`, `event`, `operation`. |
-| `[schemas]` | `protobuf` (files), `proto_include` (import roots), `jsonschema` (files) |
+| `[schemas]` | `protobuf` (files), `proto_include` (import roots), `jsonschema` (files), `packed` (files, §7.6) |
 | `[resources."<template>"]` | `kind` (`stream`, `state`, `event`, `operation`), plus the fields of Appendix D |
 | `[requires.<role>]` | `interface`, `resources`, `cardinality` (`one`, `many`), `optional`, `doc`, `annotations` |
 
@@ -2206,11 +2397,11 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | E021 | two templates under one kind token with the same shape (§2.2) | once per template after the first of its shape, in template order (below) |
 | E022 | `epoch` does not name a single-chunk parameter of its template; or a second template of the interface declares `epoch` | per resource for the first condition; once per `epoch` template after the first, in template order, for the second |
 | E023 | a type reference that does not resolve (§9.4), or a raw type that is not a media type | per reference |
-| E024 | a `json:` name defined by several listed files, or two listed JSON Schema files with one stem or one id | per reference; per listed file whose stem or id an earlier one took, once (that file is not loaded, §9.4) |
+| E024 | a `json:` or `packed:` name defined by several listed files of its kind; two listed files of one kind, JSON Schema or packed, with one stem; or two listed JSON Schema or packed files with one id | per reference; per listed file whose stem or id an earlier one took, once (that file is not loaded, §9.4) |
 | E025 | `media_param` does not name a single-chunk parameter of the template | per reference |
 | E026 | `rate` not `rare`, `low` or `burst(<n>/h)` (n from 1 to 2^32−1, decimal, no leading zero); `retention` not `<n>` + `s`/`m`/`h`/`d`/`w` (n ≥ 1, decimal digits, leading zeros allowed, the seconds at most 2^64−1, unsigned) (§2.6) | per field |
 | E027 | a string in the canonical form (§9.5) outside printable ASCII (0x20–0x7E), keys included | per value |
-| E028 | a number outside the canonical domain (§9.5): an integer outside ±(2^53−1), a float that is not finite, or a float JCS writes as such an integer; in the canonical form, or in a JSON Schema artifact | per value; once per artifact |
+| E028 | a number outside the canonical domain (§9.5): an integer outside ±(2^53−1), a float that is not finite, or a float JCS writes as such an integer; in the canonical form, or in a JSON Schema or packed artifact | per value; once per artifact |
 | E029 | a schema file missing, unreadable, not JSON (a duplicate member included), or not compiling (protobuf editions, and a file under no import root, included) (§9.4) | per file |
 | E030 | a role not `[a-z][a-z0-9_]*`, an `interface` not `<name>.v<major>`, a `resources` entry that is not a template, or `resources = []` | per finding |
 | E031 | `deprecated.replaced_by` names no other template of the interface, or `since` is greater than `minor` (checked only when `minor` is present) | per condition (both can fire on one resource) |
@@ -2220,6 +2411,14 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | E035 | a requirement names a resource its interface does not declare, when that interface is in the set; checked against the interface's first declaration (below) | per resource name (set check) |
 | E036 | two contracts of a set declare one interface id | per declaration after the first (set check) |
 | E037 | a JSON Schema keyword outside the subset (§7.3) | once per keyword and file |
+| E038 | a packed file outside §7.6's shape: its top level, a type or a field missing a member it needs, holding one it does not take, or holding a value of the wrong type or spelling, a name's included | once per object: the file, a type or a field |
+| E039 | an empty packed declaration: a range whose `minimum` is above its `maximum`, an enum with no value, or a record with no field (§7.6) | per field or record |
+| E040 | a fixed-point field whose `minimum`, `maximum` or `resolution` is not a decimal string, or whose `resolution` is not above 0 or does not divide `maximum` − `minimum` (§7.6) | per field |
+| E041 | a packed field whose width is not from 1 to 64 bits, or an enum whose `width` holds fewer codes than it needs (§7.6) | per field |
+| E042 | a name repeated in a packed file: a field's in its record, a value in its enum, or a reserved code in its list | per repeat, after the first |
+| E043 | a packed field whose `type` names no field type of §7.6 | per field |
+| E044 | a packed type with no envelope to carry it: an explicit stream's type, an attachment, or an operation's type (§7.1) | per reference |
+| E045 | an extension marker misplaced: a field after a marker that is not optional, or a marker right after another (§7.6) | per field or marker |
 | W101 | two resolved resources under one token whose templates overlap, with different types (the payload type, or an operation's request and response) | per pair |
 | W102 | an operation's request type has a top-level field named like a template parameter | per resource |
 | W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it, judged on resolved types only (cascade 6) | per field (a defaulted one is silent) |
@@ -2247,6 +2446,19 @@ because of these rules:
    type takes the field: `encoding` waits for the payload type, or, on an
    operation, for all four types; `attachment_encoding` for the attachment.
    `[F: contracts/e023-encoding]`
+7. **In a packed file,** a type whose name is not a type name is E038, and
+   defines no type. A file whose `types` is missing, or is not an object,
+   defines none.
+   - A field gets at most one of E038 and E043, and then nothing more.
+     E043 is checked first, on a `type` that is a string.
+   - A field gets at most one of E039, E040 and E041, the first met in
+     this order: a decimal string that does not read (E040), an empty
+     range (E039), a `resolution` not above 0 or not dividing (E040), and
+     the width (E041).
+   - E042 and E045 read the fields of a record that have neither E038 nor
+     E043. A repeat inside one field's `values` or `reserved` is E042 too,
+     on a field without E038.
+   `[F: contracts/e038-packed-shape, e042-packed-duplicate, e045-packed-extension]`
 
 **Order.** Resources are taken in the bytewise order of their template
 text: a sorted table's order, not the file's, since TOML gives a table's
@@ -2368,13 +2580,29 @@ MUST have the same fingerprint.
     An empty or absent fragment is the whole document. A fragment that does
     not start with `/` (`#anchor`) is not a pointer. The pointer MUST
     resolve.
-  - **In a bundle,** which keeps no paths, the file part names the artifact
-    whose `name` is the stem of its last path segment. Stems and ids are
-    unique per contract, so every loaded file is an artifact under its own
-    stem, and this is the file the path named: in the bundle of a contract
-    with no E024 and no E032, every `$ref` resolves.
+  - **In a bundle,** which keeps no paths, the file part names the JSON
+    Schema artifact whose `name` is the stem of its last path segment.
+    Stems and ids are unique per contract, so every loaded file is an
+    artifact under its own stem, and this is the file the path named: in
+    the bundle of a contract with no E024 and no E032, every `$ref`
+    resolves.
 
 `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]`
+
+**Packed.** A packed file is read as a JSON Schema file is, and declares
+§7.6's types.
+- **The artifact** is the document, read as strict JSON (E029). Its id
+  hashes the document's JCS bytes, and its `name` is the file's stem.
+- **Stems and ids.** A stem MUST be unique among the listed packed files,
+  and an id among the listed JSON Schema and packed files (E024). A later
+  file whose stem or id is taken is not loaded.
+- **`packed:Name`** is `types/Name` in the one listed packed file that
+  defines it (E023 when none does, E024 when several do).
+- **`packed:stem#Name`** looks only in the packed file with that stem.
+- **Its declarations** are linted E038 to E045, and its placement E044
+  (§7.1).
+
+`[F: contracts/ok-packed, e024-packed-ambiguous]`
 
 **Raw.** A media type is `<type>/<subtype>` or `<type>/*`. Each token is a
 lowercase letter or digit followed by lowercase letters, digits or
@@ -2390,7 +2618,7 @@ always present.
 | `format` | `"zk2-contract/draft-1"` |
 | `interface` | the interface id, `"<name>.v<major>"` |
 | `uses` | the profile ids, deduplicated, sorted by (name as a string, major as a number) |
-| `schemas` | one `{"id", "kind", "name"}` per artifact (§9.4), sorted by `id`. `kind` is `protobuf` or `jsonschema`. |
+| `schemas` | one `{"id", "kind", "name"}` per artifact (§9.4), sorted by `id`. `kind` is `protobuf`, `jsonschema` or `packed`. |
 | `resources` | one object per resource, sorted by (kind token's spelling, template), bytewise: `@op` < `@state` < `@stream` < `events` < `state` < `stream` |
 | `requires` | an object keyed by role |
 
@@ -2432,6 +2660,7 @@ always present.
 **A type** is one of these:
 - `{"kind": "protobuf", "name": <fully qualified message>, "schema": <artifact id>}`;
 - `{"kind": "jsonschema", "name": <the $defs key, without any stem>, "schema": <artifact id>}`;
+- `{"kind": "packed", "name": <the types key, without any stem>, "schema": <artifact id>}`;
 - `{"kind": "raw", "media_type": …, "media_param": <name or null>}`.
 
 **A requirement** is `{"interface", "resources", "cardinality",
@@ -2440,6 +2669,12 @@ or `null` for "all".
 
 **Excluded:** `minor`, the interface's `summary`, and every `doc`. An
 operation's `summary` *type* is included, and so is `deprecated.reason`.
+
+**The format tag** is unchanged by authoring draft 3. A contract that
+lists no packed file has the canonical bytes, and the fingerprint, it had
+under draft 2. One that lists one holds the kind `packed`, which no
+earlier form holds, so the two cannot be confused.
+`[F: contracts/ok-packed]`
 
 **Restrictions.** Every string, keys included, is printable ASCII
 (0x20–0x7E), and every number is in the **canonical domain**:
@@ -2472,7 +2707,7 @@ Its fingerprint is
 `sha256:8c7493396b63865ef028879e04c641c76fd18178f4d6a6cac8c166f7b94c8577`.
 
 **Portability.**
-- Canonical bytes are portable for JSON Schema and raw types.
+- Canonical bytes are portable for JSON Schema, packed and raw types.
 - For protobuf, they are portable only between implementations whose
   `FileDescriptorSet`s match byte for byte: `protox` 0.9 matches `protoc`
   3.21.12 with the flags above (spike S7). The protobuf fixtures assume
@@ -2489,7 +2724,8 @@ the extra documents it references:
 ```json
 {"contract": <canonical contract>,
  "schemas": {"sha256:…": {"kind": "protobuf", "data": "<base64 FileDescriptorSet>"},
-             "sha256:…": {"kind": "jsonschema", "data": <JSON Schema document>}},
+             "sha256:…": {"kind": "jsonschema", "data": <JSON Schema document>},
+             "sha256:…": {"kind": "packed", "data": <packed document>}},
  "extras": {"sha256:…": {"media_type": "application/json", "data": <JSON document>}}}
 ```
 
@@ -2523,7 +2759,7 @@ in order, and refuse with the given tag at the first failure.
 | 6 | The contract keeps §9.5's restrictions | `restrictions` |
 | 7 | `schemas` and `extras` are objects when present (absent means empty), and `contract.schemas` is a list of `{id, kind}` | `shape` |
 | 8 | Every key of `schemas` is listed by the contract | `unlisted_schema` |
-| 9 | For each listed schema, in id order: it is present (`missing_schema`); its `kind` is the listed one, an entry that is not an object or has no `kind` included (`schema_kind`); it has a `data` member and no member besides `kind` and `data`, `data` is base64 text for protobuf, and its kind is `protobuf` or `jsonschema` (`shape`); it hashes to its id, from the decoded bytes for protobuf and the JCS bytes for jsonschema (`schema_hash`) | as given |
+| 9 | For each listed schema, in id order: it is present (`missing_schema`); its `kind` is the listed one, an entry that is not an object or has no `kind` included (`schema_kind`); it has a `data` member and no member besides `kind` and `data`, `data` is base64 text for protobuf, and its kind is `protobuf`, `jsonschema` or `packed` (`shape`); it hashes to its id, from the decoded bytes for protobuf and the JCS bytes for jsonschema and packed (`schema_hash`) | as given |
 | 10 | For each extra, in id order: it has `data`, no member besides `media_type` and `data`, and a `media_type` that is a string when present (`shape`); the JCS bytes of `data` hash to its id (`extra_hash`) | as given |
 | 11 | The extras' ids are exactly the `views.document` values of the contract's resources | `extras` |
 | 12 | Where the caller expects a fingerprint (from a contract key or a descriptor), the contract's fingerprint equals it | `fingerprint` |
@@ -2601,7 +2837,7 @@ The steps' details `[F: bundles/*]`:
   - their canonical forms are equal once each schema id is replaced by its
     artifact's `kind` and `name`; and
   - their artifacts, matched by `kind` and `name`, are equal: JSON Schema
-    documents by their JCS bytes, and protobuf `FileDescriptorSet`s as
+    and packed documents by their JCS bytes, and protobuf `FileDescriptorSet`s as
     messages, once source info and every default `json_name` are dropped.
     The default `json_name` is protoc's: the field name with each `_`
     removed and the letter after it upper-cased. Raw types have no
@@ -2719,7 +2955,7 @@ The request, response, error and summary types follow the type rules below.
 
 | Change | Class | Rule |
 |---|---|---|
-| The schema kind changed (raw, protobuf, jsonschema) | breaking | `type_kind_changed` |
+| The schema kind changed (raw, protobuf, jsonschema, packed) | breaking | `type_kind_changed` |
 | A raw media type changed | breaking | `media_type_changed` |
 | A raw `media_param` changed | review | `media_param_changed` |
 | An artifact that does not decode, or lacks the named type; a `$ref` the comparison follows that resolves to nothing in its revision (no artifact by that stem, or no member at that pointer) | review (a conforming builder never produces one; verification checks hashes, not content) | `schema_unreadable` |
@@ -2858,6 +3094,46 @@ added is the one undecided change measured (spike S7): a new writer sends
 the new variant, and an old reader refuses it. A branch added to an
 `anyOf`, or removed from either, is left to a human.
 `[F: compat/payload/jsonschema/oneof-add-branch, anyof-add-branch]`
+
+**Packed payloads:** the wire is the layout (§7.6), so the rules read it
+field by field. Names and descriptions are not the wire.
+- **What is compared.** Each revision's `fields`, item by item, from the
+  first. A marker meets a marker. Two fields are compared by their
+  declarations, the rules below.
+- **A different length** is growth behind a marker when the shorter list
+  ends with a marker, and the longer goes on after it. An optional field
+  appended or removed there is compatible. Any other difference of length
+  or order is breaking (`fields_changed`).
+- **Breaking:**
+  - a field's `type` changed (`type_changed`), or a marker where the other
+    revision has a field (`fields_changed`);
+  - `optional` toggled (`presence_changed`): the presence bit appears or
+    goes;
+  - a bound moved, `minimum` or `maximum`, compared as values
+    (`bound_changed`), so `"2.00"` and `"2"` are one bound;
+  - a `resolution` changed (`resolution_changed`);
+  - a width changed (`width_changed`): a counter's `width`, an enum's
+    width, or `ms` toggled;
+  - `reserved` changed (`reserved_changed`): the codes move;
+  - an enum's escape toggled, a value moved to another index, or a value
+    added or removed where no escape reads it (`enum_changed`).
+- **Review:**
+  - a field renamed (`field_renamed`);
+  - an enum value renamed in place, to a name the other revision does not
+    hold (`enum_value_renamed`);
+  - a value removed from the end of an enum with an escape
+    (`enum_value_removed`): an old writer still writes it, and a new
+    reader reads the escape.
+- **Compatible:** a value added at the end of an enum with an escape,
+  within its width: an old reader reads it as the escape. And every
+  change to a name or a `description` not listed above.
+
+`[F: compat/payload/packed/append-behind-marker, remove-behind-marker,
+append-closed, marker-added, type-changed, optional-toggled, bound-moved,
+bound-respelled, resolution-changed, width-widened, reserved-added,
+enum-reordered, enum-closed-added, enum-escape-widened, field-renamed,
+enum-value-renamed, enum-escape-removed, enum-escape-added,
+description-only, compat/transitive/packed-group-reused]`
 
 ---
 
@@ -3205,9 +3481,9 @@ The format is the generator's own. The reference reads an enrollment file
 
 Conformance is claimed by role. Five of §0's roles have a **class** each:
 that role's rules, and the static rules that bind every implementation
-(§0). The static rules are those of §1, §7.5 and §9, and those on what a
+(§0). The static rules are those of §1, §7.5, §7.6 and §9, and those on what a
 contract states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of
-any of these sections, §1, §7.5 and §9 included, that names a role is that
+any of these sections, §1, §7.5, §7.6 and §9 included, that names a role is that
 role's. A rule elsewhere that names the
 lint code checking it (§9.2) is static too, and so is §3.3's rule for a
 descriptor checker. A class holds its role's rules in this text and in
@@ -3215,7 +3491,7 @@ descriptor checker. A class holds its role's rules in this text and in
 
 **How a static rule binds.** A static rule binds an implementation where
 it does what the rule governs. Such acts are parsing or building a key,
-parsing or writing an envelope (§7.5), slugging a value, linting a
+parsing or writing an envelope (§7.5) or a packed record (§7.6), slugging a value, linting a
 contract, building or verifying a bundle, checking a history and
 classifying a revision. A rule on what a contract
 states binds it through the contracts it writes and the lints it runs.
@@ -3899,6 +4175,15 @@ brief:
   A key, as a session hears it, and the sample's `Encoding` → whether the
   sample carries an envelope (`carries.json`, read by
   [`observer.md`](observer.md) §7.3).
+- **`packed/`**: one packed document, shared by every case (`schema`).
+  Each of its types → its layout form, that form's sha256, its tag, each
+  item's width and start, and the shortest and longest record this
+  revision writes (`layouts`). A type, a deployment epoch where its
+  fields need one, and a value → the record's bits before the pad, its pad
+  and its bytes in hex, or the writer's refusal (`writes`). A type, a tag
+  and a record's bytes → the JSON reading, or the reader's refusal, the
+  first in §7.6's order (`reads`). Every accepted write reads back under
+  the type's tag, to its value or to the `reads_as` its case gives.
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).

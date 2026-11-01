@@ -1,0 +1,62 @@
+{
+  "types": {
+    "A": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "counter",
+          "width": 0
+        },
+        {
+          "name": "b",
+          "type": "counter",
+          "width": 65
+        },
+        {
+          "name": "c",
+          "type": "int",
+          "minimum": 7,
+          "maximum": 7
+        },
+        {
+          "name": "d",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "1",
+          "resolution": "0.00000000000000000001"
+        },
+        {
+          "name": "e",
+          "type": "enum",
+          "values": [
+            "x",
+            "y",
+            "z"
+          ],
+          "width": 1
+        },
+        {
+          "name": "f",
+          "type": "enum",
+          "values": [
+            "only"
+          ]
+        },
+        {
+          "name": "g",
+          "type": "int",
+          "minimum": 7,
+          "maximum": 7,
+          "reserved": [
+            "not_available"
+          ]
+        },
+        {
+          "name": "h",
+          "type": "counter",
+          "width": 64
+        }
+      ]
+    }
+  }
+}

@@ -49,6 +49,10 @@
       "error": "shape",
       "ok": false
     },
+    "packed.bundle.json": {
+      "fingerprint": "sha256:ce1e8463ea4c5750fcb4ab75c311261e52699de538b0a5759b69ab1b3a6a75c2",
+      "ok": true
+    },
     "ref-names-no-artifact.bundle.json": {
       "fingerprint": "sha256:7765aa53db06c50e99223f132d01c55d7883222a2efd8c19ca507daa9c2a8a03",
       "ok": true
@@ -67,6 +71,10 @@
     },
     "schema-entry-not-object.bundle.json": {
       "error": "schema_kind",
+      "ok": false
+    },
+    "schema-hash-packed.bundle.json": {
+      "error": "schema_hash",
       "ok": false
     },
     "schema-hash-protobuf.bundle.json": {

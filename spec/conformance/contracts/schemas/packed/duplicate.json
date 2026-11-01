@@ -1,0 +1,40 @@
+{
+  "types": {
+    "A": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "bool"
+        },
+        {
+          "name": "a",
+          "type": "bool"
+        },
+        {
+          "name": "a",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1,
+          "reserved": [
+            "error",
+            "error"
+          ]
+        },
+        {
+          "name": "b",
+          "type": "enum",
+          "values": [
+            "x",
+            "y",
+            "x",
+            "x"
+          ]
+        },
+        {
+          "name": "b",
+          "type": "nope"
+        }
+      ]
+    }
+  }
+}

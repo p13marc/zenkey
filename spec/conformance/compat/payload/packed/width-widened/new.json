@@ -1,0 +1,13 @@
+{
+  "types": {
+    "Status": {
+      "fields": [
+        {
+          "name": "n",
+          "type": "counter",
+          "width": 32
+        }
+      ]
+    }
+  }
+}

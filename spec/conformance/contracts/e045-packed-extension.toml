@@ -1,0 +1,13 @@
+# core §7.6, §9.2 E045: two fields after a marker that are not optional (one
+# saying so), and a marker right after another.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/extension.json"]
+
+[resources.a]
+kind = "stream"
+type = "packed:A"

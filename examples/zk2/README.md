@@ -33,7 +33,7 @@ cargo run -p zenkey-model --bin zk2 -- contract bundle <file> --history examples
 | [`acl/`](acl/) | Access-control enrollments (spec §11) for the walkthrough's vehicle router and the tcgui pilot: principals, the services, archives and tools they run, their bindings and calls; and the vehicle router's face policy toward the ground (`walkthrough.face.toml`, `link.v1`). `zenctl acl gen` plans them; `*.enrollment.toml` and `*.face.toml` are deployment files, not contracts | #612, #769 |
 | [`link/`](link/) | `link.v1`'s scenarios as an example: the `radio.v1` contract, every kind exposed in part, with its enrollment and the lab router's face policy. `zenctl acl gen --face-policy` compiles them into the `access_control` and `downsampling` blocks; `zenctl check face` judges a router's block against them | #769 |
 
-## The authoring format (draft 2, r3.3)
+## The authoring format (draft 3, r3.3)
 
 **Draft 1** applies r3.3's decisions (D1–D26, `docs/zk2/architecture.md`
 §0.3) to draft 0, which the mappings were first written in. `zenkey-model`
@@ -51,6 +51,15 @@ form and the fingerprint of one that writes the number
 ([`ok-cardinality-unbounded`](../../spec/conformance/contracts/ok-cardinality-unbounded.toml)).
 The canonical form did not change, so its `format` tag is still
 `zk2-contract/draft-1`, and no published fingerprint moved.
+
+**Draft 3** (core 0.75, #979) adds the `packed` type kind (core §7.6):
+`[schemas] packed` lists packed files, strict JSON whose `types` are
+records of bit fields, and a type reference reads `packed:Name` or
+`packed:stem#Name`. A packed type is a stream's, a state's or an event's,
+never an explicit stream's, an attachment or an operation's (E044). A
+contract that lists no packed file has the canonical form it had, so the
+`format` tag is still `zk2-contract/draft-1` and no example's fingerprint
+moved.
 
 ### One file per interface major
 
@@ -96,6 +105,7 @@ defaulted or written out.
 [schemas]
 protobuf   = ["proto/nav/v2/nav.proto"]   # proto2/proto3 only (no editions yet)
 jsonschema = ["schemas/nav.json", "../../../spec/profiles/telemetry/telemetry.v1.json"]   # a profile's standard schema, by its path
+packed     = ["packed/sensor.json"]            # draft 3: packed records (core §7.6), stem `sensor`
 ```
 
 **Type references**, used by `type`, `attachment`, `request`, `response`,
@@ -104,6 +114,7 @@ jsonschema = ["schemas/nav.json", "../../../spec/profiles/telemetry/telemetry.v1
 | Spelling | Means |
 |---|---|
 | `"nav.v2.Position"` | a protobuf message, fully qualified, defined in a listed `.proto` file. The well-known types (`google.protobuf.Empty`, …) are always available. |
+| `"packed:Reading"`, `"packed:sensor#Reading"` | draft 3: `types/Reading` in a listed packed file, unique across them, or in the one whose stem is `sensor` (core §7.6, §9.4). |
 | `"json:Status"` | the `$defs/Status` definition. ✱ The name must be unique across the listed files (lint). |
 | ✱ `"json:telemetry.v1#telemetry.v1.Point"` | the qualified form: `$defs/telemetry.v1.Point` in the listed file whose stem is `telemetry.v1`. This is how a contract refers to another interface's type, or to a profile's type, which is the profile's by its artifact's id (D7; core §10 point 1, 0.35). The unqualified `json:telemetry.v1.Point` resolves the same when no other listed file defines the name. |
 | `{ raw = "image/jpeg" }` | opaque bytes of a media type. Generic tools show the type and size and never decode it. |

@@ -1,0 +1,19 @@
+{
+  "types": {
+    "Status": {
+      "fields": [
+        {
+          "name": "mode",
+          "type": "enum",
+          "values": [
+            "off",
+            "on",
+            "auto",
+            "eco"
+          ],
+          "escape": true
+        }
+      ]
+    }
+  }
+}
