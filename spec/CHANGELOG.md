@@ -3,14 +3,14 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.79 — 2026-11-01: Appendix B's zenoh defaults labelled as 1.10.1's (#1011)
+## 0.77 — 2026-11-01: Appendix B's zenoh defaults labelled as 1.10.1's (#1011)
 
 zenoh-modem builds on a zenoh fork, `zm-1.10.2-r1`, whose
 `wait_before_close` defaults to 10 s, its lease. zenoh 1.10.1's is 5 s.
 Once zenoh-modem depends on zenkey, zenkey runs on the fork. A readiness
 run on 2026-11-01 found the texts' figures to be 1.10.1's. The rules
 already read the deployment's `wait_before_close`, so no rule moves.
-`observer.md` moves to text 0.18 beside it
+`observer.md` moves to text 0.17 beside it
 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)).
 
 **Changed: Appendix B, "What a path drops, and what a reader sees".**

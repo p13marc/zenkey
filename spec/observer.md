@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.18 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.17 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.79 ([`core.md`](core.md)) |
+| **Written against** | core 0.77 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may

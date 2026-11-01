@@ -13,12 +13,12 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
-## 0.18 — 2026-11-01: §5.2's zenoh defaults labelled as 1.10.1's (#1011)
+## 0.17 — 2026-11-01: §5.2's zenoh defaults labelled as 1.10.1's (#1011)
 
 zenoh-modem's zenoh fork, `zm-1.10.2-r1`, defaults `wait_before_close` to
 10 s, its lease. zenoh 1.10.1's is 5 s. §5.2 gave 1.10.1's figures as
 zenoh's. Its rules already read the deployment's `wait_before_close`, so
-no rule moves. This text is written against core 0.79, whose Appendix B
+no rule moves. This text is written against core 0.77, whose Appendix B
 labels the same figures.
 
 **Changed: §5.2, "Lost no delivery".**
