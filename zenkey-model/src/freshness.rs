@@ -16,6 +16,14 @@
 //! holds (a delivery's age on its monotonic clock, a reply's stamp age
 //! against its wall clock, whether that clock is trusted to the delta) and
 //! hands it over as values. The owner's re-puts (§2.4) are the runtime's.
+//!
+//! **A reader's view** ([`View`], #978's F2): the members of one owner's
+//! collections for one interface as a reader heard them, and what that
+//! owner's heartbeats (core §7.5, [`crate::heartbeat`]) confirmed. A
+//! heartbeat whose section's digest is the view's confirms each member it
+//! vouches for at its arrival, so [`View::observation`] ages a member from
+//! the later of its last put and its last confirmation. No rule adopts the
+//! heartbeat yet: the judgement is §2.5's, unchanged.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -25,6 +33,7 @@ use serde_json::Value;
 
 use crate::authoring::Kind;
 use crate::contract::Resource;
+use crate::wire::Stamp;
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "freshness.v1";
@@ -595,6 +604,409 @@ pub fn judge_all(h: &Horizon, observations: &[Observation]) -> Judged {
     combine(observations.iter().map(|o| judge(h, o)))
 }
 
+// --- #978's F2: a reader's view, as heartbeats confirm it ----------------------
+
+/// An instant on a reader's monotonic clock, as a [`View`] keeps it: a
+/// delivery's or a heartbeat's arrival.
+pub trait Arrival: Copy + Ord {
+    /// The time from `earlier` to this instant, zero when `earlier` is
+    /// later.
+    fn since(self, earlier: Self) -> Duration;
+}
+
+impl Arrival for std::time::Instant {
+    fn since(self, earlier: Self) -> Duration {
+        self.saturating_duration_since(earlier)
+    }
+}
+
+impl Arrival for crate::timing::Mono {
+    fn since(self, earlier: Self) -> Duration {
+        self.saturating_since(earlier)
+    }
+}
+
+/// One member as a [`View`] holds it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Held<T> {
+    collection: usize,
+    /// The last mutation's in-band stamp; `None` for a put that carried
+    /// none, which no digest can count, and for a delete.
+    stamp: Option<Stamp>,
+    deleted: bool,
+    /// The last mutation's arrival.
+    at: T,
+    /// The last heartbeat that vouched for it, since its last mutation.
+    confirmed: Option<T>,
+}
+
+/// What one section of a heartbeat did to the [`View`] (#978's design
+/// §1.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SectionRead {
+    /// The view does not follow the collection: nothing read.
+    NotFollowed,
+    /// Its map bit is 0: nothing confirmed there.
+    Absent,
+    /// The digest, or the live count, is not the view's: nothing
+    /// confirmed in the collection.
+    Diverged,
+    /// The digest is the view's: each member vouched for is confirmed at
+    /// the heartbeat's arrival, these keys in key order.
+    Confirmed(Vec<String>),
+}
+
+impl SectionRead {
+    /// `not_followed`, `absent`, `diverged` or `confirmed`.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotFollowed => "not_followed",
+            Self::Absent => "absent",
+            Self::Diverged => "diverged",
+            Self::Confirmed(_) => "confirmed",
+        }
+    }
+}
+
+/// What a heartbeat did to the [`View`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Applied {
+    /// CH's tag is not the revision the view holds: nothing confirmed.
+    Revision,
+    /// The body was refused (core §7.5): nothing confirmed.
+    Refused(crate::heartbeat::BodyRefusal),
+    /// Its key's seq is not after the last heartbeat's, within one run:
+    /// nothing confirmed, nothing counted.
+    Older,
+    /// Read, each collection's section in map order. `gap` says the key's
+    /// seqs skipped since the last heartbeat: one or more were lost.
+    Read {
+        gap: bool,
+        sections: Vec<SectionRead>,
+    },
+}
+
+/// A reader's view of one owner's state for one interface, as its
+/// deliveries, its reads and that owner's heartbeats make it (core §7.5's
+/// heartbeat; #978's F2). No rule adopts the heartbeat yet, so nothing
+/// here changes a [`judge`]: a heartbeat that confirms a member is a
+/// confirmation of it, as a put is (§2.5), and [`View::observation`] ages
+/// the member from the later of the two.
+///
+/// - **The members** are each collection's that the reader heard: a put
+///   with its in-band stamp, a delete, or a read's answer
+///   ([`View::replace`]). A put older than the one held, within one run,
+///   is not taken.
+/// - **A heartbeat** ([`View::apply`]) confirms, in each collection the
+///   view follows ([`View::follow`]), each member vouched for, when the
+///   section's digest is the view's and its live count is too. A reader
+///   follows only a collection it hears whole: one whose template it
+///   subscribes with no parameter bound.
+/// - **A divergence** confirms nothing in its collection. After two in a
+///   row the collection is due a read ([`View::reread_due`]), whose answer
+///   replaces what the view holds.
+/// - **A gap** in the heartbeat key's seqs is a heartbeat lost: the
+///   view's members are incomplete until one arrives in sequence.
+#[derive(Debug, Clone)]
+pub struct View<T> {
+    layout: crate::heartbeat::Layout,
+    follows: Vec<bool>,
+    members: BTreeMap<String, Held<T>>,
+    diverged: Vec<u32>,
+    last: Option<Stamp>,
+    gap: bool,
+    time: Option<crate::heartbeat::Time>,
+    heartbeats: u64,
+}
+
+impl<T: Arrival> View<T> {
+    /// An empty view of a revision's collections, following none.
+    #[must_use]
+    pub fn new(layout: crate::heartbeat::Layout) -> Self {
+        let n = layout.collections.len();
+        Self {
+            layout,
+            follows: vec![false; n],
+            members: BTreeMap::new(),
+            diverged: vec![0; n],
+            last: None,
+            gap: false,
+            time: None,
+            heartbeats: 0,
+        }
+    }
+
+    /// The revision's layout.
+    #[must_use]
+    pub fn layout(&self) -> &crate::heartbeat::Layout {
+        &self.layout
+    }
+
+    /// Follows the collection at `index`; `false` when there is none.
+    pub fn follow(&mut self, index: usize) -> bool {
+        match self.follows.get_mut(index) {
+            Some(f) => {
+                *f = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Follows the collection named `<kind token>/<template>`; `false`
+    /// when it is none.
+    pub fn follow_resource(&mut self, resource: &str) -> bool {
+        self.layout
+            .index_of(resource)
+            .is_some_and(|i| self.follow(i))
+    }
+
+    /// Whether it follows any collection.
+    #[must_use]
+    pub fn follows_any(&self) -> bool {
+        self.follows.iter().any(|f| *f)
+    }
+
+    /// A put of `key` heard at `at`, with its in-band stamp (`None` when it
+    /// carried none). A key of no collection is not held, and a put older
+    /// than the one held within one run is not taken.
+    pub fn put(&mut self, key: &str, stamp: Option<Stamp>, at: T) {
+        self.mutation(key, stamp, false, at);
+    }
+
+    /// A delete of `key` heard at `at`, with its in-band stamp where its
+    /// attachment carried one.
+    pub fn delete(&mut self, key: &str, stamp: Option<Stamp>, at: T) {
+        self.mutation(key, stamp, true, at);
+    }
+
+    fn mutation(&mut self, key: &str, stamp: Option<Stamp>, deleted: bool, at: T) {
+        let Some(k) = crate::heartbeat::base_relative(key) else {
+            return;
+        };
+        let Some(collection) = self.layout.collection_of(k) else {
+            return;
+        };
+        if let (Some(h), Some(s)) = (self.members.get(k).and_then(|h| h.stamp), stamp)
+            && h.run == s.run
+            && s.seq <= h.seq
+        {
+            return;
+        }
+        self.members.insert(
+            k.to_owned(),
+            Held {
+                collection,
+                stamp,
+                deleted,
+                at,
+                confirmed: None,
+            },
+        );
+    }
+
+    /// A complete read of the collection at `index` (S4's answer, or a
+    /// snapshot once #977 lands), at `at`: its live members replace the
+    /// view's, a member it left out leaving the view, and the collection
+    /// is no longer due a read. A put heard after the read was asked is
+    /// the caller's to apply again after it (core §4.2).
+    pub fn replace<'k>(
+        &mut self,
+        index: usize,
+        live: impl IntoIterator<Item = (&'k str, Option<Stamp>)>,
+        at: T,
+    ) {
+        self.members.retain(|_, h| h.collection != index);
+        for (key, stamp) in live {
+            let Some(k) = crate::heartbeat::base_relative(key) else {
+                continue;
+            };
+            if self.layout.collection_of(k) == Some(index) {
+                self.members.insert(
+                    k.to_owned(),
+                    Held {
+                        collection: index,
+                        stamp,
+                        deleted: false,
+                        at,
+                        confirmed: None,
+                    },
+                );
+            }
+        }
+        if let Some(d) = self.diverged.get_mut(index) {
+            *d = 0;
+        }
+    }
+
+    /// The live members of a collection the view holds, in key order.
+    fn live(&self, index: usize) -> impl Iterator<Item = (&String, &Held<T>)> {
+        self.members
+            .iter()
+            .filter(move |(_, h)| h.collection == index && !h.deleted)
+    }
+
+    /// The view's digest of a collection: `None` while it holds a live
+    /// member whose put carried no in-band stamp, which no digest counts.
+    #[must_use]
+    pub fn digest(&self, index: usize) -> Option<crate::heartbeat::Digest> {
+        let mut d = crate::heartbeat::Digest::EMPTY;
+        for (k, h) in self.live(index) {
+            d.toggle(k, h.stamp?);
+        }
+        Some(d)
+    }
+
+    /// A heartbeat heard at `at`: CH's tag, its stamp and its body. See
+    /// [`View`]'s doc for what it confirms.
+    pub fn apply(&mut self, tag: crate::wire::Tag, stamp: Stamp, body: &[u8], at: T) -> Applied {
+        use crate::heartbeat::{Heartbeat, Members};
+        if tag != self.layout.tag {
+            return Applied::Revision;
+        }
+        let hb = match Heartbeat::parse(body, &self.layout) {
+            Ok(hb) => hb,
+            Err(r) => return Applied::Refused(r),
+        };
+        let gap = match self.last {
+            Some(l) if l.run == stamp.run => {
+                match crate::seed::Order::Serial.seqs(l.seq, stamp.seq) {
+                    Some(std::cmp::Ordering::Greater) => {
+                        stamp.seq.get().wrapping_sub(l.seq.get()) & crate::wire::Seq::MAX.get() != 1
+                    }
+                    _ => return Applied::Older,
+                }
+            }
+            _ => false,
+        };
+        self.last = Some(stamp);
+        self.gap = gap;
+        self.time = Some(hb.time);
+        self.heartbeats += 1;
+        let mut sections = Vec::with_capacity(hb.sections.len());
+        for (i, section) in hb.sections.iter().enumerate() {
+            if !self.follows[i] {
+                sections.push(SectionRead::NotFollowed);
+                continue;
+            }
+            let Some(s) = section else {
+                self.diverged[i] = 0;
+                sections.push(SectionRead::Absent);
+                continue;
+            };
+            let keys: Vec<String> = self.live(i).map(|(k, _)| k.clone()).collect();
+            let same_count = match &s.members {
+                Members::One { .. } => keys.len() <= 1,
+                m => m.live() == Some(keys.len() as u64),
+            };
+            if self.digest(i) != Some(s.digest) || !same_count {
+                self.diverged[i] = self.diverged[i].saturating_add(1);
+                sections.push(SectionRead::Diverged);
+                continue;
+            }
+            self.diverged[i] = 0;
+            let vouched: Vec<String> = s
+                .members
+                .vouched()
+                .into_iter()
+                .filter_map(|r| keys.get(usize::try_from(r).ok()?).cloned())
+                .collect();
+            for k in &vouched {
+                if let Some(h) = self.members.get_mut(k) {
+                    h.confirmed = Some(at);
+                }
+            }
+            sections.push(SectionRead::Confirmed(vouched));
+        }
+        Applied::Read { gap, sections }
+    }
+
+    /// The last heartbeat that vouched for `key` since its last mutation.
+    #[must_use]
+    pub fn confirmed(&self, key: &str) -> Option<T> {
+        let k = crate::heartbeat::base_relative(key)?;
+        self.members.get(k).and_then(|h| h.confirmed)
+    }
+
+    /// The collections due a read: two heartbeats in a row diverged there.
+    #[must_use]
+    pub fn reread_due(&self) -> Vec<usize> {
+        (0..self.diverged.len())
+            .filter(|i| self.follows[*i] && self.diverged[*i] >= 2)
+            .collect()
+    }
+
+    /// Whether the last heartbeat came after a gap in its key's seqs.
+    #[must_use]
+    pub fn gap(&self) -> bool {
+        self.gap
+    }
+
+    /// The owner's time in the last heartbeat applied.
+    #[must_use]
+    pub fn owner_time(&self) -> Option<crate::heartbeat::Time> {
+        self.time
+    }
+
+    /// The last heartbeat applied: its stamp.
+    #[must_use]
+    pub fn last_heartbeat(&self) -> Option<Stamp> {
+        self.last
+    }
+
+    /// How many heartbeats it applied.
+    #[must_use]
+    pub fn heartbeats(&self) -> u64 {
+        self.heartbeats
+    }
+
+    /// `key`'s last confirmation at `now` (§2.5): the later of its last
+    /// mutation and the last heartbeat that vouched for it, as a [`Last`];
+    /// `None` for a member the view does not hold.
+    #[must_use]
+    pub fn last(&self, key: &str, now: T) -> Option<Last> {
+        let k = crate::heartbeat::base_relative(key)?;
+        let h = self.members.get(k)?;
+        Some(if h.deleted {
+            Last::Delete(now.since(h.at))
+        } else {
+            Last::Put(now.since(h.confirmed.map_or(h.at, |c| c.max(h.at))))
+        })
+    }
+
+    /// `key` as a subscription's observation at `now` (§2.5), the view
+    /// standing in for its deliveries: its last confirmation, how long the
+    /// subscription has `listened`, and complete when the subscription
+    /// lost nothing (`complete`) and no heartbeat was lost.
+    #[must_use]
+    pub fn observation(
+        &self,
+        key: &str,
+        now: T,
+        listened: Duration,
+        complete: bool,
+    ) -> Observation {
+        Observation::Subscribed {
+            last: self.last(key, now),
+            listened,
+            complete: complete && !self.gap,
+        }
+    }
+}
+
+/// A subscription's last delivery of a member and, where a [`View`]
+/// holds it, the last heartbeat that vouched for it: the later is its
+/// last confirmation (§2.5). `delivered` is the subscription's own
+/// [`Last`]; a delete stays a delete.
+#[must_use]
+pub fn confirmed_last(delivered: Option<Last>, heartbeat: Option<Duration>) -> Option<Last> {
+    match (delivered, heartbeat) {
+        (Some(Last::Put(a)), Some(h)) => Some(Last::Put(a.min(h))),
+        (d, _) => d,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -666,6 +1078,229 @@ mod tests {
             Reason::NoDelivery
         );
         assert_eq!(combine([]).reason, Reason::NoObservation);
+    }
+
+    mod view {
+        use super::super::*;
+        use crate::contract::load_str;
+        use crate::heartbeat::{Digest, Heartbeat, Layout, Members, Section, Time};
+        use crate::timing::Mono;
+        use crate::wire::{Run, Seq, Tag};
+
+        const HB: &str = r#"
+[interface]
+name = "hb"
+major = 1
+minor = 0
+uses = ["freshness.v1"]
+[resources.link]
+kind = "state"
+type = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
+[resources."peer/{peer}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { peer = "string" }
+cardinality = 5
+annotations = { "freshness.ttl_s" = 2 }
+"#;
+        const LINK: &str = "zk2/lab/n1/hb.v1/state/link";
+        const A: &str = "zk2/lab/n1/hb.v1/state/peer/a";
+        const B: &str = "zk2/lab/n1/hb.v1/state/peer/b";
+
+        fn layout() -> Layout {
+            let c = load_str(HB, std::path::Path::new("."), None)
+                .contract
+                .unwrap();
+            Layout::of(&c)
+        }
+        fn st(run: u16, seq: u32) -> Stamp {
+            Stamp {
+                run: Run::U16(run),
+                seq: Seq::new(seq).unwrap(),
+            }
+        }
+        fn ms(n: u64) -> Mono {
+            Mono::after(Duration::from_millis(n))
+        }
+        /// A heartbeat over (link, peer/*), its sections given.
+        fn body(l: &Layout, link: Option<Section>, peers: Option<Section>) -> Vec<u8> {
+            Heartbeat {
+                time: Time::Unknown,
+                sections: vec![link, peers],
+            }
+            .write(l)
+            .unwrap()
+        }
+        fn view() -> View<Mono> {
+            let mut v = View::new(layout());
+            assert!(v.follow_resource("state/link"));
+            assert!(v.follow_resource("state/peer/{peer}"));
+            assert!(!v.follow_resource("state/nothing"));
+            v
+        }
+
+        #[test]
+        fn a_heartbeat_whose_digest_is_the_views_confirms_what_it_vouches_for() {
+            let l = layout();
+            let mut v = view();
+            v.put(LINK, Some(st(1, 1)), ms(0));
+            v.put(A, Some(st(1, 2)), ms(0));
+            v.put(B, Some(st(1, 3)), ms(0));
+            let link = Section {
+                digest: Digest::of([(LINK, st(1, 1))]),
+                members: Members::One { vouched: true },
+            };
+            let peers = Section {
+                digest: Digest::of([(A, st(1, 2)), (B, st(1, 3))]),
+                members: Members::templated(2, [1]),
+            };
+            let got = v.apply(
+                l.tag,
+                st(9, 0),
+                &body(&l, Some(link), Some(peers)),
+                ms(1500),
+            );
+            assert_eq!(
+                got,
+                Applied::Read {
+                    gap: false,
+                    sections: vec![
+                        SectionRead::Confirmed(vec![LINK.into()]),
+                        SectionRead::Confirmed(vec![B.into()]),
+                    ]
+                }
+            );
+            assert_eq!(v.confirmed(B), Some(ms(1500)));
+            assert_eq!(v.confirmed(A), None, "not vouched for");
+            // At 3 s: the link put at 0 is 3 s old, confirmed 1.5 s ago.
+            let h = Horizon::Within(Duration::from_secs(2));
+            let j = |k: &str| {
+                judge(
+                    &h,
+                    &v.observation(k, ms(3000), Duration::from_secs(3), true),
+                )
+            };
+            assert_eq!(j(LINK).verdict, Verdict::Fresh);
+            assert_eq!(j(B).verdict, Verdict::Fresh);
+            assert_eq!(
+                j(A).verdict,
+                Verdict::Stale,
+                "a cleared bit is no confirmation"
+            );
+            // A namespace in front reads as the base-relative key.
+            assert_eq!(v.confirmed(&format!("prod/{LINK}")), Some(ms(1500)));
+        }
+
+        #[test]
+        fn a_missed_change_diverges_and_two_in_a_row_are_due_a_read() {
+            let l = layout();
+            let mut v = view();
+            v.put(A, Some(st(1, 2)), ms(0));
+            // The owner holds a's seq 5 and b: the view missed both.
+            let owner = Digest::of([(A, st(1, 5)), (B, st(1, 6))]);
+            let sec = || Section {
+                digest: owner,
+                members: Members::templated(2, [0, 1]),
+            };
+            for (seq, due) in [(0, false), (1, true)] {
+                let got = v.apply(l.tag, st(9, seq), &body(&l, None, Some(sec())), ms(1000));
+                assert_eq!(
+                    got,
+                    Applied::Read {
+                        gap: false,
+                        sections: vec![SectionRead::Absent, SectionRead::Diverged]
+                    }
+                );
+                assert_eq!(v.reread_due() == vec![1], due);
+            }
+            assert_eq!(v.confirmed(A), None);
+            // The read's answer replaces the view, and the next heartbeat confirms.
+            v.replace(1, [(A, Some(st(1, 5))), (B, Some(st(1, 6)))], ms(1100));
+            assert!(v.reread_due().is_empty());
+            let got = v.apply(l.tag, st(9, 2), &body(&l, None, Some(sec())), ms(1200));
+            assert_eq!(
+                got,
+                Applied::Read {
+                    gap: false,
+                    sections: vec![
+                        SectionRead::Absent,
+                        SectionRead::Confirmed(vec![A.into(), B.into()])
+                    ]
+                }
+            );
+        }
+
+        #[test]
+        fn a_deleted_member_leaves_the_digest_and_a_stale_put_is_not_taken() {
+            let mut v = view();
+            v.put(A, Some(st(1, 4)), ms(0));
+            v.put(A, Some(st(1, 3)), ms(10));
+            assert_eq!(v.digest(1), Some(Digest::of([(A, st(1, 4))])));
+            v.delete(A, Some(st(1, 5)), ms(20));
+            assert_eq!(v.digest(1), Some(Digest::EMPTY));
+            assert_eq!(
+                v.last(A, ms(30)),
+                Some(Last::Delete(Duration::from_millis(10)))
+            );
+            // Another run's put is taken whatever its seq.
+            v.put(A, Some(st(2, 0)), ms(40));
+            assert_eq!(v.digest(1), Some(Digest::of([(A, st(2, 0))])));
+            // A put with no envelope leaves the collection with no digest.
+            v.put(B, None, ms(50));
+            assert_eq!(v.digest(1), None);
+            // A key of no collection is not held.
+            v.put("zk2/lab/n1/hb.v1/state/other", Some(st(1, 1)), ms(60));
+            assert_eq!(v.last("zk2/lab/n1/hb.v1/state/other", ms(70)), None);
+        }
+
+        #[test]
+        fn a_gap_is_a_heartbeat_lost_and_the_tag_and_the_order_guard() {
+            let l = layout();
+            let mut v = view();
+            v.put(LINK, Some(st(1, 1)), ms(0));
+            let link = || {
+                Some(Section {
+                    digest: Digest::of([(LINK, st(1, 1))]),
+                    members: Members::One { vouched: true },
+                })
+            };
+            let b = body(&l, link(), None);
+            let other = Tag::new((l.tag.get() + 1) % 16).unwrap();
+            assert_eq!(v.apply(other, st(9, 0), &b, ms(100)), Applied::Revision);
+            assert!(matches!(
+                v.apply(l.tag, st(9, 0), &b, ms(100)),
+                Applied::Read { gap: false, .. }
+            ));
+            assert!(matches!(
+                v.apply(l.tag, st(9, 3), &b, ms(200)),
+                Applied::Read { gap: true, .. }
+            ));
+            assert!(v.gap());
+            let o = v.observation(LINK, ms(5000), Duration::from_secs(5), true);
+            assert_eq!(
+                judge(&Horizon::Within(Duration::from_secs(2)), &o).reason,
+                Reason::Incomplete
+            );
+            assert_eq!(v.apply(l.tag, st(9, 3), &b, ms(300)), Applied::Older);
+            assert_eq!(v.apply(l.tag, st(9, 1), &b, ms(300)), Applied::Older);
+            assert!(matches!(
+                v.apply(l.tag, st(9, 4), &b, ms(400)),
+                Applied::Read { gap: false, .. }
+            ));
+            assert!(!v.gap());
+            // A new run of the key is no gap, and its seq starts anew.
+            assert!(matches!(
+                v.apply(l.tag, st(10, 0), &b, ms(500)),
+                Applied::Read { gap: false, .. }
+            ));
+            // A body cut short is refused, and counts as no heartbeat.
+            assert!(matches!(
+                v.apply(l.tag, st(10, 1), &b[..2], ms(600)),
+                Applied::Refused(_)
+            ));
+            assert_eq!(v.heartbeats(), 4);
+        }
     }
 
     #[test]
