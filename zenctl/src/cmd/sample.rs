@@ -73,6 +73,26 @@ impl Line {
                     let c = inband::refused_conformance(&r, refusal);
                     (r, c)
                 }
+                inband::Payload::Heartbeat { body, .. } => {
+                    let r = PayloadRendering {
+                        key: key.to_owned(),
+                        size: body.len(),
+                        resource: None,
+                        rendered: Rendered::Structural {
+                            why: Unresolved::DecodeNotAsked,
+                            value: None,
+                            text: format!(
+                                "<{}, {} bytes>",
+                                inband::heartbeat_declared(key),
+                                body.len()
+                            ),
+                        },
+                    };
+                    let c = Conformance::NotChecked {
+                        reason: Unresolved::DecodeNotAsked.words(),
+                    };
+                    (r, c)
+                }
                 inband::Payload::Plain(record) | inband::Payload::Record { record, .. } => (
                     PayloadRendering {
                         key: key.to_owned(),

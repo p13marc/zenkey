@@ -430,6 +430,22 @@ impl Render for StateReport {
 
 // ── watch ──────────────────────────────────────────────────────────────────
 
+/// A heartbeat's confirmation, for a person (#978's F2): which members it
+/// confirmed, by which heartbeat.
+pub fn confirmation_lines(c: &zenkey_fleet::report::WatchConfirmation) -> Vec<String> {
+    let mut lines = vec![format!(
+        "{}  [{}]  in band {}",
+        c.key, c.provider, c.heartbeat
+    )];
+    if c.confirmed.is_empty() {
+        lines.push("  <heartbeat: its digest is the watch's, and it vouches for none>".to_owned());
+    }
+    for k in &c.confirmed {
+        lines.push(format!("  confirmed by heartbeat: {k}"));
+    }
+    lines
+}
+
 /// A watched sample, for a person: its key and provider, then its
 /// rendering.
 pub fn sample_lines(s: &WatchSample) -> Vec<String> {

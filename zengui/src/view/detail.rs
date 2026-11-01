@@ -1162,6 +1162,7 @@ fn reply_chips<'a>(reply: &Reply, source: String, sp: Spacing) -> Element<'a, Me
             reply.encoding.clone()
         }),
     ]
+    .extend(heartbeat_chip(reply))
     .extend(stamp_chips(
         reply.inband.as_ref(),
         reply.stamp.as_ref(),
@@ -1171,6 +1172,22 @@ fn reply_chips<'a>(reply: &Reply, source: String, sp: Spacing) -> Element<'a, Me
     .align_y(iced::Alignment::Center)
     .wrap()
     .into()
+}
+
+/// A heartbeat's chip (core §7.5's form 6; #978's F2): the reply is an
+/// owner's word on the state it holds for the interface named, its body
+/// read through the lens with that interface's revision, never a record.
+fn heartbeat_chip<'a>(reply: &Reply) -> Option<Element<'a, Message>> {
+    if reply.delete {
+        return None;
+    }
+    let bytes = reply.payload.to_bytes();
+    match zenkey_fleet::model::inband::payload(&reply.key, Some(&reply.encoding), &bytes) {
+        zenkey_fleet::model::inband::Payload::Heartbeat { .. } => Some(kit::data_chip(
+            zenkey_fleet::model::inband::heartbeat_declared(&reply.key),
+        )),
+        _ => None,
+    }
 }
 
 /// A reply's bytes: a tombstone said, a value hex beside decoded, and its

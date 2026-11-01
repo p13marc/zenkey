@@ -111,6 +111,17 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
                     break WatchEnd::Count;
                 }
             }
+            next = watch.next_confirmation() => {
+                // A heartbeat confirmed members of the collection (#978's
+                // F2): a row of its own, never a sample.
+                if let Some(c) = next {
+                    sink.row("confirmation", serde_json::to_value(&c)?)?;
+                    for line in crate::render::confirmation_lines(&c) {
+                        sink.line(line)?;
+                    }
+                    sink.flush()?;
+                }
+            }
             () = async {
                 match deadline {
                     Some(d) => tokio::time::sleep_until(d).await,

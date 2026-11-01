@@ -48,7 +48,7 @@
 
 mod impls;
 pub use impls::RateView;
-pub use impls::acts::{payload_text, sample_lines, summary_lines};
+pub use impls::acts::{confirmation_lines, payload_text, sample_lines, summary_lines};
 pub use impls::local::{
     CacheAction, CacheReport, CachedNamespace, ContextAction, ContextList, ContextRow, ContextShow,
     GetReport, HostIdInput, HostIdReport, KeyCanon, KeyOp, KeyRelation, V1Origin,
