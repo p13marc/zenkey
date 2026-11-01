@@ -11,11 +11,13 @@
 //! record                           every byte after the seq, read as the resource's type says
 //! ```
 //!
-//! **Defined ahead of its use.** No rule adopts the envelope yet: no owner
-//! writes one and no consumer has to read one. The reference's readers
-//! accept one already (below), so the flip that makes the writers write it
-//! (#976) leaves them reading. What a run names and how a seq counts are
-//! for the rule that adopts it; this module fixes the bytes alone.
+//! **Adopted by core §4.3** (0.73, #976's flip): an owner writes the
+//! envelope on every put of a `stream`, `state`, `@state` or `events` key
+//! and every delete of a state member, an `@stream` sample's excepted. What
+//! a run names and how a seq counts are §4.3's, and the order of two
+//! in-band stamps [`crate::seed`]'s; this module fixes the bytes, a
+//! descriptor's spelling of a run ([`Run::hex`]), and which samples carry
+//! an envelope.
 //!
 //! **Parsing reads no contract,** as parsing a key does (§1.1): it knows
 //! the sample's kind, put ([`Envelope::parse`]) or delete
@@ -27,12 +29,12 @@
 //!
 //! Not [`crate::envelope`], the error envelope of a failed call (§5.2).
 //!
-//! **Reading beside today's wire** (#976's A2, ahead of the rule that
-//! adopts the envelope): a reader tells a sample that carries an envelope
-//! by its key and its Encoding alone ([`carries`]), reads a put's payload
-//! through [`read_put`] and a delete's attachment through [`read_delete`],
-//! and reads every other sample as it did. The order of two in-band stamps
-//! is [`crate::seed`]'s.
+//! **Reading** (#976's A2; observer §7.3): a reader tells a sample that
+//! carries an envelope by its key and its Encoding alone ([`carries`]),
+//! reads a put's payload through [`read_put`] and a delete's attachment
+//! through [`read_delete`], and reads every other sample as it did. The
+//! order of two in-band stamps is [`crate::seed`]'s, by the key's kind
+//! ([`enveloped_kind`]).
 
 use thiserror::Error;
 
@@ -220,11 +222,24 @@ impl Header {
 }
 
 /// A run: 16 or 32 bits unsigned, written big-endian, as CH's width bit
-/// says. What a run names is for the rule that adopts the envelope.
+/// says. An instance's ordering epoch (core §4.3): a 16-bit run is a
+/// counter in the owner's record, a 32-bit run a random draw. Two runs of
+/// different widths are two runs, whatever their values, and nothing
+/// orders two runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Run {
     U16(u16),
     U32(u32),
+}
+
+impl std::fmt::Display for Run {
+    /// Its descriptor spelling ([`Run::hex`]).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Run::U16(v) => write!(f, "{v:04x}"),
+            Run::U32(v) => write!(f, "{v:08x}"),
+        }
+    }
 }
 
 impl Run {
@@ -247,6 +262,32 @@ impl Run {
     #[must_use]
     pub const fn width_bytes(self) -> usize {
         if self.is_wide() { 4 } else { 2 }
+    }
+
+    /// The run as a descriptor states it (core §3.3): its bytes in
+    /// lowercase hexadecimal, 4 digits for a 16-bit run and 8 for a 32-bit
+    /// one. So `00a1` and `000000a1` are two runs.
+    #[must_use]
+    pub fn hex(self) -> String {
+        self.to_string()
+    }
+
+    /// A descriptor's `run` read back: exactly 4 or 8 lowercase hex
+    /// digits, the width from their count. `None` for any other spelling,
+    /// which a descriptor checker reports as D002.
+    #[must_use]
+    pub fn from_hex(text: &str) -> Option<Run> {
+        let lower_hex = text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !lower_hex {
+            return None;
+        }
+        match text.len() {
+            4 => u16::from_str_radix(text, 16).ok().map(Run::U16),
+            8 => u32::from_str_radix(text, 16).ok().map(Run::U32),
+            _ => None,
+        }
     }
 }
 
@@ -276,8 +317,8 @@ impl Seq {
     }
 }
 
-/// An envelope's stamp: its run and its seq. Not §4.3's stamp, which still
-/// orders a key's values until a rule adopts the envelope.
+/// An envelope's stamp, the sample's in-band stamp (core §4.3): its run
+/// and its seq, which order a key's values within one run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Stamp {
     pub run: Run,
@@ -478,35 +519,48 @@ pub const ENCODING: &str = "zenoh/bytes";
 
 /// Whether `key` is a zk2 data key whose kind is a stream, state or an
 /// event (§1.1, by the grammar alone, with no contract): the keys whose
-/// samples may carry an envelope. An operation's (`@op`) and every control
-/// key (`@zk`) keep their wire.
+/// samples may carry an envelope ([`enveloped_kind`]). An operation's
+/// (`@op`) and every control key (`@zk`) keep their wire.
+#[must_use]
+pub fn enveloped_key(key: &str) -> bool {
+    enveloped_kind(key).is_some()
+}
+
+/// The kind token of a key whose samples may carry an envelope: a zk2 data
+/// key whose kind is a stream, state or an event, by the grammar alone.
+/// `None` for an operation's key, every control key (`@zk`), a foreign key
+/// and a key the grammar refuses. The kind picks how two seqs of one run
+/// compare ([`crate::seed::Order::of_kind`]).
 ///
 /// A session in a namespace hears a key base-relative, and one in none
 /// hears it with the namespace in front (§1.6), which is any chunks: the
 /// key is read from its first `zk2` chunk from which the grammar parses a
 /// zk2 key, so another deployment's key reads as its own.
 #[must_use]
-pub fn enveloped_key(key: &str) -> bool {
+pub fn enveloped_kind(key: &str) -> Option<KindToken> {
     let mut rest = Some(key);
     while let Some(k) = rest {
         if k.starts_with("zk2/") {
             match parse(k) {
-                Ok(ZkKey::Data { kind, .. }) => return kind != KindToken::Op,
-                Ok(_) => return false,
+                Ok(ZkKey::Data { kind, .. }) => {
+                    return (kind != KindToken::Op).then_some(kind);
+                }
+                Ok(_) => return None,
                 Err(_) => {}
             }
         }
         rest = k.split_once('/').map(|(_, r)| r);
     }
-    false
+    None
 }
 
 /// Whether a sample carries an envelope: its key is a zk2 data key whose
 /// kind is a stream, state or an event ([`enveloped_key`]), and its
-/// Encoding is `zenoh/bytes` ([`ENCODING`]). No zk2 owner sends
-/// `zenoh/bytes` before a rule adopts the envelope (§7.2 asks the
-/// predefined Encoding, and a raw type keeps its media type), so the test
-/// tells the two wires apart. Every other sample is read as it is today.
+/// Encoding is `zenoh/bytes` ([`ENCODING`]). An owner sends `zenoh/bytes`
+/// on such a key only with an envelope (core §7.2 asks the predefined
+/// Encoding of every other sample, and a raw type keeps its media type), so
+/// the test tells the two wires apart. Every other sample is read as it
+/// was before the envelope.
 #[must_use]
 pub fn carries(key: &str, encoding: &str) -> bool {
     encoding == ENCODING && enveloped_key(key)
@@ -623,6 +677,40 @@ mod tests {
         }
     }
 
+    /// A run as a descriptor states it (core §3.3): 4 lowercase hex digits
+    /// for a 16-bit run, 8 for a 32-bit one, and nothing else read back.
+    #[test]
+    fn a_run_as_a_descriptor_states_it() {
+        assert_eq!(Run::U16(3).hex(), "0003");
+        assert_eq!(Run::U16(0xa1).hex(), "00a1");
+        assert_eq!(Run::U32(0xa1).hex(), "000000a1");
+        assert_eq!(Run::U32(u32::MAX).hex(), "ffffffff");
+        for r in [
+            Run::U16(0),
+            Run::U16(u16::MAX),
+            Run::U32(0),
+            Run::U32(0xdead_beef),
+        ] {
+            assert_eq!(Run::from_hex(&r.hex()), Some(r));
+        }
+        assert_eq!(Run::from_hex("00a1"), Some(Run::U16(0xa1)));
+        assert_eq!(Run::from_hex("000000a1"), Some(Run::U32(0xa1)));
+        for bad in [
+            "",
+            "1a2b3",
+            "ABCD",
+            "00A1",
+            "abc",
+            "+0a1",
+            "-001",
+            "000000a1f",
+            " 0a1",
+            "g000",
+        ] {
+            assert_eq!(Run::from_hex(bad), None, "{bad:?}");
+        }
+    }
+
     #[test]
     fn each_kind_refuses_the_others_form() {
         let d = DeleteStamp {
@@ -672,6 +760,7 @@ mod tests {
             "zk2/zk2/h/s/i.v1/state/mode",
         ] {
             assert!(enveloped_key(key), "{key}");
+            assert!(enveloped_kind(key).is_some(), "{key}");
             assert!(carries(key, ENCODING), "{key}");
             for other in [
                 "application/json",
@@ -695,8 +784,17 @@ mod tests {
             "",
         ] {
             assert!(!enveloped_key(key), "{key}");
+            assert_eq!(enveloped_kind(key), None, "{key}");
             assert!(!carries(key, ENCODING), "{key}");
         }
+        assert_eq!(
+            enveloped_kind("prod/zk2/h/s/i.v1/@stream/frames/f1"),
+            Some(KindToken::ExplicitStream)
+        );
+        assert_eq!(
+            enveloped_kind("zk2/h/s/i.v1/events/fault/01arz3ndektsv4rrffq69g5fav"),
+            Some(KindToken::Events)
+        );
     }
 
     #[test]

@@ -22,6 +22,7 @@ use crate::chunk::{is_ident, is_lower_hex, is_plain_chunk};
 use crate::contract::Contract;
 use crate::diag::{Diagnostic, Report};
 use crate::grammar::{IfaceId, KindToken};
+use crate::wire::Run;
 
 /// The format tag of this version of the record.
 pub const FORMAT: &str = "zk2-descriptor/0.1";
@@ -36,6 +37,18 @@ pub struct Descriptor {
     pub service: String,
     /// The instance id: 16 lowercase hex digits.
     pub instance: String,
+    /// The run the instance writes under now (core §3.3, §4.3), as its bytes
+    /// in lowercase hexadecimal: 4 digits for a 16-bit run, 8 for a 32-bit
+    /// one. An owner states it; a checker reads it as optional, so a
+    /// descriptor that states none is not D000, and any other spelling is
+    /// D002. Never `null`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "some_string"
+    )]
+    #[schemars(with = "String")]
+    pub run: Option<String>,
     /// The interfaces this instance implements.
     pub interfaces: Vec<InterfaceEntry>,
     /// The capabilities this instance holds, naming the `capability:` gates
@@ -136,6 +149,11 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+/// An optional member present as a string: `null` is not its shape (D000).
+fn some_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+
 /// Parses and checks a descriptor. `contracts` are the contracts it is
 /// checked against, by fingerprint; an interface whose contract is not
 /// supplied is checked for syntax only.
@@ -187,6 +205,15 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             "D002",
             "instance",
             format!("{:?} is not 16 lowercase hex digits", d.instance),
+        ));
+    }
+    if let Some(run) = d.run.as_deref()
+        && Run::from_hex(run).is_none()
+    {
+        report.push(Diagnostic::error(
+            "D002",
+            "run",
+            format!("{run:?} is not 4 or 8 lowercase hex digits"),
         ));
     }
     for (i, c) in d.capabilities.iter().enumerate() {
@@ -413,6 +440,13 @@ fn check_exposure(
 }
 
 impl Descriptor {
+    /// The run the descriptor states (core §3.3), `None` when it states
+    /// none or spells it otherwise than 4 or 8 lowercase hex digits (D002).
+    #[must_use]
+    pub fn stated_run(&self) -> Option<Run> {
+        self.run.as_deref().and_then(Run::from_hex)
+    }
+
     /// The resources of `contract` this instance exposes (§3.3): the
     /// contract's, minus the optional ones gated on a capability it does not
     /// hold, minus those its entry lists `unavailable`; none at all when the

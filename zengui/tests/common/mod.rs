@@ -670,6 +670,7 @@ fn deployment(
                 format: "zk2-descriptor/0.1".into(),
                 service: address.into(),
                 instance: instance.to_string(),
+                run: None,
                 interfaces: vec![InterfaceEntry {
                     iface: iface.to_string(),
                     contract: revision.fingerprint().to_string(),
@@ -892,6 +893,7 @@ impl World {
                 format: "zk2-descriptor/0.1".into(),
                 service: RF0.into(),
                 instance: RF0_INSTANCE.into(),
+                run: None,
                 interfaces: vec![InterfaceEntry {
                     iface: zenkey_model::config::IFACE.into(),
                     contract: format!("sha256:{}", zenkey::config_v1::FINGERPRINT),
@@ -943,6 +945,7 @@ impl World {
                     format: "zk2-descriptor/0.1".into(),
                     service: CATALOG.into(),
                     instance: id.into(),
+                    run: None,
                     interfaces: vec![InterfaceEntry {
                         iface: rev.iface().to_string(),
                         contract: rev.fingerprint().to_string(),
@@ -1039,6 +1042,7 @@ impl World {
                 format: "zk2-descriptor/0.1".into(),
                 service: RUDDER.into(),
                 instance: RUDDER_INSTANCE.into(),
+                run: None,
                 interfaces: vec![InterfaceEntry {
                     iface: rudder.iface().to_string(),
                     contract: rudder.fingerprint().to_string(),

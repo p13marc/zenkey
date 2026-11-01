@@ -1008,6 +1008,139 @@ fn seed_merge() {
     }
 }
 
+/// `spec/conformance/seed/inband.json` (core §4.2, §4.3, 0.73; #976): a
+/// key's kind and two in-band stamps → their order, plain for state and
+/// events and serial for a stream; one key's arrivals, each with an in-band
+/// stamp, a Zenoh timestamp, both or neither → which a tool's merge keeps
+/// and, for a state key, which a consumer accepts. Written by hand from the
+/// text, checked, never blessed.
+#[test]
+fn seed_inband() {
+    use zenkey_model::grammar::KindToken;
+    use zenkey_model::seed::{
+        Held, Mark, Order, Stamp, Versus, admits_mark_in, consumer_accepts, versus_in,
+    };
+    use zenkey_model::wire::{self, Run, Seq};
+    let doc = read_json(&spec().join("conformance/seed/inband.json"));
+    let inband = |v: &Value| -> Option<wire::Stamp> {
+        if v.is_null() {
+            return None;
+        }
+        let run = v["run"].as_u64().expect("run");
+        let run = match v["width"].as_u64() {
+            Some(16) => Run::U16(u16::try_from(run).expect("a 16-bit run")),
+            Some(32) => Run::U32(u32::try_from(run).expect("a 32-bit run")),
+            w => panic!("width {w:?}"),
+        };
+        let seq = u32::try_from(v["seq"].as_u64().expect("seq")).expect("a seq");
+        Some(wire::Stamp {
+            run,
+            seq: Seq::new(seq).unwrap_or_else(|| panic!("{seq} is a seq")),
+        })
+    };
+    let zenoh = |v: Option<&Value>| -> Option<Stamp> {
+        let v = v?;
+        let time = v["time"].as_u64().expect("time");
+        let id = v["id"].as_str().expect("id");
+        Some(Stamp::parse(time, id).unwrap_or_else(|| panic!("{id:?} is an id")))
+    };
+    let order_of = |case: &Value| -> (Order, KindToken) {
+        let kind: KindToken = case["kind"]
+            .as_str()
+            .expect("kind")
+            .parse()
+            .expect("a kind token");
+        assert_ne!(
+            kind,
+            KindToken::Op,
+            "{}: an operation carries no envelope",
+            case["note"]
+        );
+        (Order::of_kind(kind), kind)
+    };
+    let pairs = doc["order"].as_array().expect("order");
+    assert!(!pairs.is_empty());
+    let mut seen = std::collections::BTreeSet::new();
+    for case in pairs {
+        let (order, kind) = order_of(case);
+        let a = Mark::InBand(inband(&case["a"]).expect("a"));
+        let b = Mark::InBand(inband(&case["b"]).expect("b"));
+        let got = match versus_in(order, a, b) {
+            Versus::Newer => "less",
+            Versus::Same => "equal",
+            Versus::Older => "greater",
+            Versus::Unordered => "unordered",
+        };
+        assert_eq!(case["expect"], json!(got), "{}", case["note"]);
+        seen.insert((kind.as_str(), got));
+    }
+    for want in [
+        ("state", "unordered"),
+        ("stream", "unordered"),
+        ("stream", "less"),
+        ("state", "less"),
+    ] {
+        assert!(seen.contains(&want), "the order pairs cover {want:?}");
+    }
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let note = &case["note"];
+        let (order, kind) = order_of(case);
+        let marks: Vec<Option<Mark>> = case["arrivals"]
+            .as_array()
+            .expect("arrivals")
+            .iter()
+            .map(|a| {
+                assert!(
+                    matches!(a["sample"].as_str(), Some("put" | "delete")),
+                    "{note}"
+                );
+                Mark::of(inband(&a["stamp"]), zenoh(a.get("zenoh")))
+            })
+            .collect();
+        let mut held = Held::Nothing;
+        let tool: Vec<bool> = marks
+            .iter()
+            .map(|m| {
+                let kept = admits_mark_in(order, held, *m);
+                if kept {
+                    held = held.after_mark(*m);
+                }
+                kept
+            })
+            .collect();
+        assert_eq!(
+            case["expect"]["tool_kept"],
+            json!(tool),
+            "{note}: a tool's merge"
+        );
+        let state = matches!(kind, KindToken::State | KindToken::ExplicitState);
+        let every_marked = marks.iter().all(Option::is_some);
+        let want = &case["expect"]["consumer_accepts"];
+        if state && every_marked {
+            let mut last: Option<Mark> = None;
+            let consumer: Vec<bool> = marks
+                .iter()
+                .map(|m| {
+                    let m = m.expect("marked");
+                    let ok = consumer_accepts(last, m);
+                    if ok {
+                        last = Some(m);
+                    }
+                    ok
+                })
+                .collect();
+            assert_eq!(*want, json!(consumer), "{note}: a consumer");
+        } else {
+            assert!(
+                want.is_null(),
+                "{note}: a consumer's rule orders a state key's stamped values"
+            );
+        }
+    }
+}
+
 /// Bytes from lowercase hexadecimal, two digits a byte.
 fn unhex(h: &str) -> Vec<u8> {
     assert!(h.len().is_multiple_of(2), "{h:?}: odd length");

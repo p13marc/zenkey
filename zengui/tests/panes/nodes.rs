@@ -157,6 +157,7 @@ fn descriptor(service: &str, instance: &str, profiles: &[&str]) -> Descriptor {
         format: "zk2-descriptor/0.1".into(),
         service: service.into(),
         instance: instance.into(),
+        run: None,
         interfaces: Vec::new(),
         capabilities: Vec::new(),
         requires: Vec::new(),

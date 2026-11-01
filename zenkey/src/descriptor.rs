@@ -118,6 +118,7 @@ pub(crate) fn build(
         format: FORMAT.to_owned(),
         service: id.addr.to_string(),
         instance: instance.to_string(),
+        run: None,
         interfaces,
         capabilities: held.iter().cloned().collect(),
         requires,

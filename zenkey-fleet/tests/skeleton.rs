@@ -97,6 +97,7 @@ fn catalog(instances: &[Inst<'_>]) -> Catalog {
                 format: "zk2-descriptor/0.1".into(),
                 service: i.address.into(),
                 instance: id.to_string(),
+                run: None,
                 interfaces: entries
                     .iter()
                     .map(|(iface, contract, token)| InterfaceEntry {

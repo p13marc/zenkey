@@ -767,6 +767,7 @@ response = { raw = "text/plain" }
             format: "zk2-descriptor/0.1".into(),
             service: address.into(),
             instance: format!("{instance:016x}"),
+            run: None,
             interfaces: revisions
                 .iter()
                 .map(|(r, token)| zenkey_model::descriptor::InterfaceEntry {
