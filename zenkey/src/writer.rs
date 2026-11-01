@@ -195,8 +195,8 @@ impl Slot for PubSlot {
 /// `zenoh/bytes` (§7.2's exception): a stream key's seq is its own in the
 /// run, kept by the service's [`crate::state::Minter`] across a publisher
 /// declared again, and a state mutation's is the owner's. An `@stream`
-/// sample keeps today's wire: its record alone, under its predefined
-/// `Encoding`.
+/// sample carries no envelope (§4.3, "Explicit streams"): its record
+/// alone, under its predefined `Encoding`.
 ///
 /// **A Zenoh timestamp** goes only on a resource core §4.3's table lists:
 /// a stream that declares `timing.lifespan_ms` (`timing.v1` §2.6,

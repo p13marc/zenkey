@@ -24,13 +24,15 @@
 //! arrives expired is discarded, counted ([`Subscription::expired`]), and
 //! never delivered.
 //!
-//! **The zk2c envelope** (core §7.5; #976's A2): every data sample is read
+//! **The zk2c envelope** (core §4.3, §7.5): every data sample is read
 //! through [`crate::inband`], so a stream, state or event sample that
 //! carries an envelope is delivered with its record as its payload and its
 //! run and seq as [`Delivery::inband`], what orders it
 //! ([`Delivery::mark`]). One whose envelope is refused is undecodable:
 //! never delivered, and counted ([`Subscription::undecodable`],
-//! [`StateAnswer::undecodable`]).
+//! [`StateAnswer::undecodable`]). A sample with no envelope, an `@stream`
+//! sample's or a foreign key's, is delivered as it arrived, ordered by its
+//! Zenoh timestamp where it carries one.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -964,7 +966,7 @@ impl Subscription {
 
     /// Samples dropped as undecodable: a stream, state or event sample
     /// under `zenoh/bytes` whose zk2c envelope was refused (core §7.5),
-    /// never read as today's payload, nor delivered.
+    /// never read as a payload with no envelope, nor delivered.
     #[must_use]
     pub fn undecodable(&self) -> u64 {
         self.seen.undecodable.load(Ordering::Relaxed)

@@ -29,12 +29,14 @@
 //!
 //! Not [`crate::envelope`], the error envelope of a failed call (§5.2).
 //!
-//! **Reading** (#976's A2; observer §7.3): a reader tells a sample that
-//! carries an envelope by its key and its Encoding alone ([`carries`]),
-//! reads a put's payload through [`read_put`] and a delete's attachment
-//! through [`read_delete`], and reads every other sample as it did. The
-//! order of two in-band stamps is [`crate::seed`]'s, by the key's kind
-//! ([`enveloped_kind`]).
+//! **Reading** (observer §7.3, "the envelope first"): a reader tells a
+//! sample that carries an envelope by its key and its Encoding alone
+//! ([`carries`]), reads a put's payload through [`read_put`] and a
+//! delete's attachment through [`read_delete`], and reads every other
+//! sample as one with no envelope: an `@stream` sample, a foreign key's
+//! (§1.7), or one whose owner broke §4.3. The order of two in-band stamps
+//! is [`crate::seed`]'s, by the key's kind ([`enveloped_kind`]), and a
+//! sample with no envelope is ordered by its Zenoh timestamp (core §4.2).
 
 use thiserror::Error;
 
@@ -559,8 +561,8 @@ pub fn enveloped_kind(key: &str) -> Option<KindToken> {
 /// Encoding is `zenoh/bytes` ([`ENCODING`]). An owner sends `zenoh/bytes`
 /// on such a key only with an envelope (core §7.2 asks the predefined
 /// Encoding of every other sample, and a raw type keeps its media type), so
-/// the test tells the two wires apart. Every other sample is read as it
-/// was before the envelope.
+/// the test tells the two wires apart. Every other sample is read as one
+/// with no envelope (observer §7.3, "Every other sample").
 #[must_use]
 pub fn carries(key: &str, encoding: &str) -> bool {
     encoding == ENCODING && enveloped_key(key)
@@ -570,7 +572,7 @@ pub fn carries(key: &str, encoding: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading<'a> {
     /// The sample carries no envelope ([`carries`]): its payload is read as
-    /// it is today.
+    /// it arrived, by observer §7.3's decode order.
     Plain,
     /// An envelope: its stamp orders the sample, and its record is the
     /// payload every later step reads (decode, a schema check, a
@@ -578,8 +580,8 @@ pub enum Reading<'a> {
     Enveloped(Envelope<'a>),
     /// An envelope refused: the sample is undecodable, with the refusal's
     /// token as its reason ([`Refusal::reason`]). It is counted and shown
-    /// as such, never read as a payload of today's wire, and never
-    /// ordered.
+    /// as such, never decoded or sniffed as a payload with no envelope
+    /// (observer §7.3's MUST NOT), and never ordered.
     Refused(Refusal),
 }
 
@@ -597,9 +599,9 @@ pub fn read_put<'a>(key: &str, encoding: &str, payload: &'a [u8]) -> Reading<'a>
 
 /// A delete's in-band stamp: on a key whose samples may carry an envelope
 /// ([`enveloped_key`]), an attachment that parses as a delete's envelope.
-/// A delete whose attachment is absent or does not parse is read as it is
-/// today, by its Zenoh timestamp: an archive's or a profile's attachment
-/// is never refused here.
+/// A delete whose attachment is absent or does not parse is read as one
+/// with no envelope, by its Zenoh timestamp (core §4.2): an archive's or a
+/// profile's attachment (`telemetry.v1`'s Epoch) is never refused here.
 #[must_use]
 pub fn read_delete(key: &str, attachment: Option<&[u8]>) -> Option<Stamp> {
     let a = attachment?;
@@ -833,7 +835,7 @@ mod tests {
     }
 
     /// Rule 3: a delete's attachment that parses carries its stamp; any
-    /// other is read as today.
+    /// other is read as one with no envelope.
     #[test]
     fn a_delete_carries_its_stamp_in_its_attachment_or_none() {
         let key = "zk2/h/s/i.v1/state/mode";
