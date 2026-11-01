@@ -541,12 +541,14 @@ def writer_decimal(f: Field, v: Any) -> Fraction:
     if isinstance(v, bool):
         raise Refused("value", f"{f.name}: {_show(v)} is not a decimal")
     h, p = _bounds(f)
+    # The order matters. The magnitude is judged on the integer as written,
+    # before json_number reads integer text past −2^63 to 2^64 − 1 as a
+    # binary64 (core 0.80): so such text no code reaches is `range`, never a
+    # double past every range (inf), which would read as no decimal, `value`.
     if isinstance(v, int) and abs(v) >= 10 ** h:
         raise Refused("range", f"{f.name}: an integer of 10^{h} or more has no code")
-    v = json_number(v)  # core 0.80: integer text past the 64-bit span is a binary64
+    v = json_number(v)
     if isinstance(v, int):
-        if abs(v) >= 10 ** h:
-            raise Refused("range", f"{f.name}: an integer of 10^{h} or more has no code")
         return Fraction(v)
     if isinstance(v, float):
         v = repr(v)

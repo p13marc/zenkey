@@ -389,6 +389,7 @@ def main(argv: list[str] | None = None) -> int:
         print("echo: --across-face needs --contracts and no SELECTOR: its scopes are the contracts' (observer §7.5)",
               file=sys.stderr)
         return 2
+    catalog_epoch: int | None = None
     if args.catalog is not None:
         from pathlib import Path
 
@@ -405,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
         except catalog.Refused as e:
             print(f"echo: --catalog: refused, {e.token}: {e} (core §8.6)", file=sys.stderr)
             return 2
-        args.epoch = catalog.resolve([held_catalog], held_catalog.id).epoch
+        catalog_epoch = catalog.resolve([held_catalog], held_catalog.id).epoch
     selector = args.selector if args.selector is not None else "zk2/**"
     held = None
     if args.contracts:
@@ -422,6 +423,9 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as e:  # noqa: BLE001 - a contract it cannot hold is refused input
             print(f"echo: --contracts: {e}", file=sys.stderr)
             return 2
+    # The epoch packed time fields are read under, once every input is
+    # checked: the catalog's, else --epoch, else 0 (core §7.6, §8.6).
+    epoch = catalog_epoch if catalog_epoch is not None else args.epoch
     watched: str | list[str] = selector
     if args.across_face:
         from . import face
@@ -447,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
         start = time.monotonic()
         samples = watch(session, watched, args.window, args.count,
                         lambda: print("echo: listening", file=sys.stderr, flush=True),
-                        writer(sys.stdout) if args.format == "ndjson" else None, held, args.epoch)
+                        writer(sys.stdout) if args.format == "ndjson" else None, held, epoch)
         watched_s = round(time.monotonic() - start, 3)
         if args.format == "json":
             doc = {"report": "echo", "selector": scope["selector"], "scope": scope, "window_s": watched_s,

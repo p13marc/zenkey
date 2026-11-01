@@ -254,31 +254,32 @@ def run(puts: int = 10) -> dict[str, Any]:
     def plain_step(name: str, selector: str, put: Callable[[bytes], None], key_text: str,
                    get: str | None = None) -> None:
         proxy = CountingProxy(ep)
-        session = _client(proxy.endpoint)
-        heard = Heard()
-        sub = session.declare_subscriber(selector, zenoh.handlers.Callback(
-            lambda s: heard.take(s.payload.to_bytes())))
         try:
-            if not _wait_heard(put, heard, name):
-                steps[name] = {"selector": selector, "ran": False, "why": "the far client heard no warm-up put"}
-                return
-            row = {"selector": selector, "ran": True, "declared": face.nonwild_prefix(selector),
-                   **_count(proxy, put, heard, name, puts, key_text.encode())}
-            if get is not None:
-                mark = proxy.mark()
-                replies = list(session.get(get, target=zenoh.QueryTarget.ALL,
-                                           consolidation=zenoh.ConsolidationMode.LATEST, timeout=5.0))
-                time.sleep(0.2)
-                got = [b for b in proxy.batches(mark) if b"_get" in b or get.encode() in b]
-                row["get"] = {"selector": get, "replies": len([r for r in replies if r.ok is not None]),
-                              "reply_batch_bytes": sorted(len(b) for b in proxy.batches(mark)
-                                                          if get.encode() in b),
-                              "carries_whole_key": any(get.encode() in b for b in got)}
-            row["framed_whole"] = proxy.framed_whole()
-            steps[name] = row
+            session = _client(proxy.endpoint)
+            try:
+                heard = Heard()
+                session.declare_subscriber(selector, zenoh.handlers.Callback(
+                    lambda s: heard.take(s.payload.to_bytes())))
+                if not _wait_heard(put, heard, name):
+                    steps[name] = {"selector": selector, "ran": False,
+                                   "why": "the far client heard no warm-up put"}
+                    return
+                row = {"selector": selector, "ran": True, "declared": face.nonwild_prefix(selector),
+                       **_count(proxy, put, heard, name, puts, key_text.encode())}
+                if get is not None:
+                    mark = proxy.mark()
+                    replies = list(session.get(get, target=zenoh.QueryTarget.ALL,
+                                               consolidation=zenoh.ConsolidationMode.LATEST, timeout=5.0))
+                    time.sleep(0.2)
+                    got = [b for b in proxy.batches(mark) if get.encode() in b]
+                    row["get"] = {"selector": get, "replies": len([r for r in replies if r.ok is not None]),
+                                  "reply_batch_bytes": sorted(len(b) for b in got),
+                                  "carries_whole_key": bool(got)}
+                row["framed_whole"] = proxy.framed_whole()
+                steps[name] = row
+            finally:
+                session.close()  # its subscriber goes with it
         finally:
-            sub.undeclare()
-            session.close()
             proxy.close()
 
     try:
@@ -287,12 +288,14 @@ def run(puts: int = 10) -> dict[str, Any]:
         from .descriptor import check_descriptor
 
         near = _client(ep)
-        answers = [a for a in live.get_descriptor(near, owner.instance_key) if a.ok]
+        try:
+            answers = [a for a in live.get_descriptor(near, owner.instance_key) if a.ok]
+        finally:
+            near.close()
         doc = json.loads(answers[0].payload) if answers else {}
         steps["0"] = {"catalog": cat.id, "epoch": cat.epoch, "stated": doc.get("catalog"),
                       "codes": check_descriptor(answers[0].payload, [face_c]) if answers else None,
                       "writing_epoch": owner.writing_epoch()}
-        near.close()
 
         # §7 steps 1 to 4: a plain session as the far client.
         plain_step("1", f"{PREFIX}/stream/level", stream("stream/level"), "level")
@@ -306,67 +309,77 @@ def run(puts: int = 10) -> dict[str, Any]:
         # a put is known to have crossed when the proxy carried it.
         scopes = face.scopes([face_c], [ADDRESS])
         proxy = CountingProxy(ep)
-        session = _client(proxy.endpoint)
-        rows: list[dict[str, Any]] = []
-        listening = threading.Event()
-        window_s = 12.0 + 4.0 * puts
+        try:
+            session = _client(proxy.endpoint)
+            try:
+                rows: list[dict[str, Any]] = []
+                listening = threading.Event()
+                window_s = 12.0 + 4.0 * puts
 
-        def tool() -> None:
-            rows.extend(echo_tool.watch(session, scopes, window_s, 0, listening.set, None,
-                                        echo_tool.Held([face_c]), None))
+                def tool() -> None:
+                    rows.extend(echo_tool.watch(session, scopes, window_s, 0, listening.set, None,
+                                                echo_tool.Held([face_c]), None))
 
-        class Carried(Heard):
-            """A put is heard when the proxy carried its record."""
+                class Carried(Heard):
+                    """A put is heard when the proxy carried its record."""
 
-            def holds(self, text: bytes) -> bool:
-                return any(text in b for b in proxy.batches())
+                    def holds(self, text: bytes) -> bool:
+                        return any(text in b for b in proxy.batches())
 
-        th = threading.Thread(target=tool, daemon=True)
-        th.start()
-        listening.wait(10)
-        tool_rows: dict[str, Any] = {"scopes": scopes, "declared": [face.nonwild_prefix(s) for s in scopes]}
-        for rid, put, text in (("stream/level", stream("stream/level"), "level"),
-                               ("stream/axis/roll", stream("stream/axis/roll"), "stream/axis"),
-                               ("state/mode", lambda t: owner.set_state(f"{PREFIX}/state/mode", t), "mode")):
-            tag = f"5{rid[7:9] or rid[:2]}"
-            if not _wait_heard(put, Carried(), tag):
-                tool_rows[rid] = {"ran": False}
-                continue
-            tool_rows[rid] = _count(proxy, put, Carried(), tag, puts, text.encode())
-        th.join(window_s + 10)
-        tool_rows["rows"] = len(rows)
-        tool_rows["undecodable"] = sum(1 for r in rows if r.get("undecodable"))
-        tool_rows["framed_whole"] = proxy.framed_whole()
-        steps["5"] = tool_rows
-        session.close()
-        proxy.close()
+                th = threading.Thread(target=tool, daemon=True)
+                th.start()
+                listening.wait(10)
+                tool_rows: dict[str, Any] = {"scopes": scopes,
+                                             "declared": [face.nonwild_prefix(s) for s in scopes]}
+                for rid, tag, put, text in (
+                        ("stream/level", "5lv", stream("stream/level"), "level"),
+                        ("stream/axis/roll", "5ax", stream("stream/axis/roll"), "stream/axis"),
+                        ("state/mode", "5md", lambda t: owner.set_state(f"{PREFIX}/state/mode", t), "mode")):
+                    if not _wait_heard(put, Carried(), tag):
+                        tool_rows[rid] = {"ran": False}
+                        continue
+                    tool_rows[rid] = _count(proxy, put, Carried(), tag, puts, text.encode())
+                th.join(window_s + 10)
+                tool_rows["rows"] = len(rows)
+                tool_rows["undecodable"] = sum(1 for r in rows if r.get("undecodable"))
+                tool_rows["framed_whole"] = proxy.framed_whole()
+                steps["5"] = tool_rows
+            finally:
+                session.close()
+        finally:
+            proxy.close()
 
         # 6 and 7: zk2py's consumer, bound exactly, then to a wildcard.
         for name, binding in (("6", ADDRESS), ("7", "site/*")):
             proxy = CountingProxy(ep)
-            consumer = Owner("ground", f"reader{name}", [reader_c], connect=proxy.endpoint,
-                             bindings={"src": [binding]})
-            consumer.start()
-            hs = {"stream/level": Heard(), "stream/axis/{axis}": Heard()}
-            for rid, h in hs.items():
-                consumer.subscribe_role("src", IFACE, rid, lambda k, x, h_=h: h_.take(x))
-            row: dict[str, Any] = {"binding": binding,
-                                   "selectors": consumer.role_keys("src", IFACE, "stream/level")
-                                   + consumer.role_keys("src", IFACE, "stream/axis/{axis}")}
-            row["declared"] = [face.nonwild_prefix(s) for s in row["selectors"]]
-            for rid, h, put, text in (("stream/level", hs["stream/level"], stream("stream/level"),
-                                       "level" if binding == ADDRESS else f"/rig/{IFACE}/stream/level"),
-                                      ("stream/axis/roll", hs["stream/axis/{axis}"], stream("stream/axis/roll"),
-                                       "stream/axis" if binding == ADDRESS
-                                       else f"/rig/{IFACE}/stream/axis")):
-                if not _wait_heard(put, h, f"{name}{rid[7:9]}"):
-                    row[rid] = {"ran": False}
-                    continue
-                row[rid] = _count(proxy, put, h, f"{name}{rid[7:9]}", puts, text.encode())
-            row["framed_whole"] = proxy.framed_whole()
-            steps[name] = row
-            consumer.close()
-            proxy.close()
+            try:
+                consumer = Owner("ground", f"reader{name}", [reader_c], connect=proxy.endpoint,
+                                 bindings={"src": [binding]})
+                try:
+                    consumer.start()
+                    hs = {"stream/level": Heard(), "stream/axis/{axis}": Heard()}
+                    for rid, h in hs.items():
+                        consumer.subscribe_role("src", IFACE, rid, lambda k, x, h_=h: h_.take(x))
+                    row: dict[str, Any] = {"binding": binding,
+                                           "selectors": consumer.role_keys("src", IFACE, "stream/level")
+                                           + consumer.role_keys("src", IFACE, "stream/axis/{axis}")}
+                    row["declared"] = [face.nonwild_prefix(s) for s in row["selectors"]]
+                    exact = binding == ADDRESS
+                    for rid, tag, h, put, text in (
+                            ("stream/level", f"{name}lv", hs["stream/level"], stream("stream/level"),
+                             "level" if exact else f"/rig/{IFACE}/stream/level"),
+                            ("stream/axis/roll", f"{name}ax", hs["stream/axis/{axis}"], stream("stream/axis/roll"),
+                             "stream/axis" if exact else f"/rig/{IFACE}/stream/axis")):
+                        if not _wait_heard(put, h, tag):
+                            row[rid] = {"ran": False}
+                            continue
+                        row[rid] = _count(proxy, put, h, tag, puts, text.encode())
+                    row["framed_whole"] = proxy.framed_whole()
+                    steps[name] = row
+                finally:
+                    consumer.close()
+            finally:
+                proxy.close()
 
         # 8: a rest parameter's member, and an event's occurrence (F-438).
         plain_step("8a", face.scopes([face_c], [ADDRESS])[4], stream("stream/path/a/b"), "stream/path")
