@@ -1,5 +1,5 @@
 {
-  "description": "core §7.6, packed records. Written by an independent reading of the text (Python, standard library), checked, never blessed. `schema` is one packed document; every case names one of its types. `layouts`: a type → its layout form (the root's fields before the first marker, without names, then \"...\" where the root ends at one), the sha256 of the form's JCS bytes in hex, the tag (the low four bits of that hash's last byte), each item's `width` and `offset` (the bit where it starts, null once an optional field or a marker before it makes it vary), and `min_bits` and `max_bits`, the shortest and longest record this revision writes, before the pad. `writes`: a type, the deployment `epoch` in seconds where its fields need one, and a value → the record's `bits` before the pad, the `pad` and the bytes in `hex`, or `{\"refused\": token}` (the writer's: `missing`, a field not given; `unknown`, a member the type does not have; `value`, a value of the wrong JSON type, a name not declared or a decimal that does not read; `range`, a value with no code; `epoch`, a time field and no epoch). An `int`, `counter` or `time` value is a JSON number written as an integer: one with a fraction or an exponent is `value`, unless its magnitude is 2^63 or more, which is `range`, since a JSON reader without big integers holds integer text past 64 bits that way (core §7.6 is silent on the spelling; this is the reading the vectors pin). An accepted write reads back, under the type's tag, to `reads_as` where given, else to its value. `reads`: a type, a tag, the record's bytes in hex and the epoch → `{\"value\": the JSON reading}` or `{\"refused\": token}`, the first in §7.6's order: `tag`; then, field by field, `length` (the record ends before a bit the layout needs) and `code` (an unused code); `extension` (a marker read as 1 and no field present after it); `length` (a byte after the pad); `pad` (a pad bit set). A marker read as 1 at the end of the reader's layout ends the reading: the rest is a later revision's, and must hold at least one bit (`length`).",
+  "description": "core §7.6, packed records. Written by an independent reading of the text (Python, standard library), checked, never blessed. `schema` is one packed document; every case names one of its types. `layouts`: a type → its layout form (the root's fields before the first marker, without names, then \"...\" where the root ends at one), the sha256 of the form's JCS bytes in hex, the tag (the low four bits of that hash's last byte), each item's `width` and `offset` (the bit where it starts, null once an optional field or a marker before it makes it vary), and `min_bits` and `max_bits`, the shortest and longest record this revision writes, before the pad. `writes`: a type, the deployment `epoch` in seconds where its fields need one, and a value → the record's `bits` before the pad, the `pad` and the bytes in `hex`, or `{\"refused\": token}` (the writer's: `missing`, a field not given; `unknown`, a member the type does not have; `value`, a value of the wrong JSON type, a name not declared or a decimal that does not read; `range`, a value with no code; `epoch`, a time field and no epoch). A fixed-point string is a JSON number's text (RFC 8259 §6), and a JSON number is read as the binary64 a JSON reader holds for it, by that double's shortest decimal text. An `int`, `counter` or `time` value is a JSON number written as an integer: one with a fraction or an exponent is `value`, unless its magnitude is 2^63 or more, which is `range`, since a JSON reader without big integers holds integer text past 64 bits that way (core §7.6, \"What a writer takes\"). An accepted write reads back, under the type's tag, to `reads_as` where given, else to its value. `reads`: a type, a tag, the record's bytes in hex and the epoch → `{\"value\": the JSON reading}` or `{\"refused\": token}`, the first in §7.6's order: `tag`; then, field by field, `length` (the record ends before a bit the layout needs) and `code` (an unused code); `extension` (a marker read as 1 and no field present after it); `length` (a byte after the pad); `pad` (a pad bit set). A marker read as 1 at the end of the reader's layout ends the reading: the rest is a later revision's, and must hold at least one bit (`length`).",
   "schema": {
     "description": "core §7.6's vectors: every type the cases read",
     "types": {
@@ -1770,6 +1770,73 @@
       },
       "reads_as": {
         "half": "0.5",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "a writer's decimal string is a JSON number's text: no `+`",
+      "type": "Ties",
+      "value": {
+        "half": "+0.5",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a writer's decimal string is a JSON number's text: no bare leading point",
+      "type": "Ties",
+      "value": {
+        "half": ".5",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a writer's decimal string is a JSON number's text: no bare trailing point",
+      "type": "Ties",
+      "value": {
+        "half": "1.",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a writer's decimal string is a JSON number's text: no leading zero",
+      "type": "Ties",
+      "value": {
+        "half": "05",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a JSON number is read as the binary64 a JSON reader holds, then by its shortest text: this one's double is 0.25, a tie, where its text is above it",
+      "type": "Ties",
+      "value": {
+        "half": 0.2500000000000000000000000001,
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0280",
+        "bits": "000000101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0",
         "signed": "0",
         "odd_top": "0"
       }

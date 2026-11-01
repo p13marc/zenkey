@@ -13,6 +13,30 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.16 — 2026-11-01: §7.3 decodes a packed record (#979)
+
+Core 0.75 added the `packed` type kind, and core 0.77 says where a
+`time` field's epoch comes from. #979's B2 lights the reference tools'
+decoder. zk2py's round 94 found the gap, F-433. This text is written
+against core 0.77.
+
+**Changed: §7.3.**
+- **The kinds a tool decodes** name `packed` beside `protobuf` and
+  `jsonschema`. The JSON Schema kind's gloss is shorter now. So the
+  rule's sentence stays whole in `RULES.md`.
+- **A packed record** is read through its type's layout, under the tag
+  its envelope's CH carried. One its layout refuses is undecodable, its
+  refusal named, and so is one that came in no envelope.
+- **Its `time` fields** are read under the deployment's epoch, 0 where it
+  states none.
+- **A packed type is named** `packed:<name>`, decoded or not.
+- **Evidence:** `[F: packed/vectors.json]`.
+
+**Deliberately not changed.**
+- **The envelope step,** which already reads every stream, state and
+  event sample under `zenoh/bytes` as an envelope.
+- **No section number.**
+
 ## 0.15 — 2026-11-01: §4.1, §4.4 and §8.3 read core 0.73's in-band stamps (#976)
 
 Core 0.73 (#976's flip) orders a key's values by an owner's run and seq,

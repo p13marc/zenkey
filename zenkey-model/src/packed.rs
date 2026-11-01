@@ -68,8 +68,9 @@ impl Decimal {
         Self::from_parts(s.starts_with('-'), int, frac.unwrap_or(""), 0)
     }
 
-    /// A writer's decimal: the declaration grammar with leading zeros and an
-    /// exponent allowed, which is how a JSON number's text reads.
+    /// A writer's decimal: a JSON number's text (RFC 8259 §6, core §7.6
+    /// "What a writer takes"), the declaration grammar with an exponent
+    /// allowed: no `+`, no leading zero, no bare point.
     #[must_use]
     pub fn parse_input(s: &str) -> Option<Self> {
         let neg = s.starts_with('-');
@@ -83,7 +84,10 @@ impl Decimal {
             None => (mant, ""),
         };
         let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
-        if !digits(int) || (mant.contains('.') && !digits(frac)) {
+        if !digits(int) || (int.len() > 1 && int.starts_with('0')) {
+            return None;
+        }
+        if mant.contains('.') && !digits(frac) {
             return None;
         }
         let exp: i64 = match exp {

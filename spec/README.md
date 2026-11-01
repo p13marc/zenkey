@@ -124,10 +124,10 @@ section number alone is the core's.
   caller or an owner where it reads
   ([observer §0](observer.md#0-conventions)).
 - **Static rule**: a rule that binds every implementation where it does
-  what the rule governs. Those are §1's, §7.5's, §9's, the contract rules
-  of the sections §12 lists, any naming its lint code, and §3.3's
-  checker's. A rule of any of those sections, §1, §7.5 and §9 included,
-  that names a role is that role's
+  what the rule governs. Those are §1's, §7.5's, §7.6's, §9's, the
+  contract rules of the sections §12 lists, any naming its lint code, and
+  §3.3's checker's. A rule of any of those sections, §1, §7.5, §7.6 and §9
+  included, that names a role is that role's
   ([§12](core.md#12-conformance-classes)).
 - **Expose**: an instance exposes a resource when it serves it, as its
   descriptor says ([§8.2](core.md#82-start-up-order)). It is **active** on
