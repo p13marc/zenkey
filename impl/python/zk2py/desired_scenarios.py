@@ -589,8 +589,8 @@ def section6(ctx: Ctx) -> None:
         author = bus.party(ctx.author_impl, AUTHOR, flags)
         target = bus.party(ctx.target_impl, TARGET, ctx.target_flags())
         s1 = _converge_v1(ctx, bus, author, target, 1)
-        author.put(SPARE, v(7))
-        author.delete(SPARE)
+        s7 = author.put(SPARE, v(7))
+        sdel = author.delete(SPARE)
         time.sleep(5.0)
         rp.check(sec, "setup: the target converged on v1; D2's document deleted 5 s ago, in the record",
                  converged_on(target.report(), s1, 1) and rec.is_file() and "lab/spare" in
@@ -598,7 +598,8 @@ def section6(ctx: Ctx) -> None:
         acts0 = target.acts()
         author.kill()
         t = time.monotonic()
-        author2 = bus.party(ctx.author_impl, AUTHOR, flags)
+        # Step 1 (0.12, F-421): "Its clock is 5 s behind."
+        author2 = bus.party(ctx.author_impl, AUTHOR, flags + ["--clock-offset-ms", "-5000"])
         _wait(lambda: bus.token_put(AUTHOR, t) is not None, 10.0, 0.01)
         gd, gd2 = bus.get(D), bus.get(D2)
         time.sleep(3.0)
@@ -611,6 +612,12 @@ def section6(ctx: Ctx) -> None:
                  reput is not None and json.loads(reput[3]) == v(1) and zid_of(reput[4]) == zid
                  and zid_of(s1) != zid and redel is not None and zid_of(redel[4]) == zid,
                  f"put {reput and reput[4]}, delete {redel and redel[4]}, zid {zid and hex(zid)}")
+        last = max(raw(s1), raw(s7), raw(sdel))
+        rp.check(sec, "1. the put's stamp is above the author's last one, though its clock is behind (§2.11): its "
+                      "record's catch-up, D2's delete the last the author issued",
+                 reput is not None and raw(reput[4]) > last and raw(sdel) == last,
+                 f"re-put {reput and reput[4]}, the last {sdel}; {raw(reput[4]) - last if reput else None} NTP64 "
+                 "units above")
         token_at = next((x[0] for x in bus.tokens if x[0] >= t and x[1] == "put" and x[2].startswith(
             f"zk2/{AUTHOR}/@zk/instance/")), None)
         rp.note(sec, f"S's receipt of the re-put {'before' if reput and token_at and reput[0] <= token_at else 'after'} "

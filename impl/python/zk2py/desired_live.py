@@ -137,8 +137,11 @@ class Author:
     """§2.11's author of ``tasks/{system}/{service}``."""
 
     def __init__(self, address: str, endpoint: str, *, record: str | None = None, window_s: float = 60.0,
-                 tokenless: tuple[str, ...] = (), tasking: Any = None) -> None:
+                 tokenless: tuple[str, ...] = (), tasking: Any = None, clock_offset_ms: int = 0) -> None:
         self.address, self.endpoint = address, endpoint
+        #: the minting clock's offset from the host's (``scenarios.md`` §6
+        #: step 1, 0.12: "Its clock is 5 s behind")
+        self.clock_offset_ms = clock_offset_ms
         self.record_path = None if record is None else Path(record)
         self.window_s, self.tokenless = window_s, set(tokenless)
         #: tasking.v1, the scenarios' or a file given in its place
@@ -162,6 +165,13 @@ class Author:
         self.owner = Owner(system, service, [self.contract], connect=self.endpoint, tombstone_s=self.window_s,
                            before_tokens=self._adopt, tokenless=self.tokenless)
         owner = self.owner
+        if self.clock_offset_ms:
+            def shifted(o: Owner = owner, ns: int = self.clock_offset_ms * 1_000_000) -> Any:
+                ts = o.session.new_timestamp()
+                n = ts.get_time_as_ntp64().as_nanos() + ns
+                return zenoh.Timestamp(zenoh.NTP64(n // 1_000_000_000, n % 1_000_000_000), ts.get_id())
+
+            owner.clock = shifted
 
         def counted(query: Any) -> None:
             with self.lock:

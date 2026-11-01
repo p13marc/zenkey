@@ -7,7 +7,7 @@ as a black box::
         [--desired-author] [--desired-record <file>] [--desired-window <s>]
         [--desired-target <system>/<service>] [--desired-unbound]
         [--desired-archive <system>/<service>] [--desired-watch]
-        [--desired-reread-ms <ms>] [--desired-hold]
+        [--desired-reread-ms <ms>] [--desired-hold] [--clock-offset-ms <ms>]
         <system>/<service>
 
 Standard output: ``connected <endpoint>``, then ``ready
@@ -139,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--desired-watch", action="store_true")
     ap.add_argument("--desired-reread-ms", type=int)
     ap.add_argument("--desired-hold", action="store_true")
+    ap.add_argument("--clock-offset-ms", type=int, default=0,
+                    help="the author's minting clock's offset from the host's, as the owner example's")
     ap.add_argument("address")
     ap.add_argument("contracts", nargs="*", help="a tasking.v1 or worker.v1 contract file, used in place of the "
                                                  "scenarios' (the owner example's)")
@@ -168,7 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     instance = None
     if args.desired_author:
         author = Author(args.address, args.connect, record=args.desired_record, window_s=args.desired_window,
-                        tokenless=tuple(args.tokenless), tasking=given.get("tasking.v1"))
+                        tokenless=tuple(args.tokenless), tasking=given.get("tasking.v1"),
+                        clock_offset_ms=args.clock_offset_ms)
         instance = author.start()
     if args.desired_target or args.desired_unbound:
         try:
