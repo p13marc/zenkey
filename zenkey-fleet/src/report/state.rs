@@ -213,6 +213,7 @@ mod tests {
             rendered: Rendered::Value {
                 declared: "json:Namespaces".into(),
                 value: json!([]),
+                epoch_assumed: None,
             },
         }
     }

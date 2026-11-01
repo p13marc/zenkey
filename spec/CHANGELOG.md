@@ -3,6 +3,78 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.76 — 2026-11-01: round 94's answers on packed records (#979)
+
+#979's B2 builds what 0.75 defined: zenkey-build's packed types, the
+runtime's codec, and a tool's decoder. zk2py's round 94 read §7.6 cold
+and found eleven points, F-423 to F-433, none a blocker. This version
+answers them. Where the vectors already decided, the
+text now says what they do; where they did not, the text decides and a
+vector or a fixture pins it.
+
+**Answered, the text taking the vectors' reading.**
+- **F-423, who writes `out_of_range`.** A value outside the range has no
+  code, and an implementation refuses it. The application gives the name
+  `out_of_range` instead. An implementation never puts the code in a
+  value's place.
+- **F-424, a fixed-point value's range.** It is its codes': a value has a
+  code when its rounded code is a value's. So a value within half a
+  resolution past a bound is written, and a tie above `maximum` only when
+  the top code is even.
+- **F-425, a writer's input.** A fixed-point string is a JSON number's
+  text, RFC 8259 §6: no `+`, no leading zero, no bare point. A new MUST
+  NOT refuses an object holding a member its type does not have, or
+  missing a field that is not optional, as `unknown` and `missing` did.
+  `RULES.md` lists 192 rules.
+- **F-430, a counter's domain.** A count is from 0 to 2^64 − 1, written
+  modulo 2^width.
+
+**Answered, the text deciding.**
+- **F-426, a JSON number.** It is read as the binary64 a JSON reader holds
+  for it, by that double's shortest text: every JSON reader can, and the
+  vectors' numbers already read so. A value with more digits is given as
+  a string. `desired.v1` §2.7 reads a number by its text, because it
+  compares documents; a writer computes a code, and its input is a value.
+- **F-427, an integer.** In a packed file, an `int`'s bound or a `width`
+  is a JSON number with no fraction and no exponent, as §9.1's TOML
+  integers are: `5.0` is E038. A writer's `int`, `counter` or `time` value
+  is read the same way. A number of magnitude 2^63 or more is outside
+  every range however it is written, since a reader without big integers
+  holds such integer text as a double.
+- **F-428, "a later file".** The JSON Schema files are taken before the
+  packed files, each list in its order.
+- **F-429, cascade 7.** Nothing in the record of a type whose name is not a
+  type name is linted.
+- **F-433, the epoch's source.** A deployment states the epoch to its
+  writers and readers. One that states none has E = 0, the Unix epoch, so
+  a `time` field's 32 bits are Unix seconds. #980's catalog will carry it.
+  `observer.md` text 0.16 names the `packed` kind in its §7.3.
+
+**Answered, the index and the glossary.**
+- **F-431:** the glossary's "Static rule" names §7.6.
+- **F-432:** §7.6's reading rule ends its lead-in with a colon, so
+  `RULES.md` shows its list's length.
+
+**The review of B1** (#1012) asked for three cases, now in
+`conformance/packed/vectors.json`: a chained marker refused as
+`extension`, with a type of three groups beside it; an `int` given `5.0`
+(`value`) and `1e30` (`range`); and a 64-bit `int` with a reserved code.
+That last type's bounds lie past the canonical domain, so no contract
+lists it (E028). Its layout form's JCS writes them as RFC 8785 writes a
+double.
+
+**Fixtures.** `vectors.json` gains 2 layouts, 15 writes and 9 reads, from
+the independent reading. `contracts/e038-packed-shape` gains a bound
+written `5.0` and a misnamed type whose record would be E043, so it pins
+F-427 and F-429. `contracts/e024-packed-twice` lists one document under
+both kinds, for F-428.
+
+**Deliberately not changed.**
+- **No fingerprint moves,** and the canonical form's tag stays
+  `zk2-contract/draft-1`.
+- **The refusal tokens** stay the vectors' vocabulary, not the text's.
+- **No section number.**
+
 ## 0.75 — 2026-11-01: the `packed` type kind (#979)
 
 Epic #975, zk2c, makes the wire bandwidth-first. 0.73 put every stream,

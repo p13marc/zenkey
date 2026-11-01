@@ -3551,6 +3551,7 @@ mod actfx {
             rendered: Rendered::Value {
                 declared: "json:DiagnosticsResponse".into(),
                 value,
+                epoch_assumed: None,
             },
         }
     }
@@ -3590,6 +3591,7 @@ mod actfx {
                     detail: Some(Rendered::Value {
                         declared: "json:TcError".into(),
                         value: json!({"kind": "kernel"}),
+                        epoch_assumed: None,
                     }),
                 },
             },
@@ -3685,6 +3687,7 @@ mod actfx {
                         rendered: Rendered::Value {
                             declared: "json:NetworkInterface".into(),
                             value: json!({"is_up": true}),
+                            epoch_assumed: None,
                         },
                         ..reply(
                             key,

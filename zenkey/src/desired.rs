@@ -1357,12 +1357,15 @@ struct Incoming {
     /// A put whose envelope was refused: undecodable (§2.7), its bytes
     /// never read as a document.
     refused: Option<zenkey_model::wire::Refusal>,
+    /// CH's tag, when it came in an envelope: a packed document is read by
+    /// it (core §7.6).
+    tag: Option<zenkey_model::wire::Tag>,
 }
 
 impl Incoming {
     fn of(s: &Sample, via: Via) -> Self {
         let read = crate::inband::read(s.clone());
-        let refused = read.refusal();
+        let (refused, tag) = (read.refusal(), read.tag());
         let s = read.sample();
         let put = s.kind() == SampleKind::Put;
         Self {
@@ -1376,6 +1379,7 @@ impl Incoming {
             },
             encoding: s.encoding().to_string(),
             refused,
+            tag,
         }
     }
 }
@@ -1917,6 +1921,7 @@ impl TargetInner {
                         payload: lk.value.unwrap_or_default(),
                         encoding: lk.encoding.map(|e| e.to_string()).unwrap_or_default(),
                         refused: None,
+                        tag: lk.tag,
                     }));
                 }
                 Ok(None) => archive = Some(false),
@@ -1986,7 +1991,13 @@ impl TargetInner {
                 .ok_or_else(|| "not strict JSON (desired.v1 §2.7, §2.10's reading)".to_owned());
         }
         let enc = (!i.encoding.is_empty()).then_some(i.encoding.as_str());
-        match zenkey_model::decode::decode(bundle, ty, enc, &i.payload) {
+        // A packed document by the tag its envelope carried, refused by its
+        // layout as a consumer's admission refuses it (core §7.6).
+        let cx = zenkey_model::decode::Context {
+            tag: i.tag,
+            epoch: None,
+        };
+        match zenkey_model::decode::decode_in(bundle, ty, enc, &i.payload, cx) {
             zenkey_model::decode::Rendered::Value(v) => Ok(Some(v)),
             zenkey_model::decode::Rendered::Opaque { .. } => Ok(None),
             zenkey_model::decode::Rendered::Undecodable { reason, .. } => Err(reason),

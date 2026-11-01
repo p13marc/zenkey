@@ -839,9 +839,10 @@ fn compare_packed_fields(
                     format!("the enum's width {} became {}", x.width, y.width),
                 );
             }
+            // Every change is reported, the escape's beside the values':
+            // a reader of either revision meets them all.
             if ea != eb {
                 v.push(Class::Breaking, "enum_changed", at, "the escape toggled");
-                return;
             }
             for (p, q) in va.iter().zip(vb) {
                 if p == q {
@@ -863,7 +864,9 @@ fn compare_packed_fields(
                     );
                 }
             }
-            match (vb.len().cmp(&va.len()), ea) {
+            // An escape reads an added or removed value only when both
+            // revisions have one.
+            match (vb.len().cmp(&va.len()), *ea && *eb) {
                 (std::cmp::Ordering::Equal, _) | (std::cmp::Ordering::Greater, true) => {}
                 (std::cmp::Ordering::Less, true) => v.push(
                     Class::Review,
@@ -1856,6 +1859,47 @@ mod tests {
             v.findings.iter().all(|f| f.rule == "schema_unreadable"),
             "{:?}",
             v.findings
+        );
+    }
+
+    /// A packed enum whose escape toggles reports its values' changes too
+    /// (#979 B2, review of B1): every change, never the first alone.
+    #[test]
+    fn a_packed_enum_reports_every_change() {
+        let dir = std::env::temp_dir().join(format!("zk2-compat-packed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rev = |values: &[&str], escape: bool| {
+            let doc = json!({"types": {"T": {"fields": [
+                {"name": "m", "type": "enum", "values": values, "escape": escape, "width": 3}
+            ]}}});
+            std::fs::write(dir.join("t.json"), doc.to_string()).unwrap();
+            let src = "[interface]\nname = \"m\"\nmajor = 1\nminor = 0\n[schemas]\npacked = [\"t.json\"]\n\
+                       [resources.s]\nkind = \"state\"\ntype = \"packed:T\"\n";
+            let l = load_str(src, &dir, None);
+            Revision::of(&l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+        };
+        let old = rev(&["off", "on", "auto"], false);
+        let new = rev(&["off", "up", "auto", "eco"], true);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let v = compare(&old, &new);
+        assert_eq!(v.class().as_str(), "breaking");
+        let said: Vec<(&str, &str)> = v
+            .findings
+            .iter()
+            .map(|f| (f.rule, f.detail.as_str()))
+            .collect();
+        assert!(
+            said.contains(&("enum_changed", "the escape toggled")),
+            "{said:?}"
+        );
+        assert!(
+            said.contains(&("enum_value_renamed", "\"on\" renamed \"up\"")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|(r, d)| *r == "enum_changed" && d.contains("added or removed")),
+            "{said:?}"
         );
     }
 }

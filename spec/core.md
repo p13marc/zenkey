@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.75** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.76** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1823,6 +1823,9 @@ codes.
 - **A decimal string** is `-?(0|[1-9][0-9]*)(\.[0-9]+)?`, read as the
   exact decimal it writes. A `resolution` is above 0, and divides
   `maximum` − `minimum` (E040). `[F: contracts/e040-packed-fixed]`
+- **An integer** in the file, an `int`'s bound or a `width`, is a JSON
+  number written with no fraction and no exponent. So `5.0` there is
+  E038, as a float is in §9.1's TOML. `[F: contracts/e038-packed-shape]`
 - **Its shortest form** has no zero at the end of a fraction, no point
   with no digit after it, and is `0` for zero.
 
@@ -1834,22 +1837,31 @@ width.
   as `minimum` + code × `resolution`. So a value read is within half a
   `resolution` of the value written: that bound is part of the
   declaration.
+- **A fixed-point value's range** is its codes'. A value has a code when
+  its rounded code is from 0 to (`maximum` − `minimum`) / `resolution`.
+  So a value within half a `resolution` past a bound is written. Exactly
+  half below `minimum` rounds to code 0. Exactly half above `maximum`
+  rounds to the even one of the top code and the next, so it has a code
+  only when the top code is even. `[F: packed/vectors.json]`
 - **Exact arithmetic.** An implementation MUST compute a fixed-point
   code, and the value it reads back, in exact decimal arithmetic, never
   in binary floating point. `[F: packed/vectors.json]`
 - **Reserved codes.** `reserved` lists some of `not_available`, `error`
   and `out_of_range`. They take the top codes of the width, from all ones
   down, in that order. With all three, `not_available` is all ones,
-  `error` the code below it and `out_of_range` the one below that. A
-  writer whose value is outside the range writes `out_of_range`, where
-  the field declares it.
+  `error` the code below it and `out_of_range` the one below that.
+- **Who writes `out_of_range`.** A value outside the range has no code,
+  and an implementation refuses it (below). The application that holds
+  such a value gives the name `out_of_range` instead, where the field
+  declares it. An implementation never puts the code in a value's place.
 - **`enum`:** the value at index i of `values` is written as i. With
   `escape`, the all-ones code is the escape, a value this revision does
   not name. A reader reads every code from n up as the escape, so a later
   revision can name more values within the width.
 - **`bool`:** 1 is true and 0 is false.
-- **`counter`:** a count c is written as c modulo 2^`width`. A width
-  below 64 is a declared loss. A reader of a counter that wraps cannot
+- **`counter`:** a count c is an integer from 0 to 2^64 − 1, written as
+  c modulo 2^`width`. A count outside it has no code. A width below 64 is
+  a declared loss. A reader of a counter that wraps cannot
   recover its total, and more than one wrap between two readings goes
   unseen.
 - **`time`:** an instant t, in milliseconds since the Unix epoch, is
@@ -1858,7 +1870,9 @@ width.
   bits. Without it, the milliseconds are dropped.
 - **The deployment epoch** E is a whole number of seconds since the Unix
   epoch. Writer and reader each hold it as an input. This version carries
-  it nowhere.
+  it nowhere, so a deployment states it to its writers and readers. One
+  that states none has E = 0, the Unix epoch: a `time` field's 32 bits
+  are then Unix seconds, to 2106.
 - **Unused codes.** A code that is no value and no declared reserved code
   is unused. So is a millisecond code from 1000 to 1023. An enum with an
   escape has none.
@@ -1905,13 +1919,16 @@ the low four bits of the last byte of the sha256 of the form's JCS bytes
 tag in CH's tag bits (§7.5). `[F: packed/vectors.json]`
 
 **Writing.** An implementation that writes a record MUST write the bits
-above for its value, then the pad. An implementation MUST NOT write a
-record for a value that has no code: a value outside its range, a name that is not declared,
+above for its value, then the pad. `[F: packed/vectors.json]` An
+implementation MUST NOT write a record for a value that has no code: a value outside its range, a name that is not declared,
 or an instant outside the epoch's 2^32 seconds. `[F: packed/vectors.json]`
+An implementation MUST NOT write a record for an object that holds a
+member its type does not have, or lacks a field that is not optional.
+`[F: packed/vectors.json]`
 
 **Reading.** An implementation that reads a record of a packed type MUST
-refuse it for the first of these that applies, in this order. Each
-refusal is named.
+refuse it, naming the refusal, for the first of these that applies, in
+this order:
 - CH's tag is not the type's (`tag`).
 - Then, reading the fields in order:
   - the record ends before a bit the layout needs (`length`);
@@ -1954,8 +1971,22 @@ member for each field present:
 - `time`: an integer, milliseconds since the Unix epoch.
 
 An absent optional field has no member, and neither has a field after a
-marker read as 0. A writer takes the same object, a fixed-point value as
-a string or a number. `[F: packed/vectors.json]`
+marker read as 0. `[F: packed/vectors.json]`
+
+**What a writer takes** is the same object, and `null` for an escape.
+- **A fixed-point value** is a string or a JSON number. A string is a
+  JSON number's text (RFC 8259 §6). So `5e-1` reads as `0.5`, and `+0.5`,
+  `.5`, `1.` and `05` are no value.
+- **A JSON number** is read as the binary64 a JSON reader holds for it,
+  by that double's shortest decimal text. So `0.15` is the decimal `0.15`.
+  A value with more digits than a double keeps is given as a string.
+- **An `int`, `counter` or `time` value** is a JSON number written with
+  no fraction and no exponent. So `5.0` is a value of the wrong type.
+- **A number of magnitude 2^63 or more** is outside every range, however
+  it is written. A JSON reader with no big integers holds such integer
+  text as a double, so the two cannot be told apart.
+
+`[F: packed/vectors.json]`
 
 ---
 
@@ -2447,7 +2478,7 @@ because of these rules:
    operation, for all four types; `attachment_encoding` for the attachment.
    `[F: contracts/e023-encoding]`
 7. **In a packed file,** a type whose name is not a type name is E038, and
-   defines no type. A file whose `types` is missing, or is not an object,
+   defines no type. Nothing in its record is linted. A file whose `types` is missing, or is not an object,
    defines none.
    - A field gets at most one of E038 and E043, and then nothing more.
      E043 is checked first, on a `type` that is a string.
@@ -2595,14 +2626,15 @@ MUST have the same fingerprint.
   hashes the document's JCS bytes, and its `name` is the file's stem.
 - **Stems and ids.** A stem MUST be unique among the listed packed files,
   and an id among the listed JSON Schema and packed files (E024). A later
-  file whose stem or id is taken is not loaded.
+  file whose stem or id is taken is not loaded. The JSON Schema files are
+  taken before the packed files, each list in its order.
 - **`packed:Name`** is `types/Name` in the one listed packed file that
   defines it (E023 when none does, E024 when several do).
 - **`packed:stem#Name`** looks only in the packed file with that stem.
 - **Its declarations** are linted E038 to E045, and its placement E044
   (§7.1).
 
-`[F: contracts/ok-packed, e024-packed-ambiguous]`
+`[F: contracts/ok-packed, e024-packed-ambiguous, e024-packed-twice]`
 
 **Raw.** A media type is `<type>/<subtype>` or `<type>/*`. Each token is a
 lowercase letter or digit followed by lowercase letters, digits or

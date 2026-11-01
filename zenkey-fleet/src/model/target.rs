@@ -333,11 +333,11 @@ fn encode_as(
     };
     match ty {
         TypeId::Raw { .. } => Ok(input.to_vec()),
-        // No operation's type is packed (core §7.1, E044), and a packed
-        // writer is #979's B2.
+        // No operation's type is packed (core §7.1, E044): no call carries
+        // a packed record.
         TypeId::Packed { name, .. } => Err(Error::unaskable(
             what,
-            format!("packed:{name} is a packed type, which this tool does not write yet"),
+            format!("packed:{name} is a packed type, which no operation carries (core §7.1)"),
         )),
         TypeId::JsonSchema { .. } => {
             use zenkey::codec::Codec as _;

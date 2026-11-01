@@ -529,3 +529,101 @@ async fn many_replies_templated_state_and_an_absent_option() {
         ("unavailable", Some("capability"))
     );
 }
+
+/// Packed records through the generated code on a bus (core §7.6, #979
+/// B2): an owner writes a stream, a state member and an event through
+/// `packed_v1::Server`, and a tool reads each back through
+/// `packed_v1::Consumer`, the same values, each sealed with its layout's
+/// tag and admitted by it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn packed_records_round_trip_through_the_generated_code() {
+    use zenkey::packed::{Coded, Decimal, Open};
+    use zenkey_codegen_test::zk2::packed_v1;
+    use zenkey_codegen_test::zk2::packed_v1::types::{Mode, Sensor, Status, mode, status};
+
+    let (_r, ep) = router().await;
+    let (owner, reader) = (client(&ep).await, client(&ep).await);
+    let mut b = ServiceBuilder::new(&owner, ServiceConfig::new(addr("lab/packed")));
+    let server = packed_v1::Server::declare(&mut b).await.unwrap();
+    let mut svc = b.start().await.unwrap();
+    let sensor = Sensor {
+        temperature: "-12.3".parse().unwrap(),
+        humidity: Decimal::from_f64(61.5).unwrap(),
+        pressure: "990.4".parse().unwrap(),
+        battery: "3.07".parse().unwrap(),
+    };
+    let reading = server.reading(&mut svc, "u1").await.unwrap();
+    reading.put(&sensor).await.unwrap();
+    let state = server.status_by_unit(&mut svc, "u1").await.unwrap();
+    let word = Status {
+        duty_available: "42.5".parse().unwrap(),
+        signal_bars: 3,
+        oper: status::Oper::NotPresent,
+        admin: status::Admin::Up,
+    };
+    state.put(&word).await.unwrap();
+
+    let tool = packed_v1::Consumer::from_inner(
+        zenkey::consumer::Consumer::for_tool(
+            &reader,
+            packed_v1::contract(),
+            &["lab/packed"],
+            &Default::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let streamed: Arc<Mutex<Vec<Sensor>>> = Arc::default();
+    let s = Arc::clone(&streamed);
+    let _sub = tool
+        .subscribe_sensor(move |r| s.lock().unwrap().push(r.value.unwrap()))
+        .await
+        .unwrap();
+    let modes: Arc<Mutex<Vec<Mode>>> = Arc::default();
+    let m = Arc::clone(&modes);
+    let _events = tool
+        .subscribe_mode_change(move |r| m.lock().unwrap().push(r.value.unwrap()))
+        .await
+        .unwrap();
+    let change = Mode {
+        mode: Open::Known(mode::Mode::Auto),
+        wide: Open::Escape,
+    };
+    eventually("the tool hears the stream and the event", || async {
+        server.sensor.put(&sensor).await.unwrap();
+        server.mode_change.put(&change).await.unwrap();
+        (!streamed.lock().unwrap().is_empty() && !modes.lock().unwrap().is_empty()).then_some(())
+    })
+    .await;
+    assert_eq!(streamed.lock().unwrap()[0], sensor);
+    assert_eq!(modes.lock().unwrap()[0], change);
+
+    fn current<V: std::fmt::Debug>(got: StateGet<V>) -> Option<V> {
+        match got {
+            StateGet::Answered(v) => v.into_iter().next().map(|c| match c {
+                zenkey::typed::Current::Value { value, .. } => value.unwrap(),
+                other => panic!("{other:?}"),
+            }),
+            StateGet::Silent => None,
+        }
+    }
+    let got = eventually("the owner answers the reading", || async {
+        current(tool.get_reading_member("u1", T).await.unwrap())
+    })
+    .await;
+    assert_eq!(got, sensor);
+    let got = eventually("the owner answers the status", || async {
+        current(tool.get_status_by_unit_member("u1", T).await.unwrap())
+    })
+    .await;
+    assert_eq!(got, word);
+    // A reserved code is a typed value, and one the field does not declare
+    // is refused before anything is published.
+    let refused = zenkey_codegen_test::zk2::packed_v1::types::Reserved {
+        level: Coded::Value(0),
+        temperature: Coded::OutOfRange,
+        phase: zenkey_codegen_test::zk2::packed_v1::types::reserved::Phase::A,
+    };
+    let e = server.reserved.put(&refused).await.unwrap_err();
+    assert!(e.to_string().contains("value"), "{e}");
+}

@@ -125,7 +125,24 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   Codegen's runtime half (#611, FI): `codec` (a Rust type and how it is
   carried), `typed` (the generic handles generated code is written
   against), and `call`, the session-free vocabulary (`OpError`,
-  `CallInfo`, `Sink`, `Outcome<T>`, `Replies<V, S>`). The default `zenoh`
+  `CallInfo`, `Sink`, `Outcome<T>`, `Replies<V, S>`). Packed records
+  (#979 B2, core §7.6): `packed` (session-free) is what a generated packed
+  type is written against (`PackedRecord`, `Coded<T>` for reserved codes,
+  `Open<E>` for an escape, the model's `BitWriter`/`BitReader`/`Fixed`/
+  `time_code` helpers), and `codec::Packed<T>` carries one, its `time`
+  fields under `DEFAULT_EPOCH` 0 until #980's catalog carries one
+  (`Codec::decode_record` by the envelope's tag, `Codec::tag`, a typed
+  writer refusing a type of another tag). Each writer of a packed resource
+  (`writer::PackedType`, from the contract's artifact) seals with its
+  layout's tag in CH (`Stamped::seal_tagged`) and refuses a record its
+  layout refuses, `Error::Payload`, nothing published; `inband::admit`
+  (and the consumer's subscribe, replay and GET) refuses a record by its
+  layout under the tag CH carried, a packed put with no envelope as `tag`
+  (`inband::Undecodable`, `Delivery::tag`, `StateAnswer::tags`);
+  `tests/packed.rs` runs `spec/conformance/packed/vectors.json` through it
+  and refuses another revision live by tag and by length
+  (`tests/contracts/packed/`, `packed-wide.v1`, `packed-collide.v1`).
+  The default `zenoh`
   feature gates everything holding a session; without it the crate is the
   model, `config`, `Implementation`, `call` and `codec`, so a contract
   crate's traits build without zenoh.

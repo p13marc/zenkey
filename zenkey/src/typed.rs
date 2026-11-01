@@ -43,7 +43,7 @@ use crate::service::{ImplState, Service, ServiceBuilder};
 use crate::state::Stamped;
 
 fn kind_check<C: Codec>(ty: Option<&TypeId>, what: &str) -> Result<()> {
-    if C::KIND.carries(ty) {
+    if C::carries(ty) {
         Ok(())
     } else {
         Err(Error::Contract(format!(
@@ -84,13 +84,35 @@ fn resource_in(impls: &[ImplState], iface: &IfaceId, resource: &str) -> Result<R
         .cloned()
 }
 
-/// A sample's payload, decoded by its `Encoding`, else the contract's.
+/// A sample's payload, decoded by its `Encoding`, else the contract's; a
+/// packed record by the tag its envelope's CH carried (core §7.6).
 fn decode_sample<C: Codec>(
     sample: &Sample,
     contract: Option<WireEncoding>,
+    tag: Option<zenkey_model::wire::Tag>,
 ) -> std::result::Result<C::Value, String> {
     let enc = sample.encoding().to_string();
-    C::decode(&sample.payload().to_bytes(), wire_of(Some(&enc), contract))
+    C::decode_record(
+        &sample.payload().to_bytes(),
+        wire_of(Some(&enc), contract),
+        tag,
+    )
+}
+
+/// A writer's codec against its untyped writer: a packed type's tag is the
+/// one its writer seals with (core §7.6), so a type generated from another
+/// revision of the layout is refused at declaration.
+fn tag_check<C: Codec>(tag: zenkey_model::wire::Tag, r: &Resource) -> Result<()> {
+    match C::tag() {
+        Some(t) if t != tag => Err(Error::Contract(format!(
+            "{}/{}: the codec's packed type has tag {}, and the contract's layout {}",
+            r.token,
+            r.template,
+            t.get(),
+            tag.get()
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// Checks the codecs of a data resource's type and attachment.
@@ -115,6 +137,7 @@ impl<C: Codec, A: Codec> Writer<C, A> {
     /// Wraps a writer of `r`, checking the codecs against it.
     pub fn new(inner: crate::writer::Writer, r: &Resource) -> Result<Self> {
         let d = check_data::<C, A>(r)?;
+        tag_check::<C>(inner.tag(), r)?;
         Ok(Self {
             inner,
             wire: d.encoding,
@@ -190,6 +213,7 @@ impl<C: Codec> StateWriter<C> {
     /// Wraps a state writer of `r`, checking the codec against it.
     pub fn new(inner: crate::state::StateWriter, r: &Resource) -> Result<Self> {
         let d = check_data::<C, Nothing>(r)?;
+        tag_check::<C>(inner.tag(), r)?;
         Ok(Self {
             inner,
             wire: d.encoding,
@@ -257,6 +281,7 @@ impl<C: Codec> EventWriter<C> {
     /// Wraps an event writer of `r`, checking the codec against it.
     pub fn new(inner: crate::writer::EventWriter, r: &Resource) -> Result<Self> {
         let d = check_data::<C, Nothing>(r)?;
+        tag_check::<C>(inner.tag(), r)?;
         Ok(Self {
             inner,
             wire: d.encoding,
@@ -333,7 +358,7 @@ pub struct Received<T> {
 
 fn received<C: Codec>(d: Delivery, wire: Option<WireEncoding>) -> Received<C::Value> {
     Received {
-        value: decode_sample::<C>(&d.sample, wire),
+        value: decode_sample::<C>(&d.sample, wire, d.tag),
         provider: d.provider,
         resource: d.resource,
         values: d.values,
@@ -444,9 +469,10 @@ pub struct StateAnswer<T> {
     /// The in-band stamp of each key answered under a zk2c envelope, a
     /// value's or a deletion's: what orders it ([`StateAnswer::mark`]).
     pub inband: std::collections::BTreeMap<String, zenkey_model::wire::Stamp>,
-    /// Each key answered with an envelope refused: undecodable, with the
-    /// refusal, and left out of [`StateAnswer::current`].
-    pub undecodable: std::collections::BTreeMap<String, zenkey_model::wire::Refusal>,
+    /// Each key answered with an envelope refused, or a packed record its
+    /// layout refused (core §7.5, §7.6): undecodable, with the refusal, and
+    /// left out of [`StateAnswer::current`].
+    pub undecodable: std::collections::BTreeMap<String, crate::inband::Undecodable>,
 }
 
 impl<T> StateAnswer<T> {
@@ -497,14 +523,15 @@ pub async fn get_answer<C: Codec>(
 ) -> Result<StateAnswer<C::Value>> {
     let wire = consumer_data::<C>(consumer, resource)?;
     let a = consumer.get_answer(resource, values, timeout).await?;
+    let tags = a.tags;
     Ok(StateAnswer {
         current: a
             .current
             .into_iter()
             .map(|c| match c {
                 crate::state::Current::Value { key, sample } => Current::Value {
+                    value: decode_sample::<C>(&sample, wire, tags.get(&key).copied()),
                     key,
-                    value: decode_sample::<C>(&sample, wire),
                     sample,
                 },
                 crate::state::Current::Deleted { key, timestamp } => {
@@ -582,10 +609,12 @@ pub async fn last_known<C: Codec>(
     let found = crate::archive::last_known(consumer.session(), archive, &origin, timeout).await?;
     Ok(found.map(|l| {
         let enc = l.encoding.as_ref().map(ToString::to_string);
+        // A packed record by the tag its envelope carried (core §7.6).
+        let tag = l.tag;
         LastKnown {
             value: l
                 .value
-                .map(|b| C::decode(&b, wire_of(enc.as_deref(), wire))),
+                .map(|b| C::decode_record(&b, wire_of(enc.as_deref(), wire), tag)),
             origin: l.origin,
             timestamp: l.timestamp,
             inband: l.inband,
@@ -602,7 +631,7 @@ fn op_check<Req: Codec, Resp: Codec, Sum: Codec>(op: &Operation, at: &str) -> Re
 }
 
 fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>) -> Result<C::Value> {
-    decode_sample::<C>(&a.sample, wire).map_err(|e| {
+    decode_sample::<C>(&a.sample, wire, None).map_err(|e| {
         Error::Payload(format!(
             "the reply on {} does not decode as its declared type: {e}",
             a.key()

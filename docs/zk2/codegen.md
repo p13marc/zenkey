@@ -106,14 +106,27 @@ none has `Server::declare(b)`.
   files of a group define is qualified by its stem. `format`, an annotation
   in the subset, is not read: a string stays a `String`. A hint that names
   no definition is a `cargo:warning`.
+- **packed** (core §7.6, #979 B2): a struct per type of each listed
+  packed file, under `__packed::<stem>`, re-exported in `types`: an `int`
+  is an `i64`, a `fixed` an exact `zenkey::packed::Decimal`, an `enum` a
+  generated enum (`zenkey::packed::Open<E>` with an escape), a field with
+  reserved codes a `zenkey::packed::Coded<T>`, and an optional field or
+  one behind a marker an `Option`. Its codec, `zenkey::packed::PackedRecord`,
+  is straight-line code, a statement per field in the layout's order over
+  the model's helpers (bits, exact fixed point, a time's code), so a
+  reader sees the record's wire; a table handed to the model's
+  interpreted codec would make the vectors check the model twice.
+  `codegen-test/tests/packed.rs` runs `spec/conformance/packed/vectors.json`
+  through it.
 - **raw:** `Vec<u8>` in the typed API; the untyped writer stays reachable
   (`inner()`) for a zero-copy `ZBytes` (SHM, §7.4). The `Encoding` comes
   from the contract (§7.2), a raw family's from its `media_param` value.
 
 The wire encoding is never the caller's choice: generated code encodes
-through a codec (`zenkey::codec::{Protobuf<T>, Json<T>, Raw, Nothing}`):
+through a codec (`zenkey::codec::{Protobuf<T>, Json<T>, Packed<T>, Raw, Nothing}`):
 protobuf with prost, JSON Schema types as the contract's `encoding` says (JSON
-or CBOR, §7.2), through the runtime's writers. Decoding follows §7.2's order:
+or CBOR, §7.2), a packed record sealed with its layout's tag (§7.6), through
+the runtime's writers. Decoding follows §7.2's order:
 the sample's `Encoding`, then the contract's.
 
 ### Serving

@@ -1369,3 +1369,49 @@ fn packed_bundle_round_trips() {
         .collect();
     assert_eq!(packed.len(), 2, "ok-packed lists two packed files");
 }
+
+/// A tool's decoder reads a packed record through the bundle's layout,
+/// under the tag its envelope carried, and refuses one by name (core
+/// §7.6, observer §7.3; #979 B2). A record that came in no envelope has
+/// no tag, and is undecodable.
+#[test]
+fn packed_records_decode_from_the_bundle() {
+    use zenkey_model::contract::Contract;
+    use zenkey_model::decode::{Context, Rendered, decode, decode_in, type_of};
+    use zenkey_model::wire::Tag;
+    let bytes = std::fs::read(spec().join("conformance/bundles/packed.bundle.json")).unwrap();
+    let b = Bundle::verify(&bytes).unwrap();
+    let c = Contract::from_bundle(&b).unwrap();
+    let r = c
+        .resources
+        .iter()
+        .find(|r| r.template.as_str() == "reading")
+        .unwrap();
+    let zenkey_model::contract::Body::Data(d) = &r.body else {
+        panic!("a stream")
+    };
+    let layout = c.packed_layout(&d.type_).unwrap().expect("a packed type");
+    let value =
+        json!({"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2", "battery": "3.7"});
+    let record = layout.write(&value, None).unwrap().bytes;
+    let ty = type_of(&b, "stream", "reading", "type").unwrap();
+    let tag = Tag::new(layout.tag()).unwrap();
+    assert_eq!(
+        decode_in(&b, ty, None, &record, Context::tagged(tag)),
+        Rendered::Value(value)
+    );
+    let undecodable = |r: Rendered| match r {
+        Rendered::Undecodable {
+            declared, reason, ..
+        } => (declared, reason),
+        other => panic!("{other:?}"),
+    };
+    let (declared, reason) = undecodable(decode(&b, ty, None, &record));
+    assert_eq!(declared, "packed:Sensor");
+    assert!(reason.contains("no tag"), "{reason}");
+    let other = Tag::new((layout.tag() + 1) % 16).unwrap();
+    let (_, reason) = undecodable(decode_in(&b, ty, None, &record, Context::tagged(other)));
+    assert!(reason.contains("tag:"), "{reason}");
+    let (_, reason) = undecodable(decode_in(&b, ty, None, &record[..4], Context::tagged(tag)));
+    assert!(reason.contains("length:"), "{reason}");
+}

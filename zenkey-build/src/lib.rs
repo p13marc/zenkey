@@ -43,7 +43,9 @@
 //! `Server`, `Consumer`, `Client` and `Fleet`. Protobuf types are prost's,
 //! compiled from the bundle's own descriptor sets (no `protoc`); JSON
 //! Schema types are typify's, or the Rust type a hint names
-//! ([`check_schema`] keeps such a type and its committed schema in step).
+//! ([`check_schema`] keeps such a type and its committed schema in step);
+//! packed types (core §7.6) are a struct each with a straight-line codec
+//! over `zenkey::packed`, agreeing bit for bit with the model's.
 //!
 //! **Contract crates** ([`Config::contract_crate`]): every runtime item
 //! behind `#[cfg(feature = "zenoh")]`, so the crate's default build has no
@@ -55,6 +57,7 @@
 mod emit;
 mod json;
 mod names;
+mod packed;
 mod proto;
 mod schema_check;
 
@@ -232,6 +235,8 @@ impl Config {
             ));
         }
         let json_files = jsons.compile(&work.join("json"))?;
+        let packed = packed::PackedTypes::gather(&contracts);
+        let packed_files = packed.compile(&work.join("packed"))?;
 
         let mut ifaces = Vec::new();
         for (file, c) in &loaded {
@@ -252,6 +257,8 @@ impl Config {
             proto_includes: (!protos.is_empty()).then(|| proto_dir.join("_includes.rs")),
             jsons: &jsons,
             json_files: &json_files,
+            packed: &packed,
+            packed_files: &packed_files,
             contract_crate: self.contract_crate,
         })?;
         write_if_changed(&out_file, code.as_bytes())?;
@@ -337,6 +344,7 @@ fn schema_inputs(file: &Path) -> Vec<PathBuf> {
         .into_iter()
         .chain(includes)
         .chain(s.jsonschema)
+        .chain(s.packed)
         .map(|p| dir.join(p))
         .collect()
 }

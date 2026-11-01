@@ -1,0 +1,16 @@
+# core §9.4: one document listed under `jsonschema` and under `packed` has
+# one id, so the later file is not loaded (E024). The JSON Schema files are
+# taken before the packed files, so the packed listing is the later one:
+# E024 alone, and no E038, though the document holds no `types`.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/packed/twice.json"]
+packed = ["schemas/packed/twice.json"]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }

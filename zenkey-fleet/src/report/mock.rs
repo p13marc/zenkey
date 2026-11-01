@@ -396,6 +396,7 @@ mod tests {
                 rendered: Rendered::Value {
                     declared: "json:DiagnosticsRequest".into(),
                     value: json!({}),
+                    epoch_assumed: None,
                 },
             },
             metadata: Some(CallMetadataView {

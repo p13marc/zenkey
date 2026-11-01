@@ -421,6 +421,16 @@ where
                 declared.resource()
             ))
         })?;
+    // Core §7.6: the layout of the stream's type, when it is packed, which
+    // admits each record as the consumer's subscription admits it.
+    let layout = match &resource.body {
+        zenkey_model::contract::Body::Data(d) => i
+            .required
+            .packed_layout(&d.type_)
+            .map_err(|e| Error::Contract(format!("{}: {e}", declared.resource())))?
+            .map(Arc::new),
+        zenkey_model::contract::Body::Operation(_) => None,
+    };
     let governed = zenkey_model::redundancy::is_governed(i.required);
     let (events, mut rx) = tokio::sync::mpsc::unbounded_channel::<ArbitrationEvent>();
     let (reread_tx, reread_rx) = tokio::sync::mpsc::unbounded_channel::<Addr>();
@@ -480,12 +490,13 @@ where
     // the first (§2.4: an address matched twice is one provider).
     let selectors = Arc::new(i.selectors);
     for (at, ke) in selectors.iter().enumerate() {
-        let (core, engine, name, template, all) = (
+        let (core, engine, name, template, all, layout) = (
             Arc::clone(&core),
             engine.clone(),
             name.clone(),
             template.clone(),
             Arc::clone(&selectors),
+            layout.clone(),
         );
         let sub = i
             .session
@@ -501,9 +512,10 @@ where
                 {
                     return;
                 }
-                // Core §7.5: a refused envelope is undecodable, no arrival.
+                // Core §7.5, §7.6: a refused envelope, or a packed record
+                // its layout refuses, is undecodable, no arrival.
                 let read = crate::inband::read(sample);
-                if let Some(why) = read.refusal() {
+                if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                     tracing::debug!(
                         key = %read.sample().key_expr(),
                         reason = %why.reason(),
@@ -511,7 +523,7 @@ where
                     );
                     return;
                 }
-                let inband = read.stamp();
+                let (inband, tag) = (read.stamp(), read.tag());
                 let sample = read.into_sample();
                 let mut c = lock(&core);
                 let key = sample.key_expr().as_str().to_owned();
@@ -564,6 +576,7 @@ where
                             arrival,
                             stamp,
                             inband,
+                            tag,
                             lifespan: lifespan.unwrap_or(premise),
                         }),
                     });

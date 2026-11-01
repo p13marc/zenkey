@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.15 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.16 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.73 ([`core.md`](core.md)) |
+| **Written against** | core 0.76 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1028,8 +1028,8 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
 
 - **What a tool that shows or judges a payload decodes** (core §7.1).
   Such a tool MUST decode each payload by its declared type: `protobuf`
-  (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema
-  2020-12, core §7.3), and a `raw` type by its media type only. The
+  (proto2 and proto3), `jsonschema` (core §7.3's subset) and `packed`
+  (core §7.6), and a `raw` type by its media type only. The
   sample's `Encoding` says which of the type's wires it travels on. A
   payload whose declared type the tool does not hold is sniffed (§8.1).
   That is a foreign key's, or a zk2 key's whose contract is not in hand
@@ -1064,6 +1064,14 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
     That covers an envelope's record. It no longer covers a stream, state
     or event sample under `zenoh/bytes` with no envelope: the envelope
     step above reads that sample as an envelope.
+  - **A packed record** is read through its type's layout, under the tag
+    its envelope's CH carried (core §7.6). One its layout refuses is
+    undecodable, and the tool names the refusal. One that came in no
+    envelope has no tag, so it is undecodable too.
+  - **A packed record's `time` fields** are read under the deployment
+    epoch, which no contract carries yet. A tool takes the one its
+    deployment states, and 0, the Unix epoch, where it states none (core
+    §7.6). `[F: packed/vectors.json]`
   - **A profile's reader.** A profile that says how its reader reads a
     sample's bytes decides for that reader. So a
     [`telemetry.v1`](profiles/telemetry/v1.md) reader reads a sample on
@@ -1076,8 +1084,8 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   `[Sc: types.md §2]`
   - **A type is named one way**, decoded or not: as a type reference
     is written (core §9.1). That is the message name for protobuf,
-    `json:<name>` for a JSON Schema type, and the media type for a raw
-    one. Which wire a JSON Schema type was read from, JSON or CBOR, is
+    `json:<name>` for a JSON Schema type, `packed:<name>` for a packed
+    one, and the media type for a raw one. Which wire a JSON Schema type was read from, JSON or CBOR, is
     part of why it failed to decode, not of its name.
 
 ### 7.4 Shared memory

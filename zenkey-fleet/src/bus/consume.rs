@@ -33,7 +33,7 @@ use zenoh::sample::{Sample, SampleKind};
 
 use crate::model::catalog::Revision;
 use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sample_conformance};
-use crate::model::render::{Member, render_with};
+use crate::model::render::{Member, render_record, render_with};
 use crate::model::target::Target;
 use crate::report::{
     InbandStamp, Stamp, StateReading, StateReport, StateRow, StateValue, WatchEvent, WatchSample,
@@ -162,6 +162,7 @@ pub async fn get_state_answer(
         .map_err(|e| runtime("get", &address, e))?;
     let complete = got.complete;
     let inband = got.inband;
+    let tags = got.tags;
     let inband_of = |key: &str| inband.get(key).copied().map(InbandStamp::from);
     let mut rows: Vec<StateRow> = got
         .current
@@ -171,7 +172,13 @@ pub async fn get_state_answer(
                 inband: inband_of(&key),
                 timestamp: sample.timestamp().map(stamp),
                 value: StateValue::Value {
-                    payload: Box::new(payload(revision, &key, &sample, Member::Type)),
+                    payload: Box::new(payload(
+                        revision,
+                        &key,
+                        &sample,
+                        Member::Type,
+                        inband.get(&key).copied().zip(tags.get(&key).copied()),
+                    )),
                 },
                 // The owner's reply as it arrived (#765): a refcount bump;
                 // a zk2c envelope's record, which the runtime stripped.
@@ -356,13 +363,19 @@ fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateR
 
 /// A sample the runtime read, its payload rendered through `member`'s
 /// type: a zk2c envelope's record is never stripped twice
-/// ([`crate::model::inband::delivered_encoding`]).
+/// ([`crate::model::inband::delivered_encoding`]), and with the run, seq
+/// and CH tag the runtime read from it, a packed record is decoded by its
+/// tag (core §7.6, [`render_record`]).
 fn payload(
     revision: &Revision,
     key: &str,
     sample: &Sample,
     member: Member,
+    envelope: Option<(zenkey_model::wire::Stamp, zenkey_model::wire::Tag)>,
 ) -> crate::report::PayloadRendering {
+    if let (Member::Type, Some((stamp, tag))) = (member, envelope) {
+        return render_record(revision, key, &sample.payload().to_bytes(), stamp, tag);
+    }
     let encoding = sample.encoding().to_string();
     render_with(
         revision,
@@ -425,7 +438,8 @@ pub async fn watch(
             let event = match d.sample.kind() {
                 SampleKind::Delete => WatchEvent::Delete,
                 SampleKind::Put => {
-                    let rendered = payload(&rev, &key, &d.sample, Member::Type);
+                    let rendered =
+                        payload(&rev, &key, &d.sample, Member::Type, d.inband.zip(d.tag));
                     let attachment = d.sample.attachment().map(|a| a.to_bytes());
                     WatchEvent::Put {
                         conformance: sample_conformance(

@@ -60,13 +60,13 @@
       ],
       "fingerprint": null
     },
-    "e002-uses": {
+    "e002-two-majors": {
       "codes": [
         "E002"
       ],
       "fingerprint": null
     },
-    "e002-two-majors": {
+    "e002-uses": {
       "codes": [
         "E002"
       ],
@@ -248,6 +248,12 @@
       ],
       "fingerprint": null
     },
+    "e024-packed-twice": {
+      "codes": [
+        "E024"
+      ],
+      "fingerprint": null
+    },
     "e024-stem": {
       "codes": [
         "E023",
@@ -411,6 +417,7 @@
     },
     "e038-packed-shape": {
       "codes": [
+        "E038",
         "E038",
         "E038",
         "E038",

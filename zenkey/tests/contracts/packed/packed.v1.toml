@@ -1,0 +1,86 @@
+# core §7.6 (#979 B2): one stream per type of spec/conformance/packed/
+# vectors.json (every type but Wide64, which no contract may list: E028),
+# a state and an event. zenkey/tests/packed.rs runs the vectors through the
+# runtime on it, and zenkey-build's codegen-test through generated code.
+[interface]
+name    = "packed"
+major   = 1
+minor   = 0
+summary = "Packed records: the vectors' types on the wire"
+
+[schemas]
+packed = ["vectors.json"]
+
+[resources.sensor]
+kind = "stream"
+type = "packed:Sensor"
+
+[resources.status]
+kind = "stream"
+type = "packed:Status"
+
+[resources.reserved]
+kind = "stream"
+type = "packed:Reserved"
+
+[resources.counters]
+kind = "stream"
+type = "packed:Counters"
+
+[resources.ties]
+kind = "stream"
+type = "packed:Ties"
+
+[resources.clock]
+kind = "stream"
+type = "packed:Clock"
+
+[resources.mode]
+kind = "stream"
+type = "packed:Mode"
+
+[resources.link]
+kind = "stream"
+type = "packed:Link"
+
+[resources.link_v2]
+kind = "stream"
+type = "packed:LinkV2"
+
+[resources.grow]
+kind = "stream"
+type = "packed:Grow"
+
+[resources.chain]
+kind = "stream"
+type = "packed:Chain"
+
+[resources.sensor_renamed]
+kind = "stream"
+type = "packed:SensorRenamed"
+
+[resources.sensor_wide]
+kind = "stream"
+type = "packed:SensorWide"
+
+[resources.sensor_collide]
+kind = "stream"
+type = "packed:SensorCollide"
+
+[resources."reading/{unit}"]      # a state, by member
+kind        = "state"
+type        = "packed:Sensor"
+params      = { unit = "string" }
+cardinality = 8
+
+[resources."status/{unit}"]       # another
+kind        = "state"
+type        = "packed:Status"
+params      = { unit = "string" }
+cardinality = 8
+
+[resources.mode_change]           # an event
+kind      = "event"
+type      = "packed:Mode"
+rate      = "burst(1000/h)"
+retention = "1d"

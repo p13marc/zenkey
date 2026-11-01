@@ -71,10 +71,13 @@ pub fn mark_of(envelope: Envelope, zenoh: Option<&zenoh::time::Timestamp>) -> Op
 pub enum Payload<'a> {
     /// No envelope: the bytes as they arrived.
     Plain(&'a [u8]),
-    /// An envelope: its record, and its run and seq.
+    /// An envelope: its record, its run and seq, and CH's tag (a packed
+    /// record's type's, core §7.6; 0 otherwise), which a packed type is
+    /// decoded by.
     Record {
         record: &'a [u8],
         stamp: wire::Stamp,
+        tag: wire::Tag,
     },
     /// A refused envelope: undecodable.
     Refused(Refusal),
@@ -93,6 +96,14 @@ impl<'a> Payload<'a> {
     pub fn stamp(&self) -> Option<wire::Stamp> {
         match self {
             Payload::Record { stamp, .. } => Some(*stamp),
+            Payload::Plain(_) | Payload::Refused(_) => None,
+        }
+    }
+
+    /// CH's tag, when the bytes carried an envelope.
+    pub fn tag(&self) -> Option<wire::Tag> {
+        match self {
+            Payload::Record { tag, .. } => Some(*tag),
             Payload::Plain(_) | Payload::Refused(_) => None,
         }
     }
@@ -129,6 +140,7 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
         Reading::Enveloped(e) => Payload::Record {
             record: e.record,
             stamp: e.stamp,
+            tag: e.tag,
         },
         Reading::Refused(r) => Payload::Refused(r),
     }
@@ -516,7 +528,8 @@ mod tests {
             p,
             Payload::Record {
                 record: b"up",
-                stamp: st
+                stamp: st,
+                tag: Tag::NONE,
             }
         );
         assert_eq!(p.encoding(Some("zenoh/bytes")), None);

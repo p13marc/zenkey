@@ -78,11 +78,18 @@ pub struct Stamped {
 
 impl Stamped {
     /// A put's payload under this stamp: §7.5's mutation, `record` after
-    /// it.
+    /// it, CH's tag 0.
     #[must_use]
     pub fn seal(&self, record: &[u8]) -> Vec<u8> {
+        self.seal_tagged(wire::Tag::NONE, record)
+    }
+
+    /// [`Stamped::seal`] with `tag` in CH: a packed record's type's (core
+    /// §7.6), 0 for every other.
+    #[must_use]
+    pub fn seal_tagged(&self, tag: wire::Tag, record: &[u8]) -> Vec<u8> {
         wire::Envelope {
-            tag: wire::Tag::NONE,
+            tag,
             stamp: self.stamp,
             record,
         }
@@ -773,7 +780,7 @@ impl Refresher {
         };
         match self.minter.mint_state(self.writer.is_stamped()) {
             Ok(stamped) => {
-                let bytes = stamped.seal(&record);
+                let bytes = stamped.seal_tagged(self.writer.tag(), &record);
                 self.store.put(
                     &self.key,
                     bytes.clone(),
@@ -958,13 +965,16 @@ impl StateWriter {
             .writer
             .meter(payload.into(), attachment.map(Into::into))
             .await?;
+        // Core §7.6 (#979): a packed record its layout refuses is refused
+        // before anything is minted, stored or published.
+        self.writer.admit_record(&payload.to_bytes())?;
         let stamped = self.minter.mint_state(self.writer.is_stamped())?;
         // §2.7 (#741): a new live member at the bound is refused, nothing
         // stored or published. After the mint, so a stopped clock never
         // leaves a member counted live without a value.
         self.writer.admit()?;
         let record = payload.to_bytes().into_owned();
-        let bytes = stamped.seal(&record);
+        let bytes = stamped.seal_tagged(self.writer.tag(), &record);
         let kept = attachment.as_ref().map(|a| a.to_bytes().into_owned());
         if self.period.is_some() {
             held.value = Some((record, kept.clone()));
@@ -997,6 +1007,13 @@ impl StateWriter {
         self.writer.telemetry()
     }
 
+    /// The tag CH carries on its records: its packed type's (core §7.6),
+    /// else 0.
+    #[must_use]
+    pub fn tag(&self) -> wire::Tag {
+        self.writer.tag()
+    }
+
     /// Re-puts the member's current value now, unchanged, under a fresh
     /// stamp: a confirmation out of turn (`alarms.v1` §2.9's re-mint). It
     /// takes the value under the member's lock, so it never puts an older
@@ -1009,7 +1026,7 @@ impl StateWriter {
             return Ok(None);
         };
         let stamped = self.minter.mint_state(self.writer.is_stamped())?;
-        let bytes = stamped.seal(&record);
+        let bytes = stamped.seal_tagged(self.writer.tag(), &record);
         self.store.put(
             &self.key,
             bytes.clone(),
@@ -1154,9 +1171,13 @@ pub struct StateAnswer {
     /// The in-band stamp of each key answered under a zk2c envelope, a
     /// value's or a deletion's: what orders it ([`StateAnswer::mark`]).
     pub inband: BTreeMap<String, zenkey_model::wire::Stamp>,
-    /// Each key answered with an envelope refused: undecodable, with the
-    /// refusal, and left out of [`StateAnswer::current`].
-    pub undecodable: BTreeMap<String, zenkey_model::wire::Refusal>,
+    /// The CH tag of each value answered under a zk2c envelope: a packed
+    /// record's type's (core §7.6), which the consumer admitted it by.
+    pub tags: BTreeMap<String, zenkey_model::wire::Tag>,
+    /// Each key answered with an envelope refused, or a packed record its
+    /// layout refused (core §7.5, §7.6): undecodable, with the refusal,
+    /// and left out of [`StateAnswer::current`].
+    pub undecodable: BTreeMap<String, crate::inband::Undecodable>,
 }
 
 impl StateAnswer {

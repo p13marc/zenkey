@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 16 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 55, 24 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 45 |
-| Every rule, once | 191 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 46 |
+| Every rule, once | 192 |
 | [Rule ids](#rule-ids) | 79 |
 
 ## Owner
@@ -543,7 +543,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.3](observer.md#73-decoding-and-rendering) | Such a tool [a tool that shows or judges a payload] MUST decode each payload by its declared type: `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and a `raw` type by its media type only. | `[Sc: types.md §2]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | Such a tool [a tool that shows or judges a payload] MUST decode each payload by its declared type: `protobuf` (proto2 and proto3), `jsonschema` (core §7.3's subset) and `packed` (core §7.6), and a `raw` type by its media type only. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a payload MUST read a sample on a zk2 data key whose kind is a stream, state or an event, and whose `Encoding` is `zenoh/bytes`, as core §7.5's envelope. | `[F: envelope/carries.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **The envelope first.** … The tool MUST NOT decode or sniff a refused envelope's bytes as a payload with no envelope. | `[F: envelope/carries.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows a payload it cannot decode MUST render it as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
@@ -654,7 +654,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.6](core.md#76-packed-records) | An implementation that writes a record MUST write the type's tag in CH's tag bits (§7.5). | `[F: packed/vectors.json]` |
 | [§7.6](core.md#76-packed-records) | An implementation that writes a record MUST write the bits above for its value, then the pad. | `[F: packed/vectors.json]` |
 | [§7.6](core.md#76-packed-records) | **Writing.** … An implementation MUST NOT write a record for a value that has no code: a value outside its range, a name that is not declared, or an instant outside the epoch's 2^32 seconds. | `[F: packed/vectors.json]` |
-| [§7.6](core.md#76-packed-records) | An implementation that reads a record of a packed type MUST refuse it for the first of these that applies, in this order. | `[F: packed/vectors.json]` |
+| [§7.6](core.md#76-packed-records) | **Writing.** … An implementation MUST NOT write a record for an object that holds a member its type does not have, or lacks a field that is not optional. | `[F: packed/vectors.json]` |
+| [§7.6](core.md#76-packed-records) | An implementation that reads a record of a packed type MUST refuse it, naming the refusal, for the first of these that applies, in this order: (5 items) | `[F: packed/vectors.json]` |
 | [§7.6](core.md#76-packed-records) | **A later revision's fields.** … That rest MUST hold at least one bit (`length`). | `[F: packed/vectors.json]` |
 
 ### [core §9.1 The authoring format](core.md#91-the-authoring-format)
@@ -683,7 +684,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [E024](core.md#94-schema-artifacts-and-type-references) | The id MUST be unique among the listed files too: a later file whose JCS bytes equal an earlier one's, whatever its own bytes, is E024, once even when its stem is taken as well, and is not loaded. | `[F: contracts/e024-identical]` |
 | [E032](core.md#94-schema-artifacts-and-type-references) | Otherwise it resolves as a path relative to the referencing file, lexically normalized, and MUST name a listed file that is loaded: one E024 did not refuse. | `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]` |
 | [E032](core.md#94-schema-artifacts-and-type-references) | The pointer MUST resolve. | `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]` |
-| [E024](core.md#94-schema-artifacts-and-type-references) | A stem MUST be unique among the listed packed files, and an id among the listed JSON Schema and packed files (E024). | `[F: contracts/ok-packed, e024-packed-ambiguous]` |
+| [E024](core.md#94-schema-artifacts-and-type-references) | A stem MUST be unique among the listed packed files, and an id among the listed JSON Schema and packed files (E024). | `[F: contracts/ok-packed, e024-packed-ambiguous, e024-packed-twice]` |
 
 ### [core §9.5 The canonical form and the fingerprint](core.md#95-the-canonical-form-and-the-fingerprint)
 

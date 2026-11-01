@@ -258,6 +258,7 @@ mod tests {
             rendered: Rendered::Value {
                 declared: "json:DiagnosticsResponse".into(),
                 value: json!({"ok": true}),
+                epoch_assumed: None,
             },
         }
     }

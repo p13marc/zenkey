@@ -1629,6 +1629,11 @@ fn decoded_pane<'a>(
                         IdentityTone::Resolved,
                         format!("contract-decoded <{declared}>"),
                     ));
+                    // A packed record's time fields rest on an epoch the
+                    // tool assumed (core §7.6, #980): said beside them.
+                    if let Some(note) = checked.rendering.rendered.epoch_note() {
+                        col = col.push(kit::muted(format!("time fields: {note}")));
+                    }
                     col = col.push(kit::mono(shown.to_string()));
                 }
                 Rendered::Structural { why, .. } => {

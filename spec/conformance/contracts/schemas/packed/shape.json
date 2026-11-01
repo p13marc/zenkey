@@ -4,7 +4,7 @@
       "fields": [
         {
           "name": "a",
-          "type": "bool"
+          "type": "float"
         }
       ]
     },
@@ -45,6 +45,12 @@
           "name": "e",
           "type": "bool",
           "optional": "yes"
+        },
+        {
+          "name": "g",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 5.0
         }
       ]
     },

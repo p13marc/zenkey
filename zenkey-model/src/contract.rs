@@ -57,6 +57,28 @@ impl Contract {
             .iter()
             .find(|r| r.token == token && r.template.as_str() == template)
     }
+
+    /// The layout of a packed type this contract references (core §7.6),
+    /// read from its artifact: `None` for a type of another kind, `Err`
+    /// naming why a packed one has none (an artifact missing, as a bundle
+    /// read without its schemas would leave it, or a declaration with a
+    /// finding).
+    ///
+    /// # Errors
+    /// The reason, in words.
+    pub fn packed_layout(&self, ty: &TypeId) -> Result<Option<crate::packed::Layout>, String> {
+        let TypeId::Packed { name, schema } = ty else {
+            return Ok(None);
+        };
+        match self.artifacts.get(schema).map(|a| &a.data) {
+            Some(crate::schema::ArtifactData::Json(doc)) => {
+                crate::packed::layout_in(doc, name).map(Some)
+            }
+            _ => Err(format!(
+                "packed:{name}: the contract carries no packed artifact {schema}"
+            )),
+        }
+    }
 }
 
 /// One resource, fully explicit.
