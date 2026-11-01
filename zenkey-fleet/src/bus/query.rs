@@ -98,7 +98,7 @@ impl FleetAnswer {
         }
         match inband::payload(&self.key, Some(encoding), &bytes.to_bytes()) {
             Payload::Plain(_) => None,
-            Payload::Record { stamp, .. } => Some(Ok(stamp)),
+            Payload::Record { stamp, .. } | Payload::Heartbeat { stamp, .. } => Some(Ok(stamp)),
             Payload::Refused(r) => Some(Err(r)),
         }
     }

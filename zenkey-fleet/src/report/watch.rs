@@ -64,6 +64,22 @@ pub enum WatchEvent {
     Delete,
 }
 
+/// What one heartbeat confirmed of the collection watched (core §7.5's
+/// form 6; #978's F2): its provider, its key and in-band stamp, and the
+/// members it vouched for whose digest was the watch's view's, in key
+/// order. A confirmation, never a sample: no value moved.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WatchConfirmation {
+    /// `<system>/<service>` whose heartbeat it was.
+    pub provider: String,
+    /// The heartbeat's key, base-relative.
+    pub key: String,
+    /// The heartbeat key's run and seq.
+    pub heartbeat: InbandStamp,
+    /// The members confirmed, base-relative, in key order.
+    pub confirmed: Vec<String>,
+}
+
 /// How a watch went, when it ends.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WatchSummary {
@@ -118,6 +134,28 @@ mod tests {
     use super::*;
     use crate::report::{Rendered, Unresolved};
     use serde_json::json;
+
+    #[test]
+    fn a_confirmation_rows_json_shape_is_pinned() {
+        let c = WatchConfirmation {
+            provider: "lab/n1".into(),
+            key: "zk2/lab/n1/freshness.v2/stream/heartbeat/hb.v1".into(),
+            heartbeat: crate::report::InbandStamp {
+                run: "0007".into(),
+                seq: 3,
+            },
+            confirmed: vec!["zk2/lab/n1/hb.v1/state/link".into()],
+        };
+        assert_eq!(
+            serde_json::to_value(&c).unwrap(),
+            json!({
+                "provider": "lab/n1",
+                "key": "zk2/lab/n1/freshness.v2/stream/heartbeat/hb.v1",
+                "heartbeat": {"run": "0007", "seq": 3},
+                "confirmed": ["zk2/lab/n1/hb.v1/state/link"],
+            })
+        );
+    }
 
     #[test]
     fn watch_rows_json_shape_is_pinned() {

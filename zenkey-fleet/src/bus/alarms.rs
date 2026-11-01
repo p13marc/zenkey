@@ -142,7 +142,19 @@ impl AlarmSpec {
 /// What a subscription called back with.
 enum Delivery {
     Sample(AlarmSample, crate::model::inband::Envelope),
-    Instance { key: ZkKey, held: bool, at: Instant },
+    Instance {
+        key: ZkKey,
+        held: bool,
+        at: Instant,
+    },
+    /// A heartbeat covering alarms.v1 (core §7.5's form 6; #978's F2).
+    Heartbeat {
+        key: String,
+        stamp: zenkey_model::wire::Stamp,
+        tag: zenkey_model::wire::Tag,
+        body: Vec<u8>,
+        at: Instant,
+    },
 }
 
 /// The bounded queue's sending half: a refusal is counted, never waited
@@ -404,6 +416,7 @@ pub struct AlarmFeed {
     refused: Arc<AtomicU64>,
     _tokens: Option<zenoh::pubsub::Subscriber<()>>,
     _data: Option<zenoh::pubsub::Subscriber<()>>,
+    _heartbeats: Option<zenoh::pubsub::Subscriber<()>>,
     discarded: Arc<AtomicU64>,
     stall: Option<Result<StallWatch, String>>,
     stall_seen: StallSeen,
@@ -460,6 +473,7 @@ impl AlarmFeed {
             refused: Arc::default(),
             _tokens: None,
             _data: None,
+            _heartbeats: None,
             discarded: Arc::default(),
             stall: None,
             stall_seen: StallSeen::default(),
@@ -517,7 +531,8 @@ impl AlarmFeed {
         }
         self.moves_seen = barrier.moves();
         self.barrier = Some(barrier);
-        let q = queue;
+        let q = queue.clone();
+        let hq = queue;
         let discarded = Arc::clone(&self.discarded);
         let data = crate::bus::teardown::declared(
             "alarms",
@@ -534,10 +549,34 @@ impl AlarmFeed {
                 }),
         )
         .await?;
+        // Each owner's heartbeats covering alarms.v1 (#978's F2): folded
+        // into the book's view of its alarms, in the queue's one order.
+        let heartbeats = crate::bus::teardown::declared(
+            "alarms' heartbeats",
+            scope.heartbeat_selector(),
+            self.session
+                .declare_subscriber(scope.heartbeat_selector())
+                .callback(move |s: Sample| {
+                    let at = Instant::now();
+                    if let crate::model::inband::Read::Heartbeat { sample, stamp, tag } =
+                        crate::model::inband::read(s)
+                    {
+                        hq.send(Delivery::Heartbeat {
+                            key: sample.key_expr().as_str().to_owned(),
+                            stamp,
+                            tag,
+                            body: sample.payload().to_bytes().into_owned(),
+                            at,
+                        });
+                    }
+                }),
+        )
+        .await?;
         self.book.subscribed(Instant::now());
         self.stall = Some(StallWatch::start(&self.session).await);
         self._tokens = Some(tokens);
         self._data = Some(data);
+        self._heartbeats = Some(heartbeats);
         self.rx = Some(rx);
         Ok(())
     }
@@ -712,6 +751,15 @@ impl AlarmFeed {
                 if let ZkKey::Instance { addr, instance } = key {
                     self.book.instance(&addr, &instance, held, at);
                 }
+            }
+            Delivery::Heartbeat {
+                key,
+                stamp,
+                tag,
+                body,
+                at,
+            } => {
+                self.book.heartbeat(&key, stamp, tag, &body, at);
             }
         }
         out.extend(self.check_stall(now, wall));
