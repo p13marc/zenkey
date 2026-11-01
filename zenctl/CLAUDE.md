@@ -113,8 +113,9 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   alone (`zenkey_fleet::acl_far_json5`; refused for a `link.v1` policy,
   exit 2), and `check face` reads each of its eight keys from the file,
   an omitted one at the binding's default (`cmd::acl::load_against` reads
-  the file twice: zenoh's loader, then its own JSON5/YAML tree for what it
-  states, into `zenkey_fleet::RouterConfig`), with `--peer-config
+  the file twice: zenoh's loader, then its own tree for what it states,
+  in the dialect and with the parser zenoh used, `ConfigDialect`, into
+  `zenkey_fleet::RouterConfig`), with `--peer-config
   <FAR-CONFIG>` and `--catalog <FILE>` (both refused, exit 2, beside a
   `link.v1` policy); `check-face.trycmd` runs the RF router of
   `examples/zk2/link/media/` and a hand-edited `wait_before_close`.

@@ -348,10 +348,23 @@ impl Transport {
         }
     }
 
-    /// The keep-alive interval, `lease_ms` / `keep_alive`, in ms.
+    /// The keep-alive interval, `lease_ms` / `keep_alive`, in whole ms,
+    /// rounded down.
     #[must_use]
     pub fn keep_alive_interval_ms(&self) -> u64 {
         self.lease_ms / self.keep_alive.max(1)
+    }
+
+    /// The keep-alive interval in words: `"60000 ms"`, or `"about 666 ms"`
+    /// where the lease is no multiple of `keep_alive`.
+    #[must_use]
+    pub fn keep_alive_interval_words(&self) -> String {
+        let exact = self.lease_ms.is_multiple_of(self.keep_alive.max(1));
+        format!(
+            "{}{} ms",
+            if exact { "" } else { "about " },
+            self.keep_alive_interval_ms()
+        )
     }
 }
 
@@ -1574,6 +1587,12 @@ fn parse_face(
         if !ok {
             return None;
         }
+        // The face is built only with its transport's batch and lease. When
+        // either is missing, the policy is refused anyway, by the error that
+        // `[transport]` itself pushed (`transport_missing`, or `bad_value` or
+        // `missing_field` at its key, in `parse` and `parse_transport`), so
+        // no policy is made of this face (`a_bad_transport_refuses_a_good_
+        // face` holds it).
         let tr = ctx.transport?;
         return Some(Face {
             far: far?,
@@ -1744,6 +1763,14 @@ fn shared_far(table: &toml::Table, out: &mut Vec<Finding>) {
 
 // ── A router's transport (v2 §2.19) ───────────────────────────────────────
 
+/// A transport value read as an integer: any u64, or a negative i64; `None`
+/// for a value of another type.
+fn integer(v: &Value) -> Option<i128> {
+    v.as_u64()
+        .map(i128::from)
+        .or_else(|| v.as_i64().map(i128::from))
+}
+
 /// Whether two transport values say the same (v2 §2.19): integers by
 /// value, anything else as JSON.
 #[must_use]
@@ -1780,14 +1807,13 @@ pub fn check_transport(
             out.push(Finding::new(Code::TransportDiffers, None, key.at()));
         }
     }
-    let lease_us = router
-        .runs(TransportKey::Lease, &defaults)
-        .as_u64()
-        .map(|ms| i128::from(ms) * 1_000);
-    let wbc_us = router
-        .runs(TransportKey::WaitBeforeClose, &defaults)
-        .as_i64()
-        .map(i128::from);
+    // Both read as integers, a u64's whole range among them; a negative
+    // `wait_before_close`, which zenoh's i64 admits, is below any lease. A
+    // value of another type (a string, a fraction) is no setting zenoh runs:
+    // `transport_differs` has reported it above, since what the policy
+    // plans is always an integer there, and this check has nothing to read.
+    let lease_us = integer(&router.runs(TransportKey::Lease, &defaults)).map(|ms| ms * 1_000);
+    let wbc_us = integer(&router.runs(TransportKey::WaitBeforeClose, &defaults));
     if let (Some(lease), Some(wbc)) = (lease_us, wbc_us)
         && wbc < lease
     {
@@ -3111,6 +3137,112 @@ mod tests {
         // The bounds, exactly: 255 keep-alives at 99.9999 % delivery.
         assert!(flaps(MAX_U32, MAX_KEEP_ALIVE, MAX_LOSS_PPM - 1));
         assert!(!flaps(MAX_U32, MAX_KEEP_ALIVE, 0));
+    }
+
+    /// A good face beside a `[transport]` that is not one never makes a
+    /// policy (v2 §2.1): the face takes its batch and lease from it, and the
+    /// error `[transport]` pushed refuses the whole.
+    #[test]
+    fn a_bad_transport_refuses_a_good_face() {
+        let face = "[face.rf]\nfar = \"ground\"\nattach = \"client\"\n\
+                    select = { link_protocols = [\"unixsock-stream\"] }\n\
+                    class = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\n\
+                    link_bps = 2400\nloss_ppm = 0\narq = true\nreply_timeout_ms = 15000\n";
+        let head = "profile = \"link.v2\"\nsystem = \"lab\"\nservices = []\n\
+                    binding = \"zenoh-1.10.1\"\n";
+        let good = "[transport]\nlease_ms = 10000\nkeep_alive = 4\n\
+                    wait_before_close_ms = 10000\nsequence = \"16bit\"\n";
+        let ok = parse(&format!("{head}{good}{face}"));
+        assert!(ok.policy.is_some(), "{:?}", ok.findings);
+        for (transport, code, at) in [
+            ("", Code::TransportMissing, "transport"),
+            ("transport = 1\n", Code::BadValue, "transport"),
+            (
+                &good.replace("lease_ms = 10000", "lease_ms = 0"),
+                Code::BadValue,
+                "transport.lease_ms",
+            ),
+            (
+                &good.replace("lease_ms = 10000\n", ""),
+                Code::MissingField,
+                "transport.lease_ms",
+            ),
+            (
+                &format!("{good}batch_bytes = 65536\n"),
+                Code::BadValue,
+                "transport.batch_bytes",
+            ),
+        ] {
+            let p = parse(&format!("{head}{transport}{face}"));
+            assert!(p.policy.is_none(), "{transport:?}");
+            assert!(
+                p.findings
+                    .iter()
+                    .any(|f| f.code == code && f.at == at && f.face.is_none()),
+                "{transport:?}: {:?}",
+                p.findings
+            );
+        }
+    }
+
+    /// `wait_under_lease` reads both values as integers (v2 §2.19): a u64
+    /// above i64::MAX and a negative i64 among them; a value of another type
+    /// is `transport_differs`, which the check of every key reports.
+    #[test]
+    fn wait_under_lease_reads_integers_and_a_wrong_type_differs() {
+        let p = parse(
+            "profile = \"link.v2\"\nsystem = \"lab\"\nservices = []\n\
+             binding = \"zenoh-1.10.1\"\n[transport]\nlease_ms = 10000\nkeep_alive = 4\n\
+             wait_before_close_ms = 10000\nsequence = \"32bit\"\n[face.rf]\n\
+             far = \"ground\"\nattach = \"client\"\n\
+             select = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\n\
+             expose = \"none\"\nmax_outage_s = 3600\nlink_bps = 1000000\nloss_ppm = 0\n\
+             arq = true\nreply_timeout_ms = 15000\n",
+        )
+        .policy
+        .expect("a policy");
+        let wbc = TransportKey::WaitBeforeClose.path();
+        let lease = TransportKey::Lease.path();
+        let found = |pairs: &[(&str, Value)]| -> Vec<(&'static str, String)> {
+            let stated = StatedTransport(
+                pairs
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                    .collect(),
+            );
+            check_transport(&p, &stated, None)
+                .into_iter()
+                .map(|f| (f.code.as_str(), f.at))
+                .collect()
+        };
+        let at = || "transport.wait_before_close_ms".to_owned();
+        let differs = || ("transport_differs", at());
+        let under = || ("wait_under_lease", at());
+        assert_eq!(found(&[(wbc, Value::from(10_000_000u64))]), []);
+        assert_eq!(found(&[(wbc, Value::from(u64::MAX))]), [differs()]);
+        assert_eq!(found(&[(wbc, Value::from(-1i64))]), [differs(), under()]);
+        assert_eq!(found(&[(wbc, Value::from("10000000"))]), [differs()]);
+        assert_eq!(found(&[(wbc, Value::from(1.0e7))]), [differs()]);
+        assert_eq!(
+            found(&[
+                (lease, Value::from("10000")),
+                (wbc, Value::from(10_000_000u64))
+            ]),
+            [("transport_differs", "transport.lease_ms".to_owned())]
+        );
+    }
+
+    /// The keep-alive interval in words: exact, or "about" where the lease
+    /// is no multiple of `keep_alive`.
+    #[test]
+    fn the_keep_alive_interval_says_when_it_rounds() {
+        let t = |lease_ms, keep_alive| Transport {
+            lease_ms,
+            keep_alive,
+            ..Binding::Zenoh1_10_1.defaults()
+        };
+        assert_eq!(t(240_000, 4).keep_alive_interval_words(), "60000 ms");
+        assert_eq!(t(2_000, 3).keep_alive_interval_words(), "about 666 ms");
     }
 
     /// The window and the handshake's air (v2 §2.16): RF's 324 full

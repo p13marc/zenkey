@@ -2657,7 +2657,11 @@ async fn v2_s1_the_router_runs_the_block() {
     //    finding (§2.19).
     let config = RouterConfig::from_json5(&format!("{{\n{block}}}")).unwrap();
     let peer = link::StatedTransport::read(
-        &RouterConfig::stated_tree(&format!("{{\n{far_block}}}"), false).unwrap(),
+        &RouterConfig::stated_tree(
+            &format!("{{\n{far_block}}}"),
+            zenkey_fleet::ConfigDialect::Json5,
+        )
+        .unwrap(),
     );
     let parsed = link::parse(V2_POLICY);
     let policy = parsed.policy.as_ref().unwrap();

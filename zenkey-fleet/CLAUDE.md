@@ -320,7 +320,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   key at zenoh 1.10.1's path, `wait_before_close` in µs) and
   `far_json5` the far end's alone. The observed side is one value now,
   `RouterConfig` (the blocks zenoh's loader read, and the transport keys
-  the file's own JSON5/YAML tree states, `RouterConfig::read`,
+  the file's own tree states, read in the dialect zenoh 1.10.1's
+  `from_file` picks by extension with the very parsers it uses,
+  `ConfigDialect`, json5 0.4.1 and toml 0.9 beside serde_yaml, each
+  stated key's value the one zenoh's loader read; `RouterConfig::read`,
   `stated_tree`, `from_json5`): `check_acl(plan, &config, against)`
   compares the transport key by key (`AclFindingKind::TransportDiffers`,
   an omitted key at the binding's default), and `check_face(plan,

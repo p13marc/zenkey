@@ -146,6 +146,15 @@ json5 = "1.0"
 # files, through exactly this crate. Already in the lock (zenoh-config's own
 # YAML reader), so the explorer reads a YAML file with the parser zenoh did.
 serde_yaml = "0.9"
+# The parsers zenoh-config 1.10.1's `Config::from_file` reads a `.json`/
+# `.json5` and a `.toml` file with (`zenoh-config-1.10.1/src/lib.rs`
+# `_from_file`; TOML under zenoh's `unstable`, which this workspace turns
+# on). Already in the lock, at exactly these versions. A reader of which
+# transport keys a router config states reads the file with the parser
+# zenoh did (link.v2 §2.19, #988 L2), so a file zenoh accepts is read
+# alike: the workspace's `json5` 1.x and `toml` 1.x are other parsers.
+json5-zenoh = { package = "json5", version = "=0.4.1" }
+toml-zenoh = { package = "toml", version = "=0.9.12" }
 # `link.v1`'s live scenarios (§11, #769 LE): a session presenting a
 # certificate CN beside its user name, to a router running mTLS. The tests
 # mint a CA and each certificate per run, so no key is kept in the tree.

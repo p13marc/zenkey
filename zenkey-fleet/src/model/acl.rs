@@ -2884,9 +2884,9 @@ fn transport_json5(
     let _ = writeln!(out, "    tx: {{");
     let _ = writeln!(
         out,
-        "      lease: {},  // ms; a keep-alive every {} ms when idle",
+        "      lease: {},  // ms; a keep-alive every {} when idle",
         v(K::Lease),
-        t.keep_alive_interval_ms()
+        t.keep_alive_interval_words()
     );
     let _ = writeln!(out, "      keep_alive: {},", v(K::KeepAlive));
     let _ = writeln!(out, "      sequence_number_resolution: {},", v(K::Sequence));
@@ -3067,8 +3067,11 @@ pub struct RouterConfig {
 impl RouterConfig {
     /// The blocks `config`, a router's configuration as zenoh's own loader
     /// read it, carries, and the transport keys `stated`, the same file's
-    /// own JSON tree ([`RouterConfig::stated_tree`]), states. A block that
-    /// does not parse as zenoh 1.10's shape is named in the error.
+    /// own JSON tree ([`RouterConfig::stated_tree`]), states. A stated key's
+    /// value is the one zenoh's loader read, typed as zenoh types it (a
+    /// fraction cast to an integer, as its deserializer does): what the
+    /// router runs. A block that does not parse as zenoh 1.10's shape is
+    /// named in the error.
     pub fn read(
         config: &zenoh::Config,
         stated: &serde_json::Value,
@@ -3090,31 +3093,74 @@ impl RouterConfig {
             .get_json("gateway")
             .ok()
             .and_then(|g| serde_json::from_str(&g).ok());
+        let mut transport = link::StatedTransport::read(stated);
+        for (path, value) in &mut transport.0 {
+            if let Some(runs) = config
+                .get_json(path)
+                .ok()
+                .and_then(|j| serde_json::from_str(&j).ok())
+            {
+                *value = runs;
+            }
+        }
         Ok(RouterConfig {
             acl,
             downsampling,
             gateway,
-            transport: link::StatedTransport::read(stated),
+            transport,
         })
     }
 
     /// A configuration file's own text as a JSON tree: what it states, a key
-    /// it omits absent. JSON5 (JSON among it), or YAML, the dialects
-    /// `zenoh::Config::from_file` reads (`link.v2` §2.19 reads an omitted
-    /// transport key at the binding's default, which zenoh's loader cannot
-    /// tell from a stated one).
-    pub fn stated_tree(text: &str, yaml: bool) -> std::result::Result<serde_json::Value, String> {
-        if yaml {
-            serde_yaml::from_str(text).map_err(|e| e.to_string())
-        } else {
-            json5::from_str(text).map_err(|e| e.to_string())
+    /// it omits absent (`link.v2` §2.19 reads an omitted transport key at
+    /// the binding's default, which zenoh's loader cannot tell from a
+    /// stated one). Read in `dialect` with the very parser zenoh 1.10.1's
+    /// `Config::from_file` reads it with, so a file zenoh accepts parses
+    /// here too.
+    pub fn stated_tree(
+        text: &str,
+        dialect: ConfigDialect,
+    ) -> std::result::Result<serde_json::Value, String> {
+        match dialect {
+            ConfigDialect::Json5 => json5_zenoh::from_str(text).map_err(|e| e.to_string()),
+            ConfigDialect::Yaml => serde_yaml::from_str(text).map_err(|e| e.to_string()),
+            ConfigDialect::Toml => toml_zenoh::from_str(text).map_err(|e| e.to_string()),
         }
     }
 
     /// [`RouterConfig::read`] of a JSON5 configuration's text.
     pub fn from_json5(text: &str) -> std::result::Result<RouterConfig, String> {
         let config = zenoh::Config::from_json5(text).map_err(|e| e.to_string())?;
-        RouterConfig::read(&config, &RouterConfig::stated_tree(text, false)?)
+        RouterConfig::read(
+            &config,
+            &RouterConfig::stated_tree(text, ConfigDialect::Json5)?,
+        )
+    }
+}
+
+/// A configuration file's dialect, as zenoh 1.10.1's `Config::from_file`
+/// picks it by the file's extension (`zenoh-config-1.10.1/src/lib.rs`,
+/// `_from_file`): `.json` and `.json5` JSON5, `.yaml` and `.yml` YAML, and
+/// `.toml` TOML, which zenoh reads under its `unstable` feature, on in this
+/// workspace. It refuses any other extension, and a file with none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigDialect {
+    Json5,
+    Yaml,
+    Toml,
+}
+
+impl ConfigDialect {
+    /// The dialect zenoh reads `path` in, or `None` where it refuses the
+    /// file for its extension.
+    #[must_use]
+    pub fn of_path(path: &std::path::Path) -> Option<ConfigDialect> {
+        match path.extension()?.to_str()? {
+            "json" | "json5" => Some(ConfigDialect::Json5),
+            "yaml" | "yml" => Some(ConfigDialect::Yaml),
+            "toml" => Some(ConfigDialect::Toml),
+            _ => None,
+        }
     }
 }
 
@@ -4032,6 +4078,12 @@ pub fn explain_acl(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::model::catalog::Revision;
+    use crate::report::{AclConfigDoc, ArchiveSpec, ContractSource, ServiceSpec, ToolSpec};
+
     /// A router's configuration of these blocks, stating no transport.
     fn config(
         acl: &AclConfigDoc,
@@ -4046,14 +4098,69 @@ mod tests {
         }
     }
 
-    use std::path::Path;
-
-    use super::*;
-    use crate::model::catalog::Revision;
-    use crate::report::{AclConfigDoc, ArchiveSpec, ContractSource, ServiceSpec, ToolSpec};
-
     fn examples() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2")
+    }
+
+    /// `stated_tree` reads a file in the dialect zenoh 1.10.1's
+    /// `Config::from_file` picks by its extension, with zenoh's own parser
+    /// (link.v2 §2.19): every file zenoh accepts here is read, the keys it
+    /// states found, and an extension zenoh refuses has no dialect. A stated
+    /// key's value is the one zenoh's loader read: `1e7` and `0x989680`,
+    /// which zenoh reads as 10,000,000, run as that integer.
+    #[test]
+    fn a_config_is_read_in_the_dialect_zenoh_reads_it() {
+        let wbc = link::TransportKey::WaitBeforeClose.path();
+        let json5 = "// a router\n{ mode: 'router', transport: { link: { tx: { lease: 0x2710, \
+                     queue: { congestion_control: { block: { wait_before_close: 1e7, }, }, }, }, }, }, }\n";
+        let json = r#"{"mode": "router", "transport": {"link": {"tx": {"lease": 10000,
+            "queue": {"congestion_control": {"block": {"wait_before_close": 10000000}}}}}}}"#;
+        let yaml = "mode: router\ntransport:\n  link:\n    tx:\n      lease: 10000\n      \
+                    queue:\n        congestion_control:\n          block:\n            \
+                    wait_before_close: 10000000\n";
+        let toml = "mode = \"router\"\n[transport.link.tx]\nlease = 10000\n\
+                    [transport.link.tx.queue.congestion_control.block]\nwait_before_close = 10000000\n";
+        let dir = std::env::temp_dir().join(format!("zk-dialect-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (ext, text, dialect) in [
+            ("json5", json5, ConfigDialect::Json5),
+            ("json", json, ConfigDialect::Json5),
+            ("json", json5, ConfigDialect::Json5),
+            ("yaml", yaml, ConfigDialect::Yaml),
+            ("yml", yaml, ConfigDialect::Yaml),
+            ("toml", toml, ConfigDialect::Toml),
+        ] {
+            let path = dir.join(format!("router.{ext}"));
+            std::fs::write(&path, text).unwrap();
+            let zenoh = zenoh::Config::from_file(&path)
+                .unwrap_or_else(|e| panic!(".{ext}: zenoh reads it: {e}"));
+            assert_eq!(ConfigDialect::of_path(&path), Some(dialect), ".{ext}");
+            let tree =
+                RouterConfig::stated_tree(text, dialect).unwrap_or_else(|e| panic!(".{ext}: {e}"));
+            let config = RouterConfig::read(&zenoh, &tree).unwrap();
+            let stated: Vec<&str> = config.transport.0.keys().map(String::as_str).collect();
+            assert_eq!(stated, ["transport/link/tx/lease", wbc], ".{ext}");
+            assert_eq!(
+                config.transport.0[wbc],
+                serde_json::json!(10_000_000),
+                ".{ext}"
+            );
+            assert_eq!(
+                config.transport.0["transport/link/tx/lease"],
+                serde_json::json!(10_000),
+                ".{ext}"
+            );
+        }
+        for ext in ["conf", "JSON5"] {
+            let path = dir.join(format!("router.{ext}"));
+            std::fs::write(&path, json).unwrap();
+            assert!(
+                zenoh::Config::from_file(&path).is_err(),
+                ".{ext}: zenoh refuses it"
+            );
+            assert_eq!(ConfigDialect::of_path(&path), None, ".{ext}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The example directories' contracts, with the contracts an example

@@ -369,7 +369,8 @@ fn link_v2_media_carry_their_transport() {
             );
         }
         let peer = link::StatedTransport::read(
-            &RouterConfig::stated_tree(&format!("{{\n{far}}}"), false).unwrap(),
+            &RouterConfig::stated_tree(&format!("{{\n{far}}}"), zenkey_fleet::ConfigDialect::Json5)
+                .unwrap(),
         );
         let ask = zenkey_fleet::FaceAsk {
             peer: Some(&peer),

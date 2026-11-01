@@ -384,9 +384,9 @@ fn transport_table(
     catalog: Option<&str>,
 ) {
     t.blank().line(format!(
-        "transport (link.v2 §2.16){}: a keep-alive every {} ms when idle",
+        "transport (link.v2 §2.16){}: a keep-alive every {} when idle",
         binding.map_or(String::new(), |b| format!(", the router running {b}")),
-        tr.keep_alive_interval_ms()
+        tr.keep_alive_interval_words()
     ));
     let mut g = Grid::unheaded(3);
     for k in zenkey_model::link::TransportKey::ALL {

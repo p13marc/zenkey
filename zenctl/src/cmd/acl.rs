@@ -108,17 +108,20 @@ pub(crate) fn load_enrollment(path: &Path) -> Result<zenkey_fleet::report::Enrol
 
 /// A config file's own text as a JSON tree, once zenoh's loader accepted
 /// it: the keys it *states*, which `link.v2` §2.19 reads apart from the
-/// defaults zenoh fills in. JSON5, or YAML for `.yaml`/`.yml`, the dialects
-/// `zenoh::Config::from_file` reads.
+/// defaults zenoh fills in. The dialect is the one zenoh 1.10.1's
+/// `Config::from_file` picks by the extension, read with the parser it
+/// used (`zenkey_fleet::ConfigDialect`), so a file zenoh accepts reads here.
 fn stated_tree(path: &Path) -> Result<serde_json::Value> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("{}", path.display()))
         .map_err(|e| unaskable!("{e:#}"))?;
-    let yaml = matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("yaml" | "yml")
-    );
-    RouterConfig::stated_tree(&text, yaml).map_err(|e| {
+    let dialect = zenkey_fleet::ConfigDialect::of_path(path).ok_or_else(|| {
+        unaskable!(
+            "{}: zenoh reads .json, .json5, .yaml, .yml and .toml config files, and this is none",
+            path.display()
+        )
+    })?;
+    RouterConfig::stated_tree(&text, dialect).map_err(|e| {
         unaskable!(
             "{}: zenoh read this file, but which keys it states could not be read: {e}",
             path.display()
