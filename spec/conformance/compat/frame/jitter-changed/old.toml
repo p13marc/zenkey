@@ -1,0 +1,11 @@
+# core §9.8, frames: jitter_ms 100 to 0, narrower: frame_changed
+[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+packed = ["r.json"]
+[resources."frames/s"]
+kind = "stream"
+type = "packed:Reading"
+frame = { records = 3, step_ms = 1000, jitter_ms = 100, keyframe_every = 3 }

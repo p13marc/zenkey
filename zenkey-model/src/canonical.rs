@@ -1,7 +1,9 @@
 //! The canonical contract and its fingerprint (r3 §3.11).
 //!
 //! - **The canonical form is fully explicit JSON:** every field of every
-//!   resource is present, `null` when absent, defaults expanded (D2).
+//!   resource is present, `null` when absent, defaults expanded (D2). The
+//!   one exception is `frame` (core §7.7, draft 4), present on a frame
+//!   resource alone, so no earlier contract's bytes move.
 //!   Documentation (`doc`, `summary`) and `minor` are excluded.
 //! - **Resources are a list sorted by (kind token, template).** Gates and
 //!   requirement resources are sorted sets; objects are ordered by JCS.
@@ -95,6 +97,11 @@ fn resource_value(r: &Resource) -> Value {
             );
             m.insert("rate".into(), json!(d.rate.map(|r| r.to_string())));
             m.insert("retention_s".into(), json!(d.retention_s));
+            // Draft 4 (core §7.7, §9.5): on a frame resource alone, so a
+            // contract with none keeps its draft 3 bytes.
+            if let Some(f) = &d.frame {
+                m.insert("frame".into(), f.canonical());
+            }
         }
         Body::Operation(o) => {
             m.insert("request".into(), type_value(&o.request));

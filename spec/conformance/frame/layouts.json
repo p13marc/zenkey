@@ -1,0 +1,529 @@
+{
+  "description": "core §7.7, a frame's declaration. Written by an independent reading of the text (Python, standard library, over B1's independent reading of §7.6), checked, never blessed. `schema` is one packed document (core §7.6) every case shares. Each layout is a record type of it and a `frame` table as a contract writes it, the keys it omits taking §7.7's defaults → `form`, the frame form (`frame`: `records`, `step_ms` and `jitter_ms`, both null without a step, and `deadband`, one item per field in field order, null or `{delta, max_records}` with delta in its shortest form; `record`: the record type's layout form), `sha256`, the lowercase hex sha256 of the form's JCS bytes, `tag`, the low four bits of that hash's last byte, `count_bits`, ⌈log₂ records⌉, `offset_bits`, ⌈log₂ span⌉ or null without a step, and `span_ms`, records × step_ms or null. `keyframe_every` reaches none of them.",
+  "schema": {
+    "description": "core §7.7's frames: zenoh-modem's four link readings, a sampler's record, and a one-field tick",
+    "types": {
+      "Link": {
+        "description": "modem.v3's link readings: sdu/dropped_total, sched/queue_depth, air/duty_cycle_available, air/duty_cycle_wait_ms",
+        "fields": [
+          {
+            "name": "dropped",
+            "type": "counter",
+            "width": 32,
+            "optional": true
+          },
+          {
+            "name": "queue_depth",
+            "type": "int",
+            "minimum": 0,
+            "maximum": 1022,
+            "reserved": [
+              "out_of_range"
+            ],
+            "optional": true
+          },
+          {
+            "name": "duty_available",
+            "type": "int",
+            "minimum": 0,
+            "maximum": 1,
+            "optional": true
+          },
+          {
+            "name": "duty_wait_ms",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "3600000",
+            "resolution": "100",
+            "reserved": [
+              "out_of_range"
+            ],
+            "optional": true
+          }
+        ]
+      },
+      "Sample": {
+        "fields": [
+          {
+            "name": "temperature",
+            "type": "fixed",
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.5"
+          },
+          {
+            "name": "rssi",
+            "type": "int",
+            "minimum": -140,
+            "maximum": -20,
+            "reserved": [
+              "not_available"
+            ]
+          },
+          {
+            "name": "link_up",
+            "type": "bool"
+          },
+          {
+            "name": "mode",
+            "type": "enum",
+            "values": [
+              "idle",
+              "rx",
+              "tx"
+            ],
+            "escape": true,
+            "optional": true
+          }
+        ]
+      },
+      "Tick": {
+        "fields": [
+          {
+            "name": "n",
+            "type": "counter",
+            "width": 8
+          }
+        ]
+      }
+    }
+  },
+  "layouts": [
+    {
+      "note": "zenoh-modem's frames/link: one record, a keyframe each put",
+      "name": "link",
+      "type": "Link",
+      "frame": {
+        "records": 1
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 1,
+            "step_ms": null,
+            "jitter_ms": null,
+            "deadband": [
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "counter",
+              "width": 32,
+              "optional": true
+            },
+            {
+              "type": "int",
+              "width": 10,
+              "optional": true,
+              "minimum": 0,
+              "maximum": 1022,
+              "reserved": [
+                "out_of_range"
+              ]
+            },
+            {
+              "type": "int",
+              "width": 1,
+              "optional": true,
+              "minimum": 0,
+              "maximum": 1,
+              "reserved": []
+            },
+            {
+              "type": "fixed",
+              "width": 16,
+              "optional": true,
+              "minimum": "0",
+              "maximum": "3600000",
+              "resolution": "100",
+              "reserved": [
+                "out_of_range"
+              ]
+            }
+          ]
+        },
+        "sha256": "a8333c64dfbfee650644545a840911e1098d935fc49cf57f5838234d6ec05e65",
+        "tag": 5,
+        "count_bits": 0,
+        "offset_bits": null,
+        "span_ms": null
+      }
+    },
+    {
+      "note": "a deadband on queue_depth moves the tag; keyframe_every does not reach it",
+      "name": "link-deadband",
+      "type": "Link",
+      "frame": {
+        "records": 1,
+        "keyframe_every": 15,
+        "deadband": {
+          "queue_depth": {
+            "delta": "4",
+            "max_records": 5
+          }
+        }
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 1,
+            "step_ms": null,
+            "jitter_ms": null,
+            "deadband": [
+              null,
+              {
+                "delta": "4",
+                "max_records": 5
+              },
+              null,
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "counter",
+              "width": 32,
+              "optional": true
+            },
+            {
+              "type": "int",
+              "width": 10,
+              "optional": true,
+              "minimum": 0,
+              "maximum": 1022,
+              "reserved": [
+                "out_of_range"
+              ]
+            },
+            {
+              "type": "int",
+              "width": 1,
+              "optional": true,
+              "minimum": 0,
+              "maximum": 1,
+              "reserved": []
+            },
+            {
+              "type": "fixed",
+              "width": 16,
+              "optional": true,
+              "minimum": "0",
+              "maximum": "3600000",
+              "resolution": "100",
+              "reserved": [
+                "out_of_range"
+              ]
+            }
+          ]
+        },
+        "sha256": "975e508f830b773fe0a35f6f59b793f9decd4c72e709904cffa3a06c7762b043",
+        "tag": 3,
+        "count_bits": 0,
+        "offset_bits": null,
+        "span_ms": null
+      }
+    },
+    {
+      "note": "delta in its shortest form: \"4.00\" is \"4\", so the form and tag are link-deadband's",
+      "name": "link-deadband-respelled",
+      "type": "Link",
+      "frame": {
+        "records": 1,
+        "keyframe_every": 3,
+        "deadband": {
+          "queue_depth": {
+            "delta": "4.00",
+            "max_records": 5
+          }
+        }
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 1,
+            "step_ms": null,
+            "jitter_ms": null,
+            "deadband": [
+              null,
+              {
+                "delta": "4",
+                "max_records": 5
+              },
+              null,
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "counter",
+              "width": 32,
+              "optional": true
+            },
+            {
+              "type": "int",
+              "width": 10,
+              "optional": true,
+              "minimum": 0,
+              "maximum": 1022,
+              "reserved": [
+                "out_of_range"
+              ]
+            },
+            {
+              "type": "int",
+              "width": 1,
+              "optional": true,
+              "minimum": 0,
+              "maximum": 1,
+              "reserved": []
+            },
+            {
+              "type": "fixed",
+              "width": 16,
+              "optional": true,
+              "minimum": "0",
+              "maximum": "3600000",
+              "resolution": "100",
+              "reserved": [
+                "out_of_range"
+              ]
+            }
+          ]
+        },
+        "sha256": "975e508f830b773fe0a35f6f59b793f9decd4c72e709904cffa3a06c7762b043",
+        "tag": 3,
+        "count_bits": 0,
+        "offset_bits": null,
+        "span_ms": null
+      }
+    },
+    {
+      "note": "three 10-s samples a frame, each within 500 ms of its instant: a 2-bit count, a 15-bit offset",
+      "name": "sample3",
+      "type": "Sample",
+      "frame": {
+        "records": 3,
+        "step_ms": 10000,
+        "jitter_ms": 500,
+        "keyframe_every": 3
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 3,
+            "step_ms": 10000,
+            "jitter_ms": 500,
+            "deadband": [
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "fixed",
+              "width": 8,
+              "optional": false,
+              "minimum": "-40",
+              "maximum": "85",
+              "resolution": "0.5",
+              "reserved": []
+            },
+            {
+              "type": "int",
+              "width": 7,
+              "optional": false,
+              "minimum": -140,
+              "maximum": -20,
+              "reserved": [
+                "not_available"
+              ]
+            },
+            {
+              "type": "bool",
+              "width": 1,
+              "optional": false
+            },
+            {
+              "type": "enum",
+              "width": 2,
+              "optional": true,
+              "escape": true
+            }
+          ]
+        },
+        "sha256": "a345e663dab72074674014b6f7c9ff21d36ef22db6b59796c7be198dba1cfa34",
+        "tag": 4,
+        "count_bits": 2,
+        "offset_bits": 15,
+        "span_ms": 30000
+      }
+    },
+    {
+      "note": "the same with no jitter: another tag",
+      "name": "sample3-exact",
+      "type": "Sample",
+      "frame": {
+        "records": 3,
+        "step_ms": 10000
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 3,
+            "step_ms": 10000,
+            "jitter_ms": 0,
+            "deadband": [
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "fixed",
+              "width": 8,
+              "optional": false,
+              "minimum": "-40",
+              "maximum": "85",
+              "resolution": "0.5",
+              "reserved": []
+            },
+            {
+              "type": "int",
+              "width": 7,
+              "optional": false,
+              "minimum": -140,
+              "maximum": -20,
+              "reserved": [
+                "not_available"
+              ]
+            },
+            {
+              "type": "bool",
+              "width": 1,
+              "optional": false
+            },
+            {
+              "type": "enum",
+              "width": 2,
+              "optional": true,
+              "escape": true
+            }
+          ]
+        },
+        "sha256": "54cbfc90b0b4652dcae25f82b4ad76cad87dc889c475f5b903405a4b9ba4e7be",
+        "tag": 14,
+        "count_bits": 2,
+        "offset_bits": 15,
+        "span_ms": 30000
+      }
+    },
+    {
+      "note": "a span of 16 ms: a 1-bit count and a 4-bit offset, every code used",
+      "name": "tick-pow2",
+      "type": "Tick",
+      "frame": {
+        "records": 2,
+        "step_ms": 8
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 2,
+            "step_ms": 8,
+            "jitter_ms": 0,
+            "deadband": [
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "counter",
+              "width": 8,
+              "optional": false
+            }
+          ]
+        },
+        "sha256": "e6cad360a51f1ddd7cf37d3a999352d7b2eea5d19dc27028de854cf86d4a7a60",
+        "tag": 0,
+        "count_bits": 1,
+        "offset_bits": 4,
+        "span_ms": 16
+      }
+    },
+    {
+      "note": "five records: a 3-bit count, so counts 5 to 7 are unused",
+      "name": "tick-five",
+      "type": "Tick",
+      "frame": {
+        "records": 5,
+        "step_ms": 1000,
+        "jitter_ms": 100
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 5,
+            "step_ms": 1000,
+            "jitter_ms": 100,
+            "deadband": [
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "counter",
+              "width": 8,
+              "optional": false
+            }
+          ]
+        },
+        "sha256": "65ad71dbcd75842fb7c1568bc8bdd108b2def050b55dcb85cca5f2839b40818a",
+        "tag": 10,
+        "count_bits": 3,
+        "offset_bits": 13,
+        "span_ms": 5000
+      }
+    },
+    {
+      "note": "the largest declaration: an 8-bit count and a 40-bit offset",
+      "name": "tick-max",
+      "type": "Tick",
+      "frame": {
+        "records": 256,
+        "step_ms": 4294967295
+      },
+      "expect": {
+        "form": {
+          "frame": {
+            "records": 256,
+            "step_ms": 4294967295,
+            "jitter_ms": 0,
+            "deadband": [
+              null
+            ]
+          },
+          "record": [
+            {
+              "type": "counter",
+              "width": 8,
+              "optional": false
+            }
+          ]
+        },
+        "sha256": "e115da7168bc2f975e6f6b98c42583a518b7ca83f255c03ad948a694d0a85107",
+        "tag": 7,
+        "count_bits": 8,
+        "offset_bits": 40,
+        "span_ms": 1099511627520
+      }
+    }
+  ]
+}

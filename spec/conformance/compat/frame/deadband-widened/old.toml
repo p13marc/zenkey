@@ -1,0 +1,11 @@
+# core §9.8, frames: max_records widened, 5 to 10: deadband_changed
+[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+packed = ["r.json"]
+[resources."frames/s"]
+kind = "stream"
+type = "packed:Reading"
+frame = { keyframe_every = 4, deadband = { level = { delta = "4", max_records = 5 } } }

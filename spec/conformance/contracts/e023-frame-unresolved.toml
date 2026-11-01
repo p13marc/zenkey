@@ -1,0 +1,15 @@
+# core §9.2 cascade 8: a frame whose packed type does not resolve. E023
+# alone: E047's marker half and E049 wait for a layout, so the deadband on
+# a field the type might not have says nothing.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources."frames/missing"]
+kind  = "stream"
+type  = "packed:frames#Nope"
+frame = { deadband = { anything = { delta = "1", max_records = 2 } } }

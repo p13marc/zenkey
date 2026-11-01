@@ -739,7 +739,7 @@ fn compat() {
                 continue;
             }
             (rev(lo, name), rev(ln, name))
-        } else if name.starts_with("contract/") {
+        } else if name.starts_with("contract/") || name.starts_with("frame/") {
             let l = |f: &str| zenkey_model::contract::load_path(&root.join(f));
             (rev(l("old.toml"), name), rev(l("new.toml"), name))
         } else if name.starts_with("transitive/") {
@@ -1202,6 +1202,31 @@ fn envelope_carries() {
         );
     }
     assert_eq!(both, [true, true], "cases on both sides");
+    // A key and a put's payload under `zenoh/bytes` → how the put reads
+    // (core §7.5): plain, its form, or the refusal, `key_kind` among them.
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    let mut seen = std::collections::BTreeSet::new();
+    for case in reads {
+        use zenkey_model::wire::{ENCODING, Reading, read_put};
+        let note = &case["note"];
+        let key = case["key"].as_str().expect("key");
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match read_put(key, ENCODING, &bytes) {
+            Reading::Plain => json!({"reads": "plain"}),
+            Reading::Enveloped(e) | Reading::Framed(e) | Reading::Heartbeat(e) => {
+                assert_eq!(e.write(), bytes, "{note}: writes back");
+                json!({"reads": e.form.as_str()})
+            }
+            Reading::Refused(r) => json!({"refused": r.token()}),
+        };
+        seen.insert(got.to_string());
+        assert_eq!(case["expect"], got, "{note}: {key}");
+    }
+    assert!(
+        seen.contains(r#"{"refused":"key_kind"}"#),
+        "a key_kind case"
+    );
 }
 
 /// `spec/conformance/envelope/vectors.json` (core §7.5, 0.72; #976): CH's
@@ -1568,6 +1593,162 @@ fn packed_vectors() {
     for token in ["tag", "length", "code", "extension", "pad"] {
         assert!(refused.contains(token), "no read case refuses with {token}");
     }
+}
+
+/// `spec/conformance/frame/layouts.json` (core §7.7, 0.83; #981 K1): a
+/// record type of the shared packed document and a `frame` table → the
+/// frame form, its sha256 and tag, the count's and the offset's widths,
+/// and the span. Written by an independent reading of the text, checked,
+/// never blessed.
+#[test]
+fn frame_layouts() {
+    let doc = read_json(&spec().join("conformance/frame/layouts.json"));
+    for (name, l) in frame_fixture_layouts() {
+        let case = doc["layouts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap()
+            .clone();
+        let got = json!({
+            "form": l.form(),
+            "sha256": l.sha256_hex(),
+            "tag": l.tag().get(),
+            "count_bits": l.count_bits(),
+            "offset_bits": l.offset_bits(),
+            "span_ms": l.span_ms(),
+        });
+        assert_eq!(case["expect"], got, "layout {name}");
+    }
+}
+
+/// Every layout of `frame/layouts.json`, by name, through the model:
+/// the packed document read, each table resolved as a contract's is.
+fn frame_fixture_layouts() -> BTreeMap<String, zenkey_model::frame::Layout> {
+    use zenkey_model::authoring::FrameSpec;
+    use zenkey_model::frame::{FrameParams, Layout};
+    use zenkey_model::packed::PackedDoc;
+    let doc = read_json(&spec().join("conformance/frame/layouts.json"));
+    let read = PackedDoc::read(&doc["schema"]);
+    assert!(read.findings.is_empty(), "{:?}", read.findings);
+    let mut out = BTreeMap::new();
+    for case in doc["layouts"].as_array().expect("layouts") {
+        let name = case["name"].as_str().expect("name").to_owned();
+        let record = read.types[case["type"].as_str().expect("type")]
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name}: no record layout"));
+        let spec: FrameSpec = serde_json::from_value(case["frame"].clone()).expect("a frame table");
+        let params = FrameParams::resolve(&spec).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let l = Layout::of(record, &params).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(out.insert(name, l).is_none(), "a layout's name once");
+    }
+    assert!(!out.is_empty());
+    out
+}
+
+/// `spec/conformance/frame/bodies.json` (core §7.7, 0.83; #981 K1): a
+/// layout and a frame's value → the body's bits, pad and bytes, or the
+/// writer's refusal, each accepted write read back; a layout, a tag and a
+/// body → the value, or the reader's refusal, the first in §7.7's order.
+/// Every accepted body writes back to its bytes. Written by an independent
+/// reading of the text, checked, never blessed.
+#[test]
+fn frame_bodies() {
+    use zenkey_model::frame::Frame;
+    use zenkey_model::packed::DEFAULT_EPOCH;
+    use zenkey_model::wire::Tag;
+    let layouts = frame_fixture_layouts();
+    let doc = read_json(&spec().join("conformance/frame/bodies.json"));
+    let hex = |b: &[u8]| -> String { b.iter().map(|x| format!("{x:02x}")).collect() };
+    let epoch = Some(DEFAULT_EPOCH);
+    let mut refused = std::collections::BTreeSet::new();
+    let writes = doc["writes"].as_array().expect("writes");
+    assert!(!writes.is_empty());
+    for case in writes {
+        let note = &case["note"];
+        let l = &layouts[case["layout"].as_str().expect("layout")];
+        let got = match Frame::from_json(&case["value"], l, epoch).and_then(|f| f.write(l)) {
+            Ok(r) => {
+                let back = Frame::parse(l.tag(), &r.bytes, l)
+                    .unwrap_or_else(|e| panic!("{note}: reads back: {e}"));
+                let want = case.get("reads_as").unwrap_or(&case["value"]);
+                assert_eq!(
+                    &back.read_json(l, epoch).unwrap(),
+                    want,
+                    "{note}: reads back"
+                );
+                assert_eq!(back.write(l).unwrap().bytes, r.bytes, "{note}: writes back");
+                json!({"hex": hex(&r.bytes), "bits": r.bit_string(), "pad": r.pad()})
+            }
+            Err(e) => {
+                refused.insert(e.token());
+                json!({"refused": e.token()})
+            }
+        };
+        assert_eq!(case["expect"], got, "write: {note}");
+    }
+    for token in ["records", "missing", "unknown", "value", "range", "order"] {
+        assert!(
+            refused.contains(token),
+            "no write case refuses with {token}"
+        );
+    }
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    let mut refused = std::collections::BTreeSet::new();
+    for case in reads {
+        let note = &case["note"];
+        let l = &layouts[case["layout"].as_str().expect("layout")];
+        let tag = Tag::new(u8::try_from(case["tag"].as_u64().expect("tag")).unwrap())
+            .expect("a 4-bit tag");
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match Frame::parse(tag, &bytes, l) {
+            Ok(f) => {
+                assert_eq!(f.write(l).unwrap().bytes, bytes, "{note}: writes back");
+                f.read_json(l, epoch).unwrap()
+            }
+            Err(e) => {
+                refused.insert(e.token());
+                json!({"refused": e.token()})
+            }
+        };
+        assert_eq!(case["expect"], got, "read: {note}");
+    }
+    for token in ["tag", "length", "code", "order", "pad"] {
+        assert!(refused.contains(token), "no read case refuses with {token}");
+    }
+}
+
+/// A frame resource's bundle reads back into the contract model and
+/// builds to its own bytes (core §9.6, §9.5), its `frame` member
+/// included; and its layout is read from the contract (core §7.7).
+#[test]
+fn frame_bundle_round_trips() {
+    use zenkey_model::contract::{Contract, load_path};
+    use zenkey_model::frame::Layout;
+    let l = load_path(&spec().join("conformance/contracts/ok-frame.toml"));
+    let c = l
+        .contract
+        .unwrap_or_else(|| panic!("ok-frame:\n{}", l.report));
+    let bytes = Bundle::build(&c).to_bytes();
+    let b = Bundle::verify(&bytes).unwrap();
+    let back = Contract::from_bundle(&b).unwrap();
+    assert_eq!(Bundle::build(&back).to_bytes(), bytes);
+    let frames: Vec<_> = back
+        .resources
+        .iter()
+        .filter_map(|r| Layout::of_resource(&back, r).unwrap())
+        .collect();
+    assert_eq!(frames.len(), 4, "ok-frame declares four frame resources");
+    let link = c
+        .resources
+        .iter()
+        .find(|r| r.template.as_str() == "frames/link")
+        .unwrap();
+    let link = Layout::of_resource(&c, link).unwrap().unwrap();
+    // The layouts fixture's `link`, from a contract.
+    assert_eq!(link.form(), frame_fixture_layouts()["link"].form());
 }
 
 /// A packed bundle reads back into the contract model and builds to its

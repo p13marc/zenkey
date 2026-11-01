@@ -1,0 +1,24 @@
+{
+  "types": {
+    "Reading": {
+      "fields": [
+        {
+          "name": "depth",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1000,
+          "optional": true
+        },
+        {
+          "name": "count",
+          "type": "counter",
+          "width": 16
+        },
+        {
+          "name": "ok",
+          "type": "bool"
+        }
+      ]
+    }
+  }
+}

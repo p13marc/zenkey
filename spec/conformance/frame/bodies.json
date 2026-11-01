@@ -1,0 +1,3211 @@
+{
+  "description": "core §7.7, a frame's body, read with its declaration (`layouts.json`, by `layout`). Written by an independent reading of the text (Python, standard library), checked, never blessed. A value is `time`, `{\"s\": seconds from the deployment epoch, \"ms\": milliseconds}` or null for the unknown time (all 42 bits set), and `records`, in order. A record is `full`, `at` (record 1 and later only: \"scheduled\", or its offset in milliseconds after record 0), `values`, each field it includes present, as §7.6's JSON reading spells it, and `absent`, the fields it includes absent, in field order. A full record includes every field. A delta record includes those in `values` and `absent`, and its bitmap follows from them. `writes`: a layout and a value → the body's `bits` before the pad, the `pad` and the `hex` bytes, or `{\"refused\": token}`: `records` (no record, or more than `records`), `unknown` (a field the type does not have), `missing` (a full record without a field that is not optional, or such a field written absent), `value` and `range` (§7.6's, an offset at or past the span and a time outside its codes among `range`), `order` (a record before the one before it). `reads`: a layout, CH's tag and the body in hex → the value, or `{\"refused\": token}`, the first in §7.7's order: `tag`; then, as the fields are read, `length` (the body ends before a bit), `code` (an unused millisecond code, a count of `records` or more, an offset at or past the span, a field's unused code) and `order` (a record's latest time below the earliest of the one before it, a scheduled record lying within `jitter_ms` of its instant); `length` (a byte after the pad); `pad`. Every write accepted reads back, under its layout's tag, to its value, or to the `reads_as` its case gives.",
+  "writes": [
+    {
+      "note": "link: a keyframe with every reading: 42 + 1 + 63 = 106 bits, 14 bytes, 6 of pad",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 7,
+              "queue_depth": 12,
+              "duty_available": 1,
+              "duty_wait_ms": "1500"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110101100000000000000000000000000000111100000011001110000000000001111",
+        "pad": 6,
+        "hex": "00000e103eb00000007819c003c0"
+      }
+    },
+    {
+      "note": "link: a keyframe with every reading absent: 42 + 1 + 4 presence bits",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {},
+            "absent": [
+              "dropped",
+              "queue_depth",
+              "duty_available",
+              "duty_wait_ms"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "bits": "00000000000000000000111000010000001111101010000",
+        "pad": 1,
+        "hex": "00000e103ea0"
+      }
+    },
+    {
+      "note": "link: the owner's clock unknown, all 42 time bits set",
+      "layout": "link",
+      "value": {
+        "time": null,
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 7,
+              "queue_depth": 12,
+              "duty_available": 1,
+              "duty_wait_ms": "1500"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "1111111111111111111111111111111111111111111100000000000000000000000000000111100000011001110000000000001111",
+        "pad": 6,
+        "hex": "fffffffffff00000007819c003c0"
+      }
+    },
+    {
+      "note": "link: reserved codes and range ends: queue_depth out_of_range, the wait at its maximum",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 4294967295,
+              "queue_depth": "out_of_range",
+              "duty_available": 0,
+              "duty_wait_ms": "3600000"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000000000000000000000000001111111111111111111111111111111111111111111111011000110010100000",
+        "pad": 6,
+        "hex": "00000000003fffffffffff632800"
+      }
+    },
+    {
+      "note": "link: a counter is written modulo 2^32, so 2^32 reads back as 0",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 1,
+          "ms": 1
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 4294967296,
+              "queue_depth": 1022,
+              "duty_available": 0,
+              "duty_wait_ms": "out_of_range"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000000000000000100000000011100000000000000000000000000000000111111111101011111111111111111",
+        "pad": 6,
+        "hex": "0000000100700000000ffd7fffc0"
+      },
+      "reads_as": {
+        "time": {
+          "s": 1,
+          "ms": 1
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 0,
+              "queue_depth": 1022,
+              "duty_available": 0,
+              "duty_wait_ms": "out_of_range"
+            },
+            "absent": []
+          }
+        ]
+      }
+    },
+    {
+      "note": "link: a delta record, the queue and the wait changed: 42 + 1 + 4 + 11 + 17 = 75 bits",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 3660,
+          "ms": 250
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {
+              "queue_depth": 30,
+              "duty_wait_ms": "2500"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "000000000000000000001110010011000011111010001011000001111010000000000011001",
+        "pad": 5,
+        "hex": "00000e4c3e8b07a00320"
+      }
+    },
+    {
+      "note": "link: a delta record, nothing changed: 42 + 1 + 4 = 47 bits",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 3720,
+          "ms": 250
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "00000000000000000000111010001000001111101000000",
+        "pad": 1,
+        "hex": "00000e883e80"
+      }
+    },
+    {
+      "note": "link: a delta record, dropped included absent: its bit 1, its presence bit 0",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 3780,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {},
+            "absent": [
+              "dropped"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "bits": "000000000000000000001110110001000000000000010000",
+        "pad": 0,
+        "hex": "00000ec40010"
+      }
+    },
+    {
+      "note": "link-deadband: the same keyframe under another tag",
+      "layout": "link-deadband",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 7,
+              "queue_depth": 12,
+              "duty_available": 1,
+              "duty_wait_ms": "1500"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110101100000000000000000000000000000111100000011001110000000000001111",
+        "pad": 6,
+        "hex": "00000e103eb00000007819c003c0"
+      }
+    },
+    {
+      "note": "sample3: a keyframe, a scheduled delta, and a late record with its offset",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7200,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "temperature": "22"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 20750,
+            "values": {
+              "rssi": -90
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000111000010000000000000001010111101101101111101011000011111000010100010000111001000110010",
+        "pad": 6,
+        "hex": "00001c20002bdb7d61f0a21c8c80"
+      }
+    },
+    {
+      "note": "sample3: three full records, each scheduled",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7200,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": true,
+            "at": "scheduled",
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": true,
+            "at": "scheduled",
+            "values": {
+              "temperature": "-40",
+              "rssi": "not_available",
+              "link_up": false
+            },
+            "absent": [
+              "mode"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "bits": "00000000000000000001110000100000000000000010101111011011011111011101111011011011111011100000000111111100",
+        "pad": 0,
+        "hex": "00001c20002bdb7ddedbee01fc"
+      }
+    },
+    {
+      "note": "sample3: one record of three: a count of 0",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7200,
+          "ms": 999
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000111000010000011111001110010111101101101111101",
+        "pad": 0,
+        "hex": "00001c20f9cbdb7d"
+      }
+    },
+    {
+      "note": "sample3: a delta frame, its record 0 a delta record",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7230,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {
+              "temperature": "85"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "000000000000000000011100001111100000000000010100011111010010000",
+        "pad": 1,
+        "hex": "00001c3e00147d20"
+      }
+    },
+    {
+      "note": "sample3: mode included absent, then as its escape",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7260,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {},
+            "absent": [
+              "mode"
+            ]
+          },
+          {
+            "full": false,
+            "at": 10000,
+            "values": {
+              "mode": null
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "00000000000000000001110001011100000000000001000010000100111000100000001111",
+        "pad": 6,
+        "hex": "00001c5c001084e203c0"
+      }
+    },
+    {
+      "note": "sample3: a record at the earliest its predecessor allows: 9500 after a record scheduled at 10000 ± 500",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7290,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 9500,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000111000111101000000000001010111101101101111101010000000100101000111000000",
+        "pad": 5,
+        "hex": "00001c7a002bdb7d404a3800"
+      }
+    },
+    {
+      "note": "sample3: a scheduled record at 20000 ± 500 after one at 20500",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7320,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 20500,
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000111001001100000000000001010111101101101111101001010000000101000000010000",
+        "pad": 5,
+        "hex": "00001c98002bdb7d280a0200"
+      }
+    },
+    {
+      "note": "sample3: the last offset in the span, 29999",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 7350,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 0,
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 29999,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000111001011011000000000001010111101101101111101000000000000000000000001110101001011110000",
+        "pad": 6,
+        "hex": "00001cb6002bdb7d000001d4bc00"
+      }
+    },
+    {
+      "note": "sample3-exact: two records at one instant, 10000",
+      "layout": "sample3-exact",
+      "value": {
+        "time": {
+          "s": 7200,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 10000,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "0000000000000000000111000010000000000000001010111101101101111101010000000100111000100000000",
+        "pad": 5,
+        "hex": "00001c20002bdb7d404e2000"
+      }
+    },
+    {
+      "note": "tick-pow2: the top offset, 15 in 4 bits",
+      "layout": "tick-pow2",
+      "value": {
+        "time": {
+          "s": 10,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "n": 1
+            },
+            "absent": []
+          },
+          {
+            "full": true,
+            "at": 15,
+            "values": {
+              "n": 2
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "000000000000000000000000000010100000000000110000000110111100000010",
+        "pad": 6,
+        "hex": "0000000a00301bc080"
+      }
+    },
+    {
+      "note": "tick-five: five records, each scheduled",
+      "layout": "tick-five",
+      "value": {
+        "time": {
+          "s": 10,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "n": 0
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 1
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 2
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 3
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 4
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "00000000000000000000000000001010000000000010010000000001100000001011000000100110000001101100000100",
+        "pad": 6,
+        "hex": "0000000a00240180b02606c100"
+      }
+    },
+    {
+      "note": "tick-max: two records, the second at the last millisecond of the span",
+      "layout": "tick-max",
+      "value": {
+        "time": {
+          "s": 4294967295,
+          "ms": 999
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "n": 255
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 1099511627519,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "111111111111111111111111111111111111100111000000011111111110011111111111111111111111111111110111111110",
+        "pad": 2,
+        "hex": "fffffffff9c07fe7fffffff7f8"
+      }
+    },
+    {
+      "note": "tick-max: 256 records, each scheduled",
+      "layout": "tick-max",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "n": 0
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 1
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 3
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 5
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 7
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 9
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 11
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 13
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 15
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 17
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 19
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 21
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 23
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 25
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 27
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 29
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 31
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 33
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 35
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 37
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 39
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 41
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 43
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 45
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 47
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 49
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 51
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 53
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 55
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 57
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 59
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 61
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 63
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 65
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 67
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 69
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 71
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 73
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 75
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 77
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 79
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 81
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 83
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 85
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 87
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 89
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 91
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 93
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 95
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 97
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 99
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 101
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 103
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 105
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 107
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 109
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 111
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 113
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 115
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 117
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 119
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 121
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 123
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 125
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 127
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 129
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 131
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 133
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 135
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 137
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 139
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 141
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 143
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 145
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 147
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 149
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 151
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 153
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 155
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 157
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 159
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 161
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 163
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 165
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 167
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 169
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 171
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 173
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 175
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 177
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 179
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 181
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 183
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 185
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 187
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 189
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 191
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 193
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 195
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 197
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 199
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 201
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 203
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 205
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 207
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 209
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 211
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 213
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 215
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 217
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 219
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 221
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 223
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 225
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 227
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 229
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 231
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 233
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 235
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 237
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 239
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 241
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 243
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 245
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 247
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 249
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 251
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 253
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {
+              "n": 255
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "bits": "000000000000000000000000000000000000000000111111111000000000110000000101001100000011010011000001010100110000011101001100001001010011000010110100110000110101001100001111010011000100010100110001001101001100010101010011000101110100110001100101001100011011010011000111010100110001111101001100100001010011001000110100110010010101001100100111010011001010010100110010101101001100101101010011001011110100110011000101001100110011010011001101010100110011011101001100111001010011001110110100110011110101001100111111010011010000010100110100001101001101000101010011010001110100110100100101001101001011010011010011010100110100111101001101010001010011010100110100110101010101001101010111010011010110010100110101101101001101011101010011010111110100110110000101001101100011010011011001010100110110011101001101101001010011011010110100110110110101001101101111010011011100010100110111001101001101110101010011011101110100110111100101001101111011010011011111010100110111111101001110000001010011100000110100111000010101001110000111010011100010010100111000101101001110001101010011100011110100111001000101001110010011010011100101010100111001011101001110011001010011100110110100111001110101001110011111010011101000010100111010001101001110100101010011101001110100111010100101001110101011010011101011010100111010111101001110110001010011101100110100111011010101001110110111010011101110010100111011101101001110111101010011101111110100111100000101001111000011010011110001010100111100011101001111001001010011110010110100111100110101001111001111010011110100010100111101001101001111010101010011110101110100111101100101001111011011010011110111010100111101111101001111100001010011111000110100111110010101001111100111010011111010010100111110101101001111101101010011111011110100111111000101001111110011010011111101010100111111011101001111111001010011111110110100111111110101001111111111",
+        "pad": 0,
+        "hex": "00000000003fe00c053034c153074c2530b4c3530f4c453134c553174c6531b4c7531f4c853234c953274ca532b4cb532f4cc53334cd53374ce533b4cf533f4d053434d153474d2534b4d3534f4d453534d553574d6535b4d7535f4d853634d953674da536b4db536f4dc53734dd53774de537b4df537f4e053834e153874e2538b4e3538f4e453934e553974e6539b4e7539f4e853a34e953a74ea53ab4eb53af4ec53b34ed53b74ee53bb4ef53bf4f053c34f153c74f253cb4f353cf4f453d34f553d74f653db4f753df4f853e34f953e74fa53eb4fb53ef4fc53f34fd53f74fe53fb4ff53ff"
+      }
+    },
+    {
+      "note": "link: two records where the frame holds one",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 7,
+              "queue_depth": 12,
+              "duty_available": 1,
+              "duty_wait_ms": "1500"
+            },
+            "absent": []
+          },
+          {
+            "full": true,
+            "at": "scheduled",
+            "values": {
+              "dropped": 7,
+              "queue_depth": 12,
+              "duty_available": 1,
+              "duty_wait_ms": "1500"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "records"
+      }
+    },
+    {
+      "note": "link: no record",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": []
+      },
+      "expect": {
+        "refused": "records"
+      }
+    },
+    {
+      "note": "sample3: four records where the frame holds three",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "records"
+      }
+    },
+    {
+      "note": "link: a field the type does not have",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "rssi": -80
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "unknown"
+      }
+    },
+    {
+      "note": "link: a counter of 2^64, outside its domain",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "dropped": 18446744073709551616
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "link: queue_depth 1023, past its maximum",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {
+              "queue_depth": 1023
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "link: a reserved code the field does not declare",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {
+              "queue_depth": "error"
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "link: a millisecond of 1000",
+      "layout": "link",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 1000
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "sample3: a full record missing rssi, which is not optional",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "20",
+              "link_up": true
+            },
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "missing"
+      }
+    },
+    {
+      "note": "sample3: rssi written absent, which it cannot be",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": false,
+            "values": {},
+            "absent": [
+              "rssi"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "refused": "missing"
+      }
+    },
+    {
+      "note": "sample3: an offset of 30000, the span",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 30000,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "sample3: a record at 9499 after one scheduled at 10000 ± 500",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 9499,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "sample3: a scheduled record at 20000 ± 500 after one at 20501",
+      "layout": "sample3",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 20501,
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "sample3-exact: a record at 9999 after one scheduled at 10000",
+      "layout": "sample3-exact",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "21.5",
+              "rssi": -85,
+              "link_up": true,
+              "mode": "rx"
+            },
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": "scheduled",
+            "values": {},
+            "absent": []
+          },
+          {
+            "full": false,
+            "at": 9999,
+            "values": {},
+            "absent": []
+          }
+        ]
+      },
+      "expect": {
+        "refused": "order"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "link: another tag",
+      "layout": "link",
+      "tag": 6,
+      "hex": "00000e103eb00000007819c003c0",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "link: the tag before a short body",
+      "layout": "link",
+      "tag": 6,
+      "hex": "00",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "link: an empty body",
+      "layout": "link",
+      "tag": 5,
+      "hex": "",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "link: the keyframe one byte short",
+      "layout": "link",
+      "tag": 5,
+      "hex": "00000e103eb00000007819c003",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "link: a byte after the pad",
+      "layout": "link",
+      "tag": 5,
+      "hex": "00000e103eb00000007819c003c000",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "link: a pad bit set",
+      "layout": "link",
+      "tag": 5,
+      "hex": "00000e103eb00000007819c003c1",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "link: every time bit set: the clock unknown",
+      "layout": "link",
+      "tag": 5,
+      "hex": "ffffffffffe0",
+      "expect": {
+        "time": null,
+        "records": [
+          {
+            "full": true,
+            "values": {},
+            "absent": [
+              "dropped",
+              "queue_depth",
+              "duty_available",
+              "duty_wait_ms"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "note": "link: every second bit set and 1000 ms: unused",
+      "layout": "link",
+      "tag": 5,
+      "hex": "fffffffffa20",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "link: 1023 ms under a known second: unused",
+      "layout": "link",
+      "tag": 5,
+      "hex": "00000005ffe0",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "link: 1000 ms: unused",
+      "layout": "link",
+      "tag": 5,
+      "hex": "00000005fa20",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "link: the last known instant",
+      "layout": "link",
+      "tag": 5,
+      "hex": "fffffffff9e0",
+      "expect": {
+        "time": {
+          "s": 4294967295,
+          "ms": 999
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {},
+            "absent": [
+              "dropped",
+              "queue_depth",
+              "duty_available",
+              "duty_wait_ms"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "note": "link: duty_wait_ms code 36001, unused",
+      "layout": "link",
+      "tag": 5,
+      "hex": "0000000000231942",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "link: duty_wait_ms code 65535, out_of_range",
+      "layout": "link",
+      "tag": 5,
+      "hex": "000000000023fffe",
+      "expect": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "duty_wait_ms": "out_of_range"
+            },
+            "absent": [
+              "dropped",
+              "queue_depth",
+              "duty_available"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "note": "link: a delta record's bitmap, then a field cut short",
+      "layout": "link",
+      "tag": 5,
+      "hex": "00000000000930",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "tick-five: a count of 5: six records of five",
+      "layout": "tick-five",
+      "tag": 10,
+      "hex": "00000000002c00",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "tick-five: a count of 7",
+      "layout": "tick-five",
+      "tag": 10,
+      "hex": "00000000003c00",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "tick-five: an unused count before a short body",
+      "layout": "tick-five",
+      "tag": 10,
+      "hex": "000000000030",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "sample3: an offset code of 30000, the span",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20001bdb7d3a9800",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "sample3: an offset code of 32767",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20001bdb7d3fff80",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "sample3: a record at 9499 after one scheduled at 10000 ± 500",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20002bdb7d404a3600",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "sample3: the order refused before a body cut short",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20002bdb7d404650",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "sample3: a count of 3, past three records",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20003bdb7d",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "sample3: temperature code 251, unused",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20000fdb78",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "sample3: rssi code 127, not_available",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20000807f0",
+      "expect": {
+        "time": {
+          "s": 7200,
+          "ms": 0
+        },
+        "records": [
+          {
+            "full": true,
+            "values": {
+              "temperature": "-40",
+              "rssi": "not_available",
+              "link_up": false
+            },
+            "absent": [
+              "mode"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "note": "sample3: rssi code 121, unused",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c2000080790",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "sample3: the third record cut short in its offset",
+      "layout": "sample3",
+      "tag": 4,
+      "hex": "00001c20002bdb7d4064",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "sample3-exact: another declaration's tag",
+      "layout": "sample3-exact",
+      "tag": 4,
+      "hex": "00000001000bdb7d",
+      "expect": {
+        "refused": "tag"
+      }
+    }
+  ]
+}

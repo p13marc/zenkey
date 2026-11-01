@@ -277,6 +277,10 @@ fn envelope(sample: &Sample) -> Option<Result<(wire::Stamp, wire::Form), Refusal
             let bytes = sample.payload().to_bytes();
             Some(match wire::read_put(key, wire::ENCODING, &bytes) {
                 Reading::Enveloped(e) | Reading::Heartbeat(e) => Ok((e.stamp, e.form)),
+                // A frame (core 0.83 §7.7) is read as before core 0.83
+                // defined it, undecodable as a reserved form, until #981's
+                // K2 brings the frame reader: never as a record.
+                Reading::Framed(_) => Err(Refusal::Reserved(wire::Form::Frame)),
                 Reading::Refused(refusal) => Err(refusal),
                 Reading::Plain => return None,
             })

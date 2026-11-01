@@ -1,0 +1,64 @@
+# core §7.7, §9.2 E048: `frame` values outside §7.7's table, one per key
+# and per deadband member.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources."frames/a"]                  # no record
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { records = 0 }
+
+[resources."frames/b"]                  # past 256
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { records = 257, step_ms = 1000 }
+
+[resources."frames/c"]                  # several records, no step
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { records = 3 }
+
+[resources."frames/d"]                  # a step on one record: one finding, the jitter with it none
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { records = 1, step_ms = 1000, jitter_ms = 0 }
+
+[resources."frames/e"]                  # a step of 0
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { records = 2, step_ms = 0 }
+
+[resources."frames/f"]                  # a step past 2^32 - 1
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { records = 2, step_ms = 4294967296 }
+
+[resources."frames/g"]                  # a jitter past half the step
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { records = 2, step_ms = 1000, jitter_ms = 501 }
+
+[resources."frames/h"]                  # keyframe_every 0, and past 65,536
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { keyframe_every = 0 }
+
+[resources."frames/i"]
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { keyframe_every = 65537 }
+
+[resources."frames/j"]                  # deadbands: a delta of 0 and a max_records of 0; a negative delta; an exponent; max_records past 65,536
+kind  = "stream"
+type  = "packed:frames#Link"
+frame = { deadband = { dropped = { delta = "0", max_records = 0 }, queue_depth = { delta = "-1", max_records = 1 }, duty_available = { delta = "1e0", max_records = 1 }, duty_wait_ms = { delta = "100", max_records = 65537 } } }
+
+[resources."frames/k"]                  # a jitter with no step
+kind  = "stream"
+type  = "packed:frames#Sample"
+frame = { jitter_ms = 10 }

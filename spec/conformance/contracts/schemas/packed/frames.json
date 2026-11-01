@@ -1,0 +1,28 @@
+{
+  "description": "core §7.7: the record types of the frame fixtures. Link is zenoh-modem's four link readings, Sample a sampler's record, and Grown a type that can grow, which no frame takes.",
+  "types": {
+    "Link": {
+      "fields": [
+        {"name": "dropped", "type": "counter", "width": 32, "optional": true},
+        {"name": "queue_depth", "type": "int", "minimum": 0, "maximum": 1022, "reserved": ["out_of_range"], "optional": true},
+        {"name": "duty_available", "type": "int", "minimum": 0, "maximum": 1, "optional": true},
+        {"name": "duty_wait_ms", "type": "fixed", "minimum": "0", "maximum": "3600000", "resolution": "100", "reserved": ["out_of_range"], "optional": true}
+      ]
+    },
+    "Sample": {
+      "fields": [
+        {"name": "temperature", "type": "fixed", "minimum": "-40", "maximum": "85", "resolution": "0.5"},
+        {"name": "rssi", "type": "int", "minimum": -140, "maximum": -20, "reserved": ["not_available"]},
+        {"name": "link_up", "type": "bool"},
+        {"name": "mode", "type": "enum", "values": ["idle", "rx", "tx"], "escape": true, "optional": true}
+      ]
+    },
+    "Grown": {
+      "fields": [
+        {"name": "level", "type": "int", "minimum": 0, "maximum": 100},
+        "...",
+        {"name": "trend", "type": "int", "minimum": -10, "maximum": 10, "optional": true}
+      ]
+    }
+  }
+}

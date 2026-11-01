@@ -1538,7 +1538,13 @@ impl Layout {
 }
 
 impl Field {
-    fn code(&self, v: &Value, epoch: Option<i64>) -> Result<u64, WriteRefusal> {
+    /// The code a writer gives `v`, the field's JSON value as §7.6's
+    /// reading spells it, with the deployment epoch a `time` field needs: a
+    /// frame's fields are written one by one (core §7.7).
+    ///
+    /// # Errors
+    /// The writer's refusal: [`WriteRefusal`].
+    pub fn code(&self, v: &Value, epoch: Option<i64>) -> Result<u64, WriteRefusal> {
         let reserved = |list: &[&'static str], s: &str| {
             reserved_code(self.width, list, s).ok_or(WriteRefusal::Value)
         };
@@ -1599,7 +1605,13 @@ impl Field {
             .map(|(_, r)| *r)
     }
 
-    fn value(&self, code: u64, epoch: Option<i64>) -> Result<Value, ReadRefusal> {
+    /// The JSON value a reader reads from `code`, as §7.6's reading spells
+    /// it.
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Code`] for an unused code, [`ReadRefusal::Epoch`] for
+    /// a `time` field and no epoch.
+    pub fn value(&self, code: u64, epoch: Option<i64>) -> Result<Value, ReadRefusal> {
         if let Some(r) = self.reserved_name(code) {
             return Ok(Value::from(r));
         }
@@ -1635,7 +1647,10 @@ impl Field {
 
     /// Whether `code` is one this field reads: [`Field::value`]'s `code`
     /// check alone.
-    fn check_code(&self, code: u64) -> Result<(), ReadRefusal> {
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Code`].
+    pub fn check_code(&self, code: u64) -> Result<(), ReadRefusal> {
         if self.reserved_name(code).is_some() {
             return Ok(());
         }

@@ -1,10 +1,11 @@
-//! The authoring format, draft 3 (`examples/zk2/README.md`, r3.3): the
+//! The authoring format, draft 4 (`examples/zk2/README.md`, r3.3): the
 //! TOML shape a contract file has, before any validation or defaulting.
 //! Draft 2 is draft 1 plus one spelling, `cardinality = "unbounded"`
 //! ([`Cardinality`], core 0.57, #937). Draft 3 adds `[schemas] packed`
-//! and the `packed:` references (core 0.75, §7.6, #979). Neither changed
-//! the canonical form of a contract that does not use what it adds, so
-//! its `format` tag is still `zk2-contract/draft-1`.
+//! and the `packed:` references (core 0.75, §7.6, #979). Draft 4 adds a
+//! resource's `frame` table ([`FrameSpec`], core 0.83, §7.7, #981). None
+//! changed the canonical form of a contract that does not use what it
+//! adds, so its `format` tag is still `zk2-contract/draft-1`.
 //!
 //! `spec/contract.schema.json` is generated from these types (schemars) and
 //! committed. A test fails when the two drift.
@@ -235,6 +236,10 @@ pub struct ResourceSpec {
     pub express: Option<bool>,
     #[serde(default)]
     pub history: Option<History>,
+    /// A frame resource's `frame` table (core §7.7, draft 4): a plain
+    /// stream's alone, never defaulted.
+    #[serde(default)]
+    pub frame: Option<FrameSpec>,
     #[serde(default)]
     pub rate: Option<String>,
     #[serde(default)]
@@ -509,6 +514,43 @@ pub struct HistoryParams {
     pub depth: u32,
     #[serde(default)]
     pub miss_detection_ms: Option<u64>,
+}
+
+/// `frame = { records, step_ms, jitter_ms, keyframe_every, deadband }`
+/// (core §7.7, draft 4), as written: its bounds are E048's, never the
+/// schema's, so a value out of range is a lint and not a load failure.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FrameSpec {
+    /// The most records one frame holds, 1 to 256; 1 when absent.
+    #[serde(default)]
+    pub records: Option<u64>,
+    /// Record i is scheduled `step_ms` × i after record 0: 1 to 2^32 − 1,
+    /// given exactly when `records` is above 1.
+    #[serde(default)]
+    pub step_ms: Option<u64>,
+    /// How far a scheduled record may lie from its instant: 0 to
+    /// `step_ms` / 2, only with `step_ms`; 0 when absent.
+    #[serde(default)]
+    pub jitter_ms: Option<u64>,
+    /// A full record at least once every this many records, 1 to 65,536;
+    /// 1 when absent.
+    #[serde(default)]
+    pub keyframe_every: Option<u64>,
+    /// A field's name → its deadband.
+    #[serde(default)]
+    pub deadband: BTreeMap<String, DeadbandSpec>,
+}
+
+/// A deadband (core §7.7): the field omitted while within `delta` of the
+/// value last included, and included at least every `max_records`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeadbandSpec {
+    /// A decimal string above 0, in the field's units (§7.6's grammar).
+    pub delta: String,
+    /// 1 to 65,536.
+    pub max_records: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

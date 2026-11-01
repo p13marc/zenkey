@@ -280,6 +280,23 @@ pub const CODES: &[(&str, &str)] = &[
         "an extension marker misplaced: a field after it that is not optional, or a marker right after another",
     ),
     (
+        "E046",
+        "`frame` on a resource that is not a plain stream, or whose template has a parameter",
+    ),
+    (
+        "E047",
+        "a frame resource's type is not packed, or is a packed type with an extension marker",
+    ),
+    ("E048", "a `frame` value outside core §7.7's table"),
+    (
+        "E049",
+        "a deadband naming no field of the record type, or a field that is not an int, fixed or counter",
+    ),
+    (
+        "E050",
+        "timing a frame resource cannot keep: a deadline below its span, a deadband past its deadline, or a lifespan",
+    ),
+    (
         "W101",
         "overlapping templates under one kind token carry different types",
     ),

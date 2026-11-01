@@ -121,6 +121,9 @@ pub struct Data {
     pub priority: Priority,
     pub express: bool,
     pub history: Option<HistoryParams>,
+    /// A frame resource's `frame` table (core §7.7, 0.83): a plain stream
+    /// with no parameter alone; `None` for every other resource.
+    pub frame: Option<crate::frame::FrameParams>,
     /// Events only.
     pub rate: Option<Rate>,
     /// Events only: how far back a replay GET may reach.
@@ -474,6 +477,9 @@ fn illegal(kind: Kind, explicit: bool, field: &str) -> Option<&'static str> {
         "history" => {
             return (!(matches!(kind, Kind::Stream | Kind::State) && !explicit)).then_some("E019");
         }
+        // §7.7 (0.83): a plain stream's, and only one with no parameter,
+        // which `resolve_resource` checks with the template in hand.
+        "frame" => return (!(kind == Kind::Stream && !explicit)).then_some("E046"),
         "explicit" => matches!(kind, Kind::Stream | Kind::State),
         "rate" | "retention" => kind == Kind::Event,
         f if kind == Kind::Operation => OP_FIELDS.contains(&f),
@@ -521,6 +527,7 @@ fn spec_fields(s: &ResourceSpec) -> Vec<&'static str> {
     p(s.priority.is_some(), "priority");
     p(s.express.is_some(), "express");
     p(s.history.is_some(), "history");
+    p(s.frame.is_some(), "frame");
     p(s.rate.is_some(), "rate");
     p(s.retention.is_some(), "retention");
     p(s.request.is_some(), "request");
@@ -706,12 +713,19 @@ fn resolve_resource(raw: &str, spec: &ResourceSpec, cx: &mut Ctx<'_>) -> Option<
     let errors_before = cx.report.errors().count();
     for f in spec_fields(spec) {
         if let Some(code) = illegal(kind, explicit, f) {
-            let why = if code == "E019" {
-                "`history` is for plain (non-explicit) stream and state resources only".to_owned()
-            } else {
-                format!("`{f}` is not a field of kind = {:?}", kind.as_str())
+            let why = match code {
+                "E019" => "`history` is for plain (non-explicit) stream and state resources only"
+                    .to_owned(),
+                "E046" => "`frame` is for a plain (non-explicit) stream resource only".to_owned(),
+                _ => format!("`{f}` is not a field of kind = {:?}", kind.as_str()),
             };
             cx.report.push(Diagnostic::error(code, at.clone(), why));
+        } else if f == "frame" && template.has_params() {
+            cx.report.push(Diagnostic::error(
+                "E046",
+                at.clone(),
+                "`frame` on a template with a parameter: a frame resource's fields are concrete",
+            ));
         }
     }
 
@@ -839,7 +853,7 @@ fn resolve_resource(raw: &str, spec: &ResourceSpec, cx: &mut Ctx<'_>) -> Option<
     let body = if kind == Kind::Operation {
         resolve_op(&at, spec, kd, &tparams, cx)
     } else {
-        resolve_data(&at, spec, kind, explicit, kd, &template, cx)
+        resolve_data(&at, spec, kind, explicit, kd, &template, &annotations, cx)
     };
     if cx.report.errors().count() > errors_before {
         return None;
@@ -893,6 +907,7 @@ fn resolve_type(
     Some(t)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_data(
     at: &str,
     spec: &ResourceSpec,
@@ -900,6 +915,7 @@ fn resolve_data(
     explicit: bool,
     kd: Option<&DefaultsBlock>,
     template: &Template,
+    annotations: &BTreeMap<String, Value>,
     cx: &mut Ctx<'_>,
 ) -> Option<Body> {
     if spec.type_.is_none() {
@@ -991,6 +1007,12 @@ fn resolve_data(
     } else {
         None
     };
+    let frame = match &spec.frame {
+        Some(f) if kind == Kind::Stream && !explicit && !template.has_params() => {
+            resolve_frame(at, f, type_.as_ref(), annotations, cx)
+        }
+        _ => None,
+    };
     let (mut rate, mut retention_s) = (None, None);
     if kind == Kind::Event {
         match &spec.rate {
@@ -1044,9 +1066,146 @@ fn resolve_data(
         priority: pick(spec.priority.as_ref(), kd, &base, |b| b.priority.as_ref()).unwrap_or(prio),
         express: pick(spec.express.as_ref(), kd, &base, |b| b.express.as_ref()).unwrap_or(false),
         history,
+        frame,
         rate,
         retention_s,
     }))
+}
+
+/// A frame resource's `frame` table (core §7.7, §9.2 cascade 8): E048 for
+/// each value outside §7.7's table; E047 for a type that resolved and is
+/// not packed, or whose packed declaration has an extension marker; E049
+/// for a deadband its record type's layout does not take; E050 for the
+/// timing it cannot keep, once its values are E048's none. `None` on any
+/// E048, so the resource carries no table.
+fn resolve_frame(
+    at: &str,
+    spec: &a::FrameSpec,
+    type_: Option<&TypeId>,
+    annotations: &BTreeMap<String, Value>,
+    cx: &mut Ctx<'_>,
+) -> Option<crate::frame::FrameParams> {
+    let params = match crate::frame::FrameParams::resolve(spec) {
+        Ok(p) => Some(p),
+        Err(why) => {
+            for w in why {
+                cx.report.push(Diagnostic::error("E048", at, w));
+            }
+            None
+        }
+    };
+    // E047 and E049 read the record type: they wait for one that resolves.
+    match type_ {
+        Some(t) if !t.is_packed() => cx.report.push(Diagnostic::error(
+            "E047",
+            at,
+            format!("a frame resource's type is {}, not packed", t.kind_str()),
+        )),
+        Some(t) => {
+            if let Some(layout) = cx.schemas.packed_layout(t).cloned() {
+                if layout
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, crate::packed::Item::Marker))
+                {
+                    cx.report.push(Diagnostic::error(
+                        "E047",
+                        at,
+                        "a frame resource's packed type has an extension marker: a delta \
+                         record's bitmap has one width for every reader",
+                    ));
+                }
+                for name in spec.deadband.keys() {
+                    match layout.fields().find(|f| &f.name == name) {
+                        None => cx.report.push(Diagnostic::error(
+                            "E049",
+                            at,
+                            format!("the deadband names {name:?}, no field of the record type"),
+                        )),
+                        Some(f) if !crate::frame::takes_deadband(f) => {
+                            cx.report.push(Diagnostic::error(
+                                "E049",
+                                at,
+                                format!(
+                                    "the deadband names {name:?}, a {} field: only an int, \
+                                     fixed or counter takes one",
+                                    f.kind.as_str()
+                                ),
+                            ));
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+        }
+        None => {}
+    }
+    let params = params?;
+    check_frame_timing(at, &params, annotations, cx.report);
+    Some(params)
+}
+
+/// E050 (core §7.7, `timing.v1` §2.3): a deadline below the span, each
+/// deadband whose `max_records` × the frame's interval passes the
+/// deadline (an unstated interval always), and a lifespan. The `timing.*`
+/// values are read as `timing.v1` §2.2 reads them: one that does not read
+/// gives none.
+fn check_frame_timing(
+    at: &str,
+    params: &crate::frame::FrameParams,
+    annotations: &BTreeMap<String, Value>,
+    report: &mut Report,
+) {
+    let crate::timing::Declaration::Declared(d) =
+        crate::timing::declaration(Kind::Stream, annotations)
+    else {
+        return;
+    };
+    let ms = |x: std::time::Duration| u64::try_from(x.as_millis()).unwrap_or(u64::MAX);
+    if let Some(deadline) = d.deadline.map(ms) {
+        if let Some(span) = params.span_ms()
+            && deadline < span
+        {
+            report.push(Diagnostic::error(
+                "E050",
+                at,
+                format!(
+                    "`timing.deadline_ms` = {deadline} is below the frame's span, {span} ms: \
+                     every frame that keeps its cadence would miss it"
+                ),
+            ));
+        }
+        let interval = params.interval_ms(annotations);
+        for (name, db) in &params.deadband {
+            let fits =
+                interval.is_some_and(|i| u64::from(db.max_records).saturating_mul(i) <= deadline);
+            if !fits {
+                report.push(Diagnostic::error(
+                    "E050",
+                    at,
+                    match interval {
+                        Some(i) => format!(
+                            "the deadband on {name:?}: {} records of {i} ms pass \
+                             `timing.deadline_ms` = {deadline}",
+                            db.max_records
+                        ),
+                        None => format!(
+                            "the deadband on {name:?} beside `timing.deadline_ms`, and no \
+                             interval stated: neither a step nor `timing.period_ms`"
+                        ),
+                    },
+                ));
+            }
+        }
+    }
+    if d.lifespan.is_some() {
+        report.push(Diagnostic::error(
+            "E050",
+            at,
+            "`timing.lifespan_ms` on a frame resource: a lifespan reads each sample's Zenoh \
+             timestamp, and a frame's records carry none of their own",
+        ));
+    }
 }
 
 fn resolve_op(

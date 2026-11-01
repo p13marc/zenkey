@@ -9,6 +9,7 @@ FULL_TRANSITIVE class in [`expect.json`](expect.json) (`core.md` §9.8).
 | `payload/jsonschema/<case>/` | `old.json`, `new.json` | The same, as a `jsonschema` artifact |
 | `payload/packed/<case>/` | `old.json`, `new.json` | The same, as a `packed` artifact (`core.md` §7.6) |
 | `contract/<case>/` | `old.toml`, `new.toml` | As contracts |
+| `frame/<case>/` | `old.toml`, `new.toml`, each a frame resource (`core.md` §7.7), and the packed files they list | As contracts |
 | `transitive/<case>/` | `v1`, `v2`, `v3`, each a protobuf directory or a `.json`, packed where `type` is `packed:` | Wrapped like the payload cases. `v3` is checked against the history `[v1, v2]`, and `against` gives its class against each |
 
 The wrapping contract names a `<kind>`, `protobuf`, `jsonschema` or

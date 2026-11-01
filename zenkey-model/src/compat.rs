@@ -533,6 +533,54 @@ fn compare_resource(o: &Value, n: &Value, ro: &Revision, rn: &Revision, at: &str
             v.push(Class::Review, rule, at, format!("`{field}` changed"));
         }
     }
+    compare_frame(o.get("frame"), n.get("frame"), at, v);
+}
+
+/// A frame resource's table (core §9.8, "Frames"): `frame` toggled, its
+/// shape or a deadband changed, all breaking, since each moves the
+/// frame's tag; `keyframe_every`, review. The record type is the packed
+/// rules', compared as the resource's type.
+fn compare_frame(o: Option<&Value>, n: Option<&Value>, at: &str, v: &mut Verdict) {
+    let (o, n) = match (o, n) {
+        (None, None) => return,
+        (Some(o), Some(n)) => (o, n),
+        _ => {
+            v.push(
+                Class::Breaking,
+                "frame_toggled",
+                at,
+                "`frame` added or removed: a reader of the other revision reads none of its samples",
+            );
+            return;
+        }
+    };
+    if ["records", "step_ms", "jitter_ms"]
+        .iter()
+        .any(|k| o[*k] != n[*k])
+    {
+        v.push(
+            Class::Breaking,
+            "frame_changed",
+            at,
+            "`records`, `step_ms` or `jitter_ms` changed: the bits and the times move",
+        );
+    }
+    if o["deadband"] != n["deadband"] {
+        v.push(
+            Class::Breaking,
+            "deadband_changed",
+            at,
+            "a deadband added, removed or changed: what an omitted field holds moves",
+        );
+    }
+    if o["keyframe_every"] != n["keyframe_every"] {
+        v.push(
+            Class::Review,
+            "keyframe_changed",
+            at,
+            "`keyframe_every` changed: how long a reader waits to heal",
+        );
+    }
 }
 
 fn compare_requires(o: &Value, n: &Value, v: &mut Verdict) {

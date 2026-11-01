@@ -70,6 +70,27 @@
         "block"
       ]
     },
+    "DeadbandSpec": {
+      "description": "A deadband (core §7.7): the field omitted while within `delta` of the\nvalue last included, and included at least every `max_records`.",
+      "type": "object",
+      "properties": {
+        "delta": {
+          "description": "A decimal string above 0, in the field's units (§7.6's grammar).",
+          "type": "string"
+        },
+        "max_records": {
+          "description": "1 to 65,536.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "delta",
+        "max_records"
+      ]
+    },
     "DefaultsBlock": {
       "description": "The fields `[defaults]` may set (r3.3 D2).",
       "type": "object",
@@ -396,6 +417,61 @@
         "forbidden",
         "allowed"
       ]
+    },
+    "FrameSpec": {
+      "description": "`frame = { records, step_ms, jitter_ms, keyframe_every, deadband }`\n(core §7.7, draft 4), as written: its bounds are E048's, never the\nschema's, so a value out of range is a lint and not a load failure.",
+      "type": "object",
+      "properties": {
+        "deadband": {
+          "description": "A field's name → its deadband.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/DeadbandSpec"
+          },
+          "default": {}
+        },
+        "jitter_ms": {
+          "description": "How far a scheduled record may lie from its instant: 0 to\n`step_ms` / 2, only with `step_ms`; 0 when absent.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "keyframe_every": {
+          "description": "A full record at least once every this many records, 1 to 65,536;\n1 when absent.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "records": {
+          "description": "The most records one frame holds, 1 to 256; 1 when absent.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "step_ms": {
+          "description": "Record i is scheduled `step_ms` × i after record 0: 1 to 2^32 − 1,\ngiven exactly when `records` is above 1.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     },
     "Gate": {
       "description": "`gate = \"capability:rssi\"` or a list of them (AND).",
@@ -734,6 +810,18 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Fanout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "frame": {
+          "description": "A frame resource's `frame` table (core §7.7, draft 4): a plain\nstream's alone, never defaulted.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameSpec"
             },
             {
               "type": "null"
