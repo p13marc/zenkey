@@ -114,11 +114,17 @@ impl Beat {
             return;
         };
         let held = self.minter.is_ahead();
+        // One instant, taken before the put: the body's time, and the last
+        // confirmation the replies of each member it vouches for carry
+        // (S2), so a reply never claims a confirmation later than the
+        // heartbeat's.
+        let at = self.minter.time();
         let time = if held {
             Time::Unknown
         } else {
-            let now = self.minter.now().get_time().to_system_time();
-            let ms = now
+            let ms = at
+                .get_time()
+                .to_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_millis() as i128);
             Time::from_unix_ms(ms, EPOCH).unwrap_or(Time::Unknown)
@@ -127,22 +133,36 @@ impl Beat {
         let Some((hb, vouched)) = self.store.heartbeat(&iface, &self.exposed, time, !held) else {
             return;
         };
-        let key = OwnedKeyExpr::from(self.writer.key_expr().clone().into_owned());
-        let stamped = self.minter.mint_stream(&key, self.writer.is_stamped());
-        let bytes = match hb.envelope(&self.layout, stamped.stamp) {
+        // The body before the seq: a heartbeat that cannot be written takes
+        // none, so its readers read no gap (§2.5).
+        let body = match hb.write(&self.layout) {
             Ok(b) => b,
             Err(e) => {
                 tracing::warn!(%iface, "freshness.v2: a heartbeat could not be written: {e}");
                 return;
             }
         };
+        let key = OwnedKeyExpr::from(self.writer.key_expr().clone().into_owned());
+        let stamped = self.minter.mint_stream(&key, self.writer.is_stamped());
+        let bytes = zenkey_model::wire::Envelope {
+            form: zenkey_model::wire::Form::Heartbeat,
+            tag: self.layout.tag,
+            stamp: stamped.stamp,
+            record: &body,
+        }
+        .write();
         match self
             .writer
             .put_stamped(&admitted, bytes.into(), None, stamped)
             .await
         {
-            Ok(()) => self.store.confirm(&vouched, self.minter.time()),
-            Err(e) => tracing::warn!(%iface, "freshness.v2: a heartbeat failed: {e}"),
+            Ok(()) => self.store.confirm(&vouched, at),
+            Err(e) => {
+                // A put never sent gives its seq back, so the next heartbeat
+                // follows the last one sent in sequence.
+                self.minter.unmint_stream(&key, stamped.stamp);
+                tracing::warn!(%iface, "freshness.v2: a heartbeat failed: {e}");
+            }
         }
     }
 
@@ -198,5 +218,37 @@ mod tests {
         assert_eq!(imp.iface().to_string(), "freshness.v2");
         assert_eq!(imp.fingerprint().hex().as_str(), FINGERPRINT);
         assert!(imp.resource(HEARTBEAT).is_ok());
+    }
+
+    /// A seq minted for a heartbeat never sent is given back, so the next
+    /// one carries it and its readers read no gap; one minted since, or a
+    /// run moved on, keeps the gap.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn a_seq_minted_for_a_put_never_sent_is_given_back() {
+        let mut c = zenoh::Config::default();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("listen/endpoints", "[]").unwrap();
+        let session = zenoh::open(c).await.unwrap();
+        let minter = Minter::new(&session);
+        let key = OwnedKeyExpr::try_from("zk2/lab/b/freshness.v2/stream/heartbeat/b.v2").unwrap();
+        let first = minter.mint_stream(&key, false).stamp;
+        let lost = minter.mint_stream(&key, false).stamp;
+        assert_eq!(lost.seq.get(), first.seq.get() + 1);
+        assert!(minter.unmint_stream(&key, lost));
+        assert_eq!(
+            minter.mint_stream(&key, false).stamp,
+            lost,
+            "the next put takes it again"
+        );
+        let third = minter.mint_stream(&key, false).stamp;
+        assert!(
+            !minter.unmint_stream(&key, lost),
+            "minted since: the gap stands"
+        );
+        assert_eq!(
+            minter.mint_stream(&key, false).stamp.seq.get(),
+            third.seq.get() + 1
+        );
     }
 }

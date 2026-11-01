@@ -2173,10 +2173,17 @@ fn plan_face(
         // streams, each covered interface's heartbeat as a template of
         // `freshness.v2` of its own, in place of the profile's own
         // templated one (§2.9).
-        let pseudo: Vec<Template> = if token == KindToken::Stream {
+        // Each template with its own heartbeat's crossing, paired as one:
+        // an interface id is a plain chunk, so every one parses, and one
+        // that did not would drop out whole, never shift a pairing.
+        let pseudo: Vec<(Template, bool)> = if token == KindToken::Stream {
             heartbeat_crosses
-                .keys()
-                .filter_map(|i| Template::parse(&format!("heartbeat/{i}")).ok())
+                .iter()
+                .filter_map(|(i, crosses)| {
+                    Template::parse(&format!("heartbeat/{i}"))
+                        .ok()
+                        .map(|t| (t, *crosses))
+                })
                 .collect()
         } else {
             Vec::new()
@@ -2203,7 +2210,6 @@ fn plan_face(
                 freshness::PROFILE_V2.to_owned(),
                 pseudo
                     .iter()
-                    .zip(heartbeat_crosses.values())
                     .map(|(template, crosses)| Item {
                         template,
                         crosses: *crosses,

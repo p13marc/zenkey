@@ -1596,36 +1596,32 @@ impl Subscription {
     }
 }
 
-/// The selector of `addr`'s members of the collection `f` follows: its
-/// template's pattern, each parameter `*` and a rest `**`.
+/// The selector of `addr`'s members of the collection `f` follows
+/// ([`zenkey_model::grammar::template_selector`]): base-relative, so the
+/// consumer's session adds its namespace on egress and its replies come
+/// back base-relative, as [`zenkey_model::heartbeat::base_relative`] reads
+/// them either way.
 fn collection_selector(f: &Followed, addr: &Addr) -> Option<OwnedKeyExpr> {
     let c = f.layout.collections.get(f.index)?;
-    let tail: Vec<String> = c
-        .template
-        .segments()
-        .iter()
-        .map(|seg| match seg {
-            Segment::Literal(l) => l.clone(),
-            Segment::Param(_) => "*".to_owned(),
-            Segment::Rest(_) => "**".to_owned(),
-        })
-        .collect();
-    OwnedKeyExpr::try_from(format!(
-        "zk2/{}/{}/{}/{}/{}",
-        addr.system,
-        addr.service,
-        f.layout.iface,
+    OwnedKeyExpr::try_from(zenkey_model::grammar::template_selector(
+        addr,
+        &f.layout.iface,
         c.token,
-        tail.join("/")
+        &c.template,
     ))
     .ok()
 }
 
 /// A re-read of `addr`'s collection after two divergences in a row
-/// (`freshness.v2` §2.5): S4's GET on the collection, and, when it ran to
-/// its end, its live members replace the view, merged with what the
-/// subscription heard since it asked (core §4.2). A GET cut short leaves
-/// the view as it was: unconfirmed, the safe side.
+/// (`freshness.v2` §2.5): S4's GET on the collection. Only a complete
+/// answer replaces the view, merged with what the subscription heard since
+/// it asked (core §4.2), since a member an answer leaves out leaves the
+/// view. An answer is possibly incomplete, as
+/// [`crate::presence::liveliness_read`] reads one, when the GET got an
+/// error reply (zenoh's at its timeout among them), ran to its timeout or
+/// to the session's interests timeout, or ended with its session cut off;
+/// such an answer replaces nothing, and the collection stays unconfirmed:
+/// the safe side. The next two divergences ask again.
 async fn reread(
     session: zenoh::Session,
     f: Arc<Followed>,
@@ -1641,6 +1637,7 @@ async fn reread(
         return;
     };
     let asked = Instant::now();
+    let ends_at = timeout.min(crate::presence::interests_timeout(&session));
     let rx = match session
         .get(ke)
         .target(zenoh::query::QueryTarget::All)
@@ -1670,6 +1667,8 @@ async fn reread(
         let read = crate::inband::read(sample);
         live.push((key, read.stamp()));
     }
+    let complete =
+        complete && asked.elapsed() < ends_at && !crate::presence::cut_off(&session).await;
     if complete {
         let mut views = seen.views.lock().expect("not poisoned");
         if let Some(v) = views.get_mut(&addr) {

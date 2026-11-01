@@ -424,6 +424,26 @@ impl Minter {
         }
     }
 
+    /// Gives back `stamp`, a seq of `key` minted for a put that was never
+    /// sent, so the next put on the key takes it again and its readers see
+    /// no gap in its seqs (core §4.3, `freshness.v2` §2.5): no sample ever
+    /// carried it, so nothing restarts. Only while `stamp`'s run is the
+    /// current one and nothing was minted on `key` since; otherwise nothing
+    /// changes, and the gap stands. Returns whether it was given back.
+    pub(crate) fn unmint_stream(&self, key: &OwnedKeyExpr, stamp: wire::Stamp) -> bool {
+        let mut r = self.runs.lock().expect("not poisoned");
+        if r.run != Some(stamp.run) {
+            return false;
+        }
+        match r.streams.get_mut(key) {
+            Some(next) if *next == (stamp.seq.get() + 1) % SEQ_END => {
+                *next = stamp.seq.get();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Sets the next state and event seq: for tests of the run change
     /// before a wrap (spec scenarios state.md §7 step 3); a deployment
     /// never sets it. Values above 2^24 are taken as 2^24, which takes a
@@ -1205,16 +1225,21 @@ impl StateWriter {
     /// `freshness.v2` it is the member's bit in its owner's heartbeat: set,
     /// each heartbeat confirms the value; clear, none does, and the member
     /// goes stale from its last confirmation. Under `freshness.v1` it
-    /// turns the re-puts on and off ([`StateWriter::set_refresh`]). On by
-    /// default, and kept across puts.
+    /// turns the re-puts on and off ([`StateWriter::set_refresh`]): one
+    /// switch, which the refresher reads alone, the store's bit being kept
+    /// only for a member a heartbeat covers. On by default, and kept
+    /// across puts.
     pub fn set_vouched(&self, on: bool) {
         self.member.refresh.store(on, Ordering::Relaxed);
         self.store.vouch(self.key.as_str(), on);
         self.member.wake.notify_one();
     }
 
-    /// Whether it vouches for the member's value now
-    /// ([`StateWriter::set_vouched`]).
+    /// The switch [`StateWriter::set_vouched`] set: under `freshness.v2`,
+    /// whether the member's bit is set in its owner's heartbeats; under
+    /// `freshness.v1`, whether its re-puts are on (the refresher reads this
+    /// switch alone, [`StateWriter::is_refreshing`]). On a resource with no
+    /// horizon above 0 it vouches for nothing either way.
     #[must_use]
     pub fn is_vouched(&self) -> bool {
         self.member.refresh.load(Ordering::Relaxed)
