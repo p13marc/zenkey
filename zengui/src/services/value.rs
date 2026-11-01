@@ -200,17 +200,18 @@ pub(crate) fn replies(
     retention_s: Option<u64>,
     now: std::time::SystemTime,
 ) -> Replies {
-    // Newest first by each reply's mark (core §7.5): by seq within a run
-    // of zk2c envelopes, by stamp among Zenoh stamps, each run and the
-    // Zenoh-stamped in the order they first arrived, since nothing orders
-    // two of them; the unstamped keep their arrival order behind.
-    let marks: Vec<_> = answers
-        .iter()
-        .map(zenkey_fleet::FleetAnswer::mark)
-        .collect();
+    // Newest first by each reply's key and mark (core §4.3): by seq within
+    // a run of zk2c envelopes, a stream key's in serial order across its
+    // wrap, by stamp among Zenoh stamps, each run (each stream key's) and
+    // the Zenoh-stamped in the order they first arrived, since nothing
+    // orders two of them; the unstamped keep their arrival order behind.
+    let order = {
+        let marks: Vec<_> = answers.iter().map(|a| (a.key.as_str(), a.mark())).collect();
+        zenkey_fleet::model::inband::newest_first(&marks)
+    };
     let mut answers: Vec<Option<zenkey_fleet::FleetAnswer>> =
         answers.into_iter().map(Some).collect();
-    let answers: Vec<zenkey_fleet::FleetAnswer> = zenkey_fleet::model::inband::newest_first(&marks)
+    let answers: Vec<zenkey_fleet::FleetAnswer> = order
         .into_iter()
         .filter_map(|i| answers[i].take())
         .collect();
@@ -694,5 +695,60 @@ mod tests {
             .collect();
         assert_eq!(order[..3], ["1.7", "1.2", "2.1"], "{order:?}");
         assert!(order[3].starts_with("Refused"), "{order:?}");
+    }
+
+    /// A stream's `@adv` history (`ReadKind::History`) sorts by serial order
+    /// (core §4.3, observer §4.1): across its seq's wrap, the sample after
+    /// 16,777,215 is the newest, as plain order would not say.
+    #[test]
+    fn a_streams_history_sorts_by_serial_order_across_the_wrap() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let lens = LensInputs {
+            namespace: String::new(),
+            catalog: None,
+            store: zenkey_fleet::BundleStore::new(Duration::from_secs(1)),
+            contracts: None,
+            generation: 0,
+            feed: None,
+        };
+        let key = "zk2/robot1/nav/nav.v2/stream/position";
+        let at = |seq: u32| zenkey_fleet::FleetAnswer {
+            key: key.into(),
+            encoding: Some("zenoh/bytes".into()),
+            attachment: None,
+            timestamp: None,
+            kind: Some(zenoh::sample::SampleKind::Put),
+            answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(
+                Envelope {
+                    tag: Tag::NONE,
+                    stamp: Stamp {
+                        run: Run::U32(7),
+                        seq: Seq::new(seq).expect("a seq"),
+                    },
+                    record: seq.to_string().as_bytes(),
+                }
+                .write(),
+            )),
+        };
+        let top = Seq::MAX.get();
+        let got = replies(
+            &lens,
+            ReadKind::History,
+            format!("{key}/@adv/**"),
+            vec![at(top - 1), at(top), at(0), at(1)],
+            0,
+            None,
+            std::time::SystemTime::now(),
+        );
+        let seqs: Vec<Option<u32>> = got
+            .replies
+            .iter()
+            .map(|r| r.inband.as_ref().map(|s| s.seq))
+            .collect();
+        assert_eq!(
+            seqs,
+            [Some(1), Some(0), Some(top), Some(top - 1)],
+            "newest first across the wrap"
+        );
     }
 }
