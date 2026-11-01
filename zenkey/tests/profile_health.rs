@@ -438,6 +438,12 @@ async fn s1_bring_up() {
         .expect("listed");
     assert!(!e.token, "\"token\": false");
     assert_eq!(got.status.unwrap().1.read(), Read::Level(Level::Ok));
+    // The instance token reaches the tool's read a little after its
+    // subscriber heard it, so the read is asked until it holds one.
+    eventually("the instance token read", || async {
+        !tokens_of(&ts, "lab/quiet").await.is_empty()
+    })
+    .await;
     let quiet_tokens = tokens_of(&ts, "lab/quiet").await;
     assert_eq!(
         quiet_tokens.len(),
