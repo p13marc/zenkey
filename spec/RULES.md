@@ -56,9 +56,9 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 15 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 15 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 53, 24 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 55, 24 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 36 |
-| Every rule, once | 173 |
+| Every rule, once | 175 |
 | [Rule ids](#rule-ids) | 71 |
 
 ## Owner
@@ -533,6 +533,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§7.3](observer.md#73-decoding-and-rendering) | Such a tool [a tool that shows or judges a payload] MUST decode each payload by its declared type: `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and a `raw` type by its media type only. | `[Sc: types.md §2]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a payload MUST read a sample on a zk2 data key whose kind is a stream, state or an event, and whose `Encoding` is `zenoh/bytes`, as core §7.5's envelope. | `[F: envelope/carries.json]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | **The envelope first.** … The tool MUST NOT decode or sniff a refused envelope's bytes as a payload with no envelope. | `[F: envelope/carries.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows a payload it cannot decode MUST render it as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool that shows a payload it cannot decode] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
 

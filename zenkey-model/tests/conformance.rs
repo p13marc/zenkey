@@ -1017,6 +1017,31 @@ fn unhex(h: &str) -> Vec<u8> {
         .collect()
 }
 
+/// `spec/conformance/envelope/carries.json` (core §7.5, observer §7.3,
+/// 0.14; #976): a key as a session hears it and the sample's Encoding →
+/// whether the sample carries a zk2c envelope, by `wire::carries`. Written
+/// by hand from the texts, checked, never blessed.
+#[test]
+fn envelope_carries() {
+    let doc = read_json(&spec().join("conformance/envelope/carries.json"));
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    let mut both = [false, false];
+    for case in cases {
+        let note = &case["note"];
+        let key = case["key"].as_str().expect("key");
+        let encoding = case["encoding"].as_str().expect("encoding");
+        let expect = case["expect"].as_bool().expect("expect");
+        both[usize::from(expect)] = true;
+        assert_eq!(
+            zenkey_model::wire::carries(key, encoding),
+            expect,
+            "{note}: {key} under {encoding}"
+        );
+    }
+    assert_eq!(both, [true, true], "cases on both sides");
+}
+
 /// `spec/conformance/envelope/vectors.json` (core §7.5, 0.72; #976): CH's
 /// three fields from one byte, and an envelope's bytes with its sample's
 /// kind → the parse or the refusal's token, the first in §7.5's order.
