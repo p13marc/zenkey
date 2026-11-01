@@ -118,6 +118,9 @@ pub enum Invalid {
     NoDeadline,
     /// A parameter of that stream's template is not bound (core R2).
     ParamsUnbound,
+    /// The role consumes a frame resource (core §7.7) and no stream that
+    /// is not one: a frame is never an arbitrated role's stream (text 0.6).
+    Framed,
 }
 
 impl Invalid {
@@ -133,6 +136,7 @@ impl Invalid {
             Self::Resource => "resource",
             Self::NoDeadline => "no_deadline",
             Self::ParamsUnbound => "params_unbound",
+            Self::Framed => "framed",
         }
     }
 
@@ -155,6 +159,9 @@ impl Invalid {
             }
             Self::ParamsUnbound => {
                 "every parameter of the role's stream is bound by the role's parameter bindings"
+            }
+            Self::Framed => {
+                "a frame resource is never an arbitrated role's stream: its put carries several records"
             }
         }
     }
@@ -275,6 +282,9 @@ pub struct Offered<'a> {
     pub template: &'a Template,
     /// Its resolved annotations (core §9.3).
     pub annotations: &'a BTreeMap<String, Value>,
+    /// Whether it is a frame resource (core §7.7), which §2.2's check 6
+    /// counts as none and check 9 refuses.
+    pub frame: bool,
 }
 
 /// The revision of the required interface a reader holds (§2.3).
@@ -297,6 +307,7 @@ impl<'a> Revision<'a> {
                     token: r.token,
                     template: &r.template,
                     annotations: &r.annotations,
+                    frame: matches!(&r.body, crate::contract::Body::Data(d) if d.frame.is_some()),
                 })
                 .collect(),
         }
@@ -380,7 +391,10 @@ pub fn declaration(
             Some(names) => names.iter().any(|n| n == r.template.as_str()),
         })
         .collect();
-    let one = match consumed.as_slice() {
+    // Check 6 counts no frame resource (text 0.6): a role on a frame and
+    // one plain stream is read over the stream.
+    let counted: Vec<&Offered<'_>> = consumed.iter().copied().filter(|r| !r.frame).collect();
+    let one = match counted.as_slice() {
         [r] if matches!(r.token, KindToken::Stream | KindToken::ExplicitStream) => Some(*r),
         _ => {
             why.push(Invalid::Resource);
@@ -396,6 +410,13 @@ pub fn declaration(
         if r.template.params().any(|(p, _)| !params.contains_key(p)) {
             why.push(Invalid::ParamsUnbound);
         }
+    }
+    // Check 9: a frame consumed, and no stream that is not one.
+    let plain_stream = counted
+        .iter()
+        .any(|r| matches!(r.token, KindToken::Stream | KindToken::ExplicitStream));
+    if consumed.iter().any(|r| r.frame) && !plain_stream {
+        why.push(Invalid::Framed);
     }
     match (one, deadline) {
         (Some(r), Some((deadline, period))) if why.is_empty() => {

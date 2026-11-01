@@ -127,6 +127,13 @@ fn resource(v: &Value, i: usize) -> Result<Resource, BundleError> {
             priority: de(m, "priority", &at)?,
             express: de(m, "express", &at)?,
             history: de::<Option<HistoryParams>>(m, "history", &at)?,
+            frame: match m.get("frame") {
+                None => None,
+                Some(f) => Some(
+                    crate::frame::FrameParams::from_canonical(f)
+                        .map_err(|e| shape(&format!("{at}.frame"), e))?,
+                ),
+            },
             rate,
             retention_s: de(m, "retention_s", &at)?,
         })

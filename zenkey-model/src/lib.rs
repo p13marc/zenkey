@@ -128,6 +128,11 @@
 //!   schema file and lints (E038 to E045), each type's layout, its layout
 //!   form and tag, and an interpreted codec over JSON values, exact in its
 //!   fixed point: the source of truth generated code (B2) matches.
+//! - [`frame`]: frames (core §7.7, 0.83; #981 K1): a frame resource's
+//!   `frame` table resolved (E048), its layout over a packed record type
+//!   with no marker, the frame form and tag, and one body read and written
+//!   back, with §7.7's refusals. A reader's field states across frames are
+//!   K2's, the owner's writer K3's.
 //! - [`wire`]: the zk2c envelope (core §7.5, 0.72; #976): CH's form, run
 //!   width and tag, the run and the seq, a put's mutation and a delete's
 //!   attachment, parsed without a contract with §7.5's refusals and written
@@ -159,6 +164,7 @@ pub mod descriptor;
 pub mod desired;
 pub mod diag;
 pub mod envelope;
+pub mod frame;
 pub mod freshness;
 pub mod grammar;
 pub mod health;

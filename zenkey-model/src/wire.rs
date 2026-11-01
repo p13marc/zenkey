@@ -6,6 +6,7 @@
 //! mutation, a put's payload        CH · run · seq · record
 //! delete, a delete's attachment    CH · run · seq
 //! heartbeat, a put's payload       CH · run · seq · body        (core 0.81, #978's F1)
+//! frame, a put's payload           CH · run · seq · body        (core 0.83, #981's K1)
 //! CH                               form (bits 7–5) · run width (bit 4) · tag (bits 3–0)
 //! run                              16 or 32 bits unsigned, big-endian, as CH's width bit says
 //! seq                              24 bits unsigned, big-endian
@@ -24,11 +25,15 @@
 //! the sample's kind, put ([`Envelope::parse`]) or delete
 //! ([`DeleteStamp::parse`]), and nothing more. So a mutation's tag is
 //! reported, never checked against a type; `packed` (#979) is the first
-//! type kind to define one. A put carries a mutation or a heartbeat
-//! ([`Envelope::form`]); a heartbeat's body is read with its covered
-//! revision ([`crate::heartbeat`]), its tag that revision's. The first refusal that applies is reported, in
-//! §7.5's order, with the token `spec/conformance/envelope/` pins
-//! ([`Refusal::token`]). Every envelope accepted writes back to its bytes.
+//! type kind to define one. A put carries a mutation, a heartbeat or a
+//! frame ([`Envelope::form`]); a heartbeat's body is read with its covered
+//! revision ([`crate::heartbeat`]), its tag that revision's, and a frame's
+//! with its declaration ([`crate::frame`]), its tag that declaration's.
+//! [`read_put`] refuses a frame on a key whose kind token is not `stream`
+//! (`key_kind`), which [`Envelope::parse_on`] reads. The first refusal that
+//! applies is reported, in §7.5's order, with the token
+//! `spec/conformance/envelope/` pins ([`Refusal::token`]). Every envelope
+//! accepted writes back to its bytes.
 //!
 //! Not [`crate::envelope`], the error envelope of a failed call (§5.2).
 //!
@@ -46,7 +51,7 @@ use thiserror::Error;
 use crate::grammar::{KindToken, ZkKey, parse};
 
 /// A form: CH's three high bits. This version defines a mutation, a
-/// delete and a heartbeat, and reserves the other five for later
+/// delete, a frame and a heartbeat, and reserves the other four for later
 /// versions, each refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Form {
@@ -60,7 +65,8 @@ pub enum Form {
     Error,
     /// Code 4, reserved: an event's occurrence.
     Event,
-    /// Code 5, reserved: a stream's records under one header.
+    /// Code 5: a stream's records under one header, a put's payload on a
+    /// plain stream's key (core 0.83 §7.7, [`crate::frame`]).
     Frame,
     /// Code 6: an owner's confirmation of the state it holds for one
     /// interface, a put's payload (core 0.81, [`crate::heartbeat`]).
@@ -110,7 +116,10 @@ impl Form {
     /// Whether this version defines the form; a reserved one is refused.
     #[must_use]
     pub const fn is_defined(self) -> bool {
-        matches!(self, Form::Mutation | Form::Delete | Form::Heartbeat)
+        matches!(
+            self,
+            Form::Mutation | Form::Delete | Form::Frame | Form::Heartbeat
+        )
     }
 
     /// The form's name, as §7.5's table and the fixtures spell it.
@@ -129,12 +138,12 @@ impl Form {
     }
 
     /// The kind of sample a defined form travels on; `None` for a reserved
-    /// one, which this version gives no sample. A heartbeat is a put's
-    /// payload, so it is refused on a delete's attachment.
+    /// one, which this version gives no sample. A frame and a heartbeat are
+    /// a put's payload, so each is refused on a delete's attachment.
     #[must_use]
     pub const fn sample_kind(self) -> Option<SampleKind> {
         match self {
-            Form::Mutation | Form::Heartbeat => Some(SampleKind::Put),
+            Form::Mutation | Form::Frame | Form::Heartbeat => Some(SampleKind::Put),
             Form::Delete => Some(SampleKind::Delete),
             _ => None,
         }
@@ -363,6 +372,9 @@ pub enum Refusal {
     /// A form the sample's kind does not carry.
     #[error("a {form} envelope on a {sample}")]
     WrongSample { form: Form, sample: SampleKind },
+    /// A frame on a key whose kind token is not `stream` (core 0.83).
+    #[error("a frame on a {0} key, which is no plain stream's")]
+    KeyKind(KindToken),
     /// A delete whose tag is not 0.
     #[error("a delete's tag is {}, not 0", .0.get())]
     DeleteTag(Tag),
@@ -375,23 +387,30 @@ pub enum Refusal {
 }
 
 impl Refusal {
-    /// The reason token `spec/conformance/envelope/vectors.json` pins:
-    /// `short`, `form`, `sample_kind`, `tag` or `trailing`.
+    /// The reason token `spec/conformance/envelope/vectors.json` and
+    /// `carries.json` pin: `short`, `form`, `sample_kind`, `key_kind`,
+    /// `tag` or `trailing`.
     #[must_use]
     pub const fn token(&self) -> &'static str {
         match self {
             Refusal::Empty | Refusal::Short { .. } => "short",
             Refusal::Reserved(_) => "form",
             Refusal::WrongSample { .. } => "sample_kind",
+            Refusal::KeyKind(_) => "key_kind",
             Refusal::DeleteTag(_) => "tag",
             Refusal::Trailing(_) => "trailing",
         }
     }
 }
 
-/// §7.5's parse, in its order: CH, its form, the sample's kind, a delete's
-/// tag, then the stamp. Returns CH, the stamp and every byte after it.
-fn read(bytes: &[u8], sample: SampleKind) -> Result<(Header, Stamp, &[u8]), Refusal> {
+/// §7.5's parse, in its order: CH, its form, the sample's kind, a frame's
+/// key kind (when `kind` is known), a delete's tag, then the stamp. Returns
+/// CH, the stamp and every byte after it.
+fn read(
+    bytes: &[u8],
+    sample: SampleKind,
+    kind: Option<KindToken>,
+) -> Result<(Header, Stamp, &[u8]), Refusal> {
     let (&ch, rest) = bytes.split_first().ok_or(Refusal::Empty)?;
     let header = Header::from_byte(ch);
     if !header.form.is_defined() {
@@ -402,6 +421,12 @@ fn read(bytes: &[u8], sample: SampleKind) -> Result<(Header, Stamp, &[u8]), Refu
             form: header.form,
             sample,
         });
+    }
+    if header.form == Form::Frame
+        && let Some(k) = kind
+        && k != KindToken::Stream
+    {
+        return Err(Refusal::KeyKind(k));
     }
     if header.form == Form::Delete && header.tag != Tag::NONE {
         return Err(Refusal::DeleteTag(header.tag));
@@ -426,18 +451,21 @@ fn read(bytes: &[u8], sample: SampleKind) -> Result<(Header, Stamp, &[u8]), Refu
 }
 
 /// A put's payload under the envelope. This version defines two forms for
-/// a put: the mutation, `CH · run · seq · record`, and the heartbeat,
+/// a put: the mutation, `CH · run · seq · record`, the frame,
+/// `CH · run · seq · body` (core 0.83), and the heartbeat,
 /// `CH · run · seq · body` (core 0.81).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Envelope<'a> {
-    /// [`Form::Mutation`] or [`Form::Heartbeat`].
+    /// [`Form::Mutation`], [`Form::Frame`] or [`Form::Heartbeat`].
     pub form: Form,
     /// A mutation's: 0 unless the record's type kind defines a tag. A
+    /// frame's: its declaration's ([`crate::frame::Layout::tag`]). A
     /// heartbeat's: its covered revision's.
     pub tag: Tag,
     pub stamp: Stamp,
     /// Every byte after the seq, possibly none: a mutation's record, read
-    /// as the resource's type says (§7.1), or a heartbeat's body.
+    /// as the resource's type says (§7.1), or a frame's or a heartbeat's
+    /// body.
     pub record: &'a [u8],
 }
 
@@ -453,6 +481,24 @@ impl<'a> Envelope<'a> {
         }
     }
 
+    /// A frame: a body under the stamp of its record 0 (core §7.7).
+    #[must_use]
+    pub const fn frame(tag: Tag, stamp: Stamp, body: &'a [u8]) -> Envelope<'a> {
+        Envelope {
+            form: Form::Frame,
+            tag,
+            stamp,
+            record: body,
+        }
+    }
+
+    /// Whether it is a frame's: its bytes after the seq are a body, never a
+    /// record.
+    #[must_use]
+    pub const fn is_frame(&self) -> bool {
+        matches!(self.form, Form::Frame)
+    }
+
     /// Whether it is a heartbeat's: its bytes after the seq are a body,
     /// never a record.
     #[must_use]
@@ -461,14 +507,31 @@ impl<'a> Envelope<'a> {
     }
 
     /// A put's payload read as an envelope, or the first refusal that
-    /// applies.
+    /// applies. The key is not read, so a frame is accepted on any key:
+    /// [`Envelope::parse_on`] reads its key's kind.
     ///
     /// # Errors
     ///
     /// [`Refusal::Empty`], [`Refusal::Reserved`], [`Refusal::WrongSample`]
     /// for a delete's form, or [`Refusal::Short`], in that order.
     pub fn parse(bytes: &'a [u8]) -> Result<Envelope<'a>, Refusal> {
-        let (header, stamp, record) = read(bytes, SampleKind::Put)?;
+        Self::read_with(bytes, None)
+    }
+
+    /// [`Envelope::parse`] for a put on a key of the kind `kind`: a frame on
+    /// a key whose kind is not `stream` is [`Refusal::KeyKind`], after the
+    /// sample's kind and before the stamp (core §7.5).
+    ///
+    /// # Errors
+    ///
+    /// [`Envelope::parse`]'s, and [`Refusal::KeyKind`] after
+    /// [`Refusal::WrongSample`].
+    pub fn parse_on(bytes: &'a [u8], kind: KindToken) -> Result<Envelope<'a>, Refusal> {
+        Self::read_with(bytes, Some(kind))
+    }
+
+    fn read_with(bytes: &'a [u8], kind: Option<KindToken>) -> Result<Envelope<'a>, Refusal> {
+        let (header, stamp, record) = read(bytes, SampleKind::Put, kind)?;
         Ok(Envelope {
             form: header.form,
             tag: header.tag,
@@ -516,7 +579,7 @@ impl DeleteStamp {
     /// for a mutation's form, [`Refusal::DeleteTag`], [`Refusal::Short`] or
     /// [`Refusal::Trailing`], in that order.
     pub fn parse(bytes: &[u8]) -> Result<DeleteStamp, Refusal> {
-        let (_, stamp, rest) = read(bytes, SampleKind::Delete)?;
+        let (_, stamp, rest) = read(bytes, SampleKind::Delete, None)?;
         if !rest.is_empty() {
             return Err(Refusal::Trailing(rest.len()));
         }
@@ -608,6 +671,11 @@ pub enum Reading<'a> {
     /// the payload every later step reads (decode, a schema check, a
     /// rendering, a profile's reader).
     Enveloped(Envelope<'a>),
+    /// A frame (core 0.83 §7.7, form 5) on a plain stream's key: its body
+    /// is read with its frame resource's declaration
+    /// ([`crate::frame::Frame::parse`]), never decoded as a record of the
+    /// key's type. Its stamp is its record 0's.
+    Framed(Envelope<'a>),
     /// A heartbeat (core 0.81, form 6): its body is read with its covered
     /// revision ([`crate::heartbeat::Heartbeat::parse`]), never decoded as
     /// a record of the key's type. Its stamp is its key's.
@@ -625,7 +693,12 @@ pub fn read_put<'a>(key: &str, encoding: &str, payload: &'a [u8]) -> Reading<'a>
     if !carries(key, encoding) {
         return Reading::Plain;
     }
-    match Envelope::parse(payload) {
+    let parsed = match enveloped_kind(key) {
+        Some(kind) => Envelope::parse_on(payload, kind),
+        None => Envelope::parse(payload),
+    };
+    match parsed {
+        Ok(e) if e.is_frame() => Reading::Framed(e),
         Ok(e) if e.is_heartbeat() => Reading::Heartbeat(e),
         Ok(e) => Reading::Enveloped(e),
         Err(r) => Reading::Refused(r),

@@ -4332,7 +4332,7 @@ fn timing_conclusions() {
 // bless claims the reference and the text agree.
 
 /// One resource of a revision, as `declarations.json` writes it.
-type AbOffer = (KindToken, Template, BTreeMap<String, Value>);
+type AbOffer = (KindToken, Template, BTreeMap<String, Value>, bool);
 
 fn ab_ifaces(v: &Value) -> Vec<zenkey_model::grammar::IfaceId> {
     v.as_array()
@@ -4444,6 +4444,7 @@ fn arbitration_declarations() {
                             Template::parse(r["template"].as_str().expect("template"))
                                 .expect("a template"),
                             annotations(&r["annotations"]),
+                            r.get("frame").and_then(Value::as_bool).unwrap_or(false),
                         )
                     })
                     .collect()
@@ -4453,11 +4454,14 @@ fn arbitration_declarations() {
             iface,
             resources: offered
                 .iter()
-                .map(|(token, template, annotations)| arbitration::Offered {
-                    token: *token,
-                    template,
-                    annotations,
-                })
+                .map(
+                    |(token, template, annotations, frame)| arbitration::Offered {
+                        token: *token,
+                        template,
+                        annotations,
+                        frame: *frame,
+                    },
+                )
                 .collect(),
         });
         let d = arbitration::declaration(&r, rev.as_ref(), &ab_params(&case["params"]));

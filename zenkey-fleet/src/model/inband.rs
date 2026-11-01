@@ -159,6 +159,10 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
             stamp: e.stamp,
             tag: e.tag,
         },
+        // A frame (core 0.83 §7.7) is read as before core 0.83 defined it,
+        // undecodable as a reserved form, until #981's K2 brings the frame
+        // reader: never decoded as a record of the key's type.
+        Reading::Framed(_) => Payload::Refused(Refusal::Reserved(wire::Form::Frame)),
         Reading::Refused(r) => Payload::Refused(r),
     }
 }
