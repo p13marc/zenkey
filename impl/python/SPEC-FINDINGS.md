@@ -23301,3 +23301,190 @@ no packed writer in a runtime yet (B2).
   (F-433). None is a blocker: zk2py took a reading of each, and the
   vectors decide F-423 to F-425 and F-430.
 - **Open:** F-423 to F-433. F-365 stays open as #965's.
+
+## At core 0.76 and observer 0.16 (#979 B2)
+
+A mend pass, not a round. It read core 0.76's and observer text 0.16's
+changelog entries first, then the sentences they name: §7.6's new and
+changed text (a writer's input, who writes `out_of_range`, the range by
+code, the integers, the counter's domain, the epoch), cascade 7, §9.4's
+order of the two lists, the glossary's Static rule, `RULES.md`'s §7.6
+entries and observer §7.3. Its evidence: `packed/vectors.json`'s new 2
+layouts, 15 writes and 9 reads, and the fixtures e038-packed-shape and
+e024-packed-twice. Nothing else was read cold, and no finding is kept for
+how a text reads.
+
+**The rules changed.** zk2py extracted every keyword sentence of
+`core.md` and `observer.md` at 99cce33d (0.75) and at 69af15a6, and
+diffed the two sets. Two changed in `core.md`:
+- §7.6's reading MUST now names the refusal and ends at a colon, folding
+  0.75's "Each refusal is named" into it (F-432). The rule is unchanged.
+- One MUST NOT is new, the writer's `unknown` and `missing` (F-425).
+
+None changed in `observer.md`: §7.3's decoding MUST keeps its sentence,
+and its list now names `packed`. The rest of 0.76 states no keyword, and
+the entries list it. **No rule changed beyond what the changelogs
+state.**
+
+### F-423 to F-433
+
+| | Status | How |
+|---|---|---|
+| F-423 | **resolved** | "A value outside the range has no code, and an implementation refuses it (below). The application that holds such a value gives the name `out_of_range` instead". The vectors' reading, as zk2py took it. |
+| F-424 | **resolved** | "A fixed-point value's range is its codes'", with both ties spelled out. The reading zk2py took, which the vectors held. |
+| F-425 | **resolved** | A string is a JSON number's text (RFC 8259 §6), and four new writes refuse `+0.5`, `.5`, `1.` and `05`, which zk2py already refused. The new MUST NOT is met by the writer's `unknown` and `missing` before any bit, and the walk holds it. |
+| F-426 | **resolved** | "A JSON number is read as the binary64 a JSON reader holds for it, by that double's shortest decimal text". Reading (b), as zk2py took it; the new write pins it. For integer text the sentence leaves a question beside F-427's answer (F-434). |
+| F-427 | **resolved** | `5.0` in the file is E038, and a writer's `5.0` for an `int`, `counter` or `time` is `value`: reading (a), as zk2py took it. e038-packed-shape pins the first. The new sentence on magnitudes of 2^63 or more was not zk2py's: its writer read `1e30` for an `int` as `value`, and the new write says `range`. It does now. The sentence says more than the vectors do (F-434). |
+| F-428 | **resolved** | "The JSON Schema files are taken before the packed files, each list in its order." As zk2py took it; e024-packed-twice passes. |
+| F-429 | **resolved** | "Nothing in its record is linted." Reading (a), as zk2py took it; e038-packed-shape's misnamed type passes. |
+| F-430 | **resolved** | "a count c is an integer from 0 to 2^64 − 1". The fix word for word. |
+| F-431 | **resolved** | The glossary names §7.6's twice. |
+| F-432 | **resolved** | `RULES.md` reads "… in this order: (5 items)". |
+| F-433 | **resolved** | Core §7.6: "One that states none has E = 0, the Unix epoch". Observer §7.3 names `packed`, reads a record under its tag, holds one its layout refuses or that came in no envelope undecodable, reads its `time` fields under that epoch, and names it `packed:<name>`. zk2py's owner, consumer and tool hand the codec 0 where no epoch is given. The vectors keep a refusal the text no longer has a case for (F-435). |
+
+### What the mend changed in zk2py
+
+- **The walk** (`classes.py`): 192 rules, 191 rows of the claimed classes
+  and the static rules, all walked. §7.6's new MUST NOT is met. Four
+  verdicts beyond the index are new, all met: observer §7.3's packed record
+  under its tag, its epoch and its name, and core §7.6's E = 0. Observer
+  §7.3's decoding MUST stays not met: the echo tool decodes `packed`, but
+  not protobuf or JSON Schema field by field.
+- **`packed`:**
+  - `Wide64`'s tag. An `int` bound past ±(2^53 − 1) went into the layout
+    form's JCS as an integer, which `rfc8785` refuses. It is now a double,
+    as the vector's description says. The runner had crashed on it.
+  - The 2^63 cut, read as the vectors read it (F-434).
+  - `deployment_epoch`, and `read_sample`, a put read as observer §7.3
+    (0.16) reads it.
+- **Live packed records:** CH's tag on the owner's packed puts,
+  `Owner.encode_packed`, `Owner.subscribe_role(record=…)`, the echo tool's
+  `--contracts` and `--epoch`, and `packed_live`'s two pairings (README,
+  "Core 0.76 and `observer.md` 0.16").
+- **`readings`:** round 94's sentence pins now read 0.76's answers, each
+  with the 0.75 form gone, and zk2py's readings stand. Also new: #1012's
+  three cases, F-434's and F-435's readings, and the echo tool's packed
+  rows.
+
+### F-434 · contradiction · core §7.6 (0.76) "What a writer takes": a number of magnitude 2^63 or more
+
+> "**A number of magnitude 2^63 or more** is outside every range, however
+> it is written. A JSON reader with no big integers holds such integer
+> text as a double, so the two cannot be told apart."
+>
+> "**`counter`:** a count c is an integer from 0 to 2^64 − 1, written as
+> c modulo 2^`width`."
+>
+> "**A JSON number** is read as the binary64 a JSON reader holds for it,
+> by that double's shortest decimal text."
+>
+> `vectors.json`'s description: "An `int`, `counter` or `time` value is a
+> JSON number written as an integer: one with a fraction or an exponent is
+> `value`, unless its magnitude is 2^63 or more, which is `range`".
+
+- **The contradiction.** Write 21 gives a 64-bit counter
+  18446744073709551615 (2^64 − 1) and expects its bits, all ones. The
+  first sentence puts that count "outside every range", and the counter's
+  own sentence puts it inside. The vectors' description limits the 2^63
+  cut to a number written with a fraction or an exponent, which is not
+  what "however it is written" says.
+- **Beside it, integer text below 2^63.** The second sentence says a
+  reader without big integers holds integer text below 2^63 as an integer.
+  The third reads "a JSON number", integer text included, "as the
+  binary64". The two part on integer text from 2^53 to 2^63 given to a
+  fixed-point field whose codes reach it. Bounds are decimal strings, so
+  no E028 keeps such a field out of a contract. Take `minimum` "0",
+  `maximum` "10000000000000000000", `resolution` "1" (64 bits), given the
+  number 9007199254740993: its binary64 is code 9007199254740992, and its
+  exact value code 9007199254740993.
+- **Took the vectors':** integer text by its exact value, so 2^64 − 1 is a
+  count. A number with a fraction or an exponent is `range` from 2^63 on
+  and `value` below it. A fixed-point value goes by its code, at any
+  magnitude its field reaches. The readings pin all three.
+- **Fix:** "A number of magnitude 2^63 or more written with a fraction or
+  an exponent is outside every range", as the vectors' description has it.
+  Then say that integer text is read by its value, not as a binary64.
+- **Changes:** wording, unless the text means its sentence. Then write 21
+  is wrong, and a 64-bit counter takes no count from 2^63.
+
+### F-435 · contradiction · core §7.6 (0.76) "The deployment epoch" beside `packed/vectors.json`'s write 46
+
+> "Writer and reader each hold it as an input. This version carries it
+> nowhere, so a deployment states it to its writers and readers. One that
+> states none has E = 0, the Unix epoch".
+>
+> Write 46, "a time field with no epoch in hand": no `epoch`, and
+> `{"refused": "epoch"}`. The description: "`epoch`, a time field and no
+> epoch".
+
+- **The contradiction.** Under 0.76 every writer holds an epoch, the one
+  its deployment states or 0, so a writer with "no epoch in hand" is a
+  case the text no longer has. Read with the text, write 46's absent
+  `epoch` is E = 0, and the write is accepted:
+  `{"at": 1700000000000, …}` is 1700000000 seconds. Read with the vectors,
+  a writer handed no epoch refuses, which no sentence of the text says.
+  The reads hold no time field without an epoch, so they decide nothing.
+- **What the reference does:** `zenctl gen`'s clock records read as now
+  under E = 0, and `zenctl watch` shows zk2py's with `epoch_assumed` 0. Its
+  tools take 0, as 0.76 says. Whether its codec, handed none, refuses was
+  not observable from outside.
+- **Took both:** the codec, handed no epoch, refuses `epoch`, so write 46
+  passes. zk2py's owner, consumer and tool never hand it none: each passes
+  the deployment's epoch, 0 where none is stated. No write or read of
+  theirs is refused `epoch`.
+- **Fix:** drop write 46 and the `epoch` token, or give write 46 an
+  expected record under E = 0. Or say in the text that an API handed no
+  epoch refuses, if that is meant.
+- **Changes:** a vector, or a sentence. No verdict.
+
+### F-436 · bug · the reference's `zenctl watch` and `zenctl echo` beside observer §7.3 (0.16): a refused packed record
+
+> Observer §7.3: "**A packed record** is read through its type's layout,
+> under the tag its envelope's CH carried (core §7.6). One its layout
+> refuses is undecodable, and the tool names the refusal."
+>
+> "A tool that shows a payload it cannot decode MUST render it as its
+> declared type and size, or through a plugin." "**Honest rendering.** …
+> It MUST NOT show garbage, and MUST NOT drop the sample silently."
+
+`packed_live`'s py-rust pairing, on black boxes built from 69af15a6.
+zk2py's owner runs `packed.v1` at `lab/pyp`. A session of zk2py's own puts
+three records on `stream/ties`, which the owner does not pump:
+- a `Sensor` record under Sensor's tag (`tag`);
+- a `Ties` record cut to one byte (`length`);
+- a `Ties` record in no envelope, under `application/octet-stream`.
+
+`zenctl watch` and `zenctl echo` both hold `packed.v1` and read the key
+meanwhile.
+- **`zenctl watch`** prints no row. Its summary says `received` 0,
+  `nonconforming` 0, `discarded` 0, `lagged` 0, `unresolved` 0, and it
+  exits 2, as for silence. The three samples are dropped silently. Holding
+  `packed-wide` or `packed-collide` over zk2py's own sensor records, it
+  says the same, so a consumer holding the wrong revision reads as
+  silence.
+- **`zenctl echo`** marks all three undecodable as `packed:Ties` and names
+  each refusal in `decode_error` ("refused by its layout, tag: …",
+  "… length: …", "a packed record travels in an envelope …"). Its `value`
+  is `"<5 bytes>"` for the first and `"<2 bytes>"` for the third, but
+  `"\u0012"` for the second: the one-byte record shown as text, a control
+  character.
+
+Both break §7.3's honest rendering, which the text states plainly. They
+change the reference, and the text needs nothing.
+- **Fix, in the reference:** `zenctl watch` shows each refused record as
+  a row naming its refusal, or counts it in its summary, and does not exit
+  as for silence when it heard one. `zenctl echo` renders an undecodable
+  record as `"<1 byte>"`, as it does the others.
+- **zk2py** counts each record its consumer refuses, with the token
+  (`Owner.undecodable`), and its echo tool shows each one undecodable,
+  never sniffed.
+
+### Counts at core 0.76 and observer 0.16
+
+436 entries.
+- **Resolved: F-423 to F-433** (core 0.76, observer 0.16), eleven.
+- **New: F-434 to F-436,** three. Two are contradictions between the text
+  and `packed/vectors.json` (F-434, F-435), and one is a bug in the
+  reference's tools (F-436). None is a blocker: zk2py takes the vectors'
+  reading of F-434 and F-435, and F-436 is the reference's.
+- **Open:** F-434 to F-436. F-365 stays open as #965's.

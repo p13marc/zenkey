@@ -71,7 +71,7 @@ case name. It exits with:
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
 | seed | §4.2 (0.27) | `seed` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not). An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). The packed cases (0.75) are wrapped as `packed` artifacts. |
-| packed | §7.6, §7.5 (0.75) | `packed`, `zk2c` | `packed/vectors.json`: each layout's form, sha256, tag, items and bit bounds; each write's bits, pad and bytes, or the writer's refusal; each read's JSON reading, or the first refusal in §7.6's order. Every accepted write is sealed in the envelope, opened and read back; every read is made through the envelope too. |
+| packed | §7.6, §7.5 (0.75, 0.76) | `packed`, `zk2c` | `packed/vectors.json`: each layout's form, sha256, tag, items and bit bounds; each write's bits, pad and bytes, or the writer's refusal; each read's JSON reading, or the first refusal in §7.6's order. Every accepted write is sealed in the envelope, opened and read back; every read is made through the envelope too. Live against the reference: `python -m zk2py.packed_live` (the mend after round 94). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
@@ -5030,6 +5030,91 @@ Round 94 found F-423 to F-433, eleven, none a blocker. The vectors decide
 F-423 to F-425 and F-430, and zk2py follows them. See "At core 0.75" in
 `SPEC-FINDINGS.md`.
 
+## Core 0.76 and `observer.md` 0.16: round 94 answered (mend pass)
+
+Core 0.76 and observer text 0.16 (#979 B2, PR #1016) answer F-423 to
+F-433. zk2py read the two entries and the sentences they name, and the
+vectors and fixtures they add, nothing else cold. A keyword diff of
+`core.md` and `observer.md` between 0.75 (99cce33d) and 69af15a6 finds
+§7.6's reading MUST reworded ("naming the refusal", a colon before its
+list) and one new MUST NOT, the writer's `unknown` and `missing`.
+`observer.md`'s keyword sentences are unchanged, though §7.3's decoding
+MUST now lists `packed`. **No rule changed beyond what the changelogs
+state.** Since #1016 a Rust runtime writes and reads packed records, so
+they ran live for the first time.
+
+### Its walk of `RULES.md` at 69af15a6
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 62 | 51 | 3 | 8 |
+| consumer | 15 | 12 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 55 | 51 | 2 | 2 |
+| static, in every class | 46 | 44 | 0 | 2 |
+
+- **191 rows walked, none without a verdict.** The new row, §7.6's MUST NOT
+  on an object holding a member its type does not have or lacking a field
+  that is not optional, is met.
+- **Beyond the index:** twenty-one, all met. Four are new: observer §7.3's
+  packed record read under its CH tag, its epoch (0 where none is stated)
+  and its name `packed:<name>`, and core §7.6's E = 0.
+- **Not met:** unchanged. Observer §7.3's decoding MUST now names
+  `packed`, which zk2py's echo tool decodes, but not protobuf or JSON
+  Schema field by field.
+
+### What the mend changed in zk2py
+
+- **`packed`:** an `int` bound past ±(2^53 − 1) goes into the layout
+  form's JCS as RFC 8785 writes a double (`Wide64`'s tag). An `int`,
+  `counter` or `time` value written with a fraction or an exponent is
+  `range` at a magnitude of 2^63 or more and `value` below it, while
+  integer text is read by its exact value (F-434). `deployment_epoch` is
+  0 where a deployment states none (F-433), and `read_sample` reads a put
+  as observer §7.3 (0.16) does: under CH's tag, and undecodable with the
+  refusal named when the layout refuses it or it came in no envelope.
+- **`zk2c.Read`** carries CH's tag.
+- **The owner:** CH's tag bits are a packed type's tag on every stream,
+  state and event put (`Owner.tag_of`), and `Owner.encode_packed` writes
+  a value under the deployment epoch.
+- **The consumer:** `Owner.subscribe_role(record=…)` reads each put
+  through the layout of the revision it holds, and counts a refused one
+  in `undecodable` with its token.
+- **The echo tool:** `--contracts` (one revision per interface) and
+  `--epoch`. A packed record is `decoded`, or `undecodable` with the
+  refusal named, never sniffed, and `declared_type` names `packed:<name>`.
+- **`packed_live`:** the two pairings below, over the Rust tests'
+  `packed.v1` and its `packed-wide` and `packed-collide` revisions, with
+  `interop/packed/zk2py_packed_reader.v1.toml` as the consumer's contract.
+- **`readings`:** round 94's sentence pins read 0.76's answers, the 0.75
+  forms gone. Also new: #1012's three cases, zk2py's readings of F-434 and
+  F-435, and the echo tool's packed rows.
+
+**`readings`: 799, up from 785.** **`just py-conformance`: 4200 of 4200**,
+`packed` 242 among them (15 layouts, 63 writes, 43 reads) and `contracts`
+127.
+
+**The black boxes, offline** (main 69af15a6). `zk2 contract lint` and
+`zk2 contract fingerprint` know packed now. On the 13 packed fixtures and
+the Rust tests' three packed contracts, their codes (W107 aside) and
+fingerprints are zk2py's, and both give E028 for a contract listing
+`Wide64`.
+
+**Live** (`python -m zk2py.packed_live`):
+
+| Pairing | Result |
+|---|---|
+| rust-py: `zenctl gen` writes, zk2py reads | **11 of 11.** 514 records on 14 streams, 2 states and an event read through zk2py's layouts, and zk2py's writer writes each reading back to the same bytes. The Rust clock records read as now under E = 0. S4's GET reads both states. zk2py's consumer and echo tool refuse the records zk2py put on the sensor key itself: by `tag` (`SensorWide`), by `length` (`SensorCollide`), and with no envelope. Consumers holding `packed-wide` and `packed-collide` refuse every Rust sensor record by `tag` and by `length`. |
+| py-rust: zk2py's owner writes, Rust reads | **11 of 13.** `zenctl get state`, `zenctl watch` (four streams and the event; the clock under `epoch_assumed` 0) and `zenctl echo` show zk2py's packed fields. Holding `packed-wide` or `packed-collide`, `zenctl watch` delivers none of zk2py's sensor records. The two failures are F-436. `zenctl watch` drops three records the `Ties` layout refuses, with no row and no count. `zenctl echo` names each refusal, but renders a one-byte record as the text `"\u0012"`. |
+
+The mend found three findings. **F-434** (contradiction): "a number of
+magnitude 2^63 or more is outside every range, however it is written",
+beside the counter's 0 to 2^64 − 1 and the vectors' write 21. **F-435**
+(contradiction): the vectors' write 46 still refuses `epoch` where 0.76
+gives E = 0. **F-436** (bug): the reference's `zenctl watch` and `zenctl
+echo` beside observer §7.3's honest rendering. See "At core 0.76 and
+observer 0.16" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -5055,17 +5140,18 @@ F-423 to F-425 and F-430, and zk2py follows them. See "At core 0.75" in
     part 5): observer §7.3's two MUSTs, decoding and honest rendering by
     the declared type. No zk2py tool holds a contract per key and shows
     its payloads: the echo tool sniffs every payload, each a zk2 key's
-    whose contract is not in hand (0.12), and there is no protobuf or JSON
-    Schema decoder field by field and no renderer by declared type. So
+    whose contract is not in hand (0.12), but a packed record of a contract
+    it is given (0.16), and there is no protobuf or JSON Schema decoder
+    field by field and no renderer by declared type. So
     `types.md` §1 to §3 are not run, and §2.4's reliability and §7.2's
     encodings rest on readings (F-379, F-397). Three owner SHOULDs too,
     §1.4's canonical form, §1.5's new session at a re-mint and §3.3's 1 KB.
     S7's consumer rule is kept from the first value since round 91. The
     deployment class is not claimed.
-  - a packed record on a bus (core 0.75, §7.6): zk2py's owner writes none
-    and its tools decode none. `packed` writes and reads records off the
-    bus, with the deployment epoch as an argument, which nothing carries
-    yet (F-433).
+  - a packed record's deployment epoch other than 0: no contract carries
+    one yet (core 0.76, §7.6; #980's catalog will), so zk2py's owner and
+    readers take 0 unless given one (`Owner.packed_epoch`, the echo tool's
+    `--epoch`), and the live pairings run at 0 alone.
   - of a `config.v1` owner fed through `desired.v1` (§2.16, round 88): a
     watch session (it reads its author's presence every 500 ms), an
     archive's last-known, and the reference's "wait that cannot end"
@@ -5142,7 +5228,11 @@ impl/python/
     zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
                                 envelope first (round 93)
     packed.py         §7.6 §9.2 the packed kind: a file's lints (E038–E045), layouts, the tag, the writer and the
-                                reader in exact decimals, a record in the envelope (round 94)
+                                reader in exact decimals, a record in the envelope (round 94); a sample read
+                                as observer §7.3 reads it, the deployment epoch (the mend after round 94)
+    packed_live.py    §7.6, observer §7.3 packed records live: zenctl gen writing for zk2py's consumer, tool and S4
+                                GET; zk2py's owner writing for zenctl get state, watch and echo; wrong revisions
+                                refused by tag and by length (the mend after round 94)
     compat.py         §9.7 §9.8 the classifier, retention identity
     conformance.py              the runner
     classes.py        §12       the classes zk2py claims, and its walk of spec/RULES.md (round 89)
@@ -5224,7 +5314,8 @@ impl/python/
     echo_tool.py      observer §8.1 §8.2 a generic watcher: the samples a selector delivers, and its scope, what it watches
                                 and the verbatim kinds it excludes, in its report and on stderr; NDJSON rows with the
                                 scope on stderr alone; each payload sniffed, its row saying which case and where it
-                                stopped resolving the key (observer §7.3, 0.12)
+                                stopped resolving the key (observer §7.3, 0.12); with --contracts, a packed record
+                                decoded or named undecodable (0.16)
     decoding.py       observer §7.3 the decode order: a held JSON Schema type on its Encoding's wire, sniffing, and what a
                                 tool says of a payload whose declared type it does not hold (0.12)
     judgement.py      observer §1 the judgement shape: a profile's answer read as Established, NotAsked, Unobservable or not
@@ -5250,7 +5341,8 @@ impl/python/
                       desired/ also configs.v1 and zk2py_configured.v1, desired.v1 scenarios §12's author
                       and the role of zk2py's config.v1 owner; classes/ zk2py_replica.v1, three operations
                       for the owner rules round 89's walk found (§5.1, §5.2, O6); state/ zk2py_ground.v1,
-                      state.md's plans, status and streams at 0.73, and zk2py_relay.v1, §13's governed stream
+                      state.md's plans, status and streams at 0.73, and zk2py_relay.v1, §13's governed stream;
+                      packed/ zk2py_packed_reader.v1, the consumer of the Rust tests' packed.v1
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.
