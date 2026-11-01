@@ -3508,8 +3508,123 @@ def family_readings(root: Path) -> list[Result]:
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
-        + _round95_readings(root)
+        + _round95_readings(root) + _round96_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.81 and 0.82, ``freshness.v2`` text 0.1, ``link.v1`` text 0.11
+    and ``link.v2`` text 0.1 (#609, round 96; #978 F1 and F3, #988 L1 and
+    L2). Each text at its version or later with its entry; the sentences
+    F-442 to F-450 quote, as they read; then zk2py's readings of what they
+    leave open. No session is opened."""
+    import hashlib
+    import re
+
+    from . import catalog, freshness_v2, heartbeat, jcs, link, zk2c
+    from .contract import load_contract
+    from .owner import keeps_timestamp
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules, log = flat("core.md"), flat("observer.md"), flat("RULES.md"), flat("CHANGELOG.md")
+    v2, sc2, l1, l2 = (flat("profiles/freshness/v2.md"), flat("profiles/freshness/scenarios-v2.md"),
+                       flat("profiles/link/v1.md"), flat("profiles/link/v2.md"))
+    llog = flat("profiles/link/CHANGELOG.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    repo = spec.parent
+    beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
+    face = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon-face.v2.toml")
+    old = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v1.toml")
+    lo = heartbeat.layout_of(beacon.canonical, beacon.fingerprint)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.82 or later, freshness.v2 0.1, link.v1 0.11 and link.v2 0.1, each with its entry",
+         [core_v >= (0, 82)] + entry("CHANGELOG.md", "0.81", "the heartbeat defined")
+         + entry("CHANGELOG.md", "0.82", "adopts the heartbeat")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.1", "confirmed by a heartbeat")
+         + entry("profiles/link/CHANGELOG.md", "0.11", "never downsampled")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.1", "the face's transport"),
+         [True]),
+        ("F-442: 0.82's entry counts 198 rules, RULES.md's table 207",
+         missing(log, "joins S2's evidence. `RULES.md` lists 198 rules.") + missing(rules, "| Every rule, once | 207 |"),
+         []),
+        ("F-443: every section uses beacon.v2, §7's reads link.exposure; beacon.v2 declares none, and a contract "
+         "that does lists link.v1 (E020)",
+         missing(sc2, "Every section uses `beacon.v2`.", "`status` and `level` read `link.exposure = \"link\"` there.")
+         + [k for r in beacon.canonical["resources"] for k in r["annotations"] if k.startswith("link.")]
+         + [face.codes, face.canonical["uses"], face.fingerprint == beacon.fingerprint],
+         [[], ["freshness.v2", "link.v1"], False]),
+        ("F-444: core §7.5 reads a record as the resource's type; the heartbeat's is octet-stream, and observer "
+         "names no heartbeat",
+         missing(core, "**The record** is every byte after the seq, possibly none. It is read as the resource's "
+                       "type says (§7.1).")
+         + [freshness_v2.standard_contract().canonical["resources"][0]["type"]["media_type"],
+            "heartbeat" in obs.lower()],
+         ["application/octet-stream", False]),
+        ("F-445, F-446: S2's freshness.v2 sentence and the table's cell; zk2py's reading: no Zenoh timestamp on a "
+         "freshness.v2 state's put, one on a freshness.v1 state's",
+         missing(core, "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead that "
+                       "member's last confirmation, as §4.3's table says.",
+                 "on its replies alone: the later of its last mutation's time and the last heartbeat's that vouched "
+                 "for it (S2), never on a put")
+         + [keeps_timestamp(beacon, next(r for r in beacon.canonical["resources"] if r["template"] == "status")),
+            keeps_timestamp(old, next(r for r in old.canonical["resources"] if r["template"] == "status"))],
+         [False, True]),
+        ("F-447: §2.10's every bit clear; zk2py's reading: the map and the digests kept, every vouched bit clear",
+         missing(v2, "Its heartbeats go on, every bit clear, so its liveness still crosses.")
+         + [freshness_v2.owner_body(lo, {"state/status"}, {
+             "zk2/lab/beacon/beacon.v2/state/status": freshness_v2.OwnerView(
+                 "zk2/lab/beacon/beacon.v2/state/status", zk2c.InBand(16, 1, 0))}, None, vouch=False)],
+         [{"time": None, "sections": {"state/status": {"digest": f"{heartbeat.digest([('zk2/lab/beacon/beacon.v2/state/status', 16, 1, 0)]):08x}", "vouched": False}}}]),
+    ]
+    # F-448: only a heartbeat read at step 4 moves the sequence (apply.json case 8).
+    view = freshness_v2.View(lo, ["state/status"])
+    body = heartbeat.write(lo, {"time": None, "sections": {}})
+    steps = [view.heartbeat(lo.tag, zk2c.InBand(16, 9, 5), body, 0),
+             view.heartbeat(lo.tag, zk2c.InBand(16, 9, 6), b"", 1),
+             view.heartbeat(lo.tag, zk2c.InBand(16, 9, 7), body, 2)]
+    out.append(("F-448: older is the one step not counted; zk2py's reading: a refused 6 between 5 and 7 leaves a gap",
+                missing(v2, "nothing is confirmed, and it is not counted (`older`).",
+                        "A heartbeat whose seq is not the last one's plus 1, within one run, follows a lost one.")
+                + [[x.get("refused") or x["read"]["gap"] for x in steps]], [[False, "short", True]]))
+    # F-449: transport.json's catalogs, refused by core §8.6, their JCS id the policy's.
+    tj = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "transport.json")
+    docs = [c["catalog"] for c in tj["cases"] if "catalog" in c]
+    reads = []
+    for d in docs:
+        try:
+            reads.append(catalog.read(json.dumps(d)).id)
+        except catalog.Refused as e:
+            reads.append(e.token)
+    out.append(("F-449: link.v2 §2.19's id and its changelog's §8.6 'not landed'; core §8.6 refuses every catalog "
+                "transport.json gives, and their JCS ids are read alone",
+                missing(l2, "The id is the first 4 bytes of the sha256 of the catalog document's JCS bytes (RFC "
+                            "8785), as 8 lowercase hex digits.")
+                + missing(llog, "since core §8.6 has not landed.")
+                + [reads, [hashlib.sha256(jcs.dumps(d)).hexdigest()[:8] for d in docs][0]],
+                [["member", "member", "member"], "50a01c11"]))
+    # F-450: a heartbeat over two revisions, one freshness.v1's.
+    revs = {"revisions": [{"uses": ["freshness.v1"], "resources": [
+        {"template": "mode", "token": "state", "annotations": {"freshness.ttl_s": 60}}]},
+        {"uses": ["freshness.v2"], "resources": [
+            {"template": "mode", "token": "state", "annotations": {"freshness.ttl_s": 60}}]}]}
+    res = link.merge_revisions("two.v1", link.revisions_of(revs))
+    out.append(("F-450: §2.9's 'a revision of it … uses freshness.v2 and it has a collection'; zk2py's reading: "
+                "a heartbeat over the revisions together",
+                missing(l1, "A listed interface has a heartbeat when a revision of it the generator is given uses "
+                            "`freshness.v2` and it has a collection")
+                + [link.heartbeat_of(revs, res)], [True]))
+    return out
 
 
 def _round95_readings(root: Path) -> list[tuple[str, Any, Any]]:

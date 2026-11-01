@@ -5254,6 +5254,128 @@ this round ran against the reference.
 Round 95 found F-437 to F-441, five, none a blocker. See "At core 0.79
 and observer 0.18" in `SPEC-FINDINGS.md`.
 
+## Core 0.81 and 0.82, `freshness.v2` 0.1, `link.v1` 0.11 and `link.v2` 0.1: the heartbeat (round 96)
+
+Two core versions, a new profile and two link texts landed since round 95:
+- **core 0.81** (#978 F1) defines §7.5's form 6, the heartbeat: its tag,
+  its collections, its body and the digest, with `heartbeat/`'s fixtures;
+- **core 0.82** (#978 F3) adopts it: §4.3's table splits row 1, S2's
+  replies carry a member's last confirmation, §4.2's "A heartbeat is no
+  mutation", §8.1's tokenless set and §8.5's liveness across a face;
+- **`freshness.v2` 0.1** says who sends a heartbeat, how often, and §2.5's
+  rule a subscriber reads it by, with `apply.json` and `scenarios-v2.md`;
+- **`link.v1` 0.11** lets a heartbeat cross where a collection it covers
+  does, never downsampled, and lists it as liveness evidence;
+- **`link.v2` 0.1** (#988 L1 and L2) puts the face's transport in the
+  face policy, read cold this round.
+
+zk2py diffed every keyword sentence of `core.md` between c29cca1e (0.80)
+and 1d1ce925 (0.82). None is gone; the seven new or reworded are their
+changelogs'. `observer.md` is unchanged at 0.18. **No rule changed beyond
+what the changelogs state**, though 0.82's entry miscounts `RULES.md`
+(F-442).
+
+### The classes zk2py claims
+
+Unchanged since round 89: the **owner**, **consumer**, **caller** and
+**observer** classes, each at the full level, and not the deployment
+class. It now follows `freshness.v2` (owner, consumer and tool) and
+`link.v2` (tool).
+
+### Its walk of `RULES.md` at 0.82
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 64 | 53 | 3 | 8 |
+| consumer | 17 | 14 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 57 | 53 | 2 | 2 |
+| static, in every class | 54 | 52 | 0 | 2 |
+
+- **205 rows walked of `RULES.md`'s 207, none without a verdict.** The six
+  new rows were given verdicts first, not met, in the walk's own commit,
+  and each is met now: §7.5's five static heartbeat rules and S2's
+  freshness.v2 sentence (owner).
+- **Beyond the index:** twenty-four, all met. One is new: §4.2's "Under
+  `freshness.v2` an owner puts no member again to confirm it" (owner).
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's two
+  decoding MUSTs.
+
+### What round 96 changed in zk2py
+
+- **`zk2c`**: form 6 parsed on a put, its tag reported and its body the
+  record, refused as a delete's attachment (`sample_kind`); `Read.form`.
+- **`heartbeat`** (core §7.5): the covered revision's tag and collections
+  (`layout_of`), the body written (`write_bits`, the list only where it is
+  shorter, a tie the bitmap) and read in §7.5's order of refusals
+  (`short`, `code`, `trailing`, `pad`), every value written back in the
+  form read, and the digest (`member_value`, `digest`).
+- **`freshness_v2`** (`freshness.v2` §2.5): `View`, the rule's four steps,
+  a gap in the heartbeat key's seqs, two divergences in a row due a read,
+  and a read's answer merged as a late joiner's seed; `Subscriber`, the
+  same on a session, re-reading by S4's GET, an optional seed of its own,
+  and `freshness.v1` §2.5's judgement from the last confirmation, a gap
+  read as a lost delivery.
+- **The owner** (§2.4, core 0.82): an interface whose contract uses
+  `freshness.v2` and has a collection is covered. The owner implements
+  the standard contract beside it, added when not given, and sends a
+  heartbeat at 0.95 of half the shortest horizon from its tokens on,
+  never from a standby, until it closes or steps down. Each map bit is
+  its collection's exposure, each digest over the members held live, and
+  a bit per member it vouches for (`Owner.vouch`). Under the clock guard
+  every vouched bit is clear and the time unknown (F-447). A covered
+  member is never re-put, its puts carry no Zenoh timestamp, and its
+  replies carry its last confirmation (F-445, F-446).
+- **`link`** (0.11): `heartbeat_of`; a heartbeat crosses exactly where a
+  collection of its interface does, carved out of `freshness.v2`'s stream
+  deny as `heartbeat/<I>`, never downsampled, and its services' liveness
+  evidence; an inline revision may be `{uses, resources}` (F-450).
+- **`link_v2`** (0.1): the policy (a policy with no `profile` read as
+  `link.v1`'s), its binding's link protocols, `[transport]` and each
+  face's medium keys with the eight new codes; the plan with the binding,
+  the catalog, the transport and each face's reply timeout; the transport
+  block at zenoh's keys, and §2.19's checks (F-449).
+- **The runner:** a `heartbeat` family over `heartbeat/`'s three files,
+  117 cases; `apply.json` in `freshness`, 64 checks; `link`'s two new plan
+  cases and `conformance/v2/`'s 52; the envelope vectors' form 6.
+- **`readings`:** round 96's pin the sentences F-442 to F-450 quote, and
+  show zk2py's readings of them.
+
+**`readings`: 822, up from 813.** **`just py-conformance`: 4607 of 4607**,
+`heartbeat` 117, `envelope` 115, `freshness` 166 and `link` 226 among them.
+
+**Live** (`python -m zk2py.freshness_v2_scenarios`), `scenarios-v2.md`
+§1–§7 against the black boxes of main 1d1ce925, in three pairings:
+
+| Section | zk2py owner, zk2py reader | Rust owner, zk2py reader | zk2py owner, zenctl |
+|---|---|---|---|
+| §1 the cadence, and the bits | 9/9 | 9/9 | 8/8 |
+| §2 a vouch withdrawn goes stale | 6/6 | 6/6 | 6/6 |
+| §3 a GET reader's age | 3/3 | 3/3 | 3/3 |
+| §4 a lost change, re-read | 4/4 | 4/4 | 2/2 |
+| §5 a late joiner by S4 | 2/2 | 2/2 | 1/1 |
+| §6 a restart, a new run | 3/3 | 3/3 | 1/1 |
+| §7 across a face | 4/4 | 4/4 | 4/4 |
+
+- **Digests and bodies agree** across implementations: zk2py's reader
+  confirms the Rust owner's members from its heartbeats, and zenctl's
+  `confirmation` rows confirm zk2py's.
+- **The owner example exposes `route`**: it takes no capability argument,
+  so §1's map reads 1 1 1 against it, the map its exposure's.
+- **zenctl** judges no freshness: S's verdicts apply `v2.md` §2.5 to the
+  arrivals of its `sample` and `confirmation` rows, and G's §2.6 to `get
+  state`'s `last_confirmation`. Watching the heartbeat resource, it reads
+  each heartbeat `undecodable` (F-444).
+- **§7** runs `beacon-face.v2.toml`, a revision §7 implies and does not
+  write (F-443).
+
+**Not run:**
+- `link.v2`'s scenarios §1, a router over a relay counting keep-alives;
+- F-436's fix, against the new black boxes.
+
+Round 96 found F-442 to F-450, nine, none a blocker. See "At core 0.82
+and freshness.v2 0.1" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -5390,6 +5512,11 @@ impl/python/
     hostid_scenarios.py hostid.v1 scenarios.md §1–§6 in temporary roots
     freshness.py      freshness.v1 horizons, judgements, the clock trust, a subscriber, a tool's read
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
+    heartbeat.py      §7.5      the heartbeat: the tag, the collections, the body written and read, the digest
+                                (round 96)
+    freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96)
+    freshness_v2_scenarios.py freshness.v2 scenarios-v2.md §1–§7 in three pairings: zk2py's owner and readers, the
+                                Rust owner with zk2py's, zk2py's owner with zenctl watch and get state (round 96)
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
     config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
@@ -5398,6 +5525,7 @@ impl/python/
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
+    link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96)
     alarms.py         alarms.v1 the key and the sanitizing step, references, strict JSON, the document, transitions,
                                 the conclusions, AlarmsOwner, the reader on a bus
     alarms_scenarios.py alarms.v1 scenarios.md §1–§10 against zk2py's owner or the Rust owner example

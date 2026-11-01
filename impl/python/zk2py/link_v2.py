@@ -426,7 +426,7 @@ def check_transport(policy_text: str, router: dict[str, Any], peer: dict[str, An
         # document's JCS bytes (RFC 8785)". transport.json's documents are no
         # catalog core §8.6 reads (an entry's `fingerprint`, an empty
         # lineage), so the id is the JCS bytes' alone, the document read by
-        # no rule of §8.6 (F-450); one §8.6 accepts has the same id.
+        # no rule of §8.6 (F-449); one §8.6 accepts has the same id.
         held = hashlib.sha256(jcs.dumps(catalog_doc)).hexdigest()[:8]
         if policy.catalog is None or held != policy.catalog:
             out.append(link.finding("catalog_mismatch", None, "catalog"))
