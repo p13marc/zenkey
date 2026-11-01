@@ -1599,6 +1599,20 @@ pub(crate) enum CheckCmd {
     ///                              whose tombstone window is below the
     ///                              face's max_outage_s (§2.11)
     ///
+    /// For a link.v2 policy (#988), the router's transport too (link.v2
+    /// §2.19), each key read at the binding's default where the FILE omits
+    /// it:
+    ///
+    ///   transport_differs          a key the router runs at another value
+    ///                              than the policy's
+    ///   wait_under_lease           the router's wait_before_close below
+    ///                              its lease, whatever the policy says
+    ///   peer_differs               with --peer-config: the far end's lease
+    ///                              or keep_alive not the router's (a
+    ///                              warning: neither is negotiated)
+    ///   catalog_mismatch           with --catalog: the catalog the far side
+    ///                              holds is not the policy's
+    ///
     /// and the block against the whole plan the same face policy, enrollment
     /// and contracts compile to, as `acl gen --check` compares them: rules,
     /// subjects, policies, the downsampling items, the south region. Opens
@@ -3990,9 +4004,17 @@ pub(crate) struct AclGenArgs {
     /// principal's policy, which loses its presence, history, admin-space
     /// and contract grants; its crossing streams get one downsampling rule
     /// per key; a south region gets `gateway.south` and the declarations of
-    /// every queryable it may query. Router to router is refused.
+    /// every queryable it may query. Router to router is refused. A
+    /// `link.v2` policy adds the router's `transport` and `routing` blocks
+    /// (link.v2 §2.18).
     #[arg(long, value_name = "FILE")]
     pub(crate) face_policy: Option<PathBuf>,
+    /// Emit the far end's `transport` and `routing` blocks on stdout, for
+    /// the far router's config or the gateway client's session config, so
+    /// that both ends run one lease and keep_alive (link.v2 §2.16, §2.18).
+    /// Needs a `link.v2` --face-policy. A foreign schema, zenoh's.
+    #[arg(long, requires = "face_policy", conflicts_with_all = ["json5", "check", "explain"])]
+    pub(crate) far_config: bool,
     /// Replaced by --face-policy (#769): refused by name, exit 2.
     #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "")]
     pub(crate) face: Option<String>,
@@ -4043,6 +4065,15 @@ pub(crate) struct CheckFaceArgs {
     /// given being the core's 60 s; with none, windows are not asked.
     #[arg(long, value_name = "ADDRESS=SECS")]
     pub(crate) window: Vec<String>,
+    /// The far end's config file, the far router's or the gateway client's,
+    /// read as zenoh reads it: its lease and keep_alive against the
+    /// router's (`link.v2` §2.19, `peer_differs`). Needs a link.v2 policy.
+    #[arg(long, value_name = "FAR-CONFIG")]
+    pub(crate) peer_config: Option<PathBuf>,
+    /// The deployment catalog the far side holds (JSON): its id against the
+    /// policy's `catalog` (`link.v2` §2.19, `catalog_mismatch`).
+    #[arg(long, value_name = "FILE")]
+    pub(crate) catalog: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }

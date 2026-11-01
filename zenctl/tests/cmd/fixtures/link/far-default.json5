@@ -1,0 +1,4 @@
+// A ground side left at zenoh's defaults: a 10 s lease with 4 keep-alives (check-face.trycmd, link.v2 §2.19).
+{
+  mode: "client",
+}
