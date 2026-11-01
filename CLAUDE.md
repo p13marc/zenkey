@@ -12,7 +12,7 @@ a crate or a decision is new. This file stays under 30 KB.
 
 ## What this repo is
 
-The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
+The **keyspace-v2 convention** for Zenoh keyspaces; on `main`, zk2:
 
 - v1's **RFC set** (v1.50; ratified at v1.18, 2026-08-15) is **not on
   `main`** since #925: it is frozen on the `v1` branch's `rfcs/`, with its
@@ -60,7 +60,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   and the conformance fixtures. Detail: `spec/CLAUDE.md`.
 
 **Strangler layout (#615), complete.** The v1 `zenkey/` and `zenkey-build/`
-sources described above, and the `fixture-tests` crate with its
+sources (their crates' `CLAUDE.md` describe them), and the `fixture-tests` crate with its
 `registry/` and `registry-kdl/` corpus, live on the **`v1` branch**, which
 releases 0.14.x patches. No member of `main` links v1: zenctl and the
 in-tree fleet left it at FJ9 (#612), zenwatch at FL2–FL3 and zengui at
@@ -216,39 +216,34 @@ crates.io, so a point release that moves one crate is a normal thing here.
 
 ### The grammar everything hangs off
 
+Every zk2 key starts at `zk2`, in one of core §1.1's five forms:
+
 ```
-v1/<origin>/<class>/<producer>/<subject...>     (base-relative)
+zk2/<system>/<service>/<iface>.v<major>/<kind>/<resource…>          (data)
+zk2/<system>/<service>/@zk/{instance,alive,member}/…                (presence)
+zk2/@zk/contract/<iface>.v<major>/<sha256>                          (bundles)
 ```
 
-Keys built by this crate are **base-relative** — they start at `v1`. The
-deployment base is the Zenoh session **namespace**, added on egress and stripped
-on ingress; there is deliberately **no base constant in zenkey** — application
-code has no way to spell it. Only session config, router artifacts, and
-un-namespaced debug tools (`zenctl`) ever see full keys
-(`grammar::with_base`/`strip_base`/`parse_full`).
+Keys are built through `zenkey-model`'s types, never `format!`. The
+deployment base is the Zenoh session **namespace**, added on egress and
+stripped on ingress; application code has no way to spell it. Only session
+config, router artifacts and the tools' sessions in no namespace see wire
+keys.
 
-### Applications adopt via two seams
+### Applications adopt through contracts
 
-1. **`AppProfile`** (`zenkey/src/profile.rs`): `AppProfile::new(app, salt)` as a
-   static — the app name (drives the host-id fallback path) and the RFC 06 §1
-   origin salt. `V1Context::for_producer(&PROFILE, name)` builds all framework
-   keys. Changing a salt re-keys the fleet; profiles are compile-time constants.
-2. **Consumer-owned registry** (RFC 08 §5): `registry/*.toml` live in the
-   application repo; `zenkey-build` generates the typed builders into the
-   consumer's `OUT_DIR` (`include!` in e.g. their `src/registry.rs`). The
-   `common = "..."` field on state subjects drives the generated
-   `AnySubject::common_state()` (the RFC-defined framework set in
-   `zenkey/src/common_state.rs`); app-specific groupings are wrappers the
-   consumer writes over its own `AnySubject`.
+An adopter writes interface contracts (`examples/zk2/`, authoring format
+draft 2), runs `zenkey-build` from its build script (lints, the history
+gate, embedded bundles, one generated module per interface), and starts a
+service with `zenkey::ServiceBuilder`. v1's `AppProfile`, origin salt and
+registry TOML live on the `v1` branch.
 
 ### Where the detail lives
 
-- `zenkey` crate module-by-module layering (each module ↔ its RFC section):
-  `zenkey/CLAUDE.md`, loaded when working in the crate.
-- Registry codegen and the registry-TOML conventions (RFC 08 §5 lints, the
-  append-only `deprecated.lock` ledger, literal-vs-`{var}` leaves, the
-  `common = "…"` framework set): the `registry-conventions` skill — read it
-  before editing any `registry/*.toml` or touching zenkey-build's codegen.
+- Each crate's `CLAUDE.md`, loaded when working in that crate, and
+  `spec/CLAUDE.md` for the texts.
+- v1's registry codegen and its TOML conventions: the
+  `registry-conventions` skill, for the `v1` branch only.
 
 ### zenctl: contract-parameterized, app-neutral
 
@@ -266,7 +261,7 @@ never a verdict. Scouting is opt-in.
 ## Conventions
 
 - Conventional commits (`feat:`/`fix:`/`docs:`/`chore:`), scope by crate
-  (`feat(zenctl): …`, `docs(rfc): …`).
+  (`feat(zenctl): …`, `docs(spec): …`).
 - Spec text is normative: when code and `spec/` disagree, either fix the code or
   amend the text explicitly (an entry in `spec/CHANGELOG.md`,
   `spec/observer-CHANGELOG.md` or the profile's CHANGELOG) — never silently
@@ -278,6 +273,7 @@ never a verdict. Scouting is opt-in.
   v1's RFC set: `scripts/check-v1-citations.sh` (in `just ci` and ci.yml)
   fails on `RFC 01`–`RFC 13` in any `.rs`, `.trycmd` or `tests/{cmd,fixtures}`
   file (#925). An IETF RFC (`RFC 3339`) is fine.
-- Publishing (crates.io, LIB CRATES ONLY): `zenkey` → `zenkey-build` →
-  `zenkey-fleet` (in that order; zenkey-build version-locks to zenkey 0.x).
-  Binaries (zenctl, zengui, zenwatch) ship via the `release.yml` binary lane.
+- Publishing (crates.io, LIB CRATES ONLY): on `main` every crate is 0.20.0
+  with `publish = false` (#929 tracks a path); the `v1` branch publishes
+  `zenkey` → `zenkey-build` → `zenkey-fleet`, in that order. Binaries
+  (zenctl, zengui, zenwatch) ship via the `release.yml` binary lane.
