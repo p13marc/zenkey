@@ -745,6 +745,11 @@ pub fn type_view(t: &TypeId) -> TypeView {
             name: name.clone(),
             schema: Some(schema.clone()),
         },
+        TypeId::Packed { name, schema } => TypeView {
+            kind: "packed".into(),
+            name: name.clone(),
+            schema: Some(schema.clone()),
+        },
         TypeId::Raw {
             media_type,
             media_param,

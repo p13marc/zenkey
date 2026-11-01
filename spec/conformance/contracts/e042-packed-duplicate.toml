@@ -1,0 +1,15 @@
+# core §7.6, §9.2 E042, cascade 7: per repeat after the first. The field
+# name `a` three times (two repeats), a reserved code twice, and an enum
+# value three times (two repeats). The second `b` has E043, and takes no
+# part in the record's check.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/duplicate.json"]
+
+[resources.a]
+kind = "stream"
+type = "packed:A"

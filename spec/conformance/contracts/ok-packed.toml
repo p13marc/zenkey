@@ -1,0 +1,24 @@
+# core §7.6, §9.4, §9.5: packed types on a stream, a state and an event,
+# by name and by stem. The canonical form holds the kind `packed`; its
+# `format` is still zk2-contract/draft-1.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/sensor.json", "schemas/packed/events.json"]
+
+[resources.reading]
+kind = "stream"
+type = "packed:Sensor"
+
+[resources.status]
+kind = "state"
+type = "packed:sensor#Status"
+
+[resources.change]
+kind = "event"
+type = "packed:events#Change"
+rate = "low"
+retention = "1d"

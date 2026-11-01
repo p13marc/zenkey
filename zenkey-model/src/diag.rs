@@ -205,7 +205,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("E023", "a type reference does not resolve"),
     (
         "E024",
-        "a `json:` name is ambiguous across the listed files, or two listed files share a stem or an id",
+        "a `json:` or `packed:` name is ambiguous across the listed files of its kind, or two listed files share a stem or an id",
     ),
     (
         "E025",
@@ -215,7 +215,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("E027", "a canonical string is not printable ASCII"),
     (
         "E028",
-        "an integer in the canonical contract or a JSON Schema artifact is outside ±(2^53−1)",
+        "an integer in the canonical contract, or a JSON Schema or packed artifact, is outside ±(2^53−1)",
     ),
     (
         "E029",
@@ -246,6 +246,38 @@ pub const CODES: &[(&str, &str)] = &[
     (
         "E037",
         "a JSON Schema uses a keyword outside the zk2 subset (pattern, allOf, not, if/then/else, …)",
+    ),
+    (
+        "E038",
+        "a packed file's top level, type or field is outside core §7.6's shape (a member missing, unknown, or of the wrong type or spelling)",
+    ),
+    (
+        "E039",
+        "an empty packed declaration: a range whose minimum is above its maximum, an enum with no value, or a record with no field",
+    ),
+    (
+        "E040",
+        "a fixed-point field's bound or resolution is not a decimal string, or its resolution is not above 0 or does not divide maximum − minimum",
+    ),
+    (
+        "E041",
+        "a packed field's width is not 1 to 64 bits, or an enum's `width` holds fewer codes than it needs",
+    ),
+    (
+        "E042",
+        "a name repeated in a packed file: a field's in its record, a value in its enum, a reserved code in its list",
+    ),
+    (
+        "E043",
+        "a packed field's `type` names no field type of core §7.6",
+    ),
+    (
+        "E044",
+        "a packed type with no envelope to carry it: an explicit stream's, an attachment, or an operation's type",
+    ),
+    (
+        "E045",
+        "an extension marker misplaced: a field after it that is not optional, or a marker right after another",
     ),
     (
         "W101",
@@ -299,6 +331,7 @@ mod tests {
             include_str!("schema.rs"),
             include_str!("canonical.rs"),
             include_str!("descriptor.rs"),
+            include_str!("packed.rs"),
         ];
         let mut found = 0;
         for text in src {

@@ -31,13 +31,12 @@ in the rule ids.
 **Conformance by role.** An implementation claims one class for each role it
 plays ([core §12](core.md#12-conformance-classes)). A class holds its role's
 rules and the static rules, listed here under implementation. Those are
-§1's, §7.5's and §9's. So are the contract rules of the sections §12 lists,
-and any rule naming its lint code. §3.3's descriptor checker is static too.
-A rule of those sections, §1, §7.5 and §9 included, that names a role is
-listed under that role. A static rule binds an implementation where it does
-what the rule governs. A class is claimed at the full level or the
-constrained one. A profile is a class of its own, and its rules are in its
-text.
+§1's, §7.5's, §7.6's and §9's. So are the contract rules of the sections §12
+lists, and any rule naming its lint code. §3.3's descriptor checker is
+static too. A rule of those sections that names a role is listed under that
+role. A static rule binds an implementation where it does what the rule
+governs. A class is claimed at the full level or the constrained one. A
+profile is a class of its own, and its rules are in its text.
 
 **A stream-only owner's minimum path** is this index filtered to two roles:
 [owner](#owner) and [implementation](#implementation-the-static-rules). A
@@ -57,9 +56,9 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 16 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 55, 24 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 36 |
-| Every rule, once | 182 |
-| [Rule ids](#rule-ids) | 71 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 45 |
+| Every rule, once | 191 |
+| [Rule ids](#rule-ids) | 79 |
 
 ## Owner
 
@@ -636,7 +635,9 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [E024](core.md#71-type-identity) | The name MUST be unique across the listed files (E024). | `[F: contracts/e023-type, e024-ambiguous, e025-media-param, e029-schema, e032-ref-dangling, e032-ref-outside, ok-json-qualified, ok-protobuf-well-known]` |
+| [E024](core.md#71-type-identity) | The name MUST be unique across the listed packed files (E024). | `[F: contracts/e024-packed-ambiguous]` |
+| [E024](core.md#71-type-identity) | The name MUST be unique across the listed JSON Schema files (E024). | `[F: contracts/e023-type, e024-ambiguous, e025-media-param, e029-schema, e032-ref-dangling, e032-ref-outside, ok-json-qualified, ok-protobuf-well-known]` |
+| [E044](core.md#71-type-identity) | A packed type MUST be the `type` of a stream, a state or an event, never an explicit stream's (E044). | `[F: contracts/e044-packed-place, ok-packed]` |
 
 ### [core §7.5 The zk2c envelope](core.md#75-the-zk2c-envelope)
 
@@ -644,6 +645,17 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§7.5](core.md#75-the-zk2c-envelope) | **Parsing.** … An implementation MUST refuse an envelope for the first of these that applies, in this order: (6 items) | `[F: envelope/vectors.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every envelope an implementation accepts MUST write back to the same bytes. | `[F: envelope/vectors.json]` |
+
+### [core §7.6 Packed records](core.md#76-packed-records)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§7.6](core.md#76-packed-records) | An implementation MUST compute a fixed-point code, and the value it reads back, in exact decimal arithmetic, never in binary floating point. | `[F: packed/vectors.json]` |
+| [§7.6](core.md#76-packed-records) | An implementation that writes a record MUST write the type's tag in CH's tag bits (§7.5). | `[F: packed/vectors.json]` |
+| [§7.6](core.md#76-packed-records) | An implementation that writes a record MUST write the bits above for its value, then the pad. | `[F: packed/vectors.json]` |
+| [§7.6](core.md#76-packed-records) | **Writing.** … An implementation MUST NOT write a record for a value that has no code: a value outside its range, a name that is not declared, or an instant outside the epoch's 2^32 seconds. | `[F: packed/vectors.json]` |
+| [§7.6](core.md#76-packed-records) | An implementation that reads a record of a packed type MUST refuse it for the first of these that applies, in this order. | `[F: packed/vectors.json]` |
+| [§7.6](core.md#76-packed-records) | **A later revision's fields.** … That rest MUST hold at least one bit (`length`). | `[F: packed/vectors.json]` |
 
 ### [core §9.1 The authoring format](core.md#91-the-authoring-format)
 
@@ -671,6 +683,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [E024](core.md#94-schema-artifacts-and-type-references) | The id MUST be unique among the listed files too: a later file whose JCS bytes equal an earlier one's, whatever its own bytes, is E024, once even when its stem is taken as well, and is not loaded. | `[F: contracts/e024-identical]` |
 | [E032](core.md#94-schema-artifacts-and-type-references) | Otherwise it resolves as a path relative to the referencing file, lexically normalized, and MUST name a listed file that is loaded: one E024 did not refuse. | `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]` |
 | [E032](core.md#94-schema-artifacts-and-type-references) | The pointer MUST resolve. | `[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous, e024-identical]` |
+| [E024](core.md#94-schema-artifacts-and-type-references) | A stem MUST be unique among the listed packed files, and an id among the listed JSON Schema and packed files (E024). | `[F: contracts/ok-packed, e024-packed-ambiguous]` |
 
 ### [core §9.5 The canonical form and the fingerprint](core.md#95-the-canonical-form-and-the-fingerprint)
 
@@ -764,7 +777,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [E021](core.md#92-the-lints) | implementation | core §9.2 The lints | two templates under one kind token with the same shape (§2.2) |
 | [E022](core.md#92-the-lints) | implementation | core §9.2 The lints | `epoch` does not name a single-chunk parameter of its template … |
 | [E023](core.md#92-the-lints) | implementation | core §9.2 The lints | a type reference that does not resolve (§9.4), or a raw type that is … |
-| [E024](core.md#92-the-lints) | implementation | core §9.2 The lints | a `json:` name defined by several listed files, or two listed JSON Schema files … |
+| [E024](core.md#92-the-lints) | implementation | core §9.2 The lints | a `json:` or `packed:` name defined by several listed files of its kind … |
 | [E025](core.md#92-the-lints) | implementation | core §9.2 The lints | `media_param` does not name a single-chunk parameter of the template |
 | [E026](core.md#92-the-lints) | implementation | core §9.2 The lints | `rate` not `rare`, `low` or `burst(<n>/h)` (n from 1 to 2^32−1, decimal, no leading … |
 | [E027](core.md#92-the-lints) | implementation | core §9.2 The lints | a string in the canonical form (§9.5) outside printable ASCII (0x20–0x7E), keys included |
@@ -778,6 +791,14 @@ MAY, and a row with no keyword, are listed here alone.
 | [E035](core.md#92-the-lints) | implementation | core §9.2 The lints | a requirement names a resource its interface does not declare, when that interface is … |
 | [E036](core.md#92-the-lints) | implementation | core §9.2 The lints | two contracts of a set declare one interface id |
 | [E037](core.md#92-the-lints) | implementation | core §9.2 The lints | a JSON Schema keyword outside the subset (§7.3) |
+| [E038](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed file outside §7.6's shape … |
+| [E039](core.md#92-the-lints) | implementation | core §9.2 The lints | an empty packed declaration … |
+| [E040](core.md#92-the-lints) | implementation | core §9.2 The lints | a fixed-point field whose `minimum`, `maximum` or `resolution` is not a decimal string, or … |
+| [E041](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed field whose width is not from 1 to 64 bits, or an … |
+| [E042](core.md#92-the-lints) | implementation | core §9.2 The lints | a name repeated in a packed file … |
+| [E043](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed field whose `type` names no field type of §7.6 |
+| [E044](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed type with no envelope to carry it … |
+| [E045](core.md#92-the-lints) | implementation | core §9.2 The lints | an extension marker misplaced … |
 | [W101](core.md#92-the-lints) | implementation | core §9.2 The lints | two resolved resources under one token whose templates overlap, with different types (the payload … |
 | [W102](core.md#92-the-lints) | implementation | core §9.2 The lints | an operation's request type has a top-level field named like a template parameter |
 | [W103](core.md#92-the-lints) | implementation | core §9.2 The lints | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it … |

@@ -1,0 +1,34 @@
+{
+  "types": {
+    "A": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "bool"
+        },
+        "...",
+        {
+          "name": "b",
+          "type": "bool"
+        },
+        {
+          "name": "c",
+          "type": "bool",
+          "optional": false
+        },
+        {
+          "name": "d",
+          "type": "bool",
+          "optional": true
+        },
+        "...",
+        "...",
+        {
+          "name": "e",
+          "type": "bool",
+          "optional": true
+        }
+      ]
+    }
+  }
+}

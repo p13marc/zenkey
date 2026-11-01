@@ -498,6 +498,33 @@ fn bless_bundles(dir: &Path) {
         json!({"ok": false, "error": "shape"}),
     ));
 
+    // Step 9 (core §9.6, 0.75): a packed artifact is carried and hashed as
+    // a JSON Schema one, by its JCS bytes. Built from `contracts/ok-packed`.
+    let packed = zenkey_model::contract::load_path(&dir.join("../contracts/ok-packed.toml"));
+    let packed = Bundle::build(
+        &packed
+            .contract
+            .unwrap_or_else(|| panic!("{}", packed.report)),
+    );
+    out.push((
+        "packed.bundle.json",
+        packed.to_bytes(),
+        json!({"ok": true, "fingerprint": packed.fingerprint().to_string()}),
+    ));
+    let mut v = packed.to_value();
+    let packed_id = packed
+        .schemas
+        .keys()
+        .find(|id| packed.schemas[*id]["kind"] == "packed")
+        .unwrap()
+        .clone();
+    v["schemas"][&packed_id]["data"]["types"]["Injected"] = json!({"fields": []});
+    out.push((
+        "schema-hash-packed.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "schema_hash"}),
+    ));
+
     let mut cases = serde_json::Map::new();
     for (name, bytes, want) in out {
         std::fs::write(dir.join(name), bytes).unwrap();
@@ -674,6 +701,8 @@ fn compat() {
     let load = |at: &Path, schema: &str, ty: &str| {
         let kind = if schema.ends_with(".proto") {
             "protobuf"
+        } else if ty.starts_with("packed:") {
+            "packed"
         } else {
             "jsonschema"
         };
@@ -1234,4 +1263,109 @@ fn envelope_vectors() {
         };
         assert_eq!(case["expect"], got, "{note}");
     }
+}
+
+/// `spec/conformance/packed/vectors.json` (core §7.6, 0.75; #979 B1): each
+/// type's layout form, its sha256 and tag, each item's width and start, and
+/// the shortest and longest record; a value → its bits, pad and bytes, or
+/// the writer's refusal; a tag and bytes → the JSON reading, or the
+/// reader's refusal, the first in §7.6's order. Every accepted write reads
+/// back. Written by an independent reading of the text, checked, never
+/// blessed.
+#[test]
+fn packed_vectors() {
+    use zenkey_model::packed::PackedDoc;
+    let doc = read_json(&spec().join("conformance/packed/vectors.json"));
+    let read = PackedDoc::read(&doc["schema"]);
+    assert!(read.findings.is_empty(), "{:?}", read.findings);
+    let layout = |name: &Value| {
+        read.types[name.as_str().expect("type")]
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name}: no layout"))
+    };
+    let hex = |b: &[u8]| -> String { b.iter().map(|x| format!("{x:02x}")).collect() };
+    let epoch = |case: &Value| case.get("epoch").and_then(Value::as_i64);
+    let layouts = doc["layouts"].as_array().expect("layouts");
+    assert_eq!(layouts.len(), read.types.len(), "a layout case per type");
+    for case in layouts {
+        let l = layout(&case["type"]);
+        let items: Vec<Value> = l
+            .slots()
+            .into_iter()
+            .map(|s| match s.name {
+                Some(name) => json!({"name": name, "width": s.width,
+                                     "optional": s.optional, "offset": s.offset}),
+                None => json!({"marker": true, "offset": s.offset}),
+            })
+            .collect();
+        let got = json!({
+            "form": l.form(),
+            "sha256": l.sha256_hex(),
+            "tag": l.tag(),
+            "items": items,
+            "min_bits": l.min_bits(),
+            "max_bits": l.max_bits(),
+        });
+        assert_eq!(case["expect"], got, "layout of {}", case["type"]);
+    }
+    let writes = doc["writes"].as_array().expect("writes");
+    assert!(!writes.is_empty());
+    for case in writes {
+        let note = &case["note"];
+        let l = layout(&case["type"]);
+        let got = match l.write(&case["value"], epoch(case)) {
+            Ok(r) => {
+                if case.get("reads_back") != Some(&Value::Bool(false)) {
+                    let want = case.get("reads_as").unwrap_or(&case["value"]);
+                    assert_eq!(
+                        l.read(l.tag(), &r.bytes, epoch(case)).as_ref(),
+                        Ok(want),
+                        "{note}: reads back"
+                    );
+                }
+                json!({"hex": hex(&r.bytes), "bits": r.bit_string(), "pad": r.pad()})
+            }
+            Err(e) => json!({"refused": e.token()}),
+        };
+        assert_eq!(case["expect"], got, "write: {note}");
+    }
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    let mut refused = std::collections::BTreeSet::new();
+    for case in reads {
+        let note = &case["note"];
+        let l = layout(&case["type"]);
+        let tag = u8::try_from(case["tag"].as_u64().expect("tag")).expect("a 4-bit tag");
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match l.read(tag, &bytes, epoch(case)) {
+            Ok(v) => json!({"value": v}),
+            Err(e) => {
+                refused.insert(e.token());
+                json!({"refused": e.token()})
+            }
+        };
+        assert_eq!(case["expect"], got, "read: {note}");
+    }
+    // Every refusal of §7.6's reader is exercised, a wrong revision's by its
+    // tag and by its length among them.
+    for token in ["tag", "length", "code", "extension", "pad"] {
+        assert!(refused.contains(token), "no read case refuses with {token}");
+    }
+}
+
+/// A packed bundle reads back into the contract model and builds to its
+/// own bytes, as every bundle does (core §9.6, §9.5; #979 B1).
+#[test]
+fn packed_bundle_round_trips() {
+    use zenkey_model::contract::Contract;
+    let bytes = std::fs::read(spec().join("conformance/bundles/packed.bundle.json")).unwrap();
+    let b = Bundle::verify(&bytes).unwrap();
+    let c = Contract::from_bundle(&b).unwrap();
+    assert_eq!(Bundle::build(&c).to_bytes(), bytes);
+    let packed: Vec<_> = c
+        .artifacts
+        .values()
+        .filter(|a| a.kind == zenkey_model::schema::SchemaKind::Packed)
+        .collect();
+    assert_eq!(packed.len(), 2, "ok-packed lists two packed files");
 }

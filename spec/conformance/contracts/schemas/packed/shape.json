@@ -1,0 +1,62 @@
+{
+  "types": {
+    "lower": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "bool"
+        }
+      ]
+    },
+    "Fine": {
+      "fields": [
+        {
+          "type": "bool"
+        },
+        {
+          "name": "b",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1,
+          "resolution": "1"
+        },
+        {
+          "name": "Bad",
+          "type": "bool"
+        },
+        {
+          "name": "c",
+          "type": "fixed",
+          "minimum": 0,
+          "maximum": "1",
+          "resolution": "0.5"
+        },
+        {
+          "name": "d",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1,
+          "reserved": [
+            "unknown"
+          ]
+        },
+        "..x",
+        {
+          "name": "e",
+          "type": "bool",
+          "optional": "yes"
+        }
+      ]
+    },
+    "Record": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "bool"
+        }
+      ],
+      "doc": "x"
+    }
+  },
+  "version": 1
+}

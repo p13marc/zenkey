@@ -1,0 +1,43 @@
+{
+  "types": {
+    "A": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "1",
+          "resolution": "0.3"
+        },
+        {
+          "name": "b",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "1",
+          "resolution": "0"
+        },
+        {
+          "name": "c",
+          "type": "fixed",
+          "minimum": "1e3",
+          "maximum": "2000",
+          "resolution": "1"
+        },
+        {
+          "name": "d",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "1",
+          "resolution": "-0.5"
+        },
+        {
+          "name": "e",
+          "type": "fixed",
+          "minimum": "x",
+          "maximum": "-1",
+          "resolution": "1"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "$defs": {
+    "Sensor": {"type": "object", "description": "a JSON Schema type named like a packed one: two kinds"}
+  }
+}

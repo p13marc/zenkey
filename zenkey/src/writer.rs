@@ -43,6 +43,9 @@ pub fn wire_encoding(ty: &TypeId, encoding: Option<WireEncoding>, values: &Bindi
             Some(WireEncoding::Cbor) => Encoding::APPLICATION_CBOR,
             _ => Encoding::APPLICATION_JSON,
         },
+        // A packed record always travels in §7.5's envelope (core §7.2,
+        // §7.6), whose `Encoding` is `zenoh/bytes`; its writer is #979's B2.
+        TypeId::Packed { .. } => Encoding::ZENOH_BYTES,
         TypeId::Raw {
             media_type,
             media_param,

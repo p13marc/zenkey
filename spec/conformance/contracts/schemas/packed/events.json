@@ -1,0 +1,28 @@
+{
+  "types": {
+    "Change": {
+      "fields": [
+        {
+          "name": "at",
+          "type": "time",
+          "ms": true
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "values": [
+            "off",
+            "on"
+          ],
+          "escape": true,
+          "width": 3
+        },
+        {
+          "name": "count",
+          "type": "counter",
+          "width": 24
+        }
+      ]
+    }
+  }
+}

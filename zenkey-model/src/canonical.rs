@@ -42,6 +42,9 @@ fn type_value(t: &TypeId) -> Value {
         TypeId::JsonSchema { name, schema } => {
             json!({"kind": "jsonschema", "name": name, "schema": schema})
         }
+        TypeId::Packed { name, schema } => {
+            json!({"kind": "packed", "name": name, "schema": schema})
+        }
         TypeId::Raw {
             media_type,
             media_param,

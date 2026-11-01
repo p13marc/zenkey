@@ -1,0 +1,22 @@
+{
+  "types": {
+    "Status": {
+      "fields": [
+        {
+          "name": "duty",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100",
+          "resolution": "0.1",
+          "description": "percent"
+        },
+        {
+          "name": "bars",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 5
+        }
+      ]
+    }
+  }
+}

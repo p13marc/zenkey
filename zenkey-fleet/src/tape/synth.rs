@@ -245,6 +245,10 @@ impl Synth {
                 bytes: self.raw(media_type, tick),
                 value: None,
             }),
+            // core §7.6: the runtime's packed writer is #979's B2.
+            TypeId::Packed { name, .. } => Err(format!(
+                "packed:{name} is a packed type, which `gen` does not synthesize yet"
+            )),
         }
     }
 

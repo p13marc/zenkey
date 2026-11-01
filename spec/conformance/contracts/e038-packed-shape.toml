@@ -1,0 +1,17 @@
+# core §7.6, §9.2 E038, cascade 7: once per object at fault. The top level
+# (an unknown member); a type whose name is not a type name, which defines
+# no type; a record with an unknown member; and in `Fine`, six fields: no
+# `name`, a member `int` does not take, a name that is not a field name, a
+# fixed bound given as a number, an unknown reserved name, an item that is
+# neither a field nor the marker, and `optional` not a boolean.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/shape.json"]
+
+[resources.a]
+kind = "stream"
+type = "packed:Fine"

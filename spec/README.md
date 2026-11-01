@@ -162,6 +162,9 @@ section number alone is the core's.
   ([§7.5](core.md#75-the-zk2c-envelope)). An owner writes one on every
   state mutation, stream sample and event, an `@stream` sample's excepted
   ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
+- **Packed record**: bit fields, each as wide as its codes need
+  ([§7.6](core.md#76-packed-records)). Its layout gives its envelope's
+  tag.
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it
@@ -186,10 +189,10 @@ section number alone is the core's.
 | [`core.md`](core.md) | **The normative core.** Its header gives its version, the date its first version was accepted, and a link to [`CHANGELOG.md`](CHANGELOG.md), which records every amendment since. Every MUST cites a fixture or a scenario. | written from r4 |
 | [`observer.md`](observer.md) | **The observer rules**, normative beside the core: what a tool, or any participant reading presence, state or the admin space, does with what it reads, when a read is complete, and what it may conclude and tell a person. Its header gives its text version, its status and the core version it is written against, and links [`observer-CHANGELOG.md`](observer-CHANGELOG.md). It holds the reader's discipline the core moved out, and the judgement shape and observer obligations that [`docs/zk2/tooling-guide.md`](../docs/zk2/tooling-guide.md) carried, promoted where they cite evidence. Its evidence is the core's fixtures and scenarios, and the profiles'. | moved from the core, and the tooling guide |
 | [`RULES.md`](RULES.md) | **The rule index**, generated from `core.md` and `observer.md`: every MUST, MUST NOT, SHOULD and SHOULD NOT, by the role it binds, then by section, with its rule id and its evidence. A stream-only owner's minimum path is its owner and implementation entries. CI fails when it is stale. | `scripts/gen-rules-index.py` |
-| [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 2. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
+| [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 3. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
-| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope. | `zenkey-model/tests/conformance.rs` |
+| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, packed records. | `zenkey-model/tests/conformance.rs` |
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
 | [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. They are listed, each with its text version, status, who uses it and the core version it is written against, in [the index](profiles/README.md#index), those nobody uses yet (`experimental`) in a table of their own, beside the template and the process. | `zenkey-model/tests/profiles.rs` |
 | [`CHANGELOG.md`](CHANGELOG.md) | The amendments to `core.md` since its first accepted version, newest first | |

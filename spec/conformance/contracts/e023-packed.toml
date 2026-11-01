@@ -1,0 +1,17 @@
+# core §9.4, §9.2 E023: no listed packed file defines the type; nor does
+# the named stem.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/sensor.json"]
+
+[resources.a]
+kind = "stream"
+type = "packed:Nope"
+
+[resources.b]
+kind = "stream"
+type = "packed:events#Sensor"

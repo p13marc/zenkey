@@ -187,6 +187,14 @@ impl Unit<'_> {
                 rust: "::std::vec::Vec<u8>".into(),
                 codec: "::zenkey::codec::Raw".into(),
             },
+            // core §7.6 (0.75): the model lays a packed type out and reads
+            // it (`zenkey_model::packed`); its emitter and
+            // `zenkey::codec::Packed<T>` are #979's B2.
+            Some(TypeId::Packed { name, .. }) => {
+                return Err(Error::Codegen(format!(
+                    "{iface}: packed:{name}: zenkey-build does not emit packed types yet (#979 B2)"
+                )));
+            }
         })
     }
 }

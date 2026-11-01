@@ -1,0 +1,83 @@
+{
+  "description": "core §7.6: the zk2c report's sensor record, and a status word",
+  "types": {
+    "Sensor": {
+      "fields": [
+        {
+          "name": "temperature",
+          "type": "fixed",
+          "minimum": "-40",
+          "maximum": "85",
+          "resolution": "0.1",
+          "reserved": [
+            "not_available",
+            "error"
+          ]
+        },
+        {
+          "name": "humidity",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100",
+          "resolution": "0.5"
+        },
+        {
+          "name": "pressure",
+          "type": "fixed",
+          "minimum": "300",
+          "maximum": "1100",
+          "resolution": "0.1"
+        },
+        {
+          "name": "battery",
+          "type": "fixed",
+          "minimum": "2.00",
+          "maximum": "4.20",
+          "resolution": "0.01",
+          "description": "volts"
+        }
+      ]
+    },
+    "Status": {
+      "description": "a 16-bit word",
+      "fields": [
+        {
+          "name": "duty_available",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "100",
+          "resolution": "0.1"
+        },
+        {
+          "name": "signal_bars",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 5
+        },
+        {
+          "name": "oper",
+          "type": "enum",
+          "values": [
+            "up",
+            "down",
+            "notPresent",
+            "unknown"
+          ]
+        },
+        {
+          "name": "admin",
+          "type": "bool"
+        },
+        "...",
+        {
+          "name": "rssi",
+          "type": "int",
+          "minimum": -150,
+          "maximum": 0,
+          "optional": true
+        },
+        "..."
+      ]
+    }
+  }
+}

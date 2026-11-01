@@ -324,6 +324,101 @@
    "type": "json:Status",
    "warnings": []
   },
+  "payload/packed/append-behind-marker": {
+   "class": "compatible",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/append-closed": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/bound-moved": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/bound-respelled": {
+   "class": "compatible",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/description-only": {
+   "class": "compatible",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/enum-closed-added": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/enum-escape-added": {
+   "class": "compatible",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/enum-escape-removed": {
+   "class": "review",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/enum-escape-widened": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/enum-reordered": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/enum-value-renamed": {
+   "class": "review",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/field-renamed": {
+   "class": "review",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/marker-added": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/optional-toggled": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/remove-behind-marker": {
+   "class": "compatible",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/reserved-added": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/resolution-changed": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/type-changed": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
+  "payload/packed/width-widened": {
+   "class": "breaking",
+   "type": "packed:Status",
+   "warnings": []
+  },
   "payload/protobuf/add-enum-value": {
    "class": "compatible",
    "same_revision": false,
@@ -500,6 +595,20 @@
     "v2"
    ],
    "type": "json:Status",
+   "warnings": []
+  },
+  "transitive/packed-group-reused": {
+   "against": {
+    "v1": "breaking",
+    "v2": "compatible"
+   },
+   "candidate": "v3",
+   "class": "breaking",
+   "history": [
+    "v1",
+    "v2"
+   ],
+   "type": "packed:Status",
    "warnings": []
   },
   "transitive/protobuf-field-reuse": {

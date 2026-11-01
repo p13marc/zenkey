@@ -215,6 +215,13 @@
       ],
       "fingerprint": null
     },
+    "e023-packed": {
+      "codes": [
+        "E023",
+        "E023"
+      ],
+      "fingerprint": null
+    },
     "e023-type": {
       "codes": [
         "E023",
@@ -230,6 +237,12 @@
       "fingerprint": null
     },
     "e024-identical": {
+      "codes": [
+        "E024"
+      ],
+      "fingerprint": null
+    },
+    "e024-packed-ambiguous": {
       "codes": [
         "E024"
       ],
@@ -396,6 +409,87 @@
       ],
       "fingerprint": null
     },
+    "e038-packed-shape": {
+      "codes": [
+        "E038",
+        "E038",
+        "E038",
+        "E038",
+        "E038",
+        "E038",
+        "E038",
+        "E038",
+        "E038",
+        "E038"
+      ],
+      "fingerprint": null
+    },
+    "e039-packed-empty": {
+      "codes": [
+        "E039",
+        "E039",
+        "E039",
+        "E039",
+        "E039"
+      ],
+      "fingerprint": null
+    },
+    "e040-packed-fixed": {
+      "codes": [
+        "E040",
+        "E040",
+        "E040",
+        "E040",
+        "E040"
+      ],
+      "fingerprint": null
+    },
+    "e041-packed-width": {
+      "codes": [
+        "E041",
+        "E041",
+        "E041",
+        "E041",
+        "E041",
+        "E041"
+      ],
+      "fingerprint": null
+    },
+    "e042-packed-duplicate": {
+      "codes": [
+        "E042",
+        "E042",
+        "E042",
+        "E042",
+        "E042",
+        "E043"
+      ],
+      "fingerprint": null
+    },
+    "e043-packed-type": {
+      "codes": [
+        "E043",
+        "E043"
+      ],
+      "fingerprint": null
+    },
+    "e044-packed-place": {
+      "codes": [
+        "E044",
+        "E044",
+        "E044",
+        "E044"
+      ],
+      "fingerprint": null
+    },
+    "e045-packed-extension": {
+      "codes": [
+        "E045",
+        "E045",
+        "E045"
+      ],
+      "fingerprint": null
+    },
     "ok-cardinality-no-ceiling": {
       "codes": [],
       "fingerprint": "sha256:daec59e632e3fb1e98f9f088cb5747d0115eae4f89ad25bc8d332a9aac161338"
@@ -431,6 +525,10 @@
     "ok-minimal": {
       "codes": [],
       "fingerprint": "sha256:8c7493396b63865ef028879e04c641c76fd18178f4d6a6cac8c166f7b94c8577"
+    },
+    "ok-packed": {
+      "codes": [],
+      "fingerprint": "sha256:ce1e8463ea4c5750fcb4ab75c311261e52699de538b0a5759b69ab1b3a6a75c2"
     },
     "ok-profile-without-vocabulary": {
       "codes": [],
@@ -469,6 +567,12 @@
         "W103"
       ],
       "fingerprint": "sha256:64d3487b766aaca8b3ca78c38a94bb272a9532aef3a90cc9fbf62e3c40cd6f89"
+    },
+    "w103-packed-encoding": {
+      "codes": [
+        "W103"
+      ],
+      "fingerprint": "sha256:4b71a019ce44d70e65c234e75aa0832b8e806d9e08801028282008b4ee4c7e08"
     },
     "w104-minor": {
       "codes": [

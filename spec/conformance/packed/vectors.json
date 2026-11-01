@@ -1,0 +1,2223 @@
+{
+  "description": "core §7.6, packed records. Written by an independent reading of the text (Python, standard library), checked, never blessed. `schema` is one packed document; every case names one of its types. `layouts`: a type → its layout form (the root's fields before the first marker, without names, then \"...\" where the root ends at one), the sha256 of the form's JCS bytes in hex, the tag (the low four bits of that hash's last byte), each item's `width` and `offset` (the bit where it starts, null once an optional field or a marker before it makes it vary), and `min_bits` and `max_bits`, the shortest and longest record this revision writes, before the pad. `writes`: a type, the deployment `epoch` in seconds where its fields need one, and a value → the record's `bits` before the pad, the `pad` and the bytes in `hex`, or `{\"refused\": token}` (the writer's: `missing`, a field not given; `unknown`, a member the type does not have; `value`, a value of the wrong JSON type, a name not declared or a decimal that does not read; `range`, a value with no code; `epoch`, a time field and no epoch). An accepted write reads back, under the type's tag, to `reads_as` where given, else to its value. `reads`: a type, a tag, the record's bytes in hex and the epoch → `{\"value\": the JSON reading}` or `{\"refused\": token}`, the first in §7.6's order: `tag`; then, field by field, `length` (the record ends before a bit the layout needs) and `code` (an unused code); `extension` (a marker read as 1 and no field present after it); `length` (a byte after the pad); `pad` (a pad bit set). A marker read as 1 at the end of the reader's layout ends the reading: the rest is a later revision's, and must hold at least one bit (`length`).",
+  "schema": {
+    "description": "core §7.6's vectors: every type the cases read",
+    "types": {
+      "Sensor": {
+        "description": "The zk2c report's sensor record: four fixed-point readings, 40 bits",
+        "fields": [
+          {
+            "name": "temperature",
+            "type": "fixed",
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1"
+          },
+          {
+            "name": "humidity",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5"
+          },
+          {
+            "name": "pressure",
+            "type": "fixed",
+            "minimum": "300",
+            "maximum": "1100",
+            "resolution": "0.1"
+          },
+          {
+            "name": "battery",
+            "type": "fixed",
+            "minimum": "2.00",
+            "maximum": "4.20",
+            "resolution": "0.01"
+          }
+        ]
+      },
+      "Status": {
+        "description": "The report's 16-bit word: four fields and no padding",
+        "fields": [
+          {
+            "name": "duty_available",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "100.0",
+            "resolution": "0.1"
+          },
+          {
+            "name": "signal_bars",
+            "type": "int",
+            "minimum": 0,
+            "maximum": 5
+          },
+          {
+            "name": "oper",
+            "type": "enum",
+            "values": [
+              "up",
+              "down",
+              "notPresent",
+              "unknown"
+            ]
+          },
+          {
+            "name": "admin",
+            "type": "enum",
+            "values": [
+              "up",
+              "down"
+            ]
+          }
+        ]
+      },
+      "Reserved": {
+        "fields": [
+          {
+            "name": "level",
+            "type": "int",
+            "minimum": -40,
+            "maximum": 85,
+            "reserved": [
+              "out_of_range",
+              "not_available",
+              "error"
+            ]
+          },
+          {
+            "name": "temperature",
+            "type": "fixed",
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1",
+            "reserved": [
+              "not_available",
+              "error"
+            ]
+          },
+          {
+            "name": "phase",
+            "type": "enum",
+            "values": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        ]
+      },
+      "Counters": {
+        "fields": [
+          {
+            "name": "c1",
+            "type": "counter",
+            "width": 1
+          },
+          {
+            "name": "c7",
+            "type": "counter",
+            "width": 7
+          },
+          {
+            "name": "c33",
+            "type": "counter",
+            "width": 33
+          },
+          {
+            "name": "c64",
+            "type": "counter",
+            "width": 64
+          }
+        ]
+      },
+      "Ties": {
+        "fields": [
+          {
+            "name": "half",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "10",
+            "resolution": "0.5"
+          },
+          {
+            "name": "signed",
+            "type": "fixed",
+            "minimum": "-1",
+            "maximum": "1",
+            "resolution": "0.1"
+          },
+          {
+            "name": "odd_top",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "9.5",
+            "resolution": "0.5"
+          }
+        ]
+      },
+      "Clock": {
+        "fields": [
+          {
+            "name": "at",
+            "type": "time"
+          },
+          {
+            "name": "at_ms",
+            "type": "time",
+            "ms": true
+          },
+          {
+            "name": "valid",
+            "type": "bool"
+          }
+        ]
+      },
+      "Mode": {
+        "fields": [
+          {
+            "name": "mode",
+            "type": "enum",
+            "values": [
+              "off",
+              "on",
+              "auto"
+            ],
+            "escape": true
+          },
+          {
+            "name": "wide",
+            "type": "enum",
+            "values": [
+              "x",
+              "y"
+            ],
+            "escape": true,
+            "width": 4
+          }
+        ]
+      },
+      "Link": {
+        "description": "Optional fields and a marker: revision 1",
+        "fields": [
+          {
+            "name": "rssi",
+            "type": "int",
+            "minimum": -150,
+            "maximum": 0,
+            "optional": true
+          },
+          {
+            "name": "up",
+            "type": "bool"
+          },
+          "..."
+        ]
+      },
+      "LinkV2": {
+        "description": "Link's revision 2: an optional field appended behind the marker, and a marker of its own",
+        "fields": [
+          {
+            "name": "rssi",
+            "type": "int",
+            "minimum": -150,
+            "maximum": 0,
+            "optional": true
+          },
+          {
+            "name": "up",
+            "type": "bool"
+          },
+          "...",
+          {
+            "name": "quality",
+            "type": "int",
+            "minimum": 0,
+            "maximum": 100,
+            "optional": true
+          },
+          "..."
+        ]
+      },
+      "Grow": {
+        "description": "A record whose marker ends on a byte boundary",
+        "fields": [
+          {
+            "name": "a",
+            "type": "int",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "..."
+        ]
+      },
+      "SensorRenamed": {
+        "description": "Sensor with its fields renamed: the same layout form and tag",
+        "fields": [
+          {
+            "name": "r_temperature",
+            "type": "fixed",
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1"
+          },
+          {
+            "name": "r_humidity",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5"
+          },
+          {
+            "name": "r_pressure",
+            "type": "fixed",
+            "minimum": "300",
+            "maximum": "1100",
+            "resolution": "0.1"
+          },
+          {
+            "name": "r_battery",
+            "type": "fixed",
+            "minimum": "2.00",
+            "maximum": "4.20",
+            "resolution": "0.01"
+          }
+        ]
+      },
+      "SensorWide": {
+        "fields": [
+          {
+            "name": "temperature",
+            "type": "fixed",
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1"
+          },
+          {
+            "name": "humidity",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5"
+          },
+          {
+            "name": "pressure",
+            "type": "fixed",
+            "minimum": "300",
+            "maximum": "1200",
+            "resolution": "0.1"
+          },
+          {
+            "name": "battery",
+            "type": "fixed",
+            "minimum": "2.00",
+            "maximum": "4.20",
+            "resolution": "0.01"
+          }
+        ],
+        "description": "Sensor with pressure's maximum moved to 1200: another tag"
+      },
+      "SensorCollide": {
+        "fields": [
+          {
+            "name": "temperature",
+            "type": "fixed",
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1"
+          },
+          {
+            "name": "humidity",
+            "type": "fixed",
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5"
+          },
+          {
+            "name": "pressure",
+            "type": "fixed",
+            "minimum": "300",
+            "maximum": "1100",
+            "resolution": "0.1"
+          },
+          {
+            "name": "battery",
+            "type": "fixed",
+            "minimum": "2.00",
+            "maximum": "4.72",
+            "resolution": "0.01"
+          }
+        ],
+        "description": "Sensor with battery's maximum moved one bit wider, its tag equal to Sensor's"
+      }
+    }
+  },
+  "layouts": [
+    {
+      "type": "Sensor",
+      "expect": {
+        "form": [
+          {
+            "type": "fixed",
+            "width": 11,
+            "optional": false,
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 8,
+            "optional": false,
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 13,
+            "optional": false,
+            "minimum": "300",
+            "maximum": "1100",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 8,
+            "optional": false,
+            "minimum": "2",
+            "maximum": "4.2",
+            "resolution": "0.01",
+            "reserved": []
+          }
+        ],
+        "sha256": "39a21339c0027173b50d23192f80e56d81ed4a89f98eee5f3093a450dfaf26b4",
+        "tag": 4,
+        "items": [
+          {
+            "name": "temperature",
+            "width": 11,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "humidity",
+            "width": 8,
+            "optional": false,
+            "offset": 11
+          },
+          {
+            "name": "pressure",
+            "width": 13,
+            "optional": false,
+            "offset": 19
+          },
+          {
+            "name": "battery",
+            "width": 8,
+            "optional": false,
+            "offset": 32
+          }
+        ],
+        "min_bits": 40,
+        "max_bits": 40
+      }
+    },
+    {
+      "type": "Status",
+      "expect": {
+        "form": [
+          {
+            "type": "fixed",
+            "width": 10,
+            "optional": false,
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "int",
+            "width": 3,
+            "optional": false,
+            "minimum": 0,
+            "maximum": 5,
+            "reserved": []
+          },
+          {
+            "type": "enum",
+            "width": 2,
+            "optional": false,
+            "escape": false,
+            "values": 4
+          },
+          {
+            "type": "enum",
+            "width": 1,
+            "optional": false,
+            "escape": false,
+            "values": 2
+          }
+        ],
+        "sha256": "f2a9418cee698b5a1f0f0d41367f2ab5ba921588bc2efcb90eecfa4267cb3d68",
+        "tag": 8,
+        "items": [
+          {
+            "name": "duty_available",
+            "width": 10,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "signal_bars",
+            "width": 3,
+            "optional": false,
+            "offset": 10
+          },
+          {
+            "name": "oper",
+            "width": 2,
+            "optional": false,
+            "offset": 13
+          },
+          {
+            "name": "admin",
+            "width": 1,
+            "optional": false,
+            "offset": 15
+          }
+        ],
+        "min_bits": 16,
+        "max_bits": 16
+      }
+    },
+    {
+      "type": "Reserved",
+      "expect": {
+        "form": [
+          {
+            "type": "int",
+            "width": 8,
+            "optional": false,
+            "minimum": -40,
+            "maximum": 85,
+            "reserved": [
+              "not_available",
+              "error",
+              "out_of_range"
+            ]
+          },
+          {
+            "type": "fixed",
+            "width": 11,
+            "optional": false,
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1",
+            "reserved": [
+              "not_available",
+              "error"
+            ]
+          },
+          {
+            "type": "enum",
+            "width": 2,
+            "optional": false,
+            "escape": false,
+            "values": 3
+          }
+        ],
+        "sha256": "6f4623282818e798f2e7c29a98a6070c23accbeabb91295511fae0a175744008",
+        "tag": 8,
+        "items": [
+          {
+            "name": "level",
+            "width": 8,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "temperature",
+            "width": 11,
+            "optional": false,
+            "offset": 8
+          },
+          {
+            "name": "phase",
+            "width": 2,
+            "optional": false,
+            "offset": 19
+          }
+        ],
+        "min_bits": 21,
+        "max_bits": 21
+      }
+    },
+    {
+      "type": "Counters",
+      "expect": {
+        "form": [
+          {
+            "type": "counter",
+            "width": 1,
+            "optional": false
+          },
+          {
+            "type": "counter",
+            "width": 7,
+            "optional": false
+          },
+          {
+            "type": "counter",
+            "width": 33,
+            "optional": false
+          },
+          {
+            "type": "counter",
+            "width": 64,
+            "optional": false
+          }
+        ],
+        "sha256": "7f89850e99f702f72f99ad5337c06a98a548a94e8395fd1e4d28553d2a778441",
+        "tag": 1,
+        "items": [
+          {
+            "name": "c1",
+            "width": 1,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "c7",
+            "width": 7,
+            "optional": false,
+            "offset": 1
+          },
+          {
+            "name": "c33",
+            "width": 33,
+            "optional": false,
+            "offset": 8
+          },
+          {
+            "name": "c64",
+            "width": 64,
+            "optional": false,
+            "offset": 41
+          }
+        ],
+        "min_bits": 105,
+        "max_bits": 105
+      }
+    },
+    {
+      "type": "Ties",
+      "expect": {
+        "form": [
+          {
+            "type": "fixed",
+            "width": 5,
+            "optional": false,
+            "minimum": "0",
+            "maximum": "10",
+            "resolution": "0.5",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 5,
+            "optional": false,
+            "minimum": "-1",
+            "maximum": "1",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 5,
+            "optional": false,
+            "minimum": "0",
+            "maximum": "9.5",
+            "resolution": "0.5",
+            "reserved": []
+          }
+        ],
+        "sha256": "d76d5b47a8367ad422cbe58e6fc5c6bcf4edbffa5763f89f5a96e02a3c52b08b",
+        "tag": 11,
+        "items": [
+          {
+            "name": "half",
+            "width": 5,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "signed",
+            "width": 5,
+            "optional": false,
+            "offset": 5
+          },
+          {
+            "name": "odd_top",
+            "width": 5,
+            "optional": false,
+            "offset": 10
+          }
+        ],
+        "min_bits": 15,
+        "max_bits": 15
+      }
+    },
+    {
+      "type": "Clock",
+      "expect": {
+        "form": [
+          {
+            "type": "time",
+            "width": 32,
+            "optional": false,
+            "ms": false
+          },
+          {
+            "type": "time",
+            "width": 42,
+            "optional": false,
+            "ms": true
+          },
+          {
+            "type": "bool",
+            "width": 1,
+            "optional": false
+          }
+        ],
+        "sha256": "b287ca8b701a369c2b2a8b8ca2559f4bea6173e22f2c6d8055bcebc5d37d873a",
+        "tag": 10,
+        "items": [
+          {
+            "name": "at",
+            "width": 32,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "at_ms",
+            "width": 42,
+            "optional": false,
+            "offset": 32
+          },
+          {
+            "name": "valid",
+            "width": 1,
+            "optional": false,
+            "offset": 74
+          }
+        ],
+        "min_bits": 75,
+        "max_bits": 75
+      }
+    },
+    {
+      "type": "Mode",
+      "expect": {
+        "form": [
+          {
+            "type": "enum",
+            "width": 2,
+            "optional": false,
+            "escape": true
+          },
+          {
+            "type": "enum",
+            "width": 4,
+            "optional": false,
+            "escape": true
+          }
+        ],
+        "sha256": "6df6752f96b268261b33d65cc86905664df8e296525ab382f4d8bc8a746fe019",
+        "tag": 9,
+        "items": [
+          {
+            "name": "mode",
+            "width": 2,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "wide",
+            "width": 4,
+            "optional": false,
+            "offset": 2
+          }
+        ],
+        "min_bits": 6,
+        "max_bits": 6
+      }
+    },
+    {
+      "type": "Link",
+      "expect": {
+        "form": [
+          {
+            "type": "int",
+            "width": 8,
+            "optional": true,
+            "minimum": -150,
+            "maximum": 0,
+            "reserved": []
+          },
+          {
+            "type": "bool",
+            "width": 1,
+            "optional": false
+          },
+          "..."
+        ],
+        "sha256": "ff92a419cfd08fc381edf22c1fc4088d47c775a535e05225252361b64982090e",
+        "tag": 14,
+        "items": [
+          {
+            "name": "rssi",
+            "width": 8,
+            "optional": true,
+            "offset": 0
+          },
+          {
+            "name": "up",
+            "width": 1,
+            "optional": false,
+            "offset": null
+          },
+          {
+            "marker": true,
+            "offset": null
+          }
+        ],
+        "min_bits": 3,
+        "max_bits": 11
+      }
+    },
+    {
+      "type": "LinkV2",
+      "expect": {
+        "form": [
+          {
+            "type": "int",
+            "width": 8,
+            "optional": true,
+            "minimum": -150,
+            "maximum": 0,
+            "reserved": []
+          },
+          {
+            "type": "bool",
+            "width": 1,
+            "optional": false
+          },
+          "..."
+        ],
+        "sha256": "ff92a419cfd08fc381edf22c1fc4088d47c775a535e05225252361b64982090e",
+        "tag": 14,
+        "items": [
+          {
+            "name": "rssi",
+            "width": 8,
+            "optional": true,
+            "offset": 0
+          },
+          {
+            "name": "up",
+            "width": 1,
+            "optional": false,
+            "offset": null
+          },
+          {
+            "marker": true,
+            "offset": null
+          },
+          {
+            "name": "quality",
+            "width": 7,
+            "optional": true,
+            "offset": null
+          },
+          {
+            "marker": true,
+            "offset": null
+          }
+        ],
+        "min_bits": 3,
+        "max_bits": 20
+      }
+    },
+    {
+      "type": "Grow",
+      "expect": {
+        "form": [
+          {
+            "type": "int",
+            "width": 7,
+            "optional": false,
+            "minimum": 0,
+            "maximum": 127,
+            "reserved": []
+          },
+          "..."
+        ],
+        "sha256": "ad4fed6039ff52f2ea5e3ceef3af34388f8a6caf7b169b86d839f3800c33dcf0",
+        "tag": 0,
+        "items": [
+          {
+            "name": "a",
+            "width": 7,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "marker": true,
+            "offset": 7
+          }
+        ],
+        "min_bits": 8,
+        "max_bits": 8
+      }
+    },
+    {
+      "type": "SensorRenamed",
+      "expect": {
+        "form": [
+          {
+            "type": "fixed",
+            "width": 11,
+            "optional": false,
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 8,
+            "optional": false,
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 13,
+            "optional": false,
+            "minimum": "300",
+            "maximum": "1100",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 8,
+            "optional": false,
+            "minimum": "2",
+            "maximum": "4.2",
+            "resolution": "0.01",
+            "reserved": []
+          }
+        ],
+        "sha256": "39a21339c0027173b50d23192f80e56d81ed4a89f98eee5f3093a450dfaf26b4",
+        "tag": 4,
+        "items": [
+          {
+            "name": "r_temperature",
+            "width": 11,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "r_humidity",
+            "width": 8,
+            "optional": false,
+            "offset": 11
+          },
+          {
+            "name": "r_pressure",
+            "width": 13,
+            "optional": false,
+            "offset": 19
+          },
+          {
+            "name": "r_battery",
+            "width": 8,
+            "optional": false,
+            "offset": 32
+          }
+        ],
+        "min_bits": 40,
+        "max_bits": 40
+      }
+    },
+    {
+      "type": "SensorWide",
+      "expect": {
+        "form": [
+          {
+            "type": "fixed",
+            "width": 11,
+            "optional": false,
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 8,
+            "optional": false,
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 14,
+            "optional": false,
+            "minimum": "300",
+            "maximum": "1200",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 8,
+            "optional": false,
+            "minimum": "2",
+            "maximum": "4.2",
+            "resolution": "0.01",
+            "reserved": []
+          }
+        ],
+        "sha256": "a18ea03af3f3b311752aa2310a680078dc471602bd671b744e85448075d285f6",
+        "tag": 6,
+        "items": [
+          {
+            "name": "temperature",
+            "width": 11,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "humidity",
+            "width": 8,
+            "optional": false,
+            "offset": 11
+          },
+          {
+            "name": "pressure",
+            "width": 14,
+            "optional": false,
+            "offset": 19
+          },
+          {
+            "name": "battery",
+            "width": 8,
+            "optional": false,
+            "offset": 33
+          }
+        ],
+        "min_bits": 41,
+        "max_bits": 41
+      }
+    },
+    {
+      "type": "SensorCollide",
+      "expect": {
+        "form": [
+          {
+            "type": "fixed",
+            "width": 11,
+            "optional": false,
+            "minimum": "-40",
+            "maximum": "85",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 8,
+            "optional": false,
+            "minimum": "0",
+            "maximum": "100",
+            "resolution": "0.5",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 13,
+            "optional": false,
+            "minimum": "300",
+            "maximum": "1100",
+            "resolution": "0.1",
+            "reserved": []
+          },
+          {
+            "type": "fixed",
+            "width": 9,
+            "optional": false,
+            "minimum": "2",
+            "maximum": "4.72",
+            "resolution": "0.01",
+            "reserved": []
+          }
+        ],
+        "sha256": "c4aab149db78d962c4056c55fb08782111653754e063004380022694ce440804",
+        "tag": 4,
+        "items": [
+          {
+            "name": "temperature",
+            "width": 11,
+            "optional": false,
+            "offset": 0
+          },
+          {
+            "name": "humidity",
+            "width": 8,
+            "optional": false,
+            "offset": 11
+          },
+          {
+            "name": "pressure",
+            "width": 13,
+            "optional": false,
+            "offset": 19
+          },
+          {
+            "name": "battery",
+            "width": 9,
+            "optional": false,
+            "offset": 32
+          }
+        ],
+        "min_bits": 41,
+        "max_bits": 41
+      }
+    }
+  ],
+  "writes": [
+    {
+      "note": "the report's sensor record, 40 bits and no pad; 3.70 reads back in its shortest form",
+      "type": "Sensor",
+      "value": {
+        "temperature": "21.5",
+        "humidity": "43.5",
+        "pressure": "1013.2",
+        "battery": "3.70"
+      },
+      "expect": {
+        "hex": "4ceafbdcaa",
+        "bits": "0100110011101010111110111101110010101010",
+        "pad": 0
+      },
+      "reads_as": {
+        "temperature": "21.5",
+        "humidity": "43.5",
+        "pressure": "1013.2",
+        "battery": "3.7"
+      }
+    },
+    {
+      "note": "a JSON number for a fixed-point value is read by its shortest decimal text",
+      "type": "Sensor",
+      "value": {
+        "temperature": 21.5,
+        "humidity": 0,
+        "pressure": "300",
+        "battery": "4.2"
+      },
+      "expect": {
+        "hex": "4ce00000dc",
+        "bits": "0100110011100000000000000000000011011100",
+        "pad": 0
+      },
+      "reads_as": {
+        "temperature": "21.5",
+        "humidity": "0",
+        "pressure": "300",
+        "battery": "4.2"
+      }
+    },
+    {
+      "note": "the bounds themselves",
+      "type": "Sensor",
+      "value": {
+        "temperature": "-40",
+        "humidity": "100",
+        "pressure": "1100",
+        "battery": "2"
+      },
+      "expect": {
+        "hex": "00191f4000",
+        "bits": "0000000000011001000111110100000000000000",
+        "pad": 0
+      }
+    },
+    {
+      "note": "below the minimum by more than half a resolution",
+      "type": "Sensor",
+      "value": {
+        "temperature": "-40.06",
+        "humidity": "43.5",
+        "pressure": "1013.2",
+        "battery": "3.70"
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "below the minimum by exactly half a resolution: code -0.5 rounds to 0, its even neighbour",
+      "type": "Sensor",
+      "value": {
+        "temperature": "-40.05",
+        "humidity": "43.5",
+        "pressure": "1013.2",
+        "battery": "3.70"
+      },
+      "expect": {
+        "hex": "000afbdcaa",
+        "bits": "0000000000001010111110111101110010101010",
+        "pad": 0
+      },
+      "reads_as": {
+        "temperature": "-40",
+        "humidity": "43.5",
+        "pressure": "1013.2",
+        "battery": "3.7"
+      }
+    },
+    {
+      "note": "above the maximum",
+      "type": "Sensor",
+      "value": {
+        "temperature": "21.5",
+        "humidity": "43.5",
+        "pressure": "1100.1",
+        "battery": "3.70"
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a fixed-point value that is not a decimal",
+      "type": "Sensor",
+      "value": {
+        "temperature": "21.5",
+        "humidity": "43,5",
+        "pressure": "1013.2",
+        "battery": "3.70"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a member the type does not have",
+      "type": "Sensor",
+      "value": {
+        "temperature": "21.5",
+        "humidity": "43.5",
+        "pressure": "1013.2",
+        "battery": "3.70",
+        "wind": "3"
+      },
+      "expect": {
+        "refused": "unknown"
+      }
+    },
+    {
+      "note": "a field missing",
+      "type": "Sensor",
+      "value": {
+        "temperature": "21.5",
+        "humidity": "43.5",
+        "pressure": "1013.2"
+      },
+      "expect": {
+        "refused": "missing"
+      }
+    },
+    {
+      "note": "the report's 16-bit word: 10 + 3 + 2 + 1 bits, no pad",
+      "type": "Status",
+      "value": {
+        "duty_available": "100",
+        "signal_bars": 5,
+        "oper": "notPresent",
+        "admin": "down"
+      },
+      "expect": {
+        "hex": "fa2d",
+        "bits": "1111101000101101",
+        "pad": 0
+      }
+    },
+    {
+      "note": "an enum name the type does not declare",
+      "type": "Status",
+      "value": {
+        "duty_available": "100",
+        "signal_bars": 5,
+        "oper": "dormant",
+        "admin": "down"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "an integer above its maximum",
+      "type": "Status",
+      "value": {
+        "duty_available": "100",
+        "signal_bars": 6,
+        "oper": "notPresent",
+        "admin": "down"
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "an integer field given a string",
+      "type": "Status",
+      "value": {
+        "duty_available": "100",
+        "signal_bars": "5",
+        "oper": "notPresent",
+        "admin": "down"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "reserved codes declared; the values below them",
+      "type": "Reserved",
+      "value": {
+        "level": -40,
+        "temperature": "0",
+        "phase": "c"
+      },
+      "expect": {
+        "hex": "003210",
+        "bits": "000000000011001000010",
+        "pad": 3
+      }
+    },
+    {
+      "note": "not_available: the top code, whatever order `reserved` lists it in",
+      "type": "Reserved",
+      "value": {
+        "level": "not_available",
+        "temperature": "not_available",
+        "phase": "c"
+      },
+      "expect": {
+        "hex": "fffff0",
+        "bits": "111111111111111111110",
+        "pad": 3
+      }
+    },
+    {
+      "note": "error: the code below all ones",
+      "type": "Reserved",
+      "value": {
+        "level": "error",
+        "temperature": "error",
+        "phase": "c"
+      },
+      "expect": {
+        "hex": "feffd0",
+        "bits": "111111101111111111010",
+        "pad": 3
+      }
+    },
+    {
+      "note": "out_of_range: the third code from the top",
+      "type": "Reserved",
+      "value": {
+        "level": "out_of_range",
+        "temperature": "0",
+        "phase": "c"
+      },
+      "expect": {
+        "hex": "fd3210",
+        "bits": "111111010011001000010",
+        "pad": 3
+      }
+    },
+    {
+      "note": "a reserved name the field does not declare",
+      "type": "Reserved",
+      "value": {
+        "level": -40,
+        "temperature": "out_of_range",
+        "phase": "c"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a value outside the range, where out_of_range is declared, is still refused: the writer says out_of_range",
+      "type": "Reserved",
+      "value": {
+        "level": 86,
+        "temperature": "0",
+        "phase": "c"
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "counters of widths 1, 7, 33 and 64, each below its modulus",
+      "type": "Counters",
+      "value": {
+        "c1": 1,
+        "c7": 127,
+        "c33": 8589934591,
+        "c64": 18446744073709551615
+      },
+      "expect": {
+        "hex": "ffffffffffffffffffffffffff80",
+        "bits": "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+        "pad": 7
+      }
+    },
+    {
+      "note": "a counter is written modulo 2^width: a declared loss",
+      "type": "Counters",
+      "value": {
+        "c1": 2,
+        "c7": 300,
+        "c33": 8589934597,
+        "c64": 0
+      },
+      "expect": {
+        "hex": "2c00000002800000000000000000",
+        "bits": "001011000000000000000000000000000000001010000000000000000000000000000000000000000000000000000000000000000",
+        "pad": 7
+      },
+      "reads_as": {
+        "c1": 0,
+        "c7": 44,
+        "c33": 5,
+        "c64": 0
+      }
+    },
+    {
+      "note": "a negative count",
+      "type": "Counters",
+      "value": {
+        "c1": 0,
+        "c7": -1,
+        "c33": 0,
+        "c64": 0
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a count beyond 64 bits",
+      "type": "Counters",
+      "value": {
+        "c1": 0,
+        "c7": 0,
+        "c33": 0,
+        "c64": 18446744073709551616
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "ties to even: 0.25 / 0.5 is 0.5, so code 0",
+      "type": "Ties",
+      "value": {
+        "half": "0.25",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0280",
+        "bits": "000000101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "ties to even: 0.75 / 0.5 is 1.5, so code 2",
+      "type": "Ties",
+      "value": {
+        "half": "0.75",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "1280",
+        "bits": "000100101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "1",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "just above a tie rounds up, read exactly",
+      "type": "Ties",
+      "value": {
+        "half": "0.2500000000000000000000000001",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0a80",
+        "bits": "000010101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0.5",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "just below a tie rounds down",
+      "type": "Ties",
+      "value": {
+        "half": "0.7499999999999999999999999999",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0a80",
+        "bits": "000010101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0.5",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "a negative tie: (-0.05 + 1) / 0.1 is 9.5, so code 10, which reads 0",
+      "type": "Ties",
+      "value": {
+        "half": "0",
+        "signed": "-0.05",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0280",
+        "bits": "000000101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "a negative tie: (-0.15 + 1) / 0.1 is 8.5, so code 8, which reads -0.2",
+      "type": "Ties",
+      "value": {
+        "half": "0",
+        "signed": "-0.15",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0200",
+        "bits": "000000100000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0",
+        "signed": "-0.2",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "a binary float's shortest text is read, not its binary value: 0.15 is a tie",
+      "type": "Ties",
+      "value": {
+        "half": "0",
+        "signed": 0.15,
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0300",
+        "bits": "000000110000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0",
+        "signed": "0.2",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "half a resolution above the maximum, at an even last code: accepted",
+      "type": "Ties",
+      "value": {
+        "half": "10.25",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "a280",
+        "bits": "101000101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "10",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "half a resolution above the maximum, at an odd last code: the tie goes out of range",
+      "type": "Ties",
+      "value": {
+        "half": "0",
+        "signed": "0",
+        "odd_top": "9.75"
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "an exponent in a writer's decimal",
+      "type": "Ties",
+      "value": {
+        "half": "5e-1",
+        "signed": "0",
+        "odd_top": "0"
+      },
+      "expect": {
+        "hex": "0a80",
+        "bits": "000010101000000",
+        "pad": 1
+      },
+      "reads_as": {
+        "half": "0.5",
+        "signed": "0",
+        "odd_top": "0"
+      }
+    },
+    {
+      "note": "the epoch itself",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "value": {
+        "at": 1700000000000,
+        "at_ms": 1700000000000,
+        "valid": true
+      },
+      "expect": {
+        "hex": "00000000000000000020",
+        "bits": "000000000000000000000000000000000000000000000000000000000000000000000000001",
+        "pad": 5
+      }
+    },
+    {
+      "note": "seconds and milliseconds since the epoch",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "value": {
+        "at": 1762000123000,
+        "at_ms": 1762000123456,
+        "valid": false
+      },
+      "expect": {
+        "hex": "03b20bfb03b20bfb7200",
+        "bits": "000000111011001000001011111110110000001110110010000010111111101101110010000",
+        "pad": 5
+      }
+    },
+    {
+      "note": "without `ms` the milliseconds are dropped",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "value": {
+        "at": 1762000123999,
+        "at_ms": 1762000123999,
+        "valid": true
+      },
+      "expect": {
+        "hex": "03b20bfb03b20bfbf9e0",
+        "bits": "000000111011001000001011111110110000001110110010000010111111101111111001111",
+        "pad": 5
+      },
+      "reads_as": {
+        "at": 1762000123000,
+        "at_ms": 1762000123999,
+        "valid": true
+      }
+    },
+    {
+      "note": "the last second the field holds",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "value": {
+        "at": 5994967295999,
+        "at_ms": 5994967295999,
+        "valid": true
+      },
+      "expect": {
+        "hex": "fffffffffffffffff9e0",
+        "bits": "111111111111111111111111111111111111111111111111111111111111111111111001111",
+        "pad": 5
+      },
+      "reads_as": {
+        "at": 5994967295000,
+        "at_ms": 5994967295999,
+        "valid": true
+      }
+    },
+    {
+      "note": "one millisecond before the epoch",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "value": {
+        "at": 1700000000000,
+        "at_ms": 1699999999999,
+        "valid": true
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "2^32 seconds after the epoch",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "value": {
+        "at": 5994967296000,
+        "at_ms": 1700000000000,
+        "valid": true
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a time field with no epoch in hand",
+      "type": "Clock",
+      "value": {
+        "at": 1700000000000,
+        "at_ms": 1700000000000,
+        "valid": true
+      },
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "an open enum's names",
+      "type": "Mode",
+      "value": {
+        "mode": "auto",
+        "wide": "y"
+      },
+      "expect": {
+        "hex": "84",
+        "bits": "100001",
+        "pad": 2
+      }
+    },
+    {
+      "note": "the escape is written as all ones",
+      "type": "Mode",
+      "value": {
+        "mode": null,
+        "wide": null
+      },
+      "expect": {
+        "hex": "fc",
+        "bits": "111111",
+        "pad": 2
+      }
+    },
+    {
+      "note": "a closed enum has no escape",
+      "type": "Status",
+      "value": {
+        "duty_available": "100",
+        "signal_bars": 5,
+        "oper": null,
+        "admin": "down"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "revision 1, the optional field absent: its presence bit, the bool, the marker at 0",
+      "type": "Link",
+      "value": {
+        "up": true
+      },
+      "expect": {
+        "hex": "40",
+        "bits": "010",
+        "pad": 5
+      }
+    },
+    {
+      "note": "revision 1, the optional field present",
+      "type": "Link",
+      "value": {
+        "rssi": -73,
+        "up": false
+      },
+      "expect": {
+        "hex": "a680",
+        "bits": "10100110100",
+        "pad": 5
+      }
+    },
+    {
+      "note": "revision 2, its appended field absent: the bytes revision 1 writes",
+      "type": "LinkV2",
+      "value": {
+        "rssi": -73,
+        "up": false
+      },
+      "expect": {
+        "hex": "a680",
+        "bits": "10100110100",
+        "pad": 5
+      }
+    },
+    {
+      "note": "revision 2, its appended field present: the marker at 1",
+      "type": "LinkV2",
+      "value": {
+        "up": true,
+        "quality": 87
+      },
+      "expect": {
+        "hex": "7ae0",
+        "bits": "011110101110",
+        "pad": 4
+      }
+    },
+    {
+      "note": "the renamed type writes Sensor's bytes",
+      "type": "SensorRenamed",
+      "value": {
+        "r_temperature": "21.5",
+        "r_humidity": "43.5",
+        "r_pressure": "1013.2",
+        "r_battery": "3.70"
+      },
+      "expect": {
+        "hex": "4ceafbdcaa",
+        "bits": "0100110011101010111110111101110010101010",
+        "pad": 0
+      },
+      "reads_as": {
+        "r_temperature": "21.5",
+        "r_humidity": "43.5",
+        "r_pressure": "1013.2",
+        "r_battery": "3.7"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "the sensor record",
+      "type": "Sensor",
+      "tag": 4,
+      "hex": "4ceafbdcaa",
+      "expect": {
+        "value": {
+          "temperature": "21.5",
+          "humidity": "43.5",
+          "pressure": "1013.2",
+          "battery": "3.7"
+        }
+      }
+    },
+    {
+      "note": "the wrong tag",
+      "type": "Sensor",
+      "tag": 5,
+      "hex": "4ceafbdcaa",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "another revision, pressure's bound moved: refused by its tag",
+      "type": "SensorWide",
+      "tag": 4,
+      "hex": "4ceafbdcaa",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "another revision whose tag collides: refused by its length",
+      "type": "SensorCollide",
+      "tag": 4,
+      "hex": "4ceafbdcaa",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a renamed type reads Sensor's record under Sensor's tag",
+      "type": "SensorRenamed",
+      "tag": 4,
+      "hex": "4ceafbdcaa",
+      "expect": {
+        "value": {
+          "r_temperature": "21.5",
+          "r_humidity": "43.5",
+          "r_pressure": "1013.2",
+          "r_battery": "3.7"
+        }
+      }
+    },
+    {
+      "note": "a byte short",
+      "type": "Sensor",
+      "tag": 4,
+      "hex": "4ceafbdc",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a byte too many",
+      "type": "Sensor",
+      "tag": 4,
+      "hex": "4ceafbdcaa00",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "no byte at all",
+      "type": "Sensor",
+      "tag": 4,
+      "hex": "",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "105 bits, then a pad of 7",
+      "type": "Counters",
+      "tag": 1,
+      "hex": "ff00000000800000000000000080",
+      "expect": {
+        "value": {
+          "c1": 1,
+          "c7": 127,
+          "c33": 1,
+          "c64": 1
+        }
+      }
+    },
+    {
+      "note": "a pad bit set",
+      "type": "Counters",
+      "tag": 1,
+      "hex": "ff00000000800000000000000081",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "the 16-bit word",
+      "type": "Status",
+      "tag": 8,
+      "hex": "fa2d",
+      "expect": {
+        "value": {
+          "duty_available": "100",
+          "signal_bars": 5,
+          "oper": "notPresent",
+          "admin": "down"
+        }
+      }
+    },
+    {
+      "note": "level's codes from 0 to 125 are values",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "7d3200",
+      "expect": {
+        "value": {
+          "level": 85,
+          "temperature": "0",
+          "phase": "a"
+        }
+      }
+    },
+    {
+      "note": "level's code 126, above the values and below the reserved codes: unused",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "7e3200",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "level's code 252, the last unused one",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "fc3200",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "level's code 253 is out_of_range",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "fd3200",
+      "expect": {
+        "value": {
+          "level": "out_of_range",
+          "temperature": "0",
+          "phase": "a"
+        }
+      }
+    },
+    {
+      "note": "level's code 254 is error, 255 not_available; temperature's 2047 not_available, 2046 error",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "feffc0",
+      "expect": {
+        "value": {
+          "level": "error",
+          "temperature": "error",
+          "phase": "a"
+        }
+      }
+    },
+    {
+      "note": "temperature's code 2047 is not_available",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "ffffe0",
+      "expect": {
+        "value": {
+          "level": "not_available",
+          "temperature": "not_available",
+          "phase": "a"
+        }
+      }
+    },
+    {
+      "note": "temperature's code 2045: unused",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "00ffa0",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "temperature's code 1250 is its maximum",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "009c50",
+      "expect": {
+        "value": {
+          "level": -40,
+          "temperature": "85",
+          "phase": "c"
+        }
+      }
+    },
+    {
+      "note": "a closed enum's code past its values: unused",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "000018",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "an unused code is refused before a short record",
+      "type": "Reserved",
+      "tag": 8,
+      "hex": "7e",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "seconds and milliseconds",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "tag": 10,
+      "hex": "03b20bfb03b20bfb7220",
+      "expect": {
+        "value": {
+          "at": 1762000123000,
+          "at_ms": 1762000123456,
+          "valid": true
+        }
+      }
+    },
+    {
+      "note": "a millisecond code of 1000: unused",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "tag": 10,
+      "hex": "03b20bfb03b20bfbfa20",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a millisecond code of 1023: unused",
+      "type": "Clock",
+      "epoch": 1700000000,
+      "tag": 10,
+      "hex": "03b20bfb03b20bfbffe0",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "an open enum's codes past its values read as the escape",
+      "type": "Mode",
+      "tag": 9,
+      "hex": "c8",
+      "expect": {
+        "value": {
+          "mode": null,
+          "wide": null
+        }
+      }
+    },
+    {
+      "note": "an open enum's next code reads as the escape: a later revision's value",
+      "type": "Mode",
+      "tag": 9,
+      "hex": "f8",
+      "expect": {
+        "value": {
+          "mode": null,
+          "wide": null
+        }
+      }
+    },
+    {
+      "note": "revision 1 reads revision 2's record: the marker at 1 at its layout's end, the rest ignored",
+      "type": "Link",
+      "tag": 14,
+      "hex": "7ae0",
+      "expect": {
+        "value": {
+          "up": true
+        }
+      }
+    },
+    {
+      "note": "revision 2 reads revision 1's record: the marker at 0, quality absent",
+      "type": "LinkV2",
+      "tag": 14,
+      "hex": "a680",
+      "expect": {
+        "value": {
+          "rssi": -73,
+          "up": false
+        }
+      }
+    },
+    {
+      "note": "one tag for both revisions",
+      "type": "LinkV2",
+      "tag": 14,
+      "hex": "7ae0",
+      "expect": {
+        "value": {
+          "up": true,
+          "quality": 87
+        }
+      }
+    },
+    {
+      "note": "the marker at 1 and nothing after it, where the reader knows every field: extension",
+      "type": "LinkV2",
+      "tag": 14,
+      "hex": "60",
+      "expect": {
+        "refused": "extension"
+      }
+    },
+    {
+      "note": "the marker at 0 on a byte boundary",
+      "type": "Grow",
+      "tag": 0,
+      "hex": "0a",
+      "expect": {
+        "value": {
+          "a": 5
+        }
+      }
+    },
+    {
+      "note": "the marker at 1 at the end of the layout, a later revision's bits after it, ignored",
+      "type": "Grow",
+      "tag": 0,
+      "hex": "0bb0",
+      "expect": {
+        "value": {
+          "a": 5
+        }
+      }
+    },
+    {
+      "note": "the marker at 1 at the end of the layout and no bit after it: length",
+      "type": "Grow",
+      "tag": 0,
+      "hex": "0b",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "the marker at 0 and a pad bit set",
+      "type": "Link",
+      "tag": 14,
+      "hex": "41",
+      "expect": {
+        "refused": "pad"
+      }
+    }
+  ]
+}

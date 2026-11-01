@@ -1,0 +1,34 @@
+{
+  "types": {
+    "A": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "int",
+          "minimum": 5,
+          "maximum": 4
+        },
+        {
+          "name": "b",
+          "type": "fixed",
+          "minimum": "1",
+          "maximum": "0.5",
+          "resolution": "0.5"
+        },
+        {
+          "name": "c",
+          "type": "enum",
+          "values": []
+        }
+      ]
+    },
+    "B": {
+      "fields": []
+    },
+    "C": {
+      "fields": [
+        "..."
+      ]
+    }
+  }
+}

@@ -1,0 +1,1475 @@
+//! Packed records (core §7.6, 0.75; #979 B1): a type kind whose record is
+//! bit fields, each as wide as the codes its declaration names.
+//!
+//! - **The schema file** ([`PackedDoc::read`]) is strict JSON: `types`, each
+//!   a record of `fields`, every field `int`, `fixed`, `enum`, `bool`,
+//!   `counter` or `time`, optionally optional, and `"..."` the extension
+//!   marker. Its lints are E038 to E045 (core §9.2), in cascade 7's order.
+//! - **The layout** ([`Layout`]) is each item's width, the record's
+//!   shortest and longest length, its layout form (the root's wire, without
+//!   names) and the tag, the low four bits of the form's sha256.
+//! - **The codec** ([`Layout::write`], [`Layout::read`]) is interpreted
+//!   over `serde_json::Value`, as core §7.6's JSON reading spells a record.
+//!   It is the source of truth that generated code (B2) matches, checked
+//!   against `spec/conformance/packed/vectors.json`.
+//!
+//! Fixed point is computed in exact decimal arithmetic over big integers,
+//! never in binary floating point: a JSON number is read by its shortest
+//! decimal text, as JSON writes it.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
+
+use num_bigint::{BigInt, Sign};
+use num_integer::Integer as _;
+use num_traits::{One as _, Signed as _, ToPrimitive as _, Zero as _};
+use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
+
+/// The extension marker, as `fields` writes it.
+pub const MARKER: &str = "...";
+
+/// The six field types of core §7.6, by their `type` spelling.
+pub const FIELD_TYPES: &[&str] = &["int", "fixed", "enum", "bool", "counter", "time"];
+
+/// The reserved codes, in the order they take the top codes of a width.
+pub const RESERVED: &[&str] = &["not_available", "error", "out_of_range"];
+
+/// The most digits a writer's decimal may carry, either side of the point,
+/// once its exponent is applied. A model limit, not the text's: a value
+/// past it is refused as `value`.
+const INPUT_DIGITS: u32 = 1024;
+
+// --- Exact decimals ---------------------------------------------------------
+
+/// An exact decimal: `m / 10^e`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Decimal {
+    m: BigInt,
+    e: u32,
+}
+
+impl Decimal {
+    /// A declaration's decimal string, `-?(0|[1-9][0-9]*)(\.[0-9]+)?`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        let body = s.strip_prefix('-').unwrap_or(s);
+        let (int, frac) = match body.split_once('.') {
+            Some((i, f)) => (i, Some(f)),
+            None => (body, None),
+        };
+        let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+        if !digits(int) || (int.len() > 1 && int.starts_with('0')) {
+            return None;
+        }
+        if frac.is_some_and(|f| !digits(f)) {
+            return None;
+        }
+        Self::from_parts(s.starts_with('-'), int, frac.unwrap_or(""), 0)
+    }
+
+    /// A writer's decimal: the declaration grammar with leading zeros and an
+    /// exponent allowed, which is how a JSON number's text reads.
+    #[must_use]
+    pub fn parse_input(s: &str) -> Option<Self> {
+        let neg = s.starts_with('-');
+        let body = s.strip_prefix('-').unwrap_or(s);
+        let (mant, exp) = match body.find(['e', 'E']) {
+            Some(i) => (&body[..i], Some(&body[i + 1..])),
+            None => (body, None),
+        };
+        let (int, frac) = match mant.split_once('.') {
+            Some((i, f)) => (i, f),
+            None => (mant, ""),
+        };
+        let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+        if !digits(int) || (mant.contains('.') && !digits(frac)) {
+            return None;
+        }
+        let exp: i64 = match exp {
+            None => 0,
+            Some(x) => {
+                let d = x.strip_prefix(['+', '-']).unwrap_or(x);
+                if !digits(d) || d.len() > 9 {
+                    return None;
+                }
+                x.parse().ok()?
+            }
+        };
+        Self::from_parts(neg, int, frac, exp)
+    }
+
+    fn from_parts(neg: bool, int: &str, frac: &str, exp: i64) -> Option<Self> {
+        let text = format!("{int}{frac}");
+        let mut m: BigInt = text.parse().ok()?;
+        let scale = i64::try_from(frac.len()).ok()? - exp;
+        let width = i64::try_from(int.len()).ok()? + exp;
+        if scale > i64::from(INPUT_DIGITS) || width > i64::from(INPUT_DIGITS) {
+            return None;
+        }
+        let e = if scale < 0 {
+            m *= pow10(u32::try_from(-scale).ok()?);
+            0
+        } else {
+            u32::try_from(scale).ok()?
+        };
+        if neg {
+            m = -m;
+        }
+        Some(Self { m, e }.normalized())
+    }
+
+    fn normalized(mut self) -> Self {
+        let ten = BigInt::from(10);
+        while self.e > 0 && (&self.m % &ten).is_zero() {
+            self.m /= &ten;
+            self.e -= 1;
+        }
+        self
+    }
+
+    /// `m` at the scale `e` (which is at least this decimal's).
+    fn at(&self, e: u32) -> BigInt {
+        &self.m * pow10(e - self.e)
+    }
+
+    fn sub(&self, o: &Self) -> Self {
+        let e = self.e.max(o.e);
+        Self {
+            m: self.at(e) - o.at(e),
+            e,
+        }
+        .normalized()
+    }
+
+    fn add(&self, o: &Self) -> Self {
+        let e = self.e.max(o.e);
+        Self {
+            m: self.at(e) + o.at(e),
+            e,
+        }
+        .normalized()
+    }
+
+    fn mul_int(&self, k: &BigInt) -> Self {
+        Self {
+            m: &self.m * k,
+            e: self.e,
+        }
+        .normalized()
+    }
+
+    fn is_positive(&self) -> bool {
+        self.m.is_positive()
+    }
+
+    /// `self / o`, when it is an integer.
+    fn div_exact(&self, o: &Self) -> Option<BigInt> {
+        let e = self.e.max(o.e);
+        let (q, r) = self.at(e).div_mod_floor(&o.at(e));
+        r.is_zero().then_some(q)
+    }
+
+    /// `self / o` rounded to the nearest integer, a tie to the even one.
+    fn div_round_even(&self, o: &Self) -> BigInt {
+        let e = self.e.max(o.e);
+        let d = o.at(e);
+        let (q, r) = self.at(e).div_mod_floor(&d);
+        let twice: BigInt = &r * BigInt::from(2u8);
+        let up = match twice.cmp(&d) {
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Equal => q.is_odd(),
+        };
+        if up { q + BigInt::one() } else { q }
+    }
+}
+
+impl PartialOrd for Decimal {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+
+impl Ord for Decimal {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        let e = self.e.max(o.e);
+        self.at(e).cmp(&o.at(e))
+    }
+}
+
+impl std::fmt::Display for Decimal {
+    /// The shortest form (core §7.6): no zero at the end of a fraction, no
+    /// point without a digit after it, `0` for zero.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let n = self.clone().normalized();
+        if n.m.is_zero() {
+            return f.write_str("0");
+        }
+        let digits = n.m.abs().to_string();
+        let e = n.e as usize;
+        let sign = if n.m.sign() == Sign::Minus { "-" } else { "" };
+        if e == 0 {
+            return write!(f, "{sign}{digits}");
+        }
+        let padded = format!("{digits:0>width$}", width = e + 1);
+        let (int, frac) = padded.split_at(padded.len() - e);
+        write!(f, "{sign}{int}.{frac}")
+    }
+}
+
+fn pow10(n: u32) -> BigInt {
+    num_traits::pow(BigInt::from(10), n as usize)
+}
+
+/// The fewest bits that hold `codes` codes, `⌈log₂ codes⌉`.
+fn bits_for(codes: &BigInt) -> u64 {
+    if codes <= &BigInt::one() {
+        0
+    } else {
+        (codes - 1u32).bits()
+    }
+}
+
+// --- The schema file ---------------------------------------------------------
+
+/// One lint finding in a packed file (core §9.2's E038 to E045).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Finding {
+    pub code: &'static str,
+    /// Where in the file: `""` for its top level, `types.<Name>`, or
+    /// `types.<Name>.fields[<i>]`.
+    pub at: String,
+    pub message: String,
+}
+
+/// A field's type, with what its declaration fixes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldKind {
+    Int {
+        minimum: i64,
+        maximum: i64,
+        reserved: Vec<&'static str>,
+    },
+    Fixed {
+        minimum: Decimal,
+        maximum: Decimal,
+        resolution: Decimal,
+        reserved: Vec<&'static str>,
+        /// `(maximum − minimum) / resolution + 1`.
+        values: u128,
+    },
+    Enum {
+        values: Vec<String>,
+        escape: bool,
+    },
+    Bool,
+    Counter,
+    Time {
+        ms: bool,
+    },
+}
+
+impl FieldKind {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Int { .. } => "int",
+            Self::Fixed { .. } => "fixed",
+            Self::Enum { .. } => "enum",
+            Self::Bool => "bool",
+            Self::Counter => "counter",
+            Self::Time { .. } => "time",
+        }
+    }
+}
+
+/// One field of a layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Field {
+    pub name: String,
+    pub kind: FieldKind,
+    /// From 1 to 64.
+    pub width: u32,
+    pub optional: bool,
+}
+
+/// An item of a record's `fields`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Item {
+    Field(Field),
+    /// The extension marker, one bit.
+    Marker,
+}
+
+/// A packed file read and linted: every type its `types` names with a type
+/// name, and the layout of each that has no finding.
+#[derive(Debug, Clone, Default)]
+pub struct PackedDoc {
+    /// `None` for a type whose record has a finding.
+    pub types: BTreeMap<String, Option<Layout>>,
+    pub findings: Vec<Finding>,
+}
+
+fn is_type_name(s: &str) -> bool {
+    let mut b = s.bytes();
+    b.next().is_some_and(|c| c.is_ascii_uppercase()) && b.all(|c| c.is_ascii_alphanumeric())
+}
+
+fn is_field_name(s: &str) -> bool {
+    let mut b = s.bytes();
+    b.next().is_some_and(|c| c.is_ascii_lowercase())
+        && b.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+}
+
+fn is_value_name(s: &str) -> bool {
+    let mut b = s.bytes();
+    b.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && b.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+}
+
+/// The members a field type takes beside `name`, `type`, `optional` and
+/// `description`, and those it needs.
+fn members(ty: &str) -> (&'static [&'static str], &'static [&'static str]) {
+    match ty {
+        "int" => (&["minimum", "maximum", "reserved"], &["minimum", "maximum"]),
+        "fixed" => (
+            &["minimum", "maximum", "resolution", "reserved"],
+            &["minimum", "maximum", "resolution"],
+        ),
+        "enum" => (&["values", "escape", "width"], &["values"]),
+        "counter" => (&["width"], &["width"]),
+        "time" => (&["ms"], &[]),
+        _ => (&[], &[]),
+    }
+}
+
+/// The first shape problem of a field object, for its one E038.
+fn field_shape(m: &Map<String, Value>, ty: &str) -> Option<String> {
+    let (takes, needs) = members(ty);
+    for k in m.keys() {
+        if !["name", "type", "optional", "description"].contains(&k.as_str())
+            && !takes.contains(&k.as_str())
+        {
+            return Some(format!("a `{ty}` field takes no member {k:?}"));
+        }
+    }
+    for k in std::iter::once(&"name").chain(needs) {
+        if !m.contains_key(*k) {
+            return Some(format!("a `{ty}` field needs `{k}`"));
+        }
+    }
+    match m.get("name") {
+        Some(Value::String(n)) if is_field_name(n) => {}
+        Some(v) => return Some(format!("`name` {v} is not [a-z][a-z0-9_]*")),
+        None => {}
+    }
+    let is_bool = |k: &str| m.get(k).is_none_or(Value::is_boolean);
+    let is_int = |k: &str| m.get(k).is_none_or(|v| v.as_i64().is_some());
+    let is_str = |k: &str| m.get(k).is_none_or(Value::is_string);
+    if !is_bool("optional") {
+        return Some("`optional` is not a boolean".into());
+    }
+    if !is_str("description") {
+        return Some("`description` is not a string".into());
+    }
+    let list_of = |k: &str, ok: &dyn Fn(&str) -> bool| match m.get(k) {
+        None => true,
+        Some(Value::Array(a)) => a.iter().all(|v| v.as_str().is_some_and(ok)),
+        Some(_) => false,
+    };
+    let problem = match ty {
+        "int" if !is_int("minimum") || !is_int("maximum") => {
+            Some("`minimum` and `maximum` are integers")
+        }
+        "fixed" if !is_str("minimum") || !is_str("maximum") || !is_str("resolution") => {
+            Some("`minimum`, `maximum` and `resolution` are decimal strings")
+        }
+        "int" | "fixed" if !list_of("reserved", &|s| RESERVED.contains(&s)) => {
+            Some("`reserved` lists not_available, error and out_of_range")
+        }
+        "enum" if !list_of("values", &is_value_name) => {
+            Some("`values` is a list of names [A-Za-z][A-Za-z0-9_]*")
+        }
+        "enum" if !is_bool("escape") => Some("`escape` is not a boolean"),
+        "enum" | "counter" if !is_int("width") => Some("`width` is not an integer"),
+        "time" if !is_bool("ms") => Some("`ms` is not a boolean"),
+        _ => None,
+    };
+    problem.map(str::to_owned)
+}
+
+/// Repeats in a list of names: each one after its first.
+fn repeats<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    let mut seen = BTreeSet::new();
+    names.into_iter().filter(|n| !seen.insert(*n)).collect()
+}
+
+fn strings(v: Option<&Value>) -> Vec<&str> {
+    v.and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+fn reserved_of(m: &Map<String, Value>) -> Vec<&'static str> {
+    let listed = strings(m.get("reserved"));
+    RESERVED
+        .iter()
+        .copied()
+        .filter(|r| listed.contains(r))
+        .collect()
+}
+
+/// A field's E039, E040 or E041, the first met in cascade 7's order, or
+/// its layout.
+fn field_of(m: &Map<String, Value>, ty: &str) -> Result<Field, (&'static str, String)> {
+    let name = m["name"].as_str().unwrap_or_default().to_owned();
+    let optional = m.get("optional").and_then(Value::as_bool).unwrap_or(false);
+    let wide = |codes: &BigInt| -> Result<u32, (&'static str, String)> {
+        let w = bits_for(codes);
+        if (1..=64).contains(&w) {
+            Ok(u32::try_from(w).unwrap_or(64))
+        } else {
+            Err((
+                "E041",
+                format!("{codes} codes need {w} bits; a field is 1 to 64"),
+            ))
+        }
+    };
+    let (kind, width) = match ty {
+        "int" => {
+            let (lo, hi) = (
+                m["minimum"].as_i64().unwrap_or(0),
+                m["maximum"].as_i64().unwrap_or(0),
+            );
+            if lo > hi {
+                return Err(("E039", format!("`minimum` {lo} is above `maximum` {hi}")));
+            }
+            let reserved = reserved_of(m);
+            let codes = BigInt::from(hi) - BigInt::from(lo) + BigInt::from(1 + reserved.len());
+            let width = wide(&codes)?;
+            (
+                FieldKind::Int {
+                    minimum: lo,
+                    maximum: hi,
+                    reserved,
+                },
+                width,
+            )
+        }
+        "fixed" => {
+            let read = |k: &str| {
+                let s = m[k].as_str().unwrap_or_default();
+                Decimal::parse(s).ok_or_else(|| ("E040", format!("`{k}` {s:?} is not a decimal")))
+            };
+            let (lo, hi, res) = (read("minimum")?, read("maximum")?, read("resolution")?);
+            if lo > hi {
+                return Err(("E039", format!("`minimum` {lo} is above `maximum` {hi}")));
+            }
+            if !res.is_positive() {
+                return Err(("E040", format!("`resolution` {res} is not above 0")));
+            }
+            let Some(steps) = hi.sub(&lo).div_exact(&res) else {
+                return Err((
+                    "E040",
+                    format!("`resolution` {res} does not divide {hi} − {lo}"),
+                ));
+            };
+            let reserved = reserved_of(m);
+            let values: BigInt = steps + BigInt::one();
+            let width = wide(&(&values + BigInt::from(reserved.len())))?;
+            (
+                FieldKind::Fixed {
+                    minimum: lo,
+                    maximum: hi,
+                    resolution: res,
+                    reserved,
+                    values: values.to_u128().unwrap_or(u128::MAX),
+                },
+                width,
+            )
+        }
+        "enum" => {
+            let values: Vec<String> = strings(m.get("values"))
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            if values.is_empty() {
+                return Err(("E039", "an enum with no value".into()));
+            }
+            let escape = m.get("escape").and_then(Value::as_bool).unwrap_or(false);
+            let need = bits_for(&BigInt::from(values.len() + usize::from(escape)));
+            let width = match m.get("width").and_then(Value::as_i64) {
+                Some(w) if !(1..=64).contains(&w) || u64::try_from(w).unwrap_or(0) < need => {
+                    return Err((
+                        "E041",
+                        format!("`width` {w}: the enum needs {need} bits, and a field is 1 to 64"),
+                    ));
+                }
+                Some(w) => u32::try_from(w).unwrap_or(64),
+                None => wide(&BigInt::from(values.len() + usize::from(escape)))?,
+            };
+            (FieldKind::Enum { values, escape }, width)
+        }
+        "bool" => (FieldKind::Bool, 1),
+        "counter" => {
+            let w = m["width"].as_i64().unwrap_or(0);
+            if !(1..=64).contains(&w) {
+                return Err(("E041", format!("a counter's `width` {w} is not 1 to 64")));
+            }
+            (FieldKind::Counter, u32::try_from(w).unwrap_or(64))
+        }
+        "time" => {
+            let ms = m.get("ms").and_then(Value::as_bool).unwrap_or(false);
+            (FieldKind::Time { ms }, if ms { 42 } else { 32 })
+        }
+        _ => unreachable!("checked by E043"),
+    };
+    Ok(Field {
+        name,
+        kind,
+        width,
+        optional,
+    })
+}
+
+impl PackedDoc {
+    /// Reads and lints a packed document (core §7.6, §9.2's E038 to E045 and
+    /// cascade 7).
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
+    pub fn read(doc: &Value) -> Self {
+        let mut findings = Vec::new();
+        let mut find = |code: &'static str, at: String, message: String| {
+            findings.push(Finding { code, at, message });
+        };
+        let Value::Object(top) = doc else {
+            find(
+                "E038",
+                String::new(),
+                "the top level is not an object".into(),
+            );
+            return Self {
+                types: BTreeMap::new(),
+                findings,
+            };
+        };
+        let mut types: BTreeMap<String, Option<Layout>> = BTreeMap::new();
+        let problem = top
+            .keys()
+            .find(|k| *k != "types" && *k != "description")
+            .map(|k| format!("the top level takes no member {k:?}"))
+            .or_else(|| {
+                (!top.get("description").is_none_or(Value::is_string))
+                    .then(|| "`description` is not a string".to_owned())
+            })
+            .or_else(|| match top.get("types") {
+                Some(Value::Object(_)) => None,
+                Some(_) => Some("`types` is not an object".into()),
+                None => Some("there is no `types`".into()),
+            });
+        if let Some(p) = problem {
+            find("E038", String::new(), p);
+        }
+        let Some(Value::Object(defs)) = top.get("types") else {
+            return Self { types, findings };
+        };
+        for (name, record) in defs {
+            let at = format!("types.{name}");
+            if !is_type_name(name) {
+                find(
+                    "E038",
+                    at,
+                    format!("{name:?} is not a type name [A-Z][A-Za-z0-9]*"),
+                );
+                continue;
+            }
+            let mut clean = true;
+            let Value::Object(rec) = record else {
+                find("E038", at, "a record is an object".into());
+                types.insert(name.clone(), None);
+                continue;
+            };
+            let problem = rec
+                .keys()
+                .find(|k| *k != "fields" && *k != "description")
+                .map(|k| format!("a record takes no member {k:?}"))
+                .or_else(|| {
+                    (!rec.get("description").is_none_or(Value::is_string))
+                        .then(|| "`description` is not a string".to_owned())
+                })
+                .or_else(|| match rec.get("fields") {
+                    Some(Value::Array(_)) => None,
+                    Some(_) => Some("`fields` is not a list".into()),
+                    None => Some("a record needs `fields`".into()),
+                });
+            if let Some(p) = problem {
+                find("E038", at.clone(), p);
+                clean = false;
+            }
+            let Some(Value::Array(list)) = rec.get("fields") else {
+                types.insert(name.clone(), None);
+                continue;
+            };
+            // Each item: a marker, a field read whole, or a field with a
+            // finding (which takes no part in E042 and E045).
+            let mut items: Vec<Option<Item>> = Vec::new();
+            let mut sound: Vec<(usize, &str, bool)> = Vec::new();
+            let mut objects = 0;
+            for (i, item) in list.iter().enumerate() {
+                let fat = format!("{at}.fields[{i}]");
+                if item.as_str() == Some(MARKER) {
+                    items.push(Some(Item::Marker));
+                    continue;
+                }
+                let Value::Object(f) = item else {
+                    find(
+                        "E038",
+                        fat,
+                        "an item is a field object or the marker \"...\"".into(),
+                    );
+                    items.push(None);
+                    clean = false;
+                    continue;
+                };
+                objects += 1;
+                let ty = match f.get("type") {
+                    Some(Value::String(t)) if FIELD_TYPES.contains(&t.as_str()) => t.as_str(),
+                    Some(Value::String(t)) => {
+                        find(
+                            "E043",
+                            fat,
+                            format!("`type` {t:?} names no field type of core §7.6"),
+                        );
+                        items.push(None);
+                        clean = false;
+                        continue;
+                    }
+                    _ => {
+                        find("E038", fat, "a field needs `type`, a string".into());
+                        items.push(None);
+                        clean = false;
+                        continue;
+                    }
+                };
+                if let Some(p) = field_shape(f, ty) {
+                    find("E038", fat, p);
+                    items.push(None);
+                    clean = false;
+                    continue;
+                }
+                let name = f["name"].as_str().unwrap_or_default();
+                let optional = f.get("optional").and_then(Value::as_bool).unwrap_or(false);
+                sound.push((i, name, optional));
+                for key in ["values", "reserved"] {
+                    for r in repeats(strings(f.get(key))) {
+                        find("E042", fat.clone(), format!("{r:?} is repeated in `{key}`"));
+                        clean = false;
+                    }
+                }
+                match field_of(f, ty) {
+                    Ok(field) => items.push(Some(Item::Field(field))),
+                    Err((code, message)) => {
+                        find(code, fat, message);
+                        items.push(None);
+                        clean = false;
+                    }
+                }
+            }
+            for r in repeats(sound.iter().map(|(_, n, _)| *n)) {
+                find(
+                    "E042",
+                    at.clone(),
+                    format!("the field name {r:?} is repeated"),
+                );
+                clean = false;
+            }
+            let first_marker = list.iter().position(|v| v.as_str() == Some(MARKER));
+            for (i, item) in list.iter().enumerate() {
+                if item.as_str() == Some(MARKER) && i > 0 && list[i - 1].as_str() == Some(MARKER) {
+                    find(
+                        "E045",
+                        format!("{at}.fields[{i}]"),
+                        "a marker right after another".into(),
+                    );
+                    clean = false;
+                }
+            }
+            if let Some(m0) = first_marker {
+                for (i, n, optional) in &sound {
+                    if *i > m0 && !optional {
+                        find(
+                            "E045",
+                            format!("{at}.fields[{i}]"),
+                            format!("{n:?} is after a marker, and is not optional"),
+                        );
+                        clean = false;
+                    }
+                }
+            }
+            if objects == 0 {
+                find("E039", at.clone(), "a record with no field".into());
+                clean = false;
+            }
+            let layout = if clean {
+                items
+                    .into_iter()
+                    .collect::<Option<Vec<Item>>>()
+                    .map(Layout::new)
+            } else {
+                None
+            };
+            types.insert(name.clone(), layout);
+        }
+        Self { types, findings }
+    }
+}
+
+// --- The layout ---------------------------------------------------------------
+
+/// A type's layout: its items, its layout form and its tag (core §7.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Layout {
+    pub items: Vec<Item>,
+    form: Value,
+    sha256: [u8; 32],
+}
+
+/// An item's width and start, as `describe` reports them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Slot {
+    /// `None` for a marker.
+    pub name: Option<String>,
+    pub width: u32,
+    pub optional: bool,
+    /// The bit where the item starts, `None` once an optional field or a
+    /// marker before it makes it vary.
+    pub offset: Option<u64>,
+}
+
+impl Field {
+    fn form(&self) -> Value {
+        let mut f = Map::new();
+        f.insert("type".into(), self.kind.as_str().into());
+        f.insert("width".into(), self.width.into());
+        f.insert("optional".into(), self.optional.into());
+        match &self.kind {
+            FieldKind::Int {
+                minimum,
+                maximum,
+                reserved,
+            } => {
+                f.insert("minimum".into(), (*minimum).into());
+                f.insert("maximum".into(), (*maximum).into());
+                f.insert("reserved".into(), reserved.clone().into());
+            }
+            FieldKind::Fixed {
+                minimum,
+                maximum,
+                resolution,
+                reserved,
+                ..
+            } => {
+                f.insert("minimum".into(), minimum.to_string().into());
+                f.insert("maximum".into(), maximum.to_string().into());
+                f.insert("resolution".into(), resolution.to_string().into());
+                f.insert("reserved".into(), reserved.clone().into());
+            }
+            FieldKind::Enum { values, escape } => {
+                f.insert("escape".into(), (*escape).into());
+                if !escape {
+                    f.insert("values".into(), values.len().into());
+                }
+            }
+            FieldKind::Time { ms } => {
+                f.insert("ms".into(), (*ms).into());
+            }
+            FieldKind::Bool | FieldKind::Counter => {}
+        }
+        Value::Object(f)
+    }
+
+    fn top(&self) -> u64 {
+        if self.width == 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.width) - 1
+        }
+    }
+
+    fn reserved_code(&self, i: usize) -> u64 {
+        self.top() - i as u64
+    }
+}
+
+/// Why a writer refused a value (core §7.6, the vectors' tokens).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteRefusal {
+    /// A field that is not optional is not given.
+    Missing,
+    /// A member the type does not have.
+    Unknown,
+    /// A value of the wrong JSON type, a name not declared, or a decimal
+    /// that does not read.
+    Value,
+    /// A value that has no code.
+    Range,
+    /// A time field, and no deployment epoch.
+    Epoch,
+}
+
+impl WriteRefusal {
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Unknown => "unknown",
+            Self::Value => "value",
+            Self::Range => "range",
+            Self::Epoch => "epoch",
+        }
+    }
+}
+
+/// Why a reader refused a record (core §7.6's order).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadRefusal {
+    /// CH's tag is not the type's.
+    Tag,
+    /// The record ends before a bit its layout needs, or holds a byte after
+    /// its pad.
+    Length,
+    /// A field's code is unused.
+    Code,
+    /// A marker read as 1 is followed by no present field.
+    Extension,
+    /// A bit of the pad is 1.
+    Pad,
+    /// A time field, and no deployment epoch: the reader's input, not the
+    /// record's fault.
+    Epoch,
+}
+
+impl ReadRefusal {
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::Tag => "tag",
+            Self::Length => "length",
+            Self::Code => "code",
+            Self::Extension => "extension",
+            Self::Pad => "pad",
+            Self::Epoch => "epoch",
+        }
+    }
+}
+
+/// A record as a writer wrote it: its bytes, and how many of their bits
+/// are the record's (the rest is the pad).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+    pub bytes: Vec<u8>,
+    pub bits: u64,
+}
+
+impl Record {
+    /// The pad's zero bits, fewer than 8.
+    #[must_use]
+    pub fn pad(&self) -> u64 {
+        self.bytes.len() as u64 * 8 - self.bits
+    }
+
+    /// The record's bits before the pad, as `0` and `1`.
+    #[must_use]
+    pub fn bit_string(&self) -> String {
+        (0..self.bits)
+            .map(|i| {
+                let b = (self.bytes[(i / 8) as usize] >> (7 - i % 8)) & 1;
+                if b == 1 { '1' } else { '0' }
+            })
+            .collect()
+    }
+}
+
+struct Bits {
+    bytes: Vec<u8>,
+    len: u64,
+}
+
+impl Bits {
+    fn push(&mut self, v: u64, width: u32) {
+        for i in (0..width).rev() {
+            if self.len.is_multiple_of(8) {
+                self.bytes.push(0);
+            }
+            if (v >> i) & 1 == 1 {
+                let last = self.bytes.len() - 1;
+                self.bytes[last] |= 0x80 >> (self.len % 8);
+            }
+            self.len += 1;
+        }
+    }
+}
+
+struct Reader<'a> {
+    bytes: &'a [u8],
+    pos: u64,
+}
+
+impl Reader<'_> {
+    fn total(&self) -> u64 {
+        self.bytes.len() as u64 * 8
+    }
+
+    fn take(&mut self, width: u32) -> Result<u64, ReadRefusal> {
+        if self.pos + u64::from(width) > self.total() {
+            return Err(ReadRefusal::Length);
+        }
+        let mut v = 0u64;
+        for _ in 0..width {
+            let b = (self.bytes[(self.pos / 8) as usize] >> (7 - self.pos % 8)) & 1;
+            v = (v << 1) | u64::from(b);
+            self.pos += 1;
+        }
+        Ok(v)
+    }
+}
+
+/// A JSON number or a decimal string, as a writer's decimal.
+fn input_decimal(v: &Value) -> Result<Decimal, WriteRefusal> {
+    match v {
+        Value::String(s) => Decimal::parse_input(s).ok_or(WriteRefusal::Value),
+        // serde_json writes a float in its shortest round-trip text (ryu),
+        // and an integer as its digits.
+        Value::Number(n) => Decimal::parse_input(&n.to_string()).ok_or(WriteRefusal::Value),
+        _ => Err(WriteRefusal::Value),
+    }
+}
+
+/// A JSON integer. A float that is integral and beyond 64 bits is how a
+/// JSON reader without big integers holds integer text past them: such a
+/// value is out of range, never of the wrong type.
+fn input_integer(v: &Value) -> Result<i128, WriteRefusal> {
+    match v {
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(i128::from(i))
+            } else if let Some(u) = n.as_u64() {
+                Ok(i128::from(u))
+            } else {
+                // Every float this large is an integer.
+                if n.as_f64().unwrap_or(0.0).abs() >= 2f64.powi(63) {
+                    Err(WriteRefusal::Range)
+                } else {
+                    Err(WriteRefusal::Value)
+                }
+            }
+        }
+        _ => Err(WriteRefusal::Value),
+    }
+}
+
+impl Layout {
+    fn new(items: Vec<Item>) -> Self {
+        let mut form = Vec::new();
+        for it in &items {
+            match it {
+                Item::Marker => {
+                    form.push(Value::from(MARKER));
+                    break;
+                }
+                Item::Field(f) => form.push(f.form()),
+            }
+        }
+        let form = Value::Array(form);
+        let sha256 = Sha256::digest(crate::schema::jcs(&form)).into();
+        Self {
+            items,
+            form,
+            sha256,
+        }
+    }
+
+    /// The layout form: the root's wire, without names (core §7.6).
+    #[must_use]
+    pub fn form(&self) -> &Value {
+        &self.form
+    }
+
+    /// The sha256 of the layout form's JCS bytes, in lowercase hex.
+    #[must_use]
+    pub fn sha256_hex(&self) -> String {
+        let mut s = String::with_capacity(64);
+        for b in self.sha256 {
+            let _ = write!(s, "{b:02x}");
+        }
+        s
+    }
+
+    /// The tag CH carries: the low four bits of the hash's last byte.
+    #[must_use]
+    pub fn tag(&self) -> u8 {
+        self.sha256[31] & 0x0f
+    }
+
+    /// Each item's width and start.
+    #[must_use]
+    pub fn slots(&self) -> Vec<Slot> {
+        let (mut pos, mut fixed) = (0u64, true);
+        let mut out = Vec::new();
+        for it in &self.items {
+            let offset = fixed.then_some(pos);
+            match it {
+                Item::Marker => {
+                    out.push(Slot {
+                        name: None,
+                        width: 1,
+                        optional: false,
+                        offset,
+                    });
+                    fixed = false;
+                }
+                Item::Field(f) => {
+                    out.push(Slot {
+                        name: Some(f.name.clone()),
+                        width: f.width,
+                        optional: f.optional,
+                        offset,
+                    });
+                    if f.optional {
+                        fixed = false;
+                    } else {
+                        pos += u64::from(f.width);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The shortest record this revision writes, before the pad: every
+    /// optional field absent and the first marker 0.
+    #[must_use]
+    pub fn min_bits(&self) -> u64 {
+        let mut n = 0;
+        for it in &self.items {
+            match it {
+                Item::Marker => return n + 1,
+                Item::Field(f) if f.optional => n += 1,
+                Item::Field(f) => n += u64::from(f.width),
+            }
+        }
+        n
+    }
+
+    /// The longest: every field present, every marker before one 1, and
+    /// the last marker 0.
+    #[must_use]
+    pub fn max_bits(&self) -> u64 {
+        self.items
+            .iter()
+            .map(|it| match it {
+                Item::Marker => 1,
+                Item::Field(f) => u64::from(f.width) + u64::from(f.optional),
+            })
+            .sum()
+    }
+
+    /// Writes a value, the JSON object core §7.6's reading spells, with the
+    /// deployment epoch in seconds where a time field needs one.
+    ///
+    /// # Errors
+    /// The writer's refusal: [`WriteRefusal`].
+    pub fn write(&self, value: &Value, epoch: Option<i64>) -> Result<Record, WriteRefusal> {
+        let Value::Object(obj) = value else {
+            return Err(WriteRefusal::Value);
+        };
+        let names: BTreeSet<&str> = self
+            .items
+            .iter()
+            .filter_map(|it| match it {
+                Item::Field(f) => Some(f.name.as_str()),
+                Item::Marker => None,
+            })
+            .collect();
+        if obj.keys().any(|k| !names.contains(k.as_str())) {
+            return Err(WriteRefusal::Unknown);
+        }
+        let mut bits = Bits {
+            bytes: Vec::new(),
+            len: 0,
+        };
+        for (i, it) in self.items.iter().enumerate() {
+            match it {
+                Item::Marker => {
+                    let later = self.items[i + 1..].iter().any(|x| match x {
+                        Item::Field(f) => obj.contains_key(&f.name),
+                        Item::Marker => false,
+                    });
+                    bits.push(u64::from(later), 1);
+                    if !later {
+                        break;
+                    }
+                }
+                Item::Field(f) => match obj.get(&f.name) {
+                    None if f.optional => bits.push(0, 1),
+                    None => return Err(WriteRefusal::Missing),
+                    Some(v) => {
+                        let code = f.code(v, epoch)?;
+                        if f.optional {
+                            bits.push(1, 1);
+                        }
+                        if let FieldKind::Time { ms: true } = f.kind {
+                            bits.push(code >> 10, 32);
+                            bits.push(code & 0x3ff, 10);
+                        } else {
+                            bits.push(code, f.width);
+                        }
+                    }
+                },
+            }
+        }
+        Ok(Record {
+            bytes: bits.bytes,
+            bits: bits.len,
+        })
+    }
+
+    /// Reads a record under the tag its envelope's CH carries, refusing it
+    /// for the first of core §7.6's checks that applies.
+    ///
+    /// # Errors
+    /// The reader's refusal: [`ReadRefusal`].
+    pub fn read(&self, tag: u8, bytes: &[u8], epoch: Option<i64>) -> Result<Value, ReadRefusal> {
+        if tag != self.tag() {
+            return Err(ReadRefusal::Tag);
+        }
+        let mut r = Reader { bytes, pos: 0 };
+        let mut out = Map::new();
+        let mut set_marker = false;
+        let mut present_after = false;
+        let last = self.items.len().saturating_sub(1);
+        for (i, it) in self.items.iter().enumerate() {
+            match it {
+                Item::Marker => {
+                    if r.take(1)? == 0 {
+                        break;
+                    }
+                    if i == last {
+                        // A later revision's bits: at least one of them.
+                        if r.total() <= r.pos {
+                            return Err(ReadRefusal::Length);
+                        }
+                        return Ok(Value::Object(out));
+                    }
+                    set_marker = true;
+                    present_after = false;
+                }
+                Item::Field(f) => {
+                    if f.optional && r.take(1)? == 0 {
+                        continue;
+                    }
+                    let code = r.take(f.width)?;
+                    out.insert(f.name.clone(), f.value(code, epoch)?);
+                    present_after = true;
+                }
+            }
+        }
+        if set_marker && !present_after {
+            return Err(ReadRefusal::Extension);
+        }
+        if bytes.len() as u64 != r.pos.div_ceil(8) {
+            return Err(ReadRefusal::Length);
+        }
+        while r.pos < r.total() {
+            if r.take(1)? == 1 {
+                return Err(ReadRefusal::Pad);
+            }
+        }
+        Ok(Value::Object(out))
+    }
+}
+
+impl Field {
+    fn code(&self, v: &Value, epoch: Option<i64>) -> Result<u64, WriteRefusal> {
+        let reserved = |list: &[&'static str], s: &str| {
+            list.iter()
+                .position(|r| *r == s)
+                .map(|i| self.reserved_code(i))
+                .ok_or(WriteRefusal::Value)
+        };
+        match &self.kind {
+            FieldKind::Int {
+                minimum,
+                maximum,
+                reserved: res,
+            } => {
+                if let Value::String(s) = v
+                    && RESERVED.contains(&s.as_str())
+                {
+                    return reserved(res, s);
+                }
+                let x = input_integer(v)?;
+                if x < i128::from(*minimum) || x > i128::from(*maximum) {
+                    return Err(WriteRefusal::Range);
+                }
+                u64::try_from(x - i128::from(*minimum)).map_err(|_| WriteRefusal::Range)
+            }
+            FieldKind::Fixed {
+                minimum,
+                resolution,
+                reserved: res,
+                values,
+                ..
+            } => {
+                if let Value::String(s) = v
+                    && RESERVED.contains(&s.as_str())
+                {
+                    return reserved(res, s);
+                }
+                let x = input_decimal(v)?;
+                let n = x.sub(minimum).div_round_even(resolution);
+                match n.to_u128() {
+                    Some(c) if c < *values => u64::try_from(c).map_err(|_| WriteRefusal::Range),
+                    _ => Err(WriteRefusal::Range),
+                }
+            }
+            FieldKind::Enum { values, escape } => match v {
+                Value::Null if *escape => Ok(self.top()),
+                Value::String(s) => values
+                    .iter()
+                    .position(|x| x == s)
+                    .map(|i| i as u64)
+                    .ok_or(WriteRefusal::Value),
+                _ => Err(WriteRefusal::Value),
+            },
+            FieldKind::Bool => v.as_bool().map(u64::from).ok_or(WriteRefusal::Value),
+            FieldKind::Counter => {
+                let c = input_integer(v)?;
+                let c = u64::try_from(c).map_err(|_| WriteRefusal::Range)?;
+                Ok(if self.width == 64 {
+                    c
+                } else {
+                    c & ((1u64 << self.width) - 1)
+                })
+            }
+            FieldKind::Time { ms } => {
+                let t = input_integer(v)?;
+                let e = epoch.ok_or(WriteRefusal::Epoch)?;
+                let delta = t - 1000 * i128::from(e);
+                let (s, m) = (delta.div_euclid(1000), delta.rem_euclid(1000));
+                let s = u32::try_from(s).map_err(|_| WriteRefusal::Range)?;
+                let m = u64::try_from(m).unwrap_or(0);
+                Ok(if *ms {
+                    (u64::from(s) << 10) | m
+                } else {
+                    u64::from(s)
+                })
+            }
+        }
+    }
+
+    fn value(&self, code: u64, epoch: Option<i64>) -> Result<Value, ReadRefusal> {
+        let named = |list: &[&'static str]| {
+            list.iter()
+                .enumerate()
+                .find(|(i, _)| code == self.reserved_code(*i))
+                .map(|(_, r)| Value::from(*r))
+        };
+        match &self.kind {
+            FieldKind::Int {
+                minimum,
+                maximum,
+                reserved,
+            } => {
+                if let Some(r) = named(reserved) {
+                    return Ok(r);
+                }
+                let span = i128::from(*maximum) - i128::from(*minimum);
+                if i128::from(code) > span {
+                    return Err(ReadRefusal::Code);
+                }
+                let v = i128::from(*minimum) + i128::from(code);
+                Ok(i64::try_from(v).map_or(Value::Null, Value::from))
+            }
+            FieldKind::Fixed {
+                minimum,
+                resolution,
+                reserved,
+                values,
+                ..
+            } => {
+                if let Some(r) = named(reserved) {
+                    return Ok(r);
+                }
+                if u128::from(code) >= *values {
+                    return Err(ReadRefusal::Code);
+                }
+                let x = minimum.add(&resolution.mul_int(&BigInt::from(code)));
+                Ok(Value::String(x.to_string()))
+            }
+            FieldKind::Enum { values, escape } => match usize::try_from(code) {
+                Ok(i) if i < values.len() => Ok(Value::String(values[i].clone())),
+                _ if *escape => Ok(Value::Null),
+                _ => Err(ReadRefusal::Code),
+            },
+            FieldKind::Bool => Ok(Value::Bool(code == 1)),
+            FieldKind::Counter => Ok(Value::from(code)),
+            FieldKind::Time { ms } => {
+                let (s, m) = if *ms {
+                    (code >> 10, code & 0x3ff)
+                } else {
+                    (code, 0)
+                };
+                if m >= 1000 {
+                    return Err(ReadRefusal::Code);
+                }
+                let e = epoch.ok_or(ReadRefusal::Epoch)?;
+                let t = 1000 * i128::from(e) + 1000 * i128::from(s) + i128::from(m);
+                Ok(i64::try_from(t).map_or(Value::Null, Value::from))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn codes(doc: &Value) -> Vec<&'static str> {
+        let mut c: Vec<_> = PackedDoc::read(doc)
+            .findings
+            .iter()
+            .map(|f| f.code)
+            .collect();
+        c.sort_unstable();
+        c
+    }
+
+    #[test]
+    fn decimals_read_exactly_and_write_shortest() {
+        for (s, want) in [
+            ("0", "0"),
+            ("-0", "0"),
+            ("2.00", "2"),
+            ("-40", "-40"),
+            ("0.10", "0.1"),
+            ("1013.2", "1013.2"),
+        ] {
+            assert_eq!(Decimal::parse(s).unwrap().to_string(), want, "{s}");
+        }
+        for bad in ["", "01", "1.", ".5", "+1", "1e3", "1,5", "--1"] {
+            assert!(Decimal::parse(bad).is_none(), "{bad}");
+        }
+        assert_eq!(Decimal::parse_input("5e-1").unwrap().to_string(), "0.5");
+        assert_eq!(Decimal::parse_input("1.5E+2").unwrap().to_string(), "150");
+        assert_eq!(
+            Decimal::parse_input("1e21").unwrap().to_string(),
+            "1000000000000000000000"
+        );
+        assert!(Decimal::parse_input("1e999999").is_none());
+    }
+
+    #[test]
+    fn ties_go_to_the_even_code() {
+        let half = Decimal::parse("0.5").unwrap();
+        let r = |s: &str| {
+            Decimal::parse_input(s)
+                .unwrap()
+                .div_round_even(&half)
+                .to_string()
+        };
+        assert_eq!(r("0.25"), "0");
+        assert_eq!(r("0.75"), "2");
+        assert_eq!(r("-0.25"), "0");
+        assert_eq!(r("-0.75"), "-2");
+        assert_eq!(r("0.2500000000000000000000000001"), "1");
+    }
+
+    #[test]
+    fn the_report_sensor_record_is_40_bits() {
+        let doc = json!({"types": {"Sensor": {"fields": [
+            {"name": "temperature", "type": "fixed", "minimum": "-40", "maximum": "85", "resolution": "0.1"},
+            {"name": "humidity", "type": "fixed", "minimum": "0", "maximum": "100", "resolution": "0.5"},
+            {"name": "pressure", "type": "fixed", "minimum": "300", "maximum": "1100", "resolution": "0.1"},
+            {"name": "battery", "type": "fixed", "minimum": "2.00", "maximum": "4.20", "resolution": "0.01"}
+        ]}}});
+        let p = PackedDoc::read(&doc);
+        assert!(p.findings.is_empty(), "{:?}", p.findings);
+        let l = p.types["Sensor"].clone().unwrap();
+        assert_eq!((l.min_bits(), l.max_bits()), (40, 40));
+        let rec = l
+            .write(
+                &json!({"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2", "battery": "3.70"}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(rec.bytes, [0x4c, 0xea, 0xfb, 0xdc, 0xaa]);
+        assert_eq!(rec.pad(), 0);
+        let back = l.read(l.tag(), &rec.bytes, None).unwrap();
+        assert_eq!(back["battery"], "3.7");
+        assert_eq!(l.read(l.tag() ^ 1, &rec.bytes, None), Err(ReadRefusal::Tag));
+        assert_eq!(
+            l.read(l.tag(), &rec.bytes[..4], None),
+            Err(ReadRefusal::Length)
+        );
+    }
+
+    #[test]
+    fn lints_follow_cascade_seven() {
+        assert_eq!(codes(&json!([])), ["E038"]);
+        assert_eq!(codes(&json!({"types": {}, "x": 1})), ["E038"]);
+        assert_eq!(codes(&json!({"types": {"bad": {"fields": []}}})), ["E038"]);
+        assert_eq!(codes(&json!({"types": {"A": {"fields": []}}})), ["E039"]);
+        assert_eq!(
+            codes(&json!({"types": {"A": {"fields": [{"name": "a", "type": "float"}]}}})),
+            ["E043"]
+        );
+        assert_eq!(
+            codes(
+                &json!({"types": {"A": {"fields": [{"name": "a", "type": "int", "minimum": 1}]}}})
+            ),
+            ["E038"]
+        );
+        assert_eq!(
+            codes(&json!({"types": {"A": {"fields": [
+                {"name": "a", "type": "int", "minimum": 2, "maximum": 1},
+                {"name": "b", "type": "fixed", "minimum": "0", "maximum": "1", "resolution": "0.3"},
+                {"name": "c", "type": "fixed", "minimum": "x", "maximum": "-1", "resolution": "0"},
+                {"name": "d", "type": "counter", "width": 65},
+                {"name": "e", "type": "int", "minimum": 0, "maximum": 0},
+                {"name": "a", "type": "bool"},
+                {"name": "f", "type": "enum", "values": ["x", "x"]},
+                "...", "...",
+                {"name": "g", "type": "bool"}
+            ]}}})),
+            [
+                "E039", "E040", "E040", "E041", "E041", "E042", "E042", "E045", "E045"
+            ]
+        );
+    }
+
+    #[test]
+    fn appending_behind_a_marker_keeps_the_tag() {
+        let v1 = json!({"types": {"L": {"fields": [{"name": "up", "type": "bool"}, "..."]}}});
+        let v2 = json!({"types": {"L": {"fields": [
+            {"name": "up", "type": "bool"}, "...",
+            {"name": "q", "type": "int", "minimum": 0, "maximum": 100, "optional": true}, "..."
+        ]}}});
+        let a = PackedDoc::read(&v1).types["L"].clone().unwrap();
+        let b = PackedDoc::read(&v2).types["L"].clone().unwrap();
+        assert_eq!(a.tag(), b.tag());
+        let new = b.write(&json!({"up": true, "q": 87}), None).unwrap();
+        assert_eq!(
+            a.read(a.tag(), &new.bytes, None).unwrap(),
+            json!({"up": true})
+        );
+        let old = a.write(&json!({"up": false}), None).unwrap();
+        assert_eq!(
+            b.read(b.tag(), &old.bytes, None).unwrap(),
+            json!({"up": false})
+        );
+    }
+}

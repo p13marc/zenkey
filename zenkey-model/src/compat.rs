@@ -22,6 +22,10 @@
 //!   is review, compared through its `$ref`s. A nullable's two spellings,
 //!   `{"type": [T, "null"]}` and `{"anyOf": [S, {"type": "null"}]}`, are one
 //!   type (spec §7.3, amendment 0.7).
+//! - **Packed payloads** (core §9.8, 0.75) are compared by their layouts,
+//!   item by item: growth behind a marker is compatible, a bound, a
+//!   resolution, a width, `reserved`, `optional` or an enum's order moved is
+//!   breaking, and a rename is review.
 //! - **Retention** ([`same_revision`]): two revisions are the same when
 //!   their canonical forms agree once schema ids are replaced by artifact
 //!   names, and their artifacts agree once protobuf descriptor sets are
@@ -172,7 +176,7 @@ impl Revision {
                             .decode(data.as_str()?)
                             .ok()?,
                     ),
-                    "jsonschema" => Schema::Json(data.clone()),
+                    "jsonschema" | "packed" => Schema::Json(data.clone()),
                     _ => return None,
                 };
                 Some((id.clone(), s))
@@ -201,12 +205,14 @@ impl Revision {
             .collect()
     }
 
-    /// JSON Schema documents by file stem (their artifact name).
+    /// JSON Schema documents by file stem (their artifact name). A packed
+    /// document is JSON too, and is left out: a `$ref` never names one.
     fn json_by_stem(&self) -> BTreeMap<String, &Value> {
         let names: BTreeMap<&str, &str> = self.canonical["schemas"]
             .as_array()
             .into_iter()
             .flatten()
+            .filter(|s| s["kind"] == "jsonschema")
             .filter_map(|s| Some((s["id"].as_str()?, s["name"].as_str()?)))
             .collect();
         self.schemas
@@ -662,12 +668,226 @@ fn compare_type(
             let mut seen = BTreeSet::new();
             cx.compare(&so, doc_old, &sn, doc_new, at, &mut seen, v);
         }
+        ("packed", "packed") => {
+            let layout = |r: &Revision, t: &Value| match r.schemas.get(s(&t["schema"])) {
+                Some(Schema::Json(doc)) => crate::packed::PackedDoc::read(doc)
+                    .types
+                    .remove(s(&t["name"]))
+                    .flatten(),
+                _ => None,
+            };
+            match (layout(ro, o), layout(rn, n)) {
+                (Some(lo), Some(ln)) => compare_packed(&lo, &ln, at, v),
+                _ => v.push(
+                    Class::Review,
+                    "schema_unreadable",
+                    at,
+                    "a packed artifact is missing, or does not lay out its type",
+                ),
+            }
+        }
         _ => v.push(
             Class::Breaking,
             "type_kind_changed",
             at,
             "the schema kind changed",
         ),
+    }
+}
+
+/// Packed payloads (core §9.8, 0.75): item by item from the first; a
+/// different length is growth behind a marker when the shorter list ends
+/// with one.
+fn compare_packed(o: &crate::packed::Layout, n: &crate::packed::Layout, at: &str, v: &mut Verdict) {
+    use crate::packed::Item;
+    let (a, b) = (&o.items, &n.items);
+    for (i, (x, y)) in a.iter().zip(b).enumerate() {
+        let at = format!("{at}.fields[{i}]");
+        match (x, y) {
+            (Item::Marker, Item::Marker) => {}
+            (Item::Field(x), Item::Field(y)) => compare_packed_fields(x, y, &at, v),
+            _ => v.push(
+                Class::Breaking,
+                "fields_changed",
+                &at,
+                "a marker where the other revision has a field",
+            ),
+        }
+    }
+    if a.len() != b.len() {
+        let shorter = if a.len() < b.len() { a } else { b };
+        if !matches!(shorter.last(), Some(Item::Marker)) {
+            v.push(
+                Class::Breaking,
+                "fields_changed",
+                at,
+                "fields added or removed where no marker ends the shorter revision",
+            );
+        }
+    }
+}
+
+fn compare_packed_fields(
+    x: &crate::packed::Field,
+    y: &crate::packed::Field,
+    at: &str,
+    v: &mut Verdict,
+) {
+    use crate::packed::FieldKind as K;
+    if x.kind.as_str() != y.kind.as_str() {
+        v.push(
+            Class::Breaking,
+            "type_changed",
+            at,
+            format!("{} became {}", x.kind.as_str(), y.kind.as_str()),
+        );
+        return;
+    }
+    if x.name != y.name {
+        v.push(
+            Class::Review,
+            "field_renamed",
+            at,
+            format!("{:?} renamed {:?}", x.name, y.name),
+        );
+    }
+    if x.optional != y.optional {
+        v.push(
+            Class::Breaking,
+            "presence_changed",
+            at,
+            "`optional` toggled: the presence bit appears or goes",
+        );
+    }
+    let bound = |v: &mut Verdict| {
+        v.push(Class::Breaking, "bound_changed", at, "a bound moved");
+    };
+    let reserved = |v: &mut Verdict| {
+        v.push(
+            Class::Breaking,
+            "reserved_changed",
+            at,
+            "`reserved` changed: the codes move",
+        );
+    };
+    match (&x.kind, &y.kind) {
+        (
+            K::Int {
+                minimum: a0,
+                maximum: a1,
+                reserved: ra,
+            },
+            K::Int {
+                minimum: b0,
+                maximum: b1,
+                reserved: rb,
+            },
+        ) => {
+            if (a0, a1) != (b0, b1) {
+                bound(v);
+            }
+            if ra != rb {
+                reserved(v);
+            }
+        }
+        (
+            K::Fixed {
+                minimum: a0,
+                maximum: a1,
+                resolution: ar,
+                reserved: ra,
+                ..
+            },
+            K::Fixed {
+                minimum: b0,
+                maximum: b1,
+                resolution: br,
+                reserved: rb,
+                ..
+            },
+        ) => {
+            if (a0, a1) != (b0, b1) {
+                bound(v);
+            }
+            if ar != br {
+                v.push(
+                    Class::Breaking,
+                    "resolution_changed",
+                    at,
+                    format!("`resolution` {ar} became {br}"),
+                );
+            }
+            if ra != rb {
+                reserved(v);
+            }
+        }
+        (
+            K::Enum {
+                values: va,
+                escape: ea,
+            },
+            K::Enum {
+                values: vb,
+                escape: eb,
+            },
+        ) => {
+            if x.width != y.width {
+                v.push(
+                    Class::Breaking,
+                    "width_changed",
+                    at,
+                    format!("the enum's width {} became {}", x.width, y.width),
+                );
+            }
+            if ea != eb {
+                v.push(Class::Breaking, "enum_changed", at, "the escape toggled");
+                return;
+            }
+            for (p, q) in va.iter().zip(vb) {
+                if p == q {
+                    continue;
+                }
+                if vb.contains(p) || va.contains(q) {
+                    v.push(
+                        Class::Breaking,
+                        "enum_changed",
+                        at,
+                        format!("{p:?} or {q:?} moved to another index"),
+                    );
+                } else {
+                    v.push(
+                        Class::Review,
+                        "enum_value_renamed",
+                        at,
+                        format!("{p:?} renamed {q:?}"),
+                    );
+                }
+            }
+            match (vb.len().cmp(&va.len()), ea) {
+                (std::cmp::Ordering::Equal, _) | (std::cmp::Ordering::Greater, true) => {}
+                (std::cmp::Ordering::Less, true) => v.push(
+                    Class::Review,
+                    "enum_value_removed",
+                    at,
+                    "a value removed: an old writer still writes it, and a new reader reads the escape",
+                ),
+                (_, false) => v.push(
+                    Class::Breaking,
+                    "enum_changed",
+                    at,
+                    "a value added or removed where no escape reads it",
+                ),
+            }
+        }
+        (K::Counter, K::Counter) | (K::Time { .. }, K::Time { .. }) if x.width != y.width => {
+            v.push(
+                Class::Breaking,
+                "width_changed",
+                at,
+                format!("the width {} became {}", x.width, y.width),
+            );
+        }
+        _ => {}
     }
 }
 

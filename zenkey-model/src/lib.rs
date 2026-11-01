@@ -3,7 +3,7 @@
 //! This is the static half of zk2 (epic #585, issue #608): everything that
 //! can be decided from files, and never needs a bus. The design of record is
 //! `docs/zk2/architecture.md` (r4), stated normatively by `spec/core.md`;
-//! the authoring format is draft 2
+//! the authoring format is draft 3
 //! (`examples/zk2/README.md`).
 //!
 //! Layer map:
@@ -18,7 +18,7 @@
 //!   ([`grammar::blind_spots`], #614 FL4).
 //! - [`template`]: resource templates, with build, match, overlap and the
 //!   most-literal-first precedence (r3.3 D1).
-//! - [`authoring`]: the TOML authoring format, draft 2, as serde types;
+//! - [`authoring`]: the TOML authoring format, draft 3, as serde types;
 //!   `spec/contract.schema.json` is generated from them.
 //! - [`diag`]: diagnostics with stable codes, the conformance surface of
 //!   the lints.
@@ -119,6 +119,10 @@
 //!   §5's three questions (`spec/profiles/arbitration/v1.md`, #909). The
 //!   subscription, the watch, the reads, the timer and the safe value are
 //!   the runtime's and the application's.
+//! - [`packed`]: the `packed` type kind (core §7.6, 0.75; #979 B1): its
+//!   schema file and lints (E038 to E045), each type's layout, its layout
+//!   form and tag, and an interpreted codec over JSON values, exact in its
+//!   fixed point: the source of truth generated code (B2) matches.
 //! - [`wire`]: the zk2c envelope (core §7.5, 0.72; #976): CH's form, run
 //!   width and tag, the run and the seq, a put's mutation and a delete's
 //!   attachment, parsed without a contract with §7.5's refusals and written
@@ -149,6 +153,7 @@ pub mod health;
 pub mod history;
 pub mod hostid;
 pub mod link;
+pub mod packed;
 pub mod redundancy;
 pub mod schema;
 pub mod seed;

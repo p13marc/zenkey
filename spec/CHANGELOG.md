@@ -3,6 +3,99 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.75 — 2026-11-01: the `packed` type kind (#979)
+
+Epic #975, zk2c, makes the wire bandwidth-first. 0.73 put every stream,
+state and event record in §7.5's envelope, whose tag was 0 for every
+kind. This version is #979's first chunk, B1: a type kind whose record is
+bit fields sized from the contract's declared ranges, and which defines
+the tag. The runtime's codec and zenkey-build's emitter are B2's. LEB128,
+Rice codes, dictionary text, bitmaps, lists and nesting are B3's. The
+face lint, "a resource exposed on a constrained face is packed", is
+#988's. `observer.md` is unchanged.
+
+**Added: §7.6, packed records.**
+- **The schema file** is strict JSON: `types`, each a record of `fields`.
+  A field is `int`, `fixed`, `enum`, `bool`, `counter` or `time`, and may
+  be optional. The string `"..."` is the extension marker.
+- **Widths** come from the declaration: ⌈log₂(codes)⌉ bits, from 1 to 64.
+  The sensor record of the zk2c report is 11 + 8 + 13 + 8 = 40 bits, 5
+  bytes.
+- **Fixed point** is read from decimal strings, in exact decimal
+  arithmetic, rounding a tie to the even code. A value read is within
+  half a resolution of the value written.
+- **Reserved codes** `not_available`, `error` and `out_of_range` take the
+  top codes of the width, from all ones down, as J1939 places its two.
+- **An enum's escape** is its all-ones code. A reader reads every code it
+  does not name as the escape, so values can be added within the width.
+- **A counter** is written modulo 2^width. A width below 64 is a declared
+  loss, and the text says what a reader loses.
+- **Time** is 32 bits of seconds since a deployment epoch, and 10 bits of
+  milliseconds with `ms`. The epoch is the writer's and reader's input.
+  #980's catalog will carry it.
+- **The layout** is the fields in order, most significant bit first, with
+  no padding between them. An optional field has a presence bit before
+  it, and a marker is one bit, 1 when a field after it is present. One
+  pad ends the record, fewer than 8 zero bits.
+- **The tag** is the low four bits of the sha256 of the layout form's JCS
+  bytes. The form is the root's wire, the fields before the first marker,
+  without names. So appending behind a marker, or renaming a field, keeps
+  the tag.
+- **A reader refuses** a record for its tag, its length, an unused code,
+  a marker set with nothing after it, or a pad bit set, in that order.
+  Each refusal is named. The text states the residue: a wrong revision
+  matches the tag 1 time in 16, and optional fields weaken the length
+  check.
+- **The JSON reading** a tool shows: integers, a fixed-point value as a
+  decimal string, a reserved code as its name, an enum's escape as `null`,
+  a time as Unix milliseconds.
+
+**Changed: §7.1, §7.2 and §7.5.**
+- **§7.1** lists the `packed` kind and its references, `packed:Name` and
+  `packed:stem#Name`. A packed type is the type of a stream, a state or an
+  event, never an explicit stream's (E044). It is never an attachment or
+  an operation's type either, since none of those carries an envelope.
+- **§7.2:** a packed record always travels in an envelope, under
+  `zenoh/bytes`. `encoding` on a packed type is ignored, with W103.
+- **§7.5:** the `packed` kind defines a tag, and §7.6's reader checks it.
+  The envelope's parser still checks it against no type.
+
+**Changed: §9, authoring draft 3.**
+- **§9.1:** `[schemas] packed` lists packed files.
+- **§9.2:** eight codes, E038 to E045, and cascade 7 for their order.
+  E023, E024, E028 and E029 now read packed files too.
+- **§9.4:** a packed artifact is read as a JSON Schema one: strict JSON,
+  its id the hash of its JCS bytes, its name its stem.
+- **§9.5:** `packed` is a schema and type kind. **The format tag stays
+  `zk2-contract/draft-1`.** Nothing forced a change. A contract with no
+  packed file keeps its bytes, and one with a packed file holds a kind no
+  earlier form holds. No fingerprint in `examples/zk2/` or any `.history`
+  moved.
+- **§9.6 and §9.7:** a bundle carries a packed document as it carries a
+  JSON Schema one, and retention compares it by its JCS bytes.
+- **§9.8:** packed payloads are classified by their layout. Growth behind
+  a marker is compatible. A bound, a resolution, a width, `reserved`,
+  `optional` or an enum's order moved is breaking. A rename is review.
+
+**Changed: §0 and §12.** §7.6's rules that name no role are static, as
+§7.5's are. Writing or reading a packed record is a static act.
+
+**Fixtures.** `conformance/packed/vectors.json`, written by an
+independent reading of the text and never blessed: layouts and tags,
+writes, reads, every refusal, fixed-point ties, counters of widths 1, 7,
+33 and 64, and a wrong revision refused by its tag and, where the tags
+collide, by its length. Lint fixtures for E038 to E045 and E024 under
+`conformance/contracts/`, a packed bundle and its tampered twin under
+`conformance/bundles/`, and classifier cases under
+`conformance/compat/payload/packed/` and `transitive/`.
+
+**Deliberately not changed.** No rule outside §7 and §9 moved, and no
+existing fixture's expectation changed. A tool's decoder does not yet
+read a packed record: it needs the envelope's tag and the deployment's
+epoch, which B2 wires. Scale and offset are not separate members: a
+field's offset is its `minimum` and its scale its `resolution`, as a CAN
+signal's are, so the declaration cannot state two that disagree.
+
 ## 0.74 — 2026-11-01: round 93's answers: the session's stamps, a random run, and the seq that never wraps (#976)
 
 zk2py round 93 (PR #1005) read 0.71 to 0.73 and `observer.md` 0.13 to 0.15

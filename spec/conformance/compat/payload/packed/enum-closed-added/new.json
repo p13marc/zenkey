@@ -1,0 +1,18 @@
+{
+  "types": {
+    "Status": {
+      "fields": [
+        {
+          "name": "oper",
+          "type": "enum",
+          "values": [
+            "up",
+            "down",
+            "unknown",
+            "testing"
+          ]
+        }
+      ]
+    }
+  }
+}

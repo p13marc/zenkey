@@ -4,7 +4,8 @@
 //! ```json
 //! {"contract": <canonical contract>,
 //!  "schemas": {"sha256:…": {"kind": "protobuf", "data": "<base64 FileDescriptorSet>"},
-//!              "sha256:…": {"kind": "jsonschema", "data": <JSON Schema document>}},
+//!              "sha256:…": {"kind": "jsonschema", "data": <JSON Schema document>},
+//!              "sha256:…": {"kind": "packed", "data": <packed document>}},
 //!  "extras": {}}
 //! ```
 //!
@@ -216,7 +217,8 @@ impl Bundle {
                         .map_err(|e| shape(&format!("schema {id}: {e}")))?;
                     sha256_id(&bytes)
                 }
-                "jsonschema" => json_id(data),
+                // A packed document is hashed as a JSON Schema one (core §9.6).
+                "jsonschema" | "packed" => json_id(data),
                 other => return Err(shape(&format!("schema {id}: unknown kind {other:?}"))),
             };
             if &got != id {

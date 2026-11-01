@@ -103,7 +103,8 @@ pub fn envelope_encoding(op: &Operation) -> &'static str {
             _ => envelope::JSON,
         },
         TypeId::Protobuf { .. } => envelope::PROTOBUF,
-        TypeId::Raw { .. } => envelope::JSON,
+        // No operation's type is packed (core §7.1, E044).
+        TypeId::Raw { .. } | TypeId::Packed { .. } => envelope::JSON,
     }
 }
 

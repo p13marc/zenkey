@@ -333,6 +333,12 @@ fn encode_as(
     };
     match ty {
         TypeId::Raw { .. } => Ok(input.to_vec()),
+        // No operation's type is packed (core §7.1, E044), and a packed
+        // writer is #979's B2.
+        TypeId::Packed { name, .. } => Err(Error::unaskable(
+            what,
+            format!("packed:{name} is a packed type, which this tool does not write yet"),
+        )),
         TypeId::JsonSchema { .. } => {
             use zenkey::codec::Codec as _;
             zenkey::codec::Json::<serde_json::Value>::encode(&json()?, encoding)
@@ -373,6 +379,7 @@ fn kind_word(ty: &TypeId) -> &'static str {
     match ty {
         TypeId::Protobuf { .. } => "protobuf",
         TypeId::JsonSchema { .. } => "JSON Schema",
+        TypeId::Packed { .. } => "packed",
         TypeId::Raw { .. } => "raw",
     }
 }
