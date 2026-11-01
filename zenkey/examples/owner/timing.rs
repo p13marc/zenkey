@@ -7,7 +7,8 @@
 //! cmd` says so, an axis once added. Each sample's payload is its sequence
 //! number as text; with `timing stamp none`, the owner's wall clock less
 //! 10 s, in nanoseconds since the Unix epoch, as text, put raw through the
-//! session with no stamp set, as `scenarios.md` §5 has it.
+//! session with no stamp set, as `scenarios.md` §5 has it, still under
+//! core §7.5's envelope from the service's minter.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -18,7 +19,9 @@ use zenkey::Service;
 use zenkey::model::contract::{Contract, load_str};
 use zenkey::model::grammar::IfaceId;
 use zenkey::model::template::Bindings;
+use zenkey::state::Minter;
 use zenkey::writer::Writer;
+use zenoh::key_expr::OwnedKeyExpr;
 
 /// `pace.v1`, as the runtime's tests keep it.
 pub const PACE_TOML: &str = include_str!("../../tests/contracts/pace.v1.toml");
@@ -61,6 +64,8 @@ pub struct Drive {
     period: Duration,
     /// `timing stamp none`: raw puts, no stamp set.
     raw: Arc<AtomicBool>,
+    /// The service's minter, whose stamps a raw put's envelope carries.
+    minter: Arc<Minter>,
     members: Mutex<BTreeMap<String, Member>>,
 }
 
@@ -79,6 +84,7 @@ impl Drive {
             session: session.clone(),
             period,
             raw: Arc::default(),
+            minter: Arc::clone(svc.minter()),
             members: Mutex::default(),
         };
         d.add("cmd", cmd);
@@ -103,6 +109,8 @@ impl Drive {
                 Arc::clone(&every_ms),
                 key.clone(),
             );
+            let minter = Arc::clone(&self.minter);
+            let owned = OwnedKeyExpr::try_from(key.clone()).expect("a writer's key");
             tokio::spawn(async move {
                 // Each tick a whole interval after the last, never drifting
                 // with the puts; the interval read anew at each (`timing
@@ -116,14 +124,20 @@ impl Drive {
                         continue;
                     }
                     let put = if raw.load(Ordering::Relaxed) {
-                        // §5: no stamp set, a payload's time 10 s old.
+                        // §5: no stamp set, a payload's time 10 s old,
+                        // under the envelope its writer would seal (core
+                        // §4.3, F-422).
                         let stale = SystemTime::now() - Duration::from_secs(10);
                         let ns = stale
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_nanos();
+                        let record = ns.to_string();
                         session
-                            .put(&key, ns.to_string())
+                            .put(
+                                &key,
+                                minter.mint_stream(&owned, false).seal(record.as_bytes()),
+                            )
                             .await
                             .map_err(|e| e.to_string())
                     } else {

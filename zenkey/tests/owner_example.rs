@@ -2114,9 +2114,10 @@ async fn the_owner_example_drives_timing() {
             break s;
         }
     };
-    let ns: u128 = String::from_utf8_lossy(&unstamped.payload().to_bytes())
-        .parse()
-        .unwrap();
+    // Still under core §7.5's envelope: no stamp is not no wire (F-422).
+    let bytes = unstamped.payload().to_bytes();
+    let env = zenkey::model::wire::Envelope::parse(&bytes).expect("an envelope");
+    let ns: u128 = String::from_utf8_lossy(env.record).parse().unwrap();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -2388,7 +2389,11 @@ async fn the_owner_example_arbitrates() {
     let _raw = tool
         .declare_subscriber("zk2/lab/safety/steer.v1/stream/cmd")
         .callback(move |x: Sample| {
-            let _ = raw_tx.send(String::from_utf8_lossy(&x.payload().to_bytes()).into_owned());
+            // Each put's record, under core §7.5's envelope (F-422).
+            let bytes = x.payload().to_bytes();
+            if let Ok(env) = zenkey::model::wire::Envelope::parse(&bytes) {
+                let _ = raw_tx.send(String::from_utf8_lossy(env.record).into_owned());
+            }
         })
         .await
         .unwrap();
