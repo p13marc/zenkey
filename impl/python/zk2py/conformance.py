@@ -3508,15 +3508,20 @@ def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    "counts the keys the bound forgot", "**Decode order** for a tool is:", "§7.3's last rung"), []),
         ("F-408, F-410, F-411, F-413: state.md §7 step 2's premise in both bullets, §4.3's bullet inside a seed, "
          "\"In both runs\", RULES.md's header; the old forms gone",
+         # Re-read under core 0.73 (round 93, #976): state.md §7 orders by
+         # runs, so no step rests on a clock and the premise is gone
+         # (state.md §7's note: "A restart takes a new run, which a consumer
+         # accepts whatever its clock"); §4.3's bullet and step 5 are over
+         # runs.
          [state.count("Rev 11 and rev 12 come within 5 s of rev 10.")]
-         + missing(core, "An old epoch's value can arrive after the new epoch's for as long as the GET is open, not "
+         + missing(core, "An old run's value can arrive after the new run's for as long as the GET is open, not "
                          "only in transit.",
-                   "It holds it until the key's next value.")
-         + missing(state, "In both runs it then holds rev 10, until rev 12, which it accepts.")
+                   "until the key's next value.")
+         + missing(state, "It holds rev 10 until rev 12, which it accepts.")
          + missing(rules, "A verb the sentence leaves out is shown in brackets. They sit where it is left out.")
          + present(core, "the risk lasts the GET", "whatever the two times")
          + present(state, "It holds rev 10 both times")
-         + present(rules, "So does a verb the sentence omits"), [2]),
+         + present(rules, "So does a verb the sentence omits"), [0]),
     ]
 
     # -- F-406: a payload whose declared type the tool does not hold ----------
@@ -3737,19 +3742,25 @@ def _round91_readings(root: Path) -> list[tuple[str, Any, Any]]:
          [True, True, True]),
         ("F-382 and F-383: a consumer by S7 from its first value, its seed's replies included, an id other than "
          "the held value's accepted, a tool's merge lasting and bounded; 0.67's sentences gone",
+         # Re-read under core 0.73 and observer 0.15 (round 93, #976): the
+         # consumer rule by seq within one run, another run accepted, from
+         # the first value on, its seed's replies included; a tool's merge
+         # lasting, within one run by seq. The same shape as 0.68's, over
+         # runs where it was over timestamp ids (the changelogs' 0.73 and
+         # 0.15 entries).
          missing(core,
-                 "A consumer MUST order each key's values by time within one timestamp id, from the first value it "
+                 "A consumer MUST order each state key's values by seq within one run, from the first value it "
                  "receives, a late joiner's seed replies included (§4.2).",
-                 "It MUST accept a value under an id other than the one its held value carries, and order by time "
-                 "within that id from then on.",
+                 "A consumer MUST accept a value under a run other than its held value's, and order by seq within "
+                 "that run from then on.",
                  "A profile MAY order a consumer's values more strictly.",
                  # Re-read under core 0.69 and observer 0.11 (round 92): F-401
                  # split the merge's MUST, F-403 reworded "no end to state" and
                  # F-398 the bound, each the same rule as 0.68 stated it.
-                 "Across two timestamp ids, a consumer MUST instead keep what §4.3's consumer rule accepts.",
-                 "So a consumer has no instant at which its merge ends")
-         + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows, "
-                   "across two timestamp ids too.",
+                 "Across two runs, a consumer MUST instead keep what §4.3's consumer rule accepts.",
+                 "A consumer orders by §4.3's consumer rule from its first value on, its seed's replies included.")
+         + missing(obs, "**A tool's merge lasts.** A tool keeps core §4.2's merge for as long as it follows. Within "
+                   "one run it orders by seq, plain or serial as the key's kind says (core §4.3).",
                    # Re-read under core 0.70 and observer 0.12 (the mend after
                    # #926 part 5): F-407 says the bound counts each forgetting.
                    "A tool that bounds what it holds counts each time the bound forgets a key, and reports the "
@@ -3942,28 +3953,32 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          # Re-read under core 0.70 (the mend after #926 part 5): F-410
          # reworded §4.3's bullet and F-411 state.md's "both times", each the
          # same rule as 0.69 stated it.
-         missing(core, "**Inside a seed.** An old epoch's value can arrive after the new epoch's for as long as the "
-                       "GET is open, not only in transit.",
-                 "So a consumer holds the reply's value, whether its time or the live samples' is later. It holds it "
-                 "until the key's next value.",
-                 "Where two instances answer, it receives only the reply `Latest` kept, the one with the greater "
-                 "stamp.")
+         # Re-read under core 0.73 (round 93, #976): over runs, a consumer
+         # and a tool both hold the reply that arrived last; Latest keeps
+         # the greater Zenoh timestamp, else the last to arrive.
+         missing(core, "**Inside a seed.** An old run's value can arrive after the new run's for as long as the GET "
+                       "is open, not only in transit.",
+                 "So a consumer and a tool both hold the reply's value over a value of the new run heard live, until "
+                 "the key's next value.",
+                 "It keeps the one with the greater Zenoh timestamp where a reply carries one, else the last to "
+                 "arrive (§4.1).")
          + missing(state, "**Inside the seed.**",
-                   "The consumer accepts rev 11, then the reply, which carries the old id. In both runs it then holds "
-                   "rev 10, until rev 12, which it accepts.",
-                   "The tool keeps the later time: rev 10 with the clock behind, and rev 11, then rev 12, on the "
-                   "host's clock."), []),
+                   "The consumer accepts rev 11, then the reply, which carries the old run. It holds rev 10 until rev "
+                   "12, which it accepts.",
+                   "The tool keeps the later arrival too: it holds rev 10, the reply that arrived last, until rev "
+                   "12."), []),
         ("F-395, F-396, F-401 to F-404: §0's static rules, §8.4's retriever, §4.2's merge in three sentences, "
          "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
-         missing(core, "They are the rules of §1 and §9 that name no role",
+         # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5 joins the
+         # static sections, and §4.2's merge is by the in-band stamp.
+         missing(core, "They are the rules of §1, §7.5 and §9 that name no role",
                  "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
                  "so that a caller or tool following the steps would report the contract unavailable",
                  "or at the timeout the caller or tool gave it (§8.1).",
-                 "It MUST keep the newer by the owner's stamp (S1, S2). Across two timestamp ids, a consumer MUST "
-                 "instead keep what §4.3's consumer rule accepts.",
-                 "Across them a consumer and a tool order differently (below).",
-                 "So a consumer has no instant at which its merge ends",
-                 "Across two ids, a consumer holds a value under the id of the last value it received")
+                 "It MUST keep the newer by its in-band stamp: within one run, by seq (§4.3). Across two runs, a "
+                 "consumer MUST instead keep what §4.3's consumer rule accepts.",
+                 "A consumer orders by §4.3's consumer rule from its first value on, its seed's replies included. So "
+                 "it keeps a value under a run other than its held value's. A tool keeps the later arrival")
          + present(core, "They are §1's, §9's", "A holder on the caller's own session", "at the caller's timeout",
                    "and keep the newer by the owner's stamp (S1, S2), or, for a consumer",
                    "there a consumer and a tool part", "has no end to state", "keeps the one whose value arrived last"),
@@ -3989,9 +4004,12 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "It is listed beside a rule it excepts. A row's MAY is in the rule ids.",
                  # Re-read under core 0.70 (the mend after #926 part 5): F-413's rewrite.
                  "A verb the sentence leaves out is shown in brackets. They sit where it is left out.",
-                 "A rule of those sections, §1 and §9 included, that names a role is listed under that role.")
-         + missing(readme, "With neither, §4.3 requires a new instance whose session has a fresh, unpinned zid",
-                   "A rule of any of those sections, §1 and §9 included, that names a role is that role's")
+                 # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5
+                 # among the static sections, and the glossary's Epoch over
+                 # runs, 0.73 having removed the new epoch's MUST.
+                 "A rule of those sections, §1, §7.5 and §9 included, that names a role is listed under that role.")
+         + missing(readme, "Each new instance writes under a new run",
+                   "A rule of any of those sections, §1, §7.5 and §9 included, that names a role is that role's")
          + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
          + present(readme, "With no record of its last stamp, §4.3 requires a fresh zid"), []),
     ]
@@ -4522,7 +4540,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # The sentences 0.66 and 0.8 made name their role: each new form in
     # place, each old form gone (round 89 compared them pair by pair).
     core_pairs = [
-        ("The owner SHOULD do so in a new session", "- It SHOULD do so in a new session"),
+        # core 0.73 (round 93, #976): "mint it", for the table's Zenoh timestamps
+        ("The owner SHOULD mint it in a new session", "- It SHOULD do so in a new session"),
         ("An owner's counter that crosses a face where neither is visible SHOULD",
          "- A counter that crosses a face where neither is visible"),
         ("**A contract's state and events** SHOULD keep `reliable` and `block`.",
