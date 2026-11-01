@@ -63,11 +63,12 @@ delete envelope as its attachment (§4.3). An ``@stream`` sample keeps its
 wire, and so do operations, the descriptor and bundles.
 - **The run.** Each instance writes under a run of its own, stated in its
   descriptor's ``run`` (§3.3). With ``run_record`` it is a 16-bit counter
-  in that file, written durably before the run's first mutation; with none,
-  with the counter spent at 0xFFFF, or for a candidate of a governed
-  interface (``redundancy.v1``), a 32-bit random draw, drawn again while it
-  equals a run this owner used. A re-mint takes a new run; a takeover does
-  not.
+  in that file, written durably before the first sample under the run (0.74,
+  F-416); with none, with a record it cannot use, with the counter spent at
+  0xFFFF, or for a candidate of a governed interface (``redundancy.v1``), a
+  32-bit random draw, drawn again while it equals a run this owner used,
+  which meets no reuse, the chance of a repeat accepted (0.74, F-417). A
+  re-mint takes a new run; a takeover does not.
 - **The seq.** One count per run over every state mutation and event
   occurrence, from 0; before it would pass 16,777,215 the owner takes a new
   run, puts its descriptor stating it, and writes on from 0. Each stream
@@ -81,7 +82,10 @@ wire, and so do operations, the descriptor and bundles.
   ``timing.v1`` lifespan, a ``health.v1`` fault where its owner sets one,
   and every put of a ``redundancy.v1`` candidate, whose session runs its
   HLC (§8.2's exception). Every other session runs with timestamping
-  disabled (§8.2, "Session posture"), unless a test rig asks for ``hlc``.
+  disabled (§8.2, "Session posture"), unless a test rig asks for ``hlc``:
+  a stamp that session adds is its posture, the SHOULD's, never the MUST
+  NOT's (0.74, F-414). Each descriptor put carries a Zenoh timestamp the
+  owner sets, from :meth:`Owner.mint` (§3.3, 0.74, F-415).
 """
 
 from __future__ import annotations
@@ -483,8 +487,9 @@ class Owner:
           scenarios §4).
         - ``run_record``: a file holding its 16-bit run counter (core §4.3,
           0.73), the last run it issued; each start, and each re-mint,
-          takes the next and writes it durably before any mutation under
-          it. None, or a counter spent at 0xFFFF, draws a 32-bit run.
+          takes the next and writes it durably before any sample under it
+          (0.74). None, a record it cannot read or write, or a counter spent
+          at 0xFFFF, draws a 32-bit run, and leaves the record as it is.
         - ``initial``: state values held at start, by key relative to the
           address (``health.v1/state/status``), put with the others before
           the tokens (§8.2 "State values"; a MUST for health.v1's status,
@@ -720,30 +725,25 @@ class Owner:
 
     def take_run(self) -> tuple[int, int]:
         """A new run (core §4.3): the record's counter plus one, written
-        durably first, or a 32-bit draw with no record, with the counter
-        spent at 0xFFFF ("and leaves the record as it is"), and for a
-        candidate. "It draws again while the run equals one it used." The
-        seqs start again at 0."""
+        durably first, before any sample under it (0.74, F-416), or a 32-bit
+        draw with no record, with the counter spent at 0xFFFF ("and leaves
+        the record as it is"), and for a candidate. "It draws again while
+        the run equals one it used"; "A random run (below) meets" no reuse,
+        "The chance of a repeat is accepted" (0.74, F-417). The seqs start
+        again at 0.
+
+        A record it cannot use, unreadable, not JSON, without ``run`` or
+        with a ``run`` that is no counter from 0 to 0xFFFF, or one it cannot
+        write, is no record: "An owner that cannot keep such a record draws
+        32-bit runs." It is left as it is, never rewritten from 0, since the
+        counter it lost may be any run already used."""
         import os
 
         with self._seq_lock:
             run: tuple[int, int] | None = None
             if self.run_record is not None and not self.candidate:
-                path = os.fspath(self.run_record)
-                last = None
-                try:
-                    with open(path, encoding="utf-8") as f:
-                        last = int(json.load(f)["run"])
-                except FileNotFoundError:
-                    last = None
-                nxt = 0 if last is None else last + 1
-                if nxt <= 0xFFFF:
-                    tmp = f"{path}.tmp"
-                    with open(tmp, "w", encoding="utf-8") as f:
-                        json.dump({"run": nxt}, f)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.replace(tmp, path)
+                nxt = self._next_counter(os.fspath(self.run_record))
+                if nxt is not None:
                     run = (16, nxt)
             if run is None:
                 while True:
@@ -755,6 +755,41 @@ class Owner:
             self._seq = 0
             self._stream_seq = {}
             return run
+
+    @staticmethod
+    def _next_counter(path: str) -> int | None:
+        """The record's next 16-bit run, written durably to ``path`` before
+        it is returned, or None where the owner draws instead: the counter
+        spent at 0xFFFF, or a record it cannot use or write. A missing file
+        is a fresh record, its first run 0."""
+        import os
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                doc = json.load(f)
+        except FileNotFoundError:
+            doc = None
+        except (OSError, ValueError):  # unreadable, not UTF-8, not JSON
+            return None
+        if doc is None:
+            nxt = 0
+        else:
+            last = doc.get("run") if isinstance(doc, dict) else None
+            if type(last) is not int or not 0 <= last <= 0xFFFF:
+                return None
+            nxt = last + 1
+        if nxt > 0xFFFF:
+            return None
+        tmp = f"{path}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"run": nxt}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except OSError:
+            return None
+        return nxt
 
     def run_hex(self) -> str:
         """The run as the descriptor states it (core §3.3)."""
@@ -1273,6 +1308,14 @@ class Owner:
             try:
                 entities, doc, tokens = self._declare_instance(self._plan_made, new)
             except Exception:
+                # The old run, its seq and its stream seqs come back; the run
+                # the failed re-mint took stays in runs_used, on purpose.
+                # Nothing was written under it, but a 16-bit one is already
+                # durable in the record, which moved past it, and a 32-bit
+                # one is a draw this process made: either way no later draw
+                # takes it, which costs nothing and keeps "It draws again
+                # while the run equals one it used" (core §4.3) true of every
+                # run it took.
                 with self._seq_lock:
                     self.run, self._seq, self._stream_seq = before[0], before[1], before[2]
                 raise

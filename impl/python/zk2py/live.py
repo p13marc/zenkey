@@ -146,7 +146,7 @@ from typing import Any
 
 import zenoh
 
-from . import admin_records, bundle, keys
+from . import admin_records, bundle, keys, zk2c
 
 #: Liveliness GET timeout: the caller's choice, 1 s in a conformance run (§8.1).
 PRESENCE_TIMEOUT_S = 1.0
@@ -1995,8 +1995,6 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
         if "*" in key:
             continue
         ts = s.timestamp
-        from . import zk2c
-
         read = zk2c.read_sample(s)
         raw = s.payload.to_bytes()
         att = None if s.attachment is None else s.attachment.to_bytes()

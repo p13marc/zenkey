@@ -39,7 +39,7 @@ from typing import Any
 
 import zenoh
 
-from . import alarms, desired, live
+from . import alarms, desired, live, zk2c
 from .contract import load_contract
 from .owner import Owner, OwnerRefused
 
@@ -619,8 +619,6 @@ class Target:
         if "*" in key or "$" in key:
             return  # R6
         ts = sample.timestamp
-        from . import zk2c
-
         read = zk2c.read_sample(sample)
         if read.refused:
             return  # observer §7.3 (0.14): undecodable, never a version

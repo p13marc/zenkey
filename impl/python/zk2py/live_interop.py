@@ -109,14 +109,15 @@ class Report:
         self.undecided.append((run, name, detail))
         print(f"INCONCLUSIVE [{run}] {name}: {detail}", flush=True)
 
-    def note(self, run: str, text: str) -> None:
-        self.info(run, text)
+    def info(self, run: str, text: str) -> None:
+        print(f"info [{run}] {text}", flush=True)
+
+    #: :mod:`zk2py.state_pairings`' sections report through ``note`` and
+    #: ``outcome``, each an info line here
+    note = info
 
     def outcome(self, pairing: str, number: str, word: str) -> None:
         self.info(f"{pairing} §{number}", word)
-
-    def info(self, run: str, text: str) -> None:
-        print(f"info [{run}] {text}", flush=True)
 
     known: list[tuple[str, str, bool, str]] = field(default_factory=list)
 
@@ -3241,10 +3242,123 @@ def _run_security4(report: Report, zenctl: Path) -> None:
 def _state_pairing(report: Report, pairing: str, section: str) -> None:
     """``state.md``'s sections at core 0.73 (#976), which
     :mod:`zk2py.state_pairings` runs in each pairing (round 93): §1 with
-    zk2py's owner (``s1``), §7 with the owner example (``s7``, ``seed``)."""
+    zk2py's owner (``s1``), §7 with the owner example (``s7``)."""
     from . import state_pairings as sp
 
     sp.SECTIONS[section](report, pairing)
+
+
+def run_python_seed(report: Report, exe: Path) -> None:
+    """Core §4.2, "A late joiner's seed", over the owner example's state,
+    its writes driven over its stdin (``put``, ``delete``), through a router
+    R1 of the runner's, merged by the in-band stamp (core 0.73, §4.3).
+    ``state.md`` §10 runs these cases with zk2py's owner alone, since it
+    holds the owner's answer and the owner example answers at once; and
+    §7 steps 4 and 5 seed across a restart. So this run keeps them with the
+    owner example as the owner (round 93's PR, review-bot):
+    - a put made between the late joiner's subscription and its GET is kept
+      once: its live sample and its reply carry one in-band stamp;
+    - a stale reply loses to a newer live put. The runner holds the GET open
+      (target ``All`` waits for every queryable): a queryable of its own on
+      the same keys, answering nothing, ends its part 1.5 s later. The
+      replies, ``Latest``'s, are delivered at the GET's end (§4.1), and a
+      put made meanwhile arrives first;
+    - a delete reaches the merge as a deletion, through the owner's
+      ``reply_del``, its delete envelope its stamp;
+    - a GET that runs to its timeout (the owner stopped) is possibly
+      incomplete (observer §4.1).
+    R1 stamps what it routes, so each live sample carries a Zenoh timestamp
+    beside its envelope, which orders it whatever that stamp
+    (``inband.json``)."""
+    import signal
+
+    import zenoh
+
+    from . import live
+    from . import seed as sd
+
+    r1, ep, _ = _r1()
+    tool, helper = live.open_client(ep), live.open_client(ep)
+    rusts: list[Owner] = []
+    extra: list[Any] = []
+    try:
+        run = "core 0.73 §4.2: a late joiner's seed over the owner example's state (budget.v1 items/{item})"
+        rust = Owner(exe, "lab/st", [REPO / BUDGET_V1], connect=ep)
+        rusts.append(rust)
+        if not report.check(run, "it starts behind R1", rust.wait_for("ready ", 120) is not None,
+                            str(rust.stderr[-1:])):
+            return
+        base = "zk2/lab/st/budget.v1/state/items"
+        pre = [rust.command(f"{v} budget.v1 state/items/{{item}} {k}") for v, k in
+               (("put", "a"), ("put", "b"), ("delete", "b"))]
+        held_open: list[Any] = []
+
+        def slow(query: Any) -> None:
+            held_open.append(query)
+            threading.Timer(1.5, query.drop).start()
+
+        extra.append(helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(slow), complete=False))
+        time.sleep(0.3)
+        lj = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
+        lj.subscribe()
+        time.sleep(0.3)
+        put_c = rust.command("put budget.v1 state/items/{item} c")  # between the subscription and the GET
+        time.sleep(0.3)
+        lj.get()
+        time.sleep(0.4)
+        put_a = rust.command("put budget.v1 state/items/{item} a")  # after the owner answered, before the GET ends
+        ended = lj.wait()
+        time.sleep(0.3)
+        v = lj.view()
+        arrivals = {k.rsplit("/", 1)[1]: [(x.via, x.outcome, str(x.inband)) for x in lj.applied if x.key == k]
+                    for k in sorted({x.key for x in lj.applied})}
+        report.check(run, "the owner example's writes: a and b put, b deleted, before the late joiner",
+                     [x.split(" ")[0] if x else x for x in pre] == ["put", "put", "deleted"], str(pre))
+        c = v.get(f"{base}/c")
+        report.check(run, "a put made between the subscription and the GET is kept, once: its live sample and its "
+                          "reply carry one in-band stamp",
+                     bool(put_c) and c is not None and not c.deleted and c.inband is not None
+                     and sorted(o for _, o, _ in arrivals.get("c", [])) == ["kept", "same"],
+                     f"{put_c!r}; c {c}; arrivals {arrivals.get('c')}")
+        a = v.get(f"{base}/a")
+        a_reply = [x for x in lj.applied if x.key == f"{base}/a" and x.via == "reply"]
+        report.check(run, "a stale reply loses to a newer live put: a's reply, at a lower seq of the same run and "
+                          "delivered at the GET's end, is dropped, and a holds the live put's stamp",
+                     bool(put_a) and a is not None and a.via == "live" and a.inband is not None
+                     and [x.outcome for x in a_reply] == ["dropped"]
+                     and all(x.inband is not None and x.inband.same_run(a.inband) and x.inband.seq < a.inband.seq
+                             for x in a_reply),
+                     f"{put_a!r}; a {a}; arrivals {arrivals.get('a')}")
+        b = v.get(f"{base}/b")
+        report.check(run, "a delete reaches the merge as a deletion: b, deleted before the late joiner came, is the "
+                          "owner's reply_del, merged as a deletion with its delete envelope's stamp",
+                     b is not None and b.deleted and b.via == "reply" and b.inband is not None, f"b {b}")
+        report.check(run, "the seed ran to its final reply, with no error reply: complete",
+                     ended and lj.seed.complete, f"ended {ended}, errors {lj.seed.errors}")
+        report.check(run, "no reply or sample refused as an envelope (observer §7.3)", not lj.undecodable,
+                     str(lj.undecodable))
+        lj.close()
+        rust.proc.send_signal(signal.SIGSTOP)
+        try:
+            ljt = sd.seed(tool, f"{base}/*", timeout=1.0)
+        finally:
+            rust.proc.send_signal(signal.SIGCONT)
+        report.check(run, "the owner example stopped (SIGSTOP): the GET runs to its timeout, ends with an error "
+                          "reply, and the seed is reported possibly incomplete",
+                     ljt.seed.ended and not ljt.seed.complete and bool(ljt.seed.errors),
+                     f"errors {ljt.seed.errors}, replies {ljt.seed.replies}")
+        ljt.close()
+    finally:
+        for e in extra:
+            try:
+                e.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        for o in rusts:
+            o.close()
+        tool.close()
+        helper.close()
+        r1.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -3270,8 +3384,10 @@ def main(argv: list[str] | None = None) -> int:
         "freshness": lambda r: run_python_freshness(r, args.owner, args.consume),
         "health": lambda r: run_python_health(r, args.owner, args.consume),
         "budget": lambda r: run_python_budget(r, args.owner),
-        # state.md at core 0.73 (round 93): zk2py.state_pairings' rust-py
-        "seed": lambda r: _state_pairing(r, "rust-py", "7"),
+        # state.md at core 0.73 (round 93): zk2py.state_pairings' rust-py §7;
+        # core §4.2's seed over the owner example, which §7 and §10 do not
+        # cover with it (the mend after round 93)
+        "seed": lambda r: run_python_seed(r, args.owner),
         "s7": lambda r: _state_pairing(r, "rust-py", "7"),
         "config": lambda r: run_python_config(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),

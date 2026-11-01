@@ -50,6 +50,7 @@ from typing import Any, Callable
 from . import arbitration as ab
 from . import live
 from . import timing as tm
+from . import zk2c
 from .owner import StandbyRefused
 
 NS = 1_000_000_000
@@ -338,8 +339,6 @@ class Actuator:
         import zenoh
 
         key = str(sample.key_expr)
-        from . import zk2c
-
         read = zk2c.read_sample(sample)
         if read.refused:
             return  # observer §7.3 (0.14), core §7.5: undecodable, no arrival
