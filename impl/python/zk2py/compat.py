@@ -916,7 +916,26 @@ def _resource_compare(old: Revision, a: dict[str, Any], new: Revision, b: dict[s
             v.add(REVIEW, optional_types[m], f"{m} {'added' if x is None else 'removed'}")
             continue
         v.merge(type_compare(old, x, new, y, m))
+    _frame_rules(v, a, b)
     return v
+
+
+def _frame_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any]) -> None:
+    """§9.8 "Frames" (core 0.83, #981 K1), a frame resource paired with its
+    counterpart, over the canonical form's ``frame`` member (resolved, a
+    deadband's ``delta`` in its shortest form)."""
+    fa, fb = a.get("frame"), b.get("frame")
+    if (fa is None) != (fb is None):
+        v.add(BREAKING, "frame_toggled", f"frame {'added' if fa is None else 'removed'}")
+        return
+    if fa is None:
+        return
+    if any(fa[k] != fb[k] for k in ("records", "step_ms", "jitter_ms")):
+        v.add(BREAKING, "frame_changed", "records, step_ms or jitter_ms changed")
+    if fa["deadband"] != fb["deadband"]:
+        v.add(BREAKING, "deadband_changed", f"deadband {fa['deadband']} → {fb['deadband']}")
+    if fa["keyframe_every"] != fb["keyframe_every"]:
+        v.add(REVIEW, "keyframe_changed", f"keyframe_every {fa['keyframe_every']} → {fb['keyframe_every']}")
 
 
 def _operation_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any]) -> None:

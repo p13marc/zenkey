@@ -6,6 +6,10 @@ delete as its attachment::
 
     mutation, a put's payload            CH · run · seq · record
     delete, a delete's attachment        CH · run · seq
+    heartbeat, a put's payload           CH · run · seq · body
+
+The heartbeat is form 6 (core 0.81, #978 F1): :mod:`zk2py.heartbeat` reads
+and writes its body, and checks its tag against the covered revision.
 
 CH is the form's code × 32, plus the run width bit × 16, plus the tag. The
 run is 16 or 32 bits, the seq 24, both big-endian. The record is every byte
@@ -44,10 +48,13 @@ from typing import Any
 
 from . import keys
 
-#: core §7.5's forms by code. Two are defined at this version; the other
-#: six are reserved, each refused (``form``).
+#: core §7.5's forms by code. Four are defined at this version (core 0.81
+#: adds the heartbeat, code 6, and 0.83 the frame, code 5, #981 K1); the
+#: other four are reserved, each refused (``form``).
 FORMS = ("mutation", "delete", "value", "error", "event", "frame", "heartbeat", "snapshot")
-DEFINED = ("mutation", "delete")
+DEFINED = ("mutation", "delete", "frame", "heartbeat")
+#: the forms a put's payload carries; a delete's attachment carries a delete
+PUT_FORMS = ("mutation", "frame", "heartbeat")
 
 #: core §7.5: "The seq is an unsigned 24-bit integer, from 0 to 16,777,215."
 SEQ_MAX = 2**24 - 1
@@ -94,7 +101,8 @@ class InBand:
 @dataclass(frozen=True)
 class Envelope:
     """A parsed envelope: its form's name, the run's width in bits, the run,
-    the seq, the tag, and the record (None for a delete)."""
+    the seq, the tag, and the record: a mutation's record, a heartbeat's
+    body, None for a delete."""
 
     form: str
     width: int
@@ -116,11 +124,14 @@ def header(byte: int) -> dict[str, Any]:
     return {"form": FORMS[byte >> 5], "run_width": 32 if byte & 0x10 else 16, "tag": byte & 0x0F}
 
 
-def parse(data: bytes, sample: str) -> Envelope:
+def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
     """Core §7.5's parse of ``data`` as the envelope a ``sample`` (``put``:
     its payload; ``delete``: its attachment) carries. Raises
     :class:`Refused` for the first reason that applies, in the text's
-    order."""
+    order. ``key_token``, the kind token "the grammar reads from the key
+    alone", refuses a frame on a key that is not a plain stream's
+    (``key_kind``, core 0.83, after ``sample_kind``); None parses with no
+    key, as ``vectors.json`` does."""
     if sample not in ("put", "delete"):
         raise ValueError(f"no such sample kind: {sample!r}")
     data = bytes(data)
@@ -129,9 +140,11 @@ def parse(data: bytes, sample: str) -> Envelope:
     h = header(data[0])
     if h["form"] not in DEFINED:
         raise Refused("form", f"form {h['form']} is reserved at this version")
-    if (sample == "put") != (h["form"] == "mutation"):
+    if (sample == "put") != (h["form"] in PUT_FORMS):
         raise Refused("sample_kind", f"a {h['form']} as a {sample}'s "
                       + ("payload" if sample == "put" else "attachment"))
+    if h["form"] == "frame" and key_token is not None and key_token != "stream":
+        raise Refused("key_kind", f"a frame on a {key_token} key: only a plain stream's carries one (core §7.5)")
     if h["form"] == "delete" and h["tag"] != 0:
         raise Refused("tag", f"a delete whose tag is {h['tag']}")
     run_bytes = h["run_width"] // 8
@@ -143,7 +156,7 @@ def parse(data: bytes, sample: str) -> Envelope:
     run = int.from_bytes(data[1:1 + run_bytes], "big")
     seq = int.from_bytes(data[1 + run_bytes:need], "big")
     return Envelope(h["form"], h["run_width"], run, seq, h["tag"],
-                    data[need:] if h["form"] == "mutation" else None)
+                    data[need:] if h["form"] in PUT_FORMS else None)
 
 
 def write(form: str, width: int, run: int, seq: int, tag: int = 0, record: bytes | None = None) -> bytes:
@@ -176,6 +189,12 @@ def deletion(stamp: InBand) -> bytes:
     return write("delete", stamp.width, stamp.run, stamp.seq)
 
 
+def heartbeat(stamp: InBand, body: bytes, tag: int) -> bytes:
+    """A heartbeat's payload: ``CH · run · seq · body`` (core §7.5, 0.81),
+    CH's tag the covered revision's (:func:`zk2py.heartbeat.tag_of`)."""
+    return write("heartbeat", stamp.width, stamp.run, stamp.seq, tag, body)
+
+
 def data_key(key: str) -> dict[str, Any] | None:
     """The zk2 key a session hears ``key`` as, base-relative or with a
     namespace in front: "read from its first ``zk2`` chunk from which the
@@ -202,6 +221,25 @@ def carries(key: str, encoding: str) -> bool:
     return parsed is not None and parsed.get("form") == "data" and parsed.get("token") in CARRYING
 
 
+def key_token(key: str) -> str | None:
+    """The kind token of the zk2 data key a session hears ``key`` as, or
+    None."""
+    p = data_key(key)
+    return p.get("token") if p is not None and p.get("form") == "data" else None
+
+
+def reads(key: str, payload: bytes) -> dict[str, str]:
+    """``carries.json``'s ``reads`` (core 0.83): how a put on ``key`` under
+    ``zenoh/bytes`` reads: ``{"reads": "plain"}`` with no envelope, its
+    form's name, or ``{"refused": token}``, ``key_kind`` among them."""
+    if not carries(key, ENCODING):
+        return {"reads": "plain"}
+    try:
+        return {"reads": parse(payload, "put", key_token(key)).form}
+    except Refused as e:
+        return {"refused": e.token}
+
+
 @dataclass(frozen=True)
 class Read:
     """A data sample read through observer §7.3's first step.
@@ -224,6 +262,9 @@ class Read:
     #: CH's tag bits of an accepted envelope, which a packed type's reader
     #: checks first (core §7.6); None where no envelope was accepted.
     tag: int | None = None
+    #: the accepted envelope's form, ``mutation`` or ``heartbeat`` for a put
+    #: (core 0.81); None where none was accepted
+    form: str | None = None
 
     @property
     def refused(self) -> bool:
@@ -241,10 +282,10 @@ def read_put(key: str, encoding: str, payload: bytes) -> Read:
     if not carries(key, encoding):
         return Read(False, bytes(payload))
     try:
-        env = parse(payload, "put")
+        env = parse(payload, "put", key_token(key))
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
-    return Read(True, env.record, env.stamp, tag=env.tag)
+    return Read(True, env.record, env.stamp, tag=env.tag, form=env.form)
 
 
 def read_delete(key: str, encoding: str, attachment: bytes | None) -> Read:
@@ -257,7 +298,7 @@ def read_delete(key: str, encoding: str, attachment: bytes | None) -> Read:
         env = parse(attachment or b"", "delete")
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
-    return Read(True, None, env.stamp)
+    return Read(True, None, env.stamp, form=env.form)
 
 
 def read_sample(sample: Any) -> Read:

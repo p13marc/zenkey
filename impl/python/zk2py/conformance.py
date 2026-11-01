@@ -249,7 +249,10 @@ def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
     d = root / "compat" / case
     got: dict[str, Any] = {}
     family = case.split("/")[0]
-    if family == "contract":
+    if family in ("contract", "frame"):
+        # compat/README.md (0.83): a frame case is "old.toml, new.toml, each a
+        # frame resource … and the packed files they list", loaded "As
+        # contracts".
         contracts = [load_contract(d / f"{n}.toml", spec_dir=root.parent) for n in ("old", "new")]
     else:
         # compat/README.md (0.75): a transitive revision is "a protobuf
@@ -463,6 +466,29 @@ def _freshness_judgements(path: Path) -> list[Result]:
     for c in _load_json(path)["cases"]:
         got = freshness.judge(c["kind"], c["annotations"], [_freshness_observation(o) for o in c["observations"]])
         out.append(_check(f"judgements: {c['note']}", got.pair(), c["expect"]))
+    return out
+
+
+def _freshness_apply(path: Path) -> list[Result]:
+    """``apply.json`` (``freshness.v2`` §2.5, text 0.1, #978 F3): each case's
+    steps through :class:`zk2py.freshness_v2.View` over the core's
+    ``heartbeat/layouts.json`` revision it names."""
+    import tempfile
+
+    from . import freshness_v2, heartbeat
+    from .contract import load_contract
+
+    data = _load_json(path)
+    lay = _load_json(path.parents[3] / "conformance" / "heartbeat" / "layouts.json")
+    layouts = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            c = load_contract(Path(tmp) / f"{name}.toml", text=text)
+            layouts[name] = heartbeat.layout_of(c.canonical, c.fingerprint)
+    out: list[Result] = []
+    for i, c in enumerate(data["cases"]):
+        for what, got, want in freshness_v2.apply_case(layouts[c["layout"]], c):
+            out.append(_check(f"apply.json {i}: {c['note']}: {what}", got, want))
     return out
 
 
@@ -703,16 +729,18 @@ def _link_interfaces(case: dict[str, Any]) -> dict[str, Any]:
     from . import link
     from .contract import load_contract
 
-    if "interfaces" in case:
-        return case["interfaces"]
     repo = Path(__file__).resolve().parents[3]
-    revisions: dict[str, list[list[dict[str, Any]]]] = {}
+    revisions: dict[str, list[dict[str, Any]]] = {}
     for rel in case.get("contracts", []):
         c = load_contract(repo / rel)
         if not c.valid or c.canonical is None:
             raise CannotRun(f"{rel}: {c.codes}")
-        revisions.setdefault(c.interface, []).append(link.resources_of(c))
-    return {i: {"revisions": revs} for i, revs in revisions.items()}
+        revisions.setdefault(c.interface, []).append(link.revision_of(c))
+    # link.v1 0.11: a case may give both, its interfaces inline and the
+    # standard contracts by path (freshness.v2's).
+    out: dict[str, Any] = {i: {"revisions": revs} for i, revs in revisions.items()}
+    out.update(case.get("interfaces", {}))
+    return out
 
 
 def _link_exposure(path: Path) -> list[Result]:
@@ -746,6 +774,39 @@ def _link_lints(path: Path) -> list[Result]:
                         interfaces=_link_interfaces(c) if has else None, windows=c.get("windows"),
                         block=c.get("block"))
         out.append(_check(f"lints: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _link_v2(path: Path) -> list[Result]:
+    """``conformance/v2/`` (link.v2 text 0.1, #988 L1 and L2), every file, an
+    unknown one failing, through :mod:`zk2py.link_v2`. ``lints.json``: a
+    policy -> every finding. ``plan.json``: a policy and a deployment -> the
+    binding, the catalog, the transport and each face's plan with its reply
+    timeout, or the refusal; ``narrow``'s principals -> the link protocols a
+    subject bound to each is selected by. ``transport.json``: a policy, a
+    router's and a far end's configuration, and a catalog -> what a generator
+    emits, and every finding."""
+    from . import link_v2
+
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        data = _load_json(f)
+        if f.name == "lints.json":
+            for c in data["cases"]:
+                out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"]), c["expect"]))
+        elif f.name == "plan.json":
+            for c in data["cases"]:
+                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c))
+                if "narrow" in c:
+                    pol, _ = link_v2.parse_policy(c["policy"])
+                    got["narrowed"] = None if pol is None else {n: link_v2.narrowed(pol, n) for n in c["narrow"]}
+                out.append(_check(f"v2 plan: {c['note']}", got, c["expect"]))
+        elif f.name == "transport.json":
+            for c in data["cases"]:
+                got = link_v2.check_transport(c["policy"], c.get("router") or {}, c.get("peer"), c.get("catalog"))
+                out.append(_check(f"v2 transport: {c['note']}", got, c["expect"]))
+        else:
+            out.append((f"v2/{f.name}", False, "an unknown fixture file: the runner does not read it"))
     return out
 
 
@@ -1332,13 +1393,13 @@ def _arbitration_conclusions(path: Path) -> list[Result]:
 PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "hostid": {"vectors.json": _hostid_vectors, "shapes.json": _hostid_shapes},
     "freshness": {"horizons.json": _freshness_horizons, "judgements.json": _freshness_judgements,
-                  "clock-trust.json": _freshness_clock_trust},
+                  "clock-trust.json": _freshness_clock_trust, "apply.json": _freshness_apply},
     "health": {"judgements.json": _health_judgements, "rollups.json": _health_rollups,
                "codes.json": _health_codes, "clock.json": _health_clock},
     "config": {"validation.json": _config_validation, "window.json": _config_window,
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
                "redaction.json": _config_redaction},
-    "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints},
+    "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints, "v2": _link_v2},
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
@@ -3450,8 +3511,193 @@ def family_readings(root: Path) -> list[Result]:
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
-        + _round95_readings(root)
+        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round96_k1_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.83 (#609, round 96's extension; #981 K1): its entry; the
+    sentences F-451 to F-454 quote, as they read; and zk2py's readings of
+    what they leave open, through :mod:`zk2py.frame`, :mod:`zk2py.compat`
+    and the contract linter. No session is opened."""
+    from . import compat, frame, packed
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    core, tim = flat("core.md"), flat("profiles/timing/v1.md")
+    log = (spec / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.83's entry, frames defined",
+         [any(line.startswith("## 0.83 ") and "frames defined" in line for line in log)], [True]),
+    ]
+    # F-451: a field renamed that carries a deadband.
+    doc = {"types": {"R": {"fields": [{"name": "level", "type": "int", "minimum": 0, "maximum": 1000}]}}}
+    ren = {"types": {"R": {"fields": [{"name": "depth", "type": "int", "minimum": 0, "maximum": 1000}]}}}
+    a_ = frame.Layout(packed.lint(doc).types["R"], frame.declaration(
+        {"deadband": {"level": {"delta": "4", "max_records": 5}}}))
+    b_ = frame.Layout(packed.lint(ren).types["R"], frame.declaration(
+        {"deadband": {"depth": {"delta": "4", "max_records": 5}}}))
+    v = compat.Verdict()
+    compat._frame_rules(v, {"frame": a_.decl.canonical()}, {"frame": b_.decl.canonical()})
+    out.append(("F-451: §9.8's deadband row and its tag sentence, §7.7's names left out, §9.5's deadband by name; "
+                "zk2py's reading: a renamed field's deadband is deadband_changed, its tag unmoved",
+                missing(core, "| A deadband added, removed or changed | breaking: what an omitted field holds moves, "
+                              "either way | `deadband_changed` |",
+                        "Each breaking change above, and each of the layout, moves the frame's tag (§7.7).",
+                        "Names are left out, so a field renamed keeps the tag.",
+                        "`deadband` is an object by field name of `{\"delta\", \"max_records\"}`")
+                + [a_.tag == b_.tag, v.cls], [True, "breaking"]))
+    # F-452: E050 reads a timing value alone; timing.v1 judges an invalid declaration's none.
+    text = """[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["timing.v1"]
+[schemas]
+packed = ["schemas/packed/frames.json"]
+[resources."frames/s"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000 }
+annotations = { "timing.deadline_ms" = 20000, "timing.period_ms" = "x" }
+"""
+    c = load_contract(spec / "conformance" / "contracts" / "zk2py-f452.toml", text=text)
+    out.append(("F-452: E050 reads each timing value alone, timing.v1 §2.2 judges none of an invalid declaration; "
+                "zk2py's reading: a valid deadline below the span beside an invalid period is E050",
+                missing(core, "It reads a `timing.*` value as `timing.v1` §2.2 does, and one that does not read "
+                              "gives none.")
+                + missing(tim, "A reader MUST NOT judge a period, a deadline or a lifespan of a resource whose "
+                               "declaration is invalid")
+                + [c.codes], [["E050"]]))
+    out.append(("F-453: timing.v1 §2.2 says no core lint reads an annotation's value; core E050 reads timing.*",
+                missing(tim, "The core has no code for it: W105 is about keys, and no core lint reads an annotation's "
+                             "value.")
+                + missing(core, "| E050 | timing a frame resource cannot keep (`timing.v1` §2.3)"), []))
+    out.append(("F-454: §7.7's owner and reader rules cite scenarios/frames.md, which spec/ does not hold",
+                missing(core, "`[Sc: frames.md §1]`", "`[Sc: frames.md §4]`", "`[Sc: frames.md §2, §5, §6]`")
+                + [(spec / "scenarios" / "frames.md").exists()], [False]))
+    return out
+
+
+def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.81 and 0.82, ``freshness.v2`` text 0.1, ``link.v1`` text 0.11
+    and ``link.v2`` text 0.1 (#609, round 96; #978 F1 and F3, #988 L1 and
+    L2). Each text at its version or later with its entry; the sentences
+    F-442 to F-450 quote, as they read; then zk2py's readings of what they
+    leave open. No session is opened."""
+    import hashlib
+    import re
+
+    from . import catalog, freshness_v2, heartbeat, jcs, link, zk2c
+    from .contract import load_contract
+    from .owner import keeps_timestamp
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules, log = flat("core.md"), flat("observer.md"), flat("RULES.md"), flat("CHANGELOG.md")
+    v2, sc2, l1, l2 = (flat("profiles/freshness/v2.md"), flat("profiles/freshness/scenarios-v2.md"),
+                       flat("profiles/link/v1.md"), flat("profiles/link/v2.md"))
+    llog = flat("profiles/link/CHANGELOG.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    repo = spec.parent
+    beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
+    face = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon-face.v2.toml")
+    old = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v1.toml")
+    lo = heartbeat.layout_of(beacon.canonical, beacon.fingerprint)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.82 or later, freshness.v2 0.1, link.v1 0.11 and link.v2 0.1, each with its entry",
+         [core_v >= (0, 82)] + entry("CHANGELOG.md", "0.81", "the heartbeat defined")
+         + entry("CHANGELOG.md", "0.82", "adopts the heartbeat")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.1", "confirmed by a heartbeat")
+         + entry("profiles/link/CHANGELOG.md", "0.11", "never downsampled")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.1", "the face's transport"),
+         [True]),
+        ("F-442: 0.82's entry counts 198 rules; RULES.md's table held 207 at 0.82 (re-keyed at 0.83, 223)",
+         missing(log, "joins S2's evidence. `RULES.md` lists 198 rules.")
+         + [int(re.search(r"\| Every rule, once \| (\d+) \|", rules).group(1)) >= 207],
+         [True]),
+        ("F-443: every section uses beacon.v2, §7's reads link.exposure; beacon.v2 declares none, and a contract "
+         "that does lists link.v1 (E020)",
+         missing(sc2, "Every section uses `beacon.v2`.", "`status` and `level` read `link.exposure = \"link\"` there.")
+         + [k for r in beacon.canonical["resources"] for k in r["annotations"] if k.startswith("link.")]
+         + [face.codes, face.canonical["uses"], face.fingerprint == beacon.fingerprint],
+         [[], ["freshness.v2", "link.v1"], False]),
+        ("F-444: core §7.5 reads a record as the resource's type; the heartbeat's is octet-stream, and observer "
+         "names no heartbeat",
+         missing(core, "**The record** is every byte after the seq, possibly none. It is read as the resource's "
+                       "type says (§7.1).")
+         + [freshness_v2.standard_contract().canonical["resources"][0]["type"]["media_type"],
+            "heartbeat" in obs.lower()],
+         ["application/octet-stream", False]),
+        ("F-445, F-446: S2's freshness.v2 sentence and the table's cell; zk2py's reading: no Zenoh timestamp on a "
+         "freshness.v2 state's put, one on a freshness.v1 state's",
+         missing(core, "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead that "
+                       "member's last confirmation, as §4.3's table says.",
+                 "on its replies alone: the later of its last mutation's time and the last heartbeat's that vouched "
+                 "for it (S2), never on a put")
+         + [keeps_timestamp(beacon, next(r for r in beacon.canonical["resources"] if r["template"] == "status")),
+            keeps_timestamp(old, next(r for r in old.canonical["resources"] if r["template"] == "status"))],
+         [False, True]),
+        ("F-447: §2.10's every bit clear; zk2py's reading: the map and the digests kept, every vouched bit clear",
+         missing(v2, "Its heartbeats go on, every bit clear, so its liveness still crosses.")
+         + [freshness_v2.owner_body(lo, {"state/status"}, {
+             "zk2/lab/beacon/beacon.v2/state/status": freshness_v2.OwnerView(
+                 "zk2/lab/beacon/beacon.v2/state/status", zk2c.InBand(16, 1, 0))}, None, vouch=False)],
+         [{"time": None, "sections": {"state/status": {"digest": f"{heartbeat.digest([('zk2/lab/beacon/beacon.v2/state/status', 16, 1, 0)]):08x}", "vouched": False}}}]),
+    ]
+    # F-448: only a heartbeat read at step 4 moves the sequence (apply.json case 8).
+    view = freshness_v2.View(lo, ["state/status"])
+    body = heartbeat.write(lo, {"time": None, "sections": {}})
+    steps = [view.heartbeat(lo.tag, zk2c.InBand(16, 9, 5), body, 0),
+             view.heartbeat(lo.tag, zk2c.InBand(16, 9, 6), b"", 1),
+             view.heartbeat(lo.tag, zk2c.InBand(16, 9, 7), body, 2)]
+    out.append(("F-448: older is the one step not counted; zk2py's reading: a refused 6 between 5 and 7 leaves a gap",
+                missing(v2, "nothing is confirmed, and it is not counted (`older`).",
+                        "A heartbeat whose seq is not the last one's plus 1, within one run, follows a lost one.")
+                + [[x.get("refused") or x["read"]["gap"] for x in steps]], [[False, "short", True]]))
+    # F-449: transport.json's catalogs, refused by core §8.6, their JCS id the policy's.
+    tj = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "transport.json")
+    docs = [c["catalog"] for c in tj["cases"] if "catalog" in c]
+    reads = []
+    for d in docs:
+        try:
+            reads.append(catalog.read(json.dumps(d)).id)
+        except catalog.Refused as e:
+            reads.append(e.token)
+    out.append(("F-449: link.v2 §2.19's id and its changelog's §8.6 'not landed'; core §8.6 refuses every catalog "
+                "transport.json gives, and their JCS ids are read alone",
+                missing(l2, "The id is the first 4 bytes of the sha256 of the catalog document's JCS bytes (RFC "
+                            "8785), as 8 lowercase hex digits.")
+                + missing(llog, "since core §8.6 has not landed.")
+                + [reads, [hashlib.sha256(jcs.dumps(d)).hexdigest()[:8] for d in docs][0]],
+                [["member", "member", "member"], "50a01c11"]))
+    # F-450: a heartbeat over two revisions, one freshness.v1's.
+    revs = {"revisions": [{"uses": ["freshness.v1"], "resources": [
+        {"template": "mode", "token": "state", "annotations": {"freshness.ttl_s": 60}}]},
+        {"uses": ["freshness.v2"], "resources": [
+            {"template": "mode", "token": "state", "annotations": {"freshness.ttl_s": 60}}]}]}
+    res = link.merge_revisions("two.v1", link.revisions_of(revs))
+    out.append(("F-450: §2.9's 'a revision of it … uses freshness.v2 and it has a collection'; zk2py's reading: "
+                "a heartbeat over the revisions together",
+                missing(l1, "A listed interface has a heartbeat when a revision of it the generator is given uses "
+                            "`freshness.v2` and it has a collection")
+                + [link.heartbeat_of(revs, res)], [True]))
+    return out
 
 
 def _round95_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -4186,7 +4432,7 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
     raised: list[str] = []
     wrong: list[str] = []
     seen = {"plain": 0, "refused": 0, "accepted": 0}
-    tokens = {"short", "form", "sample_kind", "tag", "trailing"}
+    tokens = {"short", "form", "sample_kind", "key_kind", "tag", "trailing"}
     for i, data in enumerate(payloads):
         key, enc = keys_[i % len(keys_)], encodings[(i // len(keys_)) % len(encodings)]
         for k, e in ((key, enc), (keys_[0], "zenoh/bytes")):
@@ -4207,8 +4453,10 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
             else:
                 seen["accepted"] += 1
                 st = r.stamp
-                if st is None or r.record is None or zk2c.write(
-                        "mutation", st.width, st.run, st.seq, data[0] & 0x0F, r.record) != data:
+                # core 0.81: a put carries a mutation or a heartbeat, each
+                # written back in the form it was read in
+                if st is None or r.record is None or r.form not in zk2c.PUT_FORMS or zk2c.write(
+                        r.form, st.width, st.run, st.seq, data[0] & 0x0F, r.record) != data:
                     wrong.append(f"accepted {data.hex()}")
             if d.record is not None or (d.refused and d.refusal not in tokens) or (d.enveloped and not d.refused
                                                                                     and d.stamp is None):
@@ -4863,7 +5111,7 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          # static sections, and §4.2's merge is by the in-band stamp. Under
          # core 0.75 (round 94, #979 B1): §7.6 joins them too, and under
          # core 0.79 (round 95, #980 C1a) §8.6.
-         missing(core, "They are the rules of §1, §7.5, §7.6, §8.6 and §9 that name no role",
+         missing(core, "They are the rules of §1, §7.5, §7.6, §7.7, §8.6 and §9 that name no role",
                  "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
                  "so that a caller or tool following the steps would report the contract unavailable",
                  "or at the timeout the caller or tool gave it (§8.1).",
@@ -7388,6 +7636,10 @@ def family_envelope(root: Path) -> list[Result]:
             for c in data["cases"]:
                 out.append(_check(f"envelope: carries {c['key']} {c['encoding']}: {c['note']}",
                                   zk2c.carries(c["key"], c["encoding"]), c["expect"]))
+            # core 0.83: a put's payload on its key, key_kind among the refusals
+            for c in data.get("reads", []):
+                out.append(_check(f"envelope: reads {c['key']} {c['hex'] or '(empty)'}: {c['note']}",
+                                  zk2c.reads(c["key"], bytes.fromhex(c["hex"])), c["expect"]))
         else:
             out.append((f"envelope/{path.name}", False, "an unknown fixture file: the runner does not read it"))
     return out
@@ -7460,6 +7712,146 @@ def family_packed(root: Path) -> list[Result]:
         except (packed.Refused, zk2c.Refused) as e:
             enveloped = {"refused": e.token}
         out.append(_check(f"packed: read {i} through the envelope", enveloped, c["expect"]))
+    return out
+
+
+def family_heartbeat(root: Path) -> list[Result]:
+    """``heartbeat/`` (core §7.5's heartbeat, 0.81, #978 F1), every file, an
+    unknown one failing, through :mod:`zk2py.heartbeat`. ``layouts.json``:
+    each revision's authoring text, loaded as a contract, -> its
+    fingerprint, the tag and its collections. ``bodies.json``: a layout and
+    a value -> the bits, the pad and the bytes, every write read back to its
+    value in the form written and sealed in a form 6 envelope parsed back;
+    a layout and bytes -> the value, written back to the same bytes, or the
+    first refusal. ``digests.json``: members -> each one's value and their
+    XOR."""
+    import tempfile
+
+    from . import heartbeat, zk2c
+    from .contract import load_contract
+
+    out: list[Result] = []
+    layouts: dict[str, heartbeat.Layout] = {}
+    directory = root / "heartbeat"
+    lay = _load_json(directory / "layouts.json")
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            c = load_contract(Path(tmp) / f"{name}.toml", text=text)
+            if not c.valid or c.canonical is None:
+                out.append((f"heartbeat: contract {name}", False, f"not a valid contract: {c.codes}"))
+                continue
+            layouts[name] = heartbeat.layout_of(c.canonical, c.fingerprint)
+    for path in sorted(directory.iterdir()):
+        data = _load_json(path)
+        if path.name == "layouts.json":
+            for c in data["layouts"]:
+                lo = layouts.get(c["contract"])
+                got = None if lo is None else {"contract": c["contract"], "fingerprint": lo.fingerprint,
+                                               "tag": lo.tag, "collections": [x.expect() for x in lo.collections]}
+                out.append(_check(f"heartbeat: layout {c['contract']}", got, c))
+        elif path.name == "bodies.json":
+            for i, c in enumerate(data["writes"]):
+                lo = layouts[c["layout"]]
+                bits = heartbeat.write_bits(lo, c["value"])
+                body = heartbeat.write(lo, c["value"])
+                name = f"heartbeat: write {i} {c['layout']}: {c['note']}"
+                out.append(_check(name, {"bits": bits, "pad": -len(bits) % 8, "hex": body.hex()}, c["expect"]))
+                back = heartbeat.read(lo, body)
+                written = {k: {f: v for f, v in sec.items() if f != "form"} for k, sec in back["sections"].items()}
+                out.append(_check(f"{name}: read back", {"time": back["time"], "sections": written},
+                                  {"time": c["value"]["time"],
+                                   "sections": {k: {f: v for f, v in sec.items() if f != "form"}
+                                                for k, sec in c["value"]["sections"].items()}}))
+                sealed = zk2c.heartbeat(zk2c.InBand(16, 9, i), body, lo.tag)
+                env = zk2c.parse(sealed, "put")
+                out.append(_check(f"{name}: sealed in form 6 under tag {lo.tag} and parsed back",
+                                  {"form": env.form, "tag": env.tag, "body": (env.record or b"").hex()},
+                                  {"form": "heartbeat", "tag": lo.tag, "body": body.hex()}))
+            for i, c in enumerate(data["reads"]):
+                lo = layouts[c["layout"]]
+                raw = bytes.fromhex(c["hex"])
+                try:
+                    got: Any = heartbeat.read(lo, raw)
+                except heartbeat.Refused as e:
+                    got = {"refused": e.token}
+                name = f"heartbeat: read {i} {c['layout']} {c['hex'] or '(empty)'}: {c['note']}"
+                out.append(_check(name, got, c["expect"]))
+                if "refused" not in got:
+                    out.append(_check(f"{name}: writes back", heartbeat.write(lo, got).hex(), c["hex"]))
+        elif path.name == "digests.json":
+            for i, c in enumerate(data["cases"]):
+                ms = [(m["key"], m["run_width"], m["run"], m["seq"]) for m in c["members"]]
+                got = {"values": [f"{heartbeat.member_value(*m):08x}" for m in ms],
+                       "digest": f"{heartbeat.digest(ms):08x}"}
+                out.append(_check(f"heartbeat: digest {i}: {c['note']}", got, c["expect"]))
+        else:
+            out.append((f"heartbeat/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
+def family_frame(root: Path) -> list[Result]:
+    """``frame/`` (core §7.7, 0.83, #981 K1), every file, an unknown one
+    failing, through :mod:`zk2py.frame` over :mod:`zk2py.packed`.
+    ``layouts.json``: the shared packed document lint-clean; a record type
+    and a ``frame`` table -> the frame form, its sha256, its tag, the count's
+    and the offset's widths and the span. ``bodies.json``: a layout and a
+    value -> the bits, the pad and the bytes, or the writer's refusal, every
+    accepted write read back under the layout's tag to its value or its
+    ``reads_as``, and sealed in a form 5 envelope parsed back on a stream
+    key; a layout, a tag and bytes -> the value, written back to the same
+    bytes, or the first refusal in §7.7's order."""
+    from . import frame, packed, zk2c
+
+    out: list[Result] = []
+    lay = _load_json(root / "frame" / "layouts.json")
+    linted = packed.lint(lay["schema"], "frame/layouts.json")
+    out.append(_check("frame: the shared schema is lint-clean (§9.2 E038 to E045)",
+                      [c for c, _ in linted.findings], []))
+    layouts = {c["name"]: frame.Layout(linted.types[c["type"]], frame.declaration(c["frame"]))
+               for c in lay["layouts"]}
+    for path in sorted((root / "frame").iterdir()):
+        if path.name == "README.md":
+            continue
+        data = _load_json(path)
+        if path.name == "layouts.json":
+            for c in data["layouts"]:
+                out.append(_check(f"frame: layout {c['name']}: {c['note']}", layouts[c["name"]].expect(), c["expect"]))
+        elif path.name == "bodies.json":
+            key = "zk2/rf0/modem/modem.v3/stream/frames/link"
+            for i, c in enumerate(data["writes"]):
+                lo = layouts[c["layout"]]
+                name = f"frame: write {i} {c['layout']}: {c['note']}"
+                try:
+                    bits = lo.write_bits(c["value"])
+                    body = lo.write(c["value"])
+                    got: Any = {"bits": bits, "pad": -len(bits) % 8, "hex": body.hex()}
+                except (frame.Refused, packed.Refused) as e:
+                    got = {"refused": e.token}
+                out.append(_check(name, got, c["expect"]))
+                if "refused" in got:
+                    continue
+                out.append(_check(f"{name}: read back under tag {lo.tag}", lo.read(lo.tag, body),
+                                  c.get("reads_as", c["value"])))
+                sealed = zk2c.write("frame", 16, 1, 12, lo.tag, body)
+                env = zk2c.parse(sealed, "put", zk2c.key_token(key))
+                out.append(_check(f"{name}: sealed in form 5 on a stream key and parsed back",
+                                  {"form": env.form, "tag": env.tag, "body": (env.record or b"").hex(),
+                                   "on a state key": zk2c.reads(key.replace("/stream/frames/link", "/state/link"),
+                                                                sealed)},
+                                  {"form": "frame", "tag": lo.tag, "body": body.hex(),
+                                   "on a state key": {"refused": "key_kind"}}))
+            for i, c in enumerate(data["reads"]):
+                lo = layouts[c["layout"]]
+                name = f"frame: read {i} {c['layout']} tag {c['tag']} {c['hex'] or '(empty)'}: {c['note']}"
+                try:
+                    got = lo.read(c["tag"], bytes.fromhex(c["hex"]))
+                except frame.Refused as e:
+                    got = {"refused": e.token}
+                out.append(_check(name, got, c["expect"]))
+                if "refused" not in got:
+                    out.append(_check(f"{name}: writes back", lo.write(got).hex(), c["hex"]))
+        else:
+            out.append((f"frame/{path.name}", False, "an unknown fixture file: the runner does not read it"))
     return out
 
 
@@ -7540,7 +7932,7 @@ def family_catalog(root: Path) -> list[Result]:
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
                  "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed",
-                 "catalog"}
+                 "catalog", "heartbeat", "frame"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -7575,6 +7967,8 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "envelope": family_envelope,
     "packed": family_packed,
     "catalog": family_catalog,
+    "heartbeat": family_heartbeat,
+    "frame": family_frame,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import jcs
+from . import jcs, packed
 from .lexical import GATE_NAME, IDENT, is_interface_id, is_interface_name, parse_interface_id
 from .schemas import JSON, PACKED, SchemaSet
 from .shape import Checker, load_schema
@@ -304,6 +304,8 @@ class _Loader:
         resources = doc.get("resources", {})
         self.parsed: dict[str, Template] = {}
         self.tokens: dict[str, str] = {}
+        #: core §7.7: each frame resource with no finding, its declaration
+        self.frames: dict[str, Any] = {}
         # §9.2 "Order" (0.5): resources are taken in the bytewise order of
         # their template text, "since TOML gives a table's keys no order".
         for text in sorted(resources):
@@ -406,6 +408,12 @@ class _Loader:
             if f == "history":
                 if kind not in ("stream", "state") or explicit:
                     self.diag("E019", f"{text}: history on {token}", text)
+            elif f == "frame":
+                # core 0.83 (#981 K1), authoring draft 4: "Outside a plain
+                # stream whose template has no parameter, it is E046."
+                if kind != "stream" or explicit or tpl.param_names:
+                    self.diag("E046", f"{text}: frame on a {token} resource"
+                                      + (" with a parameter" if tpl.param_names else ""), text)
             elif f not in LEGAL[kind]:
                 self.diag("E014", f"{text}: {f} is not a field of {kind}", text)
         tparams = tpl.param_names
@@ -492,6 +500,9 @@ class _Loader:
             if obj["kind"] == PACKED and (f != "type" or kind == "operation" or token == "@stream"):
                 self.diag("E044", f"{text}: {f}: a packed type with no envelope to carry it", text)
 
+        if "frame" in spec and kind == "stream" and not explicit and not tpl.param_names:
+            self.check_frame(text, spec, resolved)
+
         if kind == "operation":
             # E018 / E033 on resolved values (§9.3, 0.5).
             serving = self.resolved(kind, spec, "serving", "exclusive")
@@ -519,6 +530,108 @@ class _Loader:
                 self.diag("W103", f"{text}: encoding on a non-JSON-Schema type", text)
             if "attachment_encoding" in spec and resolved.get("attachment", {}).get("kind") != JSON:
                 self.diag("W103", f"{text}: attachment_encoding without a JSON Schema attachment", text)
+
+    def check_frame(self, text: str, spec: dict[str, Any], resolved: dict[str, Any]) -> None:
+        """Core §7.7 and §9.2's E047 to E050 on a frame resource, in cascade
+        8's order (core 0.83, #981 K1): E047 and E049 read the record type,
+        waiting for one that resolves, and E047's marker half and E049 for a
+        packed declaration with no finding; E050 waits for the values it
+        reads, none of them E048's, and reads a ``timing.*`` value as
+        ``timing.v1`` §2.2 does. A frame resource with no finding is kept in
+        ``frames`` for its canonical form."""
+        from . import frame, timing
+
+        table = spec["frame"]
+        if not isinstance(table, dict):
+            self.diag("E048", f"{text}: frame is not a table", text)
+            return
+        n = 0
+
+        def bad(what: str) -> None:
+            nonlocal n
+            n += 1
+            self.diag("E048", f"{text}: frame {what}", text)
+
+        def int_in(v: Any, lo: int, hi: int) -> bool:
+            return type(v) is int and lo <= v <= hi
+
+        records = table.get("records", 1)
+        records_ok = int_in(records, 1, 256)
+        if not records_ok:
+            bad(f"records {records!r}: from 1 to 256")
+        step = table.get("step_ms")
+        step_ok = int_in(step, 1, 2**32 - 1)
+        if "step_ms" in table:
+            if not step_ok:
+                bad(f"step_ms {step!r}: from 1 to 2^32 − 1")
+            elif records_ok and records == 1:
+                bad("step_ms given with records 1")
+        elif records_ok and records > 1:
+            bad("step_ms absent with records above 1")
+        if "jitter_ms" in table:
+            j = table["jitter_ms"]
+            if "step_ms" not in table:
+                bad("jitter_ms without step_ms")
+            elif step_ok and not (type(j) is int and 0 <= j and 2 * j <= step):
+                bad(f"jitter_ms {j!r}: from 0 to step_ms / 2")
+        if "keyframe_every" in table and not int_in(table["keyframe_every"], 1, 65536):
+            bad(f"keyframe_every {table['keyframe_every']!r}: from 1 to 65,536")
+        deadband = table.get("deadband", {})
+        good_db: dict[str, frame.Deadband] = {}
+        if isinstance(deadband, dict):
+            for name, d in deadband.items():
+                ok = isinstance(d, dict)
+                delta = packed.read_decimal(d.get("delta")) if ok else None
+                if delta is None or delta <= 0:
+                    bad(f"deadband {name}: delta {d.get('delta') if ok else d!r}: a decimal string above 0")
+                    ok = False
+                if not (isinstance(d, dict) and int_in(d.get("max_records"), 1, 65536)):
+                    bad(f"deadband {name}: max_records: from 1 to 65,536")
+                    ok = False
+                if ok and delta is not None:
+                    good_db[name] = frame.Deadband(delta, d["max_records"])
+        # E047, E049: the record type.
+        t = resolved.get("type")
+        rec = None
+        if t is not None:
+            if t["kind"] != PACKED:
+                self.diag("E047", f"{text}: a frame's type is packed, not {t['kind']}", text)
+            else:
+                rec = self.schemas.packed_record(t)
+                if rec is not None and packed.MARKER in rec.items:
+                    self.diag("E047", f"{text}: packed:{t['name']} holds an extension marker", text)
+                    rec = None
+        e049 = 0
+        if rec is not None and isinstance(deadband, dict):
+            for name in deadband:
+                f = rec.field(name)
+                if f is None or f.type not in ("int", "fixed", "counter"):
+                    e049 += 1
+                    self.diag("E049", f"{text}: deadband {name}: no int, fixed or counter field of "
+                                      f"{rec.name}", text)
+        # E050: the timing a frame cannot keep (timing.v1 §2.3).
+        ann = {}
+        ann.update(self.defaults.get("annotations", {}))
+        ann.update((self.defaults.get("stream") or {}).get("annotations", {}))
+        ann.update(spec.get("annotations", {}))
+        deadline = timing.value_ms(ann[timing.DEADLINE]) if timing.DEADLINE in ann else None
+        period = timing.value_ms(ann[timing.PERIOD]) if timing.PERIOD in ann else None
+        span = records * step if records_ok and step_ok and "step_ms" in table and records > 1 else None
+        has_step = "step_ms" in table
+        if deadline is not None and span is not None and deadline < span:
+            self.diag("E050", f"{text}: timing.deadline_ms {deadline} below the span {span}", text)
+        if deadline is not None:
+            interval = span if has_step else period
+            for name, d in good_db.items():
+                if has_step and span is None:
+                    continue  # the step is E048's: no interval to read
+                if interval is None or d.max_records * interval > deadline:
+                    self.diag("E050", f"{text}: deadband {name}: {d.max_records} × the interval "
+                                      f"{interval} past the deadline {deadline}", text)
+        if timing.LIFESPAN in ann and timing.value_ms(ann[timing.LIFESPAN]) is not None:
+            self.diag("E050", f"{text}: timing.lifespan_ms on a frame resource", text)
+        if n == 0 and e049 == 0 and rec is not None and len(good_db) == len(deadband or {}):
+            self.frames[text] = frame.declaration(table)
 
     def request_fields(self, req: dict[str, Any]) -> list[str]:
         if req["kind"] == JSON:
@@ -658,6 +771,10 @@ class _Loader:
             "rate": rate,
             "retention_s": retention_s,
         })
+        # core §9.5 (0.83): "A frame resource adds frame, and no other
+        # resource has the member".
+        if text in self.frames:
+            out["frame"] = self.frames[text].canonical()
         return out
 
     def canonicalize(self, doc: dict[str, Any]) -> None:

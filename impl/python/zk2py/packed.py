@@ -843,6 +843,11 @@ def read_sample(rec: Record, read: Any, epoch: int | None = None) -> Reading:
         return Reading(None, "no_envelope", "a packed record travels in core §7.5's envelope, which carries its tag")
     if read.refused:
         return Reading(None, read.refusal, f"a refused zk2c envelope: {read.why}")
+    if read.form not in (None, "mutation"):
+        # core 0.83 §7.7 "No reading": a frame on a resource that declares no
+        # frame table has none, "A reader counts either as undecodable"; zk2py
+        # reads no frame's records (K2's), nor a heartbeat as a record.
+        return Reading(None, "no_reading", f"a {read.form} is no record of {rec.name} (core §7.7)")
     try:
         return Reading(rec.read(read.tag, read.record or b"", deployment_epoch(epoch)))
     except Refused as e:
@@ -857,4 +862,6 @@ def open_put(rec: Record, payload: bytes, epoch: int | None = None) -> tuple[Any
     from . import zk2c
 
     env = zk2c.parse(payload, "put")
+    if env.form != "mutation":
+        raise Refused("no_reading", f"a {env.form} is no record of {rec.name} (core §7.7)")
     return env, rec.read(env.tag, env.record or b"", epoch)

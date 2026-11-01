@@ -101,7 +101,8 @@ from typing import Any
 
 import zenoh
 
-from . import bundle, envelope, freshness, templates, zk2c
+from . import bundle, envelope, freshness, freshness_v2, templates, zk2c
+from . import heartbeat as hbeat
 from .contract import Contract
 from .lexical import parse_interface_id
 from .slug import slug
@@ -204,6 +205,11 @@ class _Held:
     #: (its envelope, or a delete's attachment), which S2's reply carries
     inband: zk2c.InBand | None = None
     wire: bytes | None = None
+    #: freshness.v2 (core 0.82 §4.3's table, row 2): the member's last
+    #: confirmation, "the later of its last mutation's time and the last
+    #: heartbeat's that vouched for it", which its replies carry (S2) and
+    #: no put does; None outside such a state
+    confirm: zenoh.Timestamp | None = None
 
 
 def keeps_timestamp(c: Contract, r: dict[str, Any]) -> bool:
@@ -217,7 +223,11 @@ def keeps_timestamp(c: Contract, r: dict[str, Any]) -> bool:
 
     ann = r["annotations"]
     if r["kind"] == "state":
-        if freshness.horizon("state", ann).horizon == "within":
+        # Core 0.82's table, row 1 split in two: a horizon's state keeps its
+        # Zenoh timestamp on each mutation only where its contract does not
+        # use freshness.v2; one that does carries its last confirmation on its
+        # replies alone (:attr:`_Held.confirm`).
+        if freshness.horizon("state", ann).horizon == "within" and not freshness_v2.uses_v2(c.canonical):
             return True
         if "desired.target_param" in ann:
             return True
@@ -531,6 +541,25 @@ class Owner:
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
+            # core 0.83 (#981 K1): a frame resource's samples are frames, which
+            # this owner does not write (K3's): refused before anything is
+            # declared, never published as mutations, which have no reading.
+            framed = [r["template"] for r in c.canonical["resources"] if r.get("frame") is not None]
+            if framed:
+                raise OwnerRefused(f"{c.interface}: frame resources {framed}: zk2py's owner writes no frame "
+                                   "(core §7.7, K3)")
+        #: freshness.v2 §2.4 (core 0.82): each interface it implements whose
+        #: contract uses freshness.v2 and has a collection is covered by a
+        #: heartbeat, and it implements the standard contract beside them
+        #: (§3: "once for all of them"), added here when not given.
+        self.hb_layouts: dict[str, hbeat.Layout] = {}
+        for c in contracts:
+            if freshness_v2.uses_v2(c.canonical):
+                lo = hbeat.layout_of(c.canonical, c.fingerprint)
+                if lo.collections:
+                    self.hb_layouts[c.interface] = lo
+        if self.hb_layouts and not any(c.interface == freshness_v2.PROFILE for c in contracts):
+            contracts = [*contracts, freshness_v2.standard_contract()]
         self.system, self.service, self.contracts = system, service, contracts
         self.connect = connect
         self.bindings = bindings or {}
@@ -660,6 +689,16 @@ class Owner:
         self.undecodable: list[tuple[str, str]] = []
         #: every resource by key, (contract, resource), for the table
         self._resource_of: dict[str, tuple[Any, dict[str, Any]]] = {}
+        #: freshness.v2 §2.4: the members whose bit it clears (it no longer
+        #: vouches for their values), the interfaces whose heartbeats run, and
+        #: every heartbeat sent, (iface, in-band stamp, body value)
+        self.unvouched: set[str] = set()
+        self._hb_running: set[str] = set()
+        self._hb_thread: threading.Thread | None = None
+        self.heartbeats_sent: list[tuple[str, zk2c.InBand, dict[str, Any]]] = []
+        #: False holds every heartbeat back: a test rig's owner that breaks
+        #: §2.4's MUST on purpose
+        self.send_heartbeats = True
 
     # -- core §8.1: member tokens (timing.v1 scenarios §2, round 76) -------
 
@@ -1086,6 +1125,9 @@ class Owner:
         # Step 4 is the second half of _declare_instance.
         if self.horizons:
             self._ensure_refresher()
+        # freshness.v2 §2.4 "When": "from its interface tokens on (core §8.2,
+        # step 4), never from a standby".
+        self._start_heartbeats([i for i in self.hb_layouts if i not in self.standing_by])
 
     def _declare_resources(self, c: Contract, rows: list[tuple[dict[str, Any], str]]) -> list[Any]:
         """§8.2 step 1 for one interface: its publishers and queryables, the
@@ -1129,7 +1171,7 @@ class Owner:
                 self._encodings[key] = enc
                 self._resource_of[key] = (c, r)
                 h = freshness.horizon(r["kind"], r["annotations"])
-                if r["kind"] == "state" and h.horizon == "within":
+                if r["kind"] == "state" and h.horizon == "within" and not freshness_v2.uses_v2(c.canonical):
                     self.horizons[key] = h
         for token in ("state", "@state"):
             self._entities.append(s.declare_queryable(
@@ -1281,6 +1323,7 @@ class Owner:
                 raise
             if self.horizons:
                 self._ensure_refresher()
+            self._start_heartbeats([iface] if iface in self.hb_layouts else [])
             return True
 
     def step_down(self, iface: str) -> bool:
@@ -1305,6 +1348,9 @@ class Owner:
         the first error, raising none. Called under ``_writes``."""
         iface = c.interface
         first: Exception | None = None
+        # freshness.v2 §2.4: "They stop when the owner stops serving the
+        # interface: … when it steps down."
+        self._hb_running.discard(iface)
         tok = self._iface_tokens.pop(iface, None)
         if tok is not None:
             if tok in self._instance_entities:
@@ -1492,7 +1538,13 @@ class Owner:
                 wire = zk2c.mutation(ib, payload, self.tag_of(key))
             self._publishers[key].put(wire, encoding=zk2c.ENCODING if ib is not None else enc,
                                       **({"timestamp": stamp} if stamp is not None else {}))
-            self._held[key] = _Held(payload, enc, stamp, time.monotonic(), ib, wire)
+            held = _Held(payload, enc, stamp, time.monotonic(), ib, wire)
+            if self._covered(key):
+                # core 0.82 §4.3's table: the put carries no Zenoh timestamp;
+                # its time is the member's confirmation until a heartbeat
+                # vouches for it later.
+                held.confirm = self.mint()
+            self._held[key] = held
             self.closed_writers.discard(key)
             return stamp if stamp is not None else ib
 
@@ -1577,8 +1629,10 @@ class Owner:
                     self._publishers[key], self._encodings[key] = pub, enc
                     # freshness.v1 §2.4 applies to every member of a state
                     # with a horizon, a templated one's too.
+                    # freshness.v2 §2.4: "An owner SHOULD NOT put a member
+                    # again to confirm it: its heartbeat does."
                     h = freshness.horizon(r["kind"], r["annotations"])
-                    if r["kind"] == "state" and h.horizon == "within":
+                    if r["kind"] == "state" and h.horizon == "within" and not freshness_v2.uses_v2(c.canonical):
                         self.horizons[key] = h
                         self._ensure_refresher()
                     return
@@ -1728,6 +1782,101 @@ class Owner:
             # Core §4.3 (0.23): the report is a stream sample, which the
             # guard does not hold (health.v1 §2.5).
             self.on_guard(changed, off)
+
+    # -- freshness.v2 §2.4: the heartbeats (core §7.5's form 6) ------------------
+
+    def _covered(self, key: str) -> hbeat.Collection | None:
+        """The collection of a covered interface ``key`` is a member of."""
+        for iface, lo in self.hb_layouts.items():
+            prefix = f"zk2/{self.system}/{self.service}/{iface}/"
+            if key.startswith(prefix):
+                for col in lo.collections:
+                    if freshness_v2._member_of(lo, col, key):
+                        return col
+        return None
+
+    def vouch(self, key: str, on: bool) -> None:
+        """Set or clear a member's bit (§2.4 "Only a value it holds
+        current"): an owner that can no longer vouch for a value "clears its
+        bit and lets the member go stale". A put does not set it again."""
+        with self._writes:
+            if self._covered(key) is None:
+                raise KeyError(f"{key}: no member of a collection a heartbeat of this owner covers")
+            (self.unvouched.discard if on else self.unvouched.add)(key)
+
+    def _start_heartbeats(self, ifaces: list[str]) -> None:
+        if not ifaces:
+            return
+        with self._refresher_lock:
+            if self._stop.is_set():
+                return
+            self._hb_running.update(ifaces)
+            if self._hb_thread is None:
+                self._hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+                self._hb_thread.start()
+
+    def heartbeat_body(self, iface: str, now: zenoh.Timestamp | None) -> dict[str, Any]:
+        """The value of ``iface``'s next body (§2.4): each exposed
+        collection's map bit, its digest over the members held live, a bit
+        for each it vouches for; under the clock guard (§2.10) none vouched
+        and the time unknown."""
+        lo = self.hb_layouts[iface]
+        exposed = {f"{r['token']}/{r['template']}" for r, status in self._plan_made.get(iface, [])
+                   if status == "exposed"}
+        prefix = f"zk2/{self.system}/{self.service}/{iface}/"
+        members = {k: freshness_v2.OwnerView(k, h.inband, k not in self.unvouched)
+                   for k, h in self._held.items() if k.startswith(prefix) and h.payload is not None}
+        known = None if now is None or self.ahead else hbeat.time_of(
+            now.get_time_as_ntp64().as_nanos(), self.writing_epoch())
+        return freshness_v2.owner_body(lo, exposed, members, known, vouch=known is not None)
+
+    def _put_heartbeat(self, iface: str) -> None:
+        """One heartbeat covering ``iface``: a put on its heartbeat key (§3),
+        on the stream's publisher with the contract's QoS, its payload form
+        6, CH the covered revision's tag, the run and seq the key's own (core
+        §4.3 "Streams"). Each member it vouches for is confirmed at its time
+        (:attr:`_Held.confirm`)."""
+        lo = self.hb_layouts[iface]
+        key = hbeat.heartbeat_key(self.system, self.service, iface)
+        with self._writes:
+            if self._stop.is_set() or self.session is None or iface not in self._hb_running:
+                return
+            if key not in self._publishers:
+                self._member_publisher(key)
+            now = self.mint()
+            value = self.heartbeat_body(iface, now)
+            ib = self._next_stream_inband(key)
+            self._publishers[key].put(zk2c.heartbeat(ib, hbeat.write(lo, value), lo.tag),
+                                      encoding=zk2c.ENCODING)
+            self.heartbeats_sent.append((iface, ib, value))
+            if value["time"] is None:
+                return
+            prefix = f"zk2/{self.system}/{self.service}/{iface}/"
+            for k, h in self._held.items():
+                if k.startswith(prefix) and h.payload is not None and k not in self.unvouched \
+                        and self._covered(k) is not None and f"{self._covered(k).resource}" in value["sections"]:
+                    h.confirm = now
+
+    def _heartbeat_loop(self) -> None:
+        """Each running interface's heartbeat at its period
+        (:func:`zk2py.freshness_v2.period_ns`), the first at once; "It sends
+        them with no member live too"."""
+        due: dict[str, int] = {}
+        while not self._stop.is_set():
+            now = time.monotonic_ns()
+            for iface in sorted(self._hb_running):
+                if not self.send_heartbeats:
+                    continue
+                if due.get(iface, 0) <= now:
+                    try:
+                        self._put_heartbeat(iface)
+                    except Exception as e:  # noqa: BLE001 - the next period tries again
+                        print(f"zk2py owner: heartbeat {iface}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                    due[iface] = now + (freshness_v2.period_ns(self.hb_layouts[iface]) or 10**9)
+            for iface in [i for i in due if i not in self._hb_running]:
+                due.pop(iface)
+            nxt = min(due.values(), default=time.monotonic_ns() + 50_000_000)
+            self._stop.wait(max(0.0, min((nxt - time.monotonic_ns()) / 1e9, 0.05)))
 
     def _refresh_loop(self) -> None:
         """freshness.v1 §2.4: re-put each held member once ttl/2 has passed
@@ -1911,6 +2060,11 @@ class Owner:
             # as the delete's attachment", and the mutation's Zenoh
             # timestamp where it carried one.
             kw: dict[str, Any] = {} if held.stamp is None else {"timestamp": held.stamp}
+            if held.payload is not None and held.stamp is None and held.confirm is not None:
+                # S2 (core 0.82): "The owner's reply of a member a
+                # freshness.v2 heartbeat confirms MUST carry instead that
+                # member's last confirmation".
+                kw["timestamp"] = held.confirm
             if held.payload is not None:
                 if held.inband is not None:
                     query.reply(key, held.wire, encoding=zk2c.ENCODING, **kw)
@@ -2039,8 +2193,14 @@ class Owner:
         with self._refresher_lock:
             self._stop.set()
             refresher = self._refresher
+            beater = self._hb_thread
         if refresher is not None and refresher is not threading.current_thread():
             refresher.join(timeout=2.0)
+        # freshness.v2 §2.4: the heartbeats stop "when its service closes",
+        # before its tokens go.
+        self._hb_running.clear()
+        if beater is not None and beater is not threading.current_thread():
+            beater.join(timeout=2.0)
         # Under _writes (an RLock, which take_over's and step_down's own
         # puts re-enter): a write, a takeover or a step-down in flight ends
         # first, and none begins after, since each checks _stop under it.

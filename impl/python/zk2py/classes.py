@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.80), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 95, the mend after #926 part 5 and the
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.83), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 96, the mend after #926 part 5 and the
 mend after round 94).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
@@ -78,9 +78,12 @@ HEADINGS = {"Owner": "owner", "Consumer": "consumer", "Caller": "caller", "Deplo
 PROFILES = {
     "hostid.v1": ("owner (a minted system), tool (the duplicate check)", ""),
     "freshness.v1": ("owner (re-puts), consumer and tool (the judgements)", ""),
+    "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the re-read, the judgements)", ""),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
     "link.v1": ("tool (the generator and the checks)", ""),
+    "link.v2": ("tool (the linter, the plan, the transport block and its checks)",
+                "its scenarios' §1, a router over a relay counting keep-alives, is not run"),
     "alarms.v1": ("owner, tool (the reader and §5)", ""),
     "telemetry.v1": ("owner, tool (§5's reader)", ""),
     "desired.v1": ("owner (author), consumer (target), tool (§2.17)",
@@ -159,6 +162,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("owner", "core §4.2", "The owner's reply MUST also carry the mutation's Zenoh timestamp", MET,
      "owner.Owner.answer_state: the held Zenoh timestamp, where the mutation carried one (state_pairings §1  "
      "expected 5) (round 93, core 0.73)"),
+    # core 0.82 (#978 F3): a freshness.v2 member's reply carries its last
+    # confirmation (round 96).
+    ("owner", "core §4.2", "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead",
+     MET, "owner.Owner.answer_state: a covered member's reply stamped with _Held.confirm, the later of its put's "
+     "minted time and the last heartbeat that vouched for it, its put stamped by none (freshness_v2_scenarios §3, "
+     "py-py and py-zenctl: zenctl get state's last_confirmation) (round 96, core 0.82; F-445, F-446)"),
     ("owner", "core §4.2", "It MUST answer a selector over them with", MET,
      "owner.Owner.state_answer, reply_del within the window (state_scenarios §10)"),
     ("owner", "core §4.2", "Owner: for a key it deleted within the", MET,
@@ -539,9 +548,64 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "(round 94, core 0.75)"),
     # core 0.72 (#976): §7.5's two static rules.
     ("static", "core §7.5", "An implementation MUST refuse an envelope for the first of these", MET,
-     "zk2c.parse, in §7.5's order, each token (envelope family, vectors.json) (round 93, core 0.72)"),
+     "zk2c.parse, in §7.5's order, each token, a frame's key_kind on its key (envelope family, vectors.json, "
+     "carries.json's reads) (round 93, core 0.72; round 96, core 0.83)"),
     ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
      "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
+    # core 0.81 (#978 F1): the heartbeat's five static rules (round 96).
+    ("static", "core §7.5", "An implementation that writes a heartbeat MUST write its covered revision's tag", MET,
+     "heartbeat.tag_of, the fingerprint's last byte's low 4 bits, and zk2c.heartbeat under it (heartbeat family: "
+     "layouts.json, every write sealed in form 6 and parsed back) (round 96, core 0.81)"),
+    ("static", "core §7.5", "An implementation that writes a templated section MUST write the list only where",
+     MET, "heartbeat.write_bits: the list only where count and ranks take fewer bits than the bitmap, a tie the "
+     "bitmap (heartbeat family: bodies.json's writes) (round 96, core 0.81)"),
+    ("static", "core §7.5", "An implementation MUST compute a digest so", MET,
+     "heartbeat.member_value and digest (heartbeat family: digests.json) (round 96, core 0.81)"),
+    ("static", "core §7.5", "An implementation MUST refuse a body for the first of these", MET,
+     "heartbeat.read: short and code as the fields are read, then trailing, then pad (heartbeat family: "
+     "bodies.json's reads) (round 96, core 0.81)"),
+    ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", MET,
+     "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
+    # core 0.83 (#981 K1): §7.7's frames. The owner's and the reader's rules are
+    # K2's and K3's: zk2py writes and reads none (round 96).
+    ("owner", "core §7.7", 'An owner MUST give a frame the seq of its record 0', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", "An owner MUST start a key's first frame in a run with a full record", NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'An owner MUST write a full record at least once every', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'In a delta record, an owner MUST include each field with no deadband', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'An owner MUST include the field in any other case', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", 'An owner MUST mark a record scheduled only when', NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST NOT show or use an `unknown` or `absent` field', MET,
+     "no zk2py reader shows or uses a frame's field: a frame is undecodable in packed.read_sample and open_put, every packed reading's (round 96, core 0.83)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', NA,
+     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST NOT show or use an `unknown` or `absent` field', MET,
+     "no zk2py reader shows or uses a frame's field: a frame is undecodable in packed.read_sample and open_put, every packed reading's (round 96, core 0.83)"),
+    ("static", "core §7.7", "An implementation that writes a frame MUST write its tag in CH's tag bits", MET,
+     "frame.Layout.tag, the frame form's sha256's last byte's low 4 bits (frame family: layouts.json, every write sealed in form 5 under it and parsed back) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation that writes a frame MUST write the bits above for its records', MET,
+     "frame.Layout.write_bits and write (frame family: bodies.json's writes, bits, pad and bytes) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation MUST NOT write a frame of no record, or of more than', MET,
+     "frame.Layout.write_bits refuses records (frame family: bodies.json's writes) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation MUST NOT write a full record that lacks a field', MET,
+     "frame.Layout.write_bits refuses missing, and §7.6's value and range through packed.encode (frame family) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'An implementation MUST NOT write an offset at or past the span', MET,
+     'frame.Layout.write_bits refuses range for the offset and order for a record before its predecessor (frame family) (round 96, core 0.83)'),
+    ("static", "core §7.7", 'An implementation that reads a frame MUST refuse it for the first of these', MET,
+     "frame.Layout.read: tag, then length, code and order as the fields are read, then length and pad (frame family: bodies.json's reads) (round 96, core 0.83)"),
+    ("static", "core §7.7", 'Every body an implementation accepts MUST write back to the same bytes', MET,
+     'frame.Layout.write over every value read (frame family: every accepted read written back) (round 96, core 0.83)'),
     # core 0.75 (#979 B1): §7.6's six static rules.
     ("static", "core §7.6", "An implementation MUST compute a fixed-point code, and the value it reads back", MET,
      "packed.encode and decode over fractions.Fraction, ties to even (packed family: the Ties and Sensor writes) "
@@ -687,6 +751,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §8.2", "Across a constrained face the three are too wide", MET,
      "echo_tool --across-face subscribes by observer §7.5's scopes, refused beside a SELECTOR, and its scope  "
      "names what it excludes (constrained_live step 5; readings) (round 95, observer 0.18)"),
+    # core 0.82 (#978 F3): stated without a keyword.
+    ("owner", "core §4.2", "Under `freshness.v2` an owner puts no member again to confirm it", MET,
+     "owner.Owner: no member of a freshness.v2 contract is registered for re-puts, and its heartbeat vouches "
+     "(freshness_v2_scenarios §1 'no re-put', in each pairing) (round 96, core 0.82)"),
     # core 0.74 (F-415): stated without a keyword; an instance key is no
     # data key, so §8.2's MUST NOT does not bind it.
     ("owner", "core §3.3", "Each put of it (below) carries a Zenoh timestamp the owner sets", MET,

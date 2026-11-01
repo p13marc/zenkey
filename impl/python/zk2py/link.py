@@ -26,8 +26,16 @@ From the text alone:
   subject in the far principal's policy (§2.4, 0.3), its downsampling
   block, and the near router's ``gateway`` for a south region (§2.5).
 
+**Text 0.11** (#978 F3, round 96): ``freshness.v2``'s heartbeats. A listed
+interface has one when a revision given uses ``freshness.v2`` and it has a
+collection (:func:`heartbeat_of`); it crosses exactly where a collection of
+that interface crosses, overlapped ones set aside (§2.9); it is carved from
+``freshness.v2``'s stream deny as a template ``heartbeat/<I>`` of its own
+(§2.7), never downsampled (§2.8), and a crossing one is its services'
+liveness evidence (§2.12). An inline revision may be ``{uses, resources}``.
+
 Where the text left a choice, zk2py's is named in ``SPEC-FINDINGS.md``
-("At link.v1 0.1" to "At link.v1 0.7").
+("At link.v1 0.1" to "At link.v1 0.7", and round 96's).
 """
 
 from __future__ import annotations
@@ -425,12 +433,40 @@ class Resource:
         return freshness.horizon(_KIND_OF_TOKEN[self.token], self.annotations)
 
 
+def _revision(rev: Any) -> list[dict[str, Any]]:
+    """One revision's resources: a list, or ``{uses, resources}`` (0.11)."""
+    return list(rev["resources"]) if isinstance(rev, dict) else list(rev)
+
+
 def revisions_of(entry: Any) -> list[list[dict[str, Any]]]:
     """plan.json's interface entry: "one revision's resources, or
-    {revisions: [resources, ...]}" (0.3)."""
+    {revisions: [resources, ...]}" (0.3); "An inline revision may now be
+    {uses, resources}" (0.11)."""
     if isinstance(entry, dict) and "revisions" in entry:
-        return [list(r) for r in entry["revisions"]]
-    return [list(entry)]
+        return [_revision(r) for r in entry["revisions"]]
+    return [_revision(entry)]
+
+
+def uses_of(entry: Any) -> list[list[str]]:
+    """Each revision's ``uses``, as :func:`revisions_of` orders them; a
+    revision given as its resources alone uses nothing."""
+    revs = entry["revisions"] if isinstance(entry, dict) and "revisions" in entry else [entry]
+    return [list(r.get("uses") or []) if isinstance(r, dict) else [] for r in revs]
+
+
+#: §2.9 (0.11): the standard contract's interface, and its one resource's
+#: template, which the carve-out replaces by one per heartbeat
+HEARTBEAT_IFACE, HEARTBEAT_TEMPLATE = "freshness.v2", "heartbeat/{iface}"
+
+
+def heartbeat_of(entry: Any, resources: list["Resource"]) -> bool:
+    """§2.9 (0.11) "Which interfaces have one": "a revision of it the
+    generator is given uses freshness.v2 and it has a collection: a state or
+    an @state resource with a horizon above 0 (core §7.5)". The collection
+    is read from the interface's resources as the revisions together give
+    them (§2.3)."""
+    return any(HEARTBEAT_IFACE in u for u in uses_of(entry)) and any(
+        r.token in ("state", "@state") and r.horizon().horizon == "within" for r in resources)
 
 
 def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[Resource]:
@@ -481,6 +517,11 @@ def resources_of(contract: Any) -> list[dict[str, Any]]:
             for r in contract.canonical["resources"]]
 
 
+def revision_of(contract: Any) -> dict[str, Any]:
+    """A loaded contract as an inline revision, ``{uses, resources}``."""
+    return {"uses": list(contract.canonical["uses"]), "resources": resources_of(contract)}
+
+
 def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any]) -> dict[str, Any]:
     """§2.3: ``{faces: [...]}``, or ``{refused: [findings]}``."""
     policy, findings = parse_policy(policy_text)
@@ -497,6 +538,41 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
     if errors:
         return {"refused": sort_findings(findings + errors)}
     return {"faces": [plan_face(policy, f, implements, interfaces) for f in policy.faces]}
+
+
+def _heartbeat_denies(deny: list[dict[str, Any]], beats: dict[str, bool], listed: list[str],
+                      res: dict[str, list["Resource"]], crosses: dict[tuple[str, str, str], bool],
+                      expose: str) -> list[dict[str, Any]]:
+    """§2.7 (0.11) "Heartbeats in the denies": "For the token stream, the
+    interface freshness.v2 is carved from its heartbeats (§2.9), in place of
+    its own templated resource. Each listed interface I with a heartbeat
+    gives it the template heartbeat/<I>, which crosses exactly when I's
+    heartbeat does." The stream denies are derived again with that: a
+    crossing heartbeat counts as a crossing stream of freshness.v2."""
+    if HEARTBEAT_IFACE not in listed:
+        return deny
+    k = "stream"
+    others = [d for d in deny if d["id"] != k and not d["id"].startswith(f"{k}:")]
+    stream_items: dict[str, list[tuple[str, str, bool]]] = {}
+    for i in listed:
+        items = [(r.name, r.template, crosses[(r.iface, r.token, r.template)]) for r in res[i] if r.token == k]
+        if i == HEARTBEAT_IFACE:
+            items = [x for x in items if x[1] != HEARTBEAT_TEMPLATE]
+            items += [(f"{HEARTBEAT_IFACE}/{k}/heartbeat/{b}", f"heartbeat/{b}", c) for b, c in sorted(beats.items())]
+        stream_items[i] = items
+    any_cross = any(c for items in stream_items.values() for _, _, c in items)
+    mine: list[dict[str, Any]] = []
+    if expose != "link" or not any_cross:
+        mine.append({"id": k, "flows": list(FLOWS), "messages": list(PUSH), "key_exprs": [f"zk2/*/*/*/{k}/**"]})
+    else:
+        for i in listed:
+            root = f"zk2/*/*/{i}/{k}"
+            items = stream_items[i]
+            keys = [f"{root}/**"] if not any(c for _, _, c in items) else carve(root, items)[0]
+            if keys:
+                mine.append({"id": f"{k}:{i}", "flows": list(FLOWS), "messages": list(PUSH), "key_exprs": keys})
+    # the stream denies keep their place: after zk, adv and admin
+    return others[:3] + mine + others[3:]
 
 
 def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
@@ -535,6 +611,13 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
     def crossing_res(r: Resource) -> bool:
         return crosses[(r.iface, r.token, r.template)] and r.name not in overlapped
 
+    # §2.9 (0.11): "A generator MUST let a listed interface's heartbeat cross
+    # a face exactly when a collection of that interface crosses it,
+    # overlapped ones set aside."
+    beats = {i: any(r.token in ("state", "@state") and r.horizon().horizon == "within" and crossing_res(r)
+                    for r in res[i])
+             for i in listed if heartbeat_of(interfaces[i], res[i])}
+    deny = _heartbeat_denies(deny, beats, listed, res, crosses, expose)
     rules = []
     if expose == "link":
         for i in listed:
@@ -548,6 +631,8 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
         for s in policy.services:
             for i in implements[s]:
                 for r in res[i]:
+                    # §2.8 (0.11): "A generator MUST NOT emit a downsampling
+                    # rule for a heartbeat's key": none is a resource here.
                     if r.token in ("stream", "@stream") and crossing_res(r):
                         rules.append({"key_expr": f"zk2/{policy.system}/{s}/{i}/{r.token}/{r.template}",
                                       "freq": 1 / face.interval_s})
@@ -560,8 +645,13 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
         mine = [r for i in implements[s] for r in res[i]]
         if any(r.token in ("state", "@state") for r in mine):
             windows.append({"service": addr, "min_s": face.max_outage_s})
-        evidence = sorted({r.name for r in mine if r.token in ("stream", "@stream", "state", "@state")
-                           and crossing_res(r) and r.horizon().horizon == "within"}, key=_bytes)
+        evidence = {r.name for r in mine if r.token in ("stream", "@stream", "state", "@state")
+                    and crossing_res(r) and r.horizon().horizon == "within"}
+        # §2.12 (0.11): "The plan lists freshness.v2/stream/heartbeat/<iface>
+        # for each listed service implementing an interface whose heartbeat
+        # crosses."
+        evidence |= {f"{HEARTBEAT_IFACE}/stream/heartbeat/{i}" for i in implements[s] if beats.get(i)}
+        evidence = sorted(evidence, key=_bytes)
         liveness.append({"service": addr, "evidence": evidence})
     if face.attach == "client":
         attach: dict[str, Any] = {"shape": "client"}

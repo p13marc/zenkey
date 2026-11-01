@@ -52,7 +52,7 @@ PRIORITY = "priority"
 RESERVED = ("freshest", "lease")
 #: §2.2's eight reasons, in their order.
 REASONS = ("not_used", "manifest_role", "policy_unsupported", "value", "cardinality", "resource", "no_deadline",
-           "params_unbound")
+           "params_unbound", "framed")
 NOT_ARBITRATED, ARBITRATED, UNREAD, INVALID = "not_arbitrated", "arbitrated", "unread", "invalid"
 STREAM_TOKENS = ("stream", "@stream")
 # §2.10's causes.
@@ -130,7 +130,11 @@ def declaration(role: dict[str, Any], provider: dict[str, Any] | None,
     if provider is None:
         # "No revision held … reads checks 1 to 5 only"
         return Declaration(INVALID, reasons=tuple(reasons)) if reasons else Declaration(UNREAD)
-    mine = consumed(provider.get("resources", []), role.get("resources"))
+    everything = consumed(provider.get("resources", []), role.get("resources"))
+    # text 0.6 (core 0.83 §7.7): check 6 counts "a frame resource … as
+    # none"; a resource is one when the revision says so (`frame` true in
+    # the fixture, the canonical form's `frame` member in a contract).
+    mine = [r for r in everything if not r.get("frame")]
     stream = mine[0] if len(mine) == 1 and mine[0]["token"] in STREAM_TOKENS else None
     deadline = period = None
     if stream is None:
@@ -146,6 +150,10 @@ def declaration(role: dict[str, Any], provider: dict[str, Any] | None,
         tpl = templates.parse_template(stream["template"])
         if any(s.text not in (params or {}) for s in tpl.segments if s.kind != templates.LITERAL):
             reasons.append("params_unbound")
+    # check 9, framed: "the role consumes a frame resource, and no stream that
+    # is not one", read beside the others.
+    if any(r.get("frame") for r in everything) and not any(r["token"] in STREAM_TOKENS for r in mine):
+        reasons.append("framed")
     if reasons:
         return Declaration(INVALID, reasons=tuple(reasons))
     assert stream is not None

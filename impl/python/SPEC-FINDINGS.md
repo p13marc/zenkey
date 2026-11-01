@@ -23697,3 +23697,409 @@ re-run, and it stays open until a run shows it.
   blocker: zk2py takes a reading of each.
 - **Open:** F-436 (the reference's fix not yet run) and F-437 to F-441.
   F-365 stays open as #965's.
+
+## At core 0.82 and freshness.v2 0.1 (#978)
+
+Round 96 read changed rules cold: core 0.81 (#978 F1, the heartbeat
+defined) and 0.82 (#978 F3, the heartbeat adopted), `freshness.v2` text
+0.1, `link.v1` text 0.11, and `link.v2` text 0.1 (#988 L1 and L2), a
+profile no earlier round saw. It read each changelog entry first, then
+core §4.2, §4.3, §7.5, §8.1 and §8.5, `freshness.v2` whole (`v2.md`,
+`scenarios-v2.md`, `freshness.v2.toml`), `link.v1` §2.7 to §2.12 and
+`link.v2` whole. Its evidence: `heartbeat/`'s three files, form 6 in
+`envelope/vectors.json`, `apply.json`, `link.v1`'s `plan.json` and
+`link.v2`'s `conformance/v2/`, and scenarios-v2.md §1–§7 run live in three
+pairings against the black boxes of main 1d1ce925.
+
+**The rules changed.** zk2py extracted every keyword sentence of
+`core.md` at c29cca1e (core 0.80) and at 1d1ce925 (core 0.82) and diffed
+the two sets. None is gone. Seven are new or reworded: §7.5's five
+heartbeat MUSTs and its parse's refusals (a heartbeat as a delete's
+attachment), S2's freshness.v2 sentence, and §8.1's SHOULD naming
+`freshness.v2`. `observer.md` is unchanged at 0.18, and `freshness.v1`
+too. `link.v1`'s diff is its three new rules and their prose. **No rule
+changed beyond what the changelogs state**, though 0.82's entry miscounts
+`RULES.md` (F-442).
+
+### F-437 to F-441
+
+Core 0.81 and 0.82 answer none of them, and their entries say nothing of
+them: they stay open. F-436 was not re-run this round.
+
+### F-442 · changelog · core 0.82's entry: a count `RULES.md` does not hold
+
+> Core 0.82's entry, "Changed: S2": "`[Sc: profiles/freshness/scenarios-v2.md §3]`
+> joins S2's evidence. `RULES.md` lists 198 rules."
+>
+> `RULES.md`: "| Every rule, once | 207 |"
+
+- **The error.** `RULES.md` held 201 rules at core 0.80, and 0.81's five
+  static rules and 0.82's S2 sentence make 207, which its table states.
+  198 is no count of it, before or after.
+- **What zk2py does:** its walk reads `RULES.md`'s table (207 once) and
+  checks it against the entries, as every round has.
+- **Fix:** "lists 207 rules".
+- **Changes:** the entry alone.
+
+### F-443 · gap · scenarios-v2.md §7: a contract no section gives
+
+> Conventions: "**The contract.** Every section uses `beacon.v2`." Its
+> text declares no `link.exposure`.
+>
+> §7's setup: "`beacon.v2`'s `status` and `level` read `link.exposure =
+> "link"` there."
+>
+> `link.v1` §2.2: "`link.exposure` says whether a resource is worth
+> carrying across a constrained face." Core §9.2's E020: an annotation
+> key whose profile is "not in `uses`".
+
+- **The gap.** `link.exposure` is the contract's word, and nothing at the
+  face sets it. A `beacon.v2` whose `status` and `level` read `"link"` is
+  another revision: it writes the annotation, so it lists `link.v1` in
+  `uses` (E020 otherwise), and its fingerprint moves. §7 neither writes it
+  nor says which minor it is, so a runner guesses a contract that every
+  other section's owner does not run.
+- **What zk2py does:** §7 runs `interop/freshness/beacon-face.v2.toml`,
+  `beacon.v2` with `uses = ["freshness.v2", "link.v1"]` and `link.exposure
+  = "link"` on `status` and `level`, fingerprint `fa1f363d…`, its owner
+  and its reader both given it. The plan then derives what §7 expects, in
+  every pairing.
+- **Fix:** write §7's contract out, as the conventions write `beacon.v2`,
+  or put the annotations in `beacon.v2` itself, where a face that exposes
+  none ignores them.
+- **Changes:** the scenarios, and the reference's contract file.
+
+### F-444 · gap · a tool reading a form 6 sample
+
+> Core §7.5: "**The record** is every byte after the seq, possibly none.
+> It is read as the resource's type says (§7.1)."
+>
+> `freshness.v2.toml`: `[resources."heartbeat/{iface}"]`, `type = { raw =
+> "application/octet-stream" }`.
+>
+> `observer.md` 0.18 §7.3: a tool that shows or judges a payload reads it
+> as core §7.5's envelope, "its record the payload". The text names no
+> heartbeat.
+
+- **The gap.** A heartbeat is a put on a stream key, so a tool watching
+  the heartbeat resource reads its envelope first. Core §7.5's layout
+  calls what follows the seq a body, "read with the covered revision's
+  collections", and its "record" sentence reads it as the resource's
+  type, which is octet-stream. Observer §7.3 says neither.
+  - zenctl (1d1ce925) watching `freshness.v2 heartbeat/{iface}` reports
+    each heartbeat `undecodable`: "a zk2c heartbeat's body where a record
+    of the resource's type was read".
+  - zk2py's echo tool shows the body as its octet-stream bytes, which the
+    record sentence allows.
+  Two readings of one sample, and neither the body's sections.
+- **What zk2py does:** its echo tool reads the record sentence. Its
+  freshness.v2 reader reads the body with the covered revision.
+- **Fix:** observer §7.3: "A heartbeat's body (core §7.5) is read with
+  the covered revision's collections, never as a record of the
+  resource's type." Core §7.5's record sentence: "a mutation's record".
+- **Changes:** a rule of observer §7.3.
+
+### F-445 · ambiguity · S2: which replies carry the last confirmation
+
+> S2: "The owner's reply MUST also carry the mutation's Zenoh timestamp,
+> where the mutation carried one. The owner's reply of a member a
+> `freshness.v2` heartbeat confirms MUST carry instead that member's last
+> confirmation, as §4.3's table says."
+>
+> §4.3's table, row 2: "on its replies alone: the later of its last
+> mutation's time and the last heartbeat's that vouched for it (S2),
+> never on a put".
+
+- **The ambiguity.** A member no heartbeat confirms yet, or no longer
+  (its bit cleared since its put, before the first heartbeat, or under
+  the clock guard), is it "a member a heartbeat confirms"?
+  - Read by S2's words, no. Its reply then falls to the sentence before:
+    its put carried no Zenoh timestamp, so its reply carries none, and a
+    GET reader reads it `no_stamp`, unobservable (`freshness.v1` §2.6).
+  - Read by the table, every reply of such a state carries the later of
+    the two times, the put's where no heartbeat vouched.
+    scenarios-v2.md §3 step 2 needs the table's reading: a reply 3.5 s
+    after the bit cleared carries "the last confirmation before the bit
+    cleared", and G judges it stale, not unobservable.
+- **What zk2py does:** the table's reading. Every reply of a member of a
+  state of a contract that uses `freshness.v2` carries its last
+  confirmation. The Rust owner example does too (§3, rust-py).
+- **Fix:** S2: "The owner's reply of a member of a state §4.3's table
+  lists under `freshness.v2` MUST carry instead …".
+- **Changes:** S2's wording.
+
+### F-446 · gap · the last confirmation's Zenoh timestamp
+
+> §4.3's table, row 2: "the later of its last mutation's time and the
+> last heartbeat's that vouched for it".
+>
+> §7.5: "**The time** is §7.6's `time` field with `ms`. It counts 32
+> bits of seconds from the deployment epoch, then 10 bits of
+> milliseconds."
+>
+> §4.3, "Minting": "an owner mints each such timestamp as the greater of
+> `Session::new_timestamp()` and the last it issued plus one tick. Its id
+> is the session's zid."
+
+- **The gap.** The reply's stamp is an NTP64 time with an id. Neither
+  time it is the later of is one:
+  - the put carries no Zenoh timestamp, so "its last mutation's time" is
+    a time the owner keeps and never sends;
+  - a heartbeat's time is milliseconds from the deployment epoch, which
+    a reader converts by the epoch it holds.
+  Whether the stamp is minted (above every one issued, the session's zid)
+  or the heartbeat's time read back, to the millisecond, the text does
+  not say. A reader that compares a reply's stamp with a heartbeat's time
+  cannot tell which to expect.
+- **What zk2py does:** it mints a timestamp at each put of such a member
+  and at each heartbeat it writes, the heartbeat's time the minted one's
+  millisecond floor. A reply carries the later minted one. The Rust owner
+  example gives the members one heartbeat confirmed one stamp, which
+  reads as the same choice.
+- **Fix:** "the later of the timestamp the owner minted at its last
+  mutation and the one it minted when it wrote the last heartbeat that
+  vouched for it; that heartbeat's time is this one's, to the
+  millisecond".
+- **Changes:** §4.3's table, a rule.
+
+### F-447 · ambiguity · freshness.v2 §2.10: which bits a guarded heartbeat clears
+
+> §2.10: "While the guard holds its writes, an owner MUST NOT vouch for
+> any member, and its heartbeat's time is unknown." "Its heartbeats go
+> on, every bit clear, so its liveness still crosses."
+
+- **The ambiguity.** "Every bit" can be every vouched bit, the map and
+  the digests kept, or every bit of the map too, every section left out.
+  A reader's divergences differ: with the sections kept, two heartbeats
+  that diverge make a re-read due while the guard holds; with the map
+  clear, every collection is `absent`, and none can.
+- **What zk2py does:** vouched bits clear, the map and digests kept. The
+  Rust owner example does the same: scenarios §2 step 4's H2 reads `time`
+  unknown and each section `vouched` false, its digest present, in both
+  owners' runs.
+- **Fix:** "every vouched bit clear, its map and digests as the guard
+  found them".
+- **Changes:** the wording, or a rule if the other reading was meant.
+
+### F-448 · gap · freshness.v2 §2.5: what "the last heartbeat" is
+
+> §2.5, the rule's steps: "1. **Another revision.** … nothing is
+> confirmed (`revision`). 2. **Refused.** The body is refused (core §7.5):
+> nothing is confirmed. 3. **Older.** Within one run, its seq is not after
+> the last heartbeat's, by core §4.3's serial order: nothing is
+> confirmed, and it is not counted (`older`)."
+>
+> "**A lost heartbeat.** A heartbeat whose seq is not the last one's plus
+> 1, within one run, follows a lost one."
+>
+> `apply.json` case 8: "another revision's tag confirms nothing, and a
+> refused body neither; neither moves the sequence".
+
+- **The gap.** Only step 3 says its heartbeat is "not counted". Whether a
+  heartbeat stopped at step 1 or 2 is "the last heartbeat" for step 3
+  and for the gap, the text leaves open. The fixture says it is not: a
+  sequence 5, a refused 6, then 7 is a gap; read the other way it is
+  none, and a later 0 of the run is `older`.
+- **What zk2py does:** the fixture's reading. Only a heartbeat read at
+  step 4 moves the sequence (`freshness_v2.View`).
+- **Fix:** step 3: "the last heartbeat read at step 4"; and "A heartbeat
+  stopped at step 1, 2 or 3 is not counted."
+- **Changes:** a rule's wording, as the fixture reads it.
+
+### F-449 · contradiction · link.v2 §2.19: a catalog core §8.6 refuses
+
+> `link.v2` §2.19, `catalog_mismatch`: "given the deployment catalog the
+> far side holds, its id is not the policy's `catalog` … The id is the
+> first 4 bytes of the sha256 of the catalog document's JCS bytes (RFC
+> 8785), as 8 lowercase hex digits."
+>
+> Its changelog: "The catalog's id is computed as #980's C1 memo defines
+> it …, since core §8.6 has not landed."
+>
+> Core §8.6 (0.79): "An implementation that reads a catalog MUST refuse
+> it, naming the refusal, for the first of these that applies": an
+> entry that "lacks `index`, `iface` or `contract`, or holds another
+> member (`member`)", and "where `lineage` is present, it is not a
+> non-empty array of objects (`lineage`)".
+>
+> `transport.json`'s catalogs: `{"entries": [{"fingerprint":
+> "sha256:00", "iface": "radio.v1", "index": 0}], …, "lineage": []}`.
+
+- **The contradiction.** Core §8.6 landed at 0.79, before `link.v2` 0.1.
+  Every catalog `transport.json` gives a tool is one §8.6 refuses
+  (`member`, then `contract` and `lineage`), yet the fixture expects its
+  id read and compared. A tool that reads the far side's catalog as a
+  reader must, refuses it, and holds no id to compare.
+- **What zk2py does:** to pass the fixture, it hashes the JCS bytes of
+  what it is given and reads none of it (`link_v2.check_transport`).
+  `catalog.read` refuses all three documents, `member`.
+- **Fix:** give `transport.json` catalogs §8.6 reads (`contract`, a
+  fingerprint, no empty `lineage`), and cite §8.6: "its id, §8.6's;
+  a catalog §8.6 refuses is `catalog_mismatch`".
+- **Changes:** the fixture, and a rule of §2.19.
+
+### F-450 · gap · link.v1 §2.9 (0.11): a heartbeat over several revisions
+
+> §2.9: "**Which interfaces have one.** A listed interface has a
+> heartbeat when a revision of it the generator is given uses
+> `freshness.v2` and it has a collection: a state or an `@state` resource
+> with a horizon above 0 (core §7.5)."
+>
+> §2.3: "**A resource has a horizon** (§2.12) only where every revision
+> that declares it gives one above 0; its horizon is then the least of
+> them."
+>
+> §2.12: "The plan lists `freshness.v2/stream/heartbeat/<iface>` for each
+> listed service implementing an interface whose heartbeat crosses".
+
+- **The gap.** Two revisions of one interface, one using `freshness.v1`
+  and one `freshness.v2`, are §2.3's case. "It has a collection" can read
+  the `freshness.v2` revision's resources or the resources the revisions
+  give together, which can differ. And a service listed as implementing
+  the interface may run the `freshness.v1` revision, which sends no
+  heartbeat: its evidence then lists a key nobody puts.
+- **What zk2py does:** a heartbeat when any revision given uses
+  `freshness.v2` and the revisions together give a collection, listed as
+  evidence for every listed service implementing the interface
+  (`link.heartbeat_of`).
+- **Fix:** "a revision that uses `freshness.v2` and declares a
+  collection", and the evidence only where every revision given uses
+  `freshness.v2`, or the plan's `exposure_disagrees`-style warning when
+  they differ.
+- **Changes:** a rule of §2.9 and §2.12.
+
+### Counts at core 0.82 and freshness.v2 0.1
+
+450 entries.
+- **Resolved:** none this round.
+- **New: F-442 to F-450,** nine: a changelog entry (F-442), five gaps
+  (F-443, F-444, F-446, F-448, F-450), two ambiguities (F-445, F-447) and
+  a contradiction (F-449). None is a blocker: zk2py takes a reading of
+  each, and every pairing of scenarios-v2.md §1–§7 passes under it.
+- **Open:** F-436 (not re-run), F-437 to F-441, and F-442 to F-450.
+  F-365 stays open as #965's.
+
+## At core 0.83 (#981 K1)
+
+Round 96 was extended to core 0.83 (main baa15f11, #981 K1, frames
+defined), read cold: its changelog entry first, then core §7.7 whole,
+§7.5's form 5 and `key_kind`, §4.3's per-record seq, §9.1's `frame`,
+§9.2's E046 to E050 and cascade 8, §9.5's `frame` member, §9.8's frame
+rows and §12's static list, with `timing.v1` 0.9 §2.3 and
+`arbitration.v1` 0.6 §2.2. Its evidence: `frame/`'s two files, form 5 in
+`envelope/vectors.json`, `carries.json`'s `reads`, the contract fixtures
+`e000-frame-defaults`, `e023-frame-unresolved`, `e046` to `e050` and
+`ok-frame`, `compat/frame/`'s fourteen cases, and `declarations.json`'s
+four new cases. K1 states only static rules zk2py can check. The owner's
+and the reader's rules over a key's frames are K2's and K3's, and zk2py
+neither writes nor reads a frame on a bus.
+
+**The rules changed.** zk2py diffed every keyword sentence of `core.md`
+between 1d1ce925 (0.82) and baa15f11 (0.83). None is gone: §7.5's refusal
+list gains `key_kind`, and its write-back sentence gains `carries.json` as
+evidence. The nineteen new ones are §7.7's owner, reader and static rules,
+which the entry lists. `observer.md` is unchanged. `timing.v1` 0.9 and
+`arbitration.v1` 0.6 change what their entries state. **No rule changed
+beyond what the changelogs state.**
+
+### F-451 · ambiguity · §9.8: a deadband on a renamed field
+
+> §9.8, "Frames": "| A deadband added, removed or changed | breaking: what
+> an omitted field holds moves, either way | `deadband_changed` |" and
+> "Each breaking change above, and each of the layout, moves the frame's
+> tag (§7.7)."
+>
+> §7.7, the frame's tag: "Names are left out, so a field renamed keeps the
+> tag." §9.5: "`deadband` is an object by field name of `{"delta",
+> "max_records"}`".
+
+- **The ambiguity.** Rename a field that carries a deadband. The frame
+  form lists deadbands by position, so its tag stays. The canonical form
+  keys them by name, so its `deadband` member changes.
+  - Read by the canonical form, the deadband is "changed": breaking,
+    though §9.8 says every breaking change above moves the tag, and this
+    one does not.
+  - Read by the frame form, nothing about the deadband moved. Only the
+    packed rules' rename applies, which is review.
+  `compat/frame/record-field-renamed` renames a field with no deadband, so
+  it does not decide.
+- **What zk2py does:** it compares the canonical `frame` members, so the
+  renamed field's deadband is `deadband_changed`, breaking. Its readings
+  show the two tags equal.
+- **Fix:** say which. "A deadband added, removed or changed, its field's
+  name aside" makes the rename review. Otherwise drop the tag sentence's
+  "each" for this row.
+- **Changes:** a classification rule.
+
+### F-452 · ambiguity · E050: a timing value read alone
+
+> §9.2, cascade 8: "E050 waits for the values it reads: none of them
+> E048's. It reads a `timing.*` value as `timing.v1` §2.2 does, and one
+> that does not read gives none."
+>
+> `timing.v1` §2.2: "A reader MUST NOT judge a period, a deadline or a
+> lifespan of a resource whose declaration is invalid".
+
+- **The ambiguity.** In `timing.v1` §2.2, one value that does not read
+  makes the whole declaration invalid, and no deadline is judged. E050
+  reads each value alone. A valid `timing.deadline_ms` below the span,
+  beside a `timing.period_ms` of `"x"`, is then E050, though `timing.v1`
+  judges no deadline of that resource and its tracker never runs.
+  "As `timing.v1` §2.2 does" can be read either way: each value by §2.2's
+  rule for one value, or the declaration as §2.2 reads it.
+- **What zk2py does:** each value alone. Its readings show that contract
+  refused, E050.
+- **Fix:** "a `timing.*` value that does not read, or any of a
+  declaration `timing.v1` §2.2 reads invalid, gives none". Or keep the
+  per-value reading, and say so.
+- **Changes:** which contracts load.
+
+### F-453 · contradiction · `timing.v1` §2.2 (0.9): "no core lint reads an annotation's value"
+
+> `timing.v1` 0.9 §2.2: "A contract linter SHOULD warn of one. The core
+> has no code for it: W105 is about keys, and no core lint reads an
+> annotation's value."
+>
+> Core 0.83's E050: "timing a frame resource cannot keep (`timing.v1`
+> §2.3): a `timing.deadline_ms` below its span; …; a `timing.lifespan_ms`".
+>
+> `arbitration.v1` 0.6's entry: "Its last sentence said no core lint
+> reads an annotation's value. Core E050 now reads `timing.*` on a frame
+> resource, so it says no core lint reads `arbitration.policy`."
+
+- **The contradiction.** E050 reads `timing.deadline_ms`,
+  `timing.period_ms` and `timing.lifespan_ms`, the very values §2.2
+  speaks of. `arbitration.v1` 0.6 mended its own copy of the sentence.
+  `timing.v1` 0.9, the text E050 cites, kept it.
+- **What zk2py does:** its linter is E050 as core states it.
+- **Fix:** "The core has no code for an invalid value: W105 is about keys,
+  and E050 reads a value only on a frame resource (core §7.7)."
+- **Changes:** a sentence of `timing.v1` §2.2.
+
+### F-454 · gap · §7.7: evidence that does not exist
+
+> Core §7.7: "An owner MUST give a frame the seq of its record 0 … `[Sc:
+> frames.md §1]`", "… `[Sc: frames.md §4]`", "… `[Sc: frames.md §2, §5,
+> §6]`", eight citations in all, and twelve in `RULES.md`.
+>
+> `frame/README.md`: "Their evidence is the scenarios' `frames.md` and a
+> reader's fixture, which come with the readers and the owners."
+
+- **The gap.** `spec/scenarios/` holds no `frames.md`. Every one of
+  §7.7's owner and reader MUSTs cites it as its evidence, and
+  `RULES.md`'s index carries the citations. A runner cannot run any of
+  them, and an index reader cannot follow them.
+- **What zk2py does:** its walk gives those rows n/a. Its owner refuses a
+  contract with a frame resource, and every packed reading counts a frame
+  undecodable (`no_reading`). Neither is the rule, and neither breaks it.
+- **Fix:** cite nothing until K2 and K3 bring the scenarios, or mark the
+  evidence "to come". Core §0's tags name what exists.
+- **Changes:** the evidence tags, and `RULES.md`.
+
+### Counts at core 0.83
+
+454 entries.
+- **New: F-451 to F-454,** four: two ambiguities (F-451, F-452), a
+  contradiction (F-453) and a gap (F-454). None is a blocker.
+- **Open:** F-436 (not re-run), F-437 to F-454. F-365 stays open as
+  #965's.
