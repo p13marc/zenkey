@@ -14,6 +14,10 @@
 //! a put whose envelope is a heartbeat (core §7.5's form 6, 0.81)
 //!     → its body becomes the payload, its run and seq its key's stamp
 //!       (Read::Heartbeat): never a record of the key's type
+//! a put whose envelope is a frame (core §7.5's form 5, §7.7, 0.83)
+//!     → its body becomes the payload, its run and seq record 0's
+//!       (Read::Framed): read with its frame resource's declaration
+//!       ([`admit_frame`]), never as one record of the key's type
 //! every other sample
 //!     → read with no envelope (Read::Plain)
 //! ```
@@ -43,8 +47,12 @@
 //! profile readers read every data sample through [`read`]. A heartbeat is
 //! read with its covered revision by `zenkey_model::freshness::View`; a
 //! reader of a resource's records refuses one ([`admit`],
-//! [`Undecodable::Heartbeat`]).
+//! [`Undecodable::Heartbeat`]). A frame (#981's K2) is read by
+//! [`admit_frame`] on a frame resource, its body parsed with its layout,
+//! and refused anywhere else ([`Undecodable::Framed`]); a mutation on a
+//! frame resource has no reading ([`Undecodable::Mutation`]).
 
+use zenkey_model::frame::{self, Frame};
 use zenkey_model::packed::{Layout, ReadRefusal};
 use zenkey_model::seed::{self, Mark};
 use zenkey_model::wire::{self, Reading, Refusal, Tag};
@@ -76,6 +84,15 @@ pub enum Read {
         stamp: wire::Stamp,
         tag: Tag,
     },
+    /// A frame (core §7.5's form 5, §7.7): the put with its body as its
+    /// payload, its record 0's run and seq, and CH's tag, its frame
+    /// form's. Read with its frame resource's declaration
+    /// ([`admit_frame`]), never as one record of the key's type.
+    Framed {
+        sample: Sample,
+        stamp: wire::Stamp,
+        tag: Tag,
+    },
 }
 
 impl Read {
@@ -83,7 +100,9 @@ impl Read {
     #[must_use]
     pub fn stamp(&self) -> Option<wire::Stamp> {
         match self {
-            Read::Enveloped { stamp, .. } | Read::Heartbeat { stamp, .. } => Some(*stamp),
+            Read::Enveloped { stamp, .. }
+            | Read::Heartbeat { stamp, .. }
+            | Read::Framed { stamp, .. } => Some(*stamp),
             Read::Plain(_) | Read::Refused { .. } => None,
         }
     }
@@ -92,7 +111,9 @@ impl Read {
     #[must_use]
     pub fn tag(&self) -> Option<Tag> {
         match self {
-            Read::Enveloped { tag, .. } | Read::Heartbeat { tag, .. } => Some(*tag),
+            Read::Enveloped { tag, .. }
+            | Read::Heartbeat { tag, .. }
+            | Read::Framed { tag, .. } => Some(*tag),
             Read::Plain(_) | Read::Refused { .. } => None,
         }
     }
@@ -102,7 +123,10 @@ impl Read {
     pub fn refusal(&self) -> Option<Refusal> {
         match self {
             Read::Refused { refusal, .. } => Some(*refusal),
-            Read::Plain(_) | Read::Enveloped { .. } | Read::Heartbeat { .. } => None,
+            Read::Plain(_)
+            | Read::Enveloped { .. }
+            | Read::Heartbeat { .. }
+            | Read::Framed { .. } => None,
         }
     }
 
@@ -112,14 +136,22 @@ impl Read {
         matches!(self, Read::Heartbeat { .. })
     }
 
-    /// Why it is no record of its key's type: its envelope refused, or a
-    /// heartbeat's. `None` for a record, a delete, or a sample with no
-    /// envelope.
+    /// Whether it is a frame's: its payload is a body, never one record.
+    #[must_use]
+    pub fn is_frame(&self) -> bool {
+        matches!(self, Read::Framed { .. })
+    }
+
+    /// Why it is no record of its key's type: its envelope refused, a
+    /// heartbeat's or a frame's. `None` for a record, a delete, or a
+    /// sample with no envelope. A frame resource's reader reads a frame
+    /// by [`admit_frame`] instead.
     #[must_use]
     pub fn undecodable(&self) -> Option<Undecodable> {
         match self {
             Read::Refused { refusal, .. } => Some(Undecodable::Envelope(*refusal)),
             Read::Heartbeat { .. } => Some(Undecodable::Heartbeat),
+            Read::Framed { .. } => Some(Undecodable::Framed),
             Read::Plain(_) | Read::Enveloped { .. } => None,
         }
     }
@@ -131,7 +163,8 @@ impl Read {
             Read::Plain(sample)
             | Read::Enveloped { sample, .. }
             | Read::Refused { sample, .. }
-            | Read::Heartbeat { sample, .. } => sample,
+            | Read::Heartbeat { sample, .. }
+            | Read::Framed { sample, .. } => sample,
         }
     }
 
@@ -142,7 +175,8 @@ impl Read {
             Read::Plain(sample)
             | Read::Enveloped { sample, .. }
             | Read::Refused { sample, .. }
-            | Read::Heartbeat { sample, .. } => sample,
+            | Read::Heartbeat { sample, .. }
+            | Read::Framed { sample, .. } => sample,
         }
     }
 
@@ -153,7 +187,9 @@ impl Read {
         match self {
             Read::Refused { .. } => None,
             Read::Plain(s) => Mark::of(None, s.timestamp().map(stamp_of)),
-            Read::Enveloped { sample, stamp, .. } | Read::Heartbeat { sample, stamp, .. } => {
+            Read::Enveloped { sample, stamp, .. }
+            | Read::Heartbeat { sample, stamp, .. }
+            | Read::Framed { sample, stamp, .. } => {
                 Mark::of(Some(*stamp), sample.timestamp().map(stamp_of))
             }
         }
@@ -185,15 +221,17 @@ pub fn read(sample: Sample) -> Read {
         .expect("a put")
         .payload(record)
         .into();
-    if form == wire::Form::Heartbeat {
-        return Read::Heartbeat { sample, stamp, tag };
+    match form {
+        wire::Form::Heartbeat => Read::Heartbeat { sample, stamp, tag },
+        wire::Form::Frame => Read::Framed { sample, stamp, tag },
+        _ => Read::Enveloped { sample, stamp, tag },
     }
-    Read::Enveloped { sample, stamp, tag }
 }
 
 /// Why a received data sample is undecodable, never delivered nor ordered:
 /// its envelope refused (core §7.5), or its packed record refused by the
-/// layout of the type its reader holds (§7.6).
+/// layout of the type its reader holds (§7.6), or a frame's body by its
+/// frame resource's (§7.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Undecodable {
     Envelope(Refusal),
@@ -201,6 +239,14 @@ pub enum Undecodable {
     /// A heartbeat (core §7.5's form 6) where a record of the resource's
     /// type was read: a body, never a value.
     Heartbeat,
+    /// A frame's body refused by its frame resource's layout (core §7.7).
+    Frame(frame::ReadRefusal),
+    /// A frame on a resource that declares no `frame` table: no reading
+    /// (core §7.7).
+    Framed,
+    /// A mutation, or a sample with no envelope, on a frame resource: no
+    /// reading (core §7.7).
+    Mutation,
 }
 
 impl Undecodable {
@@ -211,7 +257,10 @@ impl Undecodable {
         match self {
             Undecodable::Envelope(r) => r.token(),
             Undecodable::Record(r) => r.token(),
+            Undecodable::Frame(r) => r.token(),
             Undecodable::Heartbeat => "heartbeat",
+            Undecodable::Framed => "frame",
+            Undecodable::Mutation => "mutation",
         }
     }
 
@@ -224,6 +273,9 @@ impl Undecodable {
             Undecodable::Heartbeat => {
                 "a heartbeat's body where a record of the resource's type was read".to_owned()
             }
+            Undecodable::Frame(r) => format!("a frame refused by its layout, {r}"),
+            Undecodable::Framed => FRAME_AS_RECORD.to_owned(),
+            Undecodable::Mutation => MUTATION_ON_FRAME.to_owned(),
         }
     }
 }
@@ -260,6 +312,38 @@ pub fn admit(read: &Read, layout: Option<&Layout>) -> Result<(), Undecodable> {
         .map_err(Undecodable::Record)
 }
 
+/// Why a frame on a resource with no `frame` table is undecodable (core
+/// §7.7, "No reading").
+pub const FRAME_AS_RECORD: &str =
+    "a zk2c frame on a resource that declares no `frame` table: it has no reading";
+
+/// Why a mutation on a frame resource is undecodable (core §7.7, "No
+/// reading"): its samples travel as frames.
+pub const MUTATION_ON_FRAME: &str =
+    "a record that came in no frame, on a frame resource: it has no reading";
+
+/// Admits a read sample of a frame resource, `layout` its frame layout
+/// (core §7.7): a frame's body parsed under the tag its CH carried, for
+/// the first of §7.7's refusals; a refused envelope refused; a mutation,
+/// or a put with no envelope, refused as having no reading. `Ok(None)` for
+/// a delete, which carries no frame.
+///
+/// # Errors
+/// The [`Undecodable`] refusal.
+pub fn admit_frame(read: &Read, layout: &frame::Layout) -> Result<Option<Frame>, Undecodable> {
+    match read {
+        Read::Framed { sample, tag, .. } => {
+            Frame::parse(*tag, &sample.payload().to_bytes(), layout)
+                .map(Some)
+                .map_err(Undecodable::Frame)
+        }
+        Read::Refused { refusal, .. } => Err(Undecodable::Envelope(*refusal)),
+        Read::Heartbeat { .. } => Err(Undecodable::Heartbeat),
+        r if r.sample().kind() == SampleKind::Delete => Ok(None),
+        Read::Enveloped { .. } | Read::Plain(_) => Err(Undecodable::Mutation),
+    }
+}
+
 /// What a sample's envelope says: `None` for a sample that carries none,
 /// else its stamp and form (a put's record or body is every byte after
 /// it) or the refusal.
@@ -276,11 +360,9 @@ fn envelope(sample: &Sample) -> Option<Result<(wire::Stamp, wire::Form), Refusal
             }
             let bytes = sample.payload().to_bytes();
             Some(match wire::read_put(key, wire::ENCODING, &bytes) {
-                Reading::Enveloped(e) | Reading::Heartbeat(e) => Ok((e.stamp, e.form)),
-                // A frame (core 0.83 §7.7) is read as before core 0.83
-                // defined it, undecodable as a reserved form, until #981's
-                // K2 brings the frame reader: never as a record.
-                Reading::Framed(_) => Err(Refusal::Reserved(wire::Form::Frame)),
+                Reading::Enveloped(e) | Reading::Heartbeat(e) | Reading::Framed(e) => {
+                    Ok((e.stamp, e.form))
+                }
                 Reading::Refused(refusal) => Err(refusal),
                 Reading::Plain => return None,
             })
