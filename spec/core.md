@@ -602,9 +602,9 @@ each document, checked against the fixture contract. `[F: descriptors/]`
 reply: the current descriptor's bytes, with `Encoding` `application/json`,
 no attachment and no timestamp (S1–S2 bind state, and a descriptor is not
 state). Each put of it (below) carries a Zenoh timestamp the owner sets.
-A caller GETs
-with consolidation `None`, as §8.4 does, takes the first reply, and waits
-for it as long as it chooses (§8.1). `[Sc: presence.md §2]`
+A caller GETs with consolidation `None`, as §8.4 does, takes the first
+reply, and waits for it as long as it chooses (§8.1).
+`[Sc: presence.md §2]`
 
 ```json
 {
@@ -1016,9 +1016,9 @@ time a profile reads (the table below).
     state mutations and event occurrences. It starts at 0, and adds 1 at
     each. So a key's mutations carry increasing seqs, with gaps.
   - **No wrap.** An owner MUST NOT let its seq for state and events wrap.
-    Before it would pass
-    16,777,215, the owner takes a new run and puts its descriptor stating
-    it. Then it writes under the new run from seq 0. `[Sc: state.md §7]`
+    Before it would pass 16,777,215, the owner takes a new run and puts
+    its descriptor stating it. Then it writes under the new run from
+    seq 0. `[Sc: state.md §7]`
   - **Streams.** Each stream key's seq is its own. It starts at 0 at the
     key's first sample in a run, adds 1 at each sample, and wraps modulo
     2^24. An owner MUST NOT restart a stream key's seq within a run, even
