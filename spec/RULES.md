@@ -55,9 +55,9 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 20 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 17 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 60, 25 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 61, 25 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 61 |
-| Every rule, once | 223 |
+| Every rule, once | 224 |
 | [Rule ids](#rule-ids) | 84 |
 
 ## Owner
@@ -132,7 +132,7 @@ The owner, consumer and caller sections each point to them.
 | [S1](core.md#42-rules-for-owners-and-consumers) | On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
 | [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
 | [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead that member's last confirmation, as §4.3's table says. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` MUST carry instead that member's last confirmation, as the table says. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
 | [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner] MUST answer a selector over them [its interfaces' `state/**` and `@state/**`] with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
 | [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). | `[Sc: state.md §2, §6]` |
 
@@ -597,6 +597,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.3](observer.md#73-decoding-and-rendering) | Such a tool [a tool that shows or judges a payload] MUST decode each payload by its declared type: `protobuf` (proto2 and proto3), `jsonschema` (core §7.3's subset) and `packed` (core §7.6), and a `raw` type by its media type only. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a payload MUST read a sample on a zk2 data key whose kind is a stream, state or an event, and whose `Encoding` is `zenoh/bytes`, as core §7.5's envelope. | `[F: envelope/carries.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **The envelope first.** … The tool MUST NOT decode or sniff a refused envelope's bytes as a payload with no envelope. | `[F: envelope/carries.json]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | A tool MUST NOT decode, render or judge a heartbeat's body as a record of its resource's type. | `[F: envelope/carries.json, heartbeat/bodies.json]` `[Sc: profiles/freshness/scenarios-v2.md §1]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows a payload it cannot decode MUST render it as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool that shows a payload it cannot decode] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
 

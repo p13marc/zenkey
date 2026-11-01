@@ -629,6 +629,10 @@
    "class": "breaking",
    "warnings": []
   },
+  "frame/deadband-field-renamed": {
+   "class": "review",
+   "warnings": []
+  },
   "frame/deadband-narrowed": {
    "class": "breaking",
    "warnings": []

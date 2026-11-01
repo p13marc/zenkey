@@ -13,6 +13,34 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.20 — 2026-11-01: §7.3, a heartbeat's body (#978)
+
+zk2py's round 96 found two readings of one heartbeat (F-444). `zenctl
+watch` called each heartbeat undecodable. zk2py's echo tool showed its
+body as octet-stream bytes, as core §7.5's record sentence allowed. Core
+0.85 says a heartbeat carries a body, never a record of its resource's
+type. This text says what a tool does, and is written against core 0.85.
+
+**Added: §7.3, "A heartbeat".**
+- **The rule.** A tool MUST NOT decode, render or judge a heartbeat's
+  body as a record of its resource's type.
+  `[F: envelope/carries.json, heartbeat/bodies.json]`
+  `[Sc: profiles/freshness/scenarios-v2.md §1]`
+- **What it shows.** A tool that shows what a heartbeat vouches for reads
+  its body with the covered revision's collections. Without that
+  revision, it shows the heartbeat by its envelope: its form, the
+  interface it covers and its size.
+- **The reference** already does. The fleet's lens reads a heartbeat with
+  the revision its provider's descriptor names, else shows its form, its
+  interface and its size. `zenctl watch` shows one undecodable, naming
+  why, and never as a value.
+
+**Appendix B** lists `heartbeat/bodies.json` against §7.3.
+
+**Deliberately not changed.**
+- **No MUST to read the body.** A tool that shows nothing a heartbeat
+  vouches for need not read it, as long as it never reads it as a record.
+
 ## 0.18 — 2026-11-01: §7.5, subscribing across a face (#980)
 
 Core 0.78 adds §8.5's "Keys across the face": a put toward the far side of

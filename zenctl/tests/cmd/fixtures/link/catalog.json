@@ -1,1 +1,1 @@
-{"format": "zk2-catalog/1", "epoch": 1767225600, "entries": [{"index": 0, "iface": "radio.v1", "fingerprint": "sha256:00"}], "lineage": []}
+{"format": "zk2-catalog/1", "epoch": 1767225600, "entries": [{"index": 0, "iface": "radio.v1", "contract": "sha256:aec974a6730ebb9fac54a773734cf3dd0542024dc7c79c52ef61dab3f435f30b"}]}

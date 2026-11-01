@@ -4,6 +4,20 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-11-01: §2.2's sentence on core lints mended (#981)
+
+zk2py's round 96 found §2.2 saying that no core lint reads an
+annotation's value (F-453). Core E050 reads `timing.*` on a frame
+resource since core 0.83. `arbitration.v1` 0.6 mended its own copy of
+the sentence, and this version mends this one. No rule changed.
+
+**Changed: §2.2.** The core has no code for an invalid value. W105 is
+about keys. E050 reads these values only on a frame resource, and reads
+none of an invalid declaration, as core 0.85's cascade 8 says (F-452).
+
+**Deliberately not changed.** The SHOULD that a linter warn of an
+invalid value, and its evidence.
+
 ## 0.9 — 2026-11-01: §2.3, the keys on a frame resource (#981)
 
 Core 0.83 defines frames (its §7.7): a stream whose samples carry several

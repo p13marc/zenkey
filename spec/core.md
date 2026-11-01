@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.84** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.85** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -887,7 +887,7 @@ and reports these codes. `[F: descriptors/]`
 | # | Rule | Evidence |
 |---|---|---|
 | S1 | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
-| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead that member's last confirmation, as §4.3's table says. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
+| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` MUST carry instead that member's last confirmation, as the table says. That holds whether or not a heartbeat vouched for the member since its last mutation. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
 | S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it. | `[Sc: state.md §2, §6]` |
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
@@ -1086,13 +1086,13 @@ time a profile reads (the table below).
 - **The Zenoh timestamps kept.** Only these resources carry a Zenoh
   timestamp the owner sets, beside the in-band stamp. Each is kept for the
   time a profile reads from it. A state among them carries one on each
-  mutation and reply (S1, S2), a stream as its profile says, and a state
-  `freshness.v2` confirms on its replies alone.
+  mutation and reply (S1, S2), and a stream as its profile says. A state
+  of a contract that uses `freshness.v2` carries one on its replies alone.
 
   | Resource | Read for | Carried as |
   |---|---|---|
   | A state whose contract declares `freshness.ttl_s` above 0, and does not use `freshness.v2` | a reply's age ([`freshness.v1`](profiles/freshness/v1.md) §2.4, §2.6) | S1, S2 |
-  | A state whose contract declares `freshness.ttl_s` above 0, and uses `freshness.v2` | a reply's age, from its last confirmation ([`freshness.v2`](profiles/freshness/v2.md) §2.4, §2.6) | on its replies alone: the later of its last mutation's time and the last heartbeat's that vouched for it (S2), never on a put |
+  | A state whose contract declares `freshness.ttl_s` above 0, and uses `freshness.v2` | a reply's age, from its last confirmation ([`freshness.v2`](profiles/freshness/v2.md) §2.4, §2.6) | on its replies alone, never on a put: the later of the timestamps the owner minted at its last mutation and at the last heartbeat that vouched for it (S2, "Minting" below) |
   | A `desired.v1` desired resource | the order of an author's versions ([`desired.v1`](profiles/desired/v1.md) §2.4, §2.6, §2.11) | S1, S2 |
   | A state that is a `telemetry.v1` metric resource | a rate's time base ([`telemetry.v1`](profiles/telemetry/v1.md) §2.11) | S1, S2 |
   | A stream that declares a `timing.v1` lifespan | a sample's age ([`timing.v1`](profiles/timing/v1.md) §2.6) | that section says |
@@ -1110,6 +1110,12 @@ time a profile reads (the table below).
       value (Appendix B), whose unit is 2^−32 s: the reference adds one
       unit. A larger step keeps the rule, which needs only that each stamp
       exceed the last (Appendix B gives zenoh-python's smallest step).
+    - **A last confirmation** (the table's second row) is minted so too.
+      An owner mints one at each mutation of such a member, though its
+      put carries none. It mints one as it writes each heartbeat (§7.5).
+      That heartbeat's time is the timestamp's instant, to the
+      millisecond, counted from the deployment epoch (§7.6).
+      `[Sc: profiles/freshness/scenarios-v2.md §3]`
   - **Order and id.** Two such timestamps with one id order by time. A
     timestamp under another id is another session's.
   - **Catch-up**, which profiles cite, is the last such timestamp an owner
@@ -1769,11 +1775,13 @@ Together they are the envelope's stamp, the sample's in-band stamp.
 This section fixes their widths and their byte order. What a run names,
 and how a seq counts, are §4.3's.
 
-**The record** is every byte after the seq, possibly none. It is read as
-the resource's type says (§7.1). In a frame, those bytes are its body,
-read with its declaration (§7.7). A sample that carries an envelope has the
-Encoding `zenoh/bytes`, whatever its record's type: the contract names the
-type.
+**The record** is every byte after a mutation's seq, possibly none. It
+is read as the resource's type says (§7.1). A heartbeat and a frame carry
+a **body** there instead, never a record of the resource's type. A
+heartbeat's is read with its covered revision's collections (below). A
+frame's is read with its declaration (§7.7). A sample that carries
+an envelope has the Encoding `zenoh/bytes`, whatever its record's type:
+the contract names the type.
 
 **Sizes.** A mutation is 6 bytes over its record, or 8 with a 32-bit run.
 So is a heartbeat over its body, and a frame over its body.
@@ -2986,9 +2994,10 @@ because of these rules:
    - E047 and E049 read the record type, so they wait for one that
      resolves (E023, E024). E047's marker half and E049 also wait for a
      packed declaration with no finding (E038 to E045).
-   - E050 waits for the values it reads: none of them E048's. It reads a
-     `timing.*` value as `timing.v1` §2.2 does, and one that does not read
-     gives none.
+   - E050 waits for the values it reads: none of them E048's. It reads
+     the `timing.*` values as `timing.v1` §2.2 reads a declaration. Where
+     one of them does not read, the declaration is invalid. E050 then
+     reads none of its values, as `timing.v1` judges none.
    `[F: contracts/e023-frame-unresolved, e047-frame-type, e049-frame-deadband, e050-frame-timing]`
 
 **Order.** Resources are taken in the bytewise order of their template
@@ -3472,6 +3481,11 @@ another added. `[F: compat/contract/explicit-true-to-false, kind-changed]`
 | `records`, `step_ms` or `jitter_ms` changed | breaking: the bits and the times move | `frame_changed` |
 | A deadband added, removed or changed | breaking: what an omitted field holds moves, either way | `deadband_changed` |
 | `keyframe_every` changed | review: how long a reader waits to heal | `keyframe_changed` |
+
+**A deadband is compared by its field's place** in the record type, as
+the frame form lists it (§7.7), never by its name. So a field renamed
+keeps its deadband. The rename is the packed rules' `field_renamed`, a
+review.
 
 The record type follows the packed rules below. It has no marker, so
 every change of its layout is breaking. Each breaking change above, and

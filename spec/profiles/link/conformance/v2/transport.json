@@ -529,14 +529,13 @@
       "catalog": {
         "entries": [
           {
-            "fingerprint": "sha256:00",
+            "contract": "sha256:aec974a6730ebb9fac54a773734cf3dd0542024dc7c79c52ef61dab3f435f30b",
             "iface": "radio.v1",
             "index": 0
           }
         ],
         "epoch": 1767225600,
-        "format": "zk2-catalog/1",
-        "lineage": []
+        "format": "zk2-catalog/1"
       },
       "expect": {
         "emit": [
@@ -583,8 +582,8 @@
         ],
         "findings": []
       },
-      "note": "the catalog the far side holds has the policy's id, 50a01c11: no finding (§2.19)",
-      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"50a01c11\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "note": "the catalog the far side holds has the policy's id, feb61e3d: no finding (§2.19)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"feb61e3d\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
         "transport/link/tx/batch_size": 222,
@@ -600,19 +599,24 @@
       "catalog": {
         "entries": [
           {
-            "fingerprint": "sha256:00",
+            "contract": "sha256:aec974a6730ebb9fac54a773734cf3dd0542024dc7c79c52ef61dab3f435f30b",
             "iface": "radio.v1",
             "index": 0
           },
           {
-            "fingerprint": "sha256:01",
+            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
             "iface": "health.v1",
             "index": 1
           }
         ],
         "epoch": 1767225600,
         "format": "zk2-catalog/1",
-        "lineage": []
+        "lineage": [
+          {
+            "entries": 1,
+            "id": "feb61e3d"
+          }
+        ]
       },
       "expect": {
         "emit": [
@@ -666,8 +670,8 @@
           }
         ]
       },
-      "note": "the far side holds the catalog's successor, f4e9b182: `catalog_mismatch` (§2.19)",
-      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"50a01c11\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "note": "the far side holds the catalog's successor, 62129a35, whose lineage names feb61e3d: `catalog_mismatch` (§2.19)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"feb61e3d\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
         "transport/link/tx/batch_size": 222,
@@ -683,14 +687,13 @@
       "catalog": {
         "entries": [
           {
-            "fingerprint": "sha256:00",
+            "contract": "sha256:aec974a6730ebb9fac54a773734cf3dd0542024dc7c79c52ef61dab3f435f30b",
             "iface": "radio.v1",
             "index": 0
           }
         ],
         "epoch": 1767225600,
-        "format": "zk2-catalog/1",
-        "lineage": []
+        "format": "zk2-catalog/1"
       },
       "expect": {
         "emit": [
@@ -1037,5 +1040,5 @@
       "router": {}
     }
   ],
-  "description": "link.v2's transport block and its checks (v2.md §2.18, §2.19). Each case is a face policy, `policy`; `router`, the transport keys a router's configuration states, by zenoh 1.10.1's configuration key, a key it omits read at the binding's default; optionally `peer`, the far end's, read alike; and optionally `catalog`, the deployment catalog the far side holds. `expect.emit` is what a generator writes, each key at zenoh's key with zenoh's value (`wait_before_close` in µs), in the policy's order; `expect.findings` is every finding, sorted as the linter sorts them."
+  "description": "link.v2's transport block and its checks (v2.md §2.18, §2.19). Each case is a face policy, `policy`; `router`, the transport keys a router's configuration states, by zenoh 1.10.1's configuration key, a key it omits read at the binding's default; optionally `peer`, the far end's, read alike; and optionally `catalog`, the deployment catalog the far side holds, a document core §8.6 reads, its id §8.6's. `expect.emit` is what a generator writes, each key at zenoh's key with zenoh's value (`wait_before_close` in µs), in the policy's order; `expect.findings` is every finding, sorted as the linter sorts them."
 }

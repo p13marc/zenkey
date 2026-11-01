@@ -3,6 +3,76 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.85 — 2026-11-01: zk2py round 96's findings answered (#978, #981)
+
+zk2py's round 96 read core 0.81 to 0.83, `freshness.v2` 0.1, `link.v1`
+0.11 and `link.v2` 0.1 cold. It filed F-442 to F-454, none a blocker.
+This version answers the core's. `freshness.v2` 0.2, `link.v1` 0.12,
+`link.v2` 0.2, `timing.v1` 0.10 and observer 0.20 answer the rest.
+
+**Corrected: 0.82's entry (F-442).** It said `RULES.md` lists 198 rules.
+It listed 207, as its table says.
+
+**Changed: S2 (F-445).** S2 named "a member a `freshness.v2` heartbeat
+confirms". Read by its words, a member no heartbeat had vouched for yet,
+or since its bit cleared, was none. Its reply then carried no Zenoh
+timestamp, and a GET reader read it unobservable.
+- S2 now names every member of a state §4.3's table lists under
+  `freshness.v2`. Its replies carry its last confirmation, vouched for
+  or not: its put's, until a heartbeat vouches.
+- That is the table's reading, which `scenarios-v2.md` §3 step 2 needs.
+  The reference and zk2py already ran it.
+- The sentence over the table says so too.
+
+**Changed: §4.3's table, row 2, and "Minting" (F-446).** A last
+confirmation is a Zenoh timestamp the owner mints, as every one of the
+table's is.
+- The owner mints one at each mutation of such a member, though its put
+  carries none. It mints one as it writes each heartbeat.
+- That heartbeat's time is the timestamp's instant, to the millisecond.
+  A reply carries the later of the two.
+- The reference and zk2py already did so. `scenarios-v2.md` §3 now
+  checks the reply's instant against the heartbeat H read.
+
+**Changed: §7.5, "The record" (F-444).** The record is what follows a
+mutation's seq. A heartbeat and a frame carry a body there, never read as
+a record of the resource's type. A heartbeat's is read with its covered
+revision's collections. Observer 0.20's §7.3 says what a tool does, and
+`envelope/carries.json` reads a heartbeat on its key as `heartbeat`.
+
+**Changed: §9.2, cascade 8 (F-452).** E050 reads the `timing.*` values
+as `timing.v1` §2.2 reads a declaration. One value that does not read
+makes it invalid, and E050 then reads none of them. The reference read
+so, and zk2py read each value alone. `contracts/e050-frame-timing` gains
+`frames/unread`: a deadline below its span beside a `timing.period_ms`
+of `"x"`, which gives no E050.
+
+**Changed: §9.8, frames (F-451).** A deadband is compared by its field's
+place, as the frame form lists it, never by its name.
+- So a field renamed with its deadband is the packed rules'
+  `field_renamed`, a review, and the frame's tag stays.
+- The text meant so. Its row's reason is what an omitted field holds,
+  which a rename does not move. And it says each breaking change moves
+  the tag, which a rename does not.
+- The reference and zk2py compared the canonical `frame` member, keyed
+  by name, and read a breaking `deadband_changed`. The reference's
+  classifier now places each deadband by the record's field names
+  (`compat::field_names`).
+- `compat/frame/deadband-field-renamed` is new: review.
+
+**Noted: §7.7's scenarios (F-454).** §7.7's owner and reader MUSTs cite
+`scenarios/frames.md`, which does not exist yet. Their tags are forward
+citations: #981's K3 writes `frames.md`, with the owners. The tags stay,
+and `RULES.md` keeps them. A placeholder file would hold no step that a
+runner could run.
+
+**Deliberately not changed.**
+- **No rule's role.** `RULES.md` lists 224 rules: 0.83's 223, and
+  observer 0.20's one.
+- **No fingerprint** of a contract in `examples/zk2/` moves. The
+  reference's test contract `beacon.v2` gains `link.v1` and two
+  `link.exposure` marks (`freshness.v2` 0.2, F-443), so its own does.
+
 ## 0.84 — 2026-11-01: the owner's catalog, in a scenario (#980)
 
 #980's C1c brings the catalog to the runtime and the tools. No rule
@@ -130,7 +200,7 @@ guard.
 **Changed: S2.** The owner's reply of a member a `freshness.v2` heartbeat
 confirms MUST carry that member's last confirmation instead of its
 mutation's Zenoh timestamp. `[Sc: profiles/freshness/scenarios-v2.md §3]`
-joins S2's evidence. `RULES.md` lists 198 rules.
+joins S2's evidence. `RULES.md` lists 207 rules.
 
 **Added: §4.2, "A heartbeat is no mutation."** Under `freshness.v2` an
 owner puts no member again to confirm it, and its heartbeat moves no seq

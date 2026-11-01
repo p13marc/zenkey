@@ -1,5 +1,5 @@
 {
-  "description": "freshness.v2 §2.5, a subscriber's rule for a heartbeat. Written by an independent reading of the text (Python, standard library), checked, never blessed. Each case names a layout of the core's `spec/conformance/heartbeat/layouts.json` and the collections the subscriber `follows`, by resource, then its `steps` in order, each at `at`, the subscriber's monotonic clock in milliseconds. `put` and `delete`: a mutation of `key` it heard, with its in-band `stamp` (`run_width` 16 or 32, `run`, `seq`) or `null` for none; a put older than the one held within one run is not taken. `read`: a complete read's answer of `collection`, asked at `asked` and arrived at `at`, its `live` members each with its stamp: it replaces the collection, merged with what was heard from `asked` on (within one run the higher seq kept, across two runs the answer's). `heartbeat`: CH's `tag`, the heartbeat key's `stamp` and the `body` in hex, then `expect`: `{revision: true}` (the tag is not the layout's), `{refused: token}` (core §7.5's body refusals), `{older: true}` (within one run, a seq not after the last heartbeat's by serial order), or `{read: {gap, sections}}`, `gap` true when the seq is not the last one's plus 1 within one run, and each collection, by resource, `not_followed`, `absent` (its map bit 0), `diverged` (its digest or live count not the view's), or `{confirmed: [keys]}`, the members vouched for, in key order. `check`: the collections due a read (`reread_due`, two divergences in a row, in map order), whether the last heartbeat read followed a gap (`gap`), and each named key's last heartbeat confirmation (`confirmed`, its `at`, or `null`: none since its last mutation, or not held).",
+  "description": "freshness.v2 §2.5, a subscriber's rule for a heartbeat. Written by an independent reading of the text (Python, standard library), checked, never blessed. Each case names a layout of the core's `spec/conformance/heartbeat/layouts.json` and the collections the subscriber `follows`, by resource, then its `steps` in order, each at `at`, the subscriber's monotonic clock in milliseconds. `put` and `delete`: a mutation of `key` it heard, with its in-band `stamp` (`run_width` 16 or 32, `run`, `seq`) or `null` for none; a put older than the one held within one run is not taken. `read`: a complete read's answer of `collection`, asked at `asked` and arrived at `at`, its `live` members each with its stamp: it replaces the collection, merged with what was heard from `asked` on (within one run the higher seq kept, across two runs the answer's). `heartbeat`: CH's `tag`, the heartbeat key's `stamp` and the `body` in hex, then `expect`: `{revision: true}` (the tag is not the layout's), `{refused: token}` (core §7.5's body refusals), `{older: true}` (within one run, a seq not after the last read heartbeat's by serial order), or `{read: {gap, sections}}`, `gap` true when the seq is not the last read one's plus 1 within one run, and each collection, by resource, `not_followed`, `absent` (its map bit 0), `diverged` (its digest or live count not the view's), or `{confirmed: [keys]}`, the members vouched for, in key order. A heartbeat expected `revision`, `refused` or `older` is not counted: it moves neither the sequence nor a count of divergences in a row. `check`: the collections due a read (`reread_due`, two divergences in a row, in map order), whether the last heartbeat read followed a gap (`gap`), and each named key's last heartbeat confirmation (`confirmed`, its `at`, or `null`: none since its last mutation, or not held).",
   "cases": [
     {
       "note": "a section whose digest is the view's confirms each member vouched for, at the heartbeat's arrival; a cleared bit confirms nothing of its member, which keeps its last confirmation",
@@ -1842,6 +1842,214 @@
             "gap": false,
             "confirmed": {
               "zk2/lab/n1/hb.v1/state/link": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "a heartbeat stopped at the tag, the body or the order is not counted: 5 read, a refused 6, then 7 follows a gap; a divergence, another revision's tag, then a divergence are two read in a row, so a read is due",
+      "layout": "hb.v1",
+      "follows": [
+        "state/link"
+      ],
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/hb.v1/state/link",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 100,
+          "heartbeat": {
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 5
+            },
+            "body": "00000e103e91138cc7be"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "sections": {
+                "@state/route/{dest}": "not_followed",
+                "state/link": {
+                  "confirmed": [
+                    "zk2/lab/n1/hb.v1/state/link"
+                  ]
+                },
+                "state/peer/{peer}": "not_followed",
+                "state/sdu/{sdu}": "not_followed"
+              }
+            }
+          }
+        },
+        {
+          "at": 200,
+          "heartbeat": {
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 6
+            },
+            "body": ""
+          },
+          "expect": {
+            "refused": "short"
+          }
+        },
+        {
+          "at": 300,
+          "heartbeat": {
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 7
+            },
+            "body": "00000e103e91138cc7be"
+          },
+          "expect": {
+            "read": {
+              "gap": true,
+              "sections": {
+                "@state/route/{dest}": "not_followed",
+                "state/link": {
+                  "confirmed": [
+                    "zk2/lab/n1/hb.v1/state/link"
+                  ]
+                },
+                "state/peer/{peer}": "not_followed",
+                "state/sdu/{sdu}": "not_followed"
+              }
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": [],
+            "gap": true,
+            "confirmed": {
+              "zk2/lab/n1/hb.v1/state/link": 300
+            }
+          }
+        },
+        {
+          "at": 400,
+          "heartbeat": {
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 8
+            },
+            "body": "00000e103e91138cc7be"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "sections": {
+                "@state/route/{dest}": "not_followed",
+                "state/link": {
+                  "confirmed": [
+                    "zk2/lab/n1/hb.v1/state/link"
+                  ]
+                },
+                "state/peer/{peer}": "not_followed",
+                "state/sdu/{sdu}": "not_followed"
+              }
+            }
+          }
+        },
+        {
+          "at": 500,
+          "put": {
+            "key": "zk2/lab/n1/hb.v1/state/link",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 600,
+          "heartbeat": {
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 9
+            },
+            "body": "00000e103e91138cc7be"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "sections": {
+                "@state/route/{dest}": "not_followed",
+                "state/link": "diverged",
+                "state/peer/{peer}": "not_followed",
+                "state/sdu/{sdu}": "not_followed"
+              }
+            }
+          }
+        },
+        {
+          "at": 700,
+          "heartbeat": {
+            "tag": 15,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 10
+            },
+            "body": "00000e103e91138cc7be"
+          },
+          "expect": {
+            "revision": true
+          }
+        },
+        {
+          "at": 800,
+          "heartbeat": {
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 10
+            },
+            "body": "00000e103e91138cc7be"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "sections": {
+                "@state/route/{dest}": "not_followed",
+                "state/link": "diverged",
+                "state/peer/{peer}": "not_followed",
+                "state/sdu/{sdu}": "not_followed"
+              }
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": [
+              "state/link"
+            ],
+            "gap": false,
+            "confirmed": {
+              "zk2/lab/n1/hb.v1/state/link": null
             }
           }
         }

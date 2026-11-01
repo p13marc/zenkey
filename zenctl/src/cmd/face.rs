@@ -87,14 +87,19 @@ fn known_windows(
     ))
 }
 
-/// The id of the deployment catalog in `path` (`link.v2` §2.19): a JSON
-/// document, its id the first 4 bytes of the sha256 of its JCS bytes.
+/// The id of the deployment catalog in `path` (`link.v2` §2.19): the
+/// catalog read as core §8.6 reads one, and its id §8.6's. A file §8.6
+/// refuses holds no id to compare, so the question is not asked: refused,
+/// naming the refusal.
 fn catalog_id(path: &std::path::Path) -> Result<String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| unaskable!("--catalog {}: {e}", path.display()))?;
-    let doc: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| unaskable!("--catalog {}: not a JSON document: {e}", path.display()))?;
-    Ok(zenkey_model::link::catalog_id(&doc))
+    zenkey_model::link::catalog_id(&text).map_err(|r| {
+        unaskable!(
+            "--catalog {}: core §8.6 refuses it as a catalog: {r} (link.v2 §2.19)",
+            path.display()
+        )
+    })
 }
 
 /// `check face`: exit 0 every face guarded as planned, 1 a finding or a

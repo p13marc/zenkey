@@ -279,7 +279,7 @@ transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
     transport.open_timeout_ms       planned 10000      runs 10000      far end 10000
     transport.accept_timeout_ms     planned 10000      runs 10000      far end 10000
     transport.interests_timeout_ms  planned 10000      runs 10000      far end 10000
-catalog: the far side holds 50a01c11, the policy names none
+catalog: the far side holds feb61e3d, the policy names none
 FAIL
 catalog_mismatch catalog: the catalog the far side holds is not the policy's: it decodes with another (link.v2 §2.19)
 peer_differs transport.lease_ms: the far end runs another lease or keep_alive than the router: the lease is not negotiated, so one direction closes sooner or pays more keep-alives (link.v2 §2.16)

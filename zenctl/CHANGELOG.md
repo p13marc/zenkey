@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `check face --catalog` reads a catalog as core §8.6 does (#988, link.v2 0.2)
+
+`link.v2` 0.2 §2.19 reads the catalog the far side holds as core §8.6
+reads one, its id §8.6's (zk2py round 96's F-449).
+
+| Before | Now | Notes |
+|---|---|---|
+| `--catalog FILE`: any JSON document, its id the sha256 of its JCS bytes | a catalog §8.6 reads, its id §8.6's | a file §8.6 refuses is refused, exit 2, naming the refusal |
+
 ## Unreleased (`main`, zk2) — `--catalog`: the deployment catalog (#980, C1c)
 
 Core 0.79 §8.6: a deployment provisions a catalog, a file stating the

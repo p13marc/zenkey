@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.18 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.20 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.78 ([`core.md`](core.md)) |
+| **Written against** | core 0.85 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1049,6 +1049,16 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   decodes, renders or judges. A refused envelope is undecodable, and the
   tool names the refusal. The tool MUST NOT decode or sniff a refused
   envelope's bytes as a payload with no envelope.
+  - **A heartbeat** (core §7.5's form 6) carries a body where a mutation
+    carries its record. A tool MUST NOT decode, render or judge a
+    heartbeat's body as a record of its resource's type.
+    `[F: envelope/carries.json, heartbeat/bodies.json]`
+    `[Sc: profiles/freshness/scenarios-v2.md §1]`
+    - **What it shows.** A tool that shows what a heartbeat vouches for
+      reads its body with the covered revision's collections. So does a
+      [`freshness.v2`](profiles/freshness/v2.md) reader (its §2.5).
+    - **Without that revision** it shows the heartbeat by its envelope:
+      its form, the interface it covers and its size.
   - **Why this reads no other sample.** Zenoh's default `Encoding` is
     `zenoh/bytes`, and core §7.2 asks an owner for its type's predefined
     one. So no conforming owner sends a stream, state or event sample
@@ -1242,6 +1252,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 |---|---|
 | `conformance/budget/` (`population.json`, `rate.json`, `lossless.json`) | §1, §2, §5 |
 | `conformance/keys.json` | §8.1 |
+| `conformance/heartbeat/bodies.json` | §7.3, a heartbeat's body |
 | `conformance/envelope/carries.json` | §7.3, the envelope first |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
 | `conformance/seed/` (`inband.json`, `merge.json`) | §4.1 |

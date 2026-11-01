@@ -2,16 +2,18 @@
 # `spec/profiles/freshness/scenarios-v2.md` states the contract: two
 # collections, one of one member and one templated, a collection the owner
 # may not expose, a state of each other kind of horizon, and a stream.
+# `status` and `level` are marked to cross a face that exposes (link.v1
+# §2.2), which only §7 runs.
 [interface]
 name  = "beacon"
 major = 2
 minor = 0
-uses  = ["freshness.v2"]
+uses  = ["freshness.v2", "link.v1"]
 
 [resources.status]                         # a collection of one member: a heartbeat every 0.95 s
 kind        = "state"
 type        = { raw = "text/plain" }
-annotations = { "freshness.ttl_s" = 2 }
+annotations = { "freshness.ttl_s" = 2, "link.exposure" = "link" }
 
 [resources."peer/{peer}"]                  # a templated collection, best_effort under loss
 kind        = "state"
@@ -41,4 +43,4 @@ type = { raw = "text/plain" }
 [resources.level]                          # a stream confirms by sampling, ttl 1 s
 kind        = "stream"
 type        = { raw = "text/plain" }
-annotations = { "freshness.ttl_s" = 1 }
+annotations = { "freshness.ttl_s" = 1, "link.exposure" = "link" }
