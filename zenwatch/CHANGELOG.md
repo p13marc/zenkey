@@ -7,6 +7,13 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — `catalog`: the deployment catalog, and the doctor's `catalog-missing` (#980, C1c)
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `catalog: [<PATH>]`, top-level beside `contracts`: `zk2-catalog/1` files the deployment provisions (core §8.6) | a file not there, or one a reader refuses, is refused by `check-config` and `run`, exit 2, named `catalog[i]` |
+| the scheduled doctor: thirty-three checks | thirty-four: `catalog-missing` (warning: a running revision the catalog its descriptor names lacks, or every one given lacks where it names none; or a descriptor naming a catalog none given is or succeeds), asked only with a `catalog` | not asked without one; a `doctor` rule reads no catalog, so asks it not. The `zenwatch.v1` schema's check id stays an open string, so its contract is unchanged |
+
 ## Unreleased (`main`, zk2) — the doctor reads `arbitration.v1` declarations (#909, BC)
 
 | Before | Now | Notes |

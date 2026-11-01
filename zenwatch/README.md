@@ -425,7 +425,11 @@ deployment's: empty is the bus-root deployment. A context's `registry` is
 not read. Contracts come from `contracts` and `--contracts` (added
 together): an authoring file, a directory of them, or a `.history` root;
 a path that loads nothing is refused, a file in a directory that is not a
-contract (a bindings file) is said on stderr and skipped.
+contract (a bindings file) is said on stderr and skipped. `catalog` names the
+deployment catalog (core §8.6), `zk2-catalog/1` files the deployment
+provisions: the scheduled doctor's `catalog-missing` judges every running
+revision against it, and is not asked without one; a file not there, or one
+a reader refuses, is refused (exit 2).
 
 ### Two sessions, both clients, and they fail fast
 

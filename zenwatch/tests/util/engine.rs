@@ -165,6 +165,7 @@ pub async fn run_once_refused(
             }),
             doctor: None,
             clocks_synced: opts.clocks_synced,
+            catalogs: &zenkey_fleet::Catalogs::default(),
         },
         std::future::pending::<()>(),
     )
@@ -208,6 +209,7 @@ pub async fn start(bus: Sessions, rules: Vec<RuleConfig>, ops: Capture, opts: Op
                 }),
                 doctor: opts.doctor.as_ref(),
                 clocks_synced: opts.clocks_synced,
+                catalogs: &zenkey_fleet::Catalogs::default(),
             },
             async move {
                 let _ = stop_rx.await;

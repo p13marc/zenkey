@@ -48,6 +48,15 @@ pub struct Config {
     /// these. Relative paths are the working directory's.
     #[serde(default)]
     pub contracts: Vec<PathBuf>,
+    /// The deployment catalog (core §8.6, #980 C1c): `zk2-catalog/1` files
+    /// the deployment provisions, never fetched from the bus. The scheduled
+    /// doctor's `catalog-missing` judges every running revision against
+    /// the one its descriptor names, or against every one given where it
+    /// names none; without one it is not asked. A file that is not there,
+    /// or that a reader refuses, is refused (exit 2). Relative paths are
+    /// the working directory's.
+    #[serde(default)]
+    pub catalog: Vec<PathBuf>,
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (500 ms), as the deployment keeps them
     /// (`freshness.v1` §2.6): the doctor — scheduled, or a `doctor` rule's —

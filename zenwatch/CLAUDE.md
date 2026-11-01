@@ -90,9 +90,12 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   clean stop; and it caches no discovery: it is not the noun
   `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
   doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
-  (`deep`, thirty-three checks since #909's BC, `arbitration-declaration`
-  among them; top-level `clocks_synced` for the `health-*` checks, which a
-  `doctor` rule reads too) every few **hours** beside the drain, as a rule
+  (`deep`, thirty-four checks since #980's C1c, `arbitration-declaration`
+  and `catalog-missing` among them; top-level `clocks_synced` for the
+  `health-*` checks, which a `doctor` rule reads too; top-level `catalog`,
+  the deployment catalogs core §8.6 provisions, loaded by `load_checked`
+  into `Loaded::catalogs` and given the scheduled doctor alone,
+  `Schedule::with_catalogs`, so a `doctor` rule asks no `catalog-missing`) every few **hours** beside the drain, as a rule
   of its own (`RuleKind::ScheduledDoctor`, id `doctor`). The first run is a
   **baseline** (one `info` notification; every finding assumed); later runs
   notify each new finding and `resolved` each fixed one, keyed `(check,
