@@ -43,6 +43,17 @@
 //! drops one silently (observer §7.3). A sample with no envelope, an `@stream` sample's or a foreign
 //! key's, is delivered as it arrived, ordered by its Zenoh timestamp where
 //! it carries one.
+//!
+//! **Heartbeats** (core §7.5's form 6, #978's F2): a subscription to a
+//! collection, a state with a horizon above 0 whose template it binds no
+//! parameter of, also hears each bound provider's heartbeat covering the
+//! interface (`zenkey_model::heartbeat::key`), and folds it into a
+//! `zenkey_model::freshness::View` per provider, from the members it
+//! delivered. A heartbeat whose section's digest is the view's confirms
+//! the members it vouches for, so [`Subscription::freshness`] ages a
+//! member from its last confirmation, a put or a heartbeat
+//! ([`Consumer::subscribe_confirmed`] hands each one over). No rule adopts
+//! the heartbeat yet, and no owner sends one.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -52,7 +63,8 @@ use std::time::{Duration, Instant, SystemTime};
 use zenkey_model::authoring::Kind;
 use zenkey_model::contract::{Body, Contract, Resource};
 use zenkey_model::freshness::{
-    ClockMeasure, ClockTrust, Horizon, Judged, Last, Observation, StampAge,
+    Applied, ClockMeasure, ClockTrust, Horizon, Judged, Last, Observation, SectionRead, StampAge,
+    View,
 };
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::packed::Layout;
@@ -272,6 +284,8 @@ pub struct Consumer {
 /// stops its `timing.v1` engine.
 pub struct Subscription {
     _subs: Vec<Subscriber<()>>,
+    /// Each bound provider's heartbeat subscriber, for a collection.
+    _heartbeats: Vec<Subscriber<()>>,
     seen: Arc<Seen>,
     /// When it was declared: how long it has listened (`freshness.v1` §2.5),
     /// and the origin of its deadlines (`timing.v1` §2.5).
@@ -292,6 +306,37 @@ struct Seen {
     /// host's clock at receipt: what `freshness.v1` §2.6 measures a GET
     /// reader's clock from.
     clocks: Mutex<BTreeMap<String, ClockMeasure>>,
+    /// For a collection, each provider's view as heartbeats confirm it
+    /// (#978's F2).
+    views: Mutex<BTreeMap<Addr, View<Instant>>>,
+    /// Heartbeats folded into a view, and heartbeats heard that could not
+    /// be: another revision's tag, a body refused, a sample on the
+    /// heartbeat key that is no heartbeat.
+    heartbeats: AtomicU64,
+    heartbeats_unread: AtomicU64,
+}
+
+/// What a heartbeat confirmed of a subscription's collection (#978's F2):
+/// the provider, the members it vouched for whose digest was the view's,
+/// in key order, and the heartbeat's stamp, arrival and time.
+#[derive(Debug, Clone)]
+pub struct Confirmation {
+    pub provider: Addr,
+    /// Base-relative, in key order; empty when its section confirmed none.
+    pub keys: Vec<String>,
+    /// The heartbeat key's run and seq.
+    pub heartbeat: zenkey_model::wire::Stamp,
+    /// Read in the subscriber's callback, on this host's monotonic clock.
+    pub arrival: Instant,
+    /// The owner's clock when it wrote it (`None`: unknown).
+    pub owner_time: Option<zenkey_model::heartbeat::Time>,
+}
+
+/// A collection a subscription follows by heartbeats: the revision's
+/// layout, and the collection's index in it.
+struct Followed {
+    layout: zenkey_model::heartbeat::Layout,
+    index: usize,
 }
 
 impl Consumer {
@@ -565,6 +610,57 @@ impl Consumer {
         C: Fn(Delivery) + Send + Sync + 'static,
         T: Fn(TimingEvent) + Send + Sync + 'static,
     {
+        self.subscribe_inner(resource, callback, on_timing, |_| {})
+            .await
+    }
+
+    /// [`Consumer::subscribe`], handing `on_confirm` what each heartbeat
+    /// confirmed of the collection subscribed (#978's F2): a resource that
+    /// is no collection, or one whose template parameters the consumer
+    /// binds, hears no heartbeat.
+    pub async fn subscribe_confirmed<C, F>(
+        &self,
+        resource: &str,
+        callback: C,
+        on_confirm: F,
+    ) -> Result<Subscription>
+    where
+        C: Fn(Delivery) + Send + Sync + 'static,
+        F: Fn(Confirmation) + Send + Sync + 'static,
+    {
+        self.subscribe_inner(resource, callback, |_| {}, on_confirm)
+            .await
+    }
+
+    /// The collection `r` is, followed by heartbeats: a state with a
+    /// horizon above 0 (core §7.5's collections) none of whose template
+    /// parameters this consumer binds, so it hears every member of each
+    /// bound provider.
+    fn followed(&self, r: &Resource) -> Option<Followed> {
+        let bound = r
+            .template
+            .params()
+            .any(|(name, _)| self.params.contains_key(name));
+        if bound {
+            return None;
+        }
+        let layout = zenkey_model::heartbeat::Layout::of(&self.contract);
+        let index = layout.index_of(&format!("{}/{}", r.token, r.template))?;
+        Some(Followed { layout, index })
+    }
+
+    async fn subscribe_inner<C, T, F>(
+        &self,
+        resource: &str,
+        callback: C,
+        on_timing: T,
+        on_confirm: F,
+    ) -> Result<Subscription>
+    where
+        C: Fn(Delivery) + Send + Sync + 'static,
+        T: Fn(TimingEvent) + Send + Sync + 'static,
+        F: Fn(Confirmation) + Send + Sync + 'static,
+    {
         let r = self.resource(resource)?.clone();
         let name = format!("{}/{}", r.token, r.template);
         let layout = self.packed_layout(&r)?;
@@ -581,15 +677,21 @@ impl Consumer {
         let prepared = timing::prepare(plan, since);
         let engine = prepared.as_ref().map(|p| Arc::clone(&p.engine));
         let callback = Arc::new(callback);
+        let followed = self.followed(&r).map(Arc::new);
+        let heartbeats = match &followed {
+            Some(f) => self.heartbeat_subscribers(f, &seen, on_confirm).await?,
+            None => Vec::new(),
+        };
         let mut subs = Vec::new();
         for ke in self.selectors(resource)? {
-            let (seen, callback, r, name, engine, layout) = (
+            let (seen, callback, r, name, engine, layout, followed) = (
                 Arc::clone(&seen),
                 Arc::clone(&callback),
                 r.clone(),
                 name.clone(),
                 engine.clone(),
                 layout.clone(),
+                followed.clone(),
             );
             let iface = self.contract.iface.clone();
             let providers = self.providers.clone();
@@ -670,10 +772,24 @@ impl Consumer {
                             .lock()
                             .expect("not poisoned")
                             .insert(addr.clone(), now);
-                        seen.members.lock().expect("not poisoned").insert(
-                            key.to_owned(),
-                            (now, sample.kind() == zenoh::sample::SampleKind::Delete),
-                        );
+                        let deleted = sample.kind() == zenoh::sample::SampleKind::Delete;
+                        seen.members
+                            .lock()
+                            .expect("not poisoned")
+                            .insert(key.to_owned(), (now, deleted));
+                        if let Some(f) = &followed {
+                            let mut views = seen.views.lock().expect("not poisoned");
+                            let view = views.entry(addr.clone()).or_insert_with(|| {
+                                let mut v = View::new(f.layout.clone());
+                                v.follow(f.index);
+                                v
+                            });
+                            if deleted {
+                                view.delete(key, inband, now);
+                            } else {
+                                view.put(key, inband, now);
+                            }
+                        }
                         if let Some(t) = sample.timestamp() {
                             let offset =
                                 StampAge::between(t.get_time().to_system_time(), SystemTime::now());
@@ -717,10 +833,99 @@ impl Consumer {
         };
         Ok(Subscription {
             _subs: subs,
+            _heartbeats: heartbeats,
             seen,
             since,
             timing,
         })
+    }
+
+    /// One heartbeat subscriber per bound provider, on the key of its
+    /// heartbeat covering this interface: each heartbeat folded into the
+    /// provider's view, what it confirmed handed to `on_confirm`.
+    async fn heartbeat_subscribers<F>(
+        &self,
+        f: &Arc<Followed>,
+        seen: &Arc<Seen>,
+        on_confirm: F,
+    ) -> Result<Vec<Subscriber<()>>>
+    where
+        F: Fn(Confirmation) + Send + Sync + 'static,
+    {
+        let on_confirm = Arc::new(on_confirm);
+        let mut out = Vec::new();
+        for p in &self.providers {
+            let (sys, svc) = p.chunks();
+            let ke = OwnedKeyExpr::try_from(zenkey_model::heartbeat::key(
+                sys,
+                svc,
+                &self.contract.iface,
+            ))
+            .map_err(zenoh)?;
+            let (f, seen, on_confirm, providers) = (
+                Arc::clone(f),
+                Arc::clone(seen),
+                Arc::clone(&on_confirm),
+                self.providers.clone(),
+            );
+            let iface = self.contract.iface.clone();
+            out.push(
+                self.session
+                    .declare_subscriber(ke)
+                    .callback(move |sample: Sample| {
+                        let arrival = Instant::now();
+                        let unread = || seen.heartbeats_unread.fetch_add(1, Ordering::Relaxed);
+                        let Some((addr, covered)) =
+                            zenkey_model::heartbeat::covered(sample.key_expr().as_str())
+                        else {
+                            unread();
+                            return;
+                        };
+                        if covered != iface || !providers.iter().any(|p| p.matches(&addr)) {
+                            unread();
+                            return;
+                        }
+                        let crate::inband::Read::Heartbeat { sample, stamp, tag } =
+                            crate::inband::read(sample)
+                        else {
+                            unread();
+                            return;
+                        };
+                        let body = sample.payload().to_bytes();
+                        let (applied, owner_time) = {
+                            let mut views = seen.views.lock().expect("not poisoned");
+                            let view = views.entry(addr.clone()).or_insert_with(|| {
+                                let mut v = View::new(f.layout.clone());
+                                v.follow(f.index);
+                                v
+                            });
+                            let applied = view.apply(tag, stamp, &body, arrival);
+                            (applied, view.owner_time())
+                        };
+                        let sections = match applied {
+                            Applied::Read { sections, .. } => sections,
+                            Applied::Older => return,
+                            Applied::Revision | Applied::Refused(_) => {
+                                unread();
+                                return;
+                            }
+                        };
+                        seen.heartbeats.fetch_add(1, Ordering::Relaxed);
+                        if let Some(SectionRead::Confirmed(keys)) = sections.get(f.index) {
+                            on_confirm(Confirmation {
+                                provider: addr,
+                                keys: keys.clone(),
+                                heartbeat: stamp,
+                                arrival,
+                                owner_time,
+                            });
+                        }
+                    })
+                    .await
+                    .map_err(zenoh)?,
+            );
+        }
+        Ok(out)
     }
 
     /// Replays an event's occurrences within `retention` (§2.6): a GET on
@@ -1167,12 +1372,19 @@ impl Subscription {
     }
 
     /// The member `key` as a `freshness.v1` observation now (§2.5): its last
-    /// delivery's age on this host's monotonic clock, never against its
+    /// confirmation's age on this host's monotonic clock, never against its
     /// stamp, and how long the subscription has listened. The callback
     /// receives every delivery, so the observation counts as complete.
+    ///
+    /// A confirmation is its last delivery, or, for a collection, the last
+    /// heartbeat of its provider that vouched for it with the view's digest
+    /// (#978's F2): the later stands. A gap in that heartbeat key's seqs
+    /// is a heartbeat lost, and leaves the observation incomplete until
+    /// one arrives in sequence.
     #[must_use]
     pub fn freshness(&self, key: &str) -> Observation {
-        let last = self
+        let now = Instant::now();
+        let delivered = self
             .seen
             .members
             .lock()
@@ -1180,16 +1392,66 @@ impl Subscription {
             .get(key)
             .map(|(at, deleted)| {
                 if *deleted {
-                    Last::Delete(at.elapsed())
+                    Last::Delete(now.saturating_duration_since(*at))
                 } else {
-                    Last::Put(at.elapsed())
+                    Last::Put(now.saturating_duration_since(*at))
                 }
             });
+        let (heartbeat, gap) = self.view_of(key, |v| {
+            (
+                v.confirmed(key).map(|c| now.saturating_duration_since(c)),
+                v.gap(),
+            )
+        });
         Observation::Subscribed {
-            last,
+            last: zenkey_model::freshness::confirmed_last(delivered, heartbeat),
             listened: self.listened(),
-            complete: true,
+            complete: !gap,
         }
+    }
+
+    /// `f` over the view of the provider whose key `key` is, or its
+    /// defaults with none.
+    fn view_of<R: Default>(&self, key: &str, f: impl FnOnce(&View<Instant>) -> R) -> R {
+        let addr = zenkey_model::heartbeat::base_relative(key).and_then(|k| match parse(k) {
+            Ok(ZkKey::Data { addr, .. }) => Some(addr),
+            _ => None,
+        });
+        let views = self.seen.views.lock().expect("not poisoned");
+        addr.and_then(|a| views.get(&a)).map(f).unwrap_or_default()
+    }
+
+    /// The last heartbeat of `key`'s provider that vouched for it, with
+    /// the view's digest (#978's F2).
+    #[must_use]
+    pub fn confirmed(&self, key: &str) -> Option<Instant> {
+        self.view_of(key, |v| v.confirmed(key))
+    }
+
+    /// Heartbeats folded into a provider's view (#978's F2).
+    #[must_use]
+    pub fn heartbeats(&self) -> u64 {
+        self.seen.heartbeats.load(Ordering::Relaxed)
+    }
+
+    /// Heartbeats heard that could not be folded: another revision's tag,
+    /// a body refused, or a sample on the heartbeat key that is none.
+    #[must_use]
+    pub fn heartbeats_unread(&self) -> u64 {
+        self.seen.heartbeats_unread.load(Ordering::Relaxed)
+    }
+
+    /// Whether `provider`'s collection is due a read: two heartbeats in a
+    /// row whose digest was not the view's (#978's design §1.5). Nothing
+    /// reads it again yet.
+    #[must_use]
+    pub fn reread_due(&self, provider: &Addr) -> bool {
+        self.seen
+            .views
+            .lock()
+            .expect("not poisoned")
+            .get(provider)
+            .is_some_and(|v| !v.reread_due().is_empty())
     }
 
     /// Per stamping clock (a stamp's id), what this subscription measured

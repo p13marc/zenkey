@@ -803,7 +803,7 @@ pub async fn last_known_all(
 /// never read as last-known.
 fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
     let read = crate::inband::read(s);
-    if let Some(why) = read.refusal() {
+    if let Some(why) = read.undecodable() {
         tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable last-known value");
         return None;
     }

@@ -11,6 +11,9 @@
 //!       (Read::Refused)
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (Read::Enveloped, the sample unchanged)
+//! a put whose envelope is a heartbeat (core §7.5's form 6, 0.80)
+//!     → its body becomes the payload, its run and seq its key's stamp
+//!       (Read::Heartbeat): never a record of the key's type
 //! every other sample
 //!     → read with no envelope (Read::Plain)
 //! ```
@@ -37,7 +40,10 @@
 //! ([`Read::mark`]).
 //!
 //! The consumer ([`crate::consumer`]), its state GET, the archive and the
-//! profile readers read every data sample through [`read`].
+//! profile readers read every data sample through [`read`]. A heartbeat is
+//! read with its covered revision by `zenkey_model::freshness::View`; a
+//! reader of a resource's records refuses one ([`admit`],
+//! [`Undecodable::Heartbeat`]).
 
 use zenkey_model::packed::{Layout, ReadRefusal};
 use zenkey_model::seed::{self, Mark};
@@ -62,6 +68,14 @@ pub enum Read {
     /// ([`Refusal::reason`]). The sample is as it arrived, for a caller
     /// that shows it; it is never decoded, nor ordered.
     Refused { sample: Sample, refusal: Refusal },
+    /// A heartbeat (core §7.5's form 6): the put with its body as its
+    /// payload, its key's run and seq, and CH's tag, its covered
+    /// revision's. Never a record of the key's type.
+    Heartbeat {
+        sample: Sample,
+        stamp: wire::Stamp,
+        tag: Tag,
+    },
 }
 
 impl Read {
@@ -69,7 +83,7 @@ impl Read {
     #[must_use]
     pub fn stamp(&self) -> Option<wire::Stamp> {
         match self {
-            Read::Enveloped { stamp, .. } => Some(*stamp),
+            Read::Enveloped { stamp, .. } | Read::Heartbeat { stamp, .. } => Some(*stamp),
             Read::Plain(_) | Read::Refused { .. } => None,
         }
     }
@@ -78,7 +92,7 @@ impl Read {
     #[must_use]
     pub fn tag(&self) -> Option<Tag> {
         match self {
-            Read::Enveloped { tag, .. } => Some(*tag),
+            Read::Enveloped { tag, .. } | Read::Heartbeat { tag, .. } => Some(*tag),
             Read::Plain(_) | Read::Refused { .. } => None,
         }
     }
@@ -88,6 +102,24 @@ impl Read {
     pub fn refusal(&self) -> Option<Refusal> {
         match self {
             Read::Refused { refusal, .. } => Some(*refusal),
+            Read::Plain(_) | Read::Enveloped { .. } | Read::Heartbeat { .. } => None,
+        }
+    }
+
+    /// Whether it is a heartbeat's: its payload is a body, never a record.
+    #[must_use]
+    pub fn is_heartbeat(&self) -> bool {
+        matches!(self, Read::Heartbeat { .. })
+    }
+
+    /// Why it is no record of its key's type: its envelope refused, or a
+    /// heartbeat's. `None` for a record, a delete, or a sample with no
+    /// envelope.
+    #[must_use]
+    pub fn undecodable(&self) -> Option<Undecodable> {
+        match self {
+            Read::Refused { refusal, .. } => Some(Undecodable::Envelope(*refusal)),
+            Read::Heartbeat { .. } => Some(Undecodable::Heartbeat),
             Read::Plain(_) | Read::Enveloped { .. } => None,
         }
     }
@@ -96,9 +128,10 @@ impl Read {
     #[must_use]
     pub fn sample(&self) -> &Sample {
         match self {
-            Read::Plain(sample) | Read::Enveloped { sample, .. } | Read::Refused { sample, .. } => {
-                sample
-            }
+            Read::Plain(sample)
+            | Read::Enveloped { sample, .. }
+            | Read::Refused { sample, .. }
+            | Read::Heartbeat { sample, .. } => sample,
         }
     }
 
@@ -106,9 +139,10 @@ impl Read {
     #[must_use]
     pub fn into_sample(self) -> Sample {
         match self {
-            Read::Plain(sample) | Read::Enveloped { sample, .. } | Read::Refused { sample, .. } => {
-                sample
-            }
+            Read::Plain(sample)
+            | Read::Enveloped { sample, .. }
+            | Read::Refused { sample, .. }
+            | Read::Heartbeat { sample, .. } => sample,
         }
     }
 
@@ -119,7 +153,7 @@ impl Read {
         match self {
             Read::Refused { .. } => None,
             Read::Plain(s) => Mark::of(None, s.timestamp().map(stamp_of)),
-            Read::Enveloped { sample, stamp, .. } => {
+            Read::Enveloped { sample, stamp, .. } | Read::Heartbeat { sample, stamp, .. } => {
                 Mark::of(Some(*stamp), sample.timestamp().map(stamp_of))
             }
         }
@@ -129,10 +163,10 @@ impl Read {
 /// Reads a received sample: see the module doc.
 #[must_use]
 pub fn read(sample: Sample) -> Read {
-    let stamp = match envelope(&sample) {
+    let (stamp, form) = match envelope(&sample) {
         None => return Read::Plain(sample),
         Some(Err(refusal)) => return Read::Refused { sample, refusal },
-        Some(Ok(stamp)) => stamp,
+        Some(Ok(read)) => read,
     };
     if sample.kind() == SampleKind::Delete {
         return Read::Enveloped {
@@ -151,6 +185,9 @@ pub fn read(sample: Sample) -> Read {
         .expect("a put")
         .payload(record)
         .into();
+    if form == wire::Form::Heartbeat {
+        return Read::Heartbeat { sample, stamp, tag };
+    }
     Read::Enveloped { sample, stamp, tag }
 }
 
@@ -161,6 +198,9 @@ pub fn read(sample: Sample) -> Read {
 pub enum Undecodable {
     Envelope(Refusal),
     Record(ReadRefusal),
+    /// A heartbeat (core §7.5's form 6) where a record of the resource's
+    /// type was read: a body, never a value.
+    Heartbeat,
 }
 
 impl Undecodable {
@@ -171,6 +211,7 @@ impl Undecodable {
         match self {
             Undecodable::Envelope(r) => r.token(),
             Undecodable::Record(r) => r.token(),
+            Undecodable::Heartbeat => "heartbeat",
         }
     }
 
@@ -180,6 +221,9 @@ impl Undecodable {
         match self {
             Undecodable::Envelope(r) => r.reason(),
             Undecodable::Record(r) => format!("a packed record refused by its layout, {r}"),
+            Undecodable::Heartbeat => {
+                "a heartbeat's body where a record of the resource's type was read".to_owned()
+            }
         }
     }
 }
@@ -200,8 +244,8 @@ impl std::fmt::Display for Undecodable {
 /// # Errors
 /// The [`Undecodable`] refusal.
 pub fn admit(read: &Read, layout: Option<&Layout>) -> Result<(), Undecodable> {
-    if let Some(r) = read.refusal() {
-        return Err(Undecodable::Envelope(r));
+    if let Some(u) = read.undecodable() {
+        return Err(u);
     }
     let Some(layout) = layout else {
         return Ok(());
@@ -217,13 +261,14 @@ pub fn admit(read: &Read, layout: Option<&Layout>) -> Result<(), Undecodable> {
 }
 
 /// What a sample's envelope says: `None` for a sample that carries none,
-/// else its stamp (a put's record is every byte after it) or the refusal.
-fn envelope(sample: &Sample) -> Option<Result<wire::Stamp, Refusal>> {
+/// else its stamp and form (a put's record or body is every byte after
+/// it) or the refusal.
+fn envelope(sample: &Sample) -> Option<Result<(wire::Stamp, wire::Form), Refusal>> {
     let key = sample.key_expr().as_str();
     match sample.kind() {
         SampleKind::Delete => {
             let attachment = sample.attachment()?.to_bytes();
-            wire::read_delete(key, Some(&attachment)).map(Ok)
+            wire::read_delete(key, Some(&attachment)).map(|s| Ok((s, wire::Form::Delete)))
         }
         SampleKind::Put => {
             if !wire::carries(key, &sample.encoding().to_string()) {
@@ -231,7 +276,7 @@ fn envelope(sample: &Sample) -> Option<Result<wire::Stamp, Refusal>> {
             }
             let bytes = sample.payload().to_bytes();
             Some(match wire::read_put(key, wire::ENCODING, &bytes) {
-                Reading::Enveloped(e) => Ok(e.stamp),
+                Reading::Enveloped(e) | Reading::Heartbeat(e) => Ok((e.stamp, e.form)),
                 Reading::Refused(refusal) => Err(refusal),
                 Reading::Plain => return None,
             })
@@ -253,7 +298,7 @@ pub fn stamp_of(ts: &Timestamp) -> seed::Stamp {
 /// when it carried one ([`Read::stamp`]).
 #[must_use]
 pub fn stamp(sample: &Sample) -> Option<wire::Stamp> {
-    envelope(sample)?.ok()
+    envelope(sample)?.ok().map(|(s, _)| s)
 }
 
 /// Why a sample's envelope was refused, read without stripping it
