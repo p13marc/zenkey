@@ -34,7 +34,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   moved verbatim from zenctl), presence and contract retrieval
   (`bus::presence`, `bus::contracts`), the session-free **lens** a raw
   observer resolves keys through (`model::lens`), contract-resolved
-  rendering (`model::render`, structural when no contract is in hand),
+  rendering (`model::render`, structural when no contract is in hand), the zk2c envelope read first (`model::inband`, core §7.5, observer §7.3, #976 A2: a stream, state or event sample under `zenoh/bytes` stripped to its record where its bytes are read, never where they are carried, `SampleView` and `FleetAnswer` deriving `envelope`/`mark`/`record`; a refused envelope undecodable with its refusal named, never sniffed nor ordered; every merge, the seeded watch, the snapshot fold and telemetry's and alarms' books (`sample_enveloped`, `SeedRead::envelopes`), by seq within a run and the later arrival across runs; a value the runtime already read never stripped twice, `inband::delivered_encoding`; the doctor's `state-stamp-foreign` counting an in-band stamp as the owner's and finding a refused one),
   `Monitor` with bounded broadcast + `Dropped(n)` honesty and ArcSwap
   key-tree snapshots, and live per-address presence (`model::presence_live`:
   up, down or unobservable, every token move a value; kept current from a
@@ -375,7 +375,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   its own `identity_epoch`, bumped at every door the lens's inputs move
   through. Payloads are checked through `Lens::check` into four
   conformance poles (valid, invalid, undecodable, not checked), the
-  verdict cache's "not yet checked" never one of them. **The tree** starts
+  verdict cache's "not yet checked" never one of them. A zk2c envelope (core §7.5, #976 A2) is stripped by the lens, the echo and history previews, `DecodedValue::of_wire` and the metric and timing reads (a refused one no arrival); a read's replies sort newest first by `inband::newest_first`; the spray's raw zk2 rows carry their type's predefined Encoding. **The tree** starts
   from the contract skeleton (`Skeleton::build(&lens, admin)`, on the
   update thread, rebuilt by `Arc` identity when the lens's inputs or the
   admin answer move, never on a tick). The admin answer is the declared
@@ -681,7 +681,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
   `--namespace`, the contract each descriptor names, the rung named where
   resolution stops (O2). A `.zrec` reads through the same lens, so live and
-  file windows are one projection. Their shapes — `KeyIdentity`/`KeyGroup`,
+  file windows are one projection, its zk2c envelopes read first (core §7.5, #976 A2): a record rendered as its type, a refused envelope undecodable with its refusal named, `--raw` sniffing the record. Their shapes — `KeyIdentity`/`KeyGroup`,
   `Conformance`, `QosMismatch`, `LensScope`, `PayloadCheck` — are in
   `report/observe.rs`. A stamp is the owner's when its id is the descriptor's
   `meta.zid`, by value (O7). `.zsnap` is version 2 and `snapshot diff`
@@ -921,7 +921,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   in a secret position fails to parse. **The three states are preserved**
   into every sink payload; a presence notice carries the engine's pinned
   `PresenceTransition` (`report::presence`), an alert its `AlarmTransition`
-  (`kind: alert`, the document rendered `schema`). Routing — which rule, which
+  (`kind: alert`, the document rendered `schema`); an alarm under a zk2c envelope is read and merged by run and seq in the fleet's `AlarmFeed` (core §7.5, #976 A2), and zenwatch reads wire bytes nowhere. Routing — which rule, which
   sink, whether it is a duplicate — is the daemon's (`engine::route`, over
   a `Notice` seam). `--dry-run` swaps every sink for a printing one. **The
   discipline** (#389, `discipline/`) sits between `route` and delivery and
@@ -1227,7 +1227,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   carries, no ε and governance from every revision held, and that it has
   listened from its stream subscriptions' declaration; text 0.4, #935:
   inline history out, no rule changed; text 0.5: round 88's F-349
-  rewritten), and `wire` (#976 A1): core §7.5's zk2c envelope, `Header`/`Form`/`Tag`/`Run`/`Seq`/`Stamp`, `Envelope::parse`/`write` for a put's mutation and `DeleteStamp::parse`/`write` for a delete's attachment, `Refusal::token` the fixtures' tokens; nothing else uses it yet.
+  rewritten), and `wire` (#976 A1): core §7.5's zk2c envelope, `Header`/`Form`/`Tag`/`Run`/`Seq`/`Stamp`, `Envelope::parse`/`write` for a put's mutation and `DeleteStamp::parse`/`write` for a delete's attachment, `Refusal::token` the fixtures' tokens; and (#976 A2) `carries`/`enveloped_key` (a stream, state or event key under `zenoh/bytes`, namespace in front or none), `read_put` → `Reading`, `read_delete`, `Refusal::reason`, with `seed::Mark`/`versus`/`admits_mark`/`consumer_accepts` ordering by seq within a run, nothing across runs or wires.
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1305,7 +1305,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `s7_a_new_epoch_inside_a_late_joiners_seed`). `archive` is a
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
-  current.
+  current. `inband` (#976 A2) reads every data sample beside today's wire: an envelope's record as the payload and its run and seq as `Delivery::inband`/`StateAnswer::inband` (`mark()`, `ValueOrder::accept_mark`); a refused one undecodable, never delivered (`Subscription::undecodable`); the archive orders by it, refusing an outdated put only within a run.
   Operations (#621, FH): `operation` serves a `complete` queryable that
   refuses fan-out (O2) and answers `unavailable` with its cause before any
   handler runs (O3), and a call left without its reply gets `internal`,
@@ -1635,9 +1635,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   the rule its tags when it has none of its own, as the header now
   says; S7's MUST to accept another id shows §4.3's MAY for a profile's
   stricter order after it (0.69, F-394), and a bracket may also give a
-  verb the sentence omits. 173 rules, 20 citing none, 9 of
+  verb the sentence omits. 175 rules, 20 citing none, 9 of
   them MUSTs (#965's; S7's two consumer MUSTs cite `state.md` §7 since
-  0.68). The glossary holds 53 terms. Core 0.72 (#976's A1, epic #975) defines §7.5's zk2c envelope ahead of its use, adopted by no rule: CH (form bits 7–5, run width bit 4, tag bits 3–0), a 16- or 32-bit run and a 24-bit seq, big-endian, then the record; a mutation (code 0) is a put's payload, a delete (code 1) a delete's attachment, codes 2–7 reserved; its refusals (short, form, sample_kind, tag, short, trailing, first match) and its round trip are static, §12 listing §7.5 beside §1 and §9; `spec/conformance/envelope/vectors.json` is its evidence. Core 0.68 and observer
+  0.68). The glossary holds 53 terms. Core 0.72 (#976's A1, epic #975) defines §7.5's zk2c envelope ahead of its use, adopted by no rule: CH (form bits 7–5, run width bit 4, tag bits 3–0), a 16- or 32-bit run and a 24-bit seq, big-endian, then the record; a mutation (code 0) is a put's payload, a delete (code 1) a delete's attachment, codes 2–7 reserved; its refusals (short, form, sample_kind, tag, short, trailing, first match) and its round trip are static, §12 listing §7.5 beside §1 and §9; `spec/conformance/envelope/vectors.json` is its evidence. Observer text 0.14 (#976's A2) reads it first: a tool that shows or judges a payload MUST read a stream, state or event sample under `zenoh/bytes` as §7.5's envelope, its record the payload, and MUST NOT sniff a refused one's bytes as a payload with no envelope (§7.3, `spec/conformance/envelope/carries.json`); since core §7.2 already asks an owner for its type's predefined `Encoding`, only a put that broke §7.2 reads differently, and the reference's raw test puts now carry their type's `Encoding`. Core 0.68 and observer
   text 0.10 (#926 part 3, zk2py round 90's F-379 to F-392) changed five
   rules: a late joiner keeps the newer by the owner's stamp, but across
   two ids a consumer orders by S7 from its first value on, its seed's
