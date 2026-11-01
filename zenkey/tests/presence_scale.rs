@@ -41,9 +41,17 @@ async fn s4_reading_presence_at_scale() {
     // What the rule is about is the last GET: complete, with every token.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
     loop {
-        let got = presence::liveliness_keys(&reader, "zk2/p4/*/@zk/**", Duration::from_secs(30))
-            .await
-            .unwrap();
+        let got =
+            match presence::liveliness_keys(&reader, "zk2/p4/*/@zk/**", Duration::from_secs(30))
+                .await
+            {
+                Ok(got) => got,
+                // Under the load a client's link can close: a read through a
+                // session cut off is not made (core §8.1), and the next is
+                // asked once the client has reconnected.
+                Err(zenkey::Error::CutOff { .. }) => Vec::new(),
+                Err(e) => panic!("{e}"),
+            };
         if got.len() == N {
             break;
         }
