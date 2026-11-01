@@ -75,7 +75,7 @@ use crate::{Error, Result};
 #[derive(Debug, Clone)]
 pub struct TriggerSpec {
     /// Full wire selectors to retain and record. The rules' own selectors
-    /// are watched too; the header names the union (O5).
+    /// are watched too, but across a face; the header names the union (O5).
     pub selectors: Vec<String>,
     /// How far back the retained window reaches: the pre-roll asked for.
     pub pre: Duration,
@@ -112,6 +112,14 @@ pub struct TriggerSpec {
     /// Replies kept per preamble GET (#339); what the bound cost rides the
     /// header's `incomplete`.
     pub max_replies: usize,
+    /// The selectors are a scope across a constrained face (core §8.5,
+    /// observer §7.5; #980 C1b): each a resource's exact key or a
+    /// template's literal prefix from the contracts in hand. The rules'
+    /// own selectors are then not watched beside them, so no wider one is
+    /// declared across the face, and they judge what arrives. No presence
+    /// is read for the lens, since no descriptor crosses: keys resolve
+    /// through `contracts` alone.
+    pub across_face: bool,
 }
 
 /// What a trigger capture reports as it runs — the frontend renders these;
@@ -334,8 +342,14 @@ where
     // Compiled before the monitor exists, so the `?` has nothing to tear
     // down (#336).
     let mut rules = RuleSet::new(&spec.rules)?;
-    let watched = watch_cover(spec.selectors.iter().chain(rules.watched()));
+    let watched = if spec.across_face {
+        watch_cover(spec.selectors.iter())
+    } else {
+        watch_cover(spec.selectors.iter().chain(rules.watched()))
+    };
     let (wants_doctor, wants_lens) = (rules.wants_doctor(), rules.wants_lens());
+    // Across a face the lens reads no presence: `contracts` resolves.
+    let reads_presence = wants_lens && !spec.across_face;
     // The doctor rules' doctor (#612, FJ6): only the checks they name, one
     // contract store for the capture, seeded with what `--contracts` holds.
     let doctor_spec = rules.doctor_spec(spec.timeout, spec.clocks_synced);
@@ -344,7 +358,7 @@ where
     let deployment = spec.deployment.as_ref();
     // The lens before the first window (FJ8b): a check inside the drain
     // never waits on a presence read or a retrieval.
-    let mut catalog: Option<Catalog> = match (wants_lens, deployment) {
+    let mut catalog: Option<Catalog> = match (reads_presence, deployment) {
         (true, Some(bus)) => crate::bus::lens::read(&bus.session, &bundles, spec.timeout)
             .await
             .ok(),
@@ -407,7 +421,7 @@ where
             } else {
                 None
             };
-            let lens = match (wants_lens, deployment) {
+            let lens = match (reads_presence, deployment) {
                 (true, Some(bus)) => crate::bus::lens::read(&bus.session, &bundles, spec.timeout)
                     .await
                     .ok(),

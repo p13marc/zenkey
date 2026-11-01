@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.17 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.18 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.77 ([`core.md`](core.md)) |
+| **Written against** | core 0.78 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1105,6 +1105,26 @@ This is core §7.4's tool half; SHM's facts and the deployment's
     An unlimited limit admits any pool, and a limit the tool cannot read
     leaves the check unobservable.
 
+### 7.5 Subscribing across a face
+
+This is core §8.5's "Keys across the face", for a tool.
+
+- A tool across a constrained face SHOULD subscribe as core §8.5 says, by
+  the scopes the contracts in hand give for the addresses it reads.
+  - **The scopes.** Each concrete resource is its exact key, and each
+    template its key with every parameter a wildcard. An event's ULID
+    chunk is a wildcard too.
+  - **Why the contracts.** No descriptor crosses the face, so the tool
+    takes the deployment's word for the addresses and their contracts, as
+    a binding does (core R7).
+  - **Why not an ambient selector.** `zk2/**` declares the prefix `zk2`
+    alone. Each put toward the tool then carries its key's text after
+    `zk2` (core Appendix B).
+  - **What it costs.** Each scope is one declaration, made again at every
+    reconnect.
+
+`[Sc: constrained.md §7]`
+
 ---
 
 ## 8. What a tool tells a person
@@ -1154,6 +1174,9 @@ advanced publication's own (core §2.5), not data. A tool that offers
 as excluded. The explicit two are an opt-in, never a default: the guard
 exists so that nobody pulls a camera's frames by accident.
 `[Sc: grammar.md §1, §2]`
+
+**Across a constrained face** the three are too wide. A tool there
+subscribes by §7.5's scopes instead.
 
 ### 8.3 A tool that reports a timestamp names who stamped it
 
@@ -1227,7 +1250,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
 | `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2) |
 | `scenarios/bindings.md` §3, §5 | §7.1 |
-| `scenarios/constrained.md` §3 | §7.1 |
+| `scenarios/constrained.md` §3, §7 | §7.1 (§3), §7.5 (§7) |
 | `scenarios/types.md` §2 | §7.3 |
 | `scenarios/grammar.md` §1, §2 | §8.2 (§1 step 5) |
 | `profiles/*/conformance/conclusions.json` (`arbitration`, `redundancy`, `timing`) | §1, not this profile's |

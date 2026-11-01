@@ -1,0 +1,61 @@
+`--across-face SYSTEM/SERVICE` (#980 C1b; core §8.5, observer §7.5): a raw
+observer across a constrained face subscribes by the scopes the contracts in
+hand give for the address. That is each concrete resource's exact key and
+each template's key with every parameter a wildcard, never `<ns>/zk2/**`,
+under which every put would carry its key's text across the face. No
+presence is read, since no descriptor crosses: keys resolve through
+`--contracts` alone. `tests/live_zk2.rs`'s
+`constrained_s7_a_tools_scope_across_a_face` runs the scope against a bus.
+
+The cases here are its refusals, each made before a session opens, and each
+this tool refusing what it was given: exit 2.
+
+No descriptor crosses a face, so the scope comes from `--contracts`, and
+without them there is none.
+
+```console
+$ zenctl echo --across-face host-a/tc
+? 2
+Error: --across-face builds its scope from the contracts in hand, since no descriptor crosses a face (observer §7.5): give --contracts
+
+```
+
+An address names one service. A wildcard there would subscribe wider than
+what the tool reads.
+
+```console
+$ zenctl echo --across-face '*/tc' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: --across-face */tc: system "*" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-9])?). Name one service, SYSTEM/SERVICE, each a plain chunk: a wildcard would subscribe wider than what this tool reads (core §8.5)
+
+```
+
+A selector typed beside it is narrowed to the face's scope, and one that
+reaches none of it is refused.
+
+```console
+$ zenctl rate 'zk2/host-b/**' --across-face host-a/tc --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: zk2/host-b/** reaches none of the resources the contracts in hand give for host-a/tc across the face: type a selector under one of them, or none
+
+```
+
+A rule that reads presence or the doctor reads `@zk`, which does not cross a
+face, so the watchdog refuses it there.
+
+```console
+$ zenctl watchdog --rule 'instance-gone host-a/tc' --across-face host-a/tc --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: watchdog --across-face: `instance-gone host-a/tc` reads presence or the doctor, which do not cross a constrained face (core §8.5): drop the rule, or ask it on the face's own side
+
+```
+
+A rule whose selector reaches none of the face's resources would watch
+nothing there.
+
+```console
+$ zenctl watchdog --rule 'rate-below zk2/host-b/** 1' --across-face host-a/tc --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: watchdog --across-face: `rate-below zk2/host-b/** 1` watches zk2/host-b/**, which reaches none of the selectors across the face (zk2/host-a/tc/tc.netif.v1/state/interfaces/*/* + zk2/host-a/tc/tc.netif.v1/state/namespaces + zk2/host-a/tc/tc.netif.v1/stream/bandwidth/*/*)
+
+```

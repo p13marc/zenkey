@@ -27,12 +27,22 @@ pub async fn run(cli: crate::cli::FieldArgs) -> Result<()> {
         selector,
         for_secs,
         max_paths,
+        face: crate::cli::AcrossFaceArgs { across_face },
         fail_on,
         contracts: _,
         ns: _,
     } = cli;
     let namespace = dep.namespace().to_owned();
+    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::Samples)?;
+    let typed = selector.is_some();
     let selector = zk2::wire_selector(selector.as_deref(), &namespace)?;
+    // Across a face, the scope the contracts give (core §8.5); the report
+    // names it as one selector, its parts joined.
+    let watched = match &face {
+        Some(face) => face.narrow(std::slice::from_ref(&selector), typed)?,
+        None => vec![selector],
+    };
+    let selector = watched.join(" + ");
     let window = super::positive_secs("--for", for_secs)?;
     if max_paths == 0 {
         return Err(unaskable!(
@@ -41,8 +51,18 @@ pub async fn run(cli: crate::cli::FieldArgs) -> Result<()> {
     }
 
     let store = zk2::store(&dep, &contracts);
-    let ns_session = dep.session().await?;
-    let catalog = zk2::read_lens(&dep, &ns_session, &store).await;
+    // Across a face no presence is read: no descriptor crosses, and
+    // --contracts resolves every key (observer §7.5).
+    let catalog = match &face {
+        Some(face) => {
+            eprintln!("{}", face.note(&watched));
+            None
+        }
+        None => {
+            let ns_session = dep.session().await?;
+            zk2::read_lens(&dep, &ns_session, &store).await
+        }
+    };
     let held = store.held().len();
     let lens = Lens::new(&namespace, catalog.as_ref(), &store)
         .offline(&contracts)
@@ -58,7 +78,7 @@ pub async fn run(cli: crate::cli::FieldArgs) -> Result<()> {
         "field: watching {selector} for {for_secs}s — subscriber declared before \
          the window opened (O4)"
     );
-    let report = zenkey_fleet::run_field(&session, &lens, &spec).await?;
+    let report = zenkey_fleet::run_field_over(&session, &lens, &spec, &watched).await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
 
     if trips(&report.findings, fail_on) {

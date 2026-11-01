@@ -1757,6 +1757,23 @@ pub fn watchdog<'a>(
     offline: &'a ContractSet,
     spec: &'a WatchdogSpec,
 ) -> impl Straw<WatchdogSummary, Transition, Error> + 'a {
+    watchdog_across(bus, store, offline, spec, None)
+}
+
+/// [`watchdog`] across a constrained face (core §8.5, observer §7.5; #980
+/// C1b), when `across_face` is given: its selectors, each a resource's
+/// exact key or a template's literal prefix from the contracts in hand,
+/// are declared in place of the rules' own, which still judge what
+/// arrives. No presence is read for the lens then, since no descriptor
+/// crosses a face: keys resolve through `offline` alone. The rules that
+/// read presence or the doctor are the caller's to refuse.
+pub fn watchdog_across<'a>(
+    bus: &'a DoctorBus,
+    store: &'a BundleStore,
+    offline: &'a ContractSet,
+    spec: &'a WatchdogSpec,
+    across_face: Option<&'a [String]>,
+) -> impl Straw<WatchdogSummary, Transition, Error> + 'a {
     sipper(async move |mut sender: sipper::Sender<Transition>| {
         use crate::{FleetEvent, StreamItem};
 
@@ -1765,12 +1782,14 @@ pub fn watchdog<'a>(
         let mut rules = RuleSet::new(&spec.rules)?;
         let (wants_doctor, wants_lens) = (rules.wants_doctor(), rules.wants_lens());
         let doctor_spec = rules.doctor_spec(spec.timeout, spec.clocks_synced);
+        // Across a face the lens reads no presence: `offline` resolves.
+        let reads_presence = wants_lens && across_face.is_none();
 
         // The lens before the first window (#337's rule, kept): a check
         // inside the drain loop must never become a presence read or a
         // retrieval, because nothing attends the broadcast while one is in
         // flight. Each tick's sweep re-reads it beside the drain.
-        let mut catalog: Option<Catalog> = if wants_lens {
+        let mut catalog: Option<Catalog> = if reads_presence {
             crate::bus::lens::read(&bus.session, store, spec.timeout)
                 .await
                 .ok()
@@ -1802,7 +1821,9 @@ pub fn watchdog<'a>(
         // Declared before the window opens — not-asked must never read as "no".
         let monitor = crate::Monitor::start(&bus.raw, crate::MonitorSpec::default()).await?;
         let mut events = monitor.events();
-        let monitor = monitor.watching(rules.watched()).await?;
+        let monitor = monitor
+            .watching(across_face.unwrap_or(rules.watched()))
+            .await?;
 
         let mut closed = false;
         loop {
@@ -1818,7 +1839,7 @@ pub fn watchdog<'a>(
                 } else {
                     None
                 };
-                let lens = if wants_lens {
+                let lens = if reads_presence {
                     crate::bus::lens::read(&bus.session, store, spec.timeout)
                         .await
                         .ok()

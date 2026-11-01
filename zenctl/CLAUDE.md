@@ -134,7 +134,17 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   and `<ns>/zk2/*/*/*/@state/**`, on `snapshot` the `@state` one alone,
   every verb's scope from `cmd::zk2::wire_scope`, refused beside a typed
   selector, exit 2; the three are the data plane but `@op` and `@zk`,
-  `observer.md` §8.2, #924; `rate` and `field` keep one selector)
+  `observer.md` §8.2, #924; `rate` and `field` keep one selector; with
+  `--across-face SYSTEM/SERVICE`, repeatable, on all eight, the scope is
+  `cmd::zk2::FaceScope`'s, core 0.78 §8.5 and observer 0.18 §7.5, #980
+  C1b: one selector per resource of the contracts in hand under each
+  address, an exact key or a template's key with each parameter a
+  wildcard, never `<ns>/zk2/**`, a typed or rule selector narrowed to it
+  (`FaceScope::narrow`), no presence read, refused without `--contracts`,
+  and under `watchdog` and `record --on` a rule reading presence or the
+  doctor refused, through the fleet's `watchdog_across`,
+  `TriggerSpec::across_face` and `run_field_over`; `live_zk2.rs`'s
+  `constrained_s7_a_tools_scope_across_a_face`)
   and resolve every key through one session-free **lens**
   (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
   `--namespace`, the contract each descriptor names, the rung named where

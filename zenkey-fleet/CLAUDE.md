@@ -307,3 +307,9 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   The doctor's `arbitration-declaration` asks the first and third
   questions of every running consumer's arbitrated role, with no view: an
   invalid declaration an error, a wildcard or shadowed entry a warning.
+  Across a constrained face (core 0.78 §8.5, observer 0.18 §7.5, #980
+  C1b), `judge::condition::watchdog_across` watches the selectors it is
+  handed in place of the rules' own, `TriggerSpec::across_face` watches
+  the capture's selectors alone, and `judge::field::run_field_over` watches
+  several: each reads no presence for its lens, keys resolving through the
+  contracts in hand.

@@ -731,13 +731,26 @@ pub async fn run_field(
     lens: &Lens<'_>,
     spec: &FieldSpec,
 ) -> Result<FieldReport> {
+    run_field_over(session, lens, spec, std::slice::from_ref(&spec.selector)).await
+}
+
+/// [`run_field`] watching `selectors` in place of `spec.selector`, which
+/// still names the window in the report: a scope across a constrained
+/// face, each selector a resource's exact key or a template's literal
+/// prefix (core §8.5, observer §7.5; #980 C1b).
+pub async fn run_field_over(
+    session: &Session,
+    lens: &Lens<'_>,
+    spec: &FieldSpec,
+    selectors: &[String],
+) -> Result<FieldReport> {
     use crate::{FleetEvent, StreamItem};
 
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
     let mut events = monitor.events();
     // Declared before the window opens: not-asked must never read as "no" —
     // and a declaration that fails takes the monitor down with it (#336).
-    let monitor = monitor.watching([spec.selector.as_str()]).await?;
+    let monitor = monitor.watching(selectors).await?;
     let opened = tokio::time::Instant::now();
     let deadline = opened + spec.window;
 

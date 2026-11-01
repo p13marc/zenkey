@@ -45,6 +45,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
     let crate::cli::TimelineArgs {
         selectors,
         explicit: crate::cli::ExplicitArgs { explicit },
+        face: crate::cli::AcrossFaceArgs { across_face },
         for_secs,
         order,
         from,
@@ -61,7 +62,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
             // Clap has already required `--for` without `--from`; the
             // positivity check is the one every window shares (#307).
             let secs = for_secs.expect("clap requires --for without --from");
-            live(&selectors, explicit, secs, &dep, &contracts).await?
+            live(&selectors, explicit, &across_face, secs, &dep, &contracts).await?
         }
     };
     let report = timeline(&window, order);
@@ -71,23 +72,41 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
 
 /// Watch the selectors for the window and collect what arrived, in order:
 /// the raw observers' one scope ([`zk2::wire_scope`]), the explicit kinds
-/// by name under `--explicit` (#924).
+/// by name under `--explicit` (#924), narrowed to the contracts' resources
+/// across a face (`--across-face`, core §8.5).
 async fn live(
     selectors: &[String],
     explicit: bool,
+    across_face: &[String],
     for_secs: f64,
     dep: &Deployment,
     contracts: &zenkey_fleet::ContractSet,
 ) -> Result<Window> {
     let duration = super::positive_secs("--for", for_secs)?;
     let namespace = dep.namespace();
-    let selectors = zk2::wire_scope(selectors, explicit, namespace, zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of(across_face, contracts, namespace, zk2::Reads::Samples)?;
+    let selectors = zk2::wire_scope(
+        selectors,
+        explicit,
+        namespace,
+        zk2::Reads::Samples,
+        face.as_ref(),
+    )?;
 
     // The lens first: the presence read names each owner's zid and the
-    // revisions its descriptors name, before the window opens.
+    // revisions its descriptors name, before the window opens. Across a
+    // face none is made: no descriptor crosses (observer §7.5).
     let store = zk2::store(dep, contracts);
-    let ns_session = dep.session().await?;
-    let catalog = zk2::read_lens(dep, &ns_session, &store).await;
+    let catalog = match &face {
+        Some(face) => {
+            eprintln!("{}", face.note(&selectors));
+            None
+        }
+        None => {
+            let ns_session = dep.session().await?;
+            zk2::read_lens(dep, &ns_session, &store).await
+        }
+    };
     let held = store.held().len();
     let lens = Lens::new(namespace, catalog.as_ref(), &store)
         .offline(contracts)

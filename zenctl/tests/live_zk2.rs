@@ -4220,20 +4220,21 @@ async fn explicit_captures_the_camera_frames_a_zk2_capture_excludes() {
     assert!(!Path::new(&refused).exists(), "nothing written: {run}");
 }
 
+/// `g.v1`: one resource of each data kind, ambient and explicit, two of
+/// them timed.
+const G_V1: &str = "[interface]\nname = \"g\"\nmajor = 1\nminor = 0\nuses = [\"timing.v1\"]\n\
+     [resources.tick]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+     annotations = { \"timing.period_ms\" = 100, \"timing.deadline_ms\" = 500 }\n\
+     [resources.frame]\nkind = \"stream\"\nexplicit = true\ntype = { raw = \"text/plain\" }\n\
+     annotations = { \"timing.period_ms\" = 100, \"timing.deadline_ms\" = 500 }\n\
+     [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+     [resources.grid]\nkind = \"state\"\nexplicit = true\ntype = { raw = \"text/plain\" }\n";
+
 /// grammar.md §1's owner, `g/svc` on `g.v1`, as far as a tool's step needs
 /// it: a plain `stream` and an `@stream`, both timed (`timing.v1`), a
 /// `state` and an `@state`, each put every 50 ms.
 async fn guard_owner(bus: &mut Bus) {
-    let g = contract_text(
-        "g.v1",
-        "[interface]\nname = \"g\"\nmajor = 1\nminor = 0\nuses = [\"timing.v1\"]\n\
-         [resources.tick]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
-         annotations = { \"timing.period_ms\" = 100, \"timing.deadline_ms\" = 500 }\n\
-         [resources.frame]\nkind = \"stream\"\nexplicit = true\ntype = { raw = \"text/plain\" }\n\
-         annotations = { \"timing.period_ms\" = 100, \"timing.deadline_ms\" = 500 }\n\
-         [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
-         [resources.grid]\nkind = \"state\"\nexplicit = true\ntype = { raw = \"text/plain\" }\n",
-    );
+    let g = contract_text("g.v1", G_V1);
     let id = iface("g.v1");
     let none = Bindings::new();
     let mut b = ServiceBuilder::new(
@@ -4268,6 +4269,210 @@ async fn guard_owner(bus: &mut Bus) {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })));
+}
+
+/// constrained.md §7's tool half (core §8.5, observer §7.5; #980 C1b): a
+/// raw observer across a face subscribes by the scopes the contracts in
+/// hand give for the address, each resource's exact key, never `zk2/**`,
+/// and resolves each key through those contracts with no presence read.
+/// `--explicit` adds the explicit resources by their keys too, and a
+/// selector reaching none of them is refused, exit 2. Then in a namespace:
+/// `echo`'s scope carries it in front, and the watchdog narrows a rule's
+/// wire selector to the face's and judges it there, refusing a
+/// base-relative one with the wire key it meant (review-bot on PR #1017).
+///
+/// The scope is read off stderr's "echoing …" and "watchdog: watching …"
+/// lines on purpose: the rows on stdout would read the same under
+/// `zk2/**`, so what was subscribed is said nowhere else. Every wait is
+/// `until`'s, bounded by `SETTLE` and keyed on stdout and the exit code, so
+/// a change of wording fails an assertion that prints the run, never a
+/// hang.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn constrained_s7_a_tools_scope_across_a_face() {
+    let mut bus = Bus::bare(None).await;
+    guard_owner(&mut bus).await;
+    wait_for(&bus, &["g/svc"]).await;
+    let contracts = bus.home.join("g.v1.toml");
+    std::fs::write(&contracts, G_V1).expect("the contract in hand");
+    let contracts = contracts.to_str().expect("a UTF-8 path");
+
+    let run = bus
+        .until(
+            &[
+                "echo",
+                "--across-face",
+                "g/svc",
+                "--contracts",
+                contracts,
+                "--count",
+                "8",
+                "--format",
+                "ndjson",
+            ],
+            |r| r.code == 0 && r.stdout.contains("stream/tick") && r.stdout.contains("state/mode"),
+        )
+        .await;
+    exits(&run, 0);
+    let echoing = |run: &Run| -> String {
+        let line = run.stderr.lines().find(|l| l.starts_with("echoing "));
+        let line = line.unwrap_or_else(|| panic!("no scope line: {run}"));
+        line["echoing ".len()..]
+            .split(" — ")
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut scope: Vec<String> = echoing(&run).split(" + ").map(str::to_owned).collect();
+    scope.sort();
+    assert_eq!(
+        scope,
+        ["zk2/g/svc/g.v1/state/mode", "zk2/g/svc/g.v1/stream/tick"],
+        "one selector per ambient resource, by its exact key, never zk2/**: {run}"
+    );
+    assert!(
+        run.stderr
+            .contains("across a constrained face to g/svc: 2 selector(s)"),
+        "{run}"
+    );
+    for row in run.stdout.lines().filter(|l| l.contains("\"key\"")) {
+        let row: Value = serde_json::from_str(row).expect("an NDJSON row");
+        assert!(
+            row["identity"]["resource"].is_string(),
+            "resolved through --contracts, with no presence read: {row}"
+        );
+    }
+
+    let run = bus
+        .until(
+            &[
+                "echo",
+                "--across-face",
+                "g/svc",
+                "--explicit",
+                "--contracts",
+                contracts,
+                "--count",
+                "16",
+                "--format",
+                "ndjson",
+            ],
+            |r| r.code == 0 && r.stdout.contains("@stream/frame"),
+        )
+        .await;
+    exits(&run, 0);
+    let mut scope: Vec<String> = echoing(&run).split(" + ").map(str::to_owned).collect();
+    scope.sort();
+    assert_eq!(
+        scope,
+        [
+            "zk2/g/svc/g.v1/@state/grid",
+            "zk2/g/svc/g.v1/@stream/frame",
+            "zk2/g/svc/g.v1/state/mode",
+            "zk2/g/svc/g.v1/stream/tick",
+        ],
+        "--explicit adds the explicit resources, each by its exact key: {run}"
+    );
+
+    let run = bus
+        .zenctl(&[
+            "echo",
+            "zk2/elsewhere/**",
+            "--across-face",
+            "g/svc",
+            "--contracts",
+            contracts,
+        ])
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("reaches none of the resources"),
+        "{run}"
+    );
+    drop(bus);
+
+    // In a namespace, every selector is a wire key with it in front.
+    let mut bus = Bus::bare(Some("prod")).await;
+    guard_owner(&mut bus).await;
+    wait_for_ns(&bus, "prod", &["g/svc"]).await;
+    let contracts = bus.home.join("g.v1.toml");
+    std::fs::write(&contracts, G_V1).expect("the contract in hand");
+    let contracts = contracts.to_str().expect("a UTF-8 path");
+
+    let run = bus
+        .until(
+            &[
+                "echo",
+                "--namespace",
+                "prod",
+                "--across-face",
+                "g/svc",
+                "--contracts",
+                contracts,
+                "--count",
+                "8",
+                "--format",
+                "ndjson",
+            ],
+            |r| r.code == 0 && r.stdout.contains("stream/tick") && r.stdout.contains("state/mode"),
+        )
+        .await;
+    exits(&run, 0);
+    let mut scope: Vec<String> = echoing(&run).split(" + ").map(str::to_owned).collect();
+    scope.sort();
+    assert_eq!(
+        scope,
+        [
+            "prod/zk2/g/svc/g.v1/state/mode",
+            "prod/zk2/g/svc/g.v1/stream/tick"
+        ],
+        "the namespace in front of each exact key: {run}"
+    );
+
+    let watchdog = |rule: &'static str| {
+        [
+            "watchdog",
+            "--namespace",
+            "prod",
+            "--across-face",
+            "g/svc",
+            "--contracts",
+            contracts,
+            "--rule",
+            rule,
+            "--every",
+            "1",
+            "--count",
+            "2",
+        ]
+    };
+    let run = bus
+        .until(&watchdog("rate-above prod/zk2/g/svc/** 1"), |r| {
+            r.code == 1 && r.stdout.contains("\"to\":\"firing\"")
+        })
+        .await;
+    exits(&run, 1);
+    let watching = run
+        .stderr
+        .lines()
+        .find_map(|l| l.strip_prefix("watchdog: watching "))
+        .unwrap_or_else(|| panic!("no scope line: {run}"));
+    let mut scope: Vec<&str> = watching.split(" + ").collect();
+    scope.sort_unstable();
+    assert_eq!(
+        scope,
+        [
+            "prod/zk2/g/svc/g.v1/state/mode",
+            "prod/zk2/g/svc/g.v1/stream/tick"
+        ],
+        "the rule's wire selector narrowed to the face's exact keys: {run}"
+    );
+
+    let run = bus.zenctl(&watchdog("rate-above zk2/g/svc/** 1")).await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains(r#"did you mean "prod/zk2/g/svc/**"?"#),
+        "a base-relative rule selector is told the wire key it meant: {run}"
+    );
 }
 
 /// grammar.md §1 step 5 (`spec/observer.md` §8.2, text 0.2; zk2py round

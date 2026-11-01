@@ -13,6 +13,36 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.18 — 2026-11-01: §7.5, subscribing across a face (#980)
+
+Core 0.78 adds §8.5's "Keys across the face": a put toward the far side of
+a constrained face can count only on the prefixes the far side's own
+subscriptions declared. This text says what a tool there does, and is
+written against core 0.78.
+
+**Added: §7.5, "Subscribing across a face".**
+- **The rule.** A tool across a constrained face SHOULD subscribe as core
+  §8.5 says, by the scopes the contracts in hand give for the addresses
+  it reads. `[Sc: constrained.md §7]`
+- **The scopes:** each concrete resource's exact key, and each template's
+  key with every parameter a wildcard, an event's ULID chunk included.
+- **Why the contracts:** no descriptor crosses, so the tool takes the
+  deployment's word, as a binding does (core R7).
+- **Why not `zk2/**`:** it declares `zk2` alone, so every put toward the
+  tool carries its key's text after it.
+- **The reference:** `zenctl`'s raw observers take `--across-face
+  SYSTEM/SERVICE`, and build their scope so.
+
+**Changed: §8.2.** "Everything is three selectors" holds on a host bus.
+Across a constrained face a tool subscribes by §7.5's scopes instead.
+
+**Appendix B** lists `constrained.md` §7 against §7.5.
+
+**Deliberately not changed.**
+- **No MUST:** a wide selector loses no sample, it only costs bytes.
+- **§8.2's naming.** A tool still names what its scope excludes.
+- **zengui's raw pump** stays ambient: it is a host-bus tool.
+
 ## 0.17 — 2026-11-01: §5.2's zenoh defaults labelled as 1.10.1's (#1011)
 
 zenoh-modem's zenoh fork, `zm-1.10.2-r1`, defaults `wait_before_close` to
