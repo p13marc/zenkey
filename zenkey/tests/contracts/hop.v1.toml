@@ -1,0 +1,20 @@
+# constrained.md §7: keys across a face, a concrete stream, a templated
+# one, and a state a far client reads.
+[interface]
+name  = "hop"
+major = 1
+minor = 0
+
+[resources.level]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources."axis/{axis}"]
+kind        = "stream"
+type        = { raw = "text/plain" }
+params      = { axis = "string" }
+cardinality = 4
+
+[resources.mode]
+kind = "state"
+type = { raw = "text/plain" }

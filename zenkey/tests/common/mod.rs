@@ -150,10 +150,15 @@ where
 /// - **Stalling** stops forwarding both ways and closes nothing: the link
 ///   goes silent, as a pulled cable or a radio out of range does, and only
 ///   zenoh's lease can tell (`spec/scenarios/budget.md` §2).
+/// - **Counting**: every byte it forwards toward the side that connected
+///   is counted, so a test reads what crossed toward a far session
+///   (`spec/scenarios/constrained.md` §7).
 pub struct Link {
     endpoint: String,
     cut: std::sync::Arc<std::sync::atomic::AtomicBool>,
     stalled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    down: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    capture: Capture,
     conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>>,
     _accept: tokio::task::JoinHandle<()>,
 }
@@ -184,14 +189,46 @@ impl Link {
         self.stalled
             .store(false, std::sync::atomic::Ordering::SeqCst);
     }
+
+    /// The bytes forwarded so far from the upstream end toward the side
+    /// that connected: what crossed toward it, TCP's own framing apart.
+    pub fn sent_down(&self) -> u64 {
+        self.down.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Starts keeping a copy of the bytes forwarded toward the side that
+    /// connected, from now on, dropping what was kept.
+    pub fn capture_down(&self) {
+        *self.capture.lock().unwrap() = Some(Vec::new());
+    }
+
+    /// The bytes kept since [`Link::capture_down`], which stops keeping
+    /// them.
+    pub fn captured_down(&self) -> Vec<u8> {
+        self.capture.lock().unwrap().take().unwrap_or_default()
+    }
+}
+
+/// A [`Link`]'s copy of what it forwarded toward the side that connected,
+/// while a test keeps one.
+type Capture = std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>;
+
+/// What a pump counts and copies of what it forwards.
+#[derive(Clone)]
+struct Tally {
+    count: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    capture: Capture,
 }
 
 /// Forwards `from` to `to` until either side closes, holding still while
-/// `stalled` is set: nothing read, nothing written.
+/// `stalled` is set: nothing read, nothing written. Each chunk is counted,
+/// and copied while a capture is kept, by `tally` when given, before it is
+/// written.
 async fn pump(
     mut from: tokio::net::tcp::OwnedReadHalf,
     mut to: tokio::net::tcp::OwnedWriteHalf,
     stalled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    tally: Option<Tally>,
 ) {
     use std::sync::atomic::Ordering;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -208,6 +245,12 @@ async fn pump(
             Ok(n) => n,
         };
         hold().await;
+        if let Some(t) = &tally {
+            if let Some(kept) = t.capture.lock().unwrap().as_mut() {
+                kept.extend_from_slice(&buf[..n]);
+            }
+            t.count.fetch_add(n as u64, Ordering::SeqCst);
+        }
         if to.write_all(&buf[..n]).await.is_err() {
             break;
         }
@@ -240,6 +283,12 @@ pub async fn link_to(upstream: &str) -> Link {
     let cut = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stalled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>> = Default::default();
+    let down = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let capture = Capture::default();
+    let tally = Tally {
+        count: std::sync::Arc::clone(&down),
+        capture: std::sync::Arc::clone(&capture),
+    };
     let (c, st, cs) = (
         std::sync::Arc::clone(&cut),
         std::sync::Arc::clone(&stalled),
@@ -256,8 +305,12 @@ pub async fn link_to(upstream: &str) -> Link {
             let (down_rd, down_wr) = down.into_split();
             let (up_rd, up_wr) = up.into_split();
             let (a, b) = (std::sync::Arc::clone(&st), std::sync::Arc::clone(&st));
+            let counted = Some(tally.clone());
             let h = tokio::spawn(async move {
-                tokio::join!(pump(down_rd, up_wr, a), pump(up_rd, down_wr, b));
+                tokio::join!(
+                    pump(down_rd, up_wr, a, None),
+                    pump(up_rd, down_wr, b, counted)
+                );
             });
             cs.lock().unwrap().push(h.abort_handle());
         }
@@ -266,6 +319,8 @@ pub async fn link_to(upstream: &str) -> Link {
         endpoint,
         cut,
         stalled,
+        down,
+        capture,
         conns,
         _accept: accept,
     }
