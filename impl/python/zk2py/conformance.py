@@ -3520,7 +3520,17 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("not UTF-8", b"\xff\xfe"), ("no run", b"{}"), ("a list", b"[4]"), ("a string", b'{"run": "4"}'),
         ("a boolean", b'{"run": true}'), ("negative", b'{"run": -1}'), ("a fraction", b'{"run": 4.5}'),
         ("beyond 16 bits", b'{"run": 65536}'), ("spent", b'{"run": 65535}'), ("a directory", None)]
-    got: list[tuple[str, int, int | None, bool]] = []
+    def record_state(path: str) -> tuple[Any, ...]:
+        """A run record's path as it stands: a file's bytes, a directory and
+        what it holds, or nothing."""
+        if os.path.isdir(path):
+            return ("dir", tuple(sorted(os.listdir(path))))
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                return ("file", f.read())
+        return ("absent",)
+
+    got: list[tuple[str, Any, int | None, bool]] = []
     with tempfile.TemporaryDirectory(prefix="zk2py-run-") as d:
         for name, data in cases:
             path = os.path.join(d, name.replace(" ", "-").replace('"', "").replace(":", "").replace("{", "")
@@ -3530,21 +3540,27 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
             elif data is not None:
                 with open(path, "wb") as f:
                     f.write(data)
+            before = record_state(path)
             o = ow.Owner("ground", "fleet-mgr", [ground], run_record=path)
             try:
                 width, run = o.take_run()
-            except Exception as e:  # noqa: BLE001 - the case's verdict
-                got.append((name, -1, None, False))
+            except Exception as e:  # noqa: BLE001 - the case's verdict, the exception named (review-bot on #1010)
+                got.append((name, f"raised {type(e).__name__}: {e}", None, False))
                 continue
-            after = None if not os.path.isfile(path) else open(path, "rb").read()
-            left = after == data if data is not None and name != "a directory" else None
+            # What the record holds after, judged one way for every case
+            # (review-bot on PR #1010): an absent record written at run 0, a
+            # good one moved on by 1, and every other left exactly as it was,
+            # its bytes, or the directory and what it holds, and no .tmp left
+            # beside it.
+            want = {"absent": ("file", b'{"run": 0}'), '{"run": 4}': ("file", b'{"run": 5}')}.get(name, before)
             got.append((name, width, run if width == 16 else None,
-                        left if left is not None else (after == b'{"run": 0}' if name == "absent" else True)))
-    out.append(("core §4.3 (0.74, review-bot on PR #1005): a run record the owner cannot use, unreadable, not "
-                "JSON, without a counter from 0 to 0xFFFF, or spent, is no record: a 32-bit draw, never a failure "
-                "of take_run, and the record left as it is; an absent one starts at run 0, a good one moves on by 1",
+                        record_state(path) == want and not os.path.exists(f"{path}.tmp")))
+    out.append(("core §4.3 (0.74, review-bot on PRs #1005 and #1010): a run record the owner cannot use, "
+                "unreadable, not JSON, without a counter from 0 to 0xFFFF, or spent, is no record: a 32-bit draw, "
+                "never a failure of take_run, and the record left exactly as it was; an absent one starts at run 0, "
+                "a good one moves on by 1",
                 got,
-                [("absent", 16, 0, True), ('{"run": 4}', 16, 5, False), ("empty", 32, None, True),
+                [("absent", 16, 0, True), ('{"run": 4}', 16, 5, True), ("empty", 32, None, True),
                  ("not JSON", 32, None, True), ("not UTF-8", 32, None, True), ("no run", 32, None, True),
                  ("a list", 32, None, True), ("a string", 32, None, True), ("a boolean", 32, None, True),
                  ("negative", 32, None, True), ("a fraction", 32, None, True), ("beyond 16 bits", 32, None, True),

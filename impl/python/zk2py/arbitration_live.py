@@ -648,8 +648,7 @@ class Commander:
                     # (§4.3), so a reader reads it and the arbiter judges it
                     # not_incumbent; with none it would be a refused envelope,
                     # no sample at all (F-422; the mend after round 93).
-                    ib = self.owner._next_stream_inband(self.key)  # noqa: SLF001
-                    self.owner.session.put(self.key, zk2c.mutation(ib, f"standby {n}".encode()),
+                    self.owner.session.put(self.key, self.owner.stream_envelope(self.key, f"standby {n}".encode()),
                                            encoding=zk2c.ENCODING)
                 except Exception:  # noqa: BLE001 - closed while putting
                     return

@@ -1011,13 +1011,14 @@ def section5(report: Report, oi: str, ci: str) -> None:
 
     for step, timestamping, hlc in (("1", True, False), ("2", False, False), ("3", True, True)):
         bus = Bus(timestamping=timestamping)
+        tap = None
         try:
             c = bus.reader(ci, RID_CMD, 100)
             c.track_presence(True)
             # What the owner puts, read as observer §7.3 reads it: whether
             # each sample carries core §7.5's envelope (core 0.73)
             tapped: list[Any] = []
-            bus.client().declare_subscriber(CMD, zenoh.handlers.Callback(
+            tap = bus.client().declare_subscriber(CMD, zenoh.handlers.Callback(
                 lambda s: tapped.append(zk2c.read_put(str(s.key_expr), str(s.encoding), s.payload.to_bytes()))))
             time.sleep(0.3)
             # step 3's control: "the owner with its session's HLC on"
@@ -1029,14 +1030,19 @@ def section5(report: Report, oi: str, ci: str) -> None:
             time.sleep(2.0)
             o.pause("cmd")
             time.sleep(0.2)
-            if tapped and all(t.refused for t in tapped):
-                # The owner example's `timing stamp none` puts its text with
-                # no envelope under zenoh/bytes: each sample a refused
-                # envelope that no reader hears (observer §7.3), so §5 is
-                # not run with it. The black box's drive, not the spec.
-                report.note(sec, f"step {step} not run: the owner example's `timing stamp none` puts no zk2c "
-                                 f"envelope ({len(tapped)} samples, each refused {tapped[0].refusal}), which core "
-                                 f"§4.3 asks of every stream put since 0.73; no reader hears them")
+            tap.undeclare()
+            tap = None
+            # Core §4.3 (0.73): every stream put carries §7.5's envelope; a
+            # refused one is no sample to any reader (observer §7.3), so the
+            # step's expectations cannot be judged without it, and the step
+            # fails here rather than passing on nothing (review-bot on PR
+            # #1010; the owner example's `timing stamp none` put none before
+            # #1009).
+            refused = sorted({t.refusal for t in tapped if t.refused})
+            if not report.check(sec, f"step {step}: the owner's puts carry core §7.5's envelope (core §4.3), so a "
+                                     f"reader hears them",
+                                bool(tapped) and not refused,
+                                f"{len(tapped)} samples tapped, refused {refused or 'none'}"):
                 c.close()
                 o.close()
                 continue
@@ -1066,6 +1072,11 @@ def section5(report: Report, oi: str, ci: str) -> None:
             c.close()
             o.close()
         finally:
+            if tap is not None:
+                try:
+                    tap.undeclare()
+                except Exception:  # noqa: BLE001 - closing anyway
+                    pass
             bus.close()
 
 

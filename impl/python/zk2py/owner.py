@@ -645,6 +645,12 @@ class Owner:
         #: stream key's next seq in the run
         self.run_record = run_record
         self.run: tuple[int, int] | None = None   # (width, value)
+        #: every run this owner took, written under or not: a re-mint that
+        #: fails keeps the run it took here on purpose. Nothing was written
+        #: under it, but a 16-bit one is already durable in the record, which
+        #: moved past it, and a 32-bit one is a draw this process made, so
+        #: no later draw takes it and "It draws again while the run equals
+        #: one it used" (core §4.3) holds of every run it took.
         self.runs_used: list[tuple[int, int]] = []
         self._seq = 0
         self._stream_seq: dict[str, int] = {}
@@ -824,6 +830,14 @@ class Owner:
             ib = zk2c.InBand(self.run[0], self.run[1], self._seq)
             self._seq += 1
             return ib
+
+    def stream_envelope(self, key: str, record: bytes) -> bytes:
+        """``record`` sealed in core §7.5's envelope on this owner's run and
+        ``key``'s next stream seq, for a put made round the writer (a test's
+        raw put, ``arbitration.v1`` scenarios §11's X): its seq is taken
+        here, as :meth:`publish` takes it, so the key's seqs stay one count
+        (core §4.3)."""
+        return zk2c.mutation(self._next_stream_inband(key), record)
 
     def _next_stream_inband(self, key: str) -> zk2c.InBand:
         """A stream key's next in-band stamp: its own seq, from 0 at its
@@ -1316,13 +1330,7 @@ class Owner:
                 entities, doc, tokens = self._declare_instance(self._plan_made, new)
             except Exception:
                 # The old run, its seq and its stream seqs come back; the run
-                # the failed re-mint took stays in runs_used, on purpose.
-                # Nothing was written under it, but a 16-bit one is already
-                # durable in the record, which moved past it, and a 32-bit
-                # one is a draw this process made: either way no later draw
-                # takes it, which costs nothing and keeps "It draws again
-                # while the run equals one it used" (core §4.3) true of every
-                # run it took.
+                # the failed re-mint took stays in runs_used (see the field).
                 with self._seq_lock:
                     self.run, self._seq, self._stream_seq = before[0], before[1], before[2]
                 raise
