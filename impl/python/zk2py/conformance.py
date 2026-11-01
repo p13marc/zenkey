@@ -466,6 +466,29 @@ def _freshness_judgements(path: Path) -> list[Result]:
     return out
 
 
+def _freshness_apply(path: Path) -> list[Result]:
+    """``apply.json`` (``freshness.v2`` §2.5, text 0.1, #978 F3): each case's
+    steps through :class:`zk2py.freshness_v2.View` over the core's
+    ``heartbeat/layouts.json`` revision it names."""
+    import tempfile
+
+    from . import freshness_v2, heartbeat
+    from .contract import load_contract
+
+    data = _load_json(path)
+    lay = _load_json(path.parents[3] / "conformance" / "heartbeat" / "layouts.json")
+    layouts = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            c = load_contract(Path(tmp) / f"{name}.toml", text=text)
+            layouts[name] = heartbeat.layout_of(c.canonical, c.fingerprint)
+    out: list[Result] = []
+    for i, c in enumerate(data["cases"]):
+        for what, got, want in freshness_v2.apply_case(layouts[c["layout"]], c):
+            out.append(_check(f"apply.json {i}: {c['note']}: {what}", got, want))
+    return out
+
+
 def _freshness_clock_trust(path: Path) -> list[Result]:
     """freshness.v1 §2.6 ground 2 (0.2): the offsets of one reading, and the
     delta -> whether the clock is trusted."""
@@ -703,16 +726,18 @@ def _link_interfaces(case: dict[str, Any]) -> dict[str, Any]:
     from . import link
     from .contract import load_contract
 
-    if "interfaces" in case:
-        return case["interfaces"]
     repo = Path(__file__).resolve().parents[3]
-    revisions: dict[str, list[list[dict[str, Any]]]] = {}
+    revisions: dict[str, list[dict[str, Any]]] = {}
     for rel in case.get("contracts", []):
         c = load_contract(repo / rel)
         if not c.valid or c.canonical is None:
             raise CannotRun(f"{rel}: {c.codes}")
-        revisions.setdefault(c.interface, []).append(link.resources_of(c))
-    return {i: {"revisions": revs} for i, revs in revisions.items()}
+        revisions.setdefault(c.interface, []).append(link.revision_of(c))
+    # link.v1 0.11: a case may give both, its interfaces inline and the
+    # standard contracts by path (freshness.v2's).
+    out: dict[str, Any] = {i: {"revisions": revs} for i, revs in revisions.items()}
+    out.update(case.get("interfaces", {}))
+    return out
 
 
 def _link_exposure(path: Path) -> list[Result]:
@@ -1332,7 +1357,7 @@ def _arbitration_conclusions(path: Path) -> list[Result]:
 PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "hostid": {"vectors.json": _hostid_vectors, "shapes.json": _hostid_shapes},
     "freshness": {"horizons.json": _freshness_horizons, "judgements.json": _freshness_judgements,
-                  "clock-trust.json": _freshness_clock_trust},
+                  "clock-trust.json": _freshness_clock_trust, "apply.json": _freshness_apply},
     "health": {"judgements.json": _health_judgements, "rollups.json": _health_rollups,
                "codes.json": _health_codes, "clock.json": _health_clock},
     "config": {"validation.json": _config_validation, "window.json": _config_window,
@@ -7463,6 +7488,80 @@ def family_packed(root: Path) -> list[Result]:
     return out
 
 
+def family_heartbeat(root: Path) -> list[Result]:
+    """``heartbeat/`` (core §7.5's heartbeat, 0.81, #978 F1), every file, an
+    unknown one failing, through :mod:`zk2py.heartbeat`. ``layouts.json``:
+    each revision's authoring text, loaded as a contract, -> its
+    fingerprint, the tag and its collections. ``bodies.json``: a layout and
+    a value -> the bits, the pad and the bytes, every write read back to its
+    value in the form written and sealed in a form 6 envelope parsed back;
+    a layout and bytes -> the value, written back to the same bytes, or the
+    first refusal. ``digests.json``: members -> each one's value and their
+    XOR."""
+    import tempfile
+
+    from . import heartbeat, zk2c
+    from .contract import load_contract
+
+    out: list[Result] = []
+    layouts: dict[str, heartbeat.Layout] = {}
+    directory = root / "heartbeat"
+    lay = _load_json(directory / "layouts.json")
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            c = load_contract(Path(tmp) / f"{name}.toml", text=text)
+            if not c.valid or c.canonical is None:
+                out.append((f"heartbeat: contract {name}", False, f"not a valid contract: {c.codes}"))
+                continue
+            layouts[name] = heartbeat.layout_of(c.canonical, c.fingerprint)
+    for path in sorted(directory.iterdir()):
+        data = _load_json(path)
+        if path.name == "layouts.json":
+            for c in data["layouts"]:
+                lo = layouts.get(c["contract"])
+                got = None if lo is None else {"contract": c["contract"], "fingerprint": lo.fingerprint,
+                                               "tag": lo.tag, "collections": [x.expect() for x in lo.collections]}
+                out.append(_check(f"heartbeat: layout {c['contract']}", got, c))
+        elif path.name == "bodies.json":
+            for i, c in enumerate(data["writes"]):
+                lo = layouts[c["layout"]]
+                bits = heartbeat.write_bits(lo, c["value"])
+                body = heartbeat.write(lo, c["value"])
+                name = f"heartbeat: write {i} {c['layout']}: {c['note']}"
+                out.append(_check(name, {"bits": bits, "pad": -len(bits) % 8, "hex": body.hex()}, c["expect"]))
+                back = heartbeat.read(lo, body)
+                written = {k: {f: v for f, v in sec.items() if f != "form"} for k, sec in back["sections"].items()}
+                out.append(_check(f"{name}: read back", {"time": back["time"], "sections": written},
+                                  {"time": c["value"]["time"],
+                                   "sections": {k: {f: v for f, v in sec.items() if f != "form"}
+                                                for k, sec in c["value"]["sections"].items()}}))
+                sealed = zk2c.heartbeat(zk2c.InBand(16, 9, i), body, lo.tag)
+                env = zk2c.parse(sealed, "put")
+                out.append(_check(f"{name}: sealed in form 6 under tag {lo.tag} and parsed back",
+                                  {"form": env.form, "tag": env.tag, "body": (env.record or b"").hex()},
+                                  {"form": "heartbeat", "tag": lo.tag, "body": body.hex()}))
+            for i, c in enumerate(data["reads"]):
+                lo = layouts[c["layout"]]
+                raw = bytes.fromhex(c["hex"])
+                try:
+                    got: Any = heartbeat.read(lo, raw)
+                except heartbeat.Refused as e:
+                    got = {"refused": e.token}
+                name = f"heartbeat: read {i} {c['layout']} {c['hex'] or '(empty)'}: {c['note']}"
+                out.append(_check(name, got, c["expect"]))
+                if "refused" not in got:
+                    out.append(_check(f"{name}: writes back", heartbeat.write(lo, got).hex(), c["hex"]))
+        elif path.name == "digests.json":
+            for i, c in enumerate(data["cases"]):
+                ms = [(m["key"], m["run_width"], m["run"], m["seq"]) for m in c["members"]]
+                got = {"values": [f"{heartbeat.member_value(*m):08x}" for m in ms],
+                       "digest": f"{heartbeat.digest(ms):08x}"}
+                out.append(_check(f"heartbeat: digest {i}: {c['note']}", got, c["expect"]))
+        else:
+            out.append((f"heartbeat/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
 def family_catalog(root: Path) -> list[Result]:
     """``catalog/`` (core §8.6, 0.79; #980 C1a), every file, an unknown one
     failing. ``documents.json``: a catalog's text -> its id, or the first
@@ -7540,7 +7639,7 @@ def family_catalog(root: Path) -> list[Result]:
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
                  "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed",
-                 "catalog"}
+                 "catalog", "heartbeat"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -7575,6 +7674,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "envelope": family_envelope,
     "packed": family_packed,
     "catalog": family_catalog,
+    "heartbeat": family_heartbeat,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,

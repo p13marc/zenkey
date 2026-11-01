@@ -549,16 +549,19 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
      "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
     # core 0.81 (#978 F1): the heartbeat's five static rules (round 96).
-    ("static", "core §7.5", "An implementation that writes a heartbeat MUST write its covered revision's tag", NOT_MET,
-     "round 96: zk2py writes no heartbeat yet (re-keyed to core 0.81)"),
+    ("static", "core §7.5", "An implementation that writes a heartbeat MUST write its covered revision's tag", MET,
+     "heartbeat.tag_of, the fingerprint's last byte's low 4 bits, and zk2c.heartbeat under it (heartbeat family: "
+     "layouts.json, every write sealed in form 6 and parsed back) (round 96, core 0.81)"),
     ("static", "core §7.5", "An implementation that writes a templated section MUST write the list only where",
-     NOT_MET, "round 96: zk2py writes no heartbeat body yet (re-keyed to core 0.81)"),
-    ("static", "core §7.5", "An implementation MUST compute a digest so", NOT_MET,
-     "round 96: zk2py computes no digest yet (re-keyed to core 0.81)"),
-    ("static", "core §7.5", "An implementation MUST refuse a body for the first of these", NOT_MET,
-     "round 96: zk2py reads no heartbeat body yet (re-keyed to core 0.81)"),
-    ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", NOT_MET,
-     "round 96: zk2py reads no heartbeat body yet (re-keyed to core 0.81)"),
+     MET, "heartbeat.write_bits: the list only where count and ranks take fewer bits than the bitmap, a tie the "
+     "bitmap (heartbeat family: bodies.json's writes) (round 96, core 0.81)"),
+    ("static", "core §7.5", "An implementation MUST compute a digest so", MET,
+     "heartbeat.member_value and digest (heartbeat family: digests.json) (round 96, core 0.81)"),
+    ("static", "core §7.5", "An implementation MUST refuse a body for the first of these", MET,
+     "heartbeat.read: short and code as the fields are read, then trailing, then pad (heartbeat family: "
+     "bodies.json's reads) (round 96, core 0.81)"),
+    ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", MET,
+     "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
     # core 0.75 (#979 B1): §7.6's six static rules.
     ("static", "core §7.6", "An implementation MUST compute a fixed-point code, and the value it reads back", MET,
      "packed.encode and decode over fractions.Fraction, ties to even (packed family: the Ties and Sensor writes) "

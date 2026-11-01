@@ -6,6 +6,10 @@ delete as its attachment::
 
     mutation, a put's payload            CH · run · seq · record
     delete, a delete's attachment        CH · run · seq
+    heartbeat, a put's payload           CH · run · seq · body
+
+The heartbeat is form 6 (core 0.81, #978 F1): :mod:`zk2py.heartbeat` reads
+and writes its body, and checks its tag against the covered revision.
 
 CH is the form's code × 32, plus the run width bit × 16, plus the tag. The
 run is 16 or 32 bits, the seq 24, both big-endian. The record is every byte
@@ -44,10 +48,13 @@ from typing import Any
 
 from . import keys
 
-#: core §7.5's forms by code. Two are defined at this version; the other
-#: six are reserved, each refused (``form``).
+#: core §7.5's forms by code. Three are defined at this version (core 0.81
+#: adds the heartbeat, code 6); the other five are reserved, each refused
+#: (``form``).
 FORMS = ("mutation", "delete", "value", "error", "event", "frame", "heartbeat", "snapshot")
-DEFINED = ("mutation", "delete")
+DEFINED = ("mutation", "delete", "heartbeat")
+#: the forms a put's payload carries; a delete's attachment carries a delete
+PUT_FORMS = ("mutation", "heartbeat")
 
 #: core §7.5: "The seq is an unsigned 24-bit integer, from 0 to 16,777,215."
 SEQ_MAX = 2**24 - 1
@@ -94,7 +101,8 @@ class InBand:
 @dataclass(frozen=True)
 class Envelope:
     """A parsed envelope: its form's name, the run's width in bits, the run,
-    the seq, the tag, and the record (None for a delete)."""
+    the seq, the tag, and the record: a mutation's record, a heartbeat's
+    body, None for a delete."""
 
     form: str
     width: int
@@ -129,7 +137,7 @@ def parse(data: bytes, sample: str) -> Envelope:
     h = header(data[0])
     if h["form"] not in DEFINED:
         raise Refused("form", f"form {h['form']} is reserved at this version")
-    if (sample == "put") != (h["form"] == "mutation"):
+    if (sample == "put") != (h["form"] in PUT_FORMS):
         raise Refused("sample_kind", f"a {h['form']} as a {sample}'s "
                       + ("payload" if sample == "put" else "attachment"))
     if h["form"] == "delete" and h["tag"] != 0:
@@ -143,7 +151,7 @@ def parse(data: bytes, sample: str) -> Envelope:
     run = int.from_bytes(data[1:1 + run_bytes], "big")
     seq = int.from_bytes(data[1 + run_bytes:need], "big")
     return Envelope(h["form"], h["run_width"], run, seq, h["tag"],
-                    data[need:] if h["form"] == "mutation" else None)
+                    data[need:] if h["form"] in PUT_FORMS else None)
 
 
 def write(form: str, width: int, run: int, seq: int, tag: int = 0, record: bytes | None = None) -> bytes:
@@ -174,6 +182,12 @@ def mutation(stamp: InBand, record: bytes, tag: int = 0) -> bytes:
 def deletion(stamp: InBand) -> bytes:
     """A delete's attachment: ``CH · run · seq``."""
     return write("delete", stamp.width, stamp.run, stamp.seq)
+
+
+def heartbeat(stamp: InBand, body: bytes, tag: int) -> bytes:
+    """A heartbeat's payload: ``CH · run · seq · body`` (core §7.5, 0.81),
+    CH's tag the covered revision's (:func:`zk2py.heartbeat.tag_of`)."""
+    return write("heartbeat", stamp.width, stamp.run, stamp.seq, tag, body)
 
 
 def data_key(key: str) -> dict[str, Any] | None:
@@ -224,6 +238,9 @@ class Read:
     #: CH's tag bits of an accepted envelope, which a packed type's reader
     #: checks first (core §7.6); None where no envelope was accepted.
     tag: int | None = None
+    #: the accepted envelope's form, ``mutation`` or ``heartbeat`` for a put
+    #: (core 0.81); None where none was accepted
+    form: str | None = None
 
     @property
     def refused(self) -> bool:
@@ -244,7 +261,7 @@ def read_put(key: str, encoding: str, payload: bytes) -> Read:
         env = parse(payload, "put")
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
-    return Read(True, env.record, env.stamp, tag=env.tag)
+    return Read(True, env.record, env.stamp, tag=env.tag, form=env.form)
 
 
 def read_delete(key: str, encoding: str, attachment: bytes | None) -> Read:
@@ -257,7 +274,7 @@ def read_delete(key: str, encoding: str, attachment: bytes | None) -> Read:
         env = parse(attachment or b"", "delete")
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
-    return Read(True, None, env.stamp)
+    return Read(True, None, env.stamp, form=env.form)
 
 
 def read_sample(sample: Any) -> Read:
