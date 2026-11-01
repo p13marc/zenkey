@@ -1,0 +1,39 @@
+# A link.v2 face policy (spec/profiles/link/v2.md; #988, L1): the lab's
+# router over an RF link at 2,400 bit/s, with Appendix B's transport. The
+# radio repairs no lost frame, so the linter warns `no_arq`.
+#
+#   zenctl acl gen --enrollment examples/zk2/link/radio.enrollment.toml \
+#                  --contracts examples/zk2/link/radio.v1.toml \
+#                  --face-policy examples/zk2/link/media/rf.face.toml --json5
+#
+# writes the router's `transport` and `routing` blocks beside its access
+# control; `--far-config` writes the far end's. At 240 s with 4 keep-alives
+# an idle link carries 2,880 keep-alives a day, and at 5 % loss expects
+# 0.36 false closes a day (v2 §2.16).
+profile  = "link.v2"
+system   = "lab"
+services = ["radio-a"]
+binding  = "zenoh-1.10.1"
+
+[transport]
+lease_ms             = 240000
+keep_alive           = 4
+wait_before_close_ms = 240000
+sequence             = "16bit"
+batch_bytes          = 222
+open_timeout_ms      = 10000
+accept_timeout_ms    = 10000
+interests_timeout_ms = 10000
+
+[face.radio]
+far              = "ground"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "link"
+interval_s       = 60
+max_outage_s     = 3600
+link_bps         = 2400
+loss_ppm         = 50000
+arq              = false
+reply_timeout_ms = 15000

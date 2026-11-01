@@ -203,3 +203,17 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `zenkey-model/tests/conformance.rs`. After an intended change, run
   `ZK2_BLESS=1 cargo test -p zenkey-model --test conformance` and read the
   diff: a bless claims every changed expectation is right.
+- **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
+  mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
+  `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
+  (a later major's fixtures one directory down, which
+  `zenkey-model/tests/profiles.rs`'s `KNOWN` names `v2/<file>`), and the
+  one `CHANGELOG.md`, its entries headed `link.v2 0.N`. It restates
+  `link.v1` by reference, replacing §2.1 (a `profile = "link.v2"`
+  policy; one with no `profile` is `link.v1`'s), §2.4's protocol list
+  (per `binding`: `zm-1.10.2-r1` adds `unixsock-dgram`) and §2.10, and
+  adds §2.16 (the router-wide `[transport]` and its lints), §2.18 (the
+  generator writes it, and the far end's) and §2.19 (`check face`'s
+  `transport_differs`, `wait_under_lease`, `peer_differs`,
+  `catalog_mismatch`). §2.17, §2.20 and §2.21 are left for #988's L3 and
+  L4. Appendix B's four media are `examples/zk2/link/media/*.face.toml`.

@@ -56,6 +56,9 @@ const KNOWN: &[(&str, &str)] = &[
     ("link", "exposure.json"),
     ("link", "plan.json"),
     ("link", "lints.json"),
+    ("link", "v2/lints.json"),
+    ("link", "v2/plan.json"),
+    ("link", "v2/transport.json"),
     ("alarms", "keys.json"),
     ("alarms", "documents.json"),
     ("alarms", "transitions.json"),
@@ -127,7 +130,9 @@ fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Every file under `spec/profiles/<profile>/conformance/` is in [`KNOWN`]
-/// (or is its `README.md`), and every entry of [`KNOWN`] exists.
+/// (or is its `README.md`), and every entry of [`KNOWN`] exists. A later
+/// major's fixtures sit one directory down, `conformance/v<N>/`, and are
+/// named so in [`KNOWN`] (`v2/lints.json`, `link.v2`).
 #[test]
 fn every_profile_fixture_is_known() {
     let mut unknown = Vec::new();
@@ -144,9 +149,23 @@ fn every_profile_fixture_is_known() {
         if !conformance.exists() {
             continue;
         }
-        for file in sorted_entries(&conformance) {
-            let name = file.file_name().unwrap().to_string_lossy().into_owned();
-            if name == "README.md" && file.is_file() {
+        let mut files = Vec::new();
+        for entry in sorted_entries(&conformance) {
+            let name = entry.file_name().unwrap().to_string_lossy().into_owned();
+            let major = name
+                .strip_prefix('v')
+                .is_some_and(|m| !m.is_empty() && m.bytes().all(|b| b.is_ascii_digit()));
+            if entry.is_dir() && major {
+                for file in sorted_entries(&entry) {
+                    let inner = file.file_name().unwrap().to_string_lossy().into_owned();
+                    files.push((file, format!("{name}/{inner}")));
+                }
+            } else {
+                files.push((entry, name));
+            }
+        }
+        for (file, name) in files {
+            if name.ends_with("README.md") && file.is_file() {
                 continue;
             }
             if file.is_file() && KNOWN.contains(&(profile.as_str(), name.as_str())) {
@@ -1978,6 +1997,148 @@ fn link_lints() {
             block: block.as_ref().map(|(f, b)| (f.as_str(), b)),
         });
         expect(case, findings_json(&found), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+// --- link.v2 (#988, L1) ---------------------------------------------------------
+
+/// `link/conformance/v2/lints.json`: a face policy → every finding
+/// (link.v2 §2.1, §2.4, §2.10, §2.16), a policy with no `profile` read as
+/// link.v1's.
+#[test]
+fn link_v2_lints() {
+    let path = profiles().join("link/conformance/v2/lints.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let found = link::lint(&link::LintInput {
+            text: case["policy"].as_str().expect("policy"),
+            ..link::LintInput::default()
+        });
+        expect(case, findings_json(&found), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `link/conformance/v2/plan.json`: a face policy and a deployment → the
+/// plan, with the router's transport, binding and catalog, and the link
+/// protocols each principal named in `narrow` keeps (link.v2 §2.4, §2.18).
+#[test]
+fn link_v2_plan() {
+    let path = profiles().join("link/conformance/v2/plan.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let parsed = link::parse(case["policy"].as_str().expect("policy"));
+        let deployment = link_deployment(case).expect("implements");
+        let got = match parsed.policy {
+            None => json!({"refused": findings_json(&parsed.findings)}),
+            Some(policy) => match link::plan(&policy, &deployment) {
+                Err(f) => json!({"refused": findings_json(&f)}),
+                Ok(plans) => {
+                    for p in &plans {
+                        let found = link::check_block(&p.name, &plan_as_block(p));
+                        assert!(found.is_empty(), "{what}: {found:?}");
+                    }
+                    let mut got = json!({
+                        "binding": policy.binding,
+                        "catalog": policy.catalog,
+                        "transport": policy.transport,
+                        "faces": serde_json::to_value(&plans).unwrap(),
+                    });
+                    if let Some(names) = case.get("narrow").and_then(Value::as_array) {
+                        let mut narrowed = serde_json::Map::new();
+                        for n in names {
+                            let n = n.as_str().expect("a principal");
+                            narrowed.insert(
+                                n.to_owned(),
+                                json!(link::narrowed(&policy, |f| policy.faces[f].far == n)),
+                            );
+                        }
+                        got["narrowed"] = Value::Object(narrowed);
+                    }
+                    got
+                }
+            },
+        };
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A case's stated transport keys, as `transport.json` writes them.
+fn stated_transport(v: &Value) -> link::StatedTransport {
+    link::StatedTransport(
+        v.as_object()
+            .expect("stated keys")
+            .iter()
+            .map(|(k, v)| {
+                assert!(
+                    link::TransportKey::of_path(k).is_some(),
+                    "{k} is one of zenoh's transport keys"
+                );
+                (k.clone(), v.clone())
+            })
+            .collect(),
+    )
+}
+
+/// `link/conformance/v2/transport.json`: a face policy, a router's stated
+/// transport, the far end's and the catalog the far side holds → what a
+/// generator writes, and every finding (link.v2 §2.18, §2.19).
+#[test]
+fn link_v2_transport() {
+    let path = profiles().join("link/conformance/v2/transport.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let parsed = link::parse(case["policy"].as_str().expect("policy"));
+        let policy = parsed
+            .policy
+            .unwrap_or_else(|| panic!("{what}: the policy is refused: {:?}", parsed.findings));
+        let emit: Vec<Value> = policy
+            .transport
+            .iter()
+            .flat_map(|t| {
+                link::TransportKey::ALL
+                    .into_iter()
+                    .map(move |k| json!({"key": k.at(), "path": k.path(), "value": t.value(k)}))
+            })
+            .collect();
+        let router = stated_transport(&case["router"]);
+        // What the generator writes reads back as the policy's, with no
+        // finding (§2.18).
+        if let Some(t) = &policy.transport {
+            let written = link::StatedTransport(
+                link::TransportKey::ALL
+                    .into_iter()
+                    .map(|k| (k.path().to_owned(), t.value(k)))
+                    .collect(),
+            );
+            let back: Vec<link::Finding> = link::check_transport(&policy, &written, None)
+                .into_iter()
+                .filter(|f| f.code == link::Code::TransportDiffers)
+                .collect();
+            assert!(back.is_empty(), "{what}: {back:?}");
+        }
+        let peer = case.get("peer").map(stated_transport);
+        let mut findings = link::check_transport(&policy, &router, peer.as_ref());
+        if let Some(c) = case.get("catalog") {
+            findings.extend(link::check_catalog(&policy, &link::catalog_id(c)));
+        }
+        link::sort_findings(&mut findings);
+        expect(
+            case,
+            json!({"emit": emit, "findings": findings_json(&findings)}),
+            &what,
+        );
     }
     if bless() {
         write_json(&path, &doc);

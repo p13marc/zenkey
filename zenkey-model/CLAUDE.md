@@ -47,7 +47,17 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `block_disabled`, and the linter's `far_of_two_faces`, a warning with no
   face; text 0.8, #819 TA: §2.13 cites `telemetry.v1`'s counter and
   epoch; texts 0.9 and 0.10, #935: inline history out, and round 86's
-  F-332 to F-335 rewritten, no rule changed), `alarms.v1`'s (`alarms`,
+  F-332 to F-335 rewritten, no rule changed; and `link.v2` 0.1 in the
+  same module, #988 L1: `parse` reads a `profile = "link.v2"` policy
+  beside a `link.v1` one, `Profile`, `Binding` (`protocols()` in place of
+  `LINK_PROTOCOLS`, `narrowed` over it, and `defaults()`, the fork's
+  `wait_before_close` 10 s where 1.10.1's is 5 s), `Transport` and
+  `TransportKey` (the policy's key, zenoh's path, the value in zenoh's
+  units), a v2 face's `batch_bytes`/`lease_ms` filled from
+  `[transport]`, `FacePlan::reply_timeout_ms`, the lints
+  `transport_missing` … `no_arq` (`keep_alive_flaps` exact in
+  `num-bigint`), and `StatedTransport`, `check_transport` and
+  `check_catalog`/`catalog_id` for v2 §2.19), `alarms.v1`'s (`alarms`,
   #800 AA: the key recipe byte for
   byte ZenSight's — `host` and `host.*` removed first, labels by name then
   value in byte order, FNV-1a 64 — as the strict `alert_key`, the public

@@ -463,7 +463,8 @@ pub use judge::field::DEFAULT_MAX_PATHS;
 // zk2's access control (spec §11, #612 FJ7): planned from an enrollment
 // and the contracts, checked against a router's config file, explained.
 pub use model::acl::{
-    AclOptions, check_acl, check_face, explain_acl, link_says, plan_acl, to_json5 as acl_plan_json5,
+    AclOptions, ConfigDialect, FaceAsk, RouterConfig, check_acl, check_face, explain_acl,
+    far_json5 as acl_far_json5, link_says, plan_acl, to_json5 as acl_plan_json5,
 };
 // `diff` is `value_diff` at the root: a bare `diff` beside `byte_diff` reads
 // as *the* diff.

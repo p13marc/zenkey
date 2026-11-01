@@ -113,8 +113,8 @@ use crate::report::{
     AclCheck, AclConfigDoc, AclDecision, AclDirection, AclExplain, AclFinding, AclFindingKind,
     AclFlow, AclGateway, AclGrantKind, AclMessage, AclPermission, AclPlan, AclPolicy, AclRefusal,
     AclRule, AclSubject, AclVia, AclWarning, AclWarningKind, Asked, BindingSpec, CallsSpec,
-    DownsamplingDoc, Enrollment, FaceBlock, FaceCheck, FaceWindow, GatewayFilter, GatewaySouth,
-    Judgement, PrincipalSpec,
+    DownsamplingDoc, Enrollment, FaceBlock, FaceCatalog, FaceCheck, FaceTransportKey, FaceWindow,
+    GatewayFilter, GatewaySouth, Judgement, PrincipalSpec,
 };
 use crate::{Error, Result};
 
@@ -1656,13 +1656,18 @@ pub fn plan_acl(
     // says, the union of their plans' denies in its policy, and warned of
     // (0.7, F-125).
     if let Some(parsed) = &opts.face_policy {
+        let v2 = parsed
+            .policy
+            .as_ref()
+            .is_some_and(|p| p.profile == link::Profile::V2);
         for f in &parsed.findings {
             warnings.push(warn(
                 AclWarningKind::FacePolicy,
                 f.face.as_deref(),
-                match f.code {
-                    link::Code::FarOfTwoFaces => "link.v1 §2.1, §2.4",
-                    _ => "link.v1 §2.1, §2.10",
+                match (f.code, v2) {
+                    (link::Code::FarOfTwoFaces, _) => "link.v1 §2.1, §2.4",
+                    (_, false) => "link.v1 §2.1, §2.10",
+                    (_, true) => "link.v2 §2.1, §2.10, §2.16",
                 },
                 format!("{} at {}: {}", f.code, f.at, link_says(f.code)),
             ));
@@ -2038,11 +2043,16 @@ pub fn plan_acl(
         .filter(|r| held_rules.contains(r.id.as_str()))
         .collect();
 
+    // The router's transport, from a link.v2 policy (link.v2 §2.16, §2.18).
+    let transport = policy.and_then(|p| p.transport);
     Ok(AclPlan {
         namespace: ns,
         default_permission: opts.default_permission,
         contracts: contracts.used.into_iter().collect(),
         faces,
+        binding: transport.and(policy.map(|p| p.binding)),
+        transport,
+        catalog: policy.and_then(|p| p.catalog.clone()),
         rules,
         subjects: placed
             .into_iter()
@@ -2300,6 +2310,42 @@ pub fn link_says(code: link::Code) -> &'static str {
              kept off, matches no subject, so it is allowed everything there: no subject naming \
              no interface and no zid selects that link protocol, among those naming it in the \
              list of its kind and nothing in the other, or no user name and no CN (§2.4, §2.15)"
+        }
+        C::KeepAliveFlaps => {
+            "at the face's loss, more than one false close a day is expected: an idle transport \
+             closes when keep_alive − 1 keep-alives in a row are lost (link.v2 §2.16)"
+        }
+        C::SequenceWindow => {
+            "one lease can carry the sequence window in full batches: after a gap that long, a \
+             frame is dropped as old (link.v2 §2.16)"
+        }
+        C::OpenUnderHandshake => {
+            "a timeout below twice the handshake's air at the face's rate: the transport may never \
+             open (link.v2 §2.16)"
+        }
+        C::ReplyTimeoutShort => {
+            "a reply timeout below 16 full batches' air: a caller that waits it gives up on \
+             replies on their way (link.v2 §2.1)"
+        }
+        C::NoArq => {
+            "the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost \
+             subscriber or queryable stays lost while the transport stays up (link.v2 §2.1)"
+        }
+        C::TransportDiffers => {
+            "the router's configuration runs this transport key at another value than the \
+             policy's, read at the binding's default where it states none (link.v2 §2.19)"
+        }
+        C::WaitUnderLease => {
+            "wait_before_close below the lease: a blocked push closes the transport on one end \
+             while the other keeps it for up to a lease (link.v2 §2.16)"
+        }
+        C::PeerDiffers => {
+            "the far end runs another lease or keep_alive than the router: the lease is not \
+             negotiated, so one direction closes sooner or pays more keep-alives (link.v2 §2.16)"
+        }
+        C::CatalogMismatch => {
+            "the catalog the far side holds is not the policy's: it decodes with another \
+             (link.v2 §2.19)"
         }
         _ => "the face policy's linter refuses it (§2.1)",
     }
@@ -2788,6 +2834,9 @@ pub fn to_json5(plan: &AclPlan) -> String {
         let _ = writeln!(out, "  ],");
         let _ = writeln!(out, "}},");
     }
+    if let (Some(t), Some(b)) = (&plan.transport, plan.binding) {
+        transport_json5(&mut out, t, Some(b), "this router");
+    }
     for f in &plan.faces {
         if matches!(f.attach, link::AttachPlan::Client) {
             let _ = writeln!(
@@ -2800,6 +2849,93 @@ pub fn to_json5(plan: &AclPlan) -> String {
         }
     }
     out
+}
+
+/// The `transport` and `routing` blocks of a `link.v2` policy's
+/// `[transport]` (`link.v2` §2.18), for `end`: each key at zenoh 1.10.1's
+/// configuration key (`zenoh-config-1.10.1/src/lib.rs`: `LinkTxConf`,
+/// `QueueConf`, `TransportUnicastConf`, `InterestsConf`), the values in
+/// zenoh's units, `wait_before_close` in µs. All eight are written, the
+/// defaults of absent ones included.
+fn transport_json5(
+    out: &mut String,
+    t: &link::Transport,
+    binding: Option<link::Binding>,
+    end: &str,
+) {
+    use link::TransportKey as K;
+    use std::fmt::Write as _;
+    let v = |k: K| t.value(k).to_string();
+    let _ = writeln!(
+        out,
+        "// The transport {end} runs (link.v2 §2.16, §2.18), from the face policy{}.\n\
+         // zenoh reads it once per process, for every link it holds. Merge it into the\n\
+         // config's own `transport` (auth, TLS) by hand: a JSON5 object holds one `transport`\n\
+         // key. Both ends run one lease and keep_alive, which are not negotiated: {}",
+        binding.map_or(String::new(), |b| format!(": binding {b}")),
+        if binding.is_some() {
+            "the far end's\n// block is `zenctl acl gen --far-config`, and `zenctl check face --peer-config` compares\n// the two."
+        } else {
+            "`zenctl check\n// face --peer-config` compares this one with the router's."
+        }
+    );
+    let _ = writeln!(out, "transport: {{");
+    let _ = writeln!(out, "  link: {{");
+    let _ = writeln!(out, "    tx: {{");
+    let _ = writeln!(
+        out,
+        "      lease: {},  // ms; a keep-alive every {} when idle",
+        v(K::Lease),
+        t.keep_alive_interval_words()
+    );
+    let _ = writeln!(out, "      keep_alive: {},", v(K::KeepAlive));
+    let _ = writeln!(out, "      sequence_number_resolution: {},", v(K::Sequence));
+    let _ = writeln!(out, "      batch_size: {},", v(K::BatchBytes));
+    let _ = writeln!(
+        out,
+        "      queue: {{ congestion_control: {{ block: {{ wait_before_close: {} }} }} }},  // µs, at least the lease",
+        v(K::WaitBeforeClose)
+    );
+    let _ = writeln!(out, "    }},");
+    let _ = writeln!(out, "  }},");
+    let _ = writeln!(
+        out,
+        "  unicast: {{ open_timeout: {}, accept_timeout: {} }},  // ms",
+        v(K::OpenTimeout),
+        v(K::AcceptTimeout)
+    );
+    let _ = writeln!(out, "}},");
+    let _ = writeln!(
+        out,
+        "routing: {{ interests: {{ timeout: {} }} }},  // ms",
+        v(K::InterestsTimeout)
+    );
+}
+
+/// The far end's `transport` and `routing` blocks (`link.v2` §2.18): the
+/// far router's configuration, or the gateway client's session one, so
+/// that both ends run the policy's lease and keep-alives (§2.16). `None`
+/// for a plan with no transport, from a `link.v1` policy or none.
+pub fn far_json5(plan: &AclPlan) -> Option<String> {
+    use std::fmt::Write as _;
+    let t = plan.transport.as_ref()?;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "// The far end's transport, generated by `zenctl acl gen --far-config` (link.v2 §2.18):\n\
+         // the far router's config, or the gateway client's session config, across {}.",
+        if plan.faces.is_empty() {
+            "the face".to_owned()
+        } else {
+            plan.faces
+                .iter()
+                .map(|f| format!("face {} (far {})", f.name, f.far))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    );
+    transport_json5(&mut out, t, None, "the far end");
+    Some(out)
 }
 
 // ── --check ───────────────────────────────────────────────────────────────
@@ -2911,20 +3047,146 @@ fn downsampling_shape(
     )
 }
 
-/// The plan against the block a router's config file carries.
+/// A router's configuration, the observed side of a check (§11.3,
+/// `link.v1` §2.15, `link.v2` §2.19): its `access_control`, `downsampling`
+/// and `gateway` blocks as zenoh's own loader parsed them, and the
+/// transport keys the file states, by zenoh's configuration key. What the
+/// router runs is not on the bus, so this is the file somebody says it
+/// runs.
+#[derive(Debug, Clone, Default)]
+pub struct RouterConfig {
+    pub acl: AclConfigDoc,
+    /// Empty when the configuration has none.
+    pub downsampling: Vec<DownsamplingDoc>,
+    pub gateway: Option<serde_json::Value>,
+    /// The keys it states (`link::StatedTransport::read` over the file's
+    /// own JSON tree): a key it omits runs at the binding's default.
+    pub transport: link::StatedTransport,
+}
+
+impl RouterConfig {
+    /// The blocks `config`, a router's configuration as zenoh's own loader
+    /// read it, carries, and the transport keys `stated`, the same file's
+    /// own JSON tree ([`RouterConfig::stated_tree`]), states. A stated key's
+    /// value is the one zenoh's loader read, typed as zenoh types it (a
+    /// fraction cast to an integer, as its deserializer does): what the
+    /// router runs. A block that does not parse as zenoh 1.10's shape is
+    /// named in the error.
+    pub fn read(
+        config: &zenoh::Config,
+        stated: &serde_json::Value,
+    ) -> std::result::Result<RouterConfig, String> {
+        let json = config
+            .get_json("access_control")
+            .map_err(|e| format!("no access_control block: {e}"))?;
+        let acl = serde_json::from_str(&json)
+            .map_err(|e| format!("access_control does not parse as zenoh 1.10's AclConfig: {e}"))?;
+        let downsampling = match config.get_json("downsampling") {
+            Err(_) => Vec::new(),
+            Ok(d) => serde_json::from_str(&d).map_err(|e| {
+                format!(
+                    "downsampling does not parse as zenoh 1.10's DownsamplingItemConf list: {e}"
+                )
+            })?,
+        };
+        let gateway = config
+            .get_json("gateway")
+            .ok()
+            .and_then(|g| serde_json::from_str(&g).ok());
+        let mut transport = link::StatedTransport::read(stated);
+        for (path, value) in &mut transport.0 {
+            if let Some(runs) = config
+                .get_json(path)
+                .ok()
+                .and_then(|j| serde_json::from_str(&j).ok())
+            {
+                *value = runs;
+            }
+        }
+        Ok(RouterConfig {
+            acl,
+            downsampling,
+            gateway,
+            transport,
+        })
+    }
+
+    /// A configuration file's own text as a JSON tree: what it states, a key
+    /// it omits absent (`link.v2` §2.19 reads an omitted transport key at
+    /// the binding's default, which zenoh's loader cannot tell from a
+    /// stated one). Read in `dialect` with the very parser zenoh 1.10.1's
+    /// `Config::from_file` reads it with, so a file zenoh accepts parses
+    /// here too.
+    pub fn stated_tree(
+        text: &str,
+        dialect: ConfigDialect,
+    ) -> std::result::Result<serde_json::Value, String> {
+        match dialect {
+            ConfigDialect::Json5 => json5_zenoh::from_str(text).map_err(|e| e.to_string()),
+            ConfigDialect::Yaml => serde_yaml::from_str(text).map_err(|e| e.to_string()),
+            ConfigDialect::Toml => toml_zenoh::from_str(text).map_err(|e| e.to_string()),
+        }
+    }
+
+    /// [`RouterConfig::read`] of a JSON5 configuration's text.
+    pub fn from_json5(text: &str) -> std::result::Result<RouterConfig, String> {
+        let config = zenoh::Config::from_json5(text).map_err(|e| e.to_string())?;
+        RouterConfig::read(
+            &config,
+            &RouterConfig::stated_tree(text, ConfigDialect::Json5)?,
+        )
+    }
+}
+
+/// A configuration file's dialect, as zenoh 1.10.1's `Config::from_file`
+/// picks it by the file's extension (`zenoh-config-1.10.1/src/lib.rs`,
+/// `_from_file`): `.json` and `.json5` JSON5, `.yaml` and `.yml` YAML, and
+/// `.toml` TOML, which zenoh reads under its `unstable` feature, on in this
+/// workspace. It refuses any other extension, and a file with none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigDialect {
+    Json5,
+    Yaml,
+    Toml,
+}
+
+impl ConfigDialect {
+    /// The dialect zenoh reads `path` in, or `None` where it refuses the
+    /// file for its extension.
+    #[must_use]
+    pub fn of_path(path: &std::path::Path) -> Option<ConfigDialect> {
+        match path.extension()?.to_str()? {
+            "json" | "json5" => Some(ConfigDialect::Json5),
+            "yaml" | "yml" => Some(ConfigDialect::Yaml),
+            "toml" => Some(ConfigDialect::Toml),
+            _ => None,
+        }
+    }
+}
+
+/// What `check face` is asked beside the block, each `None` not asked: the
+/// owners' tombstone windows by address (`link.v1` §2.11), the far end's
+/// stated transport and the id of the catalog the far side holds
+/// (`link.v2` §2.19).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FaceAsk<'a> {
+    pub windows: Option<&'a BTreeMap<String, u64>>,
+    pub peer: Option<&'a link::StatedTransport>,
+    pub catalog: Option<&'a str>,
+}
+
+/// The plan against the block a router's config file carries, and its
+/// transport against the plan's (`link.v2` §2.19), each key read at the
+/// binding's default where the file states none.
 ///
-/// `observed` is what zenoh's own loader parsed, `downsampling` its
-/// `downsampling` items, and `gateway` the config's `gateway` value, when it
-/// has one; `against` names the file. The claim judged is *the block
-/// differs from the plan*: a finding is `Established`, a block that carries
-/// the plan whole is `NotEstablished`.
-pub fn check_acl(
-    plan: &AclPlan,
-    observed: &AclConfigDoc,
-    downsampling: &[DownsamplingDoc],
-    gateway: Option<&serde_json::Value>,
-    against: &str,
-) -> AclCheck {
+/// `observed` is what zenoh's own loader parsed, with the transport keys
+/// the file states; `against` names the file. The claim judged is *the
+/// block differs from the plan*: a finding is `Established`, a block that
+/// carries the plan whole is `NotEstablished`.
+pub fn check_acl(plan: &AclPlan, config: &RouterConfig, against: &str) -> AclCheck {
+    let observed = &config.acl;
+    let downsampling = config.downsampling.as_slice();
+    let gateway = config.gateway.as_ref();
     let mut findings = Vec::new();
     let mut finding = |kind, id: &str, planned: Option<String>, observed: Option<String>| {
         findings.push(AclFinding {
@@ -3252,6 +3514,27 @@ pub fn check_acl(
         }
     }
 
+    // The router's transport (link.v2 §2.19), key by key, by zenoh's key.
+    if let (Some(t), Some(b)) = (&plan.transport, plan.binding) {
+        let defaults = b.defaults();
+        for k in link::TransportKey::ALL {
+            let planned = t.value(k);
+            let runs = config.transport.runs(k, &defaults);
+            if !link::same_value(&planned, &runs) {
+                finding(
+                    AclFindingKind::TransportDiffers,
+                    k.path(),
+                    Some(planned.to_string()),
+                    Some(if config.transport.states(k) {
+                        runs.to_string()
+                    } else {
+                        format!("{runs}, {b}'s default: the file states none")
+                    }),
+                );
+            }
+        }
+    }
+
     let judgement = if findings.is_empty() {
         Judgement::NotEstablished {
             reason: format!(
@@ -3271,7 +3554,11 @@ pub fn check_acl(
                 } else {
                     ""
                 }
-            ),
+            ) + if plan.transport.is_some() {
+                ", the transport as planned"
+            } else {
+                ""
+            },
         }
     } else {
         Judgement::Established
@@ -3384,19 +3671,28 @@ fn applies_to(d: &DownsamplingDoc, link_protocols: &[String]) -> bool {
 /// kind alone, or one bound to nobody (`link::check_narrowing`, 0.5). The
 /// downsampling rules are those of every item that applies to the face's
 /// transports, in the block's order.
-/// `windows` are
+/// `ask.windows` are
 /// the tombstone windows the deployment configures, by address (§2.11):
 /// `None` is not asked. `plan` is the plan the same policy compiled to.
+///
+/// A `link.v2` policy's transport is checked too (`link.v2` §2.19,
+/// `link::check_transport`): each key the configuration runs, read at the
+/// binding's default where it states none, against the policy's
+/// (`transport_differs`); its `wait_before_close` against its lease,
+/// whatever the policy says (`wait_under_lease`); with `ask.peer`, the far
+/// end's lease and keep-alives against the router's (`peer_differs`); and
+/// with `ask.catalog`, the catalog the far side holds (`catalog_mismatch`).
 pub fn check_face(
     plan: &AclPlan,
     policy: &FacePolicy,
-    observed: &AclConfigDoc,
-    downsampling: &[DownsamplingDoc],
-    gateway: Option<&serde_json::Value>,
-    windows: Option<&BTreeMap<String, u64>>,
+    config: &RouterConfig,
+    ask: &FaceAsk<'_>,
     against: &str,
 ) -> FaceCheck {
-    let comparison = check_acl(plan, observed, downsampling, gateway, against);
+    let comparison = check_acl(plan, config, against);
+    let observed = &config.acl;
+    let downsampling = config.downsampling.as_slice();
+    let windows = ask.windows;
     let rules: BTreeMap<&str, &crate::report::AclRuleDoc> =
         observed.rules.iter().map(|r| (r.id.as_str(), r)).collect();
     let mut findings: Vec<link::Finding> = Vec::new();
@@ -3506,16 +3802,57 @@ pub fn check_face(
             Asked::Asked(rows)
         }
     };
+    // link.v2 §2.19: the router's transport, the far end's, the catalog.
+    findings.extend(link::check_transport(policy, &config.transport, ask.peer));
+    let transport: Vec<FaceTransportKey> = match &policy.transport {
+        None => Vec::new(),
+        Some(t) => {
+            let defaults = policy.binding.defaults();
+            link::TransportKey::ALL
+                .into_iter()
+                .map(|k| FaceTransportKey {
+                    key: k.at(),
+                    path: k.path().to_owned(),
+                    planned: t.value(k),
+                    observed: config.transport.runs(k, &defaults),
+                    stated: config.transport.states(k),
+                    peer: ask.peer.map(|p| p.runs(k, &defaults)),
+                })
+                .collect()
+        }
+    };
+    let catalog = ask.catalog.map(|held| {
+        findings.extend(link::check_catalog(policy, held));
+        FaceCatalog {
+            policy: policy.catalog.clone(),
+            held: held.to_owned(),
+        }
+    });
     link::sort_findings(&mut findings);
     let judgement = if findings.is_empty() && comparison.findings.is_empty() {
         Judgement::NotEstablished {
             reason: format!(
                 "{against} guards {} face(s) as planned: @zk denied on every pair of the nine \
                  messages and both flows, every downsampling rule one concrete key, no two \
-                 intersecting{}; {}",
+                 intersecting{}{}{}{}; {}",
                 policy.faces.len(),
                 if windows.is_asked() {
                     ", every listed owner's window at least the outage"
+                } else {
+                    ""
+                },
+                if transport.is_empty() {
+                    ""
+                } else {
+                    ", the policy's transport, wait_before_close at least the lease"
+                },
+                if ask.peer.is_some() && !transport.is_empty() {
+                    ", the far end on the router's lease and keep_alive"
+                } else {
+                    ""
+                },
+                if catalog.is_some() {
+                    ", the far side's catalog the policy's"
                 } else {
                     ""
                 },
@@ -3534,6 +3871,9 @@ pub fn check_face(
         faces,
         findings,
         windows,
+        binding: policy.transport.map(|_| policy.binding),
+        transport,
+        catalog,
         comparison,
         judgement,
     }
@@ -3744,8 +4084,83 @@ mod tests {
     use crate::model::catalog::Revision;
     use crate::report::{AclConfigDoc, ArchiveSpec, ContractSource, ServiceSpec, ToolSpec};
 
+    /// A router's configuration of these blocks, stating no transport.
+    fn config(
+        acl: &AclConfigDoc,
+        ds: &[DownsamplingDoc],
+        gw: Option<&serde_json::Value>,
+    ) -> RouterConfig {
+        RouterConfig {
+            acl: acl.clone(),
+            downsampling: ds.to_vec(),
+            gateway: gw.cloned(),
+            transport: link::StatedTransport::default(),
+        }
+    }
+
     fn examples() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2")
+    }
+
+    /// `stated_tree` reads a file in the dialect zenoh 1.10.1's
+    /// `Config::from_file` picks by its extension, with zenoh's own parser
+    /// (link.v2 §2.19): every file zenoh accepts here is read, the keys it
+    /// states found, and an extension zenoh refuses has no dialect. A stated
+    /// key's value is the one zenoh's loader read: `1e7` and `0x989680`,
+    /// which zenoh reads as 10,000,000, run as that integer.
+    #[test]
+    fn a_config_is_read_in_the_dialect_zenoh_reads_it() {
+        let wbc = link::TransportKey::WaitBeforeClose.path();
+        let json5 = "// a router\n{ mode: 'router', transport: { link: { tx: { lease: 0x2710, \
+                     queue: { congestion_control: { block: { wait_before_close: 1e7, }, }, }, }, }, }, }\n";
+        let json = r#"{"mode": "router", "transport": {"link": {"tx": {"lease": 10000,
+            "queue": {"congestion_control": {"block": {"wait_before_close": 10000000}}}}}}}"#;
+        let yaml = "mode: router\ntransport:\n  link:\n    tx:\n      lease: 10000\n      \
+                    queue:\n        congestion_control:\n          block:\n            \
+                    wait_before_close: 10000000\n";
+        let toml = "mode = \"router\"\n[transport.link.tx]\nlease = 10000\n\
+                    [transport.link.tx.queue.congestion_control.block]\nwait_before_close = 10000000\n";
+        let dir = std::env::temp_dir().join(format!("zk-dialect-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (ext, text, dialect) in [
+            ("json5", json5, ConfigDialect::Json5),
+            ("json", json, ConfigDialect::Json5),
+            ("json", json5, ConfigDialect::Json5),
+            ("yaml", yaml, ConfigDialect::Yaml),
+            ("yml", yaml, ConfigDialect::Yaml),
+            ("toml", toml, ConfigDialect::Toml),
+        ] {
+            let path = dir.join(format!("router.{ext}"));
+            std::fs::write(&path, text).unwrap();
+            let zenoh = zenoh::Config::from_file(&path)
+                .unwrap_or_else(|e| panic!(".{ext}: zenoh reads it: {e}"));
+            assert_eq!(ConfigDialect::of_path(&path), Some(dialect), ".{ext}");
+            let tree =
+                RouterConfig::stated_tree(text, dialect).unwrap_or_else(|e| panic!(".{ext}: {e}"));
+            let config = RouterConfig::read(&zenoh, &tree).unwrap();
+            let stated: Vec<&str> = config.transport.0.keys().map(String::as_str).collect();
+            assert_eq!(stated, ["transport/link/tx/lease", wbc], ".{ext}");
+            assert_eq!(
+                config.transport.0[wbc],
+                serde_json::json!(10_000_000),
+                ".{ext}"
+            );
+            assert_eq!(
+                config.transport.0["transport/link/tx/lease"],
+                serde_json::json!(10_000),
+                ".{ext}"
+            );
+        }
+        for ext in ["conf", "JSON5"] {
+            let path = dir.join(format!("router.{ext}"));
+            std::fs::write(&path, json).unwrap();
+            assert!(
+                zenoh::Config::from_file(&path).is_err(),
+                ".{ext}: zenoh refuses it"
+            );
+            assert_eq!(ConfigDialect::of_path(&path), None, ".{ext}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The example directories' contracts, with the contracts an example
@@ -5179,7 +5594,13 @@ type = { raw = "text/plain" }
                 .ok()
                 .and_then(|d| serde_json::from_str(&d).ok())
                 .unwrap_or_default();
-            let checked = check_face(&plan, &p, &acl, &ds, None, None, "router.json5");
+            let checked = check_face(
+                &plan,
+                &p,
+                &config(&acl, &ds, None),
+                &FaceAsk::default(),
+                "router.json5",
+            );
             assert!(checked.findings.is_empty(), "{:?}", checked.findings);
             assert!(
                 checked.comparison.findings.is_empty(),
@@ -5200,7 +5621,7 @@ type = { raw = "text/plain" }
             "select       = { link_protocols = [\"unixsock-stream\"] }",
             &format!(
                 "select       = {{ link_protocols = {:?} }}",
-                link::LINK_PROTOCOLS
+                link::Binding::Zenoh1_10_1.protocols()
             ),
         );
         assert_ne!(every, policy);
@@ -5359,7 +5780,13 @@ type = { raw = "text/plain" }
         let plan = radio_plan(AclPermission::Deny, &policy, "");
         let block = to_json5(&plan);
         let (acl, ds, gw) = read(&block);
-        let clean = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+        let clean = check_face(
+            &plan,
+            p,
+            &config(&acl, &ds, gw.as_ref()),
+            &FaceAsk::default(),
+            "router.json5",
+        );
         assert!(clean.findings.is_empty(), "{:?}", clean.findings);
         assert!(
             clean.comparison.findings.is_empty(),
@@ -5378,7 +5805,13 @@ type = { raw = "text/plain" }
             "\"face:radio:zk\", \"face:radio:adv\"",
             "\"face:radio:adv\"",
         ));
-        let c = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+        let c = check_face(
+            &plan,
+            p,
+            &config(&acl, &ds, gw.as_ref()),
+            &FaceAsk::default(),
+            "router.json5",
+        );
         let codes: Vec<link::Code> = c.findings.iter().map(|f| f.code).collect();
         assert_eq!(codes, [link::Code::ZkNotDenied]);
         assert_eq!(c.judgement, Judgement::Established);
@@ -5401,7 +5834,13 @@ type = { raw = "text/plain" }
                 "zk2/lab/*/radio.v1/stream/air/dropped_total",
             );
         let (acl, ds, gw) = read(&wild);
-        let c = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+        let c = check_face(
+            &plan,
+            p,
+            &config(&acl, &ds, gw.as_ref()),
+            &FaceAsk::default(),
+            "router.json5",
+        );
         assert_eq!(
             c.findings,
             [link::Finding::new(
@@ -5426,7 +5865,13 @@ type = { raw = "text/plain" }
         ] {
             assert_ne!(edited, block);
             let (acl, ds, gw) = read(&edited);
-            let c = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+            let c = check_face(
+                &plan,
+                p,
+                &config(&acl, &ds, gw.as_ref()),
+                &FaceAsk::default(),
+                "router.json5",
+            );
             assert_eq!(
                 c.findings,
                 [link::Finding::new(
@@ -5442,7 +5887,13 @@ type = { raw = "text/plain" }
 
         // The block without its downsampling item: missing from the plan.
         let (acl, _, gw) = read(&block);
-        let c = check_face(&plan, p, &acl, &[], gw.as_ref(), None, "router.json5");
+        let c = check_face(
+            &plan,
+            p,
+            &config(&acl, &[], gw.as_ref()),
+            &FaceAsk::default(),
+            "router.json5",
+        );
         assert!(c.findings.is_empty(), "no rule is no wrong rule");
         assert!(
             c.comparison
@@ -5464,10 +5915,11 @@ type = { raw = "text/plain" }
             let c = check_face(
                 &plan,
                 p,
-                &acl,
-                &ds,
-                gw.as_ref(),
-                Some(&given),
+                &config(&acl, &ds, gw.as_ref()),
+                &FaceAsk {
+                    windows: Some(&given),
+                    ..FaceAsk::default()
+                },
                 "router.json5",
             );
             assert_eq!(c.findings, link::check_windows(p, &dep, &given), "{window}");
@@ -5481,10 +5933,11 @@ type = { raw = "text/plain" }
         let c = check_face(
             &plan,
             p,
-            &acl,
-            &ds,
-            gw.as_ref(),
-            Some(&none),
+            &config(&acl, &ds, gw.as_ref()),
+            &FaceAsk {
+                windows: Some(&none),
+                ..FaceAsk::default()
+            },
             "router.json5",
         );
         assert!(c.findings.is_empty(), "a window not given is 60 s");
@@ -5584,7 +6037,7 @@ type = { raw = "text/plain" }
         .unwrap();
         let block = to_json5(&plan);
         let (acl, gw) = read(&block);
-        let clean = check_acl(&plan, &acl, &[], gw.as_ref(), "router.json5");
+        let clean = check_acl(&plan, &config(&acl, &[], gw.as_ref()), "router.json5");
         assert!(clean.findings.is_empty(), "{:#?}", clean.findings);
         assert_eq!(clean.judgement.conclusive(), Some(false));
         // A downsampling item the plan does not carry: extra.
@@ -5597,7 +6050,7 @@ type = { raw = "text/plain" }
             }],
             ..DownsamplingDoc::default()
         }];
-        let c = check_acl(&plan, &acl, &extra, gw.as_ref(), "router.json5");
+        let c = check_acl(&plan, &config(&acl, &extra, gw.as_ref()), "router.json5");
         assert_eq!(
             c.findings.iter().map(|f| f.kind).collect::<Vec<_>>(),
             [AclFindingKind::DownsamplingExtra]
@@ -5616,7 +6069,7 @@ type = { raw = "text/plain" }
                 "  subjects: [\n    { id: \"stranger\", usernames: [\"stranger\"], zids: [\"a1b2c3\"] },\n",
             );
         let (acl, _) = read(&drifted);
-        let check = check_acl(&plan, &acl, &[], None, "router.json5");
+        let check = check_acl(&plan, &config(&acl, &[], None), "router.json5");
         let kinds: Vec<AclFindingKind> = check.findings.iter().map(|f| f.kind).collect();
         for k in [
             AclFindingKind::RuleDiffers,

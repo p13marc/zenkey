@@ -1,0 +1,32 @@
+# A link.v2 face policy (spec/profiles/link/v2.md; #988, L1): the lab's
+# router over a satellite short-burst-data link, store and forward, with
+# Appendix B's transport: zenoh-modem's tuned 3,600 s with 2 keep-alives,
+# 96 a day. The service retries, so a keep-alive is late rather than lost:
+# no loss, and ARQ. Billed by the message, it exposes no push (link.v1
+# Appendix B); requests cross by grant.
+profile  = "link.v2"
+system   = "lab"
+services = ["radio-a"]
+binding  = "zenoh-1.10.1"
+
+[transport]
+lease_ms             = 3600000
+keep_alive           = 2
+wait_before_close_ms = 3600000
+sequence             = "16bit"
+batch_bytes          = 271
+open_timeout_ms      = 1000000
+accept_timeout_ms    = 1000000
+interests_timeout_ms = 1000000
+
+[face.radio]
+far              = "ground"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "none"
+max_outage_s     = 86400
+link_bps         = 2400
+loss_ppm         = 0
+arq              = true
+reply_timeout_ms = 1000000

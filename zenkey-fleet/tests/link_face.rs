@@ -46,10 +46,12 @@ use std::time::{Duration, Instant};
 
 use util::zk2::{T, eventually};
 use zenkey_fleet::report::{
-    AclConfigDoc, AclFindingKind, AclPermission, AclPlan, AclPolicy, AclSubject, DownsamplingDoc,
-    Enrollment,
+    AclFindingKind, AclPermission, AclPlan, AclPolicy, AclSubject, Enrollment,
 };
-use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, check_face, plan_acl};
+use zenkey_fleet::{
+    AclOptions, ContractSet, FaceAsk, RouterConfig, acl_far_json5, acl_plan_json5, check_face,
+    plan_acl,
+};
 use zenkey_model::freshness::{self, Last, Observation, Verdict};
 use zenkey_model::link;
 use zenoh::Wait;
@@ -165,25 +167,16 @@ fn check_text(
     policy: &str,
     windows: Option<&BTreeMap<String, u64>>,
 ) -> zenkey_fleet::report::FaceCheck {
-    let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
-    let acl: AclConfigDoc = serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
-    let ds: Vec<DownsamplingDoc> = c
-        .get_json("downsampling")
-        .ok()
-        .and_then(|d| serde_json::from_str(&d).ok())
-        .unwrap_or_default();
-    let gw = c
-        .get_json("gateway")
-        .ok()
-        .and_then(|g| serde_json::from_str(&g).ok());
+    let config = RouterConfig::from_json5(&format!("{{\n{block}}}")).unwrap();
     let parsed = link::parse(policy);
     check_face(
         planned,
         parsed.policy.as_ref().unwrap(),
-        &acl,
-        &ds,
-        gw.as_ref(),
-        windows,
+        &config,
+        &FaceAsk {
+            windows,
+            ..FaceAsk::default()
+        },
         "N.json5",
     )
 }
@@ -2423,4 +2416,347 @@ async fn s13_two_faces_one_far_principal() {
             c.comparison.findings
         );
     }
+}
+
+// ── link.v2's scenarios (`spec/profiles/link/scenarios-v2.md`; #988, L2) ──
+
+/// link.v2's scenarios' face policy: the radio's, with a 2 s lease and 4
+/// keep-alives, a keep-alive every 0.5 s.
+const V2_POLICY: &str = r#"profile  = "link.v2"
+system   = "lab"
+services = ["radio-a"]
+binding  = "zenoh-1.10.1"
+
+[transport]
+lease_ms             = 2000
+keep_alive           = 4
+wait_before_close_ms = 2000
+sequence             = "16bit"
+batch_bytes          = 1000
+
+[face.radio]
+far              = "ground"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "link"
+interval_s       = 1
+max_outage_s     = 6
+link_bps         = 1000000
+loss_ppm         = 0
+arq              = true
+reply_timeout_ms = 1000
+"#;
+
+/// zenoh 1.10.1's `KeepAlive`, a transport message with no field, which a
+/// stream link frames as a batch of one byte after its 2-byte length.
+const KEEP_ALIVE: u8 = 0x04;
+
+/// What R saw: each direction's keep-alives (0, F to N; 1, N to F) and
+/// when each end closed its socket.
+#[derive(Default)]
+struct RelayLog {
+    keep_alives: [Vec<Instant>; 2],
+    closed: [Option<Instant>; 2],
+}
+
+impl RelayLog {
+    fn keep_alives(&self, dir: usize, from: Instant, to: Instant) -> usize {
+        self.keep_alives[dir]
+            .iter()
+            .filter(|t| **t >= from && **t < to)
+            .count()
+    }
+}
+
+/// R: a relay between F and N's face, over unix sockets. It forwards both
+/// directions, counts each one's keep-alives, and, while `hold` is set,
+/// holds what it reads and delivers it when the hold ends. It reads both
+/// sockets throughout, so it sees an end close at once, and passes no
+/// close on: each end's is its own. One connection.
+struct Relay {
+    path: PathBuf,
+    hold: Arc<std::sync::atomic::AtomicBool>,
+    log: Arc<Mutex<RelayLog>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Relay {
+    fn drop(&mut self) {
+        self.task.abort();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+async fn relay(to: PathBuf) -> Relay {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let path = scratch("relay.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let hold = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let log = Arc::new(Mutex::new(RelayLog::default()));
+    let (h, l) = (hold.clone(), log.clone());
+    let task = tokio::spawn(async move {
+        let (far, _) = listener.accept().await.unwrap();
+        drop(listener);
+        let near = tokio::net::UnixStream::connect(&to).await.unwrap();
+        let (far_r, far_w) = far.into_split();
+        let (near_r, near_w) = near.into_split();
+        let pump = |dir: usize,
+                    mut src: tokio::net::unix::OwnedReadHalf,
+                    mut dst: tokio::net::unix::OwnedWriteHalf| {
+            let (hold, log) = (h.clone(), l.clone());
+            async move {
+                let mut buf = vec![0u8; 65_536];
+                let mut frames: Vec<u8> = Vec::new();
+                let mut held: Vec<u8> = Vec::new();
+                let mut tick = tokio::time::interval(Duration::from_millis(20));
+                loop {
+                    tokio::select! {
+                        n = src.read(&mut buf) => {
+                            let n = n.unwrap_or(0);
+                            if n == 0 {
+                                log.lock().unwrap().closed[dir] = Some(Instant::now());
+                                // Hold the other end's socket open: its
+                                // close must be its own lease's, never
+                                // this one's passed on.
+                                let _dst = dst;
+                                std::future::pending::<()>().await;
+                                return;
+                            }
+                            let now = Instant::now();
+                            frames.extend_from_slice(&buf[..n]);
+                            while frames.len() >= 2 {
+                                let len = usize::from(u16::from_le_bytes([frames[0], frames[1]]));
+                                if frames.len() < 2 + len {
+                                    break;
+                                }
+                                if len == 1 && frames[2] == KEEP_ALIVE {
+                                    log.lock().unwrap().keep_alives[dir].push(now);
+                                }
+                                frames.drain(..2 + len);
+                            }
+                            held.extend_from_slice(&buf[..n]);
+                        }
+                        _ = tick.tick() => {}
+                    }
+                    if !hold.load(Ordering::Relaxed) && !held.is_empty() {
+                        // An end that closed is a write that fails: R
+                        // goes on reading the other.
+                        let _ = dst.write_all(&held).await;
+                        held.clear();
+                    }
+                }
+            }
+        };
+        tokio::join!(pump(0, far_r, near_w), pump(1, near_r, far_w));
+    });
+    Relay {
+        path,
+        hold,
+        log,
+        task,
+    }
+}
+
+/// A router's or a session's configuration: `block`, the generator's
+/// fragment, with the keys only a running process needs inserted.
+fn config_of(block: &str, keys: &[(&str, String)]) -> zenoh::Config {
+    let mut c = zenoh::Config::from_json5(&format!("{{\n{block}}}"))
+        .unwrap_or_else(|e| panic!("zenoh refuses the block: {e}\n{block}"));
+    for (k, v) in [
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+    ]
+    .iter()
+    .chain(keys)
+    {
+        c.insert_json5(k, v)
+            .unwrap_or_else(|e| panic!("{k} = {v}: {e}"));
+    }
+    c
+}
+
+/// The transport keys a configuration runs, by zenoh's key, as its own
+/// loader reads them back.
+fn runs(c: &zenoh::Config) -> BTreeMap<&'static str, serde_json::Value> {
+    link::TransportKey::ALL
+        .into_iter()
+        .map(|k| {
+            (
+                k.path(),
+                serde_json::from_str(&c.get_json(k.path()).unwrap()).unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// link.v2 scenarios §1: N runs the generator's block and F the far end's,
+/// over R; the tool checks both; an idle link's keep-alives are §2.16's
+/// figure; a silence below the lease keeps the transport, and one above
+/// it closes it a lease after the last thing each end received (link.v2
+/// §2.16, §2.18, §2.19).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn v2_s1_the_router_runs_the_block() {
+    let plan = plan(V2_POLICY);
+    let t = plan.transport.expect("a link.v2 policy's transport");
+    let block = acl_plan_json5(&plan);
+    let far_block = acl_far_json5(&plan).expect("the far end's block");
+
+    // 1. N runs the block, F the far end's, through R.
+    let dict = scratch("v2-near.txt");
+    std::fs::write(&dict, "router:router-pw\nground:ground-pw\n").unwrap();
+    let sock = scratch("v2-face.sock");
+    let n_config = config_of(
+        &block,
+        &[
+            ("mode", "\"router\"".to_owned()),
+            (
+                "listen/endpoints",
+                format!(
+                    "[\"{}\", \"unixsock-stream/{}\"]",
+                    util::ANY_PORT,
+                    sock.display()
+                ),
+            ),
+            (
+                "transport/auth/usrpwd",
+                format!(
+                    "{{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }}",
+                    dict.display().to_string()
+                ),
+            ),
+        ],
+    );
+    let want: BTreeMap<&str, serde_json::Value> = link::TransportKey::ALL
+        .into_iter()
+        .map(|k| (k.path(), t.value(k)))
+        .collect();
+    assert_eq!(runs(&n_config), want, "N runs the policy's eight keys");
+    let _n = zenoh::open(n_config).await.expect("N runs the block");
+    let r = relay(sock.clone()).await;
+    let f_config = config_of(
+        &far_block,
+        &[
+            ("mode", "\"client\"".to_owned()),
+            (
+                "connect/endpoints",
+                format!("[\"unixsock-stream/{}\"]", r.path.display()),
+            ),
+            (
+                "transport/auth/usrpwd",
+                "{ user: \"ground\", password: \"ground-pw\" }".to_owned(),
+            ),
+        ],
+    );
+    assert_eq!(runs(&f_config), want, "F runs the policy's eight keys");
+    let _f = zenoh::open(f_config)
+        .await
+        .expect("F attaches to N over the face");
+
+    // 2. The tool checks N's configuration, F's as the far end's: no
+    //    finding (§2.19).
+    let config = RouterConfig::from_json5(&format!("{{\n{block}}}")).unwrap();
+    let peer = link::StatedTransport::read(
+        &RouterConfig::stated_tree(
+            &format!("{{\n{far_block}}}"),
+            zenkey_fleet::ConfigDialect::Json5,
+        )
+        .unwrap(),
+    );
+    let parsed = link::parse(V2_POLICY);
+    let policy = parsed.policy.as_ref().unwrap();
+    let c = check_face(
+        &plan,
+        policy,
+        &config,
+        &FaceAsk {
+            peer: Some(&peer),
+            ..FaceAsk::default()
+        },
+        "N.json5",
+    );
+    assert!(c.findings.is_empty(), "{:?}", c.findings);
+    assert!(
+        c.comparison.findings.is_empty(),
+        "{:?}",
+        c.comparison.findings
+    );
+
+    // 3. Two leases of nothing: 4 s × 4 / 2 s keep-alives each way, the
+    //    idle bill of §2.16.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let from = Instant::now();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let to = Instant::now();
+    {
+        let log = r.log.lock().unwrap();
+        for dir in 0..2 {
+            let n = log.keep_alives(dir, from, to);
+            assert!((7..=9).contains(&n), "direction {dir}: {n} keep-alives");
+        }
+        assert_eq!(log.closed, [None, None]);
+    }
+    let per_day = 2 * 86_400 * t.keep_alive / (t.lease_ms / 1_000);
+    assert_eq!(per_day, 345_600, "§2.16's figure for this policy");
+
+    // 4. A silence of half the lease: the transport stays, and carries
+    //    keep-alives again.
+    r.hold.store(true, Ordering::Relaxed);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    r.hold.store(false, Ordering::Relaxed);
+    let after = Instant::now();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    {
+        let log = r.log.lock().unwrap();
+        assert_eq!(log.closed, [None, None], "a silence below the lease");
+        for dir in 0..2 {
+            assert!(
+                log.keep_alives(dir, after, Instant::now()) >= 1,
+                "direction {dir}: keep-alives after the silence"
+            );
+        }
+    }
+
+    // 5. A silence of twice the lease: each end closes a lease after the
+    //    last thing it received, at most one keep-alive interval before
+    //    the silence began.
+    let began = Instant::now();
+    r.hold.store(true, Ordering::Relaxed);
+    eventually("both ends close the transport", || {
+        let done = r.log.lock().unwrap().closed.iter().all(Option::is_some);
+        async move { done }
+    })
+    .await;
+    let closed = r.log.lock().unwrap().closed;
+    for (dir, at) in closed.iter().enumerate() {
+        let after = at.unwrap() - began;
+        assert!(
+            after >= Duration::from_millis(1_400) && after <= Duration::from_millis(2_800),
+            "direction {dir}: closed {after:?} into the silence"
+        );
+    }
+    r.hold.store(false, Ordering::Relaxed);
+
+    // 6. Control: `wait_before_close` edited to half the lease.
+    let edited = block.replace(
+        &format!("wait_before_close: {} ", t.wait_before_close_ms * 1_000),
+        "wait_before_close: 1000000 ",
+    );
+    assert_ne!(edited, block);
+    let config = RouterConfig::from_json5(&format!("{{\n{edited}}}")).unwrap();
+    let c = check_face(&plan, policy, &config, &FaceAsk::default(), "N.json5");
+    let codes: Vec<(&str, &str)> = c
+        .findings
+        .iter()
+        .map(|f| (f.code.as_str(), f.at.as_str()))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            ("transport_differs", "transport.wait_before_close_ms"),
+            ("wait_under_lease", "transport.wait_before_close_ms"),
+        ]
+    );
+    let _ = std::fs::remove_file(&dict);
+    let _ = std::fs::remove_file(&sock);
 }

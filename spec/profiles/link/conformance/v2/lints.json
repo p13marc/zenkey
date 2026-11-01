@@ -1,0 +1,407 @@
+{
+  "cases": [
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "the RF router of Appendix B: no error; the radio repairs no lost frame, so `no_arq` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [],
+      "note": "the same with ARQ: no finding; 240 s with 4 keep-alives at 5 % loss expects 0.36 false closes a day, below one (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [],
+      "note": "a policy with no `profile` is link.v1's, read as link.v1 §2.1 says: no finding",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "loss_ppm",
+          "code": "unknown_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a link.v1 policy knows no link.v2 key: `loss_ppm` on its face is `unknown_field` (§2.1)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\nloss_ppm     = 0\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport",
+          "code": "unknown_field",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a link.v1 policy with a `[transport]` is `unknown_field`: only link.v2 reads it (§2.1)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[transport]\nlease_ms = 10000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "profile",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "any other `profile` is `bad_value`, and the rest is read as link.v2 (§2.1)",
+      "policy": "profile  = \"link.v1\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport",
+          "code": "transport_missing",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "no `[transport]`: `transport_missing`, an error (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "`transport` that is not a table: `bad_value` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ntransport = 240000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.keep_alive",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "transport.lease_ms",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "transport.sequence",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "transport.wait_before_close_ms",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "`[transport]`'s four required keys absent: `missing_field` for each; the optional four take their defaults (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.threads",
+          "code": "unknown_field",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a key `[transport]` does not define: `unknown_field`, at `transport.<key>` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nthreads              = 2\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "batch_bytes",
+          "code": "moved_field",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "lease_ms",
+          "code": "moved_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a face's `lease_ms` and `batch_bytes` are `[transport]`'s: `moved_field` each (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nlease_ms         = 240000\nbatch_bytes      = 222\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.wait_before_close_ms",
+          "code": "wait_under_lease",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "`wait_before_close` below the lease: `wait_under_lease`, an error (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 10000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [],
+      "note": "`wait_before_close` equal to the lease: no finding (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 10000\nkeep_alive           = 4\nwait_before_close_ms = 10000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 1000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.keep_alive",
+          "code": "keep_alive_flaps",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "LoRa SF7 at the issue's 60 s with 2 keep-alives, 5 % loss: 144 false closes a day, `keep_alive_flaps` (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 60000\nkeep_alive           = 2\nwait_before_close_ms = 60000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.keep_alive",
+          "code": "keep_alive_flaps",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "one keep-alive a lease sits on the lease's boundary: `keep_alive_flaps` whatever the loss (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 1\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.sequence",
+          "code": "sequence_window",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "`8bit` on RF: 64 frames, and one 240 s lease carries 324 full batches: `sequence_window` (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"8bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.accept_timeout_ms",
+          "code": "open_under_handshake",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "transport.open_timeout_ms",
+          "code": "open_under_handshake",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "SF12 at 293 bit/s with zenoh's 10 s timeouts: the handshake takes 10.5 s, `open_under_handshake` for each (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 120000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "reply_timeout_ms",
+          "code": "reply_timeout_short",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "a reply timeout below 16 full batches' air, 11.8 s on RF: `reply_timeout_short` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 5000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.batch_bytes",
+          "code": "batch_over_lease",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "zenoh's 65,535 B batch at 2,400 bit/s takes 218 s, more than a third of the 240 s lease: `batch_over_lease`, at `transport.batch_bytes` (§2.10)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 4000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "binding",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "no `binding`: `missing_field` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "binding",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a binding v2 does not name: `bad_value`, and the link protocols are not checked against it (§2.1, §2.4)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.2\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\", \"carrier-pigeon\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.link_protocols",
+          "code": "unknown_protocol",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`unixsock-dgram` under `zenoh-1.10.1`, which refuses it: `unknown_protocol` (§2.4)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-dgram\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [],
+      "note": "`unixsock-dgram` under `zm-1.10.2-r1`, which names it: no finding (§2.4)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zm-1.10.2-r1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-dgram\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.link_protocols",
+          "code": "shared_protocol",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "select.link_protocols",
+          "code": "shared_protocol",
+          "face": "sat",
+          "severity": "error"
+        }
+      ],
+      "note": "two faces of the fork's router on `unixsock-dgram`: `shared_protocol` for each (§2.4; link.v1 §2.14)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zm-1.10.2-r1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-dgram\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n\n[face.sat]\nfar              = \"sat\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-dgram\", \"serial\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "catalog",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a catalog id is 8 lowercase hex digits: uppercase is `bad_value` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"50A01C11\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "catalog",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a catalog id of 7 digits is `bad_value` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"50a01c1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [],
+      "note": "a catalog id: no finding (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"50a01c11\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "missing_field",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "loss_ppm",
+          "code": "missing_field",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "reply_timeout_ms",
+          "code": "missing_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "the face's three medium keys absent: `missing_field` each (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "loss_ppm",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "reply_timeout_ms",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a loss above 1,000,000 ppm, an `arq` that is not a boolean, a reply timeout of 0: `bad_value` each (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 1000001\narq              = \"yes\"\nreply_timeout_ms = 0\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "transport.batch_bytes",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "transport.keep_alive",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "transport.sequence",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "`keep_alive` above 255, a sequence zenoh does not name, a batch above 65,535: `bad_value` each, and the checks that read them are skipped (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 256\nwait_before_close_ms = 240000\nsequence             = \"16\"\nbatch_bytes          = 65536\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [],
+      "note": "the SBD router of Appendix B: no finding (§2.16)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n"
+    }
+  ],
+  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.16). Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says."
+}

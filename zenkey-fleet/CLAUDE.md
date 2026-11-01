@@ -313,3 +313,24 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   the capture's selectors alone, and `judge::field::run_field_over` watches
   several: each reads no presence for its lens, keys resolving through the
   contracts in hand.
+  `link.v2` (#988 L2) runs through `model::acl`: a v2 face policy's
+  `Transport`, `Binding` and catalog id ride `AclPlan::{transport,
+  binding, catalog}` (absent for `link.v1`, so its pinned plans did not
+  move), `to_json5` writes the `transport` and `routing` blocks (every
+  key at zenoh 1.10.1's path, `wait_before_close` in µs) and
+  `far_json5` the far end's alone. The observed side is one value now,
+  `RouterConfig` (the blocks zenoh's loader read, and the transport keys
+  the file's own tree states, read in the dialect zenoh 1.10.1's
+  `from_file` picks by extension with the very parsers it uses,
+  `ConfigDialect`, json5 0.4.1 and toml 0.9 beside serde_yaml, each
+  stated key's value the one zenoh's loader read; `RouterConfig::read`,
+  `stated_tree`, `from_json5`): `check_acl(plan, &config, against)`
+  compares the transport key by key (`AclFindingKind::TransportDiffers`,
+  an omitted key at the binding's default), and `check_face(plan,
+  policy, &config, &FaceAsk { windows, peer, catalog }, against)` adds
+  `link::check_transport` and `check_catalog` to its findings and
+  `FaceCheck::{binding, transport, catalog}` rows. `tests/acl_plans.rs`
+  pins the four media of `examples/zk2/link/media/`
+  (`link-v2.<medium>.json5`) and flags a hand-edited `wait_before_close`
+  on each; `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs
+  link.v2 scenarios §1 over a relay that counts keep-alives.

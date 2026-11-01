@@ -6,7 +6,9 @@
 //! (who, bound by what, running what, with which rules) and the rules (what
 //! each allows or denies, where, as which grant). A face policy adds a
 //! section per face: its far principal and attachment, its downsampling
-//! rules, its window floors and its liveness evidence. The JSON5 fragment
+//! rules, its window floors and its liveness evidence; a `link.v2` policy
+//! adds the router's transport, and `check face` each key of it against
+//! the router's configuration and the far end's (#988, L2). The JSON5 fragment
 //! is deliberately *not* here: it is zenoh's schema, emitted under
 //! `--json5`, and a rendering of it would be a second copy of `to_json5`
 //! that drifts.
@@ -133,6 +135,9 @@ impl Render for AclPlan {
         }
         for f in &self.faces {
             face_table(t, f);
+        }
+        if let Some(tr) = &self.transport {
+            transport_table(t, tr, self.binding, self.catalog.as_deref());
         }
         if let Some(gw) = &self.gateway {
             let regions: Vec<String> = self
@@ -370,6 +375,33 @@ fn via_lines(d: &AclDirection) -> Vec<String> {
         .collect()
 }
 
+/// A `link.v2` policy's transport (§2.16), as the generator writes it
+/// (§2.18), each key beside zenoh's.
+fn transport_table(
+    t: &mut Table,
+    tr: &zenkey_model::link::Transport,
+    binding: Option<zenkey_model::link::Binding>,
+    catalog: Option<&str>,
+) {
+    t.blank().line(format!(
+        "transport (link.v2 §2.16){}: a keep-alive every {} when idle",
+        binding.map_or(String::new(), |b| format!(", the router running {b}")),
+        tr.keep_alive_interval_words()
+    ));
+    let mut g = Grid::unheaded(3);
+    for k in zenkey_model::link::TransportKey::ALL {
+        g.row([
+            Cell::text(format!("  {}", k.key())),
+            Cell::text(tr.value(k).to_string()),
+            Cell::text(k.path()),
+        ]);
+    }
+    t.grid(g);
+    if let Some(c) = catalog {
+        t.line(format!("  catalog {c}: the far side decodes with it"));
+    }
+}
+
 fn attach_word(a: &AttachPlan) -> String {
     match a {
         AttachPlan::Client => "client".to_owned(),
@@ -441,7 +473,10 @@ impl Render for FaceCheck {
     const FAMILY: &'static str = "face-check";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        let mut e = envelope_without(self, &["faces", "findings", "windows", "comparison"]);
+        let mut e = envelope_without(
+            self,
+            &["faces", "findings", "windows", "transport", "comparison"],
+        );
         // The comparison's verdict rides the envelope, its findings the rows.
         e.insert(
             "comparison".into(),
@@ -450,9 +485,10 @@ impl Render for FaceCheck {
         e
     }
 
-    /// Four row kinds: each face's block as read, each finding of §2.15
-    /// and §2.11, each window when windows were asked, and each way the
-    /// block differs from the plan.
+    /// Five row kinds: each face's block as read, each finding of §2.15,
+    /// §2.11 and `link.v2` §2.19, each window when windows were asked, each
+    /// transport key of a `link.v2` policy, and each way the block differs
+    /// from the plan.
     fn rows(&self, out: &mut dyn FnMut(Row)) {
         for f in &self.faces {
             out(Row::of("face", f));
@@ -462,6 +498,9 @@ impl Render for FaceCheck {
         }
         for w in self.windows.as_option().into_iter().flatten() {
             out(Row::of("window", w));
+        }
+        for k in &self.transport {
+            out(Row::of("transport", k));
         }
         for f in &self.comparison.findings {
             out(Row::of("difference", f));
@@ -511,6 +550,46 @@ impl Render for FaceCheck {
                 ]);
             }
             t.grid(g);
+        }
+        if !self.transport.is_empty() {
+            t.line(format!(
+                "transport (link.v2 §2.19){}:",
+                self.binding.map_or(String::new(), |b| format!(
+                    ", an omitted key read at {b}'s default"
+                ))
+            ));
+            let mut g = Grid::unheaded(4);
+            // The far end is judged on its lease and keep_alive alone; its
+            // other keys are shown as it runs them.
+            let judged = ["transport.lease_ms", "transport.keep_alive"];
+            for k in &self.transport {
+                let differs = !zenkey_model::link::same_value(&k.planned, &k.observed)
+                    || (judged.contains(&k.key.as_str())
+                        && k.peer
+                            .as_ref()
+                            .is_some_and(|p| !zenkey_model::link::same_value(p, &k.observed)));
+                g.row([
+                    Cell::text(format!("  {} {}", if differs { "✗" } else { " " }, k.key)),
+                    Cell::text(format!("planned {}", k.planned)),
+                    Cell::text(format!(
+                        "runs {}{}",
+                        k.observed,
+                        if k.stated { "" } else { " (the default)" }
+                    )),
+                    Cell::text(match &k.peer {
+                        Some(p) => format!("far end {p}"),
+                        None => String::new(),
+                    }),
+                ]);
+            }
+            t.grid(g);
+        }
+        if let Some(c) = &self.catalog {
+            t.line(format!(
+                "catalog: the far side holds {}, the policy names {}",
+                c.held,
+                c.policy.as_deref().unwrap_or("none")
+            ));
         }
         if !self.comparison.findings.is_empty() {
             t.line(format!(
@@ -574,6 +653,21 @@ impl Render for FaceCheck {
                  configuration, not on the bus (link.v1 §2.11, §5)",
             ),
         });
+        if !self.transport.is_empty() {
+            if self.transport.iter().all(|k| k.peer.is_none()) {
+                notes.push(Note::coverage(
+                    "the far end not asked: pass --peer-config <FAR-CONFIG>, the far router's or \
+                     the gateway client's config, to compare its lease and keep_alive, which are \
+                     not negotiated (link.v2 §2.16, §2.19)",
+                ));
+            }
+            if self.catalog.is_none() {
+                notes.push(Note::coverage(
+                    "the catalog not asked: pass --catalog <FILE>, the catalog the far side holds \
+                     (link.v2 §2.19)",
+                ));
+            }
+        }
         notes
     }
 }

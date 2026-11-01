@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub use zenkey_model::link::{Downsampling, FacePlan, Finding as LinkFinding};
+pub use zenkey_model::link::{Binding, Downsampling, FacePlan, Finding as LinkFinding, Transport};
 
 use super::asked::Asked;
 use super::judgement::Judgement;
@@ -358,6 +358,21 @@ pub struct AclPlan {
     /// (`link.v1` §2.4).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub faces: Vec<FacePlan>,
+    /// The zenoh the router runs, from a `link.v2` face policy (`link.v2`
+    /// §2.4): it names the defaults a check reads a transport key the
+    /// router's configuration omits at (§2.19). Absent with no transport.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<Binding>,
+    /// The router's transport, from a `link.v2` face policy (§2.16): the
+    /// `transport` and `routing` blocks the generator writes beside
+    /// `access_control`, and for the far end (§2.18). Absent for a
+    /// `link.v1` policy, which states none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<Transport>,
+    /// The id of the catalog the far side decodes with, when the policy
+    /// names one (`link.v2` §2.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
     pub rules: Vec<AclRule>,
     pub subjects: Vec<AclSubject>,
     pub policies: Vec<AclPolicy>,
@@ -798,6 +813,10 @@ pub enum AclFindingKind {
     DownsamplingExtra,
     /// Same id, a different selection, flows, messages or rules.
     DownsamplingDiffers,
+    /// A transport key (`link.v2` §2.19) the configuration runs at another
+    /// value than the plan's: as stated, or at the binding's default where
+    /// it states none. `id` is zenoh's configuration key.
+    TransportDiffers,
 }
 
 impl AclFindingKind {
@@ -819,6 +838,7 @@ impl AclFindingKind {
             AclFindingKind::DownsamplingMissing => "downsampling_missing",
             AclFindingKind::DownsamplingExtra => "downsampling_extra",
             AclFindingKind::DownsamplingDiffers => "downsampling_differs",
+            AclFindingKind::TransportDiffers => "transport_differs",
         }
     }
 }
@@ -848,9 +868,52 @@ pub struct FaceCheck {
     /// (§2.11). Absent when no window was given: not asked (§5).
     #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
     pub windows: Asked<Vec<FaceWindow>>,
+    /// The binding a `link.v2` policy names, whose defaults the transport
+    /// rows read an omitted key at (`link.v2` §2.19). Absent for a
+    /// `link.v1` policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<Binding>,
+    /// Each transport key of a `link.v2` policy against the router's
+    /// configuration, and the far end's when it was read (§2.19). Empty for
+    /// a `link.v1` policy, which states no transport.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transport: Vec<FaceTransportKey>,
+    /// The catalog the far side holds against the policy's (§2.19). Absent
+    /// when no catalog was given: not asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<FaceCatalog>,
     /// The block against the plan, as `acl gen --check` compares them.
     pub comparison: AclCheck,
     pub judgement: Judgement,
+}
+
+/// One transport key of a router's configuration against a `link.v2`
+/// policy (§2.19).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FaceTransportKey {
+    /// The policy's key, `transport.lease_ms`: where a finding points.
+    pub key: String,
+    /// zenoh 1.10.1's configuration key.
+    pub path: String,
+    /// What the generator writes, in zenoh's units.
+    pub planned: serde_json::Value,
+    /// What the configuration runs: its value, or the binding's default.
+    pub observed: serde_json::Value,
+    /// Whether the configuration states the key.
+    pub stated: bool,
+    /// What the far end's configuration runs, read alike, when it was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer: Option<serde_json::Value>,
+}
+
+/// The catalog the far side holds, by id, against the policy's (§2.19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FaceCatalog {
+    /// The policy's `catalog`; absent when it names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<String>,
+    /// The id of the catalog given.
+    pub held: String,
 }
 
 /// One face, and the part of the block that guards it.
@@ -1067,6 +1130,9 @@ history   = true
             default_permission: AclPermission::Deny,
             contracts: vec!["tc.netif.v1@sha256:00".into()],
             faces: vec![],
+            binding: None,
+            transport: None,
+            catalog: None,
             rules: vec![AclRule {
                 id: "own-in:h1/tc".into(),
                 permission: AclPermission::Allow,
@@ -1170,6 +1236,7 @@ history   = true
                 service: "lab/radio-a".into(),
                 evidence: vec![],
             }],
+            reply_timeout_ms: None,
             findings: vec![],
         }];
         plan.downsampling = vec![Downsampling {
@@ -1267,6 +1334,43 @@ history   = true
         assert!(v["rules"][0].get("holder").is_none());
         assert!(v.get("warnings").is_none());
         assert!(v.get("refusals").is_none());
+        assert!(
+            v.get("transport").is_none() && v.get("binding").is_none(),
+            "a link.v1 face: no transport"
+        );
+
+        // A link.v2 face policy's transport, binding and catalog, and the
+        // face's reply timeout (link.v2 §2.18).
+        plan.binding = Some(Binding::Zm1_10_2R1);
+        plan.transport = Some(Transport {
+            lease_ms: 240_000,
+            keep_alive: 4,
+            wait_before_close_ms: 240_000,
+            sequence: zenkey_model::link::Sequence::Bit16,
+            batch_bytes: 222,
+            open_timeout_ms: 10_000,
+            accept_timeout_ms: 10_000,
+            interests_timeout_ms: 10_000,
+        });
+        plan.catalog = Some("50a01c11".into());
+        plan.faces[0].reply_timeout_ms = Some(15_000);
+        let v = serde_json::to_value(&plan).unwrap();
+        assert_eq!(v["binding"], json!("zm-1.10.2-r1"));
+        assert_eq!(
+            v["transport"],
+            json!({
+                "lease_ms": 240000,
+                "keep_alive": 4,
+                "wait_before_close_ms": 240000,
+                "sequence": "16bit",
+                "batch_bytes": 222,
+                "open_timeout_ms": 10000,
+                "accept_timeout_ms": 10000,
+                "interests_timeout_ms": 10000,
+            })
+        );
+        assert_eq!(v["catalog"], json!("50a01c11"));
+        assert_eq!(v["faces"][0]["reply_timeout_ms"], json!(15000));
     }
 
     #[test]
@@ -1396,6 +1500,9 @@ history   = true
                 "zk2/lab/*/radio.v1/stream/air/dropped_total",
             )],
             windows: Asked::NotAsked,
+            binding: None,
+            transport: Vec::new(),
+            catalog: None,
             comparison,
             judgement: Judgement::Established,
         };
@@ -1452,6 +1559,37 @@ history   = true
                 "min_s": 6,
             }])
         );
+        // A link.v2 policy's transport and catalog (link.v2 §2.19).
+        let v2 = FaceCheck {
+            binding: Some(Binding::Zenoh1_10_1),
+            transport: vec![FaceTransportKey {
+                key: "transport.lease_ms".into(),
+                path: "transport/link/tx/lease".into(),
+                planned: json!(240000),
+                observed: json!(10000),
+                stated: false,
+                peer: Some(json!(10000)),
+            }],
+            catalog: Some(FaceCatalog {
+                policy: None,
+                held: "50a01c11".into(),
+            }),
+            ..asked
+        };
+        let v = serde_json::to_value(&v2).unwrap();
+        assert_eq!(v["binding"], json!("zenoh-1.10.1"));
+        assert_eq!(
+            v["transport"],
+            json!([{
+                "key": "transport.lease_ms",
+                "path": "transport/link/tx/lease",
+                "planned": 240000,
+                "observed": 10000,
+                "stated": false,
+                "peer": 10000,
+            }])
+        );
+        assert_eq!(v["catalog"], json!({"held": "50a01c11"}));
     }
 
     #[test]

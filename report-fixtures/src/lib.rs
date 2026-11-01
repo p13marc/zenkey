@@ -2685,6 +2685,9 @@ pub fn face_check() -> FaceCheck {
             given: true,
             min_s: 6,
         }]),
+        binding: None,
+        transport: Vec::new(),
+        catalog: None,
         comparison: AclCheck {
             namespace: String::new(),
             against: "router.json5".into(),

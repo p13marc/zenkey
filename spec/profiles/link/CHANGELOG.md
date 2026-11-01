@@ -1,8 +1,80 @@
-# `link.v1` changelog
+# `link` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) (`link.v1`) and
+[`v2.md`](v2.md) (`link.v2`). Each entry records what changed, what
+deliberately did not, and why. A breaking change is a new major, a new
+file, never an entry here ([`../README.md`](../README.md)). An entry
+headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
+`v1.md`'s.
+
+## link.v2 0.1 — 2026-11-01: the face's transport, per medium (#988, L1 and L2)
+
+`link.v1` left zenoh's transport settings to the deployment. At zenoh's
+defaults an idle link sends 69,120 keep-alives a day, and at LoRa's SF12
+a keep-alive every 30 s takes more air than the duty budget allows.
+These settings need no change on the wire, so a deployment can apply
+them as soon as the face policy and the generator carry them. This is
+#988's first text, its L1 and L2: the face side and the generator. It
+restates `link.v1` text 0.10 by reference, and says only what it adds.
+
+**A new id.** A link.v2 policy requires `[transport]`, so that a
+deployment cannot leave its lease at zenoh's 10 s by omission. A
+`link.v1` linter refuses a link.v2 policy as `unknown_field`, which is
+the intent: an older generator must not write a block that silently
+drops the transport. One reader reads both: a policy with no `profile`
+is a `link.v1` policy, read finding for finding as `link.v1` §2.1 says.
+
+**Added.**
+- **§2.1, the policy.** `profile`, `binding`, `catalog` and
+  `[transport]` at the top level, and `loss_ppm`, `arq` and
+  `reply_timeout_ms` on each face. A face's `lease_ms` and `batch_bytes`
+  moved to `[transport]`, `moved_field` on a face. The codes
+  `transport_missing`, `moved_field`, `wait_under_lease`,
+  `keep_alive_flaps`, `sequence_window`, `open_under_handshake`,
+  `reply_timeout_short` and `no_arq`. `[F: v2/lints.json]`
+- **§2.4, link protocols per binding.** `zenoh-1.10.1` names
+  `link.v1`'s nine, and `zm-1.10.2-r1` adds `unixsock-dgram` after
+  `unixsock-stream`, as the fork's `InterceptorLink` orders them (its
+  `commons/zenoh-config/src/lib.rs`, lines 320–331). Stock zenoh refuses
+  it when it loads a configuration. This is #1011's item 2.
+  `[F: v2/lints.json, v2/plan.json]`
+- **§2.10** reads `[transport]`'s batch and lease against each face's
+  rate.
+- **§2.16, the transport**, the router's for every link, since zenoh
+  1.10.1 reads it once per router. A deployment MUST run it, MUST NOT
+  run a `wait_before_close` below the lease, SHOULD run one lease and
+  keep-alive at both ends, and SHOULD NOT run a `keep_alive` the lint
+  finds flapping. `[F: v2/lints.json, v2/transport.json]` `[Sc: §1]`
+- **§2.18**, a generator MUST write the transport block, and writes the
+  far end's on request. **§2.19**, a tool MUST report `transport_differs`,
+  `wait_under_lease`, `peer_differs` and `catalog_mismatch` as the
+  fixture does. `[F: v2/transport.json]`
+- **Scenarios §1**, the router running the block, over a relay that
+  counts keep-alives.
+
+**The figures are the corrected ones.** The issue's table gave RF 120 s
+with 2 keep-alives, LoRa SF7 60 s with 2 and SF12 540 s with 2. The
+report as #999 corrected it proposes RF 240 s with 4. The baseline of
+#989 measured that at 5 % loss a `keep_alive` of 2 closes the link at
+every lost keep-alive (LoRa finding 1: 9 of 9). It also measured that
+each reopen costs more air than the keep-alives it saved (LoRa finding
+2). Appendix B gives 240 s with 4 for RF, 120 s with 4 for SF7, 1,080 s
+with 4 for SF12, and zenoh-modem's tuned 3,600 s with 2 for SBD.
+
+**What deliberately did not change.**
+- **`link.v1`** and its fixtures: a `link.v1` policy reads as it did,
+  and its plan is the same.
+- **The core.** No core rule moved. Core §8.1's caller timeout and core
+  §8.5's re-declaring after silence are #988's L4.
+- **The contract side** (frames per face, the packed requirement, the
+  heartbeat's horizon) is #988's L3, which needs #978's F3 and #981's K3
+  to land in `link.v1` first.
+- **The status** is `experimental`: no adopter's mapping lists `link.v2`
+  until zenoh-modem's faces move to it (#988's L5), and the index's
+  "Used by" says so.
+- **The catalog's id** is computed as #980's C1 memo defines it (the
+  first 4 bytes of the sha256 of the document's JCS bytes), since core
+  §8.6 has not landed. §2.19 states it, and will cite §8.6 once it does.
 
 ## 0.10 — 2026-10-30: editorial: round 86's F-332 to F-335, no rule changed (#935)
 

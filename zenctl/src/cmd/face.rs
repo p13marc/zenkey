@@ -1,6 +1,8 @@
 //! `zenctl check face <ROUTER-CONFIG> --face-policy <FILE>` (#769, LB): a
 //! router's configuration against the constrained faces it guards, exit-coded
-//! (`link.v1` §2.15).
+//! (`link.v1` §2.15); for a `link.v2` policy, its transport too, the far
+//! end's (`--peer-config`) and the catalog the far side holds
+//! (`--catalog`, link.v2 §2.19; #988, L2).
 //!
 //! A judgement, so it hangs under `check` (#307), beside `check schema`, the
 //! other one that opens no session. What a router runs is not on the bus
@@ -85,6 +87,16 @@ fn known_windows(
     ))
 }
 
+/// The id of the deployment catalog in `path` (`link.v2` §2.19): a JSON
+/// document, its id the first 4 bytes of the sha256 of its JCS bytes.
+fn catalog_id(path: &std::path::Path) -> Result<String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| unaskable!("--catalog {}: {e}", path.display()))?;
+    let doc: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| unaskable!("--catalog {}: not a JSON document: {e}", path.display()))?;
+    Ok(zenkey_model::link::catalog_id(&doc))
+}
+
 /// `check face`: exit 0 every face guarded as planned, 1 a finding or a
 /// difference from the plan, 2 no verdict.
 pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
@@ -95,6 +107,8 @@ pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
         contracts,
         default_permission,
         window,
+        peer_config,
+        catalog,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
@@ -121,14 +135,32 @@ pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
     if let Some(given) = &windows {
         ASKING.ask(known_windows(given, &plan));
     }
+    // link.v2 §2.19's two asks: a link.v1 policy states no transport and no
+    // catalog, so neither question has a premise there.
+    let v2 = policy.profile == zenkey_model::link::Profile::V2;
+    for (flag, given) in [
+        ("--peer-config", peer_config.is_some()),
+        ("--catalog", catalog.is_some()),
+    ] {
+        if given && !v2 {
+            ASKING.ask(Err::<(), anyhow::Error>(unaskable!(
+                "{flag} needs a link.v2 face policy (`profile = \"link.v2\"`, link.v2 §2.19): \
+                 a link.v1 policy states no transport and no catalog"
+            )));
+        }
+    }
+    let peer = peer_config.as_ref().map(|p| ASKING.ask(acl::load_peer(p)));
+    let held = catalog.as_ref().map(|p| ASKING.ask(catalog_id(p)));
     let observed = ASKING.ask(acl::load_against(&router));
     let report = zenkey_fleet::check_face(
         &plan,
         policy,
-        &observed.acl,
-        &observed.downsampling,
-        observed.gateway.as_ref(),
-        windows.as_ref(),
+        &observed,
+        &zenkey_fleet::FaceAsk {
+            windows: windows.as_ref(),
+            peer: peer.as_ref(),
+            catalog: held.as_deref(),
+        },
         &router.display().to_string(),
     );
     acl::plan_notes(&plan);

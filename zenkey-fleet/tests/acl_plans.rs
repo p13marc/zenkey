@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 
 use zenkey_fleet::report::{AclPermission, AclPlan, Enrollment};
-use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, plan_acl};
+use zenkey_fleet::{AclOptions, ContractSet, RouterConfig, acl_plan_json5, plan_acl};
 use zenkey_model::link;
 
 fn root() -> PathBuf {
@@ -257,28 +257,26 @@ fn radio_under_allow() {
 /// against the face policy `policy` it was compiled from: §2.15's findings,
 /// and the comparison's.
 fn self_check(plan: &AclPlan, policy: &str) -> (Vec<link::Finding>, usize) {
-    let block = acl_plan_json5(plan);
-    let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
-    let acl = serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
-    let ds: Vec<zenkey_fleet::report::DownsamplingDoc> = c
-        .get_json("downsampling")
-        .ok()
-        .and_then(|d| serde_json::from_str(&d).ok())
-        .unwrap_or_default();
-    let gw: Option<serde_json::Value> = c
-        .get_json("gateway")
-        .ok()
-        .and_then(|g| serde_json::from_str(&g).ok());
-    let parsed = link::parse(policy);
-    let report = zenkey_fleet::check_face(
+    check_block(
+        &acl_plan_json5(plan),
         plan,
-        parsed.policy.as_ref().unwrap(),
-        &acl,
-        &ds,
-        gw.as_ref(),
-        None,
-        "self",
-    );
+        policy,
+        &zenkey_fleet::FaceAsk::default(),
+    )
+}
+
+/// [`self_check`] over the block's text as given, a hand edit of what the
+/// generator wrote, with what `ask` asks.
+fn check_block(
+    block: &str,
+    plan: &AclPlan,
+    policy: &str,
+    ask: &zenkey_fleet::FaceAsk<'_>,
+) -> (Vec<link::Finding>, usize) {
+    let config = RouterConfig::from_json5(&format!("{{\n{block}}}")).unwrap();
+    let parsed = link::parse(policy);
+    let report =
+        zenkey_fleet::check_face(plan, parsed.policy.as_ref().unwrap(), &config, ask, "self");
     (report.findings, report.comparison.findings.len())
 }
 
@@ -303,6 +301,129 @@ fn every_face_block_passes_its_own_checks() {
             self_check(&radio_plan(posture), &policy),
             (Vec::new(), 0),
             "radio, {posture:?}"
+        );
+    }
+}
+
+/// `link.v2`'s four media (its Appendix B, `examples/zk2/link/media/`):
+/// the radio example's router over RF, LoRa SF7, LoRa SF12 and SBD, each
+/// with the transport of its medium (#988, L2).
+const MEDIA: [&str; 4] = ["rf", "lora-sf7", "lora-sf12", "sbd"];
+
+fn media_policy(medium: &str) -> String {
+    std::fs::read_to_string(root().join(format!("examples/zk2/link/media/{medium}.face.toml")))
+        .unwrap()
+}
+
+/// The radio example's plan over `medium`'s face policy.
+fn media_plan(medium: &str, default_permission: AclPermission) -> AclPlan {
+    let dir = root().join("examples/zk2/link");
+    let (set, problems) = ContractSet::load_path(&dir.join("radio.v1.toml"));
+    assert!(problems.is_empty(), "{problems:?}");
+    let enrollment: Enrollment =
+        toml::from_str(&std::fs::read_to_string(dir.join("radio.enrollment.toml")).unwrap())
+            .unwrap();
+    plan_acl(
+        &enrollment,
+        &set,
+        &AclOptions {
+            namespace: String::new(),
+            default_permission,
+            face_policy: Some(link::parse(&media_policy(medium))),
+        },
+    )
+    .expect("a medium's policy plans")
+}
+
+/// Each medium's block carries its transport, every key at zenoh's
+/// configuration key with the policy's value, as zenoh's own loader reads
+/// it back (link.v2 §2.18); the far end's block is the same; and `check
+/// face` passes on each in both postures, the far end beside it (§2.19).
+#[test]
+fn link_v2_media_carry_their_transport() {
+    for medium in MEDIA {
+        let policy = media_policy(medium);
+        let plan = media_plan(medium, AclPermission::Deny);
+        let t = plan.transport.expect("a link.v2 policy's transport");
+        let block = acl_plan_json5(&plan);
+        let config = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
+        let far = zenkey_fleet::acl_far_json5(&plan).expect("the far end's block");
+        let far_config = zenoh::Config::from_json5(&format!("{{\n{far}}}"))
+            .unwrap_or_else(|e| panic!("{medium}: zenoh refuses the far end's block: {e}\n{far}"));
+        for k in link::TransportKey::ALL {
+            for (end, c) in [("near", &config), ("far", &far_config)] {
+                let got: serde_json::Value = serde_json::from_str(
+                    &c.get_json(k.path())
+                        .unwrap_or_else(|e| panic!("{medium}: {}: {e}", k.path())),
+                )
+                .unwrap();
+                assert_eq!(got, t.value(k), "{medium}, the {end} end: {}", k.path());
+            }
+        }
+        pinned(&format!("link-v2.{medium}.json5"), &plan);
+        for posture in [AclPermission::Deny, AclPermission::Allow] {
+            assert_eq!(
+                self_check(&media_plan(medium, posture), &policy),
+                (Vec::new(), 0),
+                "{medium}, {posture:?}"
+            );
+        }
+        let peer = link::StatedTransport::read(
+            &RouterConfig::stated_tree(&format!("{{\n{far}}}"), zenkey_fleet::ConfigDialect::Json5)
+                .unwrap(),
+        );
+        let ask = zenkey_fleet::FaceAsk {
+            peer: Some(&peer),
+            ..Default::default()
+        };
+        assert_eq!(
+            check_block(&block, &plan, &policy, &ask),
+            (Vec::new(), 0),
+            "{medium}: the far end runs the router's lease and keep-alives"
+        );
+    }
+}
+
+/// `check face` flags a hand-edited `wait_before_close` below the lease on
+/// every medium: `wait_under_lease` from the file whatever the policy says,
+/// and `transport_differs` at the key, which the comparison names too
+/// (link.v2 §2.19). A far end left at zenoh's defaults is `peer_differs`.
+#[test]
+fn link_v2_check_face_flags_wait_before_close_under_the_lease() {
+    for medium in MEDIA {
+        let policy = media_policy(medium);
+        let plan = media_plan(medium, AclPermission::Deny);
+        let t = plan.transport.unwrap();
+        let block = acl_plan_json5(&plan);
+        let half = block.replace(
+            &format!("wait_before_close: {} ", t.wait_before_close_ms * 1_000),
+            &format!("wait_before_close: {} ", t.lease_ms * 1_000 / 2),
+        );
+        assert_ne!(half, block, "{medium}: the edit applies");
+        let (found, compared) = check_block(&half, &plan, &policy, &Default::default());
+        let codes: Vec<(&str, &str)> = found
+            .iter()
+            .map(|f| (f.code.as_str(), f.at.as_str()))
+            .collect();
+        assert_eq!(
+            codes,
+            [
+                ("transport_differs", "transport.wait_before_close_ms"),
+                ("wait_under_lease", "transport.wait_before_close_ms"),
+            ],
+            "{medium}"
+        );
+        assert_eq!(compared, 1, "{medium}: the comparison's transport_differs");
+        let defaults = link::StatedTransport::default();
+        let ask = zenkey_fleet::FaceAsk {
+            peer: Some(&defaults),
+            ..Default::default()
+        };
+        let (found, _) = check_block(&block, &plan, &policy, &ask);
+        let codes: Vec<&str> = found.iter().map(|f| f.code.as_str()).collect();
+        assert!(
+            codes.contains(&"peer_differs"),
+            "{medium}: a far end at zenoh's 10 s lease: {codes:?}"
         );
     }
 }

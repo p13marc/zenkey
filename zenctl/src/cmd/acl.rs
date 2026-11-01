@@ -41,7 +41,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use zenkey_fleet::report::{AclConfigDoc, AclPermission, DownsamplingDoc};
+use zenkey_fleet::RouterConfig;
+use zenkey_fleet::report::AclPermission;
 
 use crate::bus::Deployment;
 use crate::cmd::zk2;
@@ -105,48 +106,49 @@ pub(crate) fn load_enrollment(path: &Path) -> Result<zenkey_fleet::report::Enrol
     })
 }
 
-/// A router config's blocks, as zenoh's loader parsed them.
-pub(crate) struct Against {
-    pub(crate) acl: AclConfigDoc,
-    /// The `downsampling` items a face's are checked against (`link.v1`
-    /// §2.8); empty when the config has none.
-    pub(crate) downsampling: Vec<DownsamplingDoc>,
-    /// The `gateway` block a south-region face is checked against.
-    pub(crate) gateway: Option<serde_json::Value>,
-}
-
-/// The router config's `access_control`, `downsampling` and `gateway`
-/// blocks, as zenoh's loader parsed them.
-pub(crate) fn load_against(path: &Path) -> Result<Against> {
-    let config = zenoh::Config::from_file(path)
-        .map_err(|e| unaskable!("{}: zenoh refused the config: {e}", path.display()))?;
-    let json = config
-        .get_json("access_control")
-        .map_err(|e| unaskable!("{}: no access_control block: {e}", path.display()))?;
-    let acl = serde_json::from_str(&json).map_err(|e| {
+/// A config file's own text as a JSON tree, once zenoh's loader accepted
+/// it: the keys it *states*, which `link.v2` §2.19 reads apart from the
+/// defaults zenoh fills in. The dialect is the one zenoh 1.10.1's
+/// `Config::from_file` picks by the extension, read with the parser it
+/// used (`zenkey_fleet::ConfigDialect`), so a file zenoh accepts reads here.
+fn stated_tree(path: &Path) -> Result<serde_json::Value> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("{}", path.display()))
+        .map_err(|e| unaskable!("{e:#}"))?;
+    let dialect = zenkey_fleet::ConfigDialect::of_path(path).ok_or_else(|| {
         unaskable!(
-            "{}: access_control does not parse as zenoh 1.10's AclConfig: {e}",
+            "{}: zenoh reads .json, .json5, .yaml, .yml and .toml config files, and this is none",
             path.display()
         )
     })?;
-    let downsampling = match config.get_json("downsampling") {
-        Err(_) => Vec::new(),
-        Ok(d) => serde_json::from_str(&d).map_err(|e| {
-            unaskable!(
-                "{}: downsampling does not parse as zenoh 1.10's DownsamplingItemConf list: {e}",
-                path.display()
-            )
-        })?,
-    };
-    let gateway = config
-        .get_json("gateway")
-        .ok()
-        .and_then(|g| serde_json::from_str(&g).ok());
-    Ok(Against {
-        acl,
-        downsampling,
-        gateway,
+    RouterConfig::stated_tree(&text, dialect).map_err(|e| {
+        unaskable!(
+            "{}: zenoh read this file, but which keys it states could not be read: {e}",
+            path.display()
+        )
     })
+}
+
+/// A config file zenoh's own loader accepts, and its own tree.
+fn load_config(path: &Path) -> Result<(zenoh::Config, serde_json::Value)> {
+    let config = zenoh::Config::from_file(path)
+        .map_err(|e| unaskable!("{}: zenoh refused the config: {e}", path.display()))?;
+    Ok((config, stated_tree(path)?))
+}
+
+/// The router config's `access_control`, `downsampling` and `gateway`
+/// blocks, as zenoh's loader parsed them, and the transport keys it states
+/// (`link.v2` §2.19).
+pub(crate) fn load_against(path: &Path) -> Result<RouterConfig> {
+    let (config, stated) = load_config(path)?;
+    RouterConfig::read(&config, &stated).map_err(|e| unaskable!("{}: {e}", path.display()))
+}
+
+/// The transport keys a far end's config file states (`link.v2` §2.19):
+/// the far router's, or the gateway client's session config.
+pub(crate) fn load_peer(path: &Path) -> Result<zenkey_model::link::StatedTransport> {
+    let (_, stated) = load_config(path)?;
+    Ok(zenkey_model::link::StatedTransport::read(&stated))
 }
 
 /// The plan's warnings and refusals as stderr notes, for the modes that
@@ -221,6 +223,7 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
         against,
         explain,
         face_policy,
+        far_config,
         face,
         attach,
         far,
@@ -260,13 +263,7 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
     if check {
         let against = against.expect("clap: --check requires --against");
         let observed = ASKING.ask(load_against(&against));
-        let report = zenkey_fleet::check_acl(
-            &plan,
-            &observed.acl,
-            &observed.downsampling,
-            observed.gateway.as_ref(),
-            &against.display().to_string(),
-        );
+        let report = zenkey_fleet::check_acl(&plan, &observed, &against.display().to_string());
         plan_notes(&plan);
         crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
         // The library returns a verdict, the command exits with it, and a
@@ -303,7 +300,16 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
         );
     }
 
-    if json5 {
+    if far_config {
+        let far = zenkey_fleet::acl_far_json5(&plan).ok_or_else(|| {
+            unaskable!(
+                "--far-config: the face policy states no transport; a link.v2 policy does \
+                 (`profile = \"link.v2\"` and a `[transport]` table, link.v2 §2.1)"
+            )
+        })?;
+        print!("{far}");
+        plan_notes(&plan);
+    } else if json5 {
         print!("{}", zenkey_fleet::acl_plan_json5(&plan));
         plan_notes(&plan);
     } else {
