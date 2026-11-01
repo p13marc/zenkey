@@ -3556,8 +3556,10 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                        "it has no code.")
          + present(core, "a count c is written as c modulo"), []),
         ("F-431: the glossary's Static rule names §7.6; the 0.75 form gone",
-         missing(readme, "Those are §1's, §7.5's, §7.6's, §9's, the contract rules",
-                 "A rule of any of those sections, §1, §7.5, §7.6 and §9 included, that names a role is that role's")
+         # Re-read under core 0.79 (round 95, #980 C1a): §8.6 joins them.
+         missing(readme, "Those are §1's, §7.5's, §7.6's, §8.6's, §9's, the contract rules",
+                 "A rule of any of those sections, §1, §7.5, §7.6, §8.6 and §9 included, that names a role is that "
+                 "role's")
          + present(readme, "Those are §1's, §7.5's, §9's, the contract rules"), []),
         ("F-432: RULES.md's §7.6 reading entry ends its lead-in with a colon and its list's length; the 0.75 form "
          "gone",
@@ -3566,8 +3568,10 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + present(rules, "MUST refuse it for the first of these that applies, in this order. |"), []),
         ("F-433: the epoch 0 where a deployment states none, and observer §7.3 naming packed, a record its layout "
          "refuses or in no envelope undecodable, its time fields under that epoch; the 0.75 forms gone",
-         missing(core, "so a deployment states it to its writers and readers. One that states none has E = 0, the "
-                       "Unix epoch")
+         # Re-read under core 0.79 (round 95, #980 C1a): the epoch is the
+         # catalog's in force, else 0.
+         missing(core, "Writer and reader each hold it as an input: the epoch of the catalog in force (§8.6). Where "
+                       "none is, E is 0, the Unix epoch")
          + missing(obs, "`jsonschema` (core §7.3's subset) and `packed` (core §7.6), and a `raw` type by its media "
                         "type only.",
                    "One its layout refuses is undecodable, and the tool names the refusal. One that came in no "
@@ -4712,8 +4716,9 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
          # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5 joins the
          # static sections, and §4.2's merge is by the in-band stamp. Under
-         # core 0.75 (round 94, #979 B1): §7.6 joins them too.
-         missing(core, "They are the rules of §1, §7.5, §7.6 and §9 that name no role",
+         # core 0.75 (round 94, #979 B1): §7.6 joins them too, and under
+         # core 0.79 (round 95, #980 C1a) §8.6.
+         missing(core, "They are the rules of §1, §7.5, §7.6, §8.6 and §9 that name no role",
                  "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
                  "so that a caller or tool following the steps would report the contract unavailable",
                  "or at the timeout the caller or tool gave it (§8.1).",
@@ -4750,14 +4755,16 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  # among the static sections, and the glossary's Epoch over
                  # runs, 0.73 having removed the new epoch's MUST. Under core
                  # 0.75 (round 94, #979 B1) the index lists §7.6's too and
-                 # names no section in the sentence.
-                 "§1's, §7.5's, §7.6's and §9's.",
+                 # names no section in the sentence; under core 0.79 (round
+                 # 95, #980 C1a) §8.6's too.
+                 "§1's, §7.5's, §7.6's, §8.6's and §9's.",
                  "A rule of those sections that names a role is listed under that role.")
          + missing(readme, "Each new instance writes under a new run",
                    # Re-read under core 0.76 (the mend after round 94):
-                   # F-431's glossary names §7.6 too.
-                   "A rule of any of those sections, §1, §7.5, §7.6 and §9 included, that names a role is that "
-                   "role's")
+                   # F-431's glossary names §7.6 too, and under core 0.79
+                   # (round 95, #980 C1a) §8.6.
+                   "A rule of any of those sections, §1, §7.5, §7.6, §8.6 and §9 included, that names a role is "
+                   "that role's")
          + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
          + present(readme, "With no record of its last stamp, §4.3 requires a fresh zid"), []),
     ]

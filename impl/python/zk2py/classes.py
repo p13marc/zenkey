@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.76), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 94, the mend after #926 part 5 and the
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.79), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 95, the mend after #926 part 5 and the
 mend after round 94).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
@@ -129,6 +129,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._descriptor's run (run_hex), put again before the first write under a new run: _next_inband  "
      "puts it first at the wrap, and a re-mint's first descriptor states its new run (state_pairings §1, §7  "
      "step 3; descriptors family, D002) (round 93, core 0.73)"),
+    # core 0.79 (#980 C1a): the descriptor's catalog.
+    ("owner", "core §3.3", "An owner given a catalog MUST state its id there", NOT_MET,
+     "not yet (round 95, core 0.79): zk2py's owner takes no catalog"),
     ("owner", "core §3.3", "One member is used: an owner SHOULD state", MET,
      "owner.Owner._descriptor's meta.zid, unless a test turns it off (state_zid)"),
     ("owner", "core §3.3", "An owner SHOULD write `meta.zid` as zenoh writes", MET,
@@ -298,6 +301,11 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("consumer", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
      "a zk2py consumer is an owner.Owner service, and the bundles it holds, those of the interfaces it implements, "
      "are each on a complete queryable (live_interop's retrieval); it holds none of an interface it only requires"),
+    # core 0.78 (#980 C1b): keys across a face.
+    ("consumer", "core §8.5", "A consumer across a constrained face SHOULD subscribe to each concrete", NOT_MET,
+     "not yet (round 95, core 0.78): constrained.md §7 not run"),
+    ("consumer", "core §8.5", "A consumer across a constrained face SHOULD NOT use a selector wider", NOT_MET,
+     "not yet (round 95, core 0.78): constrained.md §7 not run"),
     ("consumer", "core §11.1", "History (§2.5): a consumer's advanced subscriber MUST NOT", NA,
      "zk2py's consumers declare no advanced subscriber (budget_scenarios §3's, a measurement, declares no detection token)"),
     # -- caller --------------------------------------------------------------------------
@@ -354,6 +362,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "live's contract store), whose two attempts go through live._answers (core 0.68, F-387)"),
     ("observer", "core §8.4", "A caller or tool MUST NOT depend on the encoding", MET,
      "live.retrieve_bundle verifies the hash, never the encoding, for every tool (core 0.68, F-387)"),
+    # core 0.79 (#980 C1a): a reader resolving a named id.
+    ("observer", "core §8.6", "A reader MUST refuse each of these", NOT_MET,
+     "not yet (round 95, core 0.79): zk2py reads no catalog"),
     ("observer", "core §11.1", "A generator MUST refuse an input that binds", MET,
      "acl.Principal binds by one name: no input can bind one by both"),
     ("observer", "core §11.1", "Under `deny`, a generator MUST NOT compile an", MET,
@@ -460,6 +471,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "(decoding.sniff), never bytes as text, and drops no sample (observer_scenarios; readings)"),
     ("observer", "observer §7.4", "A tool SHOULD check the limit at start", MET,
      "live.memlock_said, at the start of timing_tool, arbitration_tool and echo_tool (round 89)"),
+    # observer 0.18 (#980 C1b): a tool's half of core §8.5.
+    ("observer", "observer §7.5", "A tool across a constrained face SHOULD subscribe as core §8.5 says", NOT_MET,
+     "not yet (round 95, observer 0.18): constrained.md §7 not run"),
     # -- static --------------------------------------------------------------------------
     ("static", "core §1.1", "An implementation MUST refuse to build one, and", MET,
      "keys family"),
@@ -537,6 +551,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "(round 94, core 0.75)"),
     ("static", "core §7.6", "That rest MUST hold at least one bit", MET,
      "packed.Record.read (packed family: Grow's 0b and 0bb0, Link reading LinkV2) (round 94, core 0.75)"),
+    # core 0.79 (#980 C1a): §8.6's three static rules.
+    ("static", "core §8.6", "An implementation that reads a catalog MUST refuse it, naming the refusal", NOT_MET,
+     "not yet (round 95, core 0.79): zk2py reads no catalog"),
+    ("static", "core §8.6", "An implementation MUST compute it so", NOT_MET,
+     "not yet (round 95, core 0.79): zk2py computes no catalog id"),
+    ("static", "core §8.6", "A checker of succession MUST refuse a B that does not succeed A", NOT_MET,
+     "not yet (round 95, core 0.79): zk2py checks no succession"),
     ("static", "core §9.1", "A contract MUST NOT need later TOML", MET,
      "contracts family (the five e000-toml11 cases)"),
     ("static", "core §9.2", "An implementation MUST report, for each fixture, exactly", MET,
@@ -635,8 +656,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §7.3", "`packed:<name>` for a packed one", MET,
      "echo_tool's declared_type names packed:<name>, decoded or not (packed_live rust-py; readings) (observer  "
      "0.16, the mend after round 94)"),
-    # core 0.76 (F-433): stated without a keyword.
-    ("static", "core §7.6", "One that states none has E = 0, the Unix epoch", MET,
+    # core 0.76 (F-433): stated without a keyword. Re-keyed at core 0.79
+    # (#980 C1a): the epoch is the catalog's in force, else 0.
+    ("static", "core §7.6", "Where none is, E is 0, the Unix epoch", MET,
      "Owner.encode_packed under packed.deployment_epoch(Owner.packed_epoch), 0 where none is stated; zenctl  "
      "watch reads zk2py's clock records as now (packed_live py-rust) (core 0.76's F-433)"),
     # core 0.74 (F-415): stated without a keyword; an instance key is no
