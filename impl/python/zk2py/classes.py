@@ -163,13 +163,19 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.enveloped: set_state, delete_state, the re-puts, publish on a stream key and occur on an event  "
      "key, each under zenoh/bytes; an @stream sample keeps its wire (state_pairings §1, §13) (round 93, core  "
      "0.73)"),
+    # core 0.74 (F-417): "A random run (below) meets it. The chance of a
+    # repeat is accepted."
     ("owner", "core §4.3", "An owner MUST NOT write under a run that it", MET,
      "owner.Owner.take_run: the record's counter, durable before any write under it; else a 32-bit draw, drawn  "
-     "again while it equals a run this owner used (state_pairings §7 steps 1, 2); F-417 asks what a draw can  "
-     "promise of another instance's runs (round 93, core 0.73)"),
-    ("owner", "core §4.3", "An owner MUST NOT let that seq wrap", MET,
+     "again while it equals a run this owner used, which meets it (state_pairings §7 steps 1, 2); a record it  "
+     "cannot read is none, a 32-bit draw, the record left as it is (readings) (round 93, core 0.73; core  "
+     "0.74's F-417, the mend after round 93)"),
+    # core 0.74 (F-419, F-420): "its seq for state and events", where 0.73
+    # said "that seq".
+    ("owner", "core §4.3", "An owner MUST NOT let its seq for state and events wrap", MET,
      "owner.Owner._next_inband takes a new run before 16,777,216, its descriptor put first (state_pairings §7  "
-     "step 3) (round 93, core 0.73)"),
+     "step 3); a stream key's seq wraps (state_pairings §13) (round 93, core 0.73; re-keyed at core 0.74,  "
+     "the mend after round 93)"),
     ("owner", "core §4.3", "An owner MUST NOT restart a stream key's seq within a run", MET,
      "owner.Owner._next_stream_inband: each key's seq per run, kept across a step-down and takeover and a  "
      "member's publisher declared again (remove_member) (state_pairings §13 step 3) (round 93, core 0.73)"),
@@ -237,10 +243,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._bring_up (presence_scenarios §1)"),
     ("owner", "core §8.2", "A state's value is not a declaration, so", MET,
      "owner.Owner._put_held before the tokens (presence_scenarios §1)"),
+    # core 0.74 (F-414): a timestamp the owner's session adds, or one the
+    # owner sets where its session would add one anyway, is the SHOULD's.
     ("owner", "core §8.2", "An owner MUST NOT set a Zenoh timestamp on a put or a delete of a data key", MET,
      "owner.Owner: a Zenoh timestamp only on §4.3's table (_table), its session's timestamping off; a test  "
-     "rig's hlc=True or publish(timestamp=) excepted (state_pairings §1 expected 3); F-414 asks what an HLC's  "
-     "stamp is (round 93, core 0.73)"),
+     "rig's publish(timestamp=) excepted (state_pairings §1 expected 3); a test rig's hlc=True is the  "
+     "session's posture, the SHOULD's (round 93, core 0.73; core 0.74's F-414, the mend after round 93)"),
     ("owner", "core §8.2", "The owner's session SHOULD run with timestamping disabled", MET,
      "owner.Owner.open_session writes timestamping/enabled false, a router's too, but for a redundancy.v1  "
      "candidate (redundancy.v1 §2.10) and a test rig's hlc=True (round 93, core 0.73)"),
@@ -574,6 +582,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §8.3", "a tool shows it as a run and a seq, never as a time", MET,
      "zk2c.InBand's text and seed.Mark's, echo_tool's envelope {run, seq}: a run and a seq, never a time  "
      "(round 93, observer 0.15)"),
+    # core 0.74 (F-415): stated without a keyword; an instance key is no
+    # data key, so §8.2's MUST NOT does not bind it.
+    ("owner", "core §3.3", "Each put of it (below) carries a Zenoh timestamp the owner sets", MET,
+     "owner.Owner._declare_instance's first put and _put_descriptor's, each stamped from Owner.mint, on a  "
+     "session without timestamping, the session's zid its id (state_pairings §7 step 3) (core 0.74's F-415, the  "
+     "mend after round 93)"),
 ]
 
 
