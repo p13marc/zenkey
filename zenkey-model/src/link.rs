@@ -1,5 +1,6 @@
 //! `link.v1`: what crosses a constrained face
-//! (`spec/profiles/link/v1.md`, #769).
+//! (`spec/profiles/link/v1.md`, #769), and `link.v2`: the transport it runs
+//! (`spec/profiles/link/v2.md`, #988 L1).
 //!
 //! The profile's session-free half: the exposure a contract gives a
 //! resource (§2.2), the face policy a deployment writes and its lints
@@ -26,6 +27,22 @@
 //! into a router's configuration (`zenkey-fleet`'s `acl gen`), and a tool
 //! reads a block somebody says the router runs. The deployment's services
 //! and the contracts come in as values.
+//!
+//! **`link.v2`** (#988 L1) is read by the same [`parse`]: a policy whose
+//! `profile` is `"link.v2"` adds the router's [`Transport`] (v2 §2.16), the
+//! [`Binding`] it runs, which names its link protocols (v2 §2.4) and its
+//! defaults (v2 §2.19), the catalog's id, and per face the loss, the ARQ
+//! and the reply timeout (v2 §2.1); one without `profile` is a `link.v1`
+//! policy, read as it was. A v2 face's `batch_bytes` and `lease_ms` are
+//! its `[transport]`'s, so the plan and §2.10 read both profiles alike.
+//!
+//! ```text
+//! Transport::value(key)             ─▶ the value a generator writes at zenoh's key
+//! StatedTransport::read(config)     ─▶ the keys a router's configuration states
+//! check_transport(policy, router,
+//!                 peer)             ─▶ transport_differs, wait_under_lease, peer_differs
+//! check_catalog(policy, held)       ─▶ catalog_mismatch
+//! ```
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -55,6 +72,9 @@ pub const EXPOSURE: &str = "link.exposure";
 /// in place of core Appendix D's interim row (core 0.29).
 pub const VOCABULARY: &[&str] = &["exposure"];
 
+/// `link.v2`'s id, as a face policy's `profile` names it (v2 §2.1).
+pub const PROFILE_V2: &str = "link.v2";
+
 /// zenoh's transport lease, `transport.link.tx.lease`, when a face policy
 /// gives none (§2.1).
 pub const DEFAULT_LEASE_MS: u64 = 10_000;
@@ -63,8 +83,9 @@ pub const DEFAULT_LEASE_MS: u64 = 10_000;
 pub const DEFAULT_WINDOW_S: u64 = 60;
 
 /// zenoh 1.10.1's link protocol names (`InterceptorLink`, kebab-case), the
-/// values `select.link_protocols` takes (§2.1).
-pub const LINK_PROTOCOLS: &[&str] = &[
+/// values `select.link_protocols` takes (§2.1); `zm-1.10.2-r1` adds
+/// `unixsock-dgram` after `unixsock-stream` (v2 §2.4).
+const ZENOH_1_10_1_PROTOCOLS: &[&str] = &[
     "tcp",
     "udp",
     "tls",
@@ -72,6 +93,21 @@ pub const LINK_PROTOCOLS: &[&str] = &[
     "serial",
     "unixpipe",
     "unixsock-stream",
+    "vsock",
+    "ws",
+];
+
+/// The fork's `InterceptorLink` (`commons/zenoh-config/src/lib.rs` at
+/// `zm-1.10.2-r1`, lines 320–331), in its order.
+const ZM_1_10_2_R1_PROTOCOLS: &[&str] = &[
+    "tcp",
+    "udp",
+    "tls",
+    "quic",
+    "serial",
+    "unixpipe",
+    "unixsock-stream",
+    "unixsock-dgram",
     "vsock",
     "ws",
 ];
@@ -116,6 +152,323 @@ pub const PUSH_TOKENS: [KindToken; 5] = [
 const MAX_U32: u64 = u32::MAX as u64;
 const MAX_BATCH: u64 = 65_535;
 const MAX_REGION: usize = 32;
+/// `keep_alive`'s bound (v2 §2.1): it keeps `keep_alive_flaps`'s exact
+/// arithmetic small, and no medium runs more.
+const MAX_KEEP_ALIVE: u64 = 255;
+const MAX_LOSS_PPM: u64 = 1_000_000;
+
+// ── link.v2: the profile, the binding, the transport (v2 §2.1, §2.4, §2.16) ─
+
+/// Which text a face policy is read by (v2 §2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Profile {
+    /// No `profile`: `link.v1`, read as its §2.1 says.
+    #[default]
+    V1,
+    /// `profile = "link.v2"`.
+    V2,
+}
+
+impl Profile {
+    /// The profile's id.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V1 => PROFILE,
+            Self::V2 => PROFILE_V2,
+        }
+    }
+}
+
+/// The zenoh a near router runs (v2 §2.4): it names the router's link
+/// protocols, and the defaults a configuration that omits a transport key
+/// runs with (v2 §2.19). A `link.v1` policy reads as `zenoh-1.10.1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Binding {
+    /// Stock zenoh 1.10.1.
+    #[default]
+    Zenoh1_10_1,
+    /// `zm-1.10.2-r1`, the fork zenoh-modem builds on.
+    Zm1_10_2R1,
+}
+
+impl Binding {
+    /// Every binding, in the order v2 §2.4 lists them.
+    pub const ALL: [Binding; 2] = [Binding::Zenoh1_10_1, Binding::Zm1_10_2R1];
+
+    /// Its name in a policy.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Zenoh1_10_1 => "zenoh-1.10.1",
+            Self::Zm1_10_2R1 => "zm-1.10.2-r1",
+        }
+    }
+
+    /// The binding a policy's `binding` names, if any.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Binding> {
+        Self::ALL.into_iter().find(|b| b.as_str() == s)
+    }
+
+    /// The closed list of link protocols `select.link_protocols` takes and
+    /// §2.4's narrowing reads, in its order (v2 §2.4).
+    #[must_use]
+    pub fn protocols(self) -> &'static [&'static str] {
+        match self {
+            Self::Zenoh1_10_1 => ZENOH_1_10_1_PROTOCOLS,
+            Self::Zm1_10_2R1 => ZM_1_10_2_R1_PROTOCOLS,
+        }
+    }
+
+    /// What a router of this binding runs for a transport key its
+    /// configuration omits (v2 §2.19; `zenoh-config`'s `defaults.rs`): the
+    /// fork's `wait_before_close` is its lease, 10 s, where 1.10.1's is 5 s.
+    #[must_use]
+    pub fn defaults(self) -> Transport {
+        Transport {
+            lease_ms: 10_000,
+            keep_alive: 4,
+            wait_before_close_ms: match self {
+                Self::Zenoh1_10_1 => 5_000,
+                Self::Zm1_10_2R1 => 10_000,
+            },
+            sequence: Sequence::Bit32,
+            batch_bytes: MAX_BATCH,
+            open_timeout_ms: DEFAULT_TIMEOUT_MS,
+            accept_timeout_ms: DEFAULT_TIMEOUT_MS,
+            interests_timeout_ms: DEFAULT_TIMEOUT_MS,
+        }
+    }
+}
+
+impl fmt::Display for Binding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for Binding {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+/// zenoh 1.10.1's `open_timeout`, `accept_timeout` and interests timeout,
+/// in ms: an optional `[transport]` key's default (v2 §2.1).
+pub const DEFAULT_TIMEOUT_MS: u64 = 10_000;
+
+/// The frame sequence number's resolution (v2 §2.16), as zenoh's `Bits`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Sequence {
+    Bit8,
+    Bit16,
+    Bit32,
+    Bit64,
+}
+
+impl Sequence {
+    /// Every resolution.
+    pub const ALL: [Sequence; 4] = [
+        Sequence::Bit8,
+        Sequence::Bit16,
+        Sequence::Bit32,
+        Sequence::Bit64,
+    ];
+
+    /// zenoh's spelling, `"16bit"`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bit8 => "8bit",
+            Self::Bit16 => "16bit",
+            Self::Bit32 => "32bit",
+            Self::Bit64 => "64bit",
+        }
+    }
+
+    /// The resolution a spelling names, if any.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Sequence> {
+        Self::ALL.into_iter().find(|q| q.as_str() == s)
+    }
+
+    /// The window (v2 §2.16): a frame half the mask or more past the last
+    /// one received is dropped as old. zenoh 1.10.1 masks a frame's sequence
+    /// number to 7, 14, 28 and 32 bits (`common/seq_num.rs`, its
+    /// `TransportSn` being 32 bits), so the window is 64, 8,192, 2^27 and
+    /// 2^31 frames.
+    #[must_use]
+    pub fn window(self) -> u64 {
+        match self {
+            Self::Bit8 => 1 << 6,
+            Self::Bit16 => 1 << 13,
+            Self::Bit32 => 1 << 27,
+            Self::Bit64 => 1 << 31,
+        }
+    }
+}
+
+impl Serialize for Sequence {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+/// A near router's transport, `[transport]` (v2 §2.16): zenoh 1.10.1 reads
+/// it once per router, for every link. Every key resolved: an optional
+/// one the policy omits is at its default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Transport {
+    pub lease_ms: u64,
+    pub keep_alive: u64,
+    pub wait_before_close_ms: u64,
+    pub sequence: Sequence,
+    pub batch_bytes: u64,
+    pub open_timeout_ms: u64,
+    pub accept_timeout_ms: u64,
+    pub interests_timeout_ms: u64,
+}
+
+impl Transport {
+    /// The value a generator writes at `key`'s zenoh key (v2 §2.18), in
+    /// zenoh's units: `wait_before_close` in µs, the rest as the policy
+    /// states them.
+    #[must_use]
+    pub fn value(&self, key: TransportKey) -> Value {
+        match key {
+            TransportKey::Lease => Value::from(self.lease_ms),
+            TransportKey::KeepAlive => Value::from(self.keep_alive),
+            TransportKey::WaitBeforeClose => Value::from(self.wait_before_close_ms * 1_000),
+            TransportKey::Sequence => Value::from(self.sequence.as_str()),
+            TransportKey::BatchBytes => Value::from(self.batch_bytes),
+            TransportKey::OpenTimeout => Value::from(self.open_timeout_ms),
+            TransportKey::AcceptTimeout => Value::from(self.accept_timeout_ms),
+            TransportKey::InterestsTimeout => Value::from(self.interests_timeout_ms),
+        }
+    }
+
+    /// The keep-alive interval, `lease_ms` / `keep_alive`, in ms.
+    #[must_use]
+    pub fn keep_alive_interval_ms(&self) -> u64 {
+        self.lease_ms / self.keep_alive.max(1)
+    }
+}
+
+/// One key of `[transport]` (v2 §2.1), with zenoh 1.10.1's configuration
+/// key it is written at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TransportKey {
+    Lease,
+    KeepAlive,
+    WaitBeforeClose,
+    Sequence,
+    BatchBytes,
+    OpenTimeout,
+    AcceptTimeout,
+    InterestsTimeout,
+}
+
+impl TransportKey {
+    /// Every key, in the policy's order (v2 §2.1).
+    pub const ALL: [TransportKey; 8] = [
+        TransportKey::Lease,
+        TransportKey::KeepAlive,
+        TransportKey::WaitBeforeClose,
+        TransportKey::Sequence,
+        TransportKey::BatchBytes,
+        TransportKey::OpenTimeout,
+        TransportKey::AcceptTimeout,
+        TransportKey::InterestsTimeout,
+    ];
+
+    /// The key in `[transport]`.
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Lease => "lease_ms",
+            Self::KeepAlive => "keep_alive",
+            Self::WaitBeforeClose => "wait_before_close_ms",
+            Self::Sequence => "sequence",
+            Self::BatchBytes => "batch_bytes",
+            Self::OpenTimeout => "open_timeout_ms",
+            Self::AcceptTimeout => "accept_timeout_ms",
+            Self::InterestsTimeout => "interests_timeout_ms",
+        }
+    }
+
+    /// A finding's `at` for it, `transport.<key>`.
+    #[must_use]
+    pub fn at(self) -> String {
+        format!("transport.{}", self.key())
+    }
+
+    /// zenoh 1.10.1's configuration key, `/`-separated as
+    /// `zenoh::Config::insert_json5` takes it (`zenoh-config`'s `lib.rs`).
+    #[must_use]
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Lease => "transport/link/tx/lease",
+            Self::KeepAlive => "transport/link/tx/keep_alive",
+            Self::WaitBeforeClose => {
+                "transport/link/tx/queue/congestion_control/block/wait_before_close"
+            }
+            Self::Sequence => "transport/link/tx/sequence_number_resolution",
+            Self::BatchBytes => "transport/link/tx/batch_size",
+            Self::OpenTimeout => "transport/unicast/open_timeout",
+            Self::AcceptTimeout => "transport/unicast/accept_timeout",
+            Self::InterestsTimeout => "routing/interests/timeout",
+        }
+    }
+
+    /// The key whose zenoh key is `path`, if any.
+    #[must_use]
+    pub fn of_path(path: &str) -> Option<TransportKey> {
+        Self::ALL.into_iter().find(|k| k.path() == path)
+    }
+}
+
+/// The transport keys a router's configuration states, by zenoh key, as
+/// the file writes them (v2 §2.19): a key it omits is absent, and read at
+/// the binding's default.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StatedTransport(pub BTreeMap<String, Value>);
+
+impl StatedTransport {
+    /// The keys `config`, a router's configuration as a JSON tree, states:
+    /// each of [`TransportKey::ALL`]'s whose path it holds, `null` included,
+    /// since a key written down is the file's choice.
+    #[must_use]
+    pub fn read(config: &Value) -> StatedTransport {
+        let mut out = BTreeMap::new();
+        for k in TransportKey::ALL {
+            let v = k
+                .path()
+                .split('/')
+                .try_fold(config, |node, part| node.get(part));
+            if let Some(v) = v {
+                out.insert(k.path().to_owned(), v.clone());
+            }
+        }
+        StatedTransport(out)
+    }
+
+    /// Whether the configuration states `key`.
+    #[must_use]
+    pub fn states(&self, key: TransportKey) -> bool {
+        self.0.contains_key(key.path())
+    }
+
+    /// What the configuration runs for `key`: its value, or `defaults`'s
+    /// (a binding's, [`Binding::defaults`]).
+    #[must_use]
+    pub fn runs(&self, key: TransportKey, defaults: &Transport) -> Value {
+        self.0
+            .get(key.path())
+            .cloned()
+            .unwrap_or_else(|| defaults.value(key))
+    }
+}
 
 // ── Exposure (§2.2) ──────────────────────────────────────────────────────
 
@@ -376,6 +729,34 @@ pub enum Code {
     /// protocol it is not kept off matches no subject (§2.4, §2.15, 0.4,
     /// F-120).
     NarrowedTooFar,
+    /// A link.v2 policy with no `[transport]` (v2 §2.1).
+    TransportMissing,
+    /// A face's `lease_ms` or `batch_bytes` in a link.v2 policy: they are
+    /// `[transport]`'s (v2 §2.1).
+    MovedField,
+    /// `wait_before_close` below the lease, in a policy or a router's
+    /// configuration (v2 §2.16, §2.19).
+    WaitUnderLease,
+    /// A face's loss makes more than one false close a day likely (v2
+    /// §2.16).
+    KeepAliveFlaps,
+    /// One lease can carry the sequence window in full batches (v2 §2.16).
+    SequenceWindow,
+    /// An open or accept timeout below twice the handshake's air (v2
+    /// §2.16).
+    OpenUnderHandshake,
+    /// A face's reply timeout below 16 full batches' air (v2 §2.1).
+    ReplyTimeoutShort,
+    /// A face whose medium repairs no lost frame (v2 §2.1).
+    NoArq,
+    /// A router's configuration runs a transport key other than the
+    /// policy's (v2 §2.19).
+    TransportDiffers,
+    /// The far end's lease or keep-alive is not the near router's (v2
+    /// §2.19).
+    PeerDiffers,
+    /// The catalog the far side holds is not the policy's (v2 §2.19).
+    CatalogMismatch,
 }
 
 impl Code {
@@ -409,6 +790,17 @@ impl Code {
             Self::FaceSubjectBeyondFace => "face_subject_beyond_face",
             Self::FaceSubjectMisplaced => "face_subject_misplaced",
             Self::NarrowedTooFar => "narrowed_too_far",
+            Self::TransportMissing => "transport_missing",
+            Self::MovedField => "moved_field",
+            Self::WaitUnderLease => "wait_under_lease",
+            Self::KeepAliveFlaps => "keep_alive_flaps",
+            Self::SequenceWindow => "sequence_window",
+            Self::OpenUnderHandshake => "open_under_handshake",
+            Self::ReplyTimeoutShort => "reply_timeout_short",
+            Self::NoArq => "no_arq",
+            Self::TransportDiffers => "transport_differs",
+            Self::PeerDiffers => "peer_differs",
+            Self::CatalogMismatch => "catalog_mismatch",
         }
     }
 
@@ -421,7 +813,13 @@ impl Code {
             | Self::TemplatedExposure
             | Self::CarveOutOverlap
             | Self::IntervalOverHorizon
-            | Self::ExposureDisagrees => Severity::Warning,
+            | Self::ExposureDisagrees
+            | Self::KeepAliveFlaps
+            | Self::SequenceWindow
+            | Self::OpenUnderHandshake
+            | Self::ReplyTimeoutShort
+            | Self::NoArq
+            | Self::PeerDiffers => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -526,10 +924,21 @@ pub struct Face {
     /// Exactly when `expose` is [`Expose::Link`].
     pub interval_s: Option<u64>,
     pub max_outage_s: u64,
+    /// The face's `batch_bytes` in a `link.v1` policy; `[transport]`'s in a
+    /// link.v2 one (v2 §2.10).
     pub batch_bytes: u64,
     pub link_bps: u64,
-    /// [`DEFAULT_LEASE_MS`] when the policy gives none.
+    /// The face's `lease_ms` in a `link.v1` policy, [`DEFAULT_LEASE_MS`]
+    /// when it gives none; `[transport]`'s in a link.v2 one.
     pub lease_ms: u64,
+    /// link.v2's (v2 §2.1): the share of frames the medium loses, in parts
+    /// per million. `None` in a `link.v1` policy, as the next two.
+    pub loss_ppm: Option<u64>,
+    /// link.v2's: whether the medium repairs a lost frame below zenoh.
+    pub arq: Option<bool>,
+    /// link.v2's: how long a caller across the face waits for a reply, the
+    /// deployment's word to every caller.
+    pub reply_timeout_ms: Option<u64>,
 }
 
 impl Face {
@@ -554,14 +963,55 @@ fn within_lease(batch_bytes: u64, link_bps: u64, lease_ms: u64) -> bool {
     u128::from(batch_bytes) * 24_000 <= u128::from(lease_ms) * u128::from(link_bps)
 }
 
-/// A router's face policy (§2.1).
+/// Whether more than one false close a day is expected (v2 §2.16): 2 ×
+/// 86,400 × 1,000 × `keep_alive` × `loss_ppm`^(`keep_alive` − 1) >
+/// `lease_ms` × 10^(6 × (`keep_alive` − 1)), exactly.
+fn flaps(lease_ms: u64, keep_alive: u64, loss_ppm: u64) -> bool {
+    use num_bigint::BigUint;
+    let n = u32::try_from(keep_alive.saturating_sub(1)).unwrap_or(u32::MAX);
+    let lhs = BigUint::from(172_800_000u64) * keep_alive * BigUint::from(loss_ppm).pow(n);
+    let rhs = BigUint::from(lease_ms) * BigUint::from(1_000_000u64).pow(n);
+    lhs > rhs
+}
+
+/// Whether one lease can carry the sequence window in full batches (v2
+/// §2.16): window × 8 × `batch_bytes` × 1,000 ≤ `lease_ms` × `link_bps`.
+fn window_filled(sequence: Sequence, batch_bytes: u64, lease_ms: u64, link_bps: u64) -> bool {
+    u128::from(sequence.window()) * 8 * u128::from(batch_bytes) * 1_000
+        <= u128::from(lease_ms) * u128::from(link_bps)
+}
+
+/// Whether a timeout is below twice the 384-byte handshake's air at
+/// `link_bps` (v2 §2.16): timeout × `link_bps` < 2 × 384 × 8 × 1,000.
+fn under_handshake(timeout_ms: u64, link_bps: u64) -> bool {
+    u128::from(timeout_ms) * u128::from(link_bps) < 6_144_000
+}
+
+/// Whether a reply timeout is below 16 full batches' air (v2 §2.1):
+/// `reply_timeout_ms` × `link_bps` < 16 × 8 × 1,000 × `batch_bytes`.
+fn reply_short(reply_timeout_ms: u64, link_bps: u64, batch_bytes: u64) -> bool {
+    u128::from(reply_timeout_ms) * u128::from(link_bps) < 128_000 * u128::from(batch_bytes)
+}
+
+/// A router's face policy (§2.1; v2 §2.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FacePolicy {
+    /// The text it is read by.
+    pub profile: Profile,
     pub system: String,
     /// The listed services, on `system`.
     pub services: Vec<String>,
     /// The faces, by name.
     pub faces: BTreeMap<String, Face>,
+    /// The zenoh the near router runs (v2 §2.4); a `link.v1` policy's is
+    /// `zenoh-1.10.1`.
+    pub binding: Binding,
+    /// The near router's transport (v2 §2.16): a link.v2 policy's, `None`
+    /// for a `link.v1` one.
+    pub transport: Option<Transport>,
+    /// The catalog's id the far side decodes with (v2 §2.1), when a
+    /// link.v2 policy names one.
+    pub catalog: Option<String>,
 }
 
 impl FacePolicy {
@@ -580,7 +1030,19 @@ pub struct Parsed {
     pub findings: Vec<Finding>,
 }
 
-/// Reads a face policy, and lints it (§2.1).
+const TOP_KEYS_V1: &[&str] = &["system", "services", "face"];
+const TOP_KEYS_V2: &[&str] = &[
+    "profile",
+    "system",
+    "services",
+    "binding",
+    "catalog",
+    "transport",
+    "face",
+];
+
+/// Reads a face policy, and lints it (§2.1): a `link.v1` one when it has
+/// no `profile`, a link.v2 one when its `profile` is `"link.v2"` (v2 §2.1).
 #[must_use]
 pub fn parse(text: &str) -> Parsed {
     let refuse = |f: Finding| Parsed {
@@ -595,8 +1057,22 @@ pub fn parse(text: &str) -> Parsed {
         return refuse(Finding::new(Code::Toml, None, ""));
     }
     let mut out = Vec::new();
+    // Any other `profile` is a wrong value, and the rest is read as a
+    // link.v2 policy, whose key it is (v2 §2.1).
+    let profile = match table.get("profile") {
+        None => Profile::V1,
+        Some(toml::Value::String(s)) if s == PROFILE_V2 => Profile::V2,
+        Some(_) => {
+            out.push(Finding::new(Code::BadValue, None, "profile"));
+            Profile::V2
+        }
+    };
+    let top = match profile {
+        Profile::V1 => TOP_KEYS_V1,
+        Profile::V2 => TOP_KEYS_V2,
+    };
     for k in table.keys() {
-        if !["system", "services", "face"].contains(&k.as_str()) {
+        if !top.contains(&k.as_str()) {
             out.push(Finding::new(Code::UnknownField, None, k.clone()));
         }
     }
@@ -624,6 +1100,54 @@ pub fn parse(text: &str) -> Parsed {
             }
         },
     };
+    // link.v2's top level: the binding, the catalog, the transport.
+    let (binding, catalog, transport) = match profile {
+        Profile::V1 => (Some(Binding::Zenoh1_10_1), None, None),
+        Profile::V2 => {
+            let binding = match table.get("binding") {
+                None => {
+                    out.push(Finding::new(Code::MissingField, None, "binding"));
+                    None
+                }
+                Some(toml::Value::String(s)) => {
+                    let b = Binding::parse(s);
+                    if b.is_none() {
+                        out.push(Finding::new(Code::BadValue, None, "binding"));
+                    }
+                    b
+                }
+                Some(_) => {
+                    out.push(Finding::new(Code::BadValue, None, "binding"));
+                    None
+                }
+            };
+            let catalog = match table.get("catalog") {
+                None => None,
+                Some(toml::Value::String(s)) if is_catalog_id(s) => Some(s.clone()),
+                Some(_) => {
+                    out.push(Finding::new(Code::BadValue, None, "catalog"));
+                    None
+                }
+            };
+            let transport = match table.get("transport") {
+                None => {
+                    out.push(Finding::new(Code::TransportMissing, None, "transport"));
+                    None
+                }
+                Some(toml::Value::Table(t)) => Some(parse_transport(t, &mut out)),
+                Some(_) => {
+                    out.push(Finding::new(Code::BadValue, None, "transport"));
+                    None
+                }
+            };
+            (binding, catalog, transport)
+        }
+    };
+    let ctx = FaceCtx {
+        profile,
+        protocols: binding.map(Binding::protocols),
+        transport: transport.as_ref(),
+    };
     let mut faces = BTreeMap::new();
     match table.get("face") {
         None => out.push(Finding::new(Code::MissingField, None, "face")),
@@ -637,7 +1161,7 @@ pub fn parse(text: &str) -> Parsed {
                 }
                 match v {
                     toml::Value::Table(ft) => {
-                        if let Some(face) = parse_face(name, ft, &mut out) {
+                        if let Some(face) = parse_face(name, ft, &ctx, &mut out) {
                             faces.insert(name.clone(), face);
                         }
                     }
@@ -647,22 +1171,149 @@ pub fn parse(text: &str) -> Parsed {
         }
         Some(_) => out.push(Finding::new(Code::BadValue, None, "face")),
     }
-    shared_protocols(&table, &mut out);
+    if let Some(protocols) = ctx.protocols {
+        shared_protocols(&table, protocols, &mut out);
+    }
     shared_far(&table, &mut out);
     sort_findings(&mut out);
     let policy = if out.iter().any(Finding::is_error) {
         None
     } else {
         Some(FacePolicy {
+            profile,
             system: system.unwrap_or_default(),
             services: services.unwrap_or_default(),
             faces,
+            binding: binding.unwrap_or_default(),
+            transport: transport.as_ref().and_then(TransportDraft::complete),
+            catalog,
         })
     };
     Parsed {
         policy,
         findings: out,
     }
+}
+
+/// A catalog's id: 8 lowercase hex digits (v2 §2.1).
+fn is_catalog_id(s: &str) -> bool {
+    s.len() == 8 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// `[transport]` as read, each key valid or not (`None`), an optional one
+/// the policy omits at its default (v2 §2.1).
+#[derive(Debug, Clone, Default)]
+struct TransportDraft {
+    lease_ms: Option<u64>,
+    keep_alive: Option<u64>,
+    wait_before_close_ms: Option<u64>,
+    sequence: Option<Sequence>,
+    batch_bytes: Option<u64>,
+    open_timeout_ms: Option<u64>,
+    accept_timeout_ms: Option<u64>,
+    interests_timeout_ms: Option<u64>,
+}
+
+impl TransportDraft {
+    fn complete(&self) -> Option<Transport> {
+        Some(Transport {
+            lease_ms: self.lease_ms?,
+            keep_alive: self.keep_alive?,
+            wait_before_close_ms: self.wait_before_close_ms?,
+            sequence: self.sequence?,
+            batch_bytes: self.batch_bytes?,
+            open_timeout_ms: self.open_timeout_ms?,
+            accept_timeout_ms: self.accept_timeout_ms?,
+            interests_timeout_ms: self.interests_timeout_ms?,
+        })
+    }
+}
+
+/// Reads `[transport]` (v2 §2.1), and checks `wait_under_lease` (v2 §2.16)
+/// when both keys it reads are valid.
+fn parse_transport(t: &toml::Table, out: &mut Vec<Finding>) -> TransportDraft {
+    let keys: Vec<&str> = TransportKey::ALL.iter().map(|k| k.key()).collect();
+    for k in t.keys() {
+        if !keys.contains(&k.as_str()) {
+            out.push(Finding::new(
+                Code::UnknownField,
+                None,
+                format!("transport.{k}"),
+            ));
+        }
+    }
+    let mut int = |key: TransportKey, hi: u64, default: Option<u64>| match t.get(key.key()) {
+        None => {
+            if default.is_none() {
+                out.push(Finding::new(Code::MissingField, None, key.at()));
+            }
+            default
+        }
+        Some(v) => {
+            let n = int_in(v, 1, hi);
+            if n.is_none() {
+                out.push(Finding::new(Code::BadValue, None, key.at()));
+            }
+            n
+        }
+    };
+    let mut d = TransportDraft {
+        lease_ms: int(TransportKey::Lease, MAX_U32, None),
+        keep_alive: int(TransportKey::KeepAlive, MAX_KEEP_ALIVE, None),
+        wait_before_close_ms: int(TransportKey::WaitBeforeClose, MAX_U32, None),
+        sequence: None,
+        batch_bytes: int(TransportKey::BatchBytes, MAX_BATCH, Some(MAX_BATCH)),
+        open_timeout_ms: int(TransportKey::OpenTimeout, MAX_U32, Some(DEFAULT_TIMEOUT_MS)),
+        accept_timeout_ms: int(
+            TransportKey::AcceptTimeout,
+            MAX_U32,
+            Some(DEFAULT_TIMEOUT_MS),
+        ),
+        interests_timeout_ms: int(
+            TransportKey::InterestsTimeout,
+            MAX_U32,
+            Some(DEFAULT_TIMEOUT_MS),
+        ),
+    };
+    d.sequence = match t.get(TransportKey::Sequence.key()) {
+        None => {
+            out.push(Finding::new(
+                Code::MissingField,
+                None,
+                TransportKey::Sequence.at(),
+            ));
+            None
+        }
+        Some(toml::Value::String(s)) => {
+            let q = Sequence::parse(s);
+            if q.is_none() {
+                out.push(Finding::new(
+                    Code::BadValue,
+                    None,
+                    TransportKey::Sequence.at(),
+                ));
+            }
+            q
+        }
+        Some(_) => {
+            out.push(Finding::new(
+                Code::BadValue,
+                None,
+                TransportKey::Sequence.at(),
+            ));
+            None
+        }
+    };
+    if let (Some(lease), Some(wbc)) = (d.lease_ms, d.wait_before_close_ms)
+        && wbc < lease
+    {
+        out.push(Finding::new(
+            Code::WaitUnderLease,
+            None,
+            TransportKey::WaitBeforeClose.at(),
+        ));
+    }
+    d
 }
 
 /// An array of plain chunks, none repeated.
@@ -719,15 +1370,49 @@ const FACE_KEYS: &[&str] = &[
     "lease_ms",
 ];
 
-fn parse_face(name: &str, t: &toml::Table, out: &mut Vec<Finding>) -> Option<Face> {
+/// A link.v2 face's keys (v2 §2.1): `link.v1`'s less `batch_bytes` and
+/// `lease_ms`, which are `moved_field`, and the medium's three.
+const FACE_KEYS_V2: &[&str] = &[
+    "far",
+    "attach",
+    "region",
+    "select",
+    "class",
+    "expose",
+    "interval_s",
+    "max_outage_s",
+    "link_bps",
+    "loss_ppm",
+    "arq",
+    "reply_timeout_ms",
+];
+
+/// What a face is read against: its profile, its binding's link protocols
+/// (`None` when the binding is not one: the check is skipped), and a
+/// link.v2 policy's `[transport]`.
+struct FaceCtx<'a> {
+    profile: Profile,
+    protocols: Option<&'static [&'static str]>,
+    transport: Option<&'a TransportDraft>,
+}
+
+fn parse_face(
+    name: &str,
+    t: &toml::Table,
+    ctx: &FaceCtx<'_>,
+    out: &mut Vec<Finding>,
+) -> Option<Face> {
     let at = Some(name);
+    let v2 = ctx.profile == Profile::V2;
     let mut ok = true;
     let mut bad = |out: &mut Vec<Finding>, code: Code, key: &str| {
         out.push(Finding::new(code, at, key));
         ok = false;
     };
     for k in t.keys() {
-        if !FACE_KEYS.contains(&k.as_str()) {
+        if v2 && (k == "batch_bytes" || k == "lease_ms") {
+            bad(out, Code::MovedField, k);
+        } else if !(if v2 { FACE_KEYS_V2 } else { FACE_KEYS }).contains(&k.as_str()) {
             bad(out, Code::UnknownField, k);
         }
     }
@@ -795,7 +1480,13 @@ fn parse_face(name: &str, t: &toml::Table, out: &mut Vec<Finding>) -> Option<Fac
                         bad(out, Code::BadValue, "select.link_protocols");
                         None
                     }
-                    Some(l) if l.iter().any(|p| !LINK_PROTOCOLS.contains(&p.as_str())) => {
+                    // Against the binding's list, when the binding is one
+                    // (v2 §2.4): each key is checked alone.
+                    Some(l)
+                        if ctx.protocols.is_some_and(|known| {
+                            l.iter().any(|p| !known.contains(&p.as_str()))
+                        }) =>
+                    {
                         bad(out, Code::UnknownProtocol, "select.link_protocols");
                         None
                     }
@@ -840,7 +1531,7 @@ fn parse_face(name: &str, t: &toml::Table, out: &mut Vec<Finding>) -> Option<Fac
         (Some(Expose::None), true) => bad(out, Code::BadValue, "interval_s"),
         _ => {}
     }
-    let mut int = |key: &str, hi: u64, required: bool| match t.get(key) {
+    let mut int = |key: &str, lo: u64, hi: u64, required: bool| match t.get(key) {
         None => {
             if required {
                 bad(out, Code::MissingField, key);
@@ -848,17 +1539,63 @@ fn parse_face(name: &str, t: &toml::Table, out: &mut Vec<Finding>) -> Option<Fac
             None
         }
         Some(v) => {
-            let n = int_in(v, 1, hi);
+            let n = int_in(v, lo, hi);
             if n.is_none() {
                 bad(out, Code::BadValue, key);
             }
             n
         }
     };
-    let max_outage_s = int("max_outage_s", MAX_U32, true);
-    let batch_bytes = int("batch_bytes", MAX_BATCH, true);
-    let link_bps = int("link_bps", MAX_U32, true);
-    let lease_ms = int("lease_ms", MAX_U32, false);
+    let max_outage_s = int("max_outage_s", 1, MAX_U32, true);
+    let link_bps = int("link_bps", 1, MAX_U32, true);
+    if v2 {
+        let loss_ppm = int("loss_ppm", 0, MAX_LOSS_PPM, true);
+        let reply_timeout_ms = int("reply_timeout_ms", 1, MAX_U32, true);
+        let arq = match t.get("arq") {
+            None => {
+                bad(out, Code::MissingField, "arq");
+                None
+            }
+            Some(toml::Value::Boolean(b)) => Some(*b),
+            Some(_) => {
+                bad(out, Code::BadValue, "arq");
+                None
+            }
+        };
+        face_lints_v2(
+            name,
+            ctx.transport,
+            link_bps,
+            loss_ppm,
+            reply_timeout_ms,
+            arq,
+            out,
+        );
+        if !ok {
+            return None;
+        }
+        let tr = ctx.transport?;
+        return Some(Face {
+            far: far?,
+            attach: if attach? {
+                Attach::SouthRegion { region: region? }
+            } else {
+                Attach::Client
+            },
+            link_protocols: link_protocols?,
+            expose: expose?,
+            interval_s,
+            max_outage_s: max_outage_s?,
+            batch_bytes: tr.batch_bytes?,
+            link_bps: link_bps?,
+            lease_ms: tr.lease_ms?,
+            loss_ppm,
+            arq,
+            reply_timeout_ms,
+        });
+    }
+    let batch_bytes = int("batch_bytes", 1, MAX_BATCH, true);
+    let lease_ms = int("lease_ms", 1, MAX_U32, false);
     // `batch_over_lease` needs these three keys alone, so it is checked
     // whatever else the face holds (§2.1: each key is checked alone).
     let lease = if t.contains_key("lease_ms") {
@@ -892,14 +1629,68 @@ fn parse_face(name: &str, t: &toml::Table, out: &mut Vec<Finding>) -> Option<Fac
         } else {
             DEFAULT_LEASE_MS
         },
+        loss_ppm: None,
+        arq: None,
+        reply_timeout_ms: None,
     })
 }
 
+/// A link.v2 face's checks that read `[transport]` (v2 §2.1, §2.10,
+/// §2.16), each made when the keys it reads are valid, whatever else the
+/// policy holds.
+fn face_lints_v2(
+    name: &str,
+    tr: Option<&TransportDraft>,
+    link_bps: Option<u64>,
+    loss_ppm: Option<u64>,
+    reply_timeout_ms: Option<u64>,
+    arq: Option<bool>,
+    out: &mut Vec<Finding>,
+) {
+    let at = Some(name);
+    let tr = tr.cloned().unwrap_or_default();
+    let mut warn = |code: Code, key: String| out.push(Finding::new(code, at, key));
+    if let (Some(b), Some(bps), Some(l)) = (tr.batch_bytes, link_bps, tr.lease_ms)
+        && !within_lease(b, bps, l)
+    {
+        warn(Code::BatchOverLease, TransportKey::BatchBytes.at());
+    }
+    if let (Some(l), Some(k), Some(p)) = (tr.lease_ms, tr.keep_alive, loss_ppm)
+        && flaps(l, k, p)
+    {
+        warn(Code::KeepAliveFlaps, TransportKey::KeepAlive.at());
+    }
+    if let (Some(q), Some(b), Some(l), Some(bps)) =
+        (tr.sequence, tr.batch_bytes, tr.lease_ms, link_bps)
+        && window_filled(q, b, l, bps)
+    {
+        warn(Code::SequenceWindow, TransportKey::Sequence.at());
+    }
+    for (key, timeout) in [
+        (TransportKey::OpenTimeout, tr.open_timeout_ms),
+        (TransportKey::AcceptTimeout, tr.accept_timeout_ms),
+    ] {
+        if let (Some(t), Some(bps)) = (timeout, link_bps)
+            && under_handshake(t, bps)
+        {
+            warn(Code::OpenUnderHandshake, key.at());
+        }
+    }
+    if let (Some(r), Some(bps), Some(b)) = (reply_timeout_ms, link_bps, tr.batch_bytes)
+        && reply_short(r, bps, b)
+    {
+        warn(Code::ReplyTimeoutShort, "reply_timeout_ms".to_owned());
+    }
+    if arq == Some(false) {
+        warn(Code::NoArq, "arq".to_owned());
+    }
+}
+
 /// `shared_protocol` (§2.14), over every face whose protocol list is one
-/// and names only link protocols of §2.1's list: one naming another is
-/// `unknown_protocol`, a wrong value, and checks that need it are skipped
-/// (§2.1).
-fn shared_protocols(table: &toml::Table, out: &mut Vec<Finding>) {
+/// and names only link protocols of the binding's list: one naming another
+/// is `unknown_protocol`, a wrong value, and checks that need it are
+/// skipped (§2.1).
+fn shared_protocols(table: &toml::Table, known: &[&str], out: &mut Vec<Finding>) {
     let Some(toml::Value::Table(faces)) = table.get("face") else {
         return;
     };
@@ -908,7 +1699,7 @@ fn shared_protocols(table: &toml::Table, out: &mut Vec<Finding>) {
         .filter_map(|(name, v)| {
             let l = protocol_list(v.get("select")?.get("link_protocols")?)?;
             l.iter()
-                .all(|p| LINK_PROTOCOLS.contains(&p.as_str()))
+                .all(|p| known.contains(&p.as_str()))
                 .then_some((name, l))
         })
         .collect();
@@ -948,6 +1739,92 @@ fn shared_far(table: &toml::Table, out: &mut Vec<Finding>) {
         if n > 1 {
             out.push(Finding::new(Code::FarOfTwoFaces, None, far));
         }
+    }
+}
+
+// ── A router's transport (v2 §2.19) ───────────────────────────────────────
+
+/// Whether two transport values say the same (v2 §2.19): integers by
+/// value, anything else as JSON.
+#[must_use]
+pub fn same_value(a: &Value, b: &Value) -> bool {
+    match (a.as_u64(), b.as_u64()) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// Checks a router's configuration against a link.v2 policy's transport,
+/// and the far end's against it (v2 §2.19): `router` and `peer` are the
+/// keys each configuration states, a key it omits read at the binding's
+/// default.
+/// - `transport_differs`, each key whose router value is not the policy's;
+/// - `wait_under_lease`, the router's `wait_before_close` below its lease,
+///   whatever the policy says;
+/// - `peer_differs`, the far end's lease or `keep_alive` not the router's.
+///
+/// A `link.v1` policy states no transport: nothing to report.
+#[must_use]
+pub fn check_transport(
+    policy: &FacePolicy,
+    router: &StatedTransport,
+    peer: Option<&StatedTransport>,
+) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let Some(planned) = &policy.transport else {
+        return out;
+    };
+    let defaults = policy.binding.defaults();
+    for key in TransportKey::ALL {
+        if !same_value(&planned.value(key), &router.runs(key, &defaults)) {
+            out.push(Finding::new(Code::TransportDiffers, None, key.at()));
+        }
+    }
+    let lease_us = router
+        .runs(TransportKey::Lease, &defaults)
+        .as_u64()
+        .map(|ms| i128::from(ms) * 1_000);
+    let wbc_us = router
+        .runs(TransportKey::WaitBeforeClose, &defaults)
+        .as_i64()
+        .map(i128::from);
+    if let (Some(lease), Some(wbc)) = (lease_us, wbc_us)
+        && wbc < lease
+    {
+        out.push(Finding::new(
+            Code::WaitUnderLease,
+            None,
+            TransportKey::WaitBeforeClose.at(),
+        ));
+    }
+    if let Some(peer) = peer {
+        for key in [TransportKey::Lease, TransportKey::KeepAlive] {
+            if !same_value(&router.runs(key, &defaults), &peer.runs(key, &defaults)) {
+                out.push(Finding::new(Code::PeerDiffers, None, key.at()));
+            }
+        }
+    }
+    sort_findings(&mut out);
+    out
+}
+
+/// The id of a deployment catalog (v2 §2.19): the first 4 bytes of the
+/// sha256 of the document's JCS bytes, as 8 lowercase hex digits, as #980's
+/// C1 defines it for core §8.6.
+#[must_use]
+pub fn catalog_id(document: &Value) -> String {
+    let id = crate::schema::sha256_id(&crate::schema::jcs(document));
+    id.trim_start_matches("sha256:")[..8].to_owned()
+}
+
+/// `catalog_mismatch` (v2 §2.19): the id of the catalog the far side holds,
+/// `held`, is not the policy's, or the policy names none.
+#[must_use]
+pub fn check_catalog(policy: &FacePolicy, held: &str) -> Vec<Finding> {
+    if policy.catalog.as_deref() == Some(held) {
+        Vec::new()
+    } else {
+        vec![Finding::new(Code::CatalogMismatch, None, "catalog")]
     }
 }
 
@@ -1141,6 +2018,10 @@ pub struct FacePlan {
     pub downsampling: Option<Downsampling>,
     pub windows: Vec<Window>,
     pub liveness: Vec<Liveness>,
+    /// A link.v2 face's reply timeout, the deployment's word to every
+    /// caller across it (v2 §2.18); absent for a `link.v1` face.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_timeout_ms: Option<u64>,
     pub findings: Vec<Finding>,
 }
 
@@ -1382,6 +2263,7 @@ fn plan_face(
         downsampling,
         windows,
         liveness,
+        reply_timeout_ms: face.reply_timeout_ms,
         findings,
     }
 }
@@ -1948,8 +2830,15 @@ pub fn check_narrowing(policy: &FacePolicy, block: &BlockSubjects) -> Vec<Findin
     }
     let mut bare_names: BTreeSet<&str> = BTreeSet::new();
     for (name, kind) in names {
-        let kept: Vec<String> = narrowed(policy, |f| policy.faces[f].far == name)
-            .unwrap_or_else(|| LINK_PROTOCOLS.iter().map(|p| (*p).to_owned()).collect());
+        let kept: Vec<String> =
+            narrowed(policy, |f| policy.faces[f].far == name).unwrap_or_else(|| {
+                policy
+                    .binding
+                    .protocols()
+                    .iter()
+                    .map(|p| (*p).to_owned())
+                    .collect()
+            });
         let bare = kept.iter().any(|p| {
             !block
                 .subjects
@@ -1968,11 +2857,11 @@ pub fn check_narrowing(policy: &FacePolicy, block: &BlockSubjects) -> Vec<Findin
 }
 
 /// The link protocols a subject bound to a principal is selected by, on the
-/// router of `policy` (§2.4): every one of §2.1's closed list outside the
-/// faces whose far principal it is not (`is_far`, by the face's name), in
-/// the list's order. `None` when no face excludes any: the subject names
-/// none. Empty when every protocol is excluded: the principal could
-/// connect over none.
+/// router of `policy` (§2.4): every one of the binding's closed list (v2
+/// §2.4; §2.1's nine for a `link.v1` policy) outside the faces whose far
+/// principal it is not (`is_far`, by the face's name), in the list's order.
+/// `None` when no face excludes any: the subject names none. Empty when
+/// every protocol is excluded: the principal could connect over none.
 #[must_use]
 pub fn narrowed(policy: &FacePolicy, is_far: impl Fn(&str) -> bool) -> Option<Vec<String>> {
     let excluded: BTreeSet<&str> = policy
@@ -1982,7 +2871,9 @@ pub fn narrowed(policy: &FacePolicy, is_far: impl Fn(&str) -> bool) -> Option<Ve
         .flat_map(|(_, f)| f.link_protocols.iter().map(String::as_str))
         .collect();
     (!excluded.is_empty()).then(|| {
-        LINK_PROTOCOLS
+        policy
+            .binding
+            .protocols()
             .iter()
             .filter(|p| !excluded.contains(*p))
             .map(|p| (*p).to_owned())
@@ -2136,6 +3027,9 @@ mod tests {
             batch_bytes: 1,
             link_bps: 1,
             lease_ms: DEFAULT_LEASE_MS,
+            loss_ppm: None,
+            arq: None,
+            reply_timeout_ms: None,
         }
     }
 
@@ -2144,9 +3038,13 @@ mod tests {
     #[test]
     fn a_subject_is_narrowed_off_the_faces_it_is_not_far_of() {
         let policy = |faces: Vec<(&str, Face)>| FacePolicy {
+            profile: Profile::V1,
             system: "lab".into(),
             services: vec![],
             faces: faces.into_iter().map(|(n, f)| (n.to_owned(), f)).collect(),
+            binding: Binding::Zenoh1_10_1,
+            transport: None,
+            catalog: None,
         };
         let two = policy(vec![
             ("radio", face("ground", &["unixsock-stream"])),
@@ -2171,8 +3069,62 @@ mod tests {
         );
         let one = policy(vec![("radio", face("ground", &["unixsock-stream"]))]);
         assert_eq!(narrowed(&one, |_| true), None);
-        let all = policy(vec![("x", face("x", LINK_PROTOCOLS))]);
+        let all = policy(vec![("x", face("x", Binding::Zenoh1_10_1.protocols()))]);
         assert_eq!(narrowed(&all, |_| false), Some(Vec::new()));
+        // The fork's list keeps `unixsock-dgram`, after `unixsock-stream`
+        // (v2 §2.4).
+        let fork = FacePolicy {
+            binding: Binding::Zm1_10_2R1,
+            ..policy(vec![("radio", face("ground", &["unixsock-stream"]))])
+        };
+        assert_eq!(
+            narrowed(&fork, |_| false).unwrap(),
+            [
+                "tcp",
+                "udp",
+                "tls",
+                "quic",
+                "serial",
+                "unixpipe",
+                "unixsock-dgram",
+                "vsock",
+                "ws"
+            ]
+        );
+    }
+
+    /// `keep_alive_flaps` over v2's Appendix B (v2 §2.16): at 5 % loss,
+    /// 240 s with 4 keep-alives expects 0.36 false closes a day, 120 s with
+    /// 2 expects 144; at no loss 2 never flaps, and 1 always does.
+    #[test]
+    fn the_keep_alive_lint_is_exact() {
+        assert!(!flaps(240_000, 4, 50_000));
+        assert!(!flaps(120_000, 4, 50_000));
+        assert!(!flaps(1_080_000, 4, 50_000));
+        assert!(flaps(120_000, 2, 50_000));
+        assert!(flaps(60_000, 2, 50_000));
+        assert!(!flaps(3_600_000, 2, 0));
+        assert!(flaps(3_600_000, 1, 0));
+        // 2 × 86,400 × 1,000 × 4 × 0.05^3 = lease_ms exactly: not above.
+        assert!(!flaps(86_400, 4, 50_000));
+        assert!(flaps(86_399, 4, 50_000));
+        // The bounds, exactly: 255 keep-alives at 99.9999 % delivery.
+        assert!(flaps(MAX_U32, MAX_KEEP_ALIVE, MAX_LOSS_PPM - 1));
+        assert!(!flaps(MAX_U32, MAX_KEEP_ALIVE, 0));
+    }
+
+    /// The window and the handshake's air (v2 §2.16): RF's 324 full
+    /// batches a lease fit 16 bits' window and not 8 bits'.
+    #[test]
+    fn the_sequence_window_and_the_handshake_are_integer_arithmetic() {
+        assert!(!window_filled(Sequence::Bit16, 222, 240_000, 2_400));
+        assert!(window_filled(Sequence::Bit8, 222, 240_000, 2_400));
+        assert!(under_handshake(10_000, 293));
+        assert!(!under_handshake(40_000, 293));
+        assert!(!under_handshake(2_560, 2_400));
+        assert!(under_handshake(2_559, 2_400));
+        assert!(!reply_short(15_000, 2_400, 222));
+        assert!(reply_short(11_000, 2_400, 222));
     }
 
     /// An empty `link_protocols`, which zenoh 1.10.1 refuses to load, is
