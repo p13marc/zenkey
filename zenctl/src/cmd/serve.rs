@@ -59,26 +59,57 @@ pub(crate) async fn guard_address(
     Ok(())
 }
 
-/// How a mock owner of a governed interface elects (`redundancy.v1`,
-/// #841, RC), when one of `revisions` lists the profile in `uses`: a
-/// reader that holds no liveliness subscriber and no claim, and a watch
-/// session, both of their own in the namespace (§2.5 step 1, §2.7; text
-/// 0.2, F-204). The watch is the runtime's candidate's, which spells
-/// base-relative keys and keeps its own history, so it is a session in the
-/// namespace, never a tool's watch session on the wire (#875). `None` when
-/// nothing is governed, and no session opens.
-pub(crate) async fn elect(
-    dep: &Deployment,
+/// The interfaces of `revisions` that `redundancy.v1` governs: each lists
+/// the profile in `uses` (#841, RC). A mock owner of one is a candidate,
+/// whose session stamps (core §8.2's exception, `redundancy.v1` §2.10).
+pub(crate) fn governed(
     revisions: &[std::sync::Arc<zenkey_fleet::model::catalog::Revision>],
-) -> Result<Option<zenkey::redundancy::RedundancyStartup>> {
-    let governed: Vec<String> = revisions
+) -> Vec<String> {
+    revisions
         .iter()
         .filter(|r| {
             zenkey_model::redundancy::declaration_of(r.contract(), false)
                 != zenkey_model::redundancy::Declaration::NotGoverned
         })
         .map(|r| r.iface().to_string())
-        .collect();
+        .collect()
+}
+
+/// The record `--run-file` names, as the runtime's run store (core §4.3):
+/// each instance's 16-bit run made durable there before it writes. Refused
+/// beside a `governed` interface, whose candidates draw 32-bit runs, as the
+/// runtime refuses it at start, but before any session opens.
+pub(crate) fn run_store(
+    run_file: Option<std::path::PathBuf>,
+    governed: &[String],
+) -> Result<Option<std::sync::Arc<dyn zenkey::run::RunStore>>> {
+    let Some(path) = run_file else {
+        return Ok(None);
+    };
+    if !governed.is_empty() {
+        return Err(unaskable!(
+            "--run-file: redundancy.v1 governs {}, and a candidate draws a random 32-bit run at \
+             each start (core §4.3), so it keeps no run record",
+            governed.join(", ")
+        ));
+    }
+    Ok(Some(std::sync::Arc::new(zenkey::run::FileRunStore::new(
+        path,
+    ))))
+}
+
+/// How a mock owner of a governed interface elects (`redundancy.v1`,
+/// #841, RC), when `governed` names one: a reader that holds no liveliness
+/// subscriber and no claim, and a watch session, both of their own in the
+/// namespace (§2.5 step 1, §2.7; text 0.2, F-204). The watch is the
+/// runtime's candidate's, which spells base-relative keys and keeps its
+/// own history, so it is a session in the namespace, never a tool's watch
+/// session on the wire (#875). `None` when nothing is governed, and no
+/// session opens.
+pub(crate) async fn elect(
+    dep: &Deployment,
+    governed: &[String],
+) -> Result<Option<zenkey::redundancy::RedundancyStartup>> {
     if governed.is_empty() {
         return Ok(None);
     }
@@ -136,6 +167,7 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
         seed,
         count,
         for_secs,
+        run_file,
         i_know,
         contracts,
         ns: _,
@@ -191,14 +223,17 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
         }
     };
 
-    // An owner's session, timestamping on as a real owner's is (#825): a
-    // session a retrieval opened above is a reader's, and is not reused.
+    let governed = governed(std::slice::from_ref(&revision));
+    let run_store = run_store(run_file, &governed)?;
+    // An owner's session, timestamping off as an owner's is (core §8.2),
+    // on for a candidate: a session a retrieval opened above is a
+    // reader's, and is not reused.
     if let Some(reader) = session.take() {
         let _ = reader.close().await;
     }
-    let session = dep.owner_session().await?;
+    let session = dep.owner_session(!governed.is_empty()).await?;
     guard_address(&session, &address, &dep, i_know).await?;
-    let elect = elect(&dep, std::slice::from_ref(&revision)).await?;
+    let elect = elect(&dep, &governed).await?;
     let mut served = zenkey_fleet::serve_operation(
         &session,
         ServeSpec {
@@ -209,6 +244,7 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
             bindings,
             tool: "zenctl serve".into(),
             elect,
+            run_store,
         },
     )
     .await?;

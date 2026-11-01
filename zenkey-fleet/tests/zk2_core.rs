@@ -686,9 +686,17 @@ async fn each_kind_decodes_or_renders_honestly() {
         other => panic!("{other:?}"),
     }
 
-    // Protobuf.
+    // Protobuf, under its zk2c envelope (core §4.3, §7.5): the sample's
+    // Encoding is `zenoh/bytes` (§7.2's exception), and its record is read
+    // on the contract's (observer §7.3).
     let (key, enc, payload, _) = sample("stream/objects");
-    assert_eq!(enc, "application/protobuf");
+    assert_eq!(enc, "zenoh/bytes");
+    assert!(
+        zenkey_fleet::model::inband::payload(&key, Some(&enc), &payload)
+            .stamp()
+            .is_some(),
+        "stamped in band"
+    );
     let r = render(&catalog, &store, &key, Member::Type, Some(&enc), &payload);
     match &r.rendered {
         Rendered::Value { declared, value } => {
@@ -697,15 +705,17 @@ async fn each_kind_decodes_or_renders_honestly() {
         }
         other => panic!("{other:?}"),
     }
-    // Bytes that are not their declared type: the type, and the reason.
-    let r = render(
-        &catalog,
-        &store,
-        &key,
-        Member::Type,
-        Some(&enc),
-        &[0xff, 0xff, 0xff],
-    );
+    // A record that is not its declared type: the type, and the reason.
+    let garbage = zenkey_model::wire::Envelope {
+        tag: zenkey_model::wire::Tag::NONE,
+        stamp: zenkey_model::wire::Stamp {
+            run: zenkey_model::wire::Run::U16(0),
+            seq: zenkey_model::wire::Seq::new(1).expect("a seq"),
+        },
+        record: &[0xff, 0xff, 0xff],
+    }
+    .write();
+    let r = render(&catalog, &store, &key, Member::Type, Some(&enc), &garbage);
     assert!(
         matches!(&r.rendered, Rendered::Undecodable { declared, reason }
             if declared == "detections.v1.Objects" && !reason.is_empty()),
@@ -713,9 +723,9 @@ async fn each_kind_decodes_or_renders_honestly() {
         r.rendered
     );
 
-    // JSON.
+    // JSON, under its envelope too.
     let (key, enc, payload, _) = sample("bandwidth/default/eth0");
-    assert_eq!(enc, "application/json");
+    assert_eq!(enc, "zenoh/bytes");
     let r = render(&catalog, &store, &key, Member::Type, Some(&enc), &payload);
     assert_eq!(
         r.rendered,

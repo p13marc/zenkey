@@ -2180,8 +2180,10 @@ fn ndjson_lines(run: &Run) -> Vec<Value> {
 /// descriptor carries the synthetic marker in `meta`, `watch` decodes every
 /// sample through the contract the mock itself serves (§8.4) with no R6
 /// discard and no rung short of a value, and `get state` reads the mock's
-/// own stamp (S1). A second mock at the address is refused — the live half
-/// of the guard `mock-owner.trycmd` cannot reach.
+/// in-band stamp under the run its descriptor states, and on a resource
+/// core §4.3's table lists its own Zenoh timestamp too (S1). A second mock
+/// at the address is refused — the live half of the guard
+/// `mock-owner.trycmd` cannot reach.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn gen_brings_up_a_visible_owner_that_watch_and_get_state_read() {
     let bus = Bus::bare(None).await;
@@ -2216,6 +2218,10 @@ async fn gen_brings_up_a_visible_owner_that_watch_and_get_state_read() {
     let zid = d["meta"]["zid"]
         .as_str()
         .expect("the owner's zid")
+        .to_owned();
+    let stated = d["run"]
+        .as_str()
+        .expect("the descriptor states its run (core §3.3)")
         .to_owned();
 
     let summary_of = |r: &Run| -> Option<Value> {
@@ -2274,9 +2280,37 @@ async fn gen_brings_up_a_visible_owner_that_watch_and_get_state_read() {
     assert_eq!(row["state"], "value", "{run}");
     assert_eq!(row["payload"]["declared"], "json:Namespaces");
     assert_eq!(
+        row["inband"]["run"],
+        stated.as_str(),
+        "stamped in band (S1): {run}"
+    );
+    assert!(
+        row.get("timestamp").is_none(),
+        "off core §4.3's table, the mock's session stamps nothing (§8.2): {run}"
+    );
+    // `interfaces` declares `freshness.ttl_s`: on the table, its reply
+    // carries the mock's own Zenoh timestamp too.
+    let run = bus
+        .until(
+            &[
+                "get",
+                "state",
+                "host-a/tc",
+                "tc.netif.v1",
+                "interfaces/{ns}/{iface}",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0,
+        )
+        .await;
+    exits(&run, 0);
+    let row = &run.json()["rows"][0];
+    assert_eq!(row["inband"]["run"], stated.as_str(), "{run}");
+    assert_eq!(
         u128::from_str_radix(row["timestamp"]["clock"].as_str().expect("a clock"), 16).unwrap(),
         u128::from_str_radix(&zid, 16).unwrap(),
-        "the mock's own stamp (S1)"
+        "the mock's own Zenoh timestamp, on the table (S1)"
     );
 
     let again = bus
@@ -2388,6 +2422,101 @@ async fn serve_answers_a_call_and_logs_it() {
     let summary = stream_rows(&lines, "summary");
     assert_eq!(summary[0]["ended"], "count");
     assert_eq!(summary[0]["calls"], 1);
+}
+
+/// `serve --run-file` (core §4.3, #976): each instance takes the next 16-bit
+/// run from its record, made durable before it writes, and its descriptor
+/// states it (§3.3). A record that does not exist yet starts at run 0; the
+/// next instance takes run 1. Beside an interface `redundancy.v1` governs,
+/// whose candidates draw 32-bit runs, it is refused before any session,
+/// exit 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn serve_with_a_run_file_takes_the_next_run() {
+    let bus = Bus::bare(None).await;
+    let netif = examples().join("tcgui/tc.netif.v1.toml");
+    let netif = netif.to_str().expect("a UTF-8 path").to_owned();
+    let dir = tempfile::tempdir().expect("a directory");
+    let record = dir.path().join("host-a-tc.run");
+    let path = record.to_str().expect("a UTF-8 path").to_owned();
+    for want in ["0000", "0001"] {
+        let serve = bus.spawn(&[
+            "serve",
+            "host-a/tc",
+            "tc.netif.v1",
+            "diagnostics",
+            "--run-file",
+            &path,
+            "--contracts",
+            &netif,
+            "--count",
+            "1",
+            "--for",
+            "40",
+            "--format",
+            "ndjson",
+        ]);
+        let show = bus
+            .until(&["service", "show", "host-a/tc", "--format", "json"], |r| {
+                r.code == 0
+                    && r.json()["rows"][0]["descriptor"]["descriptor"]["run"].as_str() == Some(want)
+            })
+            .await;
+        exits(&show, 0);
+        let n = u16::from_str_radix(want, 16).expect("hex");
+        assert_eq!(
+            std::fs::read(&record).expect("the record"),
+            n.to_be_bytes(),
+            "the record holds the run it issued: {show}"
+        );
+        // One call ends this instance (`--count 1`), before the next starts.
+        let call = bus
+            .until(
+                &[
+                    "call",
+                    "host-a/tc",
+                    "tc.netif.v1",
+                    "diagnostics",
+                    r#"{"namespace": "default", "interface": "eth0"}"#,
+                    "--format",
+                    "json",
+                ],
+                |r| r.code == 0,
+            )
+            .await;
+        exits(&call, 0);
+        let served = serve.await.expect("the serve runner");
+        exits(&served, 0);
+    }
+
+    let governed = scenario_path("steer-governed.v1")
+        .to_str()
+        .expect("a UTF-8 path")
+        .to_owned();
+    let refused = bus
+        .zenctl(&[
+            "gen",
+            "lab/cmd-a",
+            "steer.v1",
+            "--run-file",
+            &path,
+            "--contracts",
+            &governed,
+            "--duration",
+            "1",
+        ])
+        .await;
+    exits(&refused, 2);
+    assert!(
+        refused
+            .stderr
+            .contains("--run-file: redundancy.v1 governs steer.v1"),
+        "{refused}"
+    );
+    assert_eq!(
+        std::fs::read(&record).expect("the record"),
+        [0, 1],
+        "a refusal takes no run"
+    );
 }
 
 /// `record` then `replay --namespace` (FJ8a, the tooling guide's §5): a
@@ -4739,7 +4868,11 @@ async fn check_conform_passes_a_conforming_service() {
         ("payload-type", "stream/bandwidth/{ns}/{iface}"),
         ("payload-type", "state/interfaces/{ns}/{iface}"),
         ("qos", "stream/bandwidth/{ns}/{iface}"),
+        // On core §4.3's table, by the mock's own Zenoh timestamp; off it,
+        // by the in-band stamp alone (S1, S2).
         ("state-stamp", "state/interfaces/{ns}/{iface}"),
+        ("state-stamp", "state/namespaces"),
+        ("state-get", "state/interfaces/{ns}/{iface}"),
         ("state-get", "state/namespaces"),
         ("operation", "@op/diagnostics"),
     ] {
@@ -8263,9 +8396,12 @@ async fn telemetry_across_a_face_with_no_state_opens_after_its_margin() {
 
 /// #825, and a tool's reading of a mock owner's metrics: `gen` brings up an
 /// owner of `zs.snmp.v1`, whose state resources keep history, on a session
-/// with timestamping on, as a real owner's is (it failed at the first such
-/// resource while its session had it off). T reads its Points near it, with
-/// presence: every sample conforms, its kind its tag.
+/// with timestamping off, as an owner's runs (core §8.2). Zenoh's advanced
+/// publisher refuses a cache with neither timestamps nor numbers, so each
+/// history publisher numbers its samples (§2.5): before core 0.73 it
+/// failed at the first such resource on a session without timestamping.
+/// T reads its Points near it, with presence: every sample conforms, its
+/// kind its tag.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn gen_brings_up_an_owner_of_history_resources_and_telemetry_reads_it() {
     let bus = Bus::bare(None).await;

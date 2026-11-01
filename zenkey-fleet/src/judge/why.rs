@@ -853,20 +853,30 @@ impl<'o> Ladder<'o> {
         }
     }
 
-    /// Whose clock stamped `reply`, in words (tooling guide O7).
+    /// What stamped `reply`, in words: its in-band stamp, the owner's run
+    /// and seq, never a time (core §4.3, observer §8.3), and whose clock
+    /// issued its Zenoh timestamp (tooling guide O7).
     fn stamp_words(&self, reply: &KeyReply) -> String {
-        let Some(st) = &reply.stamp else {
-            return "unstamped".to_owned();
-        };
-        let owners = self.owner_zids();
-        let whose = if owners.is_empty() {
-            "unattributable: no descriptor states its session's zid"
-        } else if owners.contains(&zid_value(&st.clock)) {
-            "the owner's own clock"
-        } else {
-            "another clock than the owner's"
-        };
-        format!("stamped {} by {} ({whose})", st.time, st.clock)
+        let inband = reply
+            .inband
+            .map(|s| format!("stamped in band ({})", crate::report::InbandStamp::from(s)));
+        let zenoh = reply.stamp.as_ref().map(|st| {
+            let owners = self.owner_zids();
+            let whose = if owners.is_empty() {
+                "unattributable: no descriptor states its session's zid"
+            } else if owners.contains(&zid_value(&st.clock)) {
+                "the owner's own clock"
+            } else {
+                "another clock than the owner's"
+            };
+            format!("stamped {} by {} ({whose})", st.time, st.clock)
+        });
+        match (inband, zenoh) {
+            (None, None) => "unstamped".to_owned(),
+            (Some(i), None) => i,
+            (None, Some(z)) => z,
+            (Some(i), Some(z)) => format!("{i}, and {z}"),
+        }
     }
 
     /// The reply's value, rendered through the revision in hand.
@@ -1028,6 +1038,7 @@ impl<'o> Ladder<'o> {
                         key: lk.origin.clone(),
                         bytes: lk.value.clone(),
                         encoding: lk.encoding.as_ref().map(ToString::to_string),
+                        inband: lk.inband,
                         stamp: lk.timestamp.as_ref().map(crate::bus::consume::stamp),
                     };
                     let what = if lk.value.is_some() {
@@ -1036,8 +1047,15 @@ impl<'o> Ladder<'o> {
                         "deletion"
                     };
                     let evidence = format!(
-                        "{archive} holds its last-known {what}{}, {}: last-known, never \
+                        "{archive} holds its last-known {what}{}{}, {}: last-known, never \
                          current (S6)",
+                        reply
+                            .inband
+                            .map(|s| format!(
+                                ", stamped in band ({})",
+                                crate::report::InbandStamp::from(s)
+                            ))
+                            .unwrap_or_default(),
                         reply
                             .stamp
                             .as_ref()
@@ -1324,11 +1342,20 @@ mod tests {
 
     const STATUS: &str = "zk2/lab/m/m.v1/state/status/eth0";
 
+    /// The fixtures' in-band stamp: run 0003, seq `seq`.
+    fn inband(seq: u32) -> zenkey_model::wire::Stamp {
+        zenkey_model::wire::Stamp {
+            run: zenkey_model::wire::Run::U16(3),
+            seq: zenkey_model::wire::Seq::new(seq).unwrap(),
+        }
+    }
+
     fn value(bytes: &[u8], clock: &str) -> KeyReply {
         KeyReply {
             key: STATUS.into(),
             bytes: Some(bytes.to_vec()),
             encoding: Some("text/plain".into()),
+            inband: Some(inband(12)),
             stamp: Some(Stamp {
                 time: "2026-10-09T10:00:00.000000000Z".into(),
                 clock: clock.into(),
@@ -1380,6 +1407,28 @@ mod tests {
             format!("{:?}", answer.verdict).contains("the owner's own clock"),
             "a zid compares by value: {answer:?}"
         );
+        assert!(
+            format!("{:?}", answer.verdict).contains("stamped in band (run 0003, seq 12), and"),
+            "the in-band stamp first, never as a time: {answer:?}"
+        );
+        // Off core §4.3's table a reply carries no Zenoh timestamp: its
+        // in-band stamp alone says what stamped it.
+        let mut bare = value(b"up", "AB12");
+        bare.stamp = None;
+        let r = judge(&key_obs(
+            STATUS,
+            presence(Some(descriptor(json!([]), "00ab12")), true),
+            Some(KeyAnswer::State {
+                replies: vec![bare],
+                complete: true,
+            }),
+        ));
+        let answer = format!("{:?}", r.rung(RungId::Answer).unwrap().verdict);
+        assert!(
+            answer.contains("a value of 2 byte(s), stamped in band (run 0003, seq 12)"),
+            "{answer}"
+        );
+        assert!(!answer.contains("clock"), "{answer}");
         assert!(r.value.is_some(), "the value, rendered");
         assert_eq!(
             r.rung(RungId::LastKnown).unwrap().verdict,
@@ -1581,6 +1630,7 @@ mod tests {
                     value: Some(b"down".to_vec()),
                     encoding: None,
                     timestamp: None,
+                    inband: Some(inband(7)),
                     identity: json!({}),
                     confirmed: false,
                 },
@@ -1593,7 +1643,10 @@ mod tests {
             panic!("{r:#?}");
         };
         assert!(
-            reason.contains("last-known: ground/archive holds its last-known value"),
+            reason.contains(
+                "last-known: ground/archive holds its last-known value, stamped in band (run \
+                 0003, seq 7)"
+            ),
             "{reason}"
         );
         assert!(reason.contains("never current"), "{reason}");

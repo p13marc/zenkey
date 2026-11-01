@@ -320,6 +320,7 @@ fn an_owner_read_shows_its_bytes_in_hex() {
                     payload: Box::new(world.check(key, body, "application/json").rendering),
                 },
                 bytes: bytes.map(|b| b.to_vec().into()),
+                inband: None,
                 timestamp: None,
                 confirmed: None,
                 identity: None,

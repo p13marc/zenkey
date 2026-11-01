@@ -231,10 +231,16 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.push(payload_type(rev, r, &name, heard, get));
         report.cases.push(qos(&name, heard));
         if r.kind == Kind::State {
-            report
-                .cases
-                .push(state_stamp(&name, &owners, obs.admin.as_ref(), heard, get));
-            report.cases.push(state_get(&name, get));
+            let table = crate::model::inband::on_the_table(rev.contract(), r);
+            report.cases.push(state_stamp(
+                &name,
+                &owners,
+                obs.admin.as_ref(),
+                heard,
+                get,
+                table,
+            ));
+            report.cases.push(state_get(&name, get, table));
         }
         report
             .cases
@@ -3323,80 +3329,140 @@ fn qos(name: &str, heard: Option<&Result<Heard, String>>) -> ConformCase {
     )
 }
 
-/// S1: every mutation and reply carries the owner's own stamp.
+/// S1: every mutation and reply carries the owner's in-band stamp (core
+/// §4.3), which is the owner's since only the owner writes its payload
+/// (observer §4.4). On a resource §4.3's table lists (`table`), each also
+/// carries a Zenoh timestamp the owner set, its clock the descriptor's
+/// `meta.zid`: there a missing or foreign one is the finding. Off the
+/// table a Zenoh timestamp is a router's, the reader's or none, and is not
+/// judged.
 fn state_stamp(
     name: &str,
     owners: &BTreeSet<String>,
     admin: Option<&Result<AdminSpace, String>>,
     heard: Option<&Result<Heard, String>>,
     get: Option<&Result<StateReport, String>>,
+    table: bool,
 ) -> ConformCase {
     const C: CaseId = CaseId::StateStamp;
-    let mut stamps: Vec<(String, Option<String>)> = Vec::new();
+    type Seen = (String, Option<crate::report::InbandStamp>, Option<String>);
+    let mut stamps: Vec<Seen> = Vec::new();
     if let Some(Ok(h)) = heard {
-        stamps.extend(
-            h.samples
-                .iter()
-                .map(|s| (s.key.clone(), s.timestamp.as_ref().map(|t| t.clock.clone()))),
-        );
+        stamps.extend(h.samples.iter().map(|s| {
+            (
+                s.key.clone(),
+                s.inband.clone(),
+                s.timestamp.as_ref().map(|t| t.clock.clone()),
+            )
+        }));
     }
     if let Some(Ok(g)) = get {
-        stamps.extend(
-            g.rows
-                .iter()
-                .map(|r| (r.key.clone(), r.timestamp.as_ref().map(|t| t.clock.clone()))),
-        );
+        stamps.extend(g.rows.iter().map(|r| {
+            (
+                r.key.clone(),
+                r.inband.clone(),
+                r.timestamp.as_ref().map(|t| t.clock.clone()),
+            )
+        }));
     }
     if stamps.is_empty() {
         return ConformCase::unobservable(C, name, "no mutation and no reply arrived to attribute");
     }
-    if owners.is_empty() {
-        return ConformCase::unobservable(
-            C,
-            name,
-            "no descriptor states its session's zid (`meta.zid`): whose clock is the owner's \
-             cannot be told — unattributable, never foreign",
-        );
+    let bare: Vec<&String> = stamps
+        .iter()
+        .filter(|(_, i, _)| i.is_none())
+        .map(|(k, _, _)| k)
+        .collect();
+    let mut why = Vec::new();
+    if let Some(k) = bare.first() {
+        why.push(format!(
+            "{} with no in-band stamp (e.g. {k}): every state mutation MUST carry its \
+             envelope's run and seq (§4.3)",
+            bare.len()
+        ));
     }
-    let unstamped: Vec<&String> = stamps
-        .iter()
-        .filter(|(_, c)| c.is_none())
-        .map(|(k, _)| k)
-        .collect();
-    let foreign: Vec<(String, String)> = stamps
-        .iter()
-        .filter_map(|(k, c)| {
-            let c = c.as_ref()?;
-            (!owners.contains(&zid_value(c))).then(|| (k.clone(), c.clone()))
-        })
-        .collect();
-    if !unstamped.is_empty() || !foreign.is_empty() {
-        let mut why = Vec::new();
-        if let Some(k) = unstamped.first() {
-            why.push(format!(
-                "{} unstamped (e.g. {k}): every mutation MUST carry a timestamp the owner set",
-                unstamped.len()
-            ));
-        }
-        if let Some((k, c)) = foreign.first() {
-            why.push(format!(
-                "{} stamped by clock {c} (e.g. {k}), not the owner's session",
-                foreign.len()
-            ));
+    if !table {
+        if why.is_empty() {
+            return ConformCase::passed(
+                C,
+                name,
+                format!(
+                    "{} mutation(s) and repl(ies), every one stamped in band by its owner \
+                     ({}); off core §4.3's table, a Zenoh timestamp is a router's or none, \
+                     and is not judged",
+                    stamps.len(),
+                    runs(stamps.iter().filter_map(|(_, i, _)| i.as_ref()))
+                ),
+            );
         }
         return ConformCase::failed(
             C,
             name,
             format!(
-                "of {} mutation(s) and repl(ies), {}; the owner's session is {}",
+                "of {} mutation(s) and repl(ies), {}",
                 stamps.len(),
-                why.join("; "),
-                owners.iter().cloned().collect::<Vec<_>>().join(", ")
+                why.join("; ")
             ),
         );
     }
-    // §4.2 "A tool's S1 check" (0.17): the owner's own stamp passes only
-    // against the routers this run verified.
+    // Core §4.3's table: the owner's Zenoh timestamp beside the in-band
+    // stamp, told by its clock (observer §4.4). A missing one is the
+    // finding whoever's clock the others are on.
+    let unstamped: Vec<&String> = stamps
+        .iter()
+        .filter(|(_, _, c)| c.is_none())
+        .map(|(k, _, _)| k)
+        .collect();
+    if owners.is_empty() && why.is_empty() && unstamped.is_empty() {
+        return ConformCase::unobservable(
+            C,
+            name,
+            "on core §4.3's table, and no descriptor states its session's zid (`meta.zid`): \
+             whose clock is the owner's cannot be told — unattributable, never foreign",
+        );
+    }
+    let foreign: Vec<(String, String)> = stamps
+        .iter()
+        .filter(|_| !owners.is_empty())
+        .filter_map(|(k, _, c)| {
+            let c = c.as_ref()?;
+            (!owners.contains(&zid_value(c))).then(|| (k.clone(), c.clone()))
+        })
+        .collect();
+    if let Some(k) = unstamped.first() {
+        why.push(format!(
+            "{} with no Zenoh timestamp (e.g. {k}): on core §4.3's table every mutation MUST \
+             also carry one the owner set",
+            unstamped.len()
+        ));
+    }
+    if let Some((k, c)) = foreign.first() {
+        why.push(format!(
+            "{} stamped by clock {c} (e.g. {k}), not the owner's session",
+            foreign.len()
+        ));
+    }
+    if !why.is_empty() {
+        let session = if owners.is_empty() {
+            "no descriptor names the owner's session".to_owned()
+        } else {
+            format!(
+                "the owner's session is {}",
+                owners.iter().cloned().collect::<Vec<_>>().join(", ")
+            )
+        };
+        return ConformCase::failed(
+            C,
+            name,
+            format!(
+                "of {} mutation(s) and repl(ies), {}; {session}",
+                stamps.len(),
+                why.join("; "),
+            ),
+        );
+    }
+    // §4.2 "A tool's S1 check" (0.17): the owner's own Zenoh timestamp
+    // passes only against the routers this run verified.
     if let Err(why) = s1_premise(admin, owners) {
         return ConformCase::unobservable(C, name, why);
     }
@@ -3404,9 +3470,11 @@ fn state_stamp(
         C,
         name,
         format!(
-            "{} mutation(s) and repl(ies), every one stamped by the owner's own session, \
-             compared by value, against {} verified router(s)",
+            "{} mutation(s) and repl(ies), every one stamped in band by its owner ({}) and, on \
+             core §4.3's table, by the owner's own session, compared by value, against {} \
+             verified router(s)",
             stamps.len(),
+            runs(stamps.iter().filter_map(|(_, i, _)| i.as_ref())),
             admin
                 .and_then(|a| a.as_ref().ok())
                 .map_or(0, |a| a.routers.len())
@@ -3414,8 +3482,22 @@ fn state_stamp(
     )
 }
 
-/// S2: the owner answers a GET over the resource, each reply stamped.
-fn state_get(name: &str, get: Option<&Result<StateReport, String>>) -> ConformCase {
+/// The runs in-band stamps were written under, in words: `run 0003`, or
+/// `runs 0003, 0004`.
+fn runs<'a>(stamps: impl Iterator<Item = &'a crate::report::InbandStamp>) -> String {
+    let runs: BTreeSet<&str> = stamps.map(|s| s.run.as_str()).collect();
+    let list = runs.iter().copied().collect::<Vec<_>>().join(", ");
+    if runs.len() == 1 {
+        format!("run {list}")
+    } else {
+        format!("runs {list}")
+    }
+}
+
+/// S2: the owner answers a GET over the resource, each reply carrying its
+/// mutation's in-band stamp, and on core §4.3's table (`table`) its Zenoh
+/// timestamp too.
+fn state_get(name: &str, get: Option<&Result<StateReport, String>>, table: bool) -> ConformCase {
     const C: CaseId = CaseId::StateGet;
     let g = match get {
         Some(Ok(g)) => g,
@@ -3438,7 +3520,7 @@ fn state_get(name: &str, get: Option<&Result<StateReport, String>>) -> ConformCa
     let bare: Vec<&str> = g
         .rows
         .iter()
-        .filter(|r| r.timestamp.is_none())
+        .filter(|r| r.inband.is_none())
         .map(|r| r.key.as_str())
         .collect();
     if let Some(first) = bare.first() {
@@ -3446,9 +3528,38 @@ fn state_get(name: &str, get: Option<&Result<StateReport, String>>) -> ConformCa
             C,
             name,
             format!(
-                "{} of {} repl(ies) carry no timestamp (e.g. {first}): a GET reply MUST carry \
-                 the timestamp of the mutation it represents",
+                "{} of {} repl(ies) carry no in-band stamp (e.g. {first}): a GET reply MUST \
+                 carry the in-band stamp of the mutation it represents",
                 bare.len(),
+                g.rows.len()
+            ),
+        );
+    }
+    if table {
+        let untimed: Vec<&str> = g
+            .rows
+            .iter()
+            .filter(|r| r.timestamp.is_none())
+            .map(|r| r.key.as_str())
+            .collect();
+        if let Some(first) = untimed.first() {
+            return ConformCase::failed(
+                C,
+                name,
+                format!(
+                    "{} of {} repl(ies) carry no Zenoh timestamp (e.g. {first}): on core \
+                     §4.3's table, a GET reply MUST carry its mutation's",
+                    untimed.len(),
+                    g.rows.len()
+                ),
+            );
+        }
+        return ConformCase::passed(
+            C,
+            name,
+            format!(
+                "{} repl(ies), each with its mutation's in-band stamp and, on core §4.3's \
+                 table, its Zenoh timestamp",
                 g.rows.len()
             ),
         );
@@ -3457,7 +3568,7 @@ fn state_get(name: &str, get: Option<&Result<StateReport, String>>) -> ConformCa
         C,
         name,
         format!(
-            "{} repl(ies), each with its mutation's timestamp",
+            "{} repl(ies), each with its mutation's in-band stamp",
             g.rows.len()
         ),
     )
@@ -3734,8 +3845,9 @@ mod tests {
     use crate::model::catalog::{DescriptorRead, Observed};
     use crate::model::render::{Member, render_with};
     use crate::report::{
-        CallMode, Judgement, QosAxes, QosMismatch, ReplierView, RepliesView, SelectionPresence,
-        SilenceView, Stamp, StateReading, StateRow, WatchSample, judgement_exit_code,
+        CallMode, InbandStamp, Judgement, QosAxes, QosMismatch, ReplierView, RepliesView,
+        SelectionPresence, SilenceView, Stamp, StateReading, StateRow, WatchSample,
+        judgement_exit_code,
     };
     use serde_json::json;
     use zenkey_model::canonical::Fingerprint;
@@ -3825,12 +3937,21 @@ mod tests {
         })
     }
 
+    /// An in-band stamp of the fixtures' run.
+    fn inband(seq: u32) -> InbandStamp {
+        InbandStamp {
+            run: "0003".into(),
+            seq,
+        }
+    }
+
     fn sample(key: &str, conformance: Conformance, qos: bool, clock: Option<&str>) -> WatchSample {
         let rev = revision();
         WatchSample {
             provider: "lab/m".into(),
             key: key.into(),
             values: BTreeMap::new(),
+            inband: Some(inband(7)),
             timestamp: clock.and_then(stamp),
             qos_mismatch: qos.then(|| QosMismatch {
                 declared: QosAxes {
@@ -3936,6 +4057,7 @@ mod tests {
                     )),
                 },
                 bytes: Some(zenoh::bytes::ZBytes::from(value.to_vec())),
+                inband: Some(inband(9)),
                 timestamp: clock.and_then(stamp),
                 confirmed: None,
                 identity: None,
@@ -4359,6 +4481,90 @@ mod tests {
                 Judgement::NotEstablished { reason } if reason.contains("fanout_forbidden")
             ),
             "{r:#?}"
+        );
+    }
+
+    /// Core §4.3, observer §4.4: off the table, a state's mutations and
+    /// replies pass S1 and S2 on their in-band stamps alone. A router's
+    /// Zenoh timestamp, or none, is not judged, and no verified router is
+    /// needed, since only the owner writes its payload.
+    #[test]
+    fn off_the_table_a_state_passes_on_its_in_band_stamp() {
+        let owners = BTreeSet::from([OWNER.to_owned()]);
+        let name = "state/plan/{dev}";
+        for clock in [None, Some("ffff")] {
+            let g = get(br#"{"up":true}"#, clock);
+            let c = state_stamp(name, &owners, None, None, Some(&g), false);
+            assert!(
+                matches!(&c.verdict, Judgement::NotEstablished { reason }
+                    if reason.contains("stamped in band by its owner (run 0003)")
+                        && reason.contains("not judged")),
+                "{c:#?}"
+            );
+            let c = state_get(name, Some(&g), false);
+            assert!(
+                matches!(&c.verdict, Judgement::NotEstablished { reason }
+                    if reason.contains("each with its mutation's in-band stamp")),
+                "{c:#?}"
+            );
+        }
+        // No descriptor's `meta.zid` is needed either.
+        let g = get(br#"{"up":true}"#, None);
+        let c = state_stamp(name, &BTreeSet::new(), None, None, Some(&g), false);
+        assert!(
+            matches!(c.verdict, Judgement::NotEstablished { .. }),
+            "{c:#?}"
+        );
+    }
+
+    /// S1, S2: a reply with no in-band stamp is the finding, on the table or
+    /// off it; on the table, so is one with no Zenoh timestamp, whoever's
+    /// clock the descriptor names.
+    #[test]
+    fn a_missing_stamp_is_a_finding_and_on_the_table_a_missing_timestamp_too() {
+        let owners = BTreeSet::from([OWNER.to_owned()]);
+        let bare = |clock| {
+            let mut g = get(br#"{"up":true}"#, clock).unwrap();
+            g.rows[0].inband = None;
+            Ok(g)
+        };
+        for table in [false, true] {
+            let g = bare(Some(OWNER));
+            let c = state_stamp(STATUS, &owners, None, None, Some(&g), table);
+            assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+            assert!(
+                c.detail
+                    .as_deref()
+                    .is_some_and(|d| d.contains("with no in-band stamp")),
+                "{c:#?}"
+            );
+            let c = state_get(STATUS, Some(&g), table);
+            assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+            assert!(
+                c.detail
+                    .as_deref()
+                    .is_some_and(|d| d.contains("no in-band stamp")),
+                "{c:#?}"
+            );
+        }
+        let g = get(br#"{"up":true}"#, None);
+        for owners in [owners, BTreeSet::new()] {
+            let c = state_stamp(STATUS, &owners, None, None, Some(&g), true);
+            assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+            assert!(
+                c.detail
+                    .as_deref()
+                    .is_some_and(|d| d.contains("with no Zenoh timestamp")),
+                "{c:#?}"
+            );
+        }
+        let c = state_get(STATUS, Some(&g), true);
+        assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+        assert!(
+            c.detail
+                .as_deref()
+                .is_some_and(|d| d.contains("carry no Zenoh timestamp")),
+            "{c:#?}"
         );
     }
 

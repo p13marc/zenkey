@@ -321,7 +321,11 @@ async fn s12_the_checks_reads_beside_a_router_declaring() {
             .unwrap_or_else(|_| panic!("round {round}: the owner's answer never crossed"))
             .expect("a reply");
         let sample = reply.into_result().expect("the owner's value");
-        assert_eq!(sample.payload().to_bytes().as_ref(), b"go north");
+        // The owner's bytes carry its zk2c envelope (core §4.3, §7.5): the
+        // record is the value.
+        let read = zenkey::inband::read(sample);
+        assert!(read.stamp().is_some(), "stamped in band (S2)");
+        assert_eq!(read.sample().payload().to_bytes().as_ref(), b"go north");
         slowest_get = slowest_get.max(asked.elapsed());
     }
     let churned = churns.load(Ordering::Relaxed);

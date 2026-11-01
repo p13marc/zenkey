@@ -1199,6 +1199,9 @@ Options:
       --for <SECS>
           Stop after this many seconds (default: until interrupted)
 
+      --run-file <PATH>
+          Take the mock owner's runs from this record (core §4.3): 2 bytes, the last 16-bit run issued, each instance's next run made durable there before anything is written under it. A file that does not exist yet starts at run 0. Keep it with the service wherever it runs. Without it, each instance draws a random 32-bit run. Refused (exit 2) beside an interface redundancy.v1 governs, whose candidates draw 32-bit runs
+
       --i-know
           Start beside an instance already running at the address: a second answerer of its operations (P3) and a split-brain on every exclusive resource (spec §6)
 
@@ -1264,7 +1267,7 @@ Options:
 $ zenctl gen --help
 Bring up a mock owner publishing every resource of its contracts.
 
-Contract-driven (#612, FJ8a): a real zk2 service at the address you name (P3, spec §6) — an instance, a descriptor (its `meta` carrying the synthetic marker {"synthetic":true,"tool":…,"seed":…}) and tokens — publishing every stream, state and event resource of each interface through the runtime's writers: the contract's QoS and `Encoding`, the owner's stamp on every state put (S1), a fresh ULID per event (§2.6), events within their declared rate. Every operation answers each call with one synthesized response. Payloads are synthesized from the bundle, deterministic per --seed: JSON Schema values that validate, protobuf messages with every field filled, raw bytes of the media type's size class. The full plan prints BEFORE anything is brought up. An address whose instance token is already present is refused unless --i-know.
+Contract-driven (#612, FJ8a): a real zk2 service at the address you name (P3, spec §6) — an instance, a descriptor (its `meta` carrying the synthetic marker {"synthetic":true,"tool":…,"seed":…}) and tokens — publishing every stream, state and event resource of each interface through the runtime's writers: the contract's QoS and `Encoding`, every value stamped in band under the instance's run (S1, §4.3; runs from --run-file when given), a fresh ULID per event (§2.6), events within their declared rate. Every operation answers each call with one synthesized response. Payloads are synthesized from the bundle, deterministic per --seed: JSON Schema values that validate, protobuf messages with every field filled, raw bytes of the media type's size class. The full plan prints BEFORE anything is brought up. An address whose instance token is already present is refused unless --i-know.
 
 Usage: zenctl gen [OPTIONS] <SYSTEM/SERVICE> [IFACE[@FP]]...
 
@@ -1303,6 +1306,9 @@ Options:
 
       --dry-run
           Print the plan and bring nothing up (no session is opened when --contracts holds every interface)
+
+      --run-file <PATH>
+          Take the mock owner's runs from this record (core §4.3): 2 bytes, the last 16-bit run issued, each instance's next run made durable there before anything is written under it. A file that does not exist yet starts at run 0. Keep it with the service wherever it runs. Without it, each instance draws a random 32-bit run. Refused (exit 2) beside an interface redundancy.v1 governs, whose candidates draw 32-bit runs
 
       --i-know
           Start beside an instance already running at the address: a second writer of its keys (P3) and a split-brain on every exclusive resource (spec §6)

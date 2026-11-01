@@ -8,7 +8,10 @@
 //! exits 2 on it.
 //!
 //! [`Stamp`] is shared with `watch`'s samples: a time is shown with the id
-//! of the clock that issued it (§4.1), the owner's own under S1.
+//! of the clock that issued it (§4.1), the owner's own on a resource core
+//! §4.3's table lists. [`InbandStamp`] is too: the run and seq the owner
+//! wrote in band (§4.3, §7.5), which order its values and carry no time
+//! (observer §8.3).
 //!
 //! A row keeps the reply's bytes beside its rendering (#765), and never
 //! serializes them: the shape is the rendering's, and a byte view (a hex
@@ -79,7 +82,14 @@ pub struct StateRow {
     /// this report's contract. Equality compares the bytes' content.
     #[serde(skip)]
     pub bytes: Option<zenoh::bytes::ZBytes>,
-    /// The mutation's stamp; absent when the reply carried none.
+    /// The mutation's in-band stamp, its envelope's run and seq (core
+    /// §4.3, S1, S2): what orders it. Absent when the reply carried no
+    /// envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inband: Option<InbandStamp>,
+    /// The mutation's Zenoh timestamp: on a resource core §4.3's table
+    /// lists, the owner's (S1). Absent when the reply carried none, as a
+    /// reply off the table does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Stamp>,
     /// Last-known reads only: whether the archive's alignment confirmed
@@ -112,6 +122,34 @@ pub struct Stamp {
     /// owner's own stamp carries its session's (S1); a router's, the
     /// router's.
     pub clock: String,
+}
+
+/// An in-band stamp (core §4.3, §7.5): the owner's run and seq. It orders a
+/// key's values within one run, and has no time: shown as a run and a seq,
+/// never as a time (observer §8.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InbandStamp {
+    /// The run, as the owner's descriptor states it (core §3.3): 4
+    /// lowercase hex digits for a 16-bit run, 8 for a 32-bit one.
+    pub run: String,
+    /// The seq within the run.
+    pub seq: u32,
+}
+
+impl From<zenkey_model::wire::Stamp> for InbandStamp {
+    fn from(s: zenkey_model::wire::Stamp) -> Self {
+        InbandStamp {
+            run: s.run.hex(),
+            seq: s.seq.get(),
+        }
+    }
+}
+
+impl std::fmt::Display for InbandStamp {
+    /// `run 0003, seq 12`: the words every medium shows it in.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "run {}, seq {}", self.run, self.seq)
+    }
 }
 
 #[cfg(test)]
@@ -164,6 +202,10 @@ mod tests {
                     payload: Box::new(payload(key)),
                 },
                 bytes: Some(zenoh::bytes::ZBytes::from(&b"[]"[..])),
+                inband: Some(InbandStamp {
+                    run: "0003".into(),
+                    seq: 12,
+                }),
                 timestamp: Some(Stamp {
                     time: "2026-10-08T12:00:00.000000000Z".into(),
                     clock: "a1b2".into(),
@@ -181,6 +223,7 @@ mod tests {
                 "key": key,
                 "state": "value",
                 "payload": serde_json::to_value(payload(key)).unwrap(),
+                "inband": {"run": "0003", "seq": 12},
                 "timestamp": {"time": "2026-10-08T12:00:00.000000000Z", "clock": "a1b2"},
                 "confirmed": false,
                 "identity": {"iface": "tc.netif.v1"},
@@ -197,6 +240,7 @@ mod tests {
             key: key.into(),
             value: StateValue::Deleted,
             bytes: None,
+            inband: None,
             timestamp: None,
             confirmed: None,
             identity: None,
@@ -208,6 +252,30 @@ mod tests {
         assert_eq!(
             serde_json::to_value(StateReading::Current).unwrap(),
             json!("current")
+        );
+    }
+
+    /// An in-band stamp reads as the descriptor spells its run, 4 or 8
+    /// hex digits, and its seq as a number (core §3.3, §4.3).
+    #[test]
+    fn an_inband_stamp_spells_its_run_as_the_descriptor_does() {
+        use zenkey_model::wire::{Run, Seq, Stamp as Wire};
+        let narrow = InbandStamp::from(Wire {
+            run: Run::U16(0xa1),
+            seq: Seq::new(7).unwrap(),
+        });
+        assert_eq!(
+            serde_json::to_value(&narrow).unwrap(),
+            json!({"run": "00a1", "seq": 7})
+        );
+        assert_eq!(narrow.to_string(), "run 00a1, seq 7");
+        let wide = InbandStamp::from(Wire {
+            run: Run::U32(0xa1),
+            seq: Seq::MAX,
+        });
+        assert_eq!(
+            serde_json::to_value(&wide).unwrap(),
+            json!({"run": "000000a1", "seq": 16_777_215})
         );
     }
 }

@@ -1035,12 +1035,18 @@ async fn s4_an_event_that_must_not_cross() {
 
 /// A late joiner's merge (core §4.2): each member and its stamp.
 #[derive(Default)]
-struct Merged(BTreeMap<String, Option<zenoh::time::Timestamp>>);
+struct Merged(BTreeMap<String, Option<zenkey_model::seed::Mark>>);
 
 impl Merged {
-    fn apply(&mut self, key: &str, kind: SampleKind, stamp: Option<zenoh::time::Timestamp>) {
-        let newer = match (self.0.get(key).copied().flatten(), stamp) {
-            (Some(held), Some(t)) => t > held,
+    /// Keeps `mark`'s sample over what `key` holds when core §4.2's merge
+    /// would: by its in-band stamp, within one run by seq, the later
+    /// arrival across two runs (`zenkey_model::seed::versus`).
+    fn apply(&mut self, key: &str, kind: SampleKind, mark: Option<zenkey_model::seed::Mark>) {
+        let newer = match (self.0.get(key).copied().flatten(), mark) {
+            (Some(held), Some(m)) => matches!(
+                zenkey_model::seed::versus(held, m),
+                zenkey_model::seed::Versus::Newer | zenkey_model::seed::Versus::Unordered
+            ),
             _ => true,
         };
         if !newer {
@@ -1048,7 +1054,7 @@ impl Merged {
         }
         match kind {
             SampleKind::Put => {
-                self.0.insert(key.to_owned(), stamp);
+                self.0.insert(key.to_owned(), mark);
             }
             SampleKind::Delete => {
                 self.0.remove(key);
@@ -1057,7 +1063,7 @@ impl Merged {
     }
 
     /// Seeds as core §4.2 says: subscribed already, GET each granted
-    /// selector over the owner's state, merge by stamp.
+    /// selector over the owner's state, merge by in-band stamp.
     async fn seed(&mut self, g: &zenoh::Session, selectors: &[String]) {
         for sel in selectors {
             let rx = g
@@ -1069,7 +1075,8 @@ impl Merged {
                 .unwrap();
             while let Ok(r) = rx.recv_async().await {
                 if let Ok(s) = r.result() {
-                    self.apply(s.key_expr().as_ref(), s.kind(), s.timestamp().copied());
+                    let mark = zenkey::inband::read(s.clone()).mark();
+                    self.apply(s.key_expr().as_ref(), s.kind(), mark);
                 }
             }
         }

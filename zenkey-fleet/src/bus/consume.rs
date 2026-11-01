@@ -36,7 +36,7 @@ use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sam
 use crate::model::render::{Member, render_with};
 use crate::model::target::Target;
 use crate::report::{
-    Stamp, StateReading, StateReport, StateRow, StateValue, WatchEvent, WatchSample,
+    InbandStamp, Stamp, StateReading, StateReport, StateRow, StateValue, WatchEvent, WatchSample,
 };
 use crate::{Error, Result};
 
@@ -161,11 +161,14 @@ pub async fn get_state_answer(
         .await
         .map_err(|e| runtime("get", &address, e))?;
     let complete = got.complete;
+    let inband = got.inband;
+    let inband_of = |key: &str| inband.get(key).copied().map(InbandStamp::from);
     let mut rows: Vec<StateRow> = got
         .current
         .into_iter()
         .map(|c| match c {
             zenkey::state::Current::Value { key, sample } => StateRow {
+                inband: inband_of(&key),
                 timestamp: sample.timestamp().map(stamp),
                 value: StateValue::Value {
                     payload: Box::new(payload(revision, &key, &sample, Member::Type)),
@@ -178,6 +181,7 @@ pub async fn get_state_answer(
                 identity: None,
             },
             zenkey::state::Current::Deleted { key, timestamp } => StateRow {
+                inband: inband_of(&key),
                 key,
                 value: StateValue::Deleted,
                 bytes: None,
@@ -343,6 +347,7 @@ fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateR
         key: lk.origin.clone(),
         value,
         bytes,
+        inband: lk.inband.map(InbandStamp::from),
         timestamp: lk.timestamp.as_ref().map(stamp),
         confirmed: Some(lk.confirmed),
         identity: Some(lk.identity),
@@ -449,6 +454,7 @@ pub async fn watch(
             );
             let sample = WatchSample {
                 provider: d.provider.to_string(),
+                inband: d.inband.map(InbandStamp::from),
                 timestamp: d.sample.timestamp().map(stamp),
                 qos_mismatch: declared
                     .as_ref()

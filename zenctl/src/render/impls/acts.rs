@@ -366,6 +366,11 @@ impl Render for StateReport {
                 Cell::asked(r.timestamp.as_ref().map(stamp_text)),
             ]);
             let mut more = Vec::new();
+            // An in-band stamp orders and has no time: a run and a seq
+            // (core §4.3, observer §8.3), beside the Zenoh STAMP.
+            if let Some(i) = &r.inband {
+                more.push(format!("  stamped in band: {i}"));
+            }
             if let Some(c) = r.confirmed {
                 more.push(if c {
                     "  confirmed by the archive's alignment".to_owned()
@@ -421,9 +426,13 @@ impl Render for StateReport {
 /// rendering.
 pub fn sample_lines(s: &WatchSample) -> Vec<String> {
     let mut lines = vec![format!(
-        "{}  [{}]{}",
+        "{}  [{}]{}{}",
         s.key,
         s.provider,
+        s.inband
+            .as_ref()
+            .map(|i| format!("  in band {i}"))
+            .unwrap_or_default(),
         s.timestamp
             .as_ref()
             .map(|t| format!("  {}", stamp_text(t)))

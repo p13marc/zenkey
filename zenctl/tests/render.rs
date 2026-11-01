@@ -3637,6 +3637,10 @@ mod actfx {
                 },
                 // Kept beside the rendering, and drawn nowhere (#765).
                 bytes: Some(zenoh::bytes::ZBytes::from(&br#"{"is_up":true}"#[..])),
+                inband: Some(zenkey_fleet::report::InbandStamp {
+                    run: "0003".into(),
+                    seq: 12,
+                }),
                 timestamp: Some(Stamp {
                     time: "2026-10-08T12:00:00.000000000Z".into(),
                     clock: "a1b2c3".into(),
@@ -3648,6 +3652,7 @@ mod actfx {
                 key: gone.into(),
                 value: StateValue::Deleted,
                 bytes: None,
+                inband: None,
                 timestamp: None,
                 confirmed: last_known.then_some(true),
                 identity: None,
@@ -3813,6 +3818,7 @@ fn current_and_last_known_state_never_look_alike() {
 CURRENT state, the owner's answer: tc.netif.v1@sha256:4f534f534f534f53… state/interfaces/{ns}/{iface} at host-a/tc
 KEY                                                      STATE                                 STAMP
 zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0  json:NetworkInterface {"is_up":true}  2026-10-08T12:00:00.000000000Z (clock a1b2c3)
+  stamped in band: run 0003, seq 12
 zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9  deleted                               —
 
 "#]]
@@ -3823,6 +3829,7 @@ zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9  deleted                
 LAST-KNOWN state from archive ground/archive, never current: tc.netif.v1@sha256:4f534f534f534f53… state/interfaces/{ns}/{iface} at host-a/tc
 KEY                                                      STATE                                 STAMP
 zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0  json:NetworkInterface {"is_up":true}  2026-10-08T12:00:00.000000000Z (clock a1b2c3)
+  stamped in band: run 0003, seq 12
   NOT confirmed: alignment has not confirmed this key
 zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9  deleted                               —
   confirmed by the archive's alignment
@@ -3841,6 +3848,18 @@ zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9  deleted                
     assert!(!ndjson(&current).contains("last-known, never current"));
     // A current read keeps no confirmation: absent, not false (O4).
     assert!(!ndjson(&current).contains("confirmed"));
+    // The in-band stamp rides every row that carried one, a run and a seq
+    // (core §4.3, observer §8.3), and is absent from one that did not.
+    let rows: Vec<serde_json::Value> = ndjson(&current)
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).expect("json"))
+        .collect();
+    assert_eq!(
+        rows[0]["inband"],
+        serde_json::json!({"run": "0003", "seq": 12})
+    );
+    assert!(rows[1].get("inband").is_none(), "{}", rows[1]);
     // Silence is no rows and a note, never "no value".
     let silent = actfx::state(StateReading::Current, vec![]);
     assert!(notes(&silent).contains("silence, not \"no value\""));
@@ -3857,6 +3876,7 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         provider: "host-a/tc".into(),
         key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
         values: Default::default(),
+        inband: None,
         timestamp: None,
         event: WatchEvent::Put {
             payload: Box::new(actfx::structural()),
@@ -3882,6 +3902,20 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         ..sample.clone()
     };
     assert!(zenctl::render::sample_lines(&delete)[1].contains("not an empty value"));
+    // An in-band stamp rides the head line as a run and a seq, never a time
+    // (core §4.3, observer §8.3).
+    let stamped = WatchSample {
+        inband: Some(zenkey_fleet::report::InbandStamp {
+            run: "0003".into(),
+            seq: 41,
+        }),
+        ..sample.clone()
+    };
+    assert_eq!(
+        zenctl::render::sample_lines(&stamped)[0],
+        "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  [host-a/tc]  in band run 0003, \
+         seq 41"
+    );
     // A sample that failed its type, off its declared QoS: each its own line,
     // the violation and the axis that differs named.
     let off = WatchSample {

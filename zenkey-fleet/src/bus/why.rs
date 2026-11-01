@@ -94,6 +94,12 @@ pub struct KeyReply {
     /// rendered ([`crate::model::render::render_with`]).
     pub bytes: Option<Vec<u8>>,
     pub encoding: Option<String>,
+    /// Its in-band stamp (core §4.3, §7.5): a put's envelope's, or a
+    /// deletion's attachment's. `None` when it carried no envelope, or one
+    /// refused.
+    pub inband: Option<zenkey_model::wire::Stamp>,
+    /// Its Zenoh timestamp, on a resource core §4.3's table lists the
+    /// owner's.
     pub stamp: Option<Stamp>,
 }
 
@@ -278,6 +284,7 @@ fn reply_of(sample: &zenoh::sample::Sample) -> KeyReply {
         key: sample.key_expr().as_str().to_owned(),
         bytes: (sample.kind() == SampleKind::Put).then(|| sample.payload().to_bytes().to_vec()),
         encoding: (sample.kind() == SampleKind::Put).then(|| sample.encoding().to_string()),
+        inband: crate::model::inband::read(sample.clone()).stamp(),
         stamp: sample.timestamp().map(crate::bus::consume::stamp),
     }
 }

@@ -244,10 +244,13 @@ impl Deployment {
     }
 
     /// A session **in** the namespace that owns keys (#825): a mock
-    /// owner's, `gen`'s and `serve`'s. It timestamps what it puts, as a real
-    /// owner's session does — a resource that declares `history` needs it —
-    /// unless `--zenoh-config` states the setting.
-    pub(crate) async fn owner_session(&self) -> Result<zenoh::Session> {
+    /// owner's, `gen`'s and `serve`'s. It runs with timestamping off, as an
+    /// owner's session SHOULD (core §8.2): the runtime stamps each value in
+    /// band, and sets a Zenoh timestamp only on §4.3's table. A `governed`
+    /// owner, a candidate of an interface `redundancy.v1` governs, has it on
+    /// (that profile's §2.10). `--zenoh-config` stating the setting is
+    /// obeyed either way.
+    pub(crate) async fn owner_session(&self, governed: bool) -> Result<zenoh::Session> {
         let t = &self.link.transport;
         zenkey_fleet::open_owner_in_namespace(
             &self.namespace,
@@ -255,6 +258,7 @@ impl Deployment {
             &t.connect,
             &t.listen,
             t.scouting,
+            governed,
         )
         .await
         .map_err(open_error)

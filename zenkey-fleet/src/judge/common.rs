@@ -37,8 +37,10 @@ pub const EXPANSION_CAP: usize = 3;
 
 // ─── S1 from outside ────────────────────────────────────────────────────────
 
-/// `Ok` when an owner's own stamp proves S1 here, or why it proves nothing
-/// (spec §4.2, "A tool's S1 check", 0.16–0.17). A stamp is clean only
+/// `Ok` when an owner's own Zenoh timestamp, on a resource core §4.3's
+/// table lists, proves S1 here, or why it proves nothing (spec §4.2, "A
+/// tool's S1 check", 0.16–0.17; observer §4.4). An in-band stamp never asks
+/// this: only the owner writes its payload. A stamp is clean only
 /// against the routers a run verified, none of them the owner: an owner
 /// that is its own router stamps with that router's id. `owner` holds the
 /// owner's `meta.zid`, by value. A foreign stamp never asks this: it is the

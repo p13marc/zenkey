@@ -326,10 +326,112 @@ pub fn structural_value(
         .and_then(structural::structural_value)
 }
 
+/// Whether core §4.3's table lists `r`, a resource of `contract`: one whose
+/// owner sets a Zenoh timestamp on each mutation beside its in-band stamp,
+/// and on each reply of a state (S1, S2). A state whose contract declares
+/// `freshness.ttl_s` above 0, a `desired.v1` desired resource, a state that
+/// is a `telemetry.v1` metric resource (its declaration valid, its type not
+/// raw, as the runtime's writer meters it), and a stream that declares a
+/// `timing.v1` lifespan.
+///
+/// The table's two other rows are no contract's to say: a `health.v1`
+/// fault carries one where its owner sets one, and a `redundancy.v1`
+/// candidate's session stamps every put. Off the table, a Zenoh timestamp
+/// is a router's, a reader's own, the owner's session's, or none, and is
+/// never the owner's word (observer §4.4).
+#[must_use]
+pub fn on_the_table(
+    contract: &zenkey_model::contract::Contract,
+    r: &zenkey_model::contract::Resource,
+) -> bool {
+    use zenkey_model::grammar::KindToken;
+    let state = matches!(r.token, KindToken::State | KindToken::ExplicitState);
+    let horizon = matches!(
+        zenkey_model::freshness::horizon_of(r),
+        zenkey_model::freshness::Horizon::Within(_)
+    );
+    let desired = matches!(
+        zenkey_model::desired::declaration_of(r),
+        zenkey_model::desired::Declaration::Declared(_)
+    );
+    let metric = match &r.body {
+        zenkey_model::contract::Body::Data(d) => {
+            matches!(
+                zenkey_model::telemetry::declaration_of(contract, r),
+                zenkey_model::telemetry::Declaration::Declared(_)
+            ) && !matches!(d.type_, zenkey_model::schema::TypeId::Raw { .. })
+        }
+        zenkey_model::contract::Body::Operation(_) => false,
+    };
+    let lifespan = zenkey_model::timing::declaration_of(r)
+        .declared()
+        .is_some_and(|t| t.lifespan.is_some());
+    (state && (horizon || desired || metric)) || lifespan
+}
+
+/// The resource of `contract` a data key names, by its kind token and
+/// template (`None` for a key that is no data key of it).
+#[must_use]
+pub fn resource_of<'c>(
+    contract: &'c zenkey_model::contract::Contract,
+    key: &str,
+) -> Option<&'c zenkey_model::contract::Resource> {
+    let Ok(zenkey_model::grammar::ZkKey::Data { kind, resource, .. }) =
+        zenkey_model::grammar::parse(key)
+    else {
+        return None;
+    };
+    let candidates: Vec<&zenkey_model::contract::Resource> = contract
+        .resources
+        .iter()
+        .filter(|r| r.token == kind)
+        .collect();
+    let refs: Vec<&str> = resource.iter().map(String::as_str).collect();
+    let (i, _) = zenkey_model::template::resolve(candidates.iter().map(|r| &r.template), &refs)?;
+    Some(candidates[i])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+
+    /// Core §4.3's table, read from the contracts that exercise each row: a
+    /// state with a horizon, a desired resource, a state metric resource
+    /// and a lifespan's stream are on it; a plain state, a plain stream, a
+    /// stream metric resource and a stream without a lifespan are not.
+    #[test]
+    fn the_table_lists_what_core_4_3_names() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let load = |rel: &str| {
+            let path = root.join(rel);
+            let text = std::fs::read_to_string(&path).expect("the contract");
+            let l = zenkey_model::contract::load_str(&text, path.parent().unwrap(), None);
+            l.contract.unwrap_or_else(|| panic!("{}", l.report))
+        };
+        let on = |c: &zenkey_model::contract::Contract, key: &str| {
+            on_the_table(c, resource_of(c, key).unwrap_or_else(|| panic!("{key}")))
+        };
+        let netif = load("examples/zk2/tcgui/tc.netif.v1.toml");
+        assert!(on(
+            &netif,
+            "zk2/h/tc/tc.netif.v1/state/interfaces/default/eth0"
+        ));
+        assert!(!on(&netif, "zk2/h/tc/tc.netif.v1/state/namespaces"));
+        assert!(!on(
+            &netif,
+            "zk2/h/tc/tc.netif.v1/stream/bandwidth/default/eth0"
+        ));
+        let plans = load("examples/zk2/walkthrough/mission_plan.v1.toml");
+        assert!(on(&plans, "zk2/g/fm/mission_plan.v1/state/plans/v1"));
+        let meter = load("zenkey/tests/contracts/meter.v1.toml");
+        assert!(on(&meter, "zk2/l/m/meter.v1/state/total"));
+        assert!(!on(&meter, "zk2/l/m/meter.v1/stream/drops"));
+        let pace = load("zenkey/tests/contracts/pace.v1.toml");
+        assert!(on(&pace, "zk2/l/p/pace.v1/stream/cmd"));
+        assert!(!on(&pace, "zk2/l/p/pace.v1/stream/axis/x"));
+        assert!(resource_of(&pace, "zk2/l/p/pace.v1/state/cmd").is_none());
+    }
 
     fn stamp(run: u16, seq: u32) -> Stamp {
         Stamp {

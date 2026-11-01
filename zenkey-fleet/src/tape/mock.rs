@@ -7,8 +7,10 @@
 //! descriptor and its tokens, so `service list`, a consumer and the doctor
 //! all see it, and every sample on its keys is attributable to it. Its
 //! samples go through the runtime's writers, which is what gives them the
-//! contract's QoS and `Encoding`, the owner's stamp on state (S1) and a
-//! fresh ULID per event.
+//! contract's QoS and `Encoding`, each value's in-band stamp under the
+//! instance's run (S1, core §4.3) and a fresh ULID per event. Its runs come
+//! from a record the operator names ([`ServeSpec::run_store`],
+//! `--run-file`), else a random 32-bit draw per instance.
 //!
 //! **The address is the operator's**, and one whose instance token is
 //! already present is refused ([`check_address`]) unless the operator says
@@ -35,6 +37,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use zenkey::operation::OperationServer;
+use zenkey::run::RunStore;
 use zenkey::{Call, Implementation, OpError, ServiceBuilder, ServiceConfig};
 use zenkey_model::contract::{Body, Resource};
 use zenkey_model::grammar::{Addr, IfaceId, ZkKey, parse};
@@ -180,6 +183,22 @@ pub(crate) fn config(
     }
     c.meta.insert("synthetic".to_owned(), marker);
     c
+}
+
+/// A mock owner's builder over `session`, its runs taken from `runs` when
+/// one is given (core §4.3): set at once, before anything the builder
+/// declares can take a run.
+pub(crate) fn builder(
+    session: &Session,
+    config: ServiceConfig,
+    runs: Option<&Arc<dyn RunStore>>,
+) -> Result<ServiceBuilder> {
+    let mut b = ServiceBuilder::new(session, config);
+    if let Some(store) = runs {
+        b.run_store(Arc::clone(store))
+            .map_err(|e| Error::unaskable("--run-file", e.to_string()))?;
+    }
+    Ok(b)
 }
 
 /// The implementation of `revision`, from its bundle's bytes: what the
@@ -393,7 +412,7 @@ pub(crate) fn runtime_error(revision: &Revision, e: zenkey::Error) -> Error {
 }
 
 /// What `serve` serves: one operation of one interface at one address.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServeSpec {
     pub address: Addr,
     pub revision: Arc<Revision>,
@@ -410,6 +429,25 @@ pub struct ServeSpec {
     /// declaring none of its queryables. `None`: a governed interface is
     /// refused at start, as the runtime refuses it.
     pub elect: Option<zenkey::redundancy::RedundancyStartup>,
+    /// Where each instance takes its 16-bit run (core §4.3, `--run-file`).
+    /// `None`: a random 32-bit run per instance. The runtime refuses one
+    /// beside `elect`, since a candidate draws 32-bit runs.
+    pub run_store: Option<Arc<dyn RunStore>>,
+}
+
+impl std::fmt::Debug for ServeSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServeSpec")
+            .field("address", &self.address)
+            .field("revision", &self.revision)
+            .field("operation", &self.operation)
+            .field("answer", &self.answer)
+            .field("bindings", &self.bindings)
+            .field("tool", &self.tool)
+            .field("elect", &self.elect)
+            .field("run_store", &self.run_store.is_some())
+            .finish()
+    }
 }
 
 /// A running `serve`: the mock owner, and the calls it has served.
@@ -439,6 +477,7 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
         bindings,
         tool,
         elect,
+        run_store,
     } = spec;
     check_roles(std::slice::from_ref(&revision), &bindings)?;
     let contract = revision.contract();
@@ -454,10 +493,11 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
         })?;
     let held = capabilities(std::iter::once(chosen));
     let iface = revision.iface().clone();
-    let mut b = ServiceBuilder::new(
+    let mut b = builder(
         session,
         config(&address, held.clone(), &bindings, marker(&tool, None)),
-    );
+        run_store.as_ref(),
+    )?;
     b.implement(implementation(&revision)?)
         .map_err(|e| runtime_error(&revision, e))?;
     let tally = Arc::new(AtomicU64::new(0));

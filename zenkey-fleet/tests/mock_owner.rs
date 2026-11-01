@@ -61,8 +61,9 @@ async fn descriptor(tool: &zenoh::Session, address: &str) -> zenkey_model::descr
 /// `gen` brings up an owner presence lists, with the synthetic marker in its
 /// descriptor; a consumer's subscription decodes every sample through the
 /// contract and discards none (R6); the owner's state GET answers with its
-/// own stamp (S1); and a second mock at the address is refused until the
-/// operator says otherwise.
+/// in-band stamp, under the run its descriptor states (S1, core §4.3), and
+/// off core §4.3's table with no Zenoh timestamp; and a second mock at the
+/// address is refused until the operator says otherwise.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
     let (_router, ep) = router(None).await;
@@ -85,6 +86,7 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
         seed: 7,
         tool: "mock_owner test".into(),
         elect: None,
+        run_store: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let (up, came_up) = tokio::sync::oneshot::channel();
@@ -103,7 +105,10 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
     assert_eq!(d.instance, instance);
     assert_eq!(d.meta["synthetic"]["synthetic"], true, "{:?}", d.meta);
     assert_eq!(d.meta["synthetic"]["seed"], 7);
-    let zid = d.meta["zid"].as_str().expect("the owner's zid").to_owned();
+    let stated = d
+        .run
+        .clone()
+        .expect("the descriptor states its run (core §3.3)");
 
     let target = ResolvedTarget::parse("host-a/tc").unwrap();
     let bw = netif
@@ -146,11 +151,11 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
     .unwrap();
     let row = state.rows.first().expect("the owner answers");
     assert!(matches!(row.value, StateValue::Value { .. }), "{row:?}");
-    let stamp = row.timestamp.as_ref().expect("stamped (S1)");
+    let inband = row.inband.as_ref().expect("stamped in band (S1)");
+    assert_eq!(inband.run, stated, "under the run its descriptor states");
     assert_eq!(
-        u128::from_str_radix(&stamp.clock, 16).unwrap(),
-        u128::from_str_radix(&zid, 16).unwrap(),
-        "the owner's own clock (O7)"
+        row.timestamp, None,
+        "off core §4.3's table, the owner's session stamps nothing (§8.2)"
     );
 
     let during = address_presence(&tool, &address, T).await.unwrap();
@@ -185,6 +190,7 @@ async fn gen_holds_an_event_to_its_declared_rate_and_says_so() {
         seed: 7,
         tool: "mock_owner test".into(),
         elect: None,
+        run_store: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let applied = plan
@@ -234,6 +240,7 @@ async fn serve_answers_logs_and_leaves_no_operation_silent() {
             bindings: BTreeMap::new(),
             tool: "mock_owner test".into(),
             elect: None,
+            run_store: None,
         },
     )
     .await
@@ -345,6 +352,7 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
                     bindings: BTreeMap::new(),
                     tool: "mock_owner test".into(),
                     elect: None,
+                    run_store: None,
                 },
             )
             .await
@@ -486,6 +494,7 @@ async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
                 seed,
                 tool: "mock_owner test".into(),
                 elect: Some(startup),
+                run_store: None,
             };
             let plan = gen_plan(&spec).unwrap();
             let (up, came_up) = tokio::sync::oneshot::channel();
@@ -653,6 +662,7 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
                     bindings: BTreeMap::new(),
                     tool: "mock_owner test".into(),
                     elect: Some(startup),
+                    run_store: None,
                 },
             )
             .await
@@ -762,6 +772,7 @@ async fn gen_declares_a_governed_member_again_after_a_step_down() {
         seed: 3,
         tool: "mock_owner test".into(),
         elect: Some(startup),
+        run_store: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let owner = client(&ep).await;

@@ -1394,8 +1394,10 @@ impl World {
 
     /// A state read of `key` as the window's task lands it (#614, FL8a):
     /// the S4 report the fleet hands back — its row rendered through the
-    /// world's contract, stamped — or an archive's last-known one, checked
-    /// and attributed through the world's lens. `body: None` is silence.
+    /// world's contract, stamped in band (run 0003, seq 12), and with a
+    /// Zenoh timestamp only on a resource core §4.3's table lists — or an
+    /// archive's last-known one, checked and attributed through the world's
+    /// lens. `body: None` is silence.
     pub fn state_read(
         &self,
         key: &str,
@@ -1405,6 +1407,10 @@ impl World {
         use zenkey_fleet::report::{StateReading, StateReport, StateRow, StateValue};
         let resolution = self.resolve(key);
         let resolved = resolution.resolved.as_ref().expect("a state key resolves");
+        let table = zenkey_fleet::model::inband::on_the_table(
+            resolved.revision.contract(),
+            resolved.resource(),
+        );
         let rows = body
             .map(|body| StateRow {
                 key: key.to_string(),
@@ -1412,7 +1418,11 @@ impl World {
                     payload: Box::new(self.check(key, body, "").rendering),
                 },
                 bytes: Some(body.to_vec().into()),
-                timestamp: Some(zenkey_fleet::report::Stamp {
+                inband: Some(zenkey_fleet::report::InbandStamp {
+                    run: "0003".into(),
+                    seq: 12,
+                }),
+                timestamp: table.then(|| zenkey_fleet::report::Stamp {
                     time: "2026-10-05T09:12:44.250000000Z".into(),
                     clock: "a1b2c3d4e5f60718".into(),
                 }),
