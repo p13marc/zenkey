@@ -5003,7 +5003,18 @@ Unchanged since round 89: the **owner**, **consumer**, **caller** and
 - **`readings`:** round 94's eleven findings, each sentence as it reads and
   the reading zk2py takes, shown through `packed` and the lints.
 
-**`readings`: 781, up from 768.** **`just py-conformance`: 4132 of 4132**,
+- **Review-bot on PR #1014:** the writer refuses `unknown` and then
+  `missing`, over the whole layout, before any bit (E045 keeps a field not
+  optional after a marker out of a clean type, and a `Record` built
+  without the lints is refused too); a writer's decimal is read with work
+  the declaration bounds, a magnitude no code reaches refused `range`
+  before any arithmetic and digits past the field's ties truncated with a
+  sticky digit, exactly; a time's range compared before its arithmetic;
+  `true` refused for an `int`, a `counter`, a `time` and a `fixed`; E044
+  checked on a state's and an event's attachment and an operation's four
+  types; every accepted write refused under each of the 15 other tags.
+
+**`readings`: 785, up from 768.** **`just py-conformance`: 4136 of 4136**,
 `packed` 193 among them, `contracts` 126 (12 packed fixtures, two with
 canonical bytes), `bundles` 28 and `compat` 120 (20 packed).
 

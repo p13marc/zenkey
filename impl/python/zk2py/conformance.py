@@ -3588,6 +3588,84 @@ def _round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "`raw` type by its media type only."),
                  missing(core, "Writer and reader each hold it as an input. This version carries it nowhere.")],
                 [[], []]))
+    # -- review-bot on PR #1014 ------------------------------------------------
+    # 1. A field not optional after a marker: E045 keeps it out of a clean
+    #    type, and a Record built without the lints refuses it missing, before
+    #    any bit, though a marker written 0 would end the record before it.
+    after = {"types": {"T": {"fields": [{"name": "a", "type": "bool"}, "...", {"name": "b", "type": "bool"}]}}}
+    try:
+        packed.record(after, "T")
+        clean: Any = "clean"
+    except ValueError:
+        clean = "not clean"
+    bare = packed.Record("T", [packed.Field("a", "bool"), packed.MARKER, packed.Field("b", "bool")])
+    out.append(("review-bot on PR #1014, 1: a field not optional after a marker is E045 and no clean type; a "
+                "Record built without the lints refuses it missing, and an unknown member first",
+                [[c for c, _ in packed.lint(after).findings], clean, write(bare, {"a": True}),
+                 write(bare, {"a": True, "c": 1})],
+                [["E045"], "not clean", {"refused": "missing"}, {"refused": "unknown"}]))
+    # 2. A writer's decimal is read with work the declaration bounds.
+    import time as _time
+
+    huge = ["1e999999999999999999999999999", "9" * 200_000, 10 ** 5000, "-1e-99999999999999999999",
+            "0." + "0" * 200_000 + "1", "0.25" + "0" * 200_000 + "1", "0.25" + "0" * 200_000, "0e99999999999999"]
+    began = _time.monotonic()
+    got = [write(half, {"v": x}) for x in huge]
+    took = _time.monotonic() - began
+    out.append(("review-bot on PR #1014, 2: a writer's decimal past the declaration's reach is refused range "
+                "before any arithmetic, and one with digits past its ties is truncated with a sticky digit, "
+                "exactly: a tie followed by 200,000 zeros and a 1 rounds up, the same tie with only zeros to even",
+                [got, took < 2.0],
+                [[{"refused": "range"}, {"refused": "range"}, {"refused": "range"}, "00000", "00000", "00001",
+                  "00000", "00000"], True]))
+    # 3. JSON's true and false are no integer, though Python's bool is an int.
+    clock = rec({"name": "v", "type": "time"})
+    flag = rec({"name": "v", "type": "bool"})
+    out.append(("review-bot on PR #1014, 3: true given to an int, a counter, a time or a fixed field is refused "
+                "value, and 1 given to a bool",
+                [write(small, {"v": True}), write(count, {"v": True}), write(clock, {"v": False}, 0),
+                 write(half, {"v": True}), write(flag, {"v": 1}), jcs.is_json_integer(True)],
+                [{"refused": "value"}] * 5 + [False]))
+    # 4. E044 per reference: an attachment's type and an operation's four
+    #    types; a stream's, a state's, an event's and an explicit state's
+    #    type are not.
+    placed = load_contract(root / "contracts" / "m.v1.toml", text="""[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+packed = ["schemas/packed/sensor.json"]
+[resources.s]
+kind = "stream"
+type = "packed:Sensor"
+[resources.st]
+kind = "state"
+type = "packed:Status"
+attachment = "packed:Status"
+[resources.ex]
+kind = "state"
+explicit = true
+type = "packed:Status"
+[resources.ev]
+kind = "event"
+type = "packed:Sensor"
+attachment = "packed:Status"
+rate = "low"
+retention = "1d"
+[resources.op]
+kind = "operation"
+request = "packed:Sensor"
+response = "packed:Status"
+error = "packed:Status"
+summary = "packed:Status"
+replies = "many"
+""")
+    out.append(("review-bot on PR #1014, 4: E044 on a state's and an event's attachment and on an operation's "
+                "request, response, error and summary; none on a stream's, a state's, an explicit state's or an "
+                "event's type",
+                sorted(d.message.split(":")[0] + ":" + d.message.split(":")[1] for d in placed.diagnostics
+                       if d.code == "E044"),
+                ["ev: attachment", "op: error", "op: request", "op: response", "op: summary", "st: attachment"]))
     # Not a finding: reserved names in §7.6's order, whichever are declared.
     err = rec({"name": "v", "type": "int", "minimum": 0, "maximum": 2, "reserved": ["out_of_range", "error"]})
     out.append(("§7.6 \"from all ones down, in that order\": error alone above out_of_range takes all ones",
@@ -6990,13 +7068,14 @@ def family_packed(root: Path) -> list[Result]:
         out.append(_check(f"{name}: sealed under tag {r.tag} and read back",
                           {"tag": env.tag, "ch": sealed[0], "value": back},
                           {"tag": r.tag, "ch": r.tag, "value": want}))
-        for other in sorted({(r.tag + 1) % 16}):
+        under: list[Any] = []
+        for other in (t for t in range(16) if t != r.tag):
             try:
                 r.read(other, record, epoch)
-                got_tag: Any = "read"
+                under.append("read")
             except packed.Refused as e:
-                got_tag = e.token
-            out.append(_check(f"{name}: refused under tag {other}", got_tag, "tag"))
+                under.append(e.token)
+        out.append(_check(f"{name}: refused under each of the 15 other tags", under, ["tag"] * 15))
     for i, c in enumerate(data["reads"]):
         r = types[c["type"]]
         try:

@@ -23044,7 +23044,7 @@ See README, "Core 0.75: the `packed` type kind". In short: `packed` reads
 and lints a packed file, computes each layout and its tag, writes and reads
 a record with exact decimals, and seals and opens it in §7.5's envelope;
 `schemas`, `contract`, `bundle` and `compat` take the kind in. **`just
-py-conformance`: 4132 of 4132**, `packed` 193 among them (13 layouts, 48
+py-conformance`: 4136 of 4136** after review-bot on PR #1014, `packed` 193 among them (13 layouts, 48
 writes, 34 reads, each accepted write sealed and read back, each read
 through the envelope too), `contracts` 126 (the 12 packed fixtures, two
 with canonical bytes), `bundles` 28, `compat` 120 (20 packed). The

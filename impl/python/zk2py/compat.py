@@ -641,9 +641,10 @@ def _packed_field(a: Any, b: Any) -> Verdict:
             v.add(BREAKING, "bound_changed", "minimum or maximum moved")
         if a.type == "fixed" and a.resolution != b.resolution:
             v.add(BREAKING, "resolution_changed", f"{a.resolution} → {b.resolution}")
-        # "reserved changed (reserved_changed): the codes move". zk2py
-        # compares the declared names as a set, in §7.6's order, which is
-        # where their codes go.
+        # "reserved changed (reserved_changed): the codes move". Each
+        # Field.reserved holds the declared names in §7.6's order, which is
+        # where their codes go, so comparing the two tuples ignores the order
+        # a file lists them in.
         if a.reserved != b.reserved:
             v.add(BREAKING, "reserved_changed", f"{list(a.reserved)} → {list(b.reserved)}")
     if a.type in ("counter", "enum", "time") and a.width != b.width:

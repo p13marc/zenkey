@@ -20,7 +20,7 @@ resolution`` in its shortest form. No binary float takes part, but for a
 writer handed a JSON number, which zk2py's strict JSON reader holds as a
 binary64: that number is read by its shortest decimal text (``repr``), as
 ``packed/vectors.json``'s "a JSON number for a fixed-point value is read by
-its shortest decimal text" says (round 94's F-425 asks whether that is the
+its shortest decimal text" says (round 94's F-426 asks whether that is the
 text's reading).
 
 **The layout** (§7.6): the fields in order, most significant bit first, an
@@ -67,11 +67,9 @@ VALUE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 DECIMAL = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?")
 #: What a writer's fixed-point string is read as: a JSON number's text, an
 #: exponent included (``packed/vectors.json``'s "an exponent in a writer's
-#: decimal"; round 94's F-424). ``43,5`` is no decimal.
-WRITER_DECIMAL = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?")
-#: zk2py's own limit on a writer's exponent, so that ``1e999999999`` is not
-#: an integer of a billion digits: beyond it the value is refused ``value``.
-MAX_EXPONENT = 4096
+#: decimal"; round 94's F-425). ``43,5`` is no decimal. Groups: the sign,
+#: the integer digits, the fraction's, the exponent's sign and digits.
+WRITER_DECIMAL = re.compile(r"(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?)([0-9]+))?")
 
 _COMMON_MEMBERS = {"name", "type", "optional", "description"}
 #: Each field type's members: (needed, taken).
@@ -273,10 +271,18 @@ class Record:
         or a number). Raises :class:`Refused`."""
         if not isinstance(value, dict):
             raise Refused("value", "a record's value is a JSON object")
-        names = {f.name for f in self.items if isinstance(f, Field)}
+        fields = [f for f in self.items if isinstance(f, Field)]
+        names = {f.name for f in fields}
         for k in value:
             if k not in names:
                 raise Refused("unknown", f"{k!r} is no field of {self.name}")
+        # Every field not optional, over the whole layout, before any bit: a
+        # marker written 0 ends the record, and E045 keeps a clean type from
+        # holding a field after a marker that is not optional, so none could
+        # be skipped there; this holds of a Record built without the lints too.
+        for f in fields:
+            if not f.optional and f.name not in value:
+                raise Refused("missing", f"{f.name!r} is not given")
         bits: list[str] = []
         for i, it in enumerate(self.items):
             if it == MARKER:
@@ -287,9 +293,7 @@ class Record:
                 continue
             assert isinstance(it, Field)
             if it.name not in value:
-                if not it.optional:
-                    raise Refused("missing", f"{it.name!r} is not given")
-                bits.append("0")
+                bits.append("0")  # an optional field absent: its presence bit
                 continue
             code = encode(it, value[it.name], epoch)
             if it.optional:
@@ -355,26 +359,34 @@ class Record:
         return out
 
 
+def _show(v: Any) -> str:
+    """A value for a refusal's message, bounded: an integer of thousands of
+    digits is not written out (Python refuses to past 4300), nor a long
+    string."""
+    if isinstance(v, int) and not isinstance(v, bool) and v.bit_length() > 128:
+        return f"an integer of {v.bit_length()} bits"
+    text = repr(v)
+    return text if len(text) <= 60 else text[:57] + "…"
+
+
 def encode(f: Field, v: Any, epoch: int | None) -> int:
     """One field's code for its JSON value (§7.6 "Codes")."""
     if f.type in ("int", "fixed") and isinstance(v, str) and not (f.type == "fixed" and _decimal_like(v)):
         if v in f.reserved:
             return f.reserved_codes()[v]
-        raise Refused("value", f"{f.name}: {v!r} is no value and no reserved code it declares")
+        raise Refused("value", f"{f.name}: {_show(v)} is no value and no reserved code it declares")
     if f.type == "int":
         if not jcs.is_json_integer(v):
             raise Refused("value", f"{f.name}: an int's value is an integer")
         if not f.minimum <= v <= f.maximum:
-            raise Refused("range", f"{f.name}: {v} is outside {f.minimum} to {f.maximum}")
+            raise Refused("range", f"{f.name}: {_show(v)} is outside {f.minimum} to {f.maximum}")
         return v - f.minimum
     if f.type == "fixed":
-        x = writer_decimal(v)
-        if x is None:
-            raise Refused("value", f"{f.name}: {v!r} is not a decimal")
+        x = writer_decimal(f, v)
         assert f.resolution is not None
         code = round_half_even((x - f.minimum) / f.resolution)
         if not 0 <= code < f.values_count:
-            raise Refused("range", f"{f.name}: {v!r} has no code")
+            raise Refused("range", f"{f.name}: {_show(v)} has no code")
         return code
     if f.type == "enum":
         if v is None:
@@ -382,7 +394,7 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
                 raise Refused("value", f"{f.name}: a closed enum has no escape")
             return (1 << f.width) - 1
         if not isinstance(v, str) or v not in f.values:
-            raise Refused("value", f"{f.name}: {v!r} is not a declared value")
+            raise Refused("value", f"{f.name}: {_show(v)} is not a declared value")
         return f.values.index(v)
     if f.type == "bool":
         if not isinstance(v, bool):
@@ -399,10 +411,12 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
         raise Refused("value", f"{f.name}: a time is an integer of Unix milliseconds")
     if epoch is None:
         raise Refused("epoch", f"{f.name}: a time field and no deployment epoch")
+    # ⌊(t − 1000E) / 1000⌋ from 0 to 2^32 − 1 is t from 1000E to 1000(E +
+    # 2^32) − 1: compared before any arithmetic on t.
+    if not 1000 * epoch <= v < 1000 * (epoch + (1 << 32)):
+        raise Refused("range", f"{f.name}: {_show(v)} is outside the epoch's 2^32 seconds")
     since = v - 1000 * epoch
     seconds = since // 1000
-    if not 0 <= seconds < 1 << 32:
-        raise Refused("range", f"{f.name}: {v} is outside the epoch's 2^32 seconds")
     return (seconds << 10) | (since % 1000) if f.ms else seconds
 
 
@@ -441,21 +455,80 @@ def _decimal_like(v: str) -> bool:
     return WRITER_DECIMAL.fullmatch(v) is not None
 
 
-def writer_decimal(v: Any) -> Fraction | None:
-    """A writer's fixed-point value, exact: a string read as a JSON number's
-    text, an integer, or a binary64 by its shortest decimal text."""
+def _fraction_digits(q: Fraction) -> int:
+    """The fewest fractional digits that write the terminating decimal q."""
+    k = 0
+    while (10 ** k) % q.denominator:
+        k += 1
+    return k
+
+
+def _bounds(f: Field) -> tuple[int, int]:
+    """For a fixed-point field, (h, P): every value with a code is below
+    10^h in magnitude, and every tie point minimum + (k + 1/2) × resolution
+    is written with at most P fractional digits."""
+    assert f.resolution is not None
+    reach = max(abs(f.minimum), abs(f.maximum)) + f.resolution
+    h = len(str(math.ceil(reach)))
+    p = max(_fraction_digits(f.minimum), _fraction_digits(f.maximum), _fraction_digits(f.resolution)) + 1
+    return h, p
+
+
+#: An exponent's digits past this many are clamped: 10^(10^18) is beyond
+#: every bound either way, and int() of a long digit string is refused by
+#: Python's int_max_str_digits.
+_EXPONENT_DIGITS = 18
+
+
+def writer_decimal(f: Field, v: Any) -> Fraction:
+    """A writer's fixed-point value for field ``f``, exact where it matters:
+    a string read as a JSON number's text, an integer, or a binary64 by its
+    shortest decimal text (F-426). Raises ``Refused("value")`` for no
+    decimal and ``Refused("range")`` for a magnitude no code reaches.
+
+    The work is bounded by the declaration, not by the value: a value of
+    10^h or more is refused before any arithmetic, and a value written with
+    more than P + 1 fractional digits is truncated toward zero at P + 1 and
+    given one more nonzero digit (a sticky digit). Every tie point has at
+    most P fractional digits, so the substitute lies between the same two
+    tie points as the value, and rounds to the same code: exact, never a
+    float."""
     if isinstance(v, bool):
-        return None
+        raise Refused("value", f"{f.name}: {_show(v)} is not a decimal")
+    h, p = _bounds(f)
     if isinstance(v, int):
+        if abs(v) >= 10 ** h:
+            raise Refused("range", f"{f.name}: an integer of 10^{h} or more has no code")
         return Fraction(v)
     if isinstance(v, float):
         v = repr(v)
-    if not isinstance(v, str) or WRITER_DECIMAL.fullmatch(v) is None:
-        return None
-    exp = re.search(r"[eE]([+-]?[0-9]+)$", v)
-    if exp and abs(int(exp.group(1))) > MAX_EXPONENT:
-        return None
-    return Fraction(v)
+    m = WRITER_DECIMAL.fullmatch(v) if isinstance(v, str) else None
+    if m is None:
+        raise Refused("value", f"{f.name}: {_show(v)} is not a decimal")
+    sign, whole, frac, esign, edigits = m.groups()
+    frac = frac or ""
+    exp = 0
+    if edigits:
+        e = edigits.lstrip("0") or "0"
+        exp = 10 ** _EXPONENT_DIGITS if len(e) > _EXPONENT_DIGITS else int(e)
+        exp = -exp if esign == "-" else exp
+    digits = whole + frac
+    point = len(whole) + exp  # digits of `digits` before the decimal point
+    stripped = digits.lstrip("0")
+    point -= len(digits) - len(stripped)
+    if not stripped:
+        return Fraction(0)
+    if point - 1 >= h:  # its leading digit is at 10^(point - 1)
+        raise Refused("range", f"{f.name}: a decimal of 10^{h} or more has no code")
+    keep = point + p + 1  # digits through the (P + 1)th after the point
+    if keep <= 0:
+        kept, sticky = 0, True
+    else:
+        head, rest = stripped[:keep], stripped[keep:]
+        kept = int(head + "0" * (keep - len(head)))
+        sticky = rest.strip("0") != ""
+    q = Fraction(10 * kept + (1 if sticky else 0), 10 ** (p + 2))
+    return -q if sign == "-" else q
 
 
 # -- the file and its lints (§9.2 E038–E045, cascade 7) -------------------------
