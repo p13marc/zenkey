@@ -2988,6 +2988,7 @@ async fn echo_renders_an_enveloped_samples_record() {
         loop {
             seq += 1;
             let envelope = Envelope {
+                form: zenkey_model::wire::Form::Mutation,
                 tag: Tag::NONE,
                 stamp: Stamp {
                     run: WireRun::U16(1),
@@ -3056,6 +3057,7 @@ const TIES: &str = "zk2/lab/packed/packed.v1/stream/ties";
 fn packed_envelope(tag: u8, seq: u32, record: &[u8]) -> Vec<u8> {
     use zenkey_model::wire::{Envelope, Run as WireRun, Seq, Stamp, Tag};
     Envelope {
+        form: zenkey_model::wire::Form::Mutation,
         tag: Tag::new(tag).expect("a 4-bit tag"),
         stamp: Stamp {
             run: WireRun::U16(1),

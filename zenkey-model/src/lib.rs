@@ -133,6 +133,11 @@
 //!   attachment, parsed without a contract with §7.5's refusals and written
 //!   back byte for byte. Defined ahead of its use: no rule adopts it yet,
 //!   and nothing else in the workspace reads or writes one.
+//! - [`heartbeat`]: the zk2c envelope's form 6 (core §7.5, 0.81; #978's
+//!   F1): a revision's collections (its `state` and `@state` resources with
+//!   a horizon above 0) as a [`heartbeat::Layout`] with its tag, a body
+//!   read and written with them and §7.5's refusals, and a collection's
+//!   [`heartbeat::Digest`]. No rule adopts it yet.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -156,6 +161,7 @@ pub mod envelope;
 pub mod freshness;
 pub mod grammar;
 pub mod health;
+pub mod heartbeat;
 pub mod history;
 pub mod hostid;
 pub mod link;

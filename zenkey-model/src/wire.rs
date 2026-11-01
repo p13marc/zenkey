@@ -5,6 +5,7 @@
 //! ```text
 //! mutation, a put's payload        CH · run · seq · record
 //! delete, a delete's attachment    CH · run · seq
+//! heartbeat, a put's payload       CH · run · seq · body        (core 0.81, #978's F1)
 //! CH                               form (bits 7–5) · run width (bit 4) · tag (bits 3–0)
 //! run                              16 or 32 bits unsigned, big-endian, as CH's width bit says
 //! seq                              24 bits unsigned, big-endian
@@ -23,7 +24,9 @@
 //! the sample's kind, put ([`Envelope::parse`]) or delete
 //! ([`DeleteStamp::parse`]), and nothing more. So a mutation's tag is
 //! reported, never checked against a type; `packed` (#979) is the first
-//! type kind to define one. The first refusal that applies is reported, in
+//! type kind to define one. A put carries a mutation or a heartbeat
+//! ([`Envelope::form`]); a heartbeat's body is read with its covered
+//! revision ([`crate::heartbeat`]), its tag that revision's. The first refusal that applies is reported, in
 //! §7.5's order, with the token `spec/conformance/envelope/` pins
 //! ([`Refusal::token`]). Every envelope accepted writes back to its bytes.
 //!
@@ -42,8 +45,9 @@ use thiserror::Error;
 
 use crate::grammar::{KindToken, ZkKey, parse};
 
-/// A form: CH's three high bits. This version defines a mutation and a
-/// delete, and reserves the other six for later versions, each refused.
+/// A form: CH's three high bits. This version defines a mutation, a
+/// delete and a heartbeat, and reserves the other five for later
+/// versions, each refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Form {
     /// Code 0: a put's run and seq, then its record.
@@ -58,7 +62,8 @@ pub enum Form {
     Event,
     /// Code 5, reserved: a stream's records under one header.
     Frame,
-    /// Code 6, reserved: an owner's periodic confirmation of what it holds.
+    /// Code 6: an owner's confirmation of the state it holds for one
+    /// interface, a put's payload (core 0.81, [`crate::heartbeat`]).
     Heartbeat,
     /// Code 7, reserved: a collection's state in one reply.
     Snapshot,
@@ -105,7 +110,7 @@ impl Form {
     /// Whether this version defines the form; a reserved one is refused.
     #[must_use]
     pub const fn is_defined(self) -> bool {
-        matches!(self, Form::Mutation | Form::Delete)
+        matches!(self, Form::Mutation | Form::Delete | Form::Heartbeat)
     }
 
     /// The form's name, as §7.5's table and the fixtures spell it.
@@ -124,10 +129,12 @@ impl Form {
     }
 
     /// The kind of sample a defined form travels on; `None` for a reserved
-    /// one, which this version gives no sample.
-    const fn sample_kind(self) -> Option<SampleKind> {
+    /// one, which this version gives no sample. A heartbeat is a put's
+    /// payload, so it is refused on a delete's attachment.
+    #[must_use]
+    pub const fn sample_kind(self) -> Option<SampleKind> {
         match self {
-            Form::Mutation => Some(SampleKind::Put),
+            Form::Mutation | Form::Heartbeat => Some(SampleKind::Put),
             Form::Delete => Some(SampleKind::Delete),
             _ => None,
         }
@@ -418,19 +425,41 @@ fn read(bytes: &[u8], sample: SampleKind) -> Result<(Header, Stamp, &[u8]), Refu
     Ok((header, Stamp { run, seq }, rest))
 }
 
-/// A put's payload under the envelope. This version defines one form for a
-/// put, the mutation: `CH · run · seq · record`.
+/// A put's payload under the envelope. This version defines two forms for
+/// a put: the mutation, `CH · run · seq · record`, and the heartbeat,
+/// `CH · run · seq · body` (core 0.81).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Envelope<'a> {
-    /// 0 unless the record's type kind defines a tag.
+    /// [`Form::Mutation`] or [`Form::Heartbeat`].
+    pub form: Form,
+    /// A mutation's: 0 unless the record's type kind defines a tag. A
+    /// heartbeat's: its covered revision's.
     pub tag: Tag,
     pub stamp: Stamp,
-    /// Every byte after the seq, possibly none, read as the resource's
-    /// type says (§7.1).
+    /// Every byte after the seq, possibly none: a mutation's record, read
+    /// as the resource's type says (§7.1), or a heartbeat's body.
     pub record: &'a [u8],
 }
 
 impl<'a> Envelope<'a> {
+    /// A mutation: a put's record under its stamp.
+    #[must_use]
+    pub const fn mutation(tag: Tag, stamp: Stamp, record: &'a [u8]) -> Envelope<'a> {
+        Envelope {
+            form: Form::Mutation,
+            tag,
+            stamp,
+            record,
+        }
+    }
+
+    /// Whether it is a heartbeat's: its bytes after the seq are a body,
+    /// never a record.
+    #[must_use]
+    pub const fn is_heartbeat(&self) -> bool {
+        matches!(self.form, Form::Heartbeat)
+    }
+
     /// A put's payload read as an envelope, or the first refusal that
     /// applies.
     ///
@@ -441,23 +470,24 @@ impl<'a> Envelope<'a> {
     pub fn parse(bytes: &'a [u8]) -> Result<Envelope<'a>, Refusal> {
         let (header, stamp, record) = read(bytes, SampleKind::Put)?;
         Ok(Envelope {
+            form: header.form,
             tag: header.tag,
             stamp,
             record,
         })
     }
 
-    /// Its CH: a mutation, the width the run takes, and its tag.
+    /// Its CH: its form, the width the run takes, and its tag.
     #[must_use]
     pub const fn header(&self) -> Header {
         Header {
-            form: Form::Mutation,
+            form: self.form,
             wide: self.stamp.run.is_wide(),
             tag: self.tag,
         }
     }
 
-    /// Its bytes: 6 over the record, or 8 with a 32-bit run.
+    /// Its bytes: 6 over the record or the body, or 8 with a 32-bit run.
     #[must_use]
     pub fn write(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.stamp.envelope_bytes() + self.record.len());
@@ -574,10 +604,14 @@ pub enum Reading<'a> {
     /// The sample carries no envelope ([`carries`]): its payload is read as
     /// it arrived, by observer §7.3's decode order.
     Plain,
-    /// An envelope: its stamp orders the sample, and its record is the
-    /// payload every later step reads (decode, a schema check, a
+    /// A mutation's envelope: its stamp orders the sample, and its record is
+    /// the payload every later step reads (decode, a schema check, a
     /// rendering, a profile's reader).
     Enveloped(Envelope<'a>),
+    /// A heartbeat (core 0.81, form 6): its body is read with its covered
+    /// revision ([`crate::heartbeat::Heartbeat::parse`]), never decoded as
+    /// a record of the key's type. Its stamp is its key's.
+    Heartbeat(Envelope<'a>),
     /// An envelope refused: the sample is undecodable, with the refusal's
     /// token as its reason ([`Refusal::reason`]). It is counted and shown
     /// as such, never decoded or sniffed as a payload with no envelope
@@ -592,6 +626,7 @@ pub fn read_put<'a>(key: &str, encoding: &str, payload: &'a [u8]) -> Reading<'a>
         return Reading::Plain;
     }
     match Envelope::parse(payload) {
+        Ok(e) if e.is_heartbeat() => Reading::Heartbeat(e),
         Ok(e) => Reading::Enveloped(e),
         Err(r) => Reading::Refused(r),
     }
@@ -665,6 +700,7 @@ mod tests {
         let record = [1, 2, 3];
         for (stamp, over) in [(narrow, 6), (wide, 8)] {
             let e = Envelope {
+                form: Form::Mutation,
                 tag: Tag::NONE,
                 stamp,
                 record: &record,
@@ -730,6 +766,7 @@ mod tests {
             })
         );
         let m = Envelope {
+            form: Form::Mutation,
             tag: Tag::NONE,
             stamp: Stamp {
                 run: Run::U16(1),
@@ -807,6 +844,7 @@ mod tests {
             seq: Seq::new(3).unwrap(),
         };
         let bytes = Envelope {
+            form: Form::Mutation,
             tag: Tag::NONE,
             stamp,
             record: br#"{"up":true}"#,

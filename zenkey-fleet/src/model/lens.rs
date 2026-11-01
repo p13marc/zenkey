@@ -405,6 +405,17 @@ impl<'a> Lens<'a> {
             // `zenoh/bytes` (observer §7.3).
             inband::Payload::Plain(b) => (b, encoding),
             inband::Payload::Record { record, .. } => (record, None),
+            // A heartbeat (core §7.5's form 6): read with the revision of
+            // the interface it covers, never as a record.
+            inband::Payload::Heartbeat { body, stamp, tag } => {
+                let (rendering, conformance) =
+                    self.heartbeat(wire, key, &resolution, body, stamp, tag);
+                return Checked {
+                    rendering,
+                    conformance,
+                    identity: resolution.identity,
+                };
+            }
         };
         match &resolution.resolved {
             Some(r) => {
@@ -434,6 +445,66 @@ impl<'a> Lens<'a> {
                     conformance,
                     identity: resolution.identity,
                 }
+            }
+        }
+    }
+
+    /// A heartbeat heard on `wire` (#978's F2): read with the revision its
+    /// provider's descriptors name for the interface it covers, when that
+    /// is held; else its form and size, with where resolution stopped. On
+    /// a key that is no heartbeat's and resolves to a resource, it is
+    /// undecodable: a body where a record was read.
+    fn heartbeat(
+        &self,
+        wire: &str,
+        key: &str,
+        resolution: &Resolution,
+        body: &[u8],
+        stamp: zenkey_model::wire::Stamp,
+        tag: zenkey_model::wire::Tag,
+    ) -> (PayloadRendering, Conformance) {
+        let Some((addr, iface)) = self
+            .relative(wire)
+            .and_then(zenkey_model::heartbeat::covered)
+        else {
+            if resolution.resolved.is_some() {
+                let declared = inband::heartbeat_declared(key);
+                let reason = inband::HEARTBEAT_AS_RECORD.to_owned();
+                return (
+                    PayloadRendering {
+                        key: key.to_owned(),
+                        size: body.len(),
+                        resource: None,
+                        rendered: Rendered::Undecodable {
+                            declared: declared.clone(),
+                            reason: reason.clone(),
+                        },
+                    },
+                    Conformance::Undecodable { declared, reason },
+                );
+            }
+            let why = resolution
+                .identity
+                .unresolved
+                .clone()
+                .unwrap_or(Unresolved::PresenceNotRead);
+            let reason = why.words();
+            return (
+                inband::heartbeat_rendering(key, why, body.len()),
+                Conformance::NotChecked { reason },
+            );
+        };
+        match self.revision_of(&addr, &iface) {
+            Ok(rev) => {
+                let layout = zenkey_model::heartbeat::Layout::of(rev.contract());
+                inband::heartbeat_check(key, &layout, stamp, tag, body)
+            }
+            Err(why) => {
+                let reason = why.words();
+                (
+                    inband::heartbeat_rendering(key, why, body.len()),
+                    Conformance::NotChecked { reason },
+                )
             }
         }
     }
@@ -1088,6 +1159,63 @@ mod tests {
         );
     }
 
+    /// A heartbeat (core §7.5's form 6; #978's F2) reads with the revision
+    /// its provider names for the interface it covers: its value, valid; on
+    /// another revision's tag undecodable, the tag named; on a resolved
+    /// data key undecodable, a body where a record was read.
+    #[test]
+    fn a_heartbeat_reads_with_the_revision_it_covers() {
+        use zenkey_model::heartbeat::{Heartbeat, Layout, Time};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let rev = status();
+        let fp = rev.fingerprint().to_string();
+        let layout = Layout::of(rev.contract());
+        let mut set = ContractSet::new();
+        set.insert(rev);
+        let cat = catalog(&fp, None);
+        let lens = Lens::new("prod", Some(&cat), &set);
+        let stamp = Stamp {
+            run: Run::U16(7),
+            seq: Seq::new(1).expect("a seq"),
+        };
+        let hb = Heartbeat {
+            time: Time::Unknown,
+            sections: vec![],
+        };
+        let bytes = hb.envelope(&layout, stamp).expect("writes");
+        let wire = "prod/zk2/lab/m/freshness.v2/stream/heartbeat/m.v1";
+        let ok = lens.check(wire, Member::Type, Some("zenoh/bytes"), &bytes);
+        assert_eq!(ok.conformance, Conformance::Valid, "{:?}", ok.rendering);
+        assert!(
+            matches!(&ok.rendering.rendered,
+                Rendered::Value { declared, value, .. } if declared == "zk2c heartbeat (m.v1)"
+                    && value == &json!({"covers": "m.v1", "run": "0007", "seq": 1,
+                                        "time": null, "sections": {}})),
+            "{:?}",
+            ok.rendering.rendered
+        );
+        let mut other = bytes.clone();
+        other[0] = (other[0] & 0xf0) | ((layout.tag.get() + 1) % 16);
+        let bad = lens.check(wire, Member::Type, Some("zenoh/bytes"), &other);
+        assert!(
+            matches!(&bad.conformance, Conformance::Undecodable { reason, .. } if reason.contains("not m.v1's")),
+            "{:?}",
+            bad.conformance
+        );
+        let on_data = lens.check(
+            "prod/zk2/lab/m/m.v1/state/status/eth0",
+            Member::Type,
+            Some("zenoh/bytes"),
+            &bytes,
+        );
+        assert!(
+            matches!(&on_data.conformance, Conformance::Undecodable { reason, .. }
+                if reason == inband::HEARTBEAT_AS_RECORD),
+            "{:?}",
+            on_data.conformance
+        );
+    }
+
     /// The envelope first (core §7.5, observer §7.3; #976's A2): a state
     /// sample under `zenoh/bytes` carries a zk2c envelope, told by its key
     /// and Encoding alone. Its record renders as the resource's type and
@@ -1106,6 +1234,7 @@ mod tests {
         let lens = Lens::new("prod", Some(&cat), &set);
         let wire = "prod/zk2/lab/m/m.v1/state/status/eth0";
         let envelope = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: Stamp {
                 run: Run::U16(7),
@@ -1191,6 +1320,7 @@ mod tests {
         let lens = Lens::new("prod", None, &set).offline(&set);
         let wire = "prod/zk2/lab/m/m.v1/state/status/eth0";
         let envelope = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: Stamp {
                 run: Run::U32(70_000),

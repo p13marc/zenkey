@@ -209,8 +209,8 @@ pub fn read(
                 Some(&e.encoding),
                 &e.payload.to_bytes(),
             )
-            .refusal()
-            .is_none()
+            .bytes()
+            .is_some()
         })
         .map(|e| e.received)
         .collect();

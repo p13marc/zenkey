@@ -1430,6 +1430,7 @@ const ENVELOPED: &str = "zk2/lab/env/m.v1/state";
 fn enveloped(run: u16, seq: u32, record: &str) -> Vec<u8> {
     use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
     Envelope {
+        form: zenkey_model::wire::Form::Mutation,
         tag: Tag::NONE,
         stamp: Stamp {
             run: Run::U16(run),

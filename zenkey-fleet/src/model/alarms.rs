@@ -60,7 +60,9 @@ use zenkey_model::alarms::{
     Payload, Presence, Reading, Reason, ScopeRead, Seed, SetJudged, SetVerdict, Severity, Track,
     Window,
 };
-use zenkey_model::freshness::{ClockMeasure, Last, Observation, Reply, StampAge};
+use zenkey_model::freshness::{
+    Applied, ClockMeasure, Last, Observation, Reply, StampAge, View, confirmed_last,
+};
 use zenkey_model::grammar::{Addr, InstanceId, ZkKey};
 use zenkey_model::seed::Held;
 use zenoh::key_expr::{KeyExpr, OwnedKeyExpr};
@@ -176,6 +178,17 @@ impl AlarmScope {
             "zk2/{}/{}/@zk/instance/*",
             self.system.as_deref().unwrap_or("*"),
             self.service.as_deref().unwrap_or("*")
+        )
+    }
+
+    /// The heartbeats covering alarms.v1 of the owners in scope (core
+    /// §7.5's form 6; #978's F2):
+    /// `zk2/<system>/<service>/freshness.v2/stream/heartbeat/alarms.v1`.
+    pub fn heartbeat_selector(&self) -> String {
+        zenkey_model::heartbeat::key(
+            self.system.as_deref().unwrap_or("*"),
+            self.service.as_deref().unwrap_or("*"),
+            &alarms_layout().iface,
         )
     }
 
@@ -466,6 +479,26 @@ pub struct AlarmBook {
     refused: u64,
     clocks: BTreeMap<String, ClockMeasure>,
     archived: BTreeMap<String, ArchivedAlarm>,
+    /// Each owner's alarms as its heartbeats confirm them (core §7.5's
+    /// form 6, #978's F2): fed by every sample the merge admits.
+    views: BTreeMap<Addr, View<Instant>>,
+}
+
+/// alarms.v1's layout for its heartbeat: the embedded standard revision's
+/// collections (its one, `state/alarms/{alert_key}`).
+fn alarms_layout() -> &'static zenkey_model::heartbeat::Layout {
+    static LAYOUT: std::sync::LazyLock<zenkey_model::heartbeat::Layout> =
+        std::sync::LazyLock::new(|| {
+            zenkey_model::heartbeat::Layout::of(zenkey::alarms::implementation().contract())
+        });
+    &LAYOUT
+}
+
+/// A view of one owner's alarms, following its one collection.
+fn alarms_view() -> View<Instant> {
+    let mut v = View::new(alarms_layout().clone());
+    v.follow_resource(zenkey::alarms::ALARMS);
+    v
 }
 
 impl AlarmBook {
@@ -499,6 +532,7 @@ impl AlarmBook {
             refused: 0,
             clocks: BTreeMap::new(),
             archived: BTreeMap::new(),
+            views: BTreeMap::new(),
         }
     }
 
@@ -780,6 +814,19 @@ impl AlarmBook {
         }
         if refused.is_none() {
             entry.merged = entry.merged.after_mark(incoming);
+            let inband = match envelope {
+                Some(Ok(stamp)) => Some(stamp),
+                _ => None,
+            };
+            let view = self
+                .views
+                .entry(entry.owner.clone())
+                .or_insert_with(alarms_view);
+            if s.delete {
+                view.delete(&s.key, inband, s.at);
+            } else {
+                view.put(&s.key, inband, s.at);
+            }
         }
         if s.via == AlarmVia::Subscription {
             entry.sub_last = Some((s.at, s.delete));
@@ -801,6 +848,28 @@ impl AlarmBook {
         });
         let key = s.key.clone();
         Some(self.transition_of(&key, change_of(t), Some(s.via), None, s.at, s.wall))
+    }
+
+    /// A heartbeat heard on `key` at `at` (core §7.5's form 6; #978's F2):
+    /// its envelope's stamp and tag, and its body. When it covers alarms.v1
+    /// and its owner is in scope, it is folded into that owner's view: a
+    /// section whose digest is the view's confirms each alarm it vouches
+    /// for at `at`, which [`AlarmBook::reading`] then ages from. `None` for
+    /// a heartbeat of anything else.
+    pub fn heartbeat(
+        &mut self,
+        key: &str,
+        stamp: zenkey_model::wire::Stamp,
+        tag: zenkey_model::wire::Tag,
+        body: &[u8],
+        at: Instant,
+    ) -> Option<Applied> {
+        let (owner, iface) = zenkey_model::heartbeat::covered(key)?;
+        if iface != alarms_layout().iface || !self.scope.selects_owner(&owner) {
+            return None;
+        }
+        let view = self.views.entry(owner).or_insert_with(alarms_view);
+        Some(view.apply(tag, stamp, body, at))
     }
 
     /// A GET was asked at `asked_at`: its replies follow as samples
@@ -1118,17 +1187,26 @@ impl AlarmBook {
         let mut observations = Vec::new();
         let healed_by = |asked: Instant| self.loss.is_none_or(|l| asked > l.at);
         if let Some(declared) = self.declared {
+            // A confirmation is the subscription's last delivery, or its
+            // owner's last heartbeat that vouched for it (#978's F2).
+            let view = self.views.get(&e.owner);
+            let heartbeat = view
+                .and_then(|v| v.confirmed(key))
+                .map(|c| now.saturating_duration_since(c));
             observations.push(Observation::Subscribed {
-                last: e.sub_last.map(|(t, delete)| {
-                    let age = now.saturating_duration_since(t);
-                    if delete {
-                        Last::Delete(age)
-                    } else {
-                        Last::Put(age)
-                    }
-                }),
+                last: confirmed_last(
+                    e.sub_last.map(|(t, delete)| {
+                        let age = now.saturating_duration_since(t);
+                        if delete {
+                            Last::Delete(age)
+                        } else {
+                            Last::Put(age)
+                        }
+                    }),
+                    heartbeat,
+                ),
                 listened: now.saturating_duration_since(declared),
-                complete: self.loss.is_none(),
+                complete: self.loss.is_none() && !view.is_some_and(View::gap),
             });
         }
         if let Some(g) = e.got.filter(|g| healed_by(g.asked_at)) {
@@ -1527,6 +1605,90 @@ mod tests {
             AlarmScope::parse("zk2/lab/*/alarms.v1/state/alarms/*").unwrap(),
             spec,
         )
+    }
+
+    /// A hand-written heartbeat covering alarms.v1 (#978's F2): its
+    /// section's digest over the alarm the book holds, under its in-band
+    /// stamp, confirms it, so the subscription's observation ages it from
+    /// the heartbeat's arrival; one of another owner, or another
+    /// interface's, is not this book's.
+    #[test]
+    fn a_heartbeat_confirms_an_alarm_the_book_holds() {
+        use zenkey_model::heartbeat::{Digest, Heartbeat, Members, Section, Time};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let mut b = book(true);
+        let t0 = Instant::now();
+        b.subscribed(t0);
+        b.presence_read(&presence(true, Some(ZID)), t0);
+        let inband = Stamp {
+            run: Run::U32(0xdead_beef),
+            seq: Seq::new(4).unwrap(),
+        };
+        b.sample_enveloped(
+            put(t0, 10, doc("warning", "firing", 1), AlarmVia::Subscription),
+            Some(Ok(inband)),
+        )
+        .unwrap();
+        let layout = alarms_layout();
+        assert_eq!(layout.collections.len(), 1, "its one collection");
+        let body = |digest| {
+            Heartbeat {
+                time: Time::Unknown,
+                sections: vec![Some(Section {
+                    digest,
+                    members: Members::templated(1, [0]),
+                })],
+            }
+            .write(layout)
+            .unwrap()
+        };
+        let hb = Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(0).unwrap(),
+        };
+        let key = AlarmScope::of(&"lab/svc".parse().unwrap()).heartbeat_selector();
+        assert_eq!(key, "zk2/lab/svc/freshness.v2/stream/heartbeat/alarms.v1");
+        let at = t0 + Duration::from_secs(600);
+        let applied = b
+            .heartbeat(&key, hb, layout.tag, &body(Digest::of([(A, inband)])), at)
+            .expect("this book's");
+        assert!(
+            matches!(&applied, Applied::Read { sections, .. }
+                if sections[0] == zenkey_model::freshness::SectionRead::Confirmed(vec![A.into()])),
+            "{applied:?}"
+        );
+        // 1000 s after the put, 400 s after the heartbeat: within 900 s.
+        let now = t0 + Duration::from_secs(1000);
+        let r = b.reading(A, now, wall()).unwrap();
+        assert!(
+            r.observations.iter().any(|o| matches!(o,
+                Observation::Subscribed { last: Some(Last::Put(age)), .. }
+                    if *age == Duration::from_secs(400))),
+            "{:?}",
+            r.observations
+        );
+        assert_eq!(
+            b.heartbeat(
+                "zk2/far/svc/freshness.v2/stream/heartbeat/alarms.v1",
+                hb,
+                layout.tag,
+                &body(Digest::EMPTY),
+                at
+            ),
+            None,
+            "an owner out of scope"
+        );
+        assert_eq!(
+            b.heartbeat(
+                "zk2/lab/svc/freshness.v2/stream/heartbeat/health.v1",
+                hb,
+                layout.tag,
+                &body(Digest::EMPTY),
+                at
+            ),
+            None,
+            "another interface's"
+        );
     }
 
     #[test]

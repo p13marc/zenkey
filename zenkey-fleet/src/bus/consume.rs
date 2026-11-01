@@ -392,11 +392,16 @@ fn payload(
 /// counts the rest as lagged.
 pub const WATCH_BUFFER: usize = 4096;
 
+/// What each heartbeat confirmed of a watched collection, as it comes.
+pub type Confirmations = tokio::sync::mpsc::Receiver<crate::report::WatchConfirmation>;
+
 /// A subscription through a tool's consumer, delivering rendered samples.
 /// Dropping it undeclares it.
 pub struct Watch {
     sub: zenkey::consumer::Subscription,
     rx: tokio::sync::mpsc::Receiver<WatchSample>,
+    /// What each heartbeat confirmed (#978's F2), apart from the samples.
+    confirmations: Option<Confirmations>,
     lagged: Arc<AtomicU64>,
     selectors: Vec<String>,
 }
@@ -451,29 +456,48 @@ pub async fn watch(
         .map(|k| k.as_str().to_owned())
         .collect();
     let (rev, lag) = (revision.clone(), Arc::clone(&lagged));
+    let (ctx, confirmations) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+    let covered = revision.iface().clone();
+    let on_confirm = move |c: zenkey::consumer::Confirmation| {
+        let _ = ctx.try_send(crate::report::WatchConfirmation {
+            key: zenkey_model::heartbeat::key(
+                c.provider.system.as_str(),
+                c.provider.service.as_str(),
+                &covered,
+            ),
+            provider: c.provider.to_string(),
+            heartbeat: InbandStamp::from(c.heartbeat),
+            confirmed: c.keys,
+        });
+    };
     let sub = consumer
-        .subscribe(&name, move |d: zenkey::consumer::Delivery| {
-            let key = d.sample.key_expr().as_str().to_owned();
-            let rendered = (d.sample.kind() == SampleKind::Put)
-                .then(|| payload(&rev, &key, &d.sample, Member::Type, d.inband.zip(d.tag)));
-            let sample = watch_sample(
-                &rev,
-                declared.as_ref(),
-                &d.provider,
-                d.values,
-                &d.sample,
-                d.inband,
-                rendered.map(|p| (p, None)),
-            );
-            if tx.try_send(sample).is_err() {
-                lag.fetch_add(1, Ordering::Relaxed);
-            }
-        })
+        .subscribe_confirmed(
+            &name,
+            move |d: zenkey::consumer::Delivery| {
+                let key = d.sample.key_expr().as_str().to_owned();
+                let rendered = (d.sample.kind() == SampleKind::Put)
+                    .then(|| payload(&rev, &key, &d.sample, Member::Type, d.inband.zip(d.tag)));
+                let sample = watch_sample(
+                    &rev,
+                    declared.as_ref(),
+                    &d.provider,
+                    d.values,
+                    &d.sample,
+                    d.inband,
+                    rendered.map(|p| (p, None)),
+                );
+                if tx.try_send(sample).is_err() {
+                    lag.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+            on_confirm,
+        )
         .await
         .map_err(|e| runtime("subscribe", address, e))?;
     Ok(Watch {
         sub,
         rx,
+        confirmations: Some(confirmations),
         lagged,
         selectors,
     })
@@ -562,6 +586,17 @@ fn refused_sample(
             Some(&sample.encoding().to_string()),
             &sample.payload().to_bytes(),
         ),
+        // A heartbeat where a record was read (core §7.5's form 6; #978's
+        // F2): its body, never decoded as the resource's type.
+        Read::Heartbeat { sample, .. } => crate::report::PayloadRendering {
+            key: key.clone(),
+            size: sample.payload().len(),
+            resource: None,
+            rendered: crate::report::Rendered::Undecodable {
+                declared: crate::model::inband::heartbeat_declared(&key),
+                reason: crate::model::inband::HEARTBEAT_AS_RECORD.to_owned(),
+            },
+        },
     };
     watch_sample(
         rev,
@@ -590,6 +625,14 @@ impl Watch {
     /// The next delivered sample; `None` once the subscription is gone.
     pub async fn next(&mut self) -> Option<WatchSample> {
         self.rx.recv().await
+    }
+
+    /// What each heartbeat confirmed of the collection watched (#978's
+    /// F2), taken once, so a reader awaits it beside [`Watch::next`]: each
+    /// `recv` is the next confirmation, `None` once the subscription is
+    /// gone. A resource that is no collection has none.
+    pub fn take_confirmations(&mut self) -> Option<Confirmations> {
+        self.confirmations.take()
     }
 
     /// Samples put on a wildcard key and discarded by rule (R6).

@@ -1035,6 +1035,7 @@ mod tests {
         let put = row(
             false,
             wire::Envelope {
+                form: zenkey_model::wire::Form::Mutation,
                 tag: wire::Tag::NONE,
                 stamp: inband(3, 4),
                 record: b"{}",

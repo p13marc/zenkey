@@ -1339,6 +1339,7 @@ async fn s9_an_archives_backend_refuses_an_outdated_put() {
         let owner = owner.clone();
         async move {
             let bytes = Envelope {
+                form: wire::Form::Mutation,
                 tag: wire::Tag::NONE,
                 stamp,
                 record,

@@ -9,6 +9,10 @@
 //!     → or refused: undecodable, its refusal named, never sniffed (Payload::Refused)
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (delete_stamp)
+//! a put whose envelope is a heartbeat (core §7.5's form 6, 0.81)
+//!     → its body, its key's stamp and its covered revision's tag
+//!       (Payload::Heartbeat), read with that revision ([`heartbeat_value`]),
+//!       never as a record of the key's type
 //! every other sample
 //!     → read with no envelope (Payload::Plain)
 //! ```
@@ -52,7 +56,7 @@ pub type Envelope = Option<Result<wire::Stamp, Refusal>>;
 pub fn envelope_of(read: &Read) -> Envelope {
     match read {
         Read::Plain(_) => None,
-        Read::Enveloped { stamp, .. } => Some(Ok(*stamp)),
+        Read::Enveloped { stamp, .. } | Read::Heartbeat { stamp, .. } => Some(Ok(*stamp)),
         Read::Refused { refusal, .. } => Some(Err(*refusal)),
     }
 }
@@ -81,6 +85,14 @@ pub enum Payload<'a> {
     },
     /// A refused envelope: undecodable.
     Refused(Refusal),
+    /// A heartbeat (core §7.5's form 6): its body, its key's run and seq,
+    /// and CH's tag, its covered revision's. Read with that revision
+    /// ([`heartbeat_value`]), never as a record of the key's type.
+    Heartbeat {
+        body: &'a [u8],
+        stamp: wire::Stamp,
+        tag: wire::Tag,
+    },
 }
 
 impl<'a> Payload<'a> {
@@ -88,14 +100,14 @@ impl<'a> Payload<'a> {
     pub fn bytes(&self) -> Option<&'a [u8]> {
         match *self {
             Payload::Plain(b) | Payload::Record { record: b, .. } => Some(b),
-            Payload::Refused(_) => None,
+            Payload::Refused(_) | Payload::Heartbeat { .. } => None,
         }
     }
 
     /// The in-band stamp, when the bytes carried an envelope.
     pub fn stamp(&self) -> Option<wire::Stamp> {
         match self {
-            Payload::Record { stamp, .. } => Some(*stamp),
+            Payload::Record { stamp, .. } | Payload::Heartbeat { stamp, .. } => Some(*stamp),
             Payload::Plain(_) | Payload::Refused(_) => None,
         }
     }
@@ -103,7 +115,7 @@ impl<'a> Payload<'a> {
     /// CH's tag, when the bytes carried an envelope.
     pub fn tag(&self) -> Option<wire::Tag> {
         match self {
-            Payload::Record { tag, .. } => Some(*tag),
+            Payload::Record { tag, .. } | Payload::Heartbeat { tag, .. } => Some(*tag),
             Payload::Plain(_) | Payload::Refused(_) => None,
         }
     }
@@ -112,7 +124,7 @@ impl<'a> Payload<'a> {
     pub fn refusal(&self) -> Option<Refusal> {
         match self {
             Payload::Refused(r) => Some(*r),
-            Payload::Plain(_) | Payload::Record { .. } => None,
+            Payload::Plain(_) | Payload::Record { .. } | Payload::Heartbeat { .. } => None,
         }
     }
 
@@ -122,7 +134,7 @@ impl<'a> Payload<'a> {
     pub fn encoding<'e>(&self, sample: Option<&'e str>) -> Option<&'e str> {
         match self {
             Payload::Plain(_) => sample,
-            Payload::Record { .. } | Payload::Refused(_) => None,
+            Payload::Record { .. } | Payload::Refused(_) | Payload::Heartbeat { .. } => None,
         }
     }
 }
@@ -142,7 +154,138 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
             stamp: e.stamp,
             tag: e.tag,
         },
+        Reading::Heartbeat(e) => Payload::Heartbeat {
+            body: e.record,
+            stamp: e.stamp,
+            tag: e.tag,
+        },
         Reading::Refused(r) => Payload::Refused(r),
+    }
+}
+
+/// A heartbeat read with the revision it covers (core §7.5's form 6;
+/// #978's F2), as a tool shows it: `{"covers", "run", "seq", "time",
+/// "sections"}`, each section by its collection's `<kind token>/<template>`
+/// with its digest and what it vouches for. `Err` with why it is not read:
+/// CH's tag is not the revision's, or the body is refused (its token).
+///
+/// # Errors
+/// The reason, in words.
+pub fn heartbeat_value(
+    layout: &zenkey_model::heartbeat::Layout,
+    stamp: wire::Stamp,
+    tag: wire::Tag,
+    body: &[u8],
+) -> Result<serde_json::Value, String> {
+    use zenkey_model::heartbeat::{Heartbeat, Members, Time};
+    if tag != layout.tag {
+        return Err(format!(
+            "its tag {} is not {}'s {} ({})",
+            tag.get(),
+            layout.iface,
+            layout.tag.get(),
+            layout.fingerprint
+        ));
+    }
+    let hb = Heartbeat::parse(body, layout).map_err(|r| format!("its body is refused: {r}"))?;
+    let mut sections = serde_json::Map::new();
+    for (c, s) in layout.collections.iter().zip(&hb.sections) {
+        let Some(s) = s else { continue };
+        let v = match &s.members {
+            Members::One { vouched } => {
+                serde_json::json!({"digest": s.digest.to_string(), "vouched": vouched})
+            }
+            m => serde_json::json!({
+                "digest": s.digest.to_string(),
+                "live": m.live(),
+                "vouched": m.vouched(),
+            }),
+        };
+        sections.insert(c.resource(), v);
+    }
+    let time = match hb.time {
+        Time::Unknown => serde_json::Value::Null,
+        Time::At { secs, ms } => serde_json::json!({"s": secs, "ms": ms}),
+    };
+    Ok(serde_json::json!({
+        "covers": layout.iface.to_string(),
+        "run": stamp.run.hex(),
+        "seq": stamp.seq.get(),
+        "time": time,
+        "sections": sections,
+    }))
+}
+
+/// Why a heartbeat where a record of a resource's type was read is
+/// undecodable: a body, never a value.
+pub const HEARTBEAT_AS_RECORD: &str =
+    "a zk2c heartbeat's body where a record of the resource's type was read";
+
+/// A heartbeat rendered with no revision of what it covers in hand: its
+/// form, its covered interface and its size, the structural ladder never
+/// run over its body.
+pub fn heartbeat_rendering(
+    key: &str,
+    why: crate::report::Unresolved,
+    size: usize,
+) -> PayloadRendering {
+    PayloadRendering {
+        key: key.to_owned(),
+        size,
+        resource: None,
+        rendered: Rendered::Structural {
+            why,
+            value: None,
+            text: format!("<{}, {size} bytes>", heartbeat_declared(key)),
+        },
+    }
+}
+
+/// A heartbeat read with the revision it covers ([`heartbeat_value`]):
+/// its value and valid, or undecodable with why (another revision's tag,
+/// a body refused).
+pub fn heartbeat_check(
+    key: &str,
+    layout: &zenkey_model::heartbeat::Layout,
+    stamp: wire::Stamp,
+    tag: wire::Tag,
+    body: &[u8],
+) -> (PayloadRendering, Conformance) {
+    let declared = heartbeat_declared(key);
+    match heartbeat_value(layout, stamp, tag, body) {
+        Ok(value) => (
+            PayloadRendering {
+                key: key.to_owned(),
+                size: body.len(),
+                resource: None,
+                rendered: Rendered::Value {
+                    declared,
+                    value,
+                    epoch_assumed: None,
+                },
+            },
+            Conformance::Valid,
+        ),
+        Err(reason) => (
+            PayloadRendering {
+                key: key.to_owned(),
+                size: body.len(),
+                resource: None,
+                rendered: Rendered::Undecodable {
+                    declared: declared.clone(),
+                    reason: reason.clone(),
+                },
+            },
+            Conformance::Undecodable { declared, reason },
+        ),
+    }
+}
+
+/// What a heartbeat is declared as: the form, and the interface it covers.
+pub fn heartbeat_declared(key: &str) -> String {
+    match zenkey_model::heartbeat::covered(key) {
+        Some((_, iface)) => format!("zk2c heartbeat ({iface})"),
+        None => "zk2c heartbeat".to_owned(),
     }
 }
 
@@ -286,7 +429,7 @@ pub fn record<'a>(
     let from = match payload(key, encoding, &bytes) {
         Payload::Plain(_) => return Ok(bytes),
         Payload::Refused(r) => return Err(r),
-        Payload::Record { stamp, .. } => stamp.envelope_bytes(),
+        Payload::Record { stamp, .. } | Payload::Heartbeat { stamp, .. } => stamp.envelope_bytes(),
     };
     Ok(after(bytes, from))
 }
@@ -310,7 +453,9 @@ pub fn read_parts<'a>(
     match payload(key, encoding, &bytes) {
         Payload::Plain(_) => (bytes, None),
         Payload::Refused(r) => (bytes, Some(Err(r))),
-        Payload::Record { stamp, .. } => (after(bytes, stamp.envelope_bytes()), Some(Ok(stamp))),
+        Payload::Record { stamp, .. } | Payload::Heartbeat { stamp, .. } => {
+            (after(bytes, stamp.envelope_bytes()), Some(Ok(stamp)))
+        }
     }
 }
 
@@ -384,6 +529,9 @@ pub fn refused_conformance(rendering: &PayloadRendering, refusal: Refusal) -> Co
 pub fn structural_text(key: &str, encoding: Option<&str>, bytes: &[u8]) -> String {
     match payload(key, encoding, bytes) {
         Payload::Refused(r) => format!("<undecodable: {}>", r.reason()),
+        Payload::Heartbeat { body, .. } => {
+            format!("<{}, {} bytes>", heartbeat_declared(key), body.len())
+        }
         Payload::Plain(b) | Payload::Record { record: b, .. } => structural::structural(b),
     }
 }
@@ -518,6 +666,7 @@ mod tests {
     fn a_namespaced_key_strips_and_a_foreign_one_does_not() {
         let st = stamp(3, 4);
         let bytes = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: st,
             record: b"up",
@@ -590,6 +739,7 @@ mod tests {
             r#"{"a":1}"#
         );
         let enveloped = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: stamp(1, 1),
             record: br#"{"a":1}"#,

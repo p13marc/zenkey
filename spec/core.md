@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.80** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.81** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1718,6 +1718,7 @@ its attachment:
 ```text
 mutation, a put's payload            CH · run · seq · record
 delete, a delete's attachment        CH · run · seq
+heartbeat, a put's payload           CH · run · seq · body
 ```
 
 **The header byte, CH,** holds three fields. Its bits are numbered from 7,
@@ -1733,10 +1734,11 @@ So CH is the form's code × 32, plus the width bit × 16, plus the tag. With
 tag 0, a mutation's CH is `0x00` with a 16-bit run and `0x10` with a 32-bit
 run. A delete's is `0x20` or `0x30`. And `0x1b` is `000 1 1011`: form 0, a
 32-bit run and tag 11. Only the `packed` kind defines a tag (§7.6). A
-delete carries no record, so its tag is 0.
+delete carries no record, so its tag is 0. A heartbeat's tag names a
+contract revision (below).
 
-**The forms.** Each form has one code. This version defines two of them,
-and reserves the other six for later versions:
+**The forms.** Each form has one code. This version defines three of
+them, and reserves the other five for later versions:
 
 | Code | Form | What it carries |
 |---|---|---|
@@ -1746,7 +1748,7 @@ and reserves the other six for later versions:
 | 3 | error | reserved: an operation's error reply (§5.2) |
 | 4 | event | reserved: an event's occurrence |
 | 5 | frame | reserved: a stream's records under one header |
-| 6 | heartbeat | reserved: an owner's periodic confirmation of what it holds |
+| 6 | heartbeat | an owner's confirmation of the state it holds for one interface (below) |
 | 7 | snapshot | reserved: a collection's state in one reply |
 
 **The run and the seq.** The run is an unsigned integer of 16 or 32 bits,
@@ -1762,6 +1764,7 @@ Encoding `zenoh/bytes`, whatever its record's type: the contract names the
 type.
 
 **Sizes.** A mutation is 6 bytes over its record, or 8 with a 32-bit run.
+So is a heartbeat over its body.
 A delete's attachment is 6 or 8 bytes, and an attachment costs 2 more on
 the wire. Beside them, a Zenoh timestamp is 26 bytes. A predefined
 Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
@@ -1775,20 +1778,117 @@ reader refuse an attachment that is not an envelope.
 
 **Parsing.** An envelope is parsed without the contract, as a key is
 (§1.1). The parser knows the sample's kind, put or delete, and nothing
-more. So it reports a mutation's tag, and checks it against no type:
-§7.6's reader does. An
+more. So it reports a mutation's or a heartbeat's tag, and checks it
+against nothing: §7.6's reader and a heartbeat's reader do. An
 implementation MUST refuse an envelope for the first of these
 that applies, in this order:
 - no byte at all, so no CH (`short`);
 - a reserved form (`form`);
 - a form the sample's kind does not carry: a delete on a put, or a
-  mutation as a delete's attachment (`sample_kind`);
+  mutation or a heartbeat as a delete's attachment (`sample_kind`);
 - a delete whose tag is not 0 (`tag`);
 - fewer bytes than CH, the run and the seq need (`short`);
 - a byte after a delete's seq (`trailing`). `[F: envelope/vectors.json]`
 
 Every envelope an implementation accepts MUST write back to the same
 bytes. `[F: envelope/vectors.json]`
+
+**The heartbeat.** A **heartbeat** is a put an owner sends for one
+interface it serves, its **covered interface**. It vouches for the members of that interface's
+state that are still current, without putting their values again. This
+version defines its bytes and how they are read. No rule yet says who
+sends one, how often, on which key, or what a reader concludes from it.
+
+- **CH's tag** is the low 4 bits of the last byte of the covered
+  revision's fingerprint (§9.5). An implementation that writes a
+  heartbeat MUST write its covered revision's tag in CH.
+  `[F: heartbeat/layouts.json]`
+- **The tag is a check.** A reader compares it with the revision it
+  holds, as §7.6's reader compares a type's tag. Another revision still
+  matches it 1 time in 16.
+- **Its run and seq** are its key's. They count as any stream key's do
+  (§4.3), so a gap in the seqs is a heartbeat lost.
+
+**The collections.** A heartbeat's body is read by its covered
+revision's collections.
+- **A collection** is a `state` or `@state` resource whose resolved
+  `freshness.ttl_s` is above 0 ([`freshness.v1`](profiles/freshness/v1.md)
+  §2.1).
+- **Their order** is the canonical form's resource order: by kind token,
+  then template (§9.5).
+- **A collection is templated** when its template has a parameter. Its
+  cardinality c then bounds its live members (§2.2). A collection whose
+  template has no parameter has one member.
+- **A live member** is one whose last mutation is a put. Its **stamp** is
+  that put's run and seq.
+- **Key order** is the byte order of the live members' base-relative
+  keys (§1.1). A member's **rank** is its place in key order, from 0.
+
+`[F: heartbeat/layouts.json]`
+
+**The body** is a run of bit fields, most significant bit first, with
+no padding between them, as §7.6's records are:
+
+```text
+body       time · map · a section for each map bit set, in map order · pad
+time       42 bits: the owner's clock when it wrote the heartbeat
+map        1 bit for each collection, in order: 1 when its section follows
+section    digest · members
+digest     32 bits: the collection's digest (below)
+members    a collection of one member:  vouched, 1 bit
+           a templated collection:      live · sel · (bitmap | count · ranks)
+live       the live members, in ⌈log₂(c + 1)⌉ bits
+sel        1 bit: 0 for a bitmap, 1 for a list
+bitmap     1 bit for each live member, in key order: 1 when vouched for
+count      the members vouched for, in ⌈log₂(live + 1)⌉ bits
+ranks      their ranks, ascending, each in ⌈log₂ live⌉ bits
+pad        zero bits up to the next whole byte, fewer than 8
+```
+
+- **The time** is §7.6's `time` field with `ms`. It counts 32 bits of
+  seconds from the deployment epoch, then 10 bits of milliseconds.
+- **Unknown.** All 42 bits set say the owner's clock is unknown. Any
+  other millisecond code from 1000 up is unused.
+- **A map bit of 0** says nothing of its collection. Its section is left
+  out.
+- **Vouched.** A bit set vouches for its member: the owner holds the
+  member's value as current. A bit clear vouches for nothing. A member
+  that is not live is never vouched for.
+- **The list or the bitmap.** An implementation that writes a templated
+  section MUST write the list only where it is shorter than the bitmap.
+  `[F: heartbeat/bodies.json]`
+
+**The digest** of a collection is the XOR of one 32-bit value for each
+of its live members. With none live it is 0. A member's value is the
+first 4 bytes, read big-endian, of the sha256 of these bytes:
+- its base-relative key, in UTF-8;
+- a zero byte;
+- a byte holding its run's width bit, 0 for a 16-bit run and 1 for a
+  32-bit run;
+- its run, then its seq, big-endian, as an envelope writes them.
+
+An implementation MUST compute a digest so. `[F: heartbeat/digests.json]`
+- **Why the XOR.** It does not depend on order. So an owner updates it at
+  each mutation, and a reader computes it over the members it holds.
+- **What it catches.** A reader that missed a put or a delete, or holds
+  another run's value, holds another digest. Two views that differ still
+  share a digest 1 time in 2^32.
+
+**Reading a body.** A body is read with the covered revision's
+collections. An implementation MUST refuse a body for the first of these
+that applies, in this order, naming the refusal:
+- reading the fields in order:
+  - the body ends before a bit its fields need (`short`);
+  - a code is unused (`code`): a millisecond code from 1000 up but the
+    unknown time's, a live count above c, a count above the live count, or
+    a rank not below the live count or not above the rank before it;
+- the body holds a byte after its pad (`trailing`);
+- a bit of the pad is 1 (`pad`).
+
+`[F: heartbeat/bodies.json]`
+
+Every body an implementation accepts MUST write back to the same bytes.
+`[F: heartbeat/bodies.json]`
 
 ### 7.6 Packed records
 

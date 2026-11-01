@@ -1356,7 +1356,7 @@ struct Incoming {
     encoding: String,
     /// A put whose envelope was refused: undecodable (§2.7), its bytes
     /// never read as a document.
-    refused: Option<zenkey_model::wire::Refusal>,
+    refused: Option<crate::inband::Undecodable>,
     /// CH's tag, when it came in an envelope: a packed document is read by
     /// it (core §7.6).
     tag: Option<zenkey_model::wire::Tag>,
@@ -1365,7 +1365,7 @@ struct Incoming {
 impl Incoming {
     fn of(s: &Sample, via: Via) -> Self {
         let read = crate::inband::read(s.clone());
-        let (refused, tag) = (read.refusal(), read.tag());
+        let (refused, tag) = (read.undecodable(), read.tag());
         let s = read.sample();
         let put = s.kind() == SampleKind::Put;
         Self {

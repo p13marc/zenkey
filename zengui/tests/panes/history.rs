@@ -233,6 +233,7 @@ fn the_history_pane_shows_in_band_stamps_and_diffs_records() {
     let key = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
     let sealed = |seq: u32, record: &[u8]| {
         Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: Stamp {
                 run: Run::U16(3),

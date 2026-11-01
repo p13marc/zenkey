@@ -1,5 +1,5 @@
 {
-  "description": "core §7.5, the zk2c envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's bytes in hex, and `sample`, the kind of the sample that carries them (`put`: they are its payload; `delete`: they are its attachment) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex, or `null` for a delete. A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form), `sample_kind` (a delete on a put, or a mutation as a delete's attachment), `tag` (a delete whose tag is not 0), `short` (fewer bytes than CH, the run and the seq need), `trailing` (a byte after a delete's seq). The parse reads no contract, so a mutation's tag is reported, never checked against a type. Every accepted case writes back to its bytes.",
+  "description": "core §7.5, the zk2c envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's bytes in hex, and `sample`, the kind of the sample that carries them (`put`: they are its payload; `delete`: they are its attachment) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex (a mutation's record, a heartbeat's body), or `null` for a delete. A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form), `sample_kind` (a delete on a put, or a mutation or a heartbeat as a delete's attachment), `tag` (a delete whose tag is not 0), `short` (fewer bytes than CH, the run and the seq need), `trailing` (a byte after a delete's seq). The parse reads no contract, so a mutation's or a heartbeat's tag is reported, never checked against a type or a revision. Every accepted case writes back to its bytes.",
   "headers": [
     {
       "note": "a mutation with a 16-bit run",
@@ -101,7 +101,7 @@
       }
     },
     {
-      "note": "form 6, reserved",
+      "note": "form 6, a heartbeat",
       "byte": "c0",
       "expect": {
         "form": "heartbeat",
@@ -358,11 +358,45 @@
       }
     },
     {
-      "note": "heartbeat, reserved",
+      "note": "a heartbeat on a put: form 6, its tag reported and its body not read",
       "sample": "put",
       "hex": "c00001000007",
       "expect": {
-        "refused": "form"
+        "form": "heartbeat",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "a heartbeat with a 32-bit run and tag 9, and a 6-byte body",
+      "sample": "put",
+      "hex": "d9deadbeef00002a0e10400000c0",
+      "expect": {
+        "form": "heartbeat",
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 42,
+        "tag": 9,
+        "record": "0e10400000c0"
+      }
+    },
+    {
+      "note": "110 0 1111: a heartbeat's CH alone",
+      "sample": "put",
+      "hex": "cf",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a heartbeat's 32-bit run cut short",
+      "sample": "put",
+      "hex": "d0000123450000",
+      "expect": {
+        "refused": "short"
       }
     },
     {
@@ -384,7 +418,7 @@
     {
       "note": "a reserved form is refused before a short stamp",
       "sample": "put",
-      "hex": "c0",
+      "hex": "e0",
       "expect": {
         "refused": "form"
       }
@@ -486,9 +520,25 @@
       }
     },
     {
-      "note": "a reserved form",
+      "note": "a heartbeat as a delete's attachment",
       "sample": "delete",
       "hex": "c00001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a heartbeat's CH alone as a delete's attachment: the wrong kind before a short stamp",
+      "sample": "delete",
+      "hex": "c3",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a reserved form",
+      "sample": "delete",
+      "hex": "e00001000008",
       "expect": {
         "refused": "form"
       }

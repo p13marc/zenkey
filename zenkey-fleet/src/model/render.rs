@@ -180,6 +180,7 @@ fn fallback_rendering(
 ) -> PayloadRendering {
     match payload {
         Payload::Refused(refusal) => inband::refused_rendering(key, size, None, None, refusal),
+        Payload::Heartbeat { body, .. } => inband::heartbeat_rendering(key, why, body.len()),
         Payload::Plain(b) | Payload::Record { record: b, .. } => structural_rendering(key, why, b),
     }
 }
@@ -262,6 +263,19 @@ fn render_read(
         }
         Payload::Plain(b) => (b, None),
         Payload::Record { record, tag, .. } => (record, Some(tag)),
+        // A heartbeat on a key whose resource has a type (core §7.5's form
+        // 6): a body, never a record of the type.
+        Payload::Heartbeat { .. } => {
+            return PayloadRendering {
+                key: key.to_owned(),
+                size,
+                resource: Some(resource),
+                rendered: Rendered::Undecodable {
+                    declared: decode::declared(ty),
+                    reason: crate::model::inband::HEARTBEAT_AS_RECORD.to_owned(),
+                },
+            };
+        }
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
     // the contract speaks next (§7.2's order). A packed record is read by
@@ -485,6 +499,7 @@ mod tests {
         let mut cbor = Vec::new();
         ciborium::into_writer(&json!({"up": true}), &mut cbor).expect("cbor");
         let envelope = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
             tag: Tag::NONE,
             stamp: Stamp {
                 run: Run::U16(1),

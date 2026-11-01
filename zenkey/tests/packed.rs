@@ -85,6 +85,7 @@ fn tool(s: &zenoh::Session, c: &Contract) -> Consumer {
 /// A put's payload: `CH · run · seq · record`, CH carrying `tag`.
 fn enveloped(tag: u8, seq: u32, record: &[u8]) -> Vec<u8> {
     Envelope {
+        form: zenkey::model::wire::Form::Mutation,
         tag: Tag::new(tag).unwrap(),
         stamp: Stamp {
             run: Run::U32(0x00be_ef00),

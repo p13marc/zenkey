@@ -1,0 +1,46 @@
+{
+  "description": "core §7.5, a heartbeat's collections. Written by an independent reading of the text (Python, standard library), checked, never blessed. `contracts` holds each revision's authoring text. `layouts`: a revision → its fingerprint, the heartbeat's tag (the low four bits of the fingerprint's last byte), and its collections in map order: each `state` or `@state` resource whose resolved `freshness.ttl_s` is above 0, by kind token then template, with its `cardinality` (`null` for a template with no parameter, one member), the width of its live count, ⌈log₂(cardinality + 1)⌉ bits (`null` with one member), and its horizon. A stream, a horizon of 0 and no horizon make no collection.",
+  "contracts": {
+    "hb.v1": "# core §7.5's heartbeat: a revision with four collections, three resources\n# that are none (a horizon of 0, none at all, and a stream's), and one\n# collection of each shape.\n[interface]\nname  = \"hb\"\nmajor = 1\nminor = 0\nuses  = [\"freshness.v1\"]\n\n[resources.link]                     # one member\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 60 }\n\n[resources.\"peer/{peer}\"]            # templated: at most 5 live, 3 bits\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nparams      = { peer = \"string\" }\ncardinality = 5\nannotations = { \"freshness.ttl_s\" = 60 }\n\n[resources.\"route/{dest}\"]           # @state, first in order: at most 2 live, 2 bits\nkind        = \"state\"\nexplicit    = true\ntype        = { raw = \"text/plain\" }\nparams      = { dest = \"string\" }\ncardinality = 2\nannotations = { \"freshness.ttl_s\" = 300 }\n\n[resources.\"sdu/{sdu}\"]              # no ceiling: 32 bits\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nparams      = { sdu = \"string\" }\ncardinality = \"unbounded\"\nannotations = { \"freshness.ttl_s\" = 120 }\n\n[resources.mode]                     # never stale: no collection\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 0 }\n\n[resources.note]                     # no horizon: no collection\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\n[resources.level]                    # a stream confirms by sampling: no collection\nkind        = \"stream\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 60 }\n",
+    "bare.v1": "# core §7.5's heartbeat: a revision with no collection, so a body is its\n# time alone.\n[interface]\nname  = \"bare\"\nmajor = 1\nminor = 0\n\n[resources.note]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\n[resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n"
+  },
+  "layouts": [
+    {
+      "contract": "hb.v1",
+      "fingerprint": "sha256:48308bfafc3688d64065a72a6cfe5b443bee9563114b177f9d7a4cdbebfb37de",
+      "tag": 14,
+      "collections": [
+        {
+          "resource": "@state/route/{dest}",
+          "cardinality": 2,
+          "live_bits": 2,
+          "ttl_s": 300
+        },
+        {
+          "resource": "state/link",
+          "cardinality": null,
+          "live_bits": null,
+          "ttl_s": 60
+        },
+        {
+          "resource": "state/peer/{peer}",
+          "cardinality": 5,
+          "live_bits": 3,
+          "ttl_s": 60
+        },
+        {
+          "resource": "state/sdu/{sdu}",
+          "cardinality": 4294967295,
+          "live_bits": 32,
+          "ttl_s": 120
+        }
+      ]
+    },
+    {
+      "contract": "bare.v1",
+      "fingerprint": "sha256:f3f37d5c6615d8bb1037343a9bde58e420b31e99f1f723fff149141bc1ebf2f3",
+      "tag": 3,
+      "collections": []
+    }
+  ]
+}

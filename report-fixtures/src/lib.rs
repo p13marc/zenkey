@@ -3221,6 +3221,7 @@ fn sealed_row(key: &str, identity: KeyIdentity, run: u16, seq: u32, record: &str
         seq: Seq::new(seq).expect("a seq"),
     };
     let bytes = Envelope {
+        form: zenkey_model::wire::Form::Mutation,
         tag: Tag::NONE,
         stamp,
         record: record.as_bytes(),
