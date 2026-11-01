@@ -1,10 +1,12 @@
 """Schema artifacts and type references (core.md §7.1, §7.3, §9.4).
 
-A contract's ``[schemas]`` lists JSON Schema and protobuf files. Each listed
-file is one *artifact*, identified by the sha256 of its bytes: the JCS bytes
-of a JSON Schema document, the FileDescriptorSet bytes of a protobuf file.
-This module loads them, reports the per-file lints (E024 stems, E028 at
-load, E029, E032, E037), and resolves type references (E023, E024).
+A contract's ``[schemas]`` lists JSON Schema, protobuf and, since core 0.75
+(authoring draft 3, #979 B1), packed files. Each listed file is one
+*artifact*, identified by the sha256 of its bytes: the JCS bytes of a JSON
+Schema or packed document, the FileDescriptorSet bytes of a protobuf file.
+This module loads them, reports the per-file lints (E024 stems and ids, E028
+at load, E029, E032, E037, and a packed file's E038 to E043 and E045,
+:mod:`zk2py.packed`), and resolves type references (E023, E024).
 """
 
 from __future__ import annotations
@@ -15,9 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import jcs, protoc
+from . import jcs, packed, protoc
 
-JSON, PROTOBUF, RAW = "jsonschema", "protobuf", "raw"
+JSON, PROTOBUF, RAW, PACKED = "jsonschema", "protobuf", "raw", "packed"
 
 # core.md §7.3, the zk2 subset of JSON Schema 2020-12.
 #: "Keywords that carry meaning".
@@ -50,7 +52,7 @@ MEDIA_TYPE = re.compile(rf"{_MEDIA_TOKEN}/(?:{_MEDIA_TOKEN}|\*)")
 
 @dataclass
 class Artifact:
-    kind: str                  # JSON or PROTOBUF
+    kind: str                  # JSON, PROTOBUF or PACKED
     name: str                  # the stem, or the proto path relative to its root
     id: str | None             # sha256:…, None when the bytes cannot be hashed
     data: Any                  # the JSON document, or the FileDescriptorSet bytes
@@ -128,6 +130,9 @@ class SchemaSet:
     contract_dir: Path
     json_files: list[Artifact] = field(default_factory=list)
     proto_files: list[Artifact] = field(default_factory=list)
+    packed_files: list[Artifact] = field(default_factory=list)
+    #: Each loaded packed file's reading (§7.6), by its listed path.
+    packed_read: dict[str, packed.Linted] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
     #: core.md §9.2 cascade 2: "E029 for one schema kind suppresses E023 for
     #: that kind".
@@ -141,7 +146,7 @@ class SchemaSet:
 
     @classmethod
     def load(cls, contract_dir: Path, jsonschema: list[str], protobuf: list[str],
-             proto_include: list[str] | None) -> SchemaSet:
+             proto_include: list[str] | None, packed_files: list[str] | None = None) -> SchemaSet:
         s = cls(contract_dir)
         taken: set[str] = set()
         for listed in jsonschema:
@@ -154,6 +159,19 @@ class SchemaSet:
             taken.add(stem(listed))
             s._load_json(listed)
         s._check_refs()
+        # §9.4 "Packed" (0.75): "A stem MUST be unique among the listed packed
+        # files, and an id among the listed JSON Schema and packed files
+        # (E024). A later file whose stem or id is taken is not loaded." The
+        # packed files are read after the JSON Schema ones, the order §9.1's
+        # table lists the two keys in (round 94's F-427 asks whether "later"
+        # spans the two lists so).
+        taken = set()
+        for listed in packed_files or []:
+            if stem(listed) in taken:
+                s._err("E024", f"{listed}: packed stem {stem(listed)!r} is already taken; not loaded")
+                continue
+            taken.add(stem(listed))
+            s._load_packed(listed)
         roots = s._proto_roots(proto_include)
         for listed in protobuf:
             s._load_proto(listed, roots)
@@ -193,6 +211,39 @@ class SchemaSet:
         for kw in refused_keywords(doc):
             self._err("E037", f"{listed}: keyword {kw!r} is outside the zk2 subset")
         self.json_files.append(Artifact(JSON, stem(listed), art_id, doc, listed))
+
+    def _load_packed(self, listed: str) -> None:
+        """§9.4 "Packed": "The artifact is the document, read as strict JSON
+        (E029). Its id hashes the document's JCS bytes, and its name is the
+        file's stem." Its declarations are linted E038 to E045 (§7.6)."""
+        path = self.contract_dir / listed
+        try:
+            raw = path.read_bytes()
+        except OSError as e:
+            self._err("E029", f"{listed}: unreadable: {e}")
+            self.broken.add(PACKED)
+            return
+        try:
+            doc = jcs.loads(raw)
+        except jcs.JsonError as e:
+            self._err("E029", f"{listed}: not JSON: {e}")
+            self.broken.add(PACKED)
+            return
+        # §9.2 E028 "in a JSON Schema or packed artifact … once per artifact".
+        _, big = jcs.restriction_violations(doc)
+        art_id = None
+        if big:
+            self._err("E028", f"{listed}: a number outside the canonical domain")
+        else:
+            art_id = jcs.jcs_id(doc)
+            if any(a.id == art_id for a in [*self.json_files, *self.packed_files]):
+                self._err("E024", f"{listed}: its id {art_id} is an earlier file's; not loaded")
+                return
+        linted = packed.lint(doc, listed)
+        for code, where in linted.findings:
+            self._err(code, where)
+        self.packed_read[listed] = linted
+        self.packed_files.append(Artifact(PACKED, stem(listed), art_id, doc, listed))
 
     def _check_refs(self) -> None:
         """§9.4: a ``$ref``'s file part resolves relative to the referencing
@@ -279,7 +330,7 @@ class SchemaSet:
 
     def artifacts(self) -> list[Artifact]:
         """§9.5: every listed artifact plus every well-known one in use."""
-        return [*self.json_files, *self.proto_files, *self.used_well_known.values()]
+        return [*self.json_files, *self.packed_files, *self.proto_files, *self.used_well_known.values()]
 
     def resolve(self, ref: Any) -> tuple[dict[str, Any] | None, list[Finding]]:
         """Resolve one type reference (§7.1, §9.4) into its canonical type
@@ -294,7 +345,37 @@ class SchemaSet:
         assert isinstance(ref, str)
         if ref.startswith("json:"):
             return self._resolve_json(ref)
+        if ref.startswith("packed:"):
+            return self._resolve_packed(ref)
         return self._resolve_proto(ref)
+
+    def _resolve_packed(self, ref: str) -> tuple[dict[str, Any] | None, list[Finding]]:
+        """§9.4 "Packed": ``packed:Name`` "is types/Name in the one listed
+        packed file that defines it (E023 when none does, E024 when several
+        do)"; ``packed:stem#Name`` "looks only in the packed file with that
+        stem". A file defines a type its ``types`` names with a type name
+        (§9.2 cascade 7)."""
+        if PACKED in self.broken:
+            return None, []
+        body = ref[len("packed:"):]
+        if "#" in body:
+            want_stem, _, name = body.partition("#")
+            files = [a for a in self.packed_files if a.name == want_stem]
+        else:
+            name, files = body, self.packed_files
+        hits = [a for a in files if name in self.packed_read[a.listed].names]
+        if not hits:
+            return None, [Finding("E023", f"{ref}: no listed packed file defines it")]
+        if len(hits) > 1:
+            return None, [Finding("E024", f"{ref}: defined by several listed packed files")]
+        return {"kind": PACKED, "name": name, "schema": hits[0].id}, []
+
+    def packed_record(self, type_obj: dict[str, Any]) -> packed.Record | None:
+        """A resolved packed type's record, when its declaration is clean."""
+        for a in self.packed_files:
+            if a.id == type_obj["schema"]:
+                return self.packed_read[a.listed].types.get(type_obj["name"])
+        return None
 
     def _resolve_json(self, ref: str) -> tuple[dict[str, Any] | None, list[Finding]]:
         if JSON in self.broken:

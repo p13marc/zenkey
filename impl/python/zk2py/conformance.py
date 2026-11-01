@@ -140,6 +140,22 @@ def family_bundles(root: Path) -> list[Result]:
     built = bundle.build(seed)
     ok = built == (d / "valid.bundle.json").read_bytes()
     out.append(("build seed.toml == valid.bundle.json", ok, "" if ok else f"got {built[:200]!r}…"))
+    # bundles/ (0.75): "the packed ones from contracts/ok-packed.toml". The
+    # valid one is that build, byte for byte, and its tampered twin differs
+    # from it in one packed document alone.
+    import json as _json
+
+    okp = load_contract(root / "contracts" / "ok-packed.toml", spec_dir=root.parent)
+    built = bundle.build(okp)
+    ok = built == (d / "packed.bundle.json").read_bytes()
+    out.append(("build contracts/ok-packed.toml == packed.bundle.json", ok, "" if ok else f"got {built[:200]!r}…"))
+    good = _json.loads(built)
+    twin = _json.loads((d / "schema-hash-packed.bundle.json").read_bytes())
+    moved = sorted(k for k in good["schemas"] if good["schemas"][k] != twin["schemas"].get(k))
+    same = good["contract"] == twin["contract"] and set(good["schemas"]) == set(twin["schemas"])
+    out.append(("schema-hash-packed.bundle.json is packed.bundle.json with one packed document changed",
+                same and len(moved) == 1 and twin["schemas"][moved[0]]["kind"] == "packed",
+                f"contract equal: {same}, documents changed: {moved}"))
     return out
 
 
@@ -236,7 +252,10 @@ def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
     if family == "contract":
         contracts = [load_contract(d / f"{n}.toml", spec_dir=root.parent) for n in ("old", "new")]
     else:
+        # compat/README.md (0.75): a transitive revision is "a protobuf
+        # directory or a .json, packed where type is packed:".
         kind = case.split("/")[1] if family == "payload" else (
+            "packed" if want["type"].startswith("packed:") else
             "jsonschema" if (d / "v1.json").exists() else "protobuf")
         names = ["old", "new"] if family == "payload" else [*want["history"], want["candidate"]]
         if kind == "protobuf":
@@ -6786,11 +6805,80 @@ def family_envelope(root: Path) -> list[Result]:
     return out
 
 
+def family_packed(root: Path) -> list[Result]:
+    """``packed/vectors.json`` (core §7.6, 0.75, #979 B1), through zk2py's own
+    lint, layout, writer and reader (:mod:`zk2py.packed`): the shared
+    ``schema`` lint-clean; each layout's form, sha256, tag, items and bit
+    bounds; each write's bits, pad and bytes, or the writer's refusal; each
+    read's JSON reading, or the first refusal in §7.6's order. Every
+    accepted write is sealed in §7.5's envelope under the type's tag, parsed
+    back, and read under the tag CH carries, to ``reads_as`` or its value."""
+    from . import packed, zk2c
+
+    data = _load_json(root / "packed" / "vectors.json")
+    unknown = set(data) - {"description", "schema", "layouts", "writes", "reads"}
+    out: list[Result] = [("packed: the file holds layouts, writes and reads", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    linted = packed.lint(data["schema"], "packed/vectors.json")
+    out.append(_check("packed: the shared schema is lint-clean (§9.2 E038 to E045)",
+                      [c for c, _ in linted.findings], []))
+    types = linted.types
+    for c in data["layouts"]:
+        r = types[c["type"]]
+        lo, hi = r.bit_bounds()
+        got = {"form": r.layout_form(), "sha256": r.layout_sha256(), "tag": r.tag, "items": r.item_layout(),
+               "min_bits": lo, "max_bits": hi}
+        out.append(_check(f"packed: layout {c['type']}", got, c["expect"]))
+    for i, c in enumerate(data["writes"]):
+        r, epoch = types[c["type"]], c.get("epoch")
+        name = f"packed: write {i} {c['type']}: {c['note']}"
+        try:
+            bits = r.write_bits(c["value"], epoch)
+            record = r.write(c["value"], epoch)
+            got: dict[str, Any] = {"hex": record.hex(), "bits": bits, "pad": -len(bits) % 8}
+        except packed.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(name, got, c["expect"]))
+        if "refused" in got:
+            continue
+        want = c.get("reads_as", c["value"])
+        sealed = packed.seal(r, c["value"], run=0x0102, seq=7, epoch=epoch)
+        env, back = packed.open_put(r, sealed, epoch)
+        out.append(_check(f"{name}: sealed under tag {r.tag} and read back",
+                          {"tag": env.tag, "ch": sealed[0], "value": back},
+                          {"tag": r.tag, "ch": r.tag, "value": want}))
+        for other in sorted({(r.tag + 1) % 16}):
+            try:
+                r.read(other, record, epoch)
+                got_tag: Any = "read"
+            except packed.Refused as e:
+                got_tag = e.token
+            out.append(_check(f"{name}: refused under tag {other}", got_tag, "tag"))
+    for i, c in enumerate(data["reads"]):
+        r = types[c["type"]]
+        try:
+            got = {"value": r.read(c["tag"], bytes.fromhex(c["hex"]), c.get("epoch"))}
+        except packed.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"packed: read {i} {c['type']} tag {c['tag']} {c['hex'] or '(empty)'}: {c['note']}",
+                          got, c["expect"]))
+        # The same record in an envelope whose CH carries the case's tag: the
+        # parser reports the tag, and the reader checks it (§7.5, §7.6).
+        payload = zk2c.write("mutation", 16, 1, 0, c["tag"], bytes.fromhex(c["hex"]))
+        try:
+            env, value = packed.open_put(r, payload, c.get("epoch"))
+            enveloped: dict[str, Any] = {"value": value}
+        except (packed.Refused, zk2c.Refused) as e:
+            enveloped = {"refused": e.token}
+        out.append(_check(f"packed: read {i} through the envelope", enveloped, c["expect"]))
+    return out
+
+
 #: Every entry of spec/conformance/ that a family reads. Appendix E lists
 #: the fixture formats; an entry no family reads fails ``layout``, so a new
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
-                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope"}
+                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -6823,6 +6911,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "budget": family_budget,
     "seed": family_seed,
     "envelope": family_envelope,
+    "packed": family_packed,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,

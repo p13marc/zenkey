@@ -15,7 +15,7 @@ from typing import Any
 
 from . import jcs
 from .contract import FORMAT, Contract
-from .schemas import JSON, PROTOBUF
+from .schemas import JSON, PACKED, PROTOBUF
 
 EXTRA_ANNOTATION = "views.document"
 
@@ -78,7 +78,8 @@ def build(contract: Contract) -> bytes:
         if a.kind == PROTOBUF:
             schemas[a.id] = {"kind": PROTOBUF, "data": base64.b64encode(a.data).decode("ascii")}
         else:
-            schemas[a.id] = {"kind": JSON, "data": a.data}
+            # §9.6 (0.75): a packed document is carried as a JSON Schema one.
+            schemas[a.id] = {"kind": a.kind, "data": a.data}
     return jcs.dumps({"contract": contract.canonical, "schemas": schemas, "extras": {}})
 
 
@@ -134,11 +135,11 @@ def verify(data: bytes, expect_fingerprint: str | None = None) -> Verified:
             raise BundleError("missing_schema", sid)
         # 0.5: "its kind is the listed one, an entry that is not an object or
         # has no kind included (schema_kind); it has a data member and no
-        # member besides kind and data, … and its kind is protobuf or
-        # jsonschema (shape)".
+        # member besides kind and data, … and its kind is protobuf,
+        # jsonschema or packed (shape)" (0.75).
         if not isinstance(entry, dict) or entry.get("kind") != listed_kind[sid]:
             raise BundleError("schema_kind", sid)
-        if "data" not in entry or set(entry) - {"kind", "data"} or entry["kind"] not in (PROTOBUF, JSON):
+        if "data" not in entry or set(entry) - {"kind", "data"} or entry["kind"] not in (PROTOBUF, JSON, PACKED):
             raise BundleError("shape", f"{sid}: no data, another member, or kind {entry.get('kind')!r}")
         if entry["kind"] == PROTOBUF:
             if not isinstance(entry["data"], str):
@@ -150,7 +151,8 @@ def verify(data: bytes, expect_fingerprint: str | None = None) -> Verified:
             got = jcs.sha256_id(raw)
         else:
             # 0.5: a document holding a number outside the canonical domain
-            # "matches no id", by rule.
+            # "matches no id", by rule. 0.75: "the JCS bytes for jsonschema
+            # and packed".
             if jcs.restriction_violations(entry["data"])[1]:
                 raise BundleError("schema_hash", f"{sid}: a number outside the canonical domain")
             got = jcs.jcs_id(entry["data"])

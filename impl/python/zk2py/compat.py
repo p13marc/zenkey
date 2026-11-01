@@ -41,7 +41,7 @@ from typing import Any, Callable
 from google.protobuf import descriptor_pb2
 
 from . import protoc
-from .schemas import ANNOTATIONS, JSON, PROTOBUF, RAW, json_pointer, stem
+from .schemas import ANNOTATIONS, JSON, PACKED, PROTOBUF, RAW, json_pointer, stem
 
 COMPATIBLE, REVIEW, BREAKING, INVALID = "compatible", "review", "breaking", "invalid"
 _ORDER = {COMPATIBLE: 0, REVIEW: 1, BREAKING: 2, INVALID: 3}
@@ -592,6 +592,87 @@ def proto_compare_enum(old: ProtoWorld, oname: str, new: ProtoWorld, nname: str)
     return v
 
 
+# ===========================================================================
+# Packed payloads (§9.8, 0.75: "the wire is the layout (§7.6), so the rules
+# read it field by field. Names and descriptions are not the wire.")
+# ===========================================================================
+
+def packed_compare(old: list[Any], new: list[Any]) -> Verdict:
+    """The transition from ``old``'s items to ``new``'s (§9.8 "Packed
+    payloads"): item by item from the first, a marker meeting a marker; then
+    a different length, growth behind a marker or ``fields_changed``."""
+    from .packed import MARKER
+
+    v = Verdict()
+    for i, (a, b) in enumerate(zip(old, new)):
+        if a == MARKER and b == MARKER:
+            continue
+        if a == MARKER or b == MARKER:
+            v.add(BREAKING, "fields_changed", f"item {i}: a marker where the other revision has a field")
+            continue
+        v.merge(_packed_field(a, b), f"item {i} ({a.name}): ")
+    if len(old) != len(new):
+        shorter, longer = (old, new) if len(old) < len(new) else (new, old)
+        rest = longer[len(shorter):]
+        # "A different length is growth behind a marker when the shorter list
+        # ends with a marker, and the longer goes on after it. An optional
+        # field appended or removed there is compatible."
+        if shorter and shorter[-1] == MARKER and all(x == MARKER or x.optional for x in rest):
+            v.add(COMPATIBLE, "", f"{len(rest)} item(s) {'appended' if longer is new else 'removed'} "
+                                  "behind a marker")
+        else:
+            v.add(BREAKING, "fields_changed", f"{len(old)} items → {len(new)}, not growth behind a marker")
+    return v
+
+
+def _packed_field(a: Any, b: Any) -> Verdict:
+    """Two fields at one place, compared by their declarations (§9.8)."""
+    v = Verdict()
+    if a.type != b.type:
+        v.add(BREAKING, "type_changed", f"{a.type} → {b.type}")
+        return v
+    if a.name != b.name:
+        v.add(REVIEW, "field_renamed", f"{a.name!r} → {b.name!r}")
+    if a.optional != b.optional:
+        v.add(BREAKING, "presence_changed", f"optional {a.optional} → {b.optional}")
+    if a.type in ("int", "fixed"):
+        # "compared as values … so "2.00" and "2" are one bound".
+        if a.minimum != b.minimum or a.maximum != b.maximum:
+            v.add(BREAKING, "bound_changed", "minimum or maximum moved")
+        if a.type == "fixed" and a.resolution != b.resolution:
+            v.add(BREAKING, "resolution_changed", f"{a.resolution} → {b.resolution}")
+        # "reserved changed (reserved_changed): the codes move". zk2py
+        # compares the declared names as a set, in §7.6's order, which is
+        # where their codes go.
+        if a.reserved != b.reserved:
+            v.add(BREAKING, "reserved_changed", f"{list(a.reserved)} → {list(b.reserved)}")
+    if a.type in ("counter", "enum", "time") and a.width != b.width:
+        v.add(BREAKING, "width_changed", f"{a.width} → {b.width} bits")
+    if a.type == "enum":
+        _packed_enum(v, a, b)
+    return v
+
+
+def _packed_enum(v: Verdict, a: Any, b: Any) -> None:
+    if a.escape != b.escape:
+        v.add(BREAKING, "enum_changed", f"escape {a.escape} → {b.escape}")
+    for name in a.values:
+        if name in b.values and a.values.index(name) != b.values.index(name):
+            v.add(BREAKING, "enum_changed", f"{name!r} moved from {a.values.index(name)} to "
+                                            f"{b.values.index(name)}")
+    for i, (x, y) in enumerate(zip(a.values, b.values)):
+        if x != y and y not in a.values and x not in b.values:
+            v.add(REVIEW, "enum_value_renamed", f"value {i}: {x!r} → {y!r}")
+    if len(a.values) != len(b.values):
+        added = len(b.values) > len(a.values)
+        if not (a.escape and b.escape):
+            v.add(BREAKING, "enum_changed", f"a value {'added' if added else 'removed'} where no escape reads it")
+        elif added:
+            v.add(COMPATIBLE, "", "a value added at the end of an enum with an escape")
+        else:
+            v.add(REVIEW, "enum_value_removed", "a value removed from the end of an enum with an escape")
+
+
 def proto_normalized(data: bytes) -> descriptor_pb2.FileDescriptorSet:
     """§9.7: identity compares the FileDescriptorSets "with source info
     dropped and every default json_name dropped"."""
@@ -635,7 +716,8 @@ def identical(a: Revision, b: Revision) -> bool:
         return False
     for key, da in aa.items():
         db = ab[key]
-        if key[0] == JSON:
+        if key[0] in (JSON, PACKED):
+            # §9.7 (0.75): "JSON Schema and packed documents by their JCS bytes".
             if jcs.dumps(da) != jcs.dumps(db):
                 return False
         elif proto_normalized(da) != proto_normalized(db):
@@ -674,6 +756,13 @@ class Revision:
         return ProtoWorld.from_sets([self.artifacts[s["id"]] for s in self.canonical["schemas"]
                                      if s["kind"] == PROTOBUF and s["id"] in self.artifacts])
 
+    def packed_type(self, t: dict[str, Any]):
+        """A packed type's record in this revision (§7.6), or None."""
+        from . import packed
+
+        doc = self.artifacts.get(t["schema"])
+        return None if doc is None else packed.lint(doc).types.get(t["name"])
+
     def json_stem(self, schema_id: str) -> str | None:
         return next((s["name"] for s in self.canonical["schemas"] if s["id"] == schema_id), None)
 
@@ -690,6 +779,13 @@ def type_compare(old: Revision, ot: dict[str, Any], new: Revision, nt: dict[str,
             v.add(BREAKING, "media_type_changed", f"{where}: {ot['media_type']} → {nt['media_type']}")
         if ot["media_param"] != nt["media_param"]:
             v.add(REVIEW, "media_param_changed", f"{where}: {ot['media_param']} → {nt['media_param']}")
+        return v
+    if ot["kind"] == PACKED:
+        orec, nrec = old.packed_type(ot), new.packed_type(nt)
+        if orec is None or nrec is None:
+            v.add(REVIEW, "schema_unreadable", f"{where}: an artifact lacks {ot['name']}, or it is not clean")
+            return v
+        v.merge(packed_compare(orec.items, nrec.items), f"{where}: ")
         return v
     if ot["kind"] == JSON:
         ow, nw = old.json_world(), new.json_world()
