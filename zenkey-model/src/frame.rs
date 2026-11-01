@@ -27,9 +27,15 @@
 //!   absent, or a code, which [`Frame::read_json`] spells as §7.6's JSON
 //!   reading does.
 //!
-//! A reader's field states over a key's frames (`known`, `within`,
-//! `unknown`, `absent`) are #981's K2, and the owner's writer is K3. This
-//! module reads one body, and holds no state across frames.
+//! - **A key's frames** are read by a [`Reader`] (#981's K2): what each
+//!   frame follows in the run it holds ([`Follows`]), and each record's
+//!   seq, time ([`When`]) and field states ([`FieldState`]: `known`,
+//!   `within`, `unknown` with why, `absent`), as §7.7's "The reader's
+//!   fields" says; [`Applied::reading`] spells them as
+//!   `spec/conformance/frame/apply.json` does, which observer §7.6's tools
+//!   show.
+//!
+//! The owner's writer is K3.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -41,7 +47,7 @@ use sha2::{Digest, Sha256};
 use crate::authoring::{FrameSpec, Kind};
 use crate::contract::{Body, Contract, Resource};
 use crate::packed::{self, BitReader, BitWriter, Decimal, Field, FieldKind, Item};
-use crate::wire::{Envelope, Stamp, Tag};
+use crate::wire::{Envelope, Run, Seq, Stamp, Tag};
 
 /// The most records one frame holds.
 pub const MAX_RECORDS: u64 = 256;
@@ -881,6 +887,428 @@ impl Frame {
             records.push(Record { full, at, slots });
         }
         Ok(Frame { time, records })
+    }
+}
+
+/// What a frame follows, in the run a reader holds (core §7.7, "The
+/// frames it expects").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Follows {
+    /// The reader held no run: its first frame of the key.
+    First,
+    /// The seq after the last record it read, in the run it holds.
+    Continues,
+    /// A newer seq by core §4.3's serial order: `lost` records lost.
+    Gap { lost: u32 },
+    /// Any other seq of the run it holds, one exactly 2^23 ahead included:
+    /// the key restarted under a run it had used, which §4.3 forbids.
+    Rewind,
+    /// A run other than the one it holds.
+    Run,
+}
+
+impl Follows {
+    /// `spec/conformance/frame/apply.json`'s token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::First => "first",
+            Self::Continues => "continues",
+            Self::Gap { .. } => "gap",
+            Self::Rewind => "rewind",
+            Self::Run => "run",
+        }
+    }
+
+    /// Whether the reader turned every field `unknown` at this frame.
+    #[must_use]
+    pub const fn resets(self) -> bool {
+        !matches!(self, Self::Continues)
+    }
+}
+
+/// Why a field is `unknown` (core §7.7's table).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Unknown {
+    /// Not included since the reader's first frame of the key.
+    First,
+    /// Not included since a frame of a run the reader did not hold.
+    Run,
+    /// Not included since records were lost.
+    Gap,
+    /// Not included since a rewind.
+    Rewind,
+    /// `max_records` records after the record that included it.
+    Deadband,
+    /// Omitted under a deadband after an inclusion that was no value: the
+    /// field absent, or a reserved code.
+    NoValue,
+}
+
+impl Unknown {
+    /// `spec/conformance/frame/apply.json`'s token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::First => "first",
+            Self::Run => "run",
+            Self::Gap => "gap",
+            Self::Rewind => "rewind",
+            Self::Deadband => "deadband",
+            Self::NoValue => "no_value",
+        }
+    }
+
+    /// Why, in words, for a person (observer §7.6).
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            Self::First => "not included since the first frame read",
+            Self::Run => "not included since a run not held",
+            Self::Gap => "not included since records were lost",
+            Self::Rewind => "not included since a rewind",
+            Self::Deadband => "max_records passed since it was included",
+            Self::NoValue => "omitted under a deadband after no value",
+        }
+    }
+
+    fn of(follows: Follows) -> Self {
+        match follows {
+            Follows::First => Self::First,
+            Follows::Run => Self::Run,
+            Follows::Gap { .. } => Self::Gap,
+            Follows::Rewind | Follows::Continues => Self::Rewind,
+        }
+    }
+}
+
+/// A field's state in one record (core §7.7, "The reader's fields").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FieldState {
+    /// Its value, at the record's time: included in this record, or
+    /// omitted with no deadband and nothing lost since it was included.
+    Known(u64),
+    /// The last value included, give or take its deadband's `delta`:
+    /// omitted under a deadband, fewer than `max_records` records after a
+    /// record that included a value.
+    Within(u64),
+    /// Nothing, with why: never its last value, never 0.
+    Unknown(Unknown),
+    /// Nothing: the owner wrote it absent.
+    Absent,
+}
+
+impl FieldState {
+    /// `spec/conformance/frame/apply.json`'s token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Known(_) => "known",
+            Self::Within(_) => "within",
+            Self::Unknown(_) => "unknown",
+            Self::Absent => "absent",
+        }
+    }
+
+    /// The code it holds: a `known` field's value, or a `within` field's
+    /// last value (give or take its delta). `None` for `unknown` and
+    /// `absent`, which hold none.
+    #[must_use]
+    pub const fn code(self) -> Option<u64> {
+        match self {
+            Self::Known(c) | Self::Within(c) => Some(c),
+            Self::Unknown(_) | Self::Absent => None,
+        }
+    }
+}
+
+/// A record's time, as a reader reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum When {
+    /// Measured: record 0's on the owner's wall clock, a later record's as
+    /// its offset on the owner's monotonic clock from record 0.
+    Measured,
+    /// `step_ms` × its index after record 0, within `jitter_ms`: an
+    /// instant and a bound, never a measurement (observer §7.6).
+    Scheduled { jitter_ms: u32 },
+    /// Record 0 of a frame whose time is unknown: the owner's clock was.
+    Unknown,
+}
+
+impl When {
+    /// `spec/conformance/frame/apply.json`'s token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Measured => "measured",
+            Self::Scheduled { .. } => "scheduled",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// One record of a frame, read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordRead {
+    /// Record 0's seq plus its index, modulo 2^24.
+    pub seq: Seq,
+    pub when: When,
+    /// After record 0: its offset, or `step_ms` × its index when
+    /// scheduled. 0 for record 0.
+    pub after_ms: u64,
+    /// Its instant in milliseconds from the deployment epoch: record 0's
+    /// time plus `after_ms`, `None` when that time is unknown.
+    pub at_ms: Option<u64>,
+    /// One per field, in field order.
+    pub fields: Vec<FieldState>,
+}
+
+/// A frame as a [`Reader`] read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Applied {
+    /// The envelope's: record 0's seq.
+    pub stamp: Stamp,
+    pub follows: Follows,
+    pub records: Vec<RecordRead>,
+}
+
+impl Applied {
+    /// The frame as `spec/conformance/frame/apply.json` spells a reading:
+    /// `run`, `seq`, `follows` (and `lost` for a gap), then each record's
+    /// `seq`, `time`, `after_ms` and `jitter_ms` where they apply, `at`
+    /// (`{s, ms}`) where its instant is known, and `fields` by name, each
+    /// `{state}` with its `value` (§7.6's JSON reading), a `within`
+    /// field's `delta`, and an `unknown` field's `why`.
+    ///
+    /// # Errors
+    /// [`Frame::read_json`]'s: a `time` field's instant past an `i64` of
+    /// milliseconds under `epoch`.
+    pub fn reading(&self, layout: &Layout, epoch: Option<i64>) -> Result<Value, ReadRefusal> {
+        let mut records = Vec::with_capacity(self.records.len());
+        for (index, rec) in self.records.iter().enumerate() {
+            let mut m = Map::new();
+            m.insert("seq".into(), rec.seq.get().into());
+            m.insert("time".into(), rec.when.token().into());
+            if index > 0 {
+                m.insert("after_ms".into(), rec.after_ms.into());
+            }
+            if let When::Scheduled { jitter_ms } = rec.when {
+                m.insert("jitter_ms".into(), jitter_ms.into());
+            }
+            if let Some(at) = rec.at_ms {
+                m.insert("at".into(), json!({"s": at / 1000, "ms": at % 1000}));
+            }
+            let mut fields = Map::new();
+            for (i, (f, s)) in layout.fields.iter().zip(&rec.fields).enumerate() {
+                let mut v = Map::new();
+                v.insert("state".into(), s.token().into());
+                match s {
+                    FieldState::Known(c) => {
+                        v.insert("value".into(), f.value(*c, epoch)?);
+                    }
+                    FieldState::Within(c) => {
+                        v.insert("value".into(), f.value(*c, epoch)?);
+                        if let Some(d) = layout.deadband(i) {
+                            v.insert("delta".into(), d.delta.to_string().into());
+                        }
+                    }
+                    FieldState::Unknown(why) => {
+                        v.insert("why".into(), why.token().into());
+                    }
+                    FieldState::Absent => {}
+                }
+                fields.insert(f.name.clone(), Value::Object(v));
+            }
+            m.insert("fields".into(), Value::Object(fields));
+            records.push(Value::Object(m));
+        }
+        let mut out = Map::new();
+        out.insert("run".into(), self.stamp.run.hex().into());
+        out.insert("seq".into(), self.stamp.seq.get().into());
+        out.insert("follows".into(), self.follows.token().into());
+        if let Follows::Gap { lost } = self.follows {
+            out.insert("lost".into(), lost.into());
+        }
+        out.insert("records".into(), Value::Array(records));
+        Ok(Value::Object(out))
+    }
+}
+
+/// What a field's last inclusion was, since the reader last reset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Last {
+    /// Not included since the reset.
+    Never,
+    Absent,
+    /// A value's code.
+    Value(u64),
+    /// A reserved code: present, and no value.
+    Reserved(u64),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Track {
+    last: Last,
+    /// Records since its last inclusion.
+    since: u32,
+}
+
+#[derive(Debug, Clone)]
+struct Held {
+    run: Run,
+    /// The seq after the last record read.
+    next: Seq,
+    /// Why every field turned unknown at the last reset.
+    reset: Unknown,
+    /// The layout's hash: another layout is read as another run.
+    layout: [u8; 32],
+    tracks: Vec<Track>,
+}
+
+/// One key's reader (core §7.7, "The reader's fields"): what it holds of
+/// the key's frames, in the run it holds. A consumer or a tool keeps one
+/// per frame key and hands it each frame in the order it arrived
+/// ([`Reader::apply`]). A frame refused by its layout never reaches it,
+/// so its records read as lost at the next frame.
+#[derive(Debug, Clone, Default)]
+pub struct Reader {
+    held: Option<Held>,
+}
+
+impl Reader {
+    /// A reader that holds nothing: its first frame is [`Follows::First`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The run it holds, and the seq it expects next.
+    #[must_use]
+    pub fn expects(&self) -> Option<Stamp> {
+        self.held.as_ref().map(|h| Stamp {
+            run: h.run,
+            seq: h.next,
+        })
+    }
+
+    /// What a frame at `stamp` would follow, read under `layout`.
+    #[must_use]
+    pub fn follows(&self, layout: &Layout, stamp: Stamp) -> Follows {
+        let Some(h) = &self.held else {
+            return Follows::First;
+        };
+        if h.run != stamp.run || h.layout != layout.sha256 {
+            return Follows::Run;
+        }
+        const SPACE: u32 = 1 << 24;
+        const HALF: u32 = 1 << 23;
+        let d = stamp.seq.get().wrapping_sub(h.next.get()) & (SPACE - 1);
+        match d {
+            0 => Follows::Continues,
+            d if d < HALF => Follows::Gap { lost: d },
+            _ => Follows::Rewind,
+        }
+    }
+
+    /// Reads a frame of the key, `stamp` its envelope's, `frame` its body
+    /// read under `layout` ([`Frame::parse`]): every field turns
+    /// `unknown` at a gap, a rewind and a run not held (its first frame
+    /// included), then each record is read in turn, a field `known` or
+    /// `absent` where included, carried where omitted with no deadband,
+    /// `within` under its deadband until `max_records` records after it
+    /// was included with a value, and `unknown` past it.
+    ///
+    /// A reader holds one layout: a frame under another (another revision
+    /// of the resource) is read as one of a run it does not hold.
+    pub fn apply(&mut self, layout: &Layout, stamp: Stamp, frame: &Frame) -> Applied {
+        let follows = self.follows(layout, stamp);
+        let n = layout.fields.len();
+        let held = match (&mut self.held, follows.resets()) {
+            (Some(h), false) => h,
+            (slot, _) => slot.insert(Held {
+                run: stamp.run,
+                next: stamp.seq,
+                reset: Unknown::of(follows),
+                layout: layout.sha256,
+                tracks: vec![
+                    Track {
+                        last: Last::Never,
+                        since: 0,
+                    };
+                    n
+                ],
+            }),
+        };
+        let base = frame.time.map(|t| u64::from(t.s) * 1000 + u64::from(t.ms));
+        let mut records = Vec::with_capacity(frame.records.len());
+        for (i, rec) in frame.records.iter().enumerate() {
+            let seq = Seq::new((stamp.seq.get() + i as u32) & Seq::MAX.get()).expect("24 bits");
+            let (when, after_ms) = match rec.at {
+                None if base.is_none() => (When::Unknown, 0),
+                None => (When::Measured, 0),
+                Some(At::Offset(o)) => (When::Measured, o),
+                Some(At::Scheduled) => (
+                    When::Scheduled {
+                        jitter_ms: layout.params.jitter_ms.unwrap_or(0),
+                    },
+                    u64::from(layout.params.step_ms.unwrap_or(0)) * i as u64,
+                ),
+            };
+            let mut fields = Vec::with_capacity(n);
+            for (k, (f, slot)) in layout.fields.iter().zip(&rec.slots).enumerate() {
+                let t = &mut held.tracks[k];
+                let state = match slot {
+                    Slot::Code(c) => {
+                        *t = Track {
+                            last: if f.reserved_name(*c).is_some() {
+                                Last::Reserved(*c)
+                            } else {
+                                Last::Value(*c)
+                            },
+                            since: 0,
+                        };
+                        FieldState::Known(*c)
+                    }
+                    Slot::Absent => {
+                        *t = Track {
+                            last: Last::Absent,
+                            since: 0,
+                        };
+                        FieldState::Absent
+                    }
+                    Slot::Omitted => {
+                        t.since = t.since.saturating_add(1);
+                        match (t.last, layout.deadband(k)) {
+                            (Last::Never, _) => FieldState::Unknown(held.reset),
+                            (Last::Absent, None) => FieldState::Absent,
+                            (Last::Value(c) | Last::Reserved(c), None) => FieldState::Known(c),
+                            (Last::Absent | Last::Reserved(_), Some(_)) => {
+                                FieldState::Unknown(Unknown::NoValue)
+                            }
+                            (Last::Value(_), Some(d)) if t.since >= d.max_records => {
+                                FieldState::Unknown(Unknown::Deadband)
+                            }
+                            (Last::Value(c), Some(_)) => FieldState::Within(c),
+                        }
+                    }
+                };
+                fields.push(state);
+            }
+            records.push(RecordRead {
+                seq,
+                when,
+                after_ms,
+                at_ms: base.map(|b| b + after_ms),
+                fields,
+            });
+        }
+        let count = u32::try_from(frame.records.len()).expect("at most 256");
+        held.next = Seq::new((stamp.seq.get() + count) & Seq::MAX.get()).expect("24 bits");
+        Applied {
+            stamp,
+            follows,
+            records,
+        }
     }
 }
 

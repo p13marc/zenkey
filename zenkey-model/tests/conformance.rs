@@ -1720,6 +1720,80 @@ fn frame_bodies() {
     }
 }
 
+/// `spec/conformance/frame/apply.json` (core §7.7's "The reader's
+/// fields"; #981 K2): one key's frames, each its run, seq and body, read
+/// by one `frame::Reader` that held nothing before the first → each frame
+/// as it reads it: what it follows, each record's seq and time, and every
+/// field's state. Written by an independent reading of the text, checked,
+/// never blessed.
+#[test]
+fn frame_apply() {
+    use zenkey_model::frame::{Frame, Reader};
+    use zenkey_model::packed::DEFAULT_EPOCH;
+    use zenkey_model::wire::{Run, Seq, Stamp};
+    let layouts = frame_fixture_layouts();
+    let doc = read_json(&spec().join("conformance/frame/apply.json"));
+    let epoch = Some(DEFAULT_EPOCH);
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    let mut follows = std::collections::BTreeSet::new();
+    let mut states = std::collections::BTreeSet::new();
+    for case in cases {
+        let note = &case["note"];
+        let l = &layouts[case["layout"].as_str().expect("layout")];
+        let mut reader = Reader::new();
+        for (i, f) in case["frames"]
+            .as_array()
+            .expect("frames")
+            .iter()
+            .enumerate()
+        {
+            let run = Run::from_hex(f["run"].as_str().expect("run")).expect("a run");
+            let seq =
+                Seq::new(u32::try_from(f["seq"].as_u64().expect("seq")).unwrap()).expect("a seq");
+            let body = unhex(f["hex"].as_str().expect("hex"));
+            let frame = Frame::parse(l.tag(), &body, l)
+                .unwrap_or_else(|e| panic!("{note}, frame {i}: {e}"));
+            assert_eq!(
+                frame.read_json(l, epoch).unwrap(),
+                f["value"],
+                "{note}, frame {i}: its value"
+            );
+            let got = reader
+                .apply(l, Stamp { run, seq }, &frame)
+                .reading(l, epoch)
+                .unwrap();
+            assert_eq!(got, f["expect"], "{note}, frame {i}");
+            follows.insert(got["follows"].as_str().unwrap().to_owned());
+            for r in got["records"].as_array().unwrap() {
+                for v in r["fields"].as_object().unwrap().values() {
+                    let token = v["state"].as_str().unwrap();
+                    states.insert(match v.get("why") {
+                        Some(w) => format!("{token}:{}", w.as_str().unwrap()),
+                        None => token.to_owned(),
+                    });
+                }
+            }
+        }
+    }
+    for token in ["first", "continues", "gap", "rewind", "run"] {
+        assert!(follows.contains(token), "no frame follows {token}");
+    }
+    for token in [
+        "known",
+        "within",
+        "absent",
+        "unknown:first",
+        "unknown:run",
+        "unknown:gap",
+        "unknown:rewind",
+        "unknown:deadband",
+        "unknown:no_value",
+    ] {
+        assert!(states.contains(token), "no field reads {token}");
+    }
+}
+
 /// A frame resource's bundle reads back into the contract model and
 /// builds to its own bytes (core §9.6, §9.5), its `frame` member
 /// included; and its layout is read from the contract (core §7.7).
