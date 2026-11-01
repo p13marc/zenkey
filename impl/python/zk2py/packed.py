@@ -791,6 +791,42 @@ def deployment_epoch(stated: int | None) -> int:
     return DEPLOYMENT_EPOCH if stated is None else stated
 
 
+@dataclass(frozen=True)
+class Reading:
+    """A packed sample read as observer §7.3 (0.16) reads one: ``value``,
+    its JSON reading, or ``refusal``, the token naming why it is
+    undecodable, and ``why``."""
+
+    value: dict[str, Any] | None
+    refusal: str | None = None
+    why: str = ""
+
+    @property
+    def undecodable(self) -> bool:
+        return self.refusal is not None
+
+    def says(self, name: str) -> str:
+        return f"undecodable as packed:{name}: {self.refusal} ({self.why})"
+
+
+def read_sample(rec: Record, read: Any, epoch: int | None = None) -> Reading:
+    """A put's :class:`zk2py.zk2c.Read` read as ``rec``'s record, observer
+    §7.3 (0.16): "A packed record is read through its type's layout, under
+    the tag its envelope's CH carried (core §7.6). One its layout refuses is
+    undecodable, and the tool names the refusal. One that came in no
+    envelope has no tag, so it is undecodable too." A refused envelope is
+    undecodable by its own token. ``time`` fields under ``epoch``, the
+    deployment's, 0 where none is stated."""
+    if not read.enveloped:
+        return Reading(None, "no_envelope", "a packed record travels in core §7.5's envelope, which carries its tag")
+    if read.refused:
+        return Reading(None, read.refusal, f"a refused zk2c envelope: {read.why}")
+    try:
+        return Reading(rec.read(read.tag, read.record or b"", deployment_epoch(epoch)))
+    except Refused as e:
+        return Reading(None, e.token, str(e).split(": ", 1)[-1])
+
+
 def open_put(rec: Record, payload: bytes, epoch: int | None = None) -> tuple[Any, dict[str, Any]]:
     """A put's payload read as ``rec``'s record: §7.5's parse, which reports
     the tag and checks it against no type, then §7.6's reader, whose first

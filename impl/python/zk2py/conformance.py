@@ -3470,10 +3470,14 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
       (:meth:`zk2py.owner.Owner.subscribe_role`) and its tool
       (:mod:`zk2py.echo_tool`) hand it 0 (:func:`zk2py.packed.deployment_epoch`).
 
-    No session is opened."""
+    And observer §7.3 at 0.16 through :func:`zk2py.packed.read_sample` and
+    the echo tool's ``--contracts``: a record its layout refuses, or that
+    came in no envelope, undecodable with its refusal named; a packed type
+    named ``packed:<name>``. No session is opened."""
     import re
 
-    from . import jcs, packed
+    from . import echo_tool, jcs, packed, zk2c
+    from .contract import load_contract
 
     spec = root.parent
     flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
@@ -3605,6 +3609,37 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  write(clock, {"at": 1700000000000}, packed.deployment_epoch(None)) == format(1700000000, "032b")],
                 [{"refused": "epoch"}, 0, 5, True]))
 
+    # -- observer §7.3 at 0.16: a tool's packed record -------------------------
+    held = echo_tool.Held([load_contract(spec.parent / "zenkey/tests/contracts/packed/packed.v1.toml")])
+    sensor_c = held.by_iface["packed.v1"]
+    sensor = next(sensor_c.schemas.packed_record(r["type"]) for r in sensor_c.canonical["resources"]
+                  if r["template"] == "sensor")
+    v = {"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2", "battery": "3.70"}
+    key = "zk2/lab/p/packed.v1/stream/sensor"
+    good = packed.seal(sensor, v, 7, 1)
+    rows = [echo_tool.row_of(key, False, len(x), e, x, None, held)
+            for x, e in ((good, zk2c.ENCODING), (zk2c.write("mutation", 16, 7, 2, (sensor.tag + 1) % 16,
+                                                             sensor.write(v)), zk2c.ENCODING),
+                         (good + b"\x00", zk2c.ENCODING), (sensor.write(v), "application/octet-stream"),
+                         (b"\xe0", zk2c.ENCODING))]
+    out.append(("observer §7.3 (0.16) in zk2py's echo tool: a packed record decoded under its tag and named "
+                "packed:Sensor; one under another tag, one with a byte after its pad, one in no envelope and a "
+                "refused envelope undecodable, the refusal named, never sniffed",
+                [[r["declared_type"]["name"] for r in rows], rows[0]["decoded"],
+                 [(r["undecodable"] or "").split(" (")[0] for r in rows[1:]], [r["sniffed"] for r in rows]],
+                [["packed:Sensor"] * 5, {"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2",
+                                         "battery": "3.7"},
+                 ["undecodable as packed:Sensor: tag", "undecodable as packed:Sensor: length",
+                  "undecodable as packed:Sensor: no_envelope", "undecodable: a refused zk2c envelope"],
+                 [None] * 5]))
+    try:
+        echo_tool.Held([load_contract(spec.parent / "zenkey/tests/contracts/packed/packed.v1.toml"),
+                        load_contract(spec.parent / "zenkey/tests/contracts/packed-wide.v1.toml")])
+        two: Any = "held"
+    except ValueError:
+        two = "refused"
+    out.append(("zk2py's echo tool holds one revision per interface: it reads no descriptor to choose between two",
+                two, "refused"))
     return out
 
 

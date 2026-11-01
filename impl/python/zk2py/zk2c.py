@@ -221,6 +221,9 @@ class Read:
     stamp: InBand | None = None
     refusal: str | None = None
     why: str = ""
+    #: CH's tag bits of an accepted envelope, which a packed type's reader
+    #: checks first (core §7.6); None where no envelope was accepted.
+    tag: int | None = None
 
     @property
     def refused(self) -> bool:
@@ -241,7 +244,7 @@ def read_put(key: str, encoding: str, payload: bytes) -> Read:
         env = parse(payload, "put")
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
-    return Read(True, env.record, env.stamp)
+    return Read(True, env.record, env.stamp, tag=env.tag)
 
 
 def read_delete(key: str, encoding: str, attachment: bytes | None) -> Read:
