@@ -1888,10 +1888,17 @@ mod tests {
             .iter()
             .map(|f| (f.rule, f.detail.as_str()))
             .collect();
-        assert!(said.contains(&("enum_changed", "the escape toggled")), "{said:?}");
-        assert!(said.contains(&("enum_value_renamed", "\"on\" renamed \"up\"")), "{said:?}");
         assert!(
-            said.iter().any(|(r, d)| *r == "enum_changed" && d.contains("added or removed")),
+            said.contains(&("enum_changed", "the escape toggled")),
+            "{said:?}"
+        );
+        assert!(
+            said.contains(&("enum_value_renamed", "\"on\" renamed \"up\"")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|(r, d)| *r == "enum_changed" && d.contains("added or removed")),
             "{said:?}"
         );
     }

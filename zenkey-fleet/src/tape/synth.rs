@@ -281,7 +281,8 @@ impl Synth {
                     let span = u128::try_from(i128::from(*maximum) - i128::from(*minimum))
                         .unwrap_or(0)
                         + 1;
-                    let x = i128::from(*minimum) + i128::try_from(u128::from(h) % span).unwrap_or(0);
+                    let x =
+                        i128::from(*minimum) + i128::try_from(u128::from(h) % span).unwrap_or(0);
                     Value::from(i64::try_from(x).unwrap_or(*minimum))
                 }
                 FieldKind::Fixed {
@@ -295,13 +296,14 @@ impl Synth {
                         .map_err(|r| r.reason().to_owned())?;
                     Value::String(x.to_string())
                 }
-                FieldKind::Enum { values, .. } => {
-                    Value::String(values[usize::try_from(h % values.len() as u64).unwrap_or(0)].clone())
-                }
+                FieldKind::Enum { values, .. } => Value::String(
+                    values[usize::try_from(h % values.len() as u64).unwrap_or(0)].clone(),
+                ),
                 FieldKind::Bool => Value::Bool(h & 1 == 1),
                 FieldKind::Counter => Value::from(tick.wrapping_mul(1 + fnv(&f.name) % 10)),
                 FieldKind::Time { .. } => Value::from(
-                    measured_ms.unwrap_or(1_700_000_000_000 + i64::try_from(tick).unwrap_or(0) * 1000),
+                    measured_ms
+                        .unwrap_or(1_700_000_000_000 + i64::try_from(tick).unwrap_or(0) * 1000),
                 ),
             };
             m.insert(f.name.clone(), v);

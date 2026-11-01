@@ -19,7 +19,8 @@ use zenkey::packed::PackedRecord;
 use zenkey_codegen_test::zk2::packed_v1::types::*;
 
 fn vectors() -> Value {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../spec/conformance/packed/vectors.json");
+    let p =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../spec/conformance/packed/vectors.json");
     serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap()
 }
 
@@ -62,9 +63,24 @@ macro_rules! by_type {
 
 fn layout<T: PackedRecord>(case: &Value) {
     let e = &case["expect"];
-    assert_eq!(u64::from(T::TAG), e["tag"].as_u64().unwrap(), "tag of {}", T::NAME);
-    assert_eq!(T::MIN_BITS, e["min_bits"].as_u64().unwrap(), "min of {}", T::NAME);
-    assert_eq!(T::MAX_BITS, e["max_bits"].as_u64().unwrap(), "max of {}", T::NAME);
+    assert_eq!(
+        u64::from(T::TAG),
+        e["tag"].as_u64().unwrap(),
+        "tag of {}",
+        T::NAME
+    );
+    assert_eq!(
+        T::MIN_BITS,
+        e["min_bits"].as_u64().unwrap(),
+        "min of {}",
+        T::NAME
+    );
+    assert_eq!(
+        T::MAX_BITS,
+        e["max_bits"].as_u64().unwrap(),
+        "max of {}",
+        T::NAME
+    );
 }
 
 fn write<T: PackedRecord>(case: &Value) {
@@ -100,16 +116,31 @@ fn every_vector_through_the_generated_code() {
     let doc = vectors();
     let generated = |case: &Value| !NOT_GENERATED.contains(&case["type"].as_str().unwrap());
     let mut counts = [0usize; 3];
-    for case in doc["layouts"].as_array().unwrap().iter().filter(|c| generated(c)) {
+    for case in doc["layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| generated(c))
+    {
         by_type!(case["type"].as_str().unwrap(), layout, case);
         counts[0] += 1;
     }
-    for case in doc["writes"].as_array().unwrap().iter().filter(|c| generated(c)) {
+    for case in doc["writes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| generated(c))
+    {
         by_type!(case["type"].as_str().unwrap(), write, case);
         counts[1] += 1;
     }
     let mut refused = std::collections::BTreeSet::new();
-    for case in doc["reads"].as_array().unwrap().iter().filter(|c| generated(c)) {
+    for case in doc["reads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| generated(c))
+    {
         refused.extend(by_type!(case["type"].as_str().unwrap(), read, case));
         counts[2] += 1;
     }
@@ -124,7 +155,8 @@ fn every_vector_through_the_generated_code() {
 #[test]
 fn the_fixtures_types_are_the_vectors() {
     let doc = vectors();
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../zenkey/tests/contracts/packed/vectors.json");
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../zenkey/tests/contracts/packed/vectors.json");
     let fixture: Value = serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap();
     let mut want = doc["schema"]["types"].as_object().unwrap().clone();
     for t in NOT_GENERATED {
@@ -148,7 +180,10 @@ fn the_codec_carries_a_generated_type() {
     let bytes = Packed::<Sensor>::encode(&s, None).unwrap();
     assert_eq!(hex(&bytes), "4ceafbdcaa");
     let tag = Packed::<Sensor>::tag().unwrap();
-    assert_eq!(Packed::<Sensor>::decode_record(&bytes, None, Some(tag)).unwrap(), s);
+    assert_eq!(
+        Packed::<Sensor>::decode_record(&bytes, None, Some(tag)).unwrap(),
+        s
+    );
     let other = Tag::new((tag.get() + 1) % 16).unwrap();
     let e = Packed::<Sensor>::decode_record(&bytes, None, Some(other)).unwrap_err();
     assert!(e.contains("tag"), "{e}");
@@ -163,7 +198,10 @@ fn the_codec_carries_a_generated_type() {
         phase: reserved::Phase::C,
     };
     let rec = r.encode(None).unwrap();
-    assert_eq!(Reserved::decode(Reserved::TAG, &rec.bytes, None).unwrap(), r);
+    assert_eq!(
+        Reserved::decode(Reserved::TAG, &rec.bytes, None).unwrap(),
+        r
+    );
     let m = Mode {
         mode: Open::Escape,
         wide: Open::Known(mode::Wide::Y),

@@ -1161,7 +1161,7 @@ pub fn json_integer(v: &Value) -> Result<i128, WriteRefusal> {
 }
 
 /// An `int` field's code for `x`: `x − minimum` (`range` outside
-/// [`minimum`, `maximum`]).
+/// `minimum` to `maximum`).
 ///
 /// # Errors
 /// [`WriteRefusal::Range`].
@@ -1603,7 +1603,8 @@ impl Field {
                 resolution,
                 values,
                 ..
-            } => fixed_value(code, minimum, resolution, *values).map(|x| Value::String(x.to_string())),
+            } => fixed_value(code, minimum, resolution, *values)
+                .map(|x| Value::String(x.to_string())),
             FieldKind::Enum { values, escape } => match usize::try_from(code) {
                 Ok(i) if i < values.len() => Ok(Value::String(values[i].clone())),
                 _ if *escape => Ok(Value::Null),
@@ -1633,11 +1634,7 @@ impl Field {
             FieldKind::Bool | FieldKind::Counter => true,
             FieldKind::Time { ms } => !*ms || code & 0x3ff < 1000,
         };
-        if used {
-            Ok(())
-        } else {
-            Err(ReadRefusal::Code)
-        }
+        if used { Ok(()) } else { Err(ReadRefusal::Code) }
     }
 }
 

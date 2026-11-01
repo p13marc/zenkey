@@ -1391,7 +1391,8 @@ fn packed_records_decode_from_the_bundle() {
         panic!("a stream")
     };
     let layout = c.packed_layout(&d.type_).unwrap().expect("a packed type");
-    let value = json!({"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2", "battery": "3.7"});
+    let value =
+        json!({"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2", "battery": "3.7"});
     let record = layout.write(&value, None).unwrap().bytes;
     let ty = type_of(&b, "stream", "reading", "type").unwrap();
     let tag = Tag::new(layout.tag()).unwrap();
@@ -1400,7 +1401,9 @@ fn packed_records_decode_from_the_bundle() {
         Rendered::Value(value)
     );
     let undecodable = |r: Rendered| match r {
-        Rendered::Undecodable { declared, reason, .. } => (declared, reason),
+        Rendered::Undecodable {
+            declared, reason, ..
+        } => (declared, reason),
         other => panic!("{other:?}"),
     };
     let (declared, reason) = undecodable(decode(&b, ty, None, &record));

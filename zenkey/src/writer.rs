@@ -214,7 +214,6 @@ impl PackedType {
     }
 }
 
-
 /// A publisher on one stream or state member, with the contract's QoS and
 /// `Encoding` (§2.4, §7.2). With `history` in the contract it is zenoh-ext's
 /// advanced publisher (§2.5): a cache of that depth, publisher detection,
@@ -598,7 +597,10 @@ impl Writer {
         let (payload, ts) = if self.is_enveloped() {
             let stamped = self.mint()?;
             let record = payload.to_bytes();
-            (ZBytes::from(stamped.seal_tagged(self.tag(), &record)), stamped.time)
+            (
+                ZBytes::from(stamped.seal_tagged(self.tag(), &record)),
+                stamped.time,
+            )
         } else {
             let ts = self.timed.then(|| self.minter.time());
             (payload, ts)

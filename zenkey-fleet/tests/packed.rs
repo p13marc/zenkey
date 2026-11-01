@@ -21,7 +21,8 @@ use zenkey_model::template::Bindings;
 use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
 
 fn contract(name: &str) -> Contract {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../zenkey/tests/contracts/{name}.toml"));
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../zenkey/tests/contracts/{name}.toml"));
     let l = load_path(&p);
     l.contract.unwrap_or_else(|| panic!("{name}: {}", l.report))
 }
@@ -72,7 +73,10 @@ async fn a_tool_shows_a_packed_record_as_its_fields() {
 
     // S4's GET, as `zenctl get state` reads it.
     let resource = revision
-        .resource("state/reading/{unit}", &[zenkey_model::authoring::Kind::State])
+        .resource(
+            "state/reading/{unit}",
+            &[zenkey_model::authoring::Kind::State],
+        )
         .unwrap();
     let read = || StateRead {
         revision: &revision,
@@ -100,21 +104,29 @@ async fn a_tool_shows_a_packed_record_as_its_fields() {
         .resource("stream/sensor", &[zenkey_model::authoring::Kind::Stream])
         .unwrap();
     let target = ResolvedTarget::parse("lab/packed").unwrap();
-    let mut watch = zenkey_fleet::watch_resource(&tool, &revision, &target, stream_r, &Bindings::new())
-        .await
-        .unwrap();
+    let mut watch =
+        zenkey_fleet::watch_resource(&tool, &revision, &target, stream_r, &Bindings::new())
+            .await
+            .unwrap();
     let raw = tool
         .declare_subscriber("zk2/lab/packed/packed.v1/stream/sensor")
         .await
         .unwrap();
     let sample = loop {
         stream.put(RECORD.to_vec()).await.unwrap();
-        if let Ok(Some(s)) = tokio::time::timeout(std::time::Duration::from_millis(200), watch.next()).await {
+        if let Ok(Some(s)) =
+            tokio::time::timeout(std::time::Duration::from_millis(200), watch.next()).await
+        {
             break s;
         }
         assert!(tokio::time::Instant::now() < deadline, "never: the watch");
     };
-    let WatchEvent::Put { payload, conformance, .. } = &sample.event else {
+    let WatchEvent::Put {
+        payload,
+        conformance,
+        ..
+    } = &sample.event
+    else {
         panic!("{sample:?}")
     };
     assert_eq!(value_of(&payload.rendered), &sensor());
@@ -180,7 +192,11 @@ fn synth_writes_packed_records() {
             let b = synth.sample(&revision, r, Member::Type, tick).unwrap();
             assert_eq!(a.bytes, b.bytes, "{}: deterministic", r.template);
             let back = layout
-                .read(layout.tag(), &a.bytes, Some(zenkey_model::packed::DEFAULT_EPOCH))
+                .read(
+                    layout.tag(),
+                    &a.bytes,
+                    Some(zenkey_model::packed::DEFAULT_EPOCH),
+                )
                 .unwrap();
             assert_eq!(Some(back), a.value, "{}", r.template);
         }

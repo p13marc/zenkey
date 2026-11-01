@@ -59,7 +59,10 @@ fn streams(c: &Contract) -> BTreeMap<String, (String, Layout)> {
                 return None;
             };
             let layout = c.packed_layout(&d.type_).unwrap().unwrap();
-            Some((name.clone(), (format!("{}/{}", r.token, r.template), layout)))
+            Some((
+                name.clone(),
+                (format!("{}/{}", r.token, r.template), layout),
+            ))
         })
         .collect()
 }
@@ -199,7 +202,10 @@ async fn every_vector_through_the_runtime() {
         let s = heard.lock().unwrap().last().cloned().unwrap();
         let admitted = zenkey::inband::admit(&zenkey::inband::read(s), Some(layout));
         let epoch = case.get("epoch").and_then(Value::as_i64);
-        match (case["expect"].get("value"), case["expect"]["refused"].as_str()) {
+        match (
+            case["expect"].get("value"),
+            case["expect"]["refused"].as_str(),
+        ) {
             (Some(value), _) => {
                 assert_eq!(admitted, Ok(()), "{note}");
                 eventually(note, || async { got.lock().unwrap().len() > delivered }).await;
@@ -230,7 +236,11 @@ async fn every_vector_through_the_runtime() {
     tokio::time::sleep(T / 4).await;
     assert_eq!(got.lock().unwrap().len() as u64 + undecodable(&subs), {
         let reads = doc["reads"].as_array().unwrap();
-        (written + reads.iter().filter(|c| types.contains_key(c["type"].as_str().unwrap())).count()) as u64
+        (written
+            + reads
+                .iter()
+                .filter(|c| types.contains_key(c["type"].as_str().unwrap()))
+                .count()) as u64
     });
 }
 
@@ -283,8 +293,14 @@ async fn a_wrong_revision_is_refused_by_tag_and_by_length() {
     for (name, _, got, sub) in &tools {
         let (delivered, refused) = (got.lock().unwrap().len(), sub.undecodable());
         match *name {
-            "right" => assert!(delivered > 0 && refused == 0, "{name}: {delivered} {refused}"),
-            _ => assert!(delivered == 0 && refused > 0, "{name}: {delivered} {refused}"),
+            "right" => assert!(
+                delivered > 0 && refused == 0,
+                "{name}: {delivered} {refused}"
+            ),
+            _ => assert!(
+                delivered == 0 && refused > 0,
+                "{name}: {delivered} {refused}"
+            ),
         }
     }
     // S4's GET: the right tool's answer holds the record under its tag; the

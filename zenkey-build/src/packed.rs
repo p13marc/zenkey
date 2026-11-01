@@ -153,7 +153,13 @@ impl PackedTypes {
 
     /// The Rust type of `packed:<name>` in artifact `schema`, as seen from a
     /// module beside `__packed` (`root` is the path to their parent).
-    pub fn rust_type(&self, iface: &str, name: &str, schema: &str, root: &str) -> Result<String, Error> {
+    pub fn rust_type(
+        &self,
+        iface: &str,
+        name: &str,
+        schema: &str,
+        root: &str,
+    ) -> Result<String, Error> {
         let f = self
             .files
             .iter()
@@ -165,7 +171,11 @@ impl PackedTypes {
                 f.stem
             )));
         }
-        Ok(format!("{root}::__packed::{}::{}", f.module, type_ident(name)))
+        Ok(format!(
+            "{root}::__packed::{}::{}",
+            f.module,
+            type_ident(name)
+        ))
     }
 
     /// Generates every file's module into `dir`. Returns (module, file)
@@ -268,7 +278,8 @@ impl Slot<'_> {
                 }
             ),
         };
-        let mut s = format!("`{}`: {what}, {} bits", f.name, f.width);
+        let bits = if f.width == 1 { "bit" } else { "bits" };
+        let mut s = format!("`{}`: {what}, {} {bits}", f.name, f.width);
         let r = reserved_of(&f.kind);
         if !r.is_empty() {
             let _ = write!(s, "; reserved {}", r.join(", "));
@@ -310,11 +321,11 @@ impl Slot<'_> {
         if declared.is_empty() {
             return value(v);
         }
-        let mut s = format!("match {v} {{ ::zenkey::packed::Coded::Value(x) => {}", value("x"));
-        for (name, variant) in RESERVED
-            .iter()
-            .zip(["NotAvailable", "Error", "OutOfRange"])
-        {
+        let mut s = format!(
+            "match {v} {{ ::zenkey::packed::Coded::Value(x) => {}",
+            value("x")
+        );
+        for (name, variant) in RESERVED.iter().zip(["NotAvailable", "Error", "OutOfRange"]) {
             match zenkey_model::packed::reserved_code(f.width, declared, name) {
                 Some(c) => {
                     let _ = write!(s, ", ::zenkey::packed::Coded::{variant} => {c}_u64");
@@ -359,15 +370,16 @@ impl Slot<'_> {
             return format!("{{ let c = r.take({})?; {} }}", f.width, value("c"));
         }
         let mut s = format!("{{ let c = r.take({})?; match c {{ ", f.width);
-        for (name, variant) in RESERVED
-            .iter()
-            .zip(["NotAvailable", "Error", "OutOfRange"])
-        {
+        for (name, variant) in RESERVED.iter().zip(["NotAvailable", "Error", "OutOfRange"]) {
             if let Some(c) = zenkey_model::packed::reserved_code(f.width, declared, name) {
                 let _ = write!(s, "{c}_u64 => ::zenkey::packed::Coded::{variant}, ");
             }
         }
-        let _ = write!(s, "c => ::zenkey::packed::Coded::Value({}) }} }}", value("c"));
+        let _ = write!(
+            s,
+            "c => ::zenkey::packed::Coded::Value({}) }} }}",
+            value("c")
+        );
         s
     }
 
@@ -378,7 +390,9 @@ impl Slot<'_> {
                 FieldKind::Int { .. } | FieldKind::Counter | FieldKind::Time { .. } => {
                     format!("::zenkey::packed::Json::from(*{x})")
                 }
-                FieldKind::Fixed { .. } => format!("::zenkey::packed::Json::String({x}.to_string())"),
+                FieldKind::Fixed { .. } => {
+                    format!("::zenkey::packed::Json::String({x}.to_string())")
+                }
                 FieldKind::Bool => format!("::zenkey::packed::Json::Bool(*{x})"),
                 FieldKind::Enum { escape: true, .. } => format!(
                     "match {x} {{ ::zenkey::packed::Open::Known(e) => ::zenkey::packed::Json::from(e.name()), ::zenkey::packed::Open::Escape => ::zenkey::packed::Json::Null }}"
@@ -400,7 +414,9 @@ impl Slot<'_> {
     /// may `?`.
     fn json_read(&self) -> String {
         let read = match &self.f.kind {
-            FieldKind::Int { .. } | FieldKind::Time { .. } => "::zenkey::packed::json_i64".to_owned(),
+            FieldKind::Int { .. } | FieldKind::Time { .. } => {
+                "::zenkey::packed::json_i64".to_owned()
+            }
             FieldKind::Fixed { .. } => "::zenkey::packed::json_decimal".to_owned(),
             FieldKind::Bool => "::zenkey::packed::json_bool".to_owned(),
             FieldKind::Counter => "::zenkey::packed::json_u64".to_owned(),
@@ -445,15 +461,10 @@ fn emit_type(s: &mut String, name: &str, module: &str, layout: &Layout, record: 
     let items = record["fields"].as_array().cloned().unwrap_or_default();
     // Each field's slot, in order.
     let mut seen_marker = false;
-    let enum_names = unique(
-        layout
-            .items
-            .iter()
-            .filter_map(|it| match it {
-                Item::Field(f) if matches!(f.kind, FieldKind::Enum { .. }) => Some(pascal(&f.name)),
-                _ => None,
-            }),
-    );
+    let enum_names = unique(layout.items.iter().filter_map(|it| match it {
+        Item::Field(f) if matches!(f.kind, FieldKind::Enum { .. }) => Some(pascal(&f.name)),
+        _ => None,
+    }));
     let mut enums = enum_names.into_iter();
     let idents = unique(layout.fields().map(|f| ident(&f.name)));
     let mut idents = idents.into_iter();
@@ -541,7 +552,10 @@ fn emit_type(s: &mut String, name: &str, module: &str, layout: &Layout, record: 
         s.push_str("        /// Its code.\n        #[must_use]\n        pub fn code(self) -> u64 {\n            self as u64\n        }\n");
         s.push_str("        /// The value of a code, `None` past the values.\n        #[must_use]\n        pub fn from_code(code: u64) -> ::std::option::Option<Self> {\n            match code {\n");
         for (i, v) in variants.iter().enumerate() {
-            let _ = writeln!(s, "                {i} => ::std::option::Option::Some(Self::{v}),");
+            let _ = writeln!(
+                s,
+                "                {i} => ::std::option::Option::Some(Self::{v}),"
+            );
         }
         s.push_str("                _ => ::std::option::Option::None,\n            }\n        }\n");
         s.push_str("        /// Its name, as the JSON reading spells it.\n        #[must_use]\n        pub fn name(self) -> &'static str {\n            match self {\n");
@@ -551,7 +565,10 @@ fn emit_type(s: &mut String, name: &str, module: &str, layout: &Layout, record: 
         s.push_str("            }\n        }\n");
         s.push_str("        /// The value a name spells.\n        #[must_use]\n        pub fn from_name(name: &str) -> ::std::option::Option<Self> {\n            match name {\n");
         for (v, raw) in variants.iter().zip(values) {
-            let _ = writeln!(s, "                {raw:?} => ::std::option::Option::Some(Self::{v}),");
+            let _ = writeln!(
+                s,
+                "                {raw:?} => ::std::option::Option::Some(Self::{v}),"
+            );
         }
         s.push_str("                _ => ::std::option::Option::None,\n            }\n        }\n    }\n\n");
     }
@@ -605,7 +622,11 @@ fn emit_type(s: &mut String, name: &str, module: &str, layout: &Layout, record: 
     }
     if let Some(m0) = first_marker {
         for f in slots[m0..].iter().flatten() {
-            let _ = writeln!(s, "            let mut {} = ::std::option::Option::None;", f.ident);
+            let _ = writeln!(
+                s,
+                "            let mut {} = ::std::option::Option::None;",
+                f.ident
+            );
         }
         s.push_str("            // A marker read as 1 that ends the layout: a later revision's bits follow.\n            let mut later = false;\n            // Whether a field is present since the last marker read as 1.\n            let mut present = false;\n            'record: {\n");
         let mut k = 0;
@@ -640,7 +661,9 @@ fn emit_type(s: &mut String, name: &str, module: &str, layout: &Layout, record: 
         if slots.last().is_some_and(Option::is_some) {
             s.push_str("                if !present {\n                    return ::std::result::Result::Err(::zenkey::packed::ReadRefusal::Extension);\n                }\n");
         }
-        s.push_str("            }\n            if !later {\n                r.end()?;\n            }\n");
+        s.push_str(
+            "            }\n            if !later {\n                r.end()?;\n            }\n",
+        );
     } else {
         s.push_str("            r.end()?;\n");
     }

@@ -146,7 +146,8 @@ impl<T: PackedRecord> Codec for Packed<T> {
     /// carried with no envelope where none is due. [`Codec::decode_record`]
     /// checks the tag the envelope carried.
     fn decode(bytes: &[u8], _: Option<WireEncoding>) -> Result<T, String> {
-        T::decode(T::TAG, bytes, Some(DEFAULT_EPOCH)).map_err(|r| format!("packed:{}: {r}", T::NAME))
+        T::decode(T::TAG, bytes, Some(DEFAULT_EPOCH))
+            .map_err(|r| format!("packed:{}: {r}", T::NAME))
     }
     fn decode_record(bytes: &[u8], _: Option<WireEncoding>, tag: Option<Tag>) -> Result<T, String> {
         let Some(tag) = tag else {
@@ -155,7 +156,8 @@ impl<T: PackedRecord> Codec for Packed<T> {
                 T::NAME
             ));
         };
-        T::decode(tag.get(), bytes, Some(DEFAULT_EPOCH)).map_err(|r| format!("packed:{}: {r}", T::NAME))
+        T::decode(tag.get(), bytes, Some(DEFAULT_EPOCH))
+            .map_err(|r| format!("packed:{}: {r}", T::NAME))
     }
     fn carries(ty: Option<&TypeId>) -> bool {
         matches!(ty, Some(TypeId::Packed { name, .. }) if name == T::NAME)
