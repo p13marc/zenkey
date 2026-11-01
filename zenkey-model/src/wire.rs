@@ -5,7 +5,7 @@
 //! ```text
 //! mutation, a put's payload        CH · run · seq · record
 //! delete, a delete's attachment    CH · run · seq
-//! heartbeat, a put's payload       CH · run · seq · body        (core 0.80, #978's F1)
+//! heartbeat, a put's payload       CH · run · seq · body        (core 0.81, #978's F1)
 //! CH                               form (bits 7–5) · run width (bit 4) · tag (bits 3–0)
 //! run                              16 or 32 bits unsigned, big-endian, as CH's width bit says
 //! seq                              24 bits unsigned, big-endian
@@ -63,7 +63,7 @@ pub enum Form {
     /// Code 5, reserved: a stream's records under one header.
     Frame,
     /// Code 6: an owner's confirmation of the state it holds for one
-    /// interface, a put's payload (core 0.80, [`crate::heartbeat`]).
+    /// interface, a put's payload (core 0.81, [`crate::heartbeat`]).
     Heartbeat,
     /// Code 7, reserved: a collection's state in one reply.
     Snapshot,
@@ -427,7 +427,7 @@ fn read(bytes: &[u8], sample: SampleKind) -> Result<(Header, Stamp, &[u8]), Refu
 
 /// A put's payload under the envelope. This version defines two forms for
 /// a put: the mutation, `CH · run · seq · record`, and the heartbeat,
-/// `CH · run · seq · body` (core 0.80).
+/// `CH · run · seq · body` (core 0.81).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Envelope<'a> {
     /// [`Form::Mutation`] or [`Form::Heartbeat`].
@@ -608,7 +608,7 @@ pub enum Reading<'a> {
     /// the payload every later step reads (decode, a schema check, a
     /// rendering, a profile's reader).
     Enveloped(Envelope<'a>),
-    /// A heartbeat (core 0.80, form 6): its body is read with its covered
+    /// A heartbeat (core 0.81, form 6): its body is read with its covered
     /// revision ([`crate::heartbeat::Heartbeat::parse`]), never decoded as
     /// a record of the key's type. Its stamp is its key's.
     Heartbeat(Envelope<'a>),

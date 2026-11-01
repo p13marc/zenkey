@@ -25,7 +25,7 @@
 //! run's width bit, the run and the seq. It is free of order, so an owner
 //! keeps it at each mutation and a reader computes it over its own view.
 //!
-//! No rule adopts the heartbeat yet (core 0.80): no owner sends one, and
+//! No rule adopts the heartbeat yet (core 0.81): no owner sends one, and
 //! `freshness.v2` (#978's F3) will name its key, its period and what a
 //! reader concludes. A reader's view of the members and how a heartbeat
 //! confirms them is [`crate::freshness::View`] (#978's F2). The refusals'

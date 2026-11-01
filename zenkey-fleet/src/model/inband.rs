@@ -9,7 +9,7 @@
 //!     → or refused: undecodable, its refusal named, never sniffed (Payload::Refused)
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (delete_stamp)
-//! a put whose envelope is a heartbeat (core §7.5's form 6, 0.80)
+//! a put whose envelope is a heartbeat (core §7.5's form 6, 0.81)
 //!     → its body, its key's stamp and its covered revision's tag
 //!       (Payload::Heartbeat), read with that revision ([`heartbeat_value`]),
 //!       never as a record of the key's type

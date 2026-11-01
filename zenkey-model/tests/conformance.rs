@@ -1283,7 +1283,7 @@ fn heartbeat_layouts() -> BTreeMap<String, zenkey_model::heartbeat::Layout> {
         .collect()
 }
 
-/// `spec/conformance/heartbeat/layouts.json` (core §7.5, 0.80; #978 F1): a
+/// `spec/conformance/heartbeat/layouts.json` (core §7.5, 0.81; #978 F1): a
 /// revision → its fingerprint, the heartbeat's tag, and its collections in
 /// map order with their cardinalities, live-count widths and horizons.
 /// Written by an independent reading of the text, checked, never blessed.
@@ -1388,7 +1388,7 @@ fn heartbeat_of(
     Heartbeat { time, sections }
 }
 
-/// `spec/conformance/heartbeat/bodies.json` (core §7.5, 0.80; #978 F1): a
+/// `spec/conformance/heartbeat/bodies.json` (core §7.5, 0.81; #978 F1): a
 /// layout and a value → the body's bits, pad and bytes, the list written
 /// only where it is shorter; a layout and bytes → the value, or the
 /// refusal, the first in §7.5's order. Every body read writes back to its
@@ -1439,7 +1439,7 @@ fn heartbeat_body_vectors() {
     );
 }
 
-/// `spec/conformance/heartbeat/digests.json` (core §7.5, 0.80; #978 F1): a
+/// `spec/conformance/heartbeat/digests.json` (core §7.5, 0.81; #978 F1): a
 /// collection's live members → each one's value and their digest. Written
 /// by an independent reading of the text, checked, never blessed.
 #[test]

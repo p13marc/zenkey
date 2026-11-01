@@ -11,7 +11,7 @@
 //!       (Read::Refused)
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (Read::Enveloped, the sample unchanged)
-//! a put whose envelope is a heartbeat (core §7.5's form 6, 0.80)
+//! a put whose envelope is a heartbeat (core §7.5's form 6, 0.81)
 //!     → its body becomes the payload, its run and seq its key's stamp
 //!       (Read::Heartbeat): never a record of the key's type
 //! every other sample
