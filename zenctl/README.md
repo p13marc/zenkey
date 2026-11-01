@@ -328,7 +328,14 @@ peers with version and locators; the mesh, `--dot` for Graphviz) · `zenctl
 scout` (raw scouting Hellos) · `zenctl key includes|intersects|canon`
 (key-expression algebra, offline) · `zenctl hostid` (this host's system as
 `hostid.v1` mints it from the machine id, read-only; `--machine-id` for a
-given id, `--v1-salt` for the v1 origins of the migration table).
+given id, `--v1-salt` for the v1 origins of the migration table) ·
+`zenctl catalog show|check --catalog <file>` (the deployment catalog, core §8.6: a
+file, never the bus; its id, epoch and indices, and `check`'s exit 1 for a
+refused document, a broken succession against `--previous`, or a revision
+in `--contracts` it lacks). Every verb that takes `--contracts` takes
+`--catalog` beside it: a packed record's `time` fields are then read under
+the epoch of the catalog the owner names, and `gen` and `serve` write under
+the one given.
 
 **Watch — live traffic.**
 `zenctl get <selector>` (a fan-in GET, every reply attributed to its key;
@@ -756,7 +763,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks thirty-three questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks thirty-four questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -798,6 +805,7 @@ none.
 | `redundancy-vacancy` | does an interface redundancy.v1 governs have candidates and no incumbent, in both of two complete presence reads? (warning; one read's vacancy is a takeover due) | redundancy.v1 §2.15 |
 | `timing-declaration` | does a contract an owner implements declare timing.v1 values a reader cannot judge: an invalid one, a deadline below its period, or timing keys on a resource that is not a stream or on a requirement? (warning) | timing.v1 §2.2 |
 | `arbitration-declaration` | does a running consumer hold a role carrying `arbitration.policy` whose declaration is invalid over every revision of the required interface in hand (error: its consumer cannot start on it), or whose binding has a wildcard or a shadowed entry, a priority nobody chose (warning)? | arbitration.v1 §2.14 |
+| `catalog-missing` | does a running instance list a revision the deployment's catalog lacks (the one its descriptor names, or every `--catalog` where it names none), or name a catalog no `--catalog` is or succeeds? (warning; asked only with `doctor --catalog <file>`, since a catalog is provisioned, never served) | §8.6 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447

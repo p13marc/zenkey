@@ -222,6 +222,19 @@ pub struct SchemaView {
     /// The artifacts those types live in — every artifact, for the whole
     /// revision — by id.
     pub artifacts: Vec<SchemaDocument>,
+    /// Where the revision sits in each deployment catalog given (core
+    /// §8.6, `--catalog`; #980 C1c). Absent when none was given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub catalogs: Vec<SchemaCatalogIndex>,
+}
+
+/// A revision's place in one deployment catalog (core §8.6): its index, or
+/// `null` where the catalog lacks it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchemaCatalogIndex {
+    /// The catalog's id, 8 lowercase hex digits.
+    pub catalog: String,
+    pub index: Option<u16>,
 }
 
 /// One member of one resource, and the type it names.
@@ -533,6 +546,16 @@ mod tests {
                     document: Asked::NotAsked,
                 },
             ],
+            catalogs: vec![
+                SchemaCatalogIndex {
+                    catalog: "0319128a".into(),
+                    index: Some(2),
+                },
+                SchemaCatalogIndex {
+                    catalog: "eddb48d5".into(),
+                    index: None,
+                },
+            ],
         };
         assert_eq!(
             serde_json::to_value(&view).expect("serialize"),
@@ -552,6 +575,10 @@ mod tests {
                 "artifacts": [
                     {"id": "sha256:01", "kind": "protobuf", "name": "camera/v1/camera.proto", "document": {"files": []}},
                     {"id": "sha256:02", "kind": "jsonschema", "name": "info"},
+                ],
+                "catalogs": [
+                    {"catalog": "0319128a", "index": 2},
+                    {"catalog": "eddb48d5", "index": null},
                 ],
             })
         );

@@ -51,6 +51,7 @@ fn exit_code(answers: &[FleetAnswer]) -> i32 {
 pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let crate::cli::GetArgs {
         selector,
         body,
@@ -81,7 +82,9 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         let ns_session = dep.session().await?;
         zk2::read_lens(&dep, &ns_session, &store).await
     };
-    let lens = Lens::new(&namespace, catalog.as_ref(), &store).offline(&contracts);
+    let lens = Lens::new(&namespace, catalog.as_ref(), &store)
+        .offline(&contracts)
+        .catalogs(&catalogs);
 
     // The GET itself, on a session in no namespace: the wire key as typed.
     let session = dep.link().session().await?;
@@ -355,6 +358,9 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
     use crate::cmd::zk2;
     let dep = crate::bus::Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    // Core §8.6: no descriptor is read here, so the catalogs given are the
+    // deployment's word for the epoch a packed `time` field counts from.
+    let epoch = zk2::load_catalogs(&cli.contracts)?.epoch(zenkey_fleet::CatalogStated::Unread);
     let target = zenkey_fleet::ResolvedTarget::parse(&cli.address.to_string())?;
     let values = zk2::bindings(&cli.params);
     let mut session = None;
@@ -374,8 +380,8 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
         timeout: dep.timeout(),
     };
     let report = match &cli.last_known {
-        None => zenkey_fleet::get_state(&session, read).await?,
-        Some(archive) => zenkey_fleet::last_known_state(&session, read, archive).await?,
+        None => zenkey_fleet::get_state_in(&session, read, epoch).await?,
+        Some(archive) => zenkey_fleet::last_known_state_in(&session, read, archive, epoch).await?,
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     if report.rows.is_empty() {
@@ -495,6 +501,88 @@ mod tests {
 
         let err = row(&error(), &lens, false, false);
         assert_eq!(err["error"]["name"], "error/unavailable");
+    }
+
+    /// Core §8.6 (#980 C1c): a packed record's `time` fields read under
+    /// the catalog given, the deployment's word with no descriptor in hand;
+    /// with none given, from 0, the epoch assumed and said so.
+    #[test]
+    fn a_time_field_reads_under_the_catalog_given() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let (set, problems) = zenkey_fleet::ContractSet::load_path(
+            &root.join("zenkey/tests/contracts/packed/packed.v1.toml"),
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let catalog =
+            zenkey_fleet::Catalogs::load(&root.join("examples/zk2/zenoh-modem/catalog.json"))
+                .unwrap();
+        let epoch = catalog.epoch();
+        let rev = set.iter().next().unwrap();
+        let clock = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "clock")
+            .unwrap();
+        let zenkey_model::contract::Body::Data(d) = &clock.body else {
+            unreachable!()
+        };
+        let layout = rev.contract().packed_layout(&d.type_).unwrap().unwrap();
+        let at = 1_800_000_000_000_i64;
+        let record = layout
+            .write(
+                &serde_json::json!({"at": at, "at_ms": at, "valid": true}),
+                Some(epoch),
+            )
+            .unwrap();
+        let bytes = Envelope {
+            form: zenkey_model::wire::Form::Mutation,
+            tag: Tag::new(layout.tag()).unwrap(),
+            stamp: Stamp {
+                run: Run::U16(1),
+                seq: Seq::new(1).unwrap(),
+            },
+            record: &record.bytes,
+        }
+        .write();
+        let a = FleetAnswer {
+            key: "prod/zk2/lab/packed/packed.v1/stream/clock".into(),
+            encoding: Some("zenoh/bytes".into()),
+            attachment: None,
+            timestamp: None,
+            kind: Some(SampleKind::Put),
+            answer: Answer::Value(zenoh::bytes::ZBytes::from(bytes.clone())),
+        };
+        let held = zenkey_fleet::Catalogs::new(vec![catalog]);
+        let lens = Lens::new("prod", None, &set).offline(&set).catalogs(&held);
+        let r = row(&a, &lens, false, false);
+        assert_eq!(r["value"]["at"], at, "under the catalog's epoch: {r}");
+        assert!(!r.to_string().contains("assumed"), "{r}");
+        let bare = Lens::new("prod", None, &set).offline(&set);
+        let c = bare.check(
+            &a.key,
+            zenkey_fleet::Member::Type,
+            Some("zenoh/bytes"),
+            &bytes,
+        );
+        assert_eq!(
+            c.rendering.rendered.epoch_note().as_deref(),
+            Some("epoch 0 assumed, #980")
+        );
+        let c = lens.check(
+            &a.key,
+            zenkey_fleet::Member::Type,
+            Some("zenoh/bytes"),
+            &bytes,
+        );
+        assert_eq!(c.rendering.rendered.epoch_note(), None);
+        let r = row(&a, &bare, false, false);
+        assert_eq!(
+            r["value"]["at"],
+            at - epoch * 1000,
+            "from 0: off by the epoch"
+        );
     }
 
     const ETH0: &str = "prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";

@@ -63,6 +63,18 @@ pub fn load_contracts(args: &ContractArgs) -> Result<ContractSet> {
     Ok(set)
 }
 
+/// The catalogs `--catalog` names, each read as core §8.6 reads it: a file
+/// that cannot be read, or a document refused, is refused (exit 2), its
+/// refusal's token named.
+pub fn load_catalogs(args: &ContractArgs) -> Result<zenkey_fleet::Catalogs> {
+    let held = args
+        .catalog
+        .iter()
+        .map(|p| zenkey_fleet::Catalogs::load(p).map_err(|e| unaskable!("--catalog {e}")))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(zenkey_fleet::Catalogs::new(held))
+}
+
 /// One presence read in the deployment's namespace, every instance's
 /// descriptor, and the names it saw remembered for completion — replacing
 /// what was remembered when the read covered the whole namespace.

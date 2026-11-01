@@ -39,6 +39,7 @@ use crate::cmd::zk2;
 pub async fn run(cli: EchoArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let EchoArgs {
         selector,
         explicit: crate::cli::ExplicitArgs { explicit },
@@ -136,7 +137,9 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         };
         seen += 1;
         let catalog = feed.as_ref().and_then(LensFeed::catalog);
-        let lens = Lens::new(&namespace, catalog.as_deref(), &store).offline(&contracts);
+        let lens = Lens::new(&namespace, catalog.as_deref(), &store)
+            .offline(&contracts)
+            .catalogs(&catalogs);
         let line = line_of(&sample, &lens, raw || no_decode);
         if let Some(f) = &feed {
             f.nudge(line.identity.unresolved.as_ref());

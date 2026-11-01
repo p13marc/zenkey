@@ -34,6 +34,11 @@ Options:
           
           They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
 
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
       --namespace <NS>
           The deployment namespace: the session is opened in it.
           

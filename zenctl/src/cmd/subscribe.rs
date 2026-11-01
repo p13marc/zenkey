@@ -38,6 +38,8 @@ use crate::render::{Mode, Sink};
 pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    // Core §8.6: the catalogs given, the deployment's word for the epoch.
+    let epoch = zk2::load_catalogs(&cli.contracts)?.epoch(zenkey_fleet::CatalogStated::Unread);
     let target = ResolvedTarget::parse(&cli.address)?;
     let values = zk2::bindings(&cli.params);
     let window = cli
@@ -64,7 +66,8 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
         Some(s) => s,
         None => dep.session().await?,
     };
-    let mut watch = zenkey_fleet::watch_resource(&session, &revision, &target, r, &values).await?;
+    let mut watch =
+        zenkey_fleet::watch_resource_in(&session, &revision, &target, r, &values, epoch).await?;
 
     let mode = Mode::of(dep.format());
     let (mut out, mut err) = (std::io::stdout(), std::io::stderr());

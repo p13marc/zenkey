@@ -56,7 +56,14 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         ns: _,
     } = cli;
     // Everything the command line can be refused for, before a session.
-    let contracts = zk2::load_contracts(&contracts)?;
+    let contracts_given = contracts;
+    let contracts = zk2::load_contracts(&contracts_given)?;
+    // Core §8.6: the one catalog an owner writes under, stated in its
+    // descriptor.
+    let catalog = zk2::load_catalogs(&contracts_given)?
+        .one()
+        .map_err(|e| unaskable!("--catalog: {e}"))?
+        .cloned();
     let members = members
         .iter()
         .map(|m| MemberArg::parse(m))
@@ -98,6 +105,7 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         tool: "zenctl gen".into(),
         elect: None,
         run_store,
+        catalog,
     };
     let plan: GenPlan = zenkey_fleet::gen_plan(&spec)?;
 

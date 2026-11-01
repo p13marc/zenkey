@@ -1,0 +1,109 @@
+The deployment catalog (#980 C1c): a noun read off a file, never the bus.
+
+```console
+$ zenctl catalog --help
+The deployment catalog: a file the deployment provisions.
+
+Core §8.6's catalog, a `zk2-catalog/1` document, given by `--catalog`: the deployment epoch a packed record's `time` fields count from, and an index per contract revision a later form carries in place of its interface id and fingerprint. It is never fetched and never served on the bus, so no session is opened. `show` reads it; `check` judges it, against the catalog it succeeds and the contracts in hand. `zk2 catalog new|add` writes one.
+
+Usage: zenctl catalog <COMMAND>
+
+Commands:
+  show   One catalog: its id, its epoch, its lineage and every entry
+  check  Judge one catalog: refused, no successor, or a revision it lacks
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+```console
+$ zenctl catalog show --help
+One catalog: its id, its epoch, its lineage and every entry.
+
+Read as core §8.6 reads it, refused naming the refusal's token (exit 2). With `--contracts`, each entry says whether that revision is in hand. Exactly one `--catalog`.
+
+Usage: zenctl catalog show [OPTIONS]
+
+Options:
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+```console
+$ zenctl catalog check --help
+Judge one catalog: refused, no successor, or a revision it lacks.
+
+Exit 1 when the document is refused, when it does not succeed `--previous`, or when a revision `--contracts` holds is not in it. The checks a deployment makes before it provisions a catalog, and a far side makes of the one it holds against its own contracts: the document read as core §8.6 reads it; succession (`epoch_moved`, `reassigned`, `removed`, `lineage`, the first that applies); and each revision in hand, by its index or as missing. Exit 0 when none applies, 2 when the file cannot be read or nothing is given. Exactly one `--catalog`.
+
+Usage: zenctl catalog check [OPTIONS]
+
+Options:
+      --previous <PATH>
+          The catalog this one should succeed (core §8.6): its lineage then ends with that catalog's id and count, its epoch is that one's, and that one's entries are its first, each at its own index
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```

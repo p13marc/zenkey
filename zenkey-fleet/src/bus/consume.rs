@@ -33,8 +33,9 @@ use zenoh::Session;
 use zenoh::sample::{Sample, SampleKind};
 
 use crate::model::catalog::Revision;
+use crate::model::deployment::Epoch;
 use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sample_conformance};
-use crate::model::render::{Member, render_record, render_with};
+use crate::model::render::{Member, render_record, render_with, render_with_in};
 use crate::model::target::Target;
 use crate::report::{
     Conformance, InbandStamp, Stamp, StateReading, StateReport, StateRow, StateValue, WatchEvent,
@@ -116,7 +117,19 @@ fn all_bound(r: &Resource, values: &Bindings) -> bool {
 /// A value row keeps the owner's reply bytes beside its rendering
 /// ([`StateRow::bytes`], #765).
 pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateReport> {
-    get_state_answer(session, read).await.map(|(r, _)| r)
+    get_state_in(session, read, Epoch::Assumed).await
+}
+
+/// [`get_state`], a packed record's `time` fields read under `epoch`, the
+/// epoch in force for the owner (core §8.6).
+pub async fn get_state_in(
+    session: &Session,
+    read: StateRead<'_>,
+    epoch: Epoch,
+) -> Result<StateReport> {
+    get_state_answer_in(session, read, epoch)
+        .await
+        .map(|(r, _)| r)
 }
 
 /// [`get_state`], with whether every GET ran to its final reply: the one
@@ -125,6 +138,15 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
 pub async fn get_state_answer(
     session: &Session,
     read: StateRead<'_>,
+) -> Result<(StateReport, bool)> {
+    get_state_answer_in(session, read, Epoch::Assumed).await
+}
+
+/// [`get_state_answer`], under `epoch` ([`get_state_in`]).
+pub async fn get_state_answer_in(
+    session: &Session,
+    read: StateRead<'_>,
+    epoch: Epoch,
 ) -> Result<(StateReport, bool)> {
     let StateRead {
         revision,
@@ -190,6 +212,7 @@ pub async fn get_state_answer(
                         &sample,
                         Member::Type,
                         inband.get(&key).copied().zip(tags.get(&key).copied()),
+                        epoch,
                     )),
                 },
                 // The owner's reply as it arrived (#765): a refcount bump;
@@ -255,6 +278,17 @@ pub async fn last_known(
     read: StateRead<'_>,
     archive: &Addr,
 ) -> Result<StateReport> {
+    last_known_in(session, read, archive, Epoch::Assumed).await
+}
+
+/// [`last_known`], a packed record's `time` fields read under `epoch`, the
+/// epoch in force for the owner the archive recorded (core §8.6).
+pub async fn last_known_in(
+    session: &Session,
+    read: StateRead<'_>,
+    archive: &Addr,
+    epoch: Epoch,
+) -> Result<StateReport> {
     let StateRead {
         revision,
         owner,
@@ -264,7 +298,8 @@ pub async fn last_known(
     } = read;
     let name = zenkey::implementation::resource_name(r);
     if !all_bound(r, values) {
-        return last_known_pattern(session, revision, owner, r, values, archive, timeout).await;
+        return last_known_pattern(session, revision, owner, r, values, archive, timeout, epoch)
+            .await;
     }
     let origin = member_key(owner, revision, r, values)?;
     let selector = zenkey::archive::archive_key(archive, &origin);
@@ -272,7 +307,7 @@ pub async fn last_known(
         .await
         .map_err(|e| runtime("get", &selector, e))?;
     let rows = got
-        .map(|lk| last_known_row(revision, lk))
+        .map(|lk| last_known_row(revision, lk, epoch))
         .into_iter()
         .collect();
     Ok(StateReport {
@@ -292,6 +327,7 @@ pub async fn last_known(
 /// [`last_known`] over a pattern (#671): the owner's selectors for the
 /// resource, a parameter not given a wildcard, each read from the archive
 /// with `archive::last_known_all`.
+#[allow(clippy::too_many_arguments)]
 async fn last_known_pattern(
     session: &Session,
     revision: &Revision,
@@ -300,6 +336,7 @@ async fn last_known_pattern(
     values: &Bindings,
     archive: &Addr,
     timeout: Duration,
+    epoch: Epoch,
 ) -> Result<StateReport> {
     let name = zenkey::implementation::resource_name(r);
     let address = owner.to_string();
@@ -324,7 +361,10 @@ async fn last_known_pattern(
             .await
             .map_err(|e| runtime("get", &selector, e))?;
         selectors.push(selector);
-        rows.extend(got.into_iter().map(|lk| last_known_row(revision, lk)));
+        rows.extend(
+            got.into_iter()
+                .map(|lk| last_known_row(revision, lk, epoch)),
+        );
     }
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(StateReport {
@@ -344,12 +384,12 @@ async fn last_known_pattern(
 /// One archive record as a state row: last-known, with whether alignment
 /// confirmed it, its type identity (§4.4), and the bytes it recorded
 /// (#765).
-fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateRow {
+fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown, epoch: Epoch) -> StateRow {
     let (value, bytes) = match lk.value {
         Some(bytes) => {
             let encoding = lk.encoding.as_ref().map(ToString::to_string);
             let value = StateValue::Value {
-                payload: Box::new(render_with(
+                payload: Box::new(render_with_in(
                     revision,
                     &lk.origin,
                     Member::Type,
@@ -357,6 +397,7 @@ fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateR
                         .as_deref()
                         .and_then(crate::model::inband::delivered_encoding),
                     &bytes,
+                    epoch,
                 )),
             };
             (value, Some(zenoh::bytes::ZBytes::from(bytes)))
@@ -386,17 +427,26 @@ fn payload(
     sample: &Sample,
     member: Member,
     envelope: Option<(zenkey_model::wire::Stamp, zenkey_model::wire::Tag)>,
+    epoch: Epoch,
 ) -> crate::report::PayloadRendering {
     if let (Member::Type, Some((stamp, tag))) = (member, envelope) {
-        return render_record(revision, key, &sample.payload().to_bytes(), stamp, tag);
+        return render_record(
+            revision,
+            key,
+            &sample.payload().to_bytes(),
+            stamp,
+            tag,
+            epoch,
+        );
     }
     let encoding = sample.encoding().to_string();
-    render_with(
+    render_with_in(
         revision,
         key,
         member,
         crate::model::inband::delivered_encoding(&encoding),
         &sample.payload().to_bytes(),
+        epoch,
     )
 }
 
@@ -431,6 +481,19 @@ pub async fn watch(
     r: &Resource,
     values: &Bindings,
 ) -> Result<Watch> {
+    watch_in(session, revision, target, r, values, Epoch::Assumed).await
+}
+
+/// [`watch`], a packed record's `time` fields read under `epoch`, the epoch
+/// in force for the target (core §8.6).
+pub async fn watch_in(
+    session: &Session,
+    revision: &Revision,
+    target: &Target,
+    r: &Resource,
+    values: &Bindings,
+    epoch: Epoch,
+) -> Result<Watch> {
     let name = zenkey::implementation::resource_name(r);
     let address = target.address.as_str();
     let params = r2_params(values)?;
@@ -447,7 +510,7 @@ pub async fn watch(
             declared.clone(),
         );
         move |refused: zenkey::consumer::Refused| {
-            let sample = refused_sample(&rev, declared.as_ref(), refused);
+            let sample = refused_sample(&rev, declared.as_ref(), refused, epoch);
             if tx.try_send(sample).is_err() {
                 lag.fetch_add(1, Ordering::Relaxed);
             }
@@ -487,8 +550,16 @@ pub async fn watch(
             &name,
             move |d: zenkey::consumer::Delivery| {
                 let key = d.sample.key_expr().as_str().to_owned();
-                let rendered = (d.sample.kind() == SampleKind::Put)
-                    .then(|| payload(&rev, &key, &d.sample, Member::Type, d.inband.zip(d.tag)));
+                let rendered = (d.sample.kind() == SampleKind::Put).then(|| {
+                    payload(
+                        &rev,
+                        &key,
+                        &d.sample,
+                        Member::Type,
+                        d.inband.zip(d.tag),
+                        epoch,
+                    )
+                });
                 let sample = watch_sample(
                     &rev,
                     declared.as_ref(),
@@ -580,6 +651,7 @@ fn refused_sample(
     rev: &Revision,
     declared: Option<&crate::report::QosAxes>,
     refused: zenkey::consumer::Refused,
+    epoch: Epoch,
 ) -> WatchSample {
     use zenkey::inband::Read;
     let sample = refused.read.sample();
@@ -587,7 +659,7 @@ fn refused_sample(
     let rendered = match &refused.read {
         // An envelope's record, its layout's refusal read under CH's tag.
         Read::Enveloped { sample, stamp, tag } => {
-            render_record(rev, &key, &sample.payload().to_bytes(), *stamp, *tag)
+            render_record(rev, &key, &sample.payload().to_bytes(), *stamp, *tag, epoch)
         }
         // A refused envelope, or a packed record in none: read as it
         // arrived, under its own Encoding.

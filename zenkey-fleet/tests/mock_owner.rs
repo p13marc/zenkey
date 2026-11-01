@@ -87,6 +87,7 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
         tool: "mock_owner test".into(),
         elect: None,
         run_store: None,
+        catalog: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let (up, came_up) = tokio::sync::oneshot::channel();
@@ -191,6 +192,7 @@ async fn gen_holds_an_event_to_its_declared_rate_and_says_so() {
         tool: "mock_owner test".into(),
         elect: None,
         run_store: None,
+        catalog: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let applied = plan
@@ -241,6 +243,7 @@ async fn serve_answers_logs_and_leaves_no_operation_silent() {
             tool: "mock_owner test".into(),
             elect: None,
             run_store: None,
+            catalog: None,
         },
     )
     .await
@@ -353,6 +356,7 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
                     tool: "mock_owner test".into(),
                     elect: None,
                     run_store: None,
+                    catalog: None,
                 },
             )
             .await
@@ -495,6 +499,7 @@ async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
                 tool: "mock_owner test".into(),
                 elect: Some(startup),
                 run_store: None,
+                catalog: None,
             };
             let plan = gen_plan(&spec).unwrap();
             let (up, came_up) = tokio::sync::oneshot::channel();
@@ -663,6 +668,7 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
                     tool: "mock_owner test".into(),
                     elect: Some(startup),
                     run_store: None,
+                    catalog: None,
                 },
             )
             .await
@@ -773,6 +779,7 @@ async fn gen_declares_a_governed_member_again_after_a_step_down() {
         tool: "mock_owner test".into(),
         elect: Some(startup),
         run_store: None,
+        catalog: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let owner = client(&ep).await;

@@ -847,6 +847,12 @@ impl Render for SchemaView {
             self.fingerprint,
             spelled(&self.source)
         ));
+        for c in &self.catalogs {
+            t.line(match c.index {
+                Some(i) => format!("  catalog {} index {i}", c.catalog),
+                None => format!("  catalog {}: not listed", c.catalog),
+            });
+        }
         let mut g = Grid::unheaded(4);
         for m in &self.members {
             g.row([
@@ -885,6 +891,12 @@ impl Render for SchemaView {
             notes.push(Note::caveat(
                 "a raw type names a media type and no schema: its bytes are not a \
                  tool's to read (spec §7.2)",
+            ));
+        }
+        if self.catalogs.iter().any(|c| c.index.is_none()) {
+            notes.push(Note::caveat(
+                "a revision a catalog does not list has no index there: a far side holding \
+                 that catalog cannot read what is written under it (core §8.6)",
             ));
         }
         if self.artifacts.iter().all(|a| a.document.is_not_asked()) && !self.artifacts.is_empty() {

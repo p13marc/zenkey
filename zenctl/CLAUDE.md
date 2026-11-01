@@ -24,8 +24,9 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirty-three
-  checks since #909's BC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: thirty-four
+  checks since #980's C1c, `catalog-missing` asked only with `doctor
+  --catalog` (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
@@ -155,7 +156,14 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   and under `watchdog` and `record --on` a rule reading presence or the
   doctor refused, through the fleet's `watchdog_across`,
   `TriggerSpec::across_face` and `run_field_over`; `live_zk2.rs`'s
-  `constrained_s7_a_tools_scope_across_a_face`)
+  `constrained_s7_a_tools_scope_across_a_face`; #980 C1c: `--catalog
+  PATH` in `ContractArgs`, beside `--contracts`, loaded by
+  `cmd::zk2::load_catalogs`, the lens's `.catalogs()` in `echo`, `get`,
+  `rate`, `field` and `snapshot`, `get state` and `watch` under the
+  catalogs' epoch with no descriptor read, `gen` and `serve` writing under
+  one, `schema show` printing each index, `doctor --catalog` asking
+  `catalog-missing`, and the noun `catalog show|check`, `cmd/catalog.rs`,
+  `tests/cmd/catalog.trycmd`)
   and resolve every key through one session-free **lens**
   (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
   `--namespace`, the contract each descriptor names, the rung named where

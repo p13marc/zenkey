@@ -49,8 +49,8 @@ use anyhow::Result;
 // context is read once, at the edge, and a command that gets a `Link` or a
 // `Deployment` is past every way resolution can fail (#209).
 use crate::cli::{
-    AclCmd, AdminCmd, BenchCmd, CheckCmd, Cli, Command, ConfigCmd, GetSub, IfaceCmd, KeyCmd,
-    NamespaceCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
+    AclCmd, AdminCmd, BenchCmd, CatalogCmd, CheckCmd, Cli, Command, ConfigCmd, GetSub, IfaceCmd,
+    KeyCmd, NamespaceCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -123,6 +123,8 @@ pub async fn run() -> Result<()> {
         Command::Config(ConfigCmd::Extend(a)) => cmd::config::extend(a).await,
         Command::Config(ConfigCmd::Persist(a)) => cmd::config::persist(a).await,
         Command::Bench(BenchCmd::Call(a)) => cmd::bench::call(a).await,
+        Command::Catalog(CatalogCmd::Show(a)) => cmd::catalog::show(a),
+        Command::Catalog(CatalogCmd::Check(a)) => cmd::catalog::check(a),
 
         // ── Wire verbs ───────────────────────────────────────────────────
         Command::Get(a) => match a.cmd {

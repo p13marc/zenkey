@@ -77,6 +77,9 @@ static ANY_SCHEMA: Value = Value::Bool(true);
 #[derive(Debug, Clone, Copy)]
 pub struct Synth {
     pub seed: u64,
+    /// The deployment epoch a packed record's `time` fields count from, in
+    /// seconds (core §7.6, §8.6): 0 unless [`Synth::under`] says.
+    pub epoch: i64,
 }
 
 /// One synthesized payload.
@@ -146,7 +149,18 @@ fn splitmix(mut x: u64) -> u64 {
 impl Synth {
     #[must_use]
     pub fn new(seed: u64) -> Synth {
-        Synth { seed }
+        Synth {
+            seed,
+            epoch: zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+        }
+    }
+
+    /// Writes packed `time` fields under `epoch`, the deployment epoch in
+    /// seconds (core §8.6): a mock owner's catalog's.
+    #[must_use]
+    pub fn under(mut self, epoch: i64) -> Synth {
+        self.epoch = epoch;
+        self
     }
 
     /// A wandering value in `[min, max]`: a sine over `tick`, phase-offset
@@ -267,7 +281,10 @@ impl Synth {
         tick: u64,
         measured_ms: Option<i64>,
     ) -> Result<Synthesized, String> {
-        use zenkey_model::packed::{DEFAULT_EPOCH, FieldKind, fixed_value};
+        use zenkey_model::packed::{FieldKind, fixed_value};
+        // A second per tick from 2023-11-14, or from the epoch where that
+        // is later: a time before the epoch has no code (core §7.6).
+        let base = 1_700_000_000_000_i64.max(self.epoch.saturating_mul(1000));
         let mut m = serde_json::Map::new();
         for f in layout.fields() {
             if f.optional && !tick.is_multiple_of(2) {
@@ -302,17 +319,16 @@ impl Synth {
                 FieldKind::Bool => Value::Bool(h & 1 == 1),
                 FieldKind::Counter => Value::from(tick.wrapping_mul(1 + fnv(&f.name) % 10)),
                 FieldKind::Time { .. } => Value::from(
-                    measured_ms
-                        .unwrap_or(1_700_000_000_000 + i64::try_from(tick).unwrap_or(0) * 1000),
+                    measured_ms.unwrap_or(base + i64::try_from(tick).unwrap_or(0) * 1000),
                 ),
             };
             m.insert(f.name.clone(), v);
         }
         let record = layout
-            .write(&Value::Object(m), Some(DEFAULT_EPOCH))
+            .write(&Value::Object(m), Some(self.epoch))
             .map_err(|r| format!("the synthesized record does not write: {r}"))?;
         let value = layout
-            .read(layout.tag(), &record.bytes, Some(DEFAULT_EPOCH))
+            .read(layout.tag(), &record.bytes, Some(self.epoch))
             .map_err(|r| format!("the synthesized record does not read back: {r}"))?;
         Ok(Synthesized {
             bytes: record.bytes,

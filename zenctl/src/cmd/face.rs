@@ -108,12 +108,20 @@ pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
         default_permission,
         window,
         peer_config,
-        catalog,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
     let windows = ASKING.ask(windows(&window));
     let enrollment = ASKING.ask(acl::load_enrollment(&enrollment));
+    // The far side's catalog, `--catalog` beside `--contracts`: one at most.
+    let catalog = ASKING.ask(match contracts.catalog.as_slice() {
+        [] => Ok(None),
+        [one] => Ok(Some(one.clone())),
+        several => Err(unaskable!(
+            "{} catalogs given: the far side holds one --catalog (link.v2 §2.19)",
+            several.len()
+        )),
+    });
     let contracts = ASKING.ask(zk2::load_contracts(&contracts));
     let parsed = ASKING.ask(acl::load_face_policy(&face_policy));
     let opts = zenkey_fleet::AclOptions {

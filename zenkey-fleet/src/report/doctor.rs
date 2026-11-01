@@ -165,11 +165,17 @@ pub enum CheckId {
     /// §2.4, §2.14; #909), read from its descriptor and the contracts it
     /// names, over every revision of the required interface in hand.
     ArbitrationDeclaration,
+    /// A running instance listing a revision the deployment's catalog
+    /// lacks, or naming a catalog none given is or succeeds (core §8.6;
+    /// #980 C1c): a far side holding the catalog cannot read an index or a
+    /// time the instance writes under it. Asked only of a run given a
+    /// catalog (`--catalog`), since a catalog is provisioned, never served.
+    CatalogMissing,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 33] = [
+    pub const ALL: [CheckId; 34] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -203,6 +209,7 @@ impl CheckId {
         CheckId::RedundancyVacancy,
         CheckId::TimingDeclaration,
         CheckId::ArbitrationDeclaration,
+        CheckId::CatalogMissing,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -241,6 +248,7 @@ impl CheckId {
             CheckId::RedundancyVacancy => "redundancy-vacancy",
             CheckId::TimingDeclaration => "timing-declaration",
             CheckId::ArbitrationDeclaration => "arbitration-declaration",
+            CheckId::CatalogMissing => "catalog-missing",
         }
     }
 
@@ -286,6 +294,7 @@ impl CheckId {
             CheckId::RedundancyVacancy => "redundancy.v1 §2.15",
             CheckId::TimingDeclaration => "timing.v1 §2.2",
             CheckId::ArbitrationDeclaration => "arbitration.v1 §2.14",
+            CheckId::CatalogMissing => "§8.6",
         }
     }
 
@@ -409,6 +418,10 @@ impl CheckId {
                 "does a running consumer hold an arbitrated role whose declaration is invalid, \
                  or whose binding leaves a priority to an order nobody chose (a wildcard or a \
                  shadowed entry)?"
+            }
+            CheckId::CatalogMissing => {
+                "does a running instance list a revision the deployment's catalog lacks, or name \
+                 a catalog that no catalog given is or succeeds?"
             }
         }
     }
@@ -1110,6 +1123,7 @@ mod check_id_tests {
                 "redundancy-vacancy",
                 "timing-declaration",
                 "arbitration-declaration",
+                "catalog-missing",
             ]
         );
     }
