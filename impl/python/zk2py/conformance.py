@@ -7318,11 +7318,84 @@ def family_packed(root: Path) -> list[Result]:
     return out
 
 
+def family_catalog(root: Path) -> list[Result]:
+    """``catalog/`` (core §8.6, 0.79; #980 C1a), every file, an unknown one
+    failing. ``documents.json``: a catalog's text -> its id, or the first
+    refusal in §8.6's order. ``ids.json``: an accepted catalog's text -> its
+    JCS bytes, their sha256 and its id. ``succession.json``: named catalogs,
+    each read as ``documents.json`` reads one; two of them -> whether the
+    second succeeds the first, or the checker's refusal; the catalogs a
+    reader holds, the id an owner names and an index -> the epoch and the
+    entry, or the reader's refusal."""
+    import hashlib
+
+    from . import catalog
+
+    def reading(text: str) -> Any:
+        try:
+            return {"id": catalog.read(text).id}
+        except catalog.Refused as e:
+            return {"refused": e.token}
+
+    out: list[Result] = []
+    for path in sorted((root / "catalog").iterdir()):
+        if path.name == "README.md":
+            continue
+        data = _load_json(path)
+        if path.name == "documents.json":
+            for i, c in enumerate(data["cases"]):
+                out.append(_check(f"catalog: document {i}: {c['note']}", reading(c["text"]), c["expect"]))
+        elif path.name == "ids.json":
+            for i, c in enumerate(data["cases"]):
+                try:
+                    cat = catalog.read(c["text"])
+                except catalog.Refused as e:
+                    got: Any = {"refused": e.token}
+                else:
+                    got = {"jcs": cat.jcs.decode("utf-8"), "sha256": hashlib.sha256(cat.jcs).hexdigest(),
+                           "id": cat.id}
+                out.append(_check(f"catalog: id {i}: {c['note']}", got, c["expect"]))
+        elif path.name == "succession.json":
+            named: dict[str, catalog.Catalog] = {}
+            for name, value in data["catalogs"].items():
+                text = json.dumps(value)
+                try:
+                    named[name] = catalog.read(text)
+                except catalog.Refused as e:
+                    out.append((f"catalog: catalog {name}", False, f"refused {e.token}: {e}"))
+                    continue
+                out.append((f"catalog: catalog {name} is read", True, ""))
+            for i, c in enumerate(data["successions"]):
+                if c["previous"] not in named or c["next"] not in named:
+                    out.append((f"catalog: succession {i}", False, "a catalog it names was refused"))
+                    continue
+                try:
+                    catalog.succession(named[c["previous"]], named[c["next"]])
+                    got = "succeeds"
+                except catalog.Refused as e:
+                    got = {"refused": e.token}
+                out.append(_check(f"catalog: succession {i}: {c['note']}", got, c["expect"]))
+            for i, c in enumerate(data["reads"]):
+                held = [named[n] for n in c["held"] if n in named]
+                try:
+                    r = catalog.resolve(held, c["catalog"], c["index"])
+                    got = {"epoch": r.epoch}
+                    if r.entry is not None:
+                        got.update(iface=r.entry[0], contract=r.entry[1])
+                except catalog.Refused as e:
+                    got = {"refused": e.token}
+                out.append(_check(f"catalog: read {i}: {c['note']}", got, c["expect"]))
+        else:
+            out.append((f"catalog/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
 #: Every entry of spec/conformance/ that a family reads. Appendix E lists
 #: the fixture formats; an entry no family reads fails ``layout``, so a new
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
-                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed"}
+                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed",
+                 "catalog"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -7356,6 +7429,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "seed": family_seed,
     "envelope": family_envelope,
     "packed": family_packed,
+    "catalog": family_catalog,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,
