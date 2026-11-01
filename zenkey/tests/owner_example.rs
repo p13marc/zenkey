@@ -1698,7 +1698,12 @@ async fn the_owner_example_stands_by_and_takes_over() {
     a.task.abort();
     let waited = ask_json(&b, "redundancy wait ledger.v1 serving 10000").await;
     assert_eq!(waited["reached"], true, "{waited}");
-    assert_eq!(call(&tool).await, ["B"]);
+    // B's operation queryable reaches the tool through the router a little
+    // after B serves, so the call is asked until B answers.
+    eventually("B answers the call", || async {
+        call(&tool).await == ["B"]
+    })
+    .await;
     eventually("B's name, put at its takeover", || async {
         state(&tool, "zk2/lab/ledger/ledger.v1/state/balance").await == [b"B".to_vec()]
     })

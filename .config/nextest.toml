@@ -25,6 +25,12 @@ fail-fast = false
 # (run 1162's `test` sat until 19:40). The slowest test, live_zk2's health
 # §8 across a constrained face, takes 200 s.
 slow-timeout = { period = "60s", terminate-after = 10 }
+# A failed test runs once more before it fails the run (2026-11-01). Most of
+# the suite waits on real clocks under a shared runner, and four of eight CI
+# runs that day each failed one different, unrelated race. A test that
+# passes on its retry is reported FLAKY in the log, never hidden: collect
+# those and fix them, as #1008 did. A test that fails twice fails the run.
+retries = 1
 # One test per CPU, nextest's default, left as it is. On vm-dev (6 CPUs, as
 # vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12. The first run
 # at 12 failed link_face's s10, 7 downsampled samples where 4 to 6 fit,
