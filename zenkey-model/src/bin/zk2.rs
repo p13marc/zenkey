@@ -286,7 +286,7 @@ fn write_catalog(c: &Catalog) -> ExitCode {
     match Catalog::parse_bytes(&c.to_jcs()) {
         Ok(read) if &read == c => {}
         other => {
-            println!("refused as written: {other:?}");
+            eprintln!("refused as written: {other:?}");
             return ExitCode::from(1);
         }
     }

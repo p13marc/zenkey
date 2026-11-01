@@ -108,16 +108,16 @@ fn catalog_exit_codes() {
         .join("../examples/zk2/zenoh-modem/modem.v3.toml")
         .display()
         .to_string();
-    let health = Path::new(env!("CARGO_MANIFEST_DIR"))
+    // The history's first file by name, so the pick never hangs on the
+    // file system's order.
+    let mut revisions: Vec<_> = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../spec/profiles/.history/health.v1")
         .read_dir()
         .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path()
-        .display()
-        .to_string();
+        .map(|e| e.unwrap().path())
+        .collect();
+    revisions.sort();
+    let health = revisions[0].display().to_string();
 
     let (code, first) = run(&["catalog", "new", "--epoch", "1767225600", &modem]);
     assert_eq!(code, 0);
