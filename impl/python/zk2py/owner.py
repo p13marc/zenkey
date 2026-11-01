@@ -837,7 +837,7 @@ class Owner:
         raw put, ``arbitration.v1`` scenarios §11's X): its seq is taken
         here, as :meth:`publish` takes it, so the key's seqs stay one count
         (core §4.3)."""
-        return zk2c.mutation(self._next_stream_inband(key), record)
+        return zk2c.mutation(self._next_stream_inband(key), record, self.tag_of(key))
 
     def _next_stream_inband(self, key: str) -> zk2c.InBand:
         """A stream key's next in-band stamp: its own seq, from 0 at its
@@ -850,6 +850,53 @@ class Owner:
             seq = self._stream_seq.get(key, 0)
             self._stream_seq[key] = (seq + 1) % 2**24
             return zk2c.InBand(self.run[0], self.run[1], seq)
+
+    @staticmethod
+    def _tag_for(c: Any, r: dict[str, Any]) -> int:
+        """CH's tag bits for a sample of ``r`` (core §7.6, 0.75): a packed
+        type's tag, "An implementation that writes a record MUST write the
+        type's tag in CH's tag bits (§7.5)"; 0 for every other kind."""
+        if r.get("type", {}).get("kind") != "packed":
+            return 0
+        rec = c.schemas.packed_record(r["type"]) if c.schemas is not None else None
+        if rec is None:
+            raise OwnerRefused(f"{r['token']}/{r['template']}: packed:{r['type']['name']} has no clean record")
+        return rec.tag
+
+    def tag_of(self, key: str) -> int:
+        """The tag of the type of the resource ``key`` is a sample of: its
+        own resource's, or a member's template's."""
+        found = self._resource_of.get(key) or self._member_of.get(key)
+        return 0 if found is None else self._tag_for(*found)
+
+    def packed_record(self, key: str) -> Any:
+        """The packed record of ``key``'s type, for its writer to encode a
+        value with (:meth:`zk2py.packed.Record.write`); None where the type
+        is not packed. A member's publisher is declared here, as its first
+        put would."""
+        if key not in self._resource_of and key not in self._member_of:
+            self._member_publisher(key)
+        c, r = self._resource_of.get(key) or self._member_of[key]
+        if r["type"]["kind"] != "packed" or c.schemas is None:
+            return None
+        return c.schemas.packed_record(r["type"])
+
+    #: The deployment epoch this owner's writers hold for a packed type's
+    #: ``time`` fields, Unix seconds; None where the deployment states none,
+    #: which is E = 0 (core 0.76 §7.6).
+    packed_epoch: int | None = None
+
+    def encode_packed(self, key: str, value: Any) -> bytes:
+        """``value``, the JSON reading of ``key``'s packed type, as its
+        record (core §7.6 "Writing", "What a writer takes"), under the
+        deployment epoch. Raises :class:`zk2py.packed.Refused`: nothing is
+        put of a value the text refuses."""
+        from . import packed
+
+        rec = self.packed_record(key)
+        if rec is None:
+            raise OwnerRefused(f"{key}: its type is not packed")
+        return rec.write(value, packed.deployment_epoch(self.packed_epoch))
 
     def _table(self, key: str) -> bool:
         """Whether ``key``'s resource carries a Zenoh timestamp the owner
@@ -1423,7 +1470,7 @@ class Owner:
             ib, wire = None, payload
             if enveloped(key):
                 ib = self._next_inband()
-                wire = zk2c.mutation(ib, payload)
+                wire = zk2c.mutation(ib, payload, self.tag_of(key))
             self._publishers[key].put(wire, encoding=zk2c.ENCODING if ib is not None else enc,
                                       **({"timestamp": stamp} if stamp is not None else {}))
             self._held[key] = _Held(payload, enc, stamp, time.monotonic(), ib, wire)
@@ -1598,7 +1645,7 @@ class Owner:
             qos = qos_of(r)
             # Core §4.3 (0.73): an occurrence carries §7.5's envelope, its seq
             # the owner's one count over state and events, under zenoh/bytes.
-            wire, enc = zk2c.mutation(self._next_inband(), payload), zk2c.ENCODING
+            wire, enc = zk2c.mutation(self._next_inband(), payload, self._tag_for(c, r)), zk2c.ENCODING
             ts = {"timestamp": self.mint()} if self.candidate else {}
             if r["reliability"] == "reliable":
                 self.session.put(key, wire, encoding=enc, congestion_control=qos["congestion_control"],
@@ -1701,7 +1748,7 @@ class Owner:
                     ib, wire = None, held.payload
                     if enveloped(key):
                         ib = self._next_inband()
-                        wire = zk2c.mutation(ib, held.payload)
+                        wire = zk2c.mutation(ib, held.payload, self.tag_of(key))
                     self._publishers[key].put(wire, encoding=zk2c.ENCODING if ib is not None else held.encoding,
                                               **({"timestamp": stamp} if stamp is not None else {}))
                     self._held[key] = _Held(held.payload, held.encoding, stamp, time.monotonic(), ib, wire)
@@ -1743,7 +1790,7 @@ class Owner:
         if enveloped(key):
             # Core §4.3: a stream key's own seq, in §7.5's envelope, under
             # zenoh/bytes; an @stream sample keeps its wire.
-            payload = zk2c.mutation(self._next_stream_inband(key), payload)
+            payload = zk2c.mutation(self._next_stream_inband(key), payload, self.tag_of(key))
             kw["encoding"] = zk2c.ENCODING
         self._publishers[key].put(payload, **kw)
 
@@ -1755,10 +1802,23 @@ class Owner:
         at start (R1, 0.20): ``<system>/*`` stays a wildcard over services."""
         return [f"zk2/{p}/{iface}/{rid}" for p in self.resolved_bindings.get(role, [])]
 
-    def subscribe_role(self, role: str, iface: str, rid: str, sink: Any, discarded: Any = None) -> None:
+    def subscribe_role(self, role: str, iface: str, rid: str, sink: Any, discarded: Any = None,
+                       record: Any = None, epoch: int | None = None) -> None:
         """Subscribe through a role's resolved bindings, handing ``sink``
         each sample's (key, payload). A sample whose key expression is not
-        concrete is discarded (R6), and its key handed to ``discarded``."""
+        concrete is discarded (R6), and its key handed to ``discarded``.
+
+        With ``record``, the :class:`zk2py.packed.Record` of the resource's
+        packed type in the revision this consumer holds, each put is read
+        through it (core §7.6, observer §7.3 at 0.16): ``sink`` gets its
+        JSON reading, and one the layout refuses, or that came in no
+        envelope, is undecodable, counted with its refusal named and never
+        handed on. Its ``time`` fields are read under ``epoch``, the
+        deployment's, 0 where none is stated. A delete carries no record, so
+        it hands ``sink`` (key, None), never bytes; its envelope, in the
+        delete's attachment, is read as every delete's is."""
+        from . import packed
+
         assert self.session is not None
 
         def received(sample: zenoh.Sample) -> None:
@@ -1770,6 +1830,16 @@ class Owner:
                 read = zk2c.read_sample(sample)
                 if read.refused:
                     self.undecodable.append((key, read.refusal))
+                    return
+                if record is not None:
+                    if sample.kind == zenoh.SampleKind.DELETE:
+                        sink(key, None)
+                        return
+                    got = packed.read_sample(record, read, epoch)
+                    if got.undecodable:
+                        self.undecodable.append((key, got.refusal))
+                        return
+                    sink(key, got.value)
                     return
                 sink(key, read.record if read.record is not None else b"")
             elif discarded is not None:

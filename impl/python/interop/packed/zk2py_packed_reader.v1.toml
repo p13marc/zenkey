@@ -1,0 +1,18 @@
+# zk2py's consumer of `packed.v1` (core §7.6; #609, the mend after round 94):
+# a role bound to the owner under test, Rust's `zenctl gen` or zk2py's own,
+# whose packed records the consumer reads through the layouts of the
+# revision of `packed.v1` it holds (zenkey/tests/contracts/packed/, or the
+# other revisions beside it). It must load with no finding at all.
+[interface]
+name    = "zk2py_packed_reader"
+major   = 1
+minor   = 0
+summary = "zk2py's reader of packed records"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[requires.src]
+interface = "packed.v1"
+resources = ["sensor", "status", "clock", "chain", "reading/{unit}", "status/{unit}", "mode_change"]
