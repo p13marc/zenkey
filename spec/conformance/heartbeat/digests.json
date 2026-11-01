@@ -1,0 +1,232 @@
+{
+  "description": "core §7.5, a collection's digest. Written by an independent reading of the text (Python, standard library), checked, never blessed. `cases`: the collection's live members, each its base-relative `key`, its stamp's `run_width` (16 or 32), `run` and `seq` → each member's `values` (the first 4 bytes of the sha256 of the key in UTF-8, a zero byte, a byte holding the run's width bit, 0 for 16 and 1 for 32, then the run and the seq big-endian, as an envelope writes them), in the order given, and the `digest`: their XOR, 0 with none live, as 8 hex digits.",
+  "cases": [
+    {
+      "note": "none live: 0",
+      "members": [],
+      "expect": {
+        "values": [],
+        "digest": "00000000"
+      }
+    },
+    {
+      "note": "one member, a 16-bit run",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/link",
+          "run_width": 16,
+          "run": 1,
+          "seq": 7
+        }
+      ],
+      "expect": {
+        "values": [
+          "5c0c752c"
+        ],
+        "digest": "5c0c752c"
+      }
+    },
+    {
+      "note": "the same key and seq under a 32-bit run of the same value: another value",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/link",
+          "run_width": 32,
+          "run": 1,
+          "seq": 7
+        }
+      ],
+      "expect": {
+        "values": [
+          "a41dc20c"
+        ],
+        "digest": "a41dc20c"
+      }
+    },
+    {
+      "note": "the same member one seq later",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/link",
+          "run_width": 16,
+          "run": 1,
+          "seq": 8
+        }
+      ],
+      "expect": {
+        "values": [
+          "3570a90f"
+        ],
+        "digest": "3570a90f"
+      }
+    },
+    {
+      "note": "the same member, another run",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/link",
+          "run_width": 16,
+          "run": 2,
+          "seq": 7
+        }
+      ],
+      "expect": {
+        "values": [
+          "208c03c2"
+        ],
+        "digest": "208c03c2"
+      }
+    },
+    {
+      "note": "three peers, in key order",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/alpha",
+          "run_width": 16,
+          "run": 3,
+          "seq": 10
+        },
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/bravo",
+          "run_width": 16,
+          "run": 3,
+          "seq": 11
+        },
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/charlie",
+          "run_width": 16,
+          "run": 3,
+          "seq": 12
+        }
+      ],
+      "expect": {
+        "values": [
+          "56e6a54c",
+          "f70a215c",
+          "d779f30f"
+        ],
+        "digest": "7695771f"
+      }
+    },
+    {
+      "note": "the same three in another order: the same digest",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/charlie",
+          "run_width": 16,
+          "run": 3,
+          "seq": 12
+        },
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/alpha",
+          "run_width": 16,
+          "run": 3,
+          "seq": 10
+        },
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/bravo",
+          "run_width": 16,
+          "run": 3,
+          "seq": 11
+        }
+      ],
+      "expect": {
+        "values": [
+          "d779f30f",
+          "56e6a54c",
+          "f70a215c"
+        ],
+        "digest": "7695771f"
+      }
+    },
+    {
+      "note": "two of them: the third's value XORed out",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/alpha",
+          "run_width": 16,
+          "run": 3,
+          "seq": 10
+        },
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/bravo",
+          "run_width": 16,
+          "run": 3,
+          "seq": 11
+        }
+      ],
+      "expect": {
+        "values": [
+          "56e6a54c",
+          "f70a215c"
+        ],
+        "digest": "a1ec8410"
+      }
+    },
+    {
+      "note": "members of two runs: one outlived a run change",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/alpha",
+          "run_width": 16,
+          "run": 3,
+          "seq": 10
+        },
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/bravo",
+          "run_width": 32,
+          "run": 3735928559,
+          "seq": 0
+        }
+      ],
+      "expect": {
+        "values": [
+          "56e6a54c",
+          "1d1dcf5b"
+        ],
+        "digest": "4bfb6a17"
+      }
+    },
+    {
+      "note": "the runs' and the seq's maxima",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/zulu",
+          "run_width": 32,
+          "run": 4294967295,
+          "seq": 16777215
+        },
+        {
+          "key": "zk2/lab/n1/hb.v1/state/peer/yankee",
+          "run_width": 16,
+          "run": 65535,
+          "seq": 16777215
+        }
+      ],
+      "expect": {
+        "values": [
+          "b9d9b431",
+          "24c84992"
+        ],
+        "digest": "9d11fda3"
+      }
+    },
+    {
+      "note": "an @state member, with a slug in its key",
+      "members": [
+        {
+          "key": "zk2/lab/n1/hb.v1/@state/route/_2fdst",
+          "run_width": 16,
+          "run": 9,
+          "seq": 1
+        }
+      ],
+      "expect": {
+        "values": [
+          "9462270f"
+        ],
+        "digest": "9462270f"
+      }
+    }
+  ]
+}

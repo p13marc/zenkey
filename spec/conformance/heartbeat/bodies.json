@@ -1,0 +1,875 @@
+{
+  "description": "core §7.5, a heartbeat's body, read with its revision's collections (`layouts.json`). Written by an independent reading of the text (Python, standard library), checked, never blessed. A value is `time`, `{\"s\": seconds from the deployment epoch, \"ms\": milliseconds}` or `null` for the unknown time (all 42 bits set), and `sections`, by resource: a collection with a section has its map bit set, and one without has it 0. A collection of one member's section is its `digest` (8 hex digits) and whether it is `vouched`. A templated collection's is its `digest`, its `live` count and the ranks `vouched` for, ascending, and, where read, the `form` read: `bitmap` or `list`. `writes`: a layout and a value → the body's `bits` before the pad, the `pad` and the `hex` bytes; the writer writes the list only where it is shorter than the bitmap, so a tie keeps the bitmap. `reads`: a layout and bytes in hex → the value, or `{\"refused\": token}`, the first in §7.5's order: `short` (the body ends before a bit its fields need), `code` (a millisecond code from 1000 up but the unknown time's, a live count above the cardinality, a count above the live count, or a rank not below the live count or not above the rank before it), `trailing` (a byte after the pad), `pad` (a pad bit set). Every value read writes back to its bytes, in the form read.",
+  "writes": [
+    {
+      "note": "bare.v1: no collection, so the time alone: 42 bits and 6 of pad",
+      "layout": "bare.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {}
+      },
+      "expect": {
+        "bits": "000000000000000000001110000100000011111010",
+        "pad": 6,
+        "hex": "00000e103e80"
+      }
+    },
+    {
+      "note": "bare.v1: the time unknown, all 42 bits set",
+      "layout": "bare.v1",
+      "value": {
+        "time": null,
+        "sections": {}
+      },
+      "expect": {
+        "bits": "111111111111111111111111111111111111111111",
+        "pad": 6,
+        "hex": "ffffffffffc0"
+      }
+    },
+    {
+      "note": "the largest known time: every second bit set, 999 ms",
+      "layout": "bare.v1",
+      "value": {
+        "time": {
+          "s": 4294967295,
+          "ms": 999
+        },
+        "sections": {}
+      },
+      "expect": {
+        "bits": "111111111111111111111111111111111111100111",
+        "pad": 6,
+        "hex": "fffffffff9c0"
+      }
+    },
+    {
+      "note": "hb.v1: every map bit 0, no section",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {}
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110100000",
+        "pad": 2,
+        "hex": "00000e103e80"
+      }
+    },
+    {
+      "note": "one member vouched for",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "a1b2c3d4",
+            "vouched": true
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110100100101000011011001011000011110101001",
+        "pad": 1,
+        "hex": "00000e103e9286cb0f52"
+      }
+    },
+    {
+      "note": "one member not vouched for",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "a1b2c3d4",
+            "vouched": false
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110100100101000011011001011000011110101000",
+        "pad": 1,
+        "hex": "00000e103e9286cb0f50"
+      }
+    },
+    {
+      "note": "one member, not live: digest 0, never vouched",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "00000000",
+            "vouched": false
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110100100000000000000000000000000000000000",
+        "pad": 1,
+        "hex": "00000e103e9000000000"
+      }
+    },
+    {
+      "note": "templated, none live: a 0-bit bitmap",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "00000000",
+            "live": 0,
+            "vouched": []
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110100010000000000000000000000000000000000000",
+        "pad": 6,
+        "hex": "00000e103e880000000000"
+      }
+    },
+    {
+      "note": "templated, three live, two vouched: the bitmap (3 bits) is shorter than the list (2 + 2 × 2)",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "0badf00d",
+            "live": 3,
+            "vouched": [
+              0,
+              2
+            ]
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110100010000010111010110111110000000011010110101",
+        "pad": 3,
+        "hex": "00000e103e882eb7c035a8"
+      }
+    },
+    {
+      "note": "templated, five live, all vouched: the bitmap (5 bits) against the list (3 + 5 × 3)",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "12345678",
+            "live": 5,
+            "vouched": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ]
+          }
+        }
+      },
+      "expect": {
+        "bits": "000000000000000000001110000100000011111010001000010010001101000101011001111000101011111",
+        "pad": 1,
+        "hex": "00000e103e8848d159e2be"
+      }
+    },
+    {
+      "note": "templated, five live, none vouched: the list (3 bits, a count of 0) is shorter than the bitmap (5)",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "12345678",
+            "live": 5,
+            "vouched": []
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110100010000100100011010001010110011110001011000",
+        "pad": 3,
+        "hex": "00000e103e8848d159e2c0"
+      }
+    },
+    {
+      "note": "one live of two: the bitmap (1 bit) against the list (1 + 0 × 1); a tie keeps the bitmap",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "@state/route/{dest}": {
+            "digest": "ffffffff",
+            "live": 1,
+            "vouched": [
+              0
+            ]
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000011100001000000111110101000111111111111111111111111111111110101",
+        "pad": 6,
+        "hex": "00000e103ea3fffffffd40"
+      }
+    },
+    {
+      "note": "no ceiling: a 32-bit live count; 40 live, one vouched: the list (6 + 6) is shorter than the bitmap (40)",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/sdu/{sdu}": {
+            "digest": "cafebabe",
+            "live": 40,
+            "vouched": [
+              17
+            ]
+          }
+        }
+      },
+      "expect": {
+        "bits": "000000000000000000001110000100000011111010000111001010111111101011101010111110000000000000000000000000001010001000001010001",
+        "pad": 5,
+        "hex": "00000e103e872bfaeaf8000000a20a20"
+      }
+    },
+    {
+      "note": "no ceiling: 9 live, two vouched: the bitmap (9) is shorter than the list (4 + 2 × 4)",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/sdu/{sdu}": {
+            "digest": "cafebabe",
+            "live": 9,
+            "vouched": [
+              3,
+              8
+            ]
+          }
+        }
+      },
+      "expect": {
+        "bits": "000000000000000000001110000100000011111010000111001010111111101011101010111110000000000000000000000000000010010000100001",
+        "pad": 0,
+        "hex": "00000e103e872bfaeaf80000002421"
+      }
+    },
+    {
+      "note": "every collection, in map order: @state first",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "sections": {
+          "@state/route/{dest}": {
+            "digest": "00000001",
+            "live": 2,
+            "vouched": [
+              1
+            ]
+          },
+          "state/link": {
+            "digest": "00000002",
+            "vouched": true
+          },
+          "state/peer/{peer}": {
+            "digest": "00000003",
+            "live": 1,
+            "vouched": [
+              0
+            ]
+          },
+          "state/sdu/{sdu}": {
+            "digest": "00000004",
+            "live": 2,
+            "vouched": []
+          }
+        }
+      },
+      "expect": {
+        "bits": "0000000000000000000000000000000000000000001111000000000000000000000000000000011000100000000000000000000000000000010100000000000000000000000000000011001010000000000000000000000000000010000000000000000000000000000000010000",
+        "pad": 4,
+        "hex": "00000000003c00000006200000005000000032800000020000000100"
+      }
+    },
+    {
+      "note": "two collections of four, the map's bits 0 1 0 1",
+      "layout": "hb.v1",
+      "value": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "deadbeef",
+            "vouched": true
+          },
+          "state/sdu/{sdu}": {
+            "digest": "00000000",
+            "live": 0,
+            "vouched": []
+          }
+        }
+      },
+      "expect": {
+        "bits": "000000000000000000001110000100000011111010010111011110101011011011111011101111100000000000000000000000000000000000000000000000000000000000000000",
+        "pad": 0,
+        "hex": "00000e103e977ab6fbbe0000000000000000"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "written: bare.v1: no collection, so the time alone: 42 bits and 6 of pad",
+      "layout": "bare.v1",
+      "hex": "00000e103e80",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {}
+      }
+    },
+    {
+      "note": "written: bare.v1: the time unknown, all 42 bits set",
+      "layout": "bare.v1",
+      "hex": "ffffffffffc0",
+      "expect": {
+        "time": null,
+        "sections": {}
+      }
+    },
+    {
+      "note": "written: the largest known time: every second bit set, 999 ms",
+      "layout": "bare.v1",
+      "hex": "fffffffff9c0",
+      "expect": {
+        "time": {
+          "s": 4294967295,
+          "ms": 999
+        },
+        "sections": {}
+      }
+    },
+    {
+      "note": "written: hb.v1: every map bit 0, no section",
+      "layout": "hb.v1",
+      "hex": "00000e103e80",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {}
+      }
+    },
+    {
+      "note": "written: one member vouched for",
+      "layout": "hb.v1",
+      "hex": "00000e103e9286cb0f52",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "a1b2c3d4",
+            "vouched": true
+          }
+        }
+      }
+    },
+    {
+      "note": "written: one member not vouched for",
+      "layout": "hb.v1",
+      "hex": "00000e103e9286cb0f50",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "a1b2c3d4",
+            "vouched": false
+          }
+        }
+      }
+    },
+    {
+      "note": "written: one member, not live: digest 0, never vouched",
+      "layout": "hb.v1",
+      "hex": "00000e103e9000000000",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "00000000",
+            "vouched": false
+          }
+        }
+      }
+    },
+    {
+      "note": "written: templated, none live: a 0-bit bitmap",
+      "layout": "hb.v1",
+      "hex": "00000e103e880000000000",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "00000000",
+            "form": "bitmap",
+            "live": 0,
+            "vouched": []
+          }
+        }
+      }
+    },
+    {
+      "note": "written: templated, three live, two vouched: the bitmap (3 bits) is shorter than the list (2 + 2 × 2)",
+      "layout": "hb.v1",
+      "hex": "00000e103e882eb7c035a8",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "0badf00d",
+            "form": "bitmap",
+            "live": 3,
+            "vouched": [
+              0,
+              2
+            ]
+          }
+        }
+      }
+    },
+    {
+      "note": "written: templated, five live, all vouched: the bitmap (5 bits) against the list (3 + 5 × 3)",
+      "layout": "hb.v1",
+      "hex": "00000e103e8848d159e2be",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "12345678",
+            "form": "bitmap",
+            "live": 5,
+            "vouched": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ]
+          }
+        }
+      }
+    },
+    {
+      "note": "written: templated, five live, none vouched: the list (3 bits, a count of 0) is shorter than the bitmap (5)",
+      "layout": "hb.v1",
+      "hex": "00000e103e8848d159e2c0",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "12345678",
+            "form": "list",
+            "live": 5,
+            "vouched": []
+          }
+        }
+      }
+    },
+    {
+      "note": "written: one live of two: the bitmap (1 bit) against the list (1 + 0 × 1); a tie keeps the bitmap",
+      "layout": "hb.v1",
+      "hex": "00000e103ea3fffffffd40",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "@state/route/{dest}": {
+            "digest": "ffffffff",
+            "form": "bitmap",
+            "live": 1,
+            "vouched": [
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "note": "written: no ceiling: a 32-bit live count; 40 live, one vouched: the list (6 + 6) is shorter than the bitmap (40)",
+      "layout": "hb.v1",
+      "hex": "00000e103e872bfaeaf8000000a20a20",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/sdu/{sdu}": {
+            "digest": "cafebabe",
+            "form": "list",
+            "live": 40,
+            "vouched": [
+              17
+            ]
+          }
+        }
+      }
+    },
+    {
+      "note": "written: no ceiling: 9 live, two vouched: the bitmap (9) is shorter than the list (4 + 2 × 4)",
+      "layout": "hb.v1",
+      "hex": "00000e103e872bfaeaf80000002421",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/sdu/{sdu}": {
+            "digest": "cafebabe",
+            "form": "bitmap",
+            "live": 9,
+            "vouched": [
+              3,
+              8
+            ]
+          }
+        }
+      }
+    },
+    {
+      "note": "written: every collection, in map order: @state first",
+      "layout": "hb.v1",
+      "hex": "00000000003c00000006200000005000000032800000020000000100",
+      "expect": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "sections": {
+          "@state/route/{dest}": {
+            "digest": "00000001",
+            "form": "bitmap",
+            "live": 2,
+            "vouched": [
+              1
+            ]
+          },
+          "state/link": {
+            "digest": "00000002",
+            "vouched": true
+          },
+          "state/peer/{peer}": {
+            "digest": "00000003",
+            "form": "bitmap",
+            "live": 1,
+            "vouched": [
+              0
+            ]
+          },
+          "state/sdu/{sdu}": {
+            "digest": "00000004",
+            "form": "bitmap",
+            "live": 2,
+            "vouched": []
+          }
+        }
+      }
+    },
+    {
+      "note": "written: two collections of four, the map's bits 0 1 0 1",
+      "layout": "hb.v1",
+      "hex": "00000e103e977ab6fbbe0000000000000000",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/link": {
+            "digest": "deadbeef",
+            "vouched": true
+          },
+          "state/sdu/{sdu}": {
+            "digest": "00000000",
+            "form": "bitmap",
+            "live": 0,
+            "vouched": []
+          }
+        }
+      }
+    },
+    {
+      "note": "a list where the bitmap is shorter: read, the writer's MUST not the reader's",
+      "layout": "hb.v1",
+      "hex": "00000e103e882eb7c035e2",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "0badf00d",
+            "form": "list",
+            "live": 3,
+            "vouched": [
+              0,
+              2
+            ]
+          }
+        }
+      }
+    },
+    {
+      "note": "a bitmap where the list is shorter: read",
+      "layout": "hb.v1",
+      "hex": "00000e103e8848d159e280",
+      "expect": {
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "sections": {
+          "state/peer/{peer}": {
+            "digest": "12345678",
+            "form": "bitmap",
+            "live": 5,
+            "vouched": []
+          }
+        }
+      }
+    },
+    {
+      "note": "no byte at all",
+      "layout": "bare.v1",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "five bytes: the time needs 42 bits",
+      "layout": "bare.v1",
+      "hex": "00000e103e",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a section's digest cut short",
+      "layout": "hb.v1",
+      "hex": "00000e103e93ffffc0",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a millisecond code of 1000",
+      "layout": "bare.v1",
+      "hex": "00000e10fa00",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a millisecond code of 1023 under a known second",
+      "layout": "bare.v1",
+      "hex": "00000e10ffc0",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "seconds all ones, 1022 ms: not the unknown time",
+      "layout": "bare.v1",
+      "hex": "ffffffffff80",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a millisecond code is refused before a short digest",
+      "layout": "hb.v1",
+      "hex": "00000001fa13fc",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "six live where the cardinality is 5",
+      "layout": "hb.v1",
+      "hex": "00000e103e880000000300",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "seven live where the cardinality is 5",
+      "layout": "hb.v1",
+      "hex": "00000e103e88000000038000",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a count of 3 where 2 are live",
+      "layout": "hb.v1",
+      "hex": "00000e103ea000000002ec",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a rank not below the live count: 3 of 3",
+      "layout": "hb.v1",
+      "hex": "00000e103e8800000001dc",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "ranks not ascending: 2 then 1",
+      "layout": "hb.v1",
+      "hex": "00000e103e8800000001e9",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a rank repeated: 1 then 1",
+      "layout": "hb.v1",
+      "hex": "00000e103e8800000001e5",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a list cut short in its second rank",
+      "layout": "hb.v1",
+      "hex": "00000e103e880000000252",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a byte after the pad",
+      "layout": "bare.v1",
+      "hex": "00000e103e8000",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a byte after the pad, all zero bits",
+      "layout": "hb.v1",
+      "hex": "00000e103e8000",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a pad bit set",
+      "layout": "bare.v1",
+      "hex": "00000e103e81",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "the first pad bit set",
+      "layout": "hb.v1",
+      "hex": "00000e103e82",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "a pad bit set, and an unused code before it: code first",
+      "layout": "bare.v1",
+      "hex": "00000e10fa41",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a byte after the pad, and a pad bit set: trailing first",
+      "layout": "bare.v1",
+      "hex": "00000e103e8100",
+      "expect": {
+        "refused": "trailing"
+      }
+    }
+  ]
+}

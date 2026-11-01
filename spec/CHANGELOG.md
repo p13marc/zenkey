@@ -3,6 +3,67 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.81 — 2026-11-01: the heartbeat defined (#978)
+
+Epic #975, zk2c, makes the wire bandwidth-first. Today `freshness.v1`
+confirms a member by putting it again, whole and freshly stamped. #978
+replaces those puts with one heartbeat per interface that vouches for
+its members by a bit. This version is #978's F1: §7.5 defines form 6,
+which 0.72 reserved, and no rule adopts it yet. F3's `freshness.v2`
+will name the key, the period and what a reader concludes.
+
+**Added: §7.5, the heartbeat.**
+- **The form** is code 6, a put's payload: `CH · run · seq · body`. On a
+  delete's attachment it is refused, `sample_kind`, as a mutation is.
+- **CH's tag** is the low 4 bits of the last byte of the covered
+  revision's fingerprint. A writer MUST write it. A reader compares it
+  with the revision it holds, as §7.6's reader compares a type's tag.
+- **The run and seq** are the heartbeat key's, counted as any stream
+  key's are. So a gap in the seqs is a heartbeat lost.
+- **The collections** of a revision are its `state` and `@state`
+  resources with a horizon above 0, in the canonical resource order. A
+  collection whose template has a parameter is templated, and its
+  cardinality bounds its live members.
+- **The body** is bits, most significant first, padded once at the end,
+  as a packed record is. It holds the owner's time, a map bit for each
+  collection, and a section for each bit set.
+- **The time** is §7.6's `time` with `ms`, 42 bits from the deployment
+  epoch. All ones say the owner's clock is unknown.
+- **A section** is the collection's digest, then a vouched bit for a
+  member, or for a templated collection its live count and either a
+  bitmap or a list of ranks. A writer MUST write the list only where it
+  is shorter.
+- **The digest** is the XOR, over the live members, of the first 4 bytes
+  of the sha256 of the key, a zero byte, the run's width bit, the run
+  and the seq. It is 0 with none live. An implementation MUST compute it
+  so.
+- **Reading a body** refuses it for the first reason that applies, each
+  named: `short`, `code` (an unused millisecond, live count, count or
+  rank), `trailing`, then `pad`. Every body accepted MUST write back to
+  its bytes.
+
+**Changed: §7.5's parse.** It accepts form 6 on a put and reports its
+tag, as it reports a mutation's. Five forms stay reserved.
+
+**Fixtures.** `conformance/heartbeat/`, written by an independent reading
+of the text (Python, standard library), checked and never blessed:
+- `layouts.json`: two revisions' collections, their order, widths and
+  horizons, and their fingerprints and tags;
+- `bodies.json`: values written to bits and bytes, and bytes read back to
+  values or refused, each refusal in its place in the order;
+- `digests.json`: members' values and their collections' digests.
+
+`conformance/envelope/vectors.json` reads form 6 on a put, and refuses it
+on a delete's attachment. Its reserved-form cases use form 7.
+
+**Deliberately not changed.**
+- **No rule adopts the heartbeat.** No owner sends one, and §4.3's table
+  is unchanged. `freshness.v1`'s re-puts stand until F3 and F4.
+- **No key.** F3's `freshness.v2` declares it as a resource.
+- **No section number,** and no fingerprint moves.
+- **The digest covers the run.** A member can outlive a run change within
+  its instance, and a seq alone would read two runs' values as one.
+
 ## 0.80 — 2026-11-01: a writer's integers, and the epoch none states (#979)
 
 zk2py's mend after round 94 read 0.76's §7.6 cold and ran packed records

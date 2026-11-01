@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 17 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 57, 25 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 49 |
-| Every rule, once | 201 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 54 |
+| Every rule, once | 206 |
 | [Rule ids](#rule-ids) | 79 |
 
 ## Owner
@@ -674,6 +674,11 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§7.5](core.md#75-the-zk2c-envelope) | **Parsing.** … An implementation MUST refuse an envelope for the first of these that applies, in this order: (6 items) | `[F: envelope/vectors.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every envelope an implementation accepts MUST write back to the same bytes. | `[F: envelope/vectors.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a heartbeat MUST write its covered revision's tag in CH. | `[F: heartbeat/layouts.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a templated section MUST write the list only where it is shorter than the bitmap. | `[F: heartbeat/bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST compute a digest so. | `[F: heartbeat/digests.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | **Reading a body.** … An implementation MUST refuse a body for the first of these that applies, in this order, naming the refusal: (3 items) | `[F: heartbeat/bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | Every body an implementation accepts MUST write back to the same bytes. | `[F: heartbeat/bodies.json]` |
 
 ### [core §7.6 Packed records](core.md#76-packed-records)
 
