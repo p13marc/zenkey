@@ -245,10 +245,11 @@ fn replies_view(
     }
 }
 
-/// Who in the selection holds the interface's token and sent no value
-/// (§5.1, "Attribution"), from the runtime's own presence read of the
-/// selection (#671): its providers, and whether every read behind them
-/// completed. A read that fails is said, never read as nobody.
+/// Who in the selection serves the interface and sent no value (§5.1,
+/// "Attribution"), from the runtime's own presence read of the selection
+/// (#671): its providers, a tokenless one's by instance token and
+/// descriptor (#1015), and whether every read behind them completed. A
+/// read that fails is said, never read as nobody.
 fn selection_presence(
     address: &str,
     revision: &Revision,

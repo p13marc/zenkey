@@ -1,4 +1,7 @@
-//! `spec/scenarios/bindings.md` §1–§5 (spec §3.2 R1–R6).
+//! `spec/scenarios/bindings.md` §1–§5 (spec §3.2 R1–R6), and a consumer's
+//! presence as core §8.1 and observer §3.6 read it (#1015): a tokenless
+//! provider found by its instance token and descriptor, and absence only
+//! from a complete read.
 
 mod common;
 
@@ -6,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use common::{SETTLE, T, client, config, contract, eventually, imp, router};
-use zenkey::consumer::Delivery;
+use common::{SETTLE, T, addr, client, config, contract, eventually, imp, router};
+use zenkey::consumer::{Consumer, Delivery, Liveness};
 use zenkey::model::grammar::{IfaceId, ZkKey};
 use zenkey::model::template::Bindings;
 use zenkey::presence::{self, Edge};
@@ -20,7 +23,18 @@ fn detections() -> IfaceId {
 
 /// A detector: `detections.v1` with a writer on `objects`.
 async fn detector(s: &zenoh::Session, address: &str) -> (Service, Writer) {
-    let mut b = ServiceBuilder::new(s, config(address));
+    detector_with(s, config(address)).await
+}
+
+/// A detector whose deployment puts `detections.v1` in its tokenless set
+/// (core §8.1, U22): an instance token, a descriptor marking the interface
+/// `"token": false`, and no interface token.
+async fn tokenless_detector(s: &zenoh::Session, address: &str) -> (Service, Writer) {
+    detector_with(s, config(address).tokenless(detections())).await
+}
+
+async fn detector_with(s: &zenoh::Session, cfg: zenkey::ServiceConfig) -> (Service, Writer) {
+    let mut b = ServiceBuilder::new(s, cfg);
     b.implement(imp("detections.v1")).unwrap();
     let w = b
         .declare_writer(&detections(), "stream/objects", &Bindings::new())
@@ -363,4 +377,219 @@ async fn s5_a_provider_on_the_services_own_system() {
         refused.is_err_and(|e| e.to_string().contains("own system")),
         "a tool's self.system binding is refused"
     );
+}
+
+/// The `detections.v1` consumer a tool makes of `providers` (R1).
+fn tool_consumer(s: &zenoh::Session, providers: &[&str]) -> Consumer {
+    Consumer::for_tool(
+        s,
+        Arc::new(contract("detections.v1")),
+        providers,
+        &BTreeMap::new(),
+    )
+    .unwrap()
+}
+
+/// #1015 (core §8.1, U22): a provider with the interface in its tokenless
+/// set holds no interface token, and a consumer finds it by its instance
+/// token and its descriptor, exactly or by a wildcard: `wait_for_provider`
+/// returns it, `present` and `presence` list it beside a provider holding
+/// the token, and `liveness` reads it present. A service whose descriptor
+/// lists no `detections.v1` is no provider. Stopped, it reads absent, from
+/// a complete read. The same for a client.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r5_a_tokenless_provider_is_present() {
+    let (_r1, ep) = router(None).await;
+    let tracker_s = client(&ep).await;
+    let dets_s = client(&ep).await;
+    let (t_svc, sub, _got) =
+        tracker(&tracker_s, "ground/tracker", &["vehicle-01/*", "ground/*"]).await;
+    let exact = tool_consumer(&tracker_s, &["vehicle-01/det"]);
+    let waiter = exact.clone();
+    let waiting = tokio::spawn(async move { waiter.wait_for_provider(SETTLE).await.unwrap() });
+
+    let (det, _w) = tokenless_detector(&dets_s, "vehicle-01/det").await;
+    let (_tok, _tw) = detector(&dets_s, "vehicle-01/tok").await;
+    assert_eq!(
+        waiting.await.unwrap(),
+        Some(addr("vehicle-01/det")),
+        "the wait finds the tokenless provider"
+    );
+    assert!(
+        presence::liveliness_keys(&tracker_s, "zk2/vehicle-01/det/@zk/alive/**", T)
+            .await
+            .unwrap()
+            .is_empty(),
+        "it holds no interface token"
+    );
+
+    // The wildcard binding: both detectors, and not the tracker, whose
+    // descriptor `ground/*` reads lists no `detections.v1`.
+    let wide = t_svc
+        .consumer("sources", Arc::new(contract("detections.v1")))
+        .unwrap();
+    let both = [addr("vehicle-01/det"), addr("vehicle-01/tok")];
+    eventually("both detectors present", || async {
+        wide.present(T).await.unwrap() == both
+    })
+    .await;
+    let read = wide.presence(T).await.unwrap();
+    assert_eq!(read.providers, both);
+    assert!(read.complete && read.undescribed.is_empty(), "{read:?}");
+    assert_eq!(exact.present(T).await.unwrap(), [addr("vehicle-01/det")]);
+    let window = Duration::from_secs(5);
+    for c in [&exact, &wide] {
+        assert_eq!(
+            c.liveness(&sub, &addr("vehicle-01/det"), window, T)
+                .await
+                .unwrap(),
+            Liveness::Present
+        );
+    }
+    let calls = zenkey::Client::new(
+        &tracker_s,
+        Arc::new(contract("detections.v1")),
+        &["vehicle-01/*"],
+    )
+    .unwrap();
+    let called = calls.presence(T).await.unwrap();
+    assert_eq!(called.providers, both, "{called:?}");
+    assert!(called.complete, "{called:?}");
+
+    // Stopped: absent, from a complete read.
+    det.close().await.unwrap();
+    eventually("the stopped provider reads absent", || async {
+        exact
+            .liveness(&sub, &addr("vehicle-01/det"), window, T)
+            .await
+            .unwrap()
+            == Liveness::Absent
+    })
+    .await;
+    let read = exact.presence(T).await.unwrap();
+    assert!(read.complete && read.providers.is_empty(), "{read:?}");
+    assert_eq!(wide.present(T).await.unwrap(), [addr("vehicle-01/tok")]);
+}
+
+/// #1015 (core §8.1; observer §3.5, §3.6): a consumer's presence read cut
+/// off while it runs is answered at the cut, possibly incomplete, and reads
+/// its provider neither present nor absent: unobservable. A read through
+/// the session cut off is not made, and a presence wait goes on through
+/// it; healed, the provider reads present again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r7_a_read_cut_off_reads_neither_present_nor_absent() {
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let link = common::link_to(&ep).await;
+    let tool = common::retrying_client(link.endpoint()).await;
+    let (_det, _w) = tokenless_detector(&owner, "vehicle-01/det").await;
+    let c = tool_consumer(&tool, &["vehicle-01/det"]);
+    let sub = c.subscribe("stream/objects", |_| {}).await.unwrap();
+    let det = addr("vehicle-01/det");
+    let window = Duration::from_secs(5);
+    eventually("the tool reads the provider present", || async {
+        c.liveness(&sub, &det, window, T)
+            .await
+            .is_ok_and(|l| l == Liveness::Present)
+    })
+    .await;
+
+    // A read in flight when the link is cut. Its timeout is long, so an
+    // answer at the cut cannot be the timeout's.
+    let long = Duration::from_secs(10);
+    link.stall();
+    assert!(!presence::cut_off(&tool).await, "stalled, the link is held");
+    let cut = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        link.cut();
+        Instant::now()
+    };
+    let (judged, cut_at) = tokio::join!(c.liveness(&sub, &det, window, long), cut);
+    assert!(
+        cut_at.elapsed() < long / 2,
+        "answered at the cut, not at its timeout"
+    );
+    assert_eq!(
+        judged.expect("made: the check before it passed"),
+        Liveness::Unobservable,
+        "neither present nor absent"
+    );
+
+    // Cut off: a read is not made, and a wait goes on through it.
+    eventually("the tool holds no transport", || async {
+        presence::cut_off(&tool).await
+    })
+    .await;
+    let refused = c
+        .liveness(&sub, &det, window, T)
+        .await
+        .expect_err("not made");
+    assert!(matches!(refused, zenkey::Error::CutOff { .. }), "{refused}");
+    assert_eq!(
+        c.wait_for_provider(Duration::from_millis(500))
+            .await
+            .unwrap(),
+        None
+    );
+
+    link.heal();
+    assert_eq!(
+        c.wait_for_provider(SETTLE).await.unwrap(),
+        Some(det.clone())
+    );
+    eventually("present again", || async {
+        c.liveness(&sub, &det, window, T)
+            .await
+            .is_ok_and(|l| l == Liveness::Present)
+    })
+    .await;
+}
+
+/// #1015 (observer §3.6): a provider that stops reads absent only from a
+/// complete read. Stopped while the consumer's link is stalled, its reads
+/// end at their timeout, possibly incomplete, and it reads unobservable;
+/// once the link flows, a complete read holding nothing of it reads it
+/// absent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r7_a_stopped_provider_reads_absent_only_from_a_complete_read() {
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let link = common::link_to(&ep).await;
+    let tool = common::retrying_client(link.endpoint()).await;
+    let (det_svc, _w) = tokenless_detector(&owner, "vehicle-01/det").await;
+    let c = tool_consumer(&tool, &["vehicle-01/*"]);
+    let sub = c.subscribe("stream/objects", |_| {}).await.unwrap();
+    let det = addr("vehicle-01/det");
+    let window = Duration::from_secs(5);
+    eventually("the tool reads the provider present", || async {
+        c.liveness(&sub, &det, window, T)
+            .await
+            .is_ok_and(|l| l == Liveness::Present)
+    })
+    .await;
+
+    link.stall();
+    det_svc.close().await.unwrap();
+    let read = c.presence(T).await.unwrap();
+    assert!(
+        !read.complete
+            && read.providers.is_empty()
+            && read.errors.iter().any(|e| e.ends_with(": Timeout")),
+        "ended at its timeout: {read:?}"
+    );
+    assert_eq!(
+        c.liveness(&sub, &det, window, T).await.unwrap(),
+        Liveness::Unobservable,
+        "never absent from a read possibly incomplete"
+    );
+
+    link.heal();
+    eventually("absent, from a complete read", || async {
+        c.liveness(&sub, &det, window, T)
+            .await
+            .is_ok_and(|l| l == Liveness::Absent)
+    })
+    .await;
+    let read = c.presence(T).await.unwrap();
+    assert!(read.complete && read.providers.is_empty(), "{read:?}");
 }

@@ -88,12 +88,12 @@
 //! it asks which session a reader made its reads on
 //! (`spec/scenarios/presence.md` §9, 0.38).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use zenkey_model::descriptor::{self, Descriptor};
-use zenkey_model::grammar::{Addr, InstanceId, ZkKey, instance_key, parse};
+use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey, instance_key, parse};
 use zenoh::query::{ConsolidationMode, Reply};
 
 use crate::error::{Error, Result, zenoh};
@@ -952,6 +952,147 @@ impl Found {
             Self::Nothing => Err(Error::Zenoh("no descriptor reply".to_owned())),
         }
     }
+}
+
+/// How many descriptor GETs [`serving`] keeps in flight at once.
+const DESCRIBE_CONCURRENCY: usize = 64;
+
+/// Who among the services `providers` select serves `iface` now, as core
+/// §8.1 finds a provider (#1015):
+/// - by its interface token, `zk2/<sys>/<svc>/@zk/alive/<iface>/**`;
+/// - or, for an interface in its tokenless set (U22), by an instance token
+///   whose descriptor lists the interface `"token": false` (§3.3). The
+///   descriptor's mark is the owner's tokenless set as its deployment
+///   configured it, so the reader consults no set of its own.
+///
+/// An exact address holding the token needs no more reads. Any other
+/// selection's instance tokens are read too, and the descriptor of each
+/// instance of an address holding no token is asked, at most
+/// [`DESCRIBE_CONCURRENCY`] at once.
+///
+/// It returns what each read established (observer §3.6). A liveliness
+/// read possibly incomplete ([`PresenceRead::complete`]), or a descriptor
+/// not read ([`crate::client::Present::undescribed`]), leaves the result
+/// not complete: a provider missing from it may be there. A read through
+/// a session cut off is not made: the first is the error
+/// [`Error::CutOff`], and a later one ends the reading, not complete, the
+/// tokens already seen kept.
+pub(crate) async fn serving(
+    session: &zenoh::Session,
+    providers: &[crate::consumer::Provider],
+    iface: &IfaceId,
+    timeout: Duration,
+) -> Result<crate::client::Present> {
+    let mut made = false;
+    let mut complete = true;
+    let mut errors = Vec::new();
+    let mut tokened: BTreeSet<Addr> = BTreeSet::new();
+    let mut instances: BTreeSet<(Addr, InstanceId)> = BTreeSet::new();
+    for p in providers {
+        let (sys, svc) = p.chunks();
+        let alive = format!("zk2/{sys}/{svc}/@zk/alive/{iface}/**");
+        let Some(read) = made_read(session, &alive, timeout, &mut made).await? else {
+            complete = false;
+            break;
+        };
+        complete &= read.complete;
+        errors.extend(read.errors);
+        let mut held = false;
+        for key in &read.keys {
+            if let Ok(ZkKey::Alive { addr, .. }) = parse(key) {
+                tokened.insert(addr);
+                held = true;
+            }
+        }
+        if held && p.is_exact() {
+            continue;
+        }
+        let instance = format!("zk2/{sys}/{svc}/@zk/instance/*");
+        let Some(read) = made_read(session, &instance, timeout, &mut made).await? else {
+            complete = false;
+            break;
+        };
+        complete &= read.complete;
+        errors.extend(read.errors);
+        for key in &read.keys {
+            if let Ok(ZkKey::Instance { addr, instance }) = parse(key) {
+                instances.insert((addr, instance));
+            }
+        }
+    }
+    let mut tokenless = BTreeSet::new();
+    let mut undescribed = BTreeSet::new();
+    let wanted: Vec<_> = instances
+        .into_iter()
+        .filter(|(addr, _)| !tokened.contains(addr))
+        .collect();
+    let mut pending = wanted.into_iter();
+    let mut tasks = tokio::task::JoinSet::new();
+    loop {
+        while tasks.len() < DESCRIBE_CONCURRENCY {
+            let Some((addr, instance)) = pending.next() else {
+                break;
+            };
+            let session = session.clone();
+            tasks.spawn(async move {
+                let found = descriptor(&session, &addr, &instance, timeout).await;
+                (addr, found)
+            });
+        }
+        let Some(joined) = tasks.join_next().await else {
+            break;
+        };
+        match joined {
+            Ok((addr, Ok(Found::Descriptor(d, _)))) => {
+                if lists_tokenless(&d, iface) {
+                    tokenless.insert(addr);
+                }
+            }
+            Ok((addr, _)) => {
+                undescribed.insert(addr);
+            }
+            Err(e) => {
+                complete = false;
+                errors.push(format!("a descriptor GET's task failed: {e}"));
+            }
+        }
+    }
+    // An address that another of its instances shows serving is not unknown.
+    undescribed.retain(|a| !tokenless.contains(a));
+    complete &= undescribed.is_empty();
+    tokened.extend(tokenless);
+    Ok(crate::client::Present {
+        providers: tokened.into_iter().collect(),
+        complete,
+        errors,
+        undescribed: undescribed.into_iter().collect(),
+    })
+}
+
+/// [`liveliness_read`] for [`serving`]: `None` for a read not made because
+/// the session was cut off after an earlier read was made.
+async fn made_read(
+    session: &zenoh::Session,
+    selector: &str,
+    timeout: Duration,
+    made: &mut bool,
+) -> Result<Option<PresenceRead>> {
+    match liveliness_read(session, selector, timeout).await {
+        Ok(read) => {
+            *made = true;
+            Ok(Some(read))
+        }
+        Err(Error::CutOff { .. }) if *made => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether `d` lists `iface` as served with no interface token (§3.3,
+/// §8.1). A standby is never tokenless (D012).
+fn lists_tokenless(d: &Descriptor, iface: &IfaceId) -> bool {
+    d.interfaces
+        .iter()
+        .any(|e| !e.token && !e.standby && e.iface.parse::<IfaceId>().is_ok_and(|i| i == *iface))
 }
 
 /// An edge of the data-flow graph (R3): a consumer's role, bound to a

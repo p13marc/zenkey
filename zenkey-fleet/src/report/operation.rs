@@ -184,15 +184,16 @@ pub struct ReplierView {
 /// Who a fan-out selected and did not hear from (§5.1, "Attribution").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SelectionPresence {
-    /// The liveliness selector read, base-relative.
+    /// The interface-token selector read, base-relative. A provider with
+    /// the interface in its tokenless set holds no token there, and is read
+    /// by its instance token and descriptor beside it (§8.1, #1015).
     pub selector: String,
-    /// Whether the read completed (§8.1). Possibly incomplete: a holder it
-    /// missed is not listed below.
+    /// Whether the reads completed (§8.1). Possibly incomplete: a provider
+    /// they missed is not listed below.
     pub complete: bool,
-    /// Services holding the interface's token that sent no value: each
-    /// refused or was silent, which the caller cannot tell apart. A
-    /// provider with the interface in its tokenless set holds no token and
-    /// is not listed (§8.1).
+    /// Services serving the interface that sent no value, by its token or,
+    /// tokenless, by instance token and descriptor: each refused or was
+    /// silent, which the caller cannot tell apart.
     pub unheard: Vec<String>,
     /// Why the read could not be made, when it could not.
     #[serde(default, skip_serializing_if = "Option::is_none")]

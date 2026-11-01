@@ -9,7 +9,12 @@
 //!   with no system of its own, is refused one.
 //! - **R2:** a template parameter may be bound, to `self.system`,
 //!   `self.service` or a value. Unbound parameters select every member.
-//! - **R5:** a consumer MAY wait on presence for its providers.
+//! - **R5:** a consumer MAY wait on presence for its providers. A provider
+//!   is present by its interface token, or, for an interface in its
+//!   tokenless set, by an instance token whose descriptor marks the
+//!   interface `"token": false` (§8.1, U22); it is absent only by a
+//!   complete read (observer §3.6), and a read possibly incomplete leaves
+//!   it unobservable (#1015).
 //! - **R6:** a sample whose key expression is not concrete is discarded and
 //!   counted: zenoh delivers a put on a wildcard key with the publisher's key.
 //! - **R7:** where presence cannot be observed (a constrained face),
@@ -117,6 +122,19 @@ impl Provider {
             self.service.as_deref().unwrap_or("*"),
         )
     }
+
+    /// Whether it names one address, neither position `*`.
+    pub(crate) fn is_exact(&self) -> bool {
+        self.system.is_some() && self.service.is_some()
+    }
+
+    /// The binding that names `addr` alone.
+    pub(crate) fn exact(addr: &Addr) -> Self {
+        Self {
+            system: Some(addr.system.to_string()),
+            service: Some(addr.service.to_string()),
+        }
+    }
 }
 
 /// Whether presence can be observed for a role's providers (R7).
@@ -132,14 +150,23 @@ pub enum Presence {
 /// A provider's liveness as a consumer can judge it (R7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Liveness {
-    /// Presence is observable, and the provider holds its interface token.
+    /// Presence is observable, and the provider serves the interface: it
+    /// holds the interface's token, or, for an interface in its tokenless
+    /// set, an instance token whose descriptor lists the interface
+    /// `"token": false` (§8.1, #1015).
     Present,
-    /// Presence is observable, and the provider holds none.
+    /// Presence is observable, and a complete read shows the provider
+    /// serving none of it: absence, as only a complete read establishes it
+    /// (§8.1, observer §3.6).
     Absent,
     /// Presence is unavailable, and data arrived within the window.
     Fresh,
-    /// Presence is unavailable, and nothing arrived within the window. Not
-    /// *down*: nothing can tell.
+    /// Nothing can tell, so not *down*: presence is unavailable and nothing
+    /// arrived within the window (R7), or the presence read was possibly
+    /// incomplete (§8.1: it ended at its timeout or with another error
+    /// reply, was cut off while it ran or ran to the session's interests
+    /// timeout, or a descriptor it needed did not answer) and did not show
+    /// the provider (observer §3.6, "an address unobservable, never down").
     Unobservable,
 }
 
@@ -850,32 +877,39 @@ impl Consumer {
             .map_err(|e| Error::Contract(format!("{}/{}: {e}", r.token, r.template)))
     }
 
-    /// The bound providers holding this interface's token now (§8.1).
+    /// The bound providers serving this interface now (§8.1): each holding
+    /// its token, or, for an interface in its tokenless set (U22), an
+    /// instance token whose descriptor lists it `"token": false` (#1015).
+    /// Sorted. Whether the reads were complete is
+    /// [`Consumer::presence`]'s to say.
     pub async fn present(&self, timeout: Duration) -> Result<Vec<Addr>> {
-        let mut out = Vec::new();
-        for p in &self.providers {
-            let (sys, svc) = p.chunks();
-            let sel = format!("zk2/{sys}/{svc}/@zk/alive/{}/**", self.contract.iface);
-            for t in crate::presence::tokens(&self.session, &sel, timeout).await? {
-                if let ZkKey::Alive { addr, .. } = t
-                    && !out.contains(&addr)
-                {
-                    out.push(addr);
-                }
-            }
-        }
-        Ok(out)
+        Ok(self.presence(timeout).await?.providers)
     }
 
-    /// Waits until a bound provider holds this interface's token, or
-    /// `timeout` passes (R5). Returns the first one seen.
+    /// [`Consumer::present`], with whether the reads were complete (§8.1):
+    /// a provider missing from a possibly incomplete read is not absent
+    /// (observer §3.6).
+    pub async fn presence(&self, timeout: Duration) -> Result<crate::Present> {
+        crate::presence::serving(
+            &self.session,
+            &self.providers,
+            &self.contract.iface,
+            timeout,
+        )
+        .await
+    }
+
+    /// Waits until a bound provider serves this interface, or `timeout`
+    /// passes (R5). Returns the first one a read shows, in address order.
     ///
-    /// It reads presence again and again ([`Consumer::present`]), backing
+    /// It reads presence again and again ([`Consumer::presence`]), backing
     /// off from 20 ms to 250 ms, and declares no liveliness subscriber: a
     /// session that reads presence holds none (core §8.1, 0.37; #830),
     /// and this consumer's session goes on reading it ([`Consumer::present`],
-    /// [`Consumer::liveness`]). A read through a session cut off from every
-    /// other zenoh node is not made, and the wait goes on.
+    /// [`Consumer::liveness`]). A tokenless provider is found by its
+    /// instance token and descriptor (#1015). A read possibly incomplete
+    /// that shows no provider, and a read through a session cut off from
+    /// every other zenoh node, which is not made, leave the wait going on.
     pub async fn wait_for_provider(&self, timeout: Duration) -> Result<Option<Addr>> {
         let deadline = tokio::time::Instant::now() + timeout;
         let mut pause = Duration::from_millis(20);
@@ -884,14 +918,15 @@ impl Consumer {
             if left.is_zero() {
                 return Ok(None);
             }
-            match self.present(left.min(Duration::from_secs(1))).await {
-                Ok(found) => {
-                    if let Some(first) = found.into_iter().next() {
+            let read = self.presence(left.min(Duration::from_secs(1)));
+            match tokio::time::timeout(left, read).await {
+                Ok(Ok(found)) => {
+                    if let Some(first) = found.providers.into_iter().next() {
                         return Ok(Some(first));
                     }
                 }
-                Err(Error::CutOff { .. }) => {}
-                Err(e) => return Err(e),
+                Ok(Err(Error::CutOff { .. })) | Err(_) => {}
+                Ok(Err(e)) => return Err(e),
             }
             let left = deadline.saturating_duration_since(tokio::time::Instant::now());
             tokio::time::sleep(pause.min(left)).await;
@@ -918,9 +953,17 @@ impl Consumer {
         ))
     }
 
-    /// A provider's liveness (R7): from its token when presence is
+    /// A provider's liveness (R7): from its presence when presence is
     /// observable, from the freshness of `sub`'s deliveries when not.
     /// `window` is the horizon of what crosses (`freshness.v1` §2.9).
+    ///
+    /// Presence is read at `provider`'s own address, as
+    /// [`Consumer::presence`] reads a binding: its interface token, else,
+    /// tokenless, its instance tokens and descriptors (#1015). It is
+    /// [`Liveness::Absent`] only when that read is complete (§8.1, observer
+    /// §3.6); a possibly incomplete read that does not show it is
+    /// [`Liveness::Unobservable`]. A read through a session cut off is not
+    /// made: [`Error::CutOff`].
     pub async fn liveness(
         &self,
         sub: &Subscription,
@@ -930,10 +973,19 @@ impl Consumer {
     ) -> Result<Liveness> {
         Ok(match self.presence {
             Presence::Observable => {
-                if self.present(timeout).await?.contains(provider) {
+                let read = crate::presence::serving(
+                    &self.session,
+                    &[Provider::exact(provider)],
+                    &self.contract.iface,
+                    timeout,
+                )
+                .await?;
+                if read.providers.contains(provider) {
                     Liveness::Present
-                } else {
+                } else if read.complete {
                     Liveness::Absent
+                } else {
+                    Liveness::Unobservable
                 }
             }
             Presence::Unavailable => match sub.last_seen(provider) {
