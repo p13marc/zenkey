@@ -774,6 +774,39 @@ def _link_lints(path: Path) -> list[Result]:
     return out
 
 
+def _link_v2(path: Path) -> list[Result]:
+    """``conformance/v2/`` (link.v2 text 0.1, #988 L1 and L2), every file, an
+    unknown one failing, through :mod:`zk2py.link_v2`. ``lints.json``: a
+    policy -> every finding. ``plan.json``: a policy and a deployment -> the
+    binding, the catalog, the transport and each face's plan with its reply
+    timeout, or the refusal; ``narrow``'s principals -> the link protocols a
+    subject bound to each is selected by. ``transport.json``: a policy, a
+    router's and a far end's configuration, and a catalog -> what a generator
+    emits, and every finding."""
+    from . import link_v2
+
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        data = _load_json(f)
+        if f.name == "lints.json":
+            for c in data["cases"]:
+                out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"]), c["expect"]))
+        elif f.name == "plan.json":
+            for c in data["cases"]:
+                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c))
+                if "narrow" in c:
+                    pol, _ = link_v2.parse_policy(c["policy"])
+                    got["narrowed"] = None if pol is None else {n: link_v2.narrowed(pol, n) for n in c["narrow"]}
+                out.append(_check(f"v2 plan: {c['note']}", got, c["expect"]))
+        elif f.name == "transport.json":
+            for c in data["cases"]:
+                got = link_v2.check_transport(c["policy"], c.get("router") or {}, c.get("peer"), c.get("catalog"))
+                out.append(_check(f"v2 transport: {c['note']}", got, c["expect"]))
+        else:
+            out.append((f"v2/{f.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
 def _alarms_keys(path: Path) -> list[Result]:
     """alarms.v1 §2.2, §2.3, §2.12: `derive`, `host_scoped`, `ref` and
     `parse`, each by its `op`. A `derive` case also checks that framed input
@@ -1363,7 +1396,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "config": {"validation.json": _config_validation, "window.json": _config_window,
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
                "redaction.json": _config_redaction},
-    "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints},
+    "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints, "v2": _link_v2},
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,

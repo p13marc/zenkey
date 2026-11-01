@@ -82,6 +82,8 @@ PROFILES = {
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
     "link.v1": ("tool (the generator and the checks)", ""),
+    "link.v2": ("tool (the linter, the plan, the transport block and its checks)",
+                "its scenarios' §1, a router over a relay counting keep-alives, is not run"),
     "alarms.v1": ("owner, tool (the reader and §5)", ""),
     "telemetry.v1": ("owner, tool (§5's reader)", ""),
     "desired.v1": ("owner (author), consumer (target), tool (§2.17)",
