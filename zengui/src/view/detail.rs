@@ -27,7 +27,7 @@
 use iced::widget::{Column, row};
 use iced::{Element, Length};
 
-use zenkey_fleet::report::{Provenance, QosAxes, Stamp, StateValue};
+use zenkey_fleet::report::{InbandStamp, Provenance, QosAxes, Stamp, StateValue};
 
 use crate::keyfacts::{KeyGroup, Resolution, Rung, Unresolved};
 use crate::message::{Message, PaneMsg, SlotId};
@@ -963,14 +963,32 @@ fn human_span(seconds: u64) -> String {
     format!("{seconds}s")
 }
 
-/// A stamp's chip: whose clock issued it (O7), in words.
-fn stamp_chip<'a>(stamp: Option<&Stamp>, provenance: Option<Provenance>) -> Element<'a, Message> {
-    kit::data_chip(match (stamp, provenance) {
-        (None, _) => "unstamped",
-        (Some(_), Some(Provenance::Owner)) => "stamped by the owner's clock (S1)",
-        (Some(_), Some(Provenance::Other)) => "stamped by another clock (O7)",
-        (Some(_), _) => "stamp unattributable (O7)",
-    })
+/// A value's stamps as chips: its in-band stamp, the owner's run and seq,
+/// which order and carry no time (core §4.3, observer §8.3), and a Zenoh
+/// timestamp's, whose clock issued it (O7), only where one is carried. A
+/// value with neither is `unstamped`. Since core 0.73 an owner's value off
+/// §4.3's table carries its in-band stamp alone. Each chip is its own, so a
+/// row that holds them wraps between them in a narrow pane.
+fn stamp_chips<'a>(
+    inband: Option<&InbandStamp>,
+    stamp: Option<&Stamp>,
+    provenance: Option<Provenance>,
+) -> Vec<Element<'a, Message>> {
+    let mut chips = Vec::new();
+    if let Some(i) = inband {
+        chips.push(kit::data_chip(format!("{}·{} (in band)", i.run, i.seq)));
+    }
+    let zenoh = match (stamp, provenance) {
+        (None, _) if inband.is_some() => None,
+        (None, _) => Some("unstamped"),
+        (Some(_), Some(Provenance::Owner)) => Some("stamped by the owner's clock (S1)"),
+        (Some(_), Some(Provenance::Other)) => Some("stamped by another clock (O7)"),
+        (Some(_), _) => Some("stamp unattributable (O7)"),
+    };
+    if let Some(words) = zenoh {
+        chips.push(kit::data_chip(words));
+    }
+    chips
 }
 
 /// The stamp itself, beside its chip: the time and the clock's id.
@@ -1003,8 +1021,12 @@ fn owner_value<'a>(answer: &'a StateAnswer, data: &DetailData<'a>) -> Element<'a
     }
     chips = chips
         .push(kit::data_chip(format!("via {}", ReadKind::Owner.word())))
-        .push(stamp_chip(row.timestamp.as_ref(), answer.provenance));
-    col = col.push(chips);
+        .extend(stamp_chips(
+            row.inband.as_ref(),
+            row.timestamp.as_ref(),
+            answer.provenance,
+        ));
+    col = col.push(chips.wrap());
     if let Some(line) = stamp_line(row.timestamp.as_ref()) {
         col = col.push(line);
     }
@@ -1139,10 +1161,15 @@ fn reply_chips<'a>(reply: &Reply, source: String, sp: Spacing) -> Element<'a, Me
         } else {
             reply.encoding.clone()
         }),
-        stamp_chip(reply.stamp.as_ref(), reply.provenance),
     ]
+    .extend(stamp_chips(
+        reply.inband.as_ref(),
+        reply.stamp.as_ref(),
+        reply.provenance,
+    ))
     .spacing(sp.xs)
     .align_y(iced::Alignment::Center)
+    .wrap()
     .into()
 }
 
@@ -1251,16 +1278,19 @@ fn last_known_section<'a>(data: &DetailData<'a>) -> Element<'a, Message> {
                     .into();
             };
             col = col.push(
-                row![
-                    kit::data_chip(match row.confirmed {
-                        Some(true) => "confirmed by alignment (§4.4)",
-                        Some(false) => "not confirmed by alignment (§4.4)",
-                        None => "alignment not stated",
-                    }),
-                    stamp_chip(row.timestamp.as_ref(), answer.provenance),
-                ]
+                row![kit::data_chip(match row.confirmed {
+                    Some(true) => "confirmed by alignment (§4.4)",
+                    Some(false) => "not confirmed by alignment (§4.4)",
+                    None => "alignment not stated",
+                }),]
+                .extend(stamp_chips(
+                    row.inband.as_ref(),
+                    row.timestamp.as_ref(),
+                    answer.provenance,
+                ))
                 .spacing(sp.xs)
-                .align_y(iced::Alignment::Center),
+                .align_y(iced::Alignment::Center)
+                .wrap(),
             );
             if let Some(line) = stamp_line(row.timestamp.as_ref()) {
                 col = col.push(line);

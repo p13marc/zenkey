@@ -40,6 +40,7 @@ fn raw(key: &str, body: &[u8], encoding: &str) -> ValueRead {
             encoding: encoding.to_string(),
             attachment: None,
             delete: false,
+            inband: None,
             stamp: None,
             provenance: None,
         }],
@@ -147,6 +148,30 @@ fn the_detail_pane_tags_decode_provenance() {
     );
 }
 
+/// Core 0.73 (§4.3, §8.2): an owner's state off §4.3's table carries its
+/// in-band stamp alone. The Inspector shows its run and seq, and no Zenoh
+/// stamp's chip or line, since none is carried: "unstamped" would be wrong.
+#[test]
+fn a_value_off_the_table_shows_its_in_band_stamp_alone() {
+    let world = common::World::new();
+    let key = "zk2/host-a/tc/tc.netif.v1/state/namespaces";
+    let identity = leak(world.resolve(key));
+    let answer = world.state_read(key, Some(br#"{"namespaces":["default"]}"#), None);
+    let decoded = answer.decoded.clone().expect("a value row is checked");
+    let fetched = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(
+        ValueRead::Owner(answer),
+    )));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(identity),
+        fetched: Fetched::Landed(fetched),
+        decoded: Some(leak(decoded).as_ref()),
+        ..data(key)
+    }));
+    assert!(ui.find("0003·12 (in band)").is_ok());
+    assert!(ui.find("unstamped").is_err(), "it is stamped, in band");
+    assert!(ui.find("stamp unattributable (O7)").is_err());
+}
+
 /// #614 (FL8a): the value names the zk2 read that produced it — S4's owner
 /// GET, its silence, an archive's last-known answer beside it and never as
 /// it, a raw GET — and none of them is ever "no value".
@@ -176,6 +201,10 @@ fn the_value_names_the_zk2_read_that_produced_it() {
     }));
     assert!(ui.find("via owner GET (S4)").is_ok());
     assert!(ui.find("contract-decoded <json:NetworkInterface>").is_ok());
+    assert!(
+        ui.find("0003·12 (in band)").is_ok(),
+        "the owner's run and seq, never a time (core §4.3, observer §8.3)"
+    );
     assert!(
         ui.find("stamp unattributable (O7)").is_ok(),
         "no descriptor of this world states meta.zid: unattributable, never foreign"
