@@ -239,6 +239,18 @@ pub const ALL: &[Scene] = &[
         // newest sample rode other axes than its contract declares.
         landmark: "congestion: declared block, observed drop",
     },
+    // Core 0.73's wire in the History (#976 A4): `host-a/tc`'s eth0 in its
+    // owner's envelope, its value put again unchanged each tick. Every row
+    // shows its run and seq beside its arrival, and the diff compares
+    // records: a re-put, said so, never a change.
+    Scene {
+        name: "inspector-history-inband",
+        // Tall, so the Inspector's History sits on screen below Detail and
+        // Series: a scene cannot scroll a pane.
+        size: (1440.0, 2000.0),
+        build: history_inband,
+        landmark: "re-stamped in band (0003·46 → 0003·47), same value: a re-put (core §4.2)",
+    },
     // timing.v1 in the Inspector (#908, MC). `robot1/nav`'s position:
     // period 100 ms and lifespan 500 ms beside TYPE, the contract's; no
     // deadline, so not asked; published every 250 ms, its period not kept
@@ -1267,6 +1279,32 @@ fn timed_on(prefs: Prefs, mut world: World, key: &str, ticks: u32) -> (Zengui, W
     world.verdicts(&mut app);
     preset(&mut app, LayoutPreset::Explore);
     (app, world)
+}
+
+/// `host-a/tc`'s eth0 in its owner's envelope (#976 A4), its value put
+/// again unchanged at every tick: a re-put each time (core §4.2).
+fn history_inband(theme: ThemeChoice) -> Zengui {
+    let mut app = window(prefs(theme));
+    let mut world = World::new().sealing(ETH0);
+    world.connect(&mut app);
+    world.tick(&mut app);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(ETH0.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(ETH0.into()))),
+    );
+    // Seven ticks, seqs 41 to 47: a short History, so its diff panel sits
+    // on screen below the rows.
+    let up = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
+    for _ in 0..7 {
+        world.tick_with(&mut app, ETH0, up.to_vec());
+    }
+    world.verdicts(&mut app);
+    preset(&mut app, LayoutPreset::Explore);
+    app
 }
 
 fn timing_period(theme: ThemeChoice) -> Zengui {

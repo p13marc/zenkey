@@ -221,6 +221,87 @@ fn the_history_pane_falls_back_to_bytes_and_admits_it() {
     );
 }
 
+/// Under core 0.73's wire (#976 A4): each row shows its owner's run and seq
+/// beside its clock, and the diff compares records, never envelopes — a
+/// re-put of the same record says it is one, with both stamps, and two
+/// records with no structural form are compared as their own bytes.
+#[test]
+fn the_history_pane_shows_in_band_stamps_and_diffs_records() {
+    use zengui::view::history::{HistoryData, section};
+    use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+
+    let key = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+    let sealed = |seq: u32, record: &[u8]| {
+        Envelope {
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U16(3),
+                seq: Seq::new(seq).unwrap(),
+            },
+            record,
+        }
+        .write()
+    };
+    let recording = |script: &[(u32, &[u8])]| {
+        let mut rec = HistoryRecorder::new(key, 8);
+        for (seq, record) in script {
+            rec.observe(&zenkey_fleet::SampleView {
+                key: key.to_string(),
+                payload: zenoh::bytes::ZBytes::from(sealed(*seq, record)),
+                encoding: "zenoh/bytes".to_string(),
+                kind: zenoh::sample::SampleKind::Put,
+                timestamp: None,
+                stamped_by: None,
+                attachment: None,
+                priority: zenoh::qos::Priority::DEFAULT,
+                congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+                reliability: zenoh::qos::Reliability::DEFAULT,
+                express: false,
+                source: None,
+                received: Instant::now(),
+            });
+        }
+        rec
+    };
+    fn pane<'a>(key: &'a str, rec: &'a HistoryRecorder) -> iced_test::Simulator<'a, Message> {
+        simulator::<Message, _, _>(section(HistoryData {
+            slot: zengui::message::SlotId::FOLLOW,
+            sp: sp(),
+            key: Some(key),
+            recorder: Some(rec),
+            watched: true,
+            scroll: Default::default(),
+            snapshot: None,
+            compare_snapshot: false,
+        }))
+    }
+
+    let rec = recording(&[(4, br#"{"rx":1}"#), (9, br#"{"rx":1}"#)]);
+    let mut ui = pane(key, &rec);
+    assert!(
+        ui.find("0003·9 (in band)").is_ok(),
+        "the newest row's stamp"
+    );
+    assert!(ui.find("0003·4 (in band)").is_ok(), "the one before it");
+    assert!(
+        ui.find("re-stamped in band (0003·4 → 0003·9), same value: a re-put (core §4.2)")
+            .is_ok(),
+        "the same record under a new seq is a re-put, never a change"
+    );
+
+    let rec = recording(&[(10, b"hello world"), (11, b"hello there")]);
+    let mut ui = pane(key, &rec);
+    assert!(
+        ui.find("neither sample has a structural form — compared as bytes, not as fields")
+            .is_ok()
+    );
+    assert!(
+        ui.find("11 B → 11 B · first 6 B and last 0 B in common · differs over 6..11 → 6..11")
+            .is_ok(),
+        "the records' bytes, not the envelopes' (whose seq differs at byte 5)"
+    );
+}
+
 /// The bound is on screen, not implied by a short list (tooling guide O6).
 #[test]
 fn the_history_pane_counts_what_it_evicted() {
@@ -335,6 +416,14 @@ fn the_history_pane_compares_against_a_v2_snapshot_row() {
     );
     assert!(ui.find("stamped by the owner's clock (a1b2, S1)").is_ok());
     assert!(
+        ui.find(
+            "stamped in band 0003·12 — the owner's run and seq: its order, never a time (core \
+             §4.3)"
+        )
+        .is_err(),
+        "a row with no envelope says nothing of one"
+    );
+    assert!(
         ui.find("~ is_up  true → false").is_ok(),
         "the snapshot's value against the newest sample, field by field"
     );
@@ -363,4 +452,32 @@ fn the_history_pane_compares_against_a_v2_snapshot_row() {
         )
         .is_ok()
     );
+
+    // A row the file kept an in-band stamp for (#976 A4): its run and seq,
+    // never a time (observer §8.3), beside whose clock set its timestamp.
+    let stamped = zenkey_fleet::SnapshotRow {
+        inband: Some(zenkey_fleet::report::InbandStamp {
+            run: "0003".into(),
+            seq: 12,
+        }),
+        ..row.clone()
+    };
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
+        sp: sp(),
+        key: Some(key),
+        recorder: Some(&rec),
+        watched: true,
+        scroll: Default::default(),
+        snapshot: Some((&stamped, &header)),
+        compare_snapshot: true,
+    }));
+    assert!(
+        ui.find(
+            "stamped in band 0003·12 — the owner's run and seq: its order, never a time (core \
+             §4.3)"
+        )
+        .is_ok()
+    );
+    assert!(ui.find("stamped by the owner's clock (a1b2, S1)").is_ok());
 }

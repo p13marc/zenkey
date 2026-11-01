@@ -234,8 +234,9 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
 /// same pair renderer as the timeline diff, with the left column captioned
 /// by the snapshot's moment and span — and, since `.zsnap` v2 (#614,
 /// FL8b), what the snapshot established of its row: the key's identity at
-/// collection, the payload against its declared type, whose clock stamped
-/// it (O7), and who held it — evidence, not inference.
+/// collection, the payload against its declared type, its in-band stamp
+/// (#976 A4), whose clock set its Zenoh timestamp (O7), and who held it —
+/// evidence, not inference. The pair compares records, never envelopes.
 fn snapshot_section<'a>(
     rec: &HistoryRecorder,
     row: &zenkey_fleet::SnapshotRow,
@@ -262,6 +263,13 @@ fn snapshot_section<'a>(
         .align_y(iced::Alignment::Center),
     );
     col = col.push(kit::muted(holder_line(&row.holder)));
+    if let Some(i) = &row.inband {
+        col = col.push(kit::muted(format!(
+            "stamped in band {}·{} — the owner's run and seq: its order, never a time (core \
+             §4.3)",
+            i.run, i.seq
+        )));
+    }
     if let Some(stamper) = &row.stamper {
         col = col.push(kit::muted(stamper_line(stamper)));
     }
@@ -343,13 +351,18 @@ fn row_view<'a>(
         )
     };
 
-    let head = row![
+    let mut head = row![
         kit::mono(format!("{marker} t-{age}")),
         kit::muted(stamp(entry, rec)),
-        kind,
     ]
     .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
+    // The owner's run and seq beside the clock, never as one (observer
+    // §8.3): what orders the key's values.
+    if let Some(i) = &entry.inband {
+        head = head.push(kit::muted(inband_chip(i)));
+    }
+    let head = head.push(kind);
 
     // No spacing and no padding on the two-line body: the row is pinned to
     // `sp.row(..)`, which already spends all the air the density allows —
@@ -363,7 +376,9 @@ fn row_view<'a>(
     .into()
 }
 
-/// The row's time, labelled with the clock that produced it.
+/// The row's time, labelled with the clock that produced it. Its in-band
+/// stamp rides beside it ([`inband_chip`]): the owner's run and seq, which
+/// order the key's values and are never a time (observer §8.3).
 fn stamp(entry: &HistoryEntry, rec: &HistoryRecorder) -> String {
     match &entry.timestamp {
         Some(t) => {
@@ -381,6 +396,23 @@ fn stamp(entry: &HistoryEntry, rec: &HistoryRecorder) -> String {
                 .saturating_duration_since(rec.since)
                 .as_secs_f64()
         ),
+    }
+}
+
+/// An in-band stamp as the Inspector's chips spell it (`view::detail`).
+pub fn inband_chip(i: &zenkey_fleet::report::InbandStamp) -> String {
+    format!("{}·{} (in band)", i.run, i.seq)
+}
+
+/// A pair whose value did not move and whose in-band stamp did: a re-put
+/// (core §4.2, "A re-put is a mutation"), said so, with both stamps.
+fn restamped(prev: &HistoryEntry, entry: &HistoryEntry) -> Option<String> {
+    match (&prev.inband, &entry.inband) {
+        (Some(a), Some(b)) if a != b => Some(format!(
+            "re-stamped in band ({}·{} → {}·{}), same value: a re-put (core §4.2)",
+            a.run, a.seq, b.run, b.seq
+        )),
+        _ => None,
     }
 }
 
@@ -444,9 +476,9 @@ fn pair_view<'a>(
             let d = zenkey_fleet::value_diff(old, new, MAX_CHANGES);
             if d.is_empty() {
                 return col
-                    .push(kit::muted(
-                        "no change — every field is identical to the previous sample",
-                    ))
+                    .push(kit::muted(restamped(prev, entry).unwrap_or_else(|| {
+                        "no change — every field is identical to the previous sample".into()
+                    })))
                     .into();
             }
             col.push(changes_view(&d, sp)).into()
@@ -494,10 +526,12 @@ enum Tone {
     Removed,
 }
 
-/// The honest fallback when at least one side is not a document.
+/// The honest fallback when at least one side is not a document: their
+/// records compared as bytes (observer §7.3), never their envelopes, whose
+/// seq moves at every put.
 fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry, sp: Spacing) -> Element<'a, Message> {
-    let old = prev.payload.to_bytes();
-    let new = entry.payload.to_bytes();
+    let old = prev.record();
+    let new = entry.record();
     let d = zenkey_fleet::byte_diff(&old, &new);
     let which = match (prev.value.is_some(), entry.value.is_some()) {
         (false, false) => "neither sample has a structural form",
@@ -510,7 +544,9 @@ fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry, sp: Spacing) -> Ele
         "{which} — compared as bytes, not as fields"
     )));
     if d.is_empty() {
-        col = col.push(kit::muted("no change — the bytes are identical"));
+        col = col.push(kit::muted(
+            restamped(prev, entry).unwrap_or_else(|| "no change — the bytes are identical".into()),
+        ));
         return col.into();
     }
     let (old_range, new_range) = d.ranges();
