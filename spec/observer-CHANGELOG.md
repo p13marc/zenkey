@@ -15,10 +15,10 @@ scenarios; this text carries none: its evidence is the core's
 
 ## 0.16 — 2026-11-01: §7.3 decodes a packed record (#979)
 
-Core 0.75 added the `packed` type kind, and core 0.77 says where a
+Core 0.75 added the `packed` type kind, and core 0.76 says where a
 `time` field's epoch comes from. #979's B2 lights the reference tools'
 decoder. zk2py's round 94 found the gap, F-433. This text is written
-against core 0.77.
+against core 0.76.
 
 **Changed: §7.3.**
 - **The kinds a tool decodes** name `packed` beside `protobuf` and

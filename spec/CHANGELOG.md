@@ -3,12 +3,12 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.77 — 2026-11-01: round 94's answers on packed records (#979)
+## 0.76 — 2026-11-01: round 94's answers on packed records (#979)
 
 #979's B2 builds what 0.75 defined: zenkey-build's packed types, the
 runtime's codec, and a tool's decoder. zk2py's round 94 read §7.6 cold
 and found eleven points, F-423 to F-433, none a blocker. This version
-answers them. 0.76 is lane A's. Where the vectors already decided, the
+answers them. Where the vectors already decided, the
 text now says what they do; where they did not, the text decides and a
 vector or a fixture pins it.
 
