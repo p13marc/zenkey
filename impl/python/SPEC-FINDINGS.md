@@ -23488,3 +23488,212 @@ change the reference, and the text needs nothing.
   reference's tools (F-436). None is a blocker: zk2py takes the vectors'
   reading of F-434 and F-435, and F-436 is the reference's.
 - **Open:** F-434 to F-436. F-365 stays open as #965's.
+
+## At core 0.79 and observer 0.18 (#980 C1, #1011)
+
+Round 95 read changed rules cold: core 0.77 to 0.79 and observer texts
+0.17 and 0.18, then core 0.80 (#1021) on the coordinator's word, which
+answers F-434 and F-435. It read each changelog entry first, then core
+§3.3, §7.6's epoch, §8.5, §8.6, §12, Appendices B and E, observer §5.2 and
+§7.5, `scenarios/constrained.md` §7 and the glossary's new terms
+(Catalog, Deployment epoch). Its evidence: `catalog/`'s three files,
+`catalog.schema.json`, the descriptor fixtures `ok-catalog`,
+`d002-catalog-*` and `d000-catalog-null`, `budget/lossless.json`'s new
+stall bound, and `packed/vectors.json`'s write 47 and read 22.
+
+**The rules changed.** zk2py extracted every keyword sentence of
+`core.md` and `observer.md` at 69af15a6 (core 0.76, observer 0.16) and at
+af59a1ae (core 0.79, observer 0.18), and diffed the two sets. None is
+gone or reworded. Seven are new in `core.md`: §3.3's catalog id, §8.5's
+two SHOULDs, and §8.6's reading, id, succession checker, the deployment's
+MUST NOT and the reader's refusals. One is new in `observer.md`, §7.5's
+SHOULD. 0.77 and observer 0.17 move no rule: they relabel zenoh's
+defaults as 1.10.1's, and `lossless.json`'s new case, the fork's 10 s
+`wait_before_close` beside a 10 s lease giving 7.5 s, passes. 0.80's
+sentences state no keyword, and `RULES.md` holds 201 rules before and
+after it. **No rule changed beyond what the changelogs state.**
+
+### F-434 and F-435
+
+| | Status | How |
+|---|---|---|
+| F-434 | **resolved** | Core 0.80: "A JSON number with no fraction and no exponent, from −2^63 to 2^64 − 1, is read as that integer, exactly. Any other is read as the binary64 a JSON reader holds for it", and "A binary64 of magnitude 2^63 or more given for one of them is out of range". The vectors' reading, as zk2py took it. zk2py now also reads integer text outside that span as a binary64 (`packed.json_number`), so 2^64 written as digits is `range` for a counter by the cut, not by the field. |
+| F-435 | **resolved** | Core 0.80: the vectors' write 46 becomes write 47, which writes its record under E = 0, and read 22 reads it back. The writer's `epoch` token is gone. zk2py's codec, handed no epoch, now writes and reads under E = 0, as its owner, consumer and tool already did. |
+
+F-436 is the reference's, and #1021's e023843f says it fixes `zenctl watch`
+and `zenctl echo`. The black boxes predate it (69af15a6), so it was not
+re-run, and it stays open until a run shows it.
+
+### F-437 · ambiguity · core §8.6 (0.79) "Reading an index": who a reader is
+
+> "**Never a guess.** A reader MUST refuse each of these:"
+>
+> Core §12: "A rule of any of these sections, §1, §7.5, §7.6, §8.6 and §9
+> included, that names a role is that role's."
+>
+> Observer §0: "It is normative too for any other participant where it
+> reads presence, state or the admin space and concludes from what it
+> read". "A **reader** is any of them, reading." The glossary's Reader
+> says the same.
+>
+> `RULES.md`: "Where a consumer reads presence, state or the admin space,
+> `observer.md`'s reader rules bind it (core §12). They are under
+> observer, marked *reader*: §8.6, …"
+
+- **The ambiguity.** §8.6's reader reads an index or a time out of a
+  record, on any data key, a stream's included. That is not presence,
+  state or the admin space, and "reader" is not one of core §0's roles.
+  - Read with §12, the rule names no role, so it is static and binds any
+    implementation that reads an index. `RULES.md` then lists it under
+    the wrong heading.
+  - Read with observer §0 and the index, it is a reader's rule, which binds
+    a consumer only where it reads presence, state or the admin space. A
+    consumer reading a stream's `time` fields through a catalog is then
+    bound by nothing.
+- **Took the first reading's effect:** whatever role reads an index or a
+  time through a catalog meets it, through `catalog.resolve`. The walk keeps the index's
+  row under observer.
+- **Fix:** name the role, "A consumer or a tool that reads an index …".
+  Or widen observer §0's reader to one that reads a record's index or
+  time.
+- **Changes:** which class holds the rule. No verdict.
+
+### F-438 · gap · core §8.5 (0.78) and observer §7.5 (0.18): a template's selector for a rest parameter, and an event without a parameter
+
+> "**A template's selector** is its key with each parameter a wildcard,
+> and an event's ULID chunk too. Its literal prefix is what is declared."
+>
+> Core §2.2: "**`{name...}`** is a **rest** parameter: one or more chunks,
+> each slugged."
+>
+> Observer §7.5: "Each concrete resource is its exact key, and each
+> template its key with every parameter a wildcard. An event's ULID chunk
+> is a wildcard too."
+
+- **A rest parameter.** It is one chunk or more. `*` matches exactly one,
+  so it misses a member of two chunks. `**` matches none too, so it is
+  wider than what is read. Neither is the selector, and the text names no
+  other.
+- **An event without a parameter** is a concrete resource with no exact
+  key: each occurrence is `…/<ulid>` (core §2.6). Core's sentence gives the
+  ULID chunk's wildcard to "a template's selector" only. Observer's covers
+  any event.
+- **Took:** a rest parameter is `*/**`, one chunk or more, and an event's
+  ULID chunk is `*` whether or not its template has a parameter
+  (`face.template_selector`, `face.scope`). Measured with zk2py's owner
+  (`constrained_live` step 8): `…/stream/path/*/**` declares
+  `…/stream/path`, and the member `path/a/b` crosses in 30 B carrying
+  `/a/b`. `…/events/alarm/*` declares `…/events/alarm`, and an occurrence
+  crosses in 55 B carrying its `/<ulid>`, 27 B and a length byte.
+- **Fix:** "each parameter `*`, a rest parameter `*/**`, and an event's
+  ULID chunk `*`, whether or not the event has a template".
+- **Changes:** wording. No verdict.
+
+### F-439 · gap · core §8.5 (0.78) beside R1 and R2: a wildcard binding, and a bound parameter
+
+> "A consumer across a constrained face SHOULD subscribe to each concrete
+> resource it reads by its exact key, and to a template by its literal
+> prefix up to the first parameter."
+>
+> "A consumer across a constrained face SHOULD NOT use a selector wider
+> than what it reads."
+>
+> R1: "exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning
+> every service on `vehicle-01` that implements the interface)". R7:
+> "Across a constrained face, a consumer binds statically". R2:
+> "`{vehicle} = self.system` (or `self.service`) binds the consumer to its
+> own slice of a provider's collection."
+
+- **A wildcard binding.** A consumer bound to `site/*` reads every
+  service of `site`. Without presence, which does not cross (R7), it
+  knows no exact key, and its selector `zk2/site/*/…` declares `zk2/site`
+  alone (Appendix B, fact 2). So every put carries the rest of its key.
+  Neither SHOULD says whether such a binding meets it, and no rule asks a
+  deployment to bind exact addresses across a face. Measured
+  (`constrained_live` step 7): zk2py's consumer bound to `site/*` reads a
+  `level` put in 57 B and an `axis/roll` put in 61 B. Bound to `site/rig`
+  (step 6), it reads them in 25 B and 31 B.
+- **A bound parameter.** A template whose parameter the role binds is
+  read for one value. Its selector with that parameter a wildcard, which
+  the first SHOULD gives, is wider than what the consumer reads, which
+  the second refuses.
+- **Took:** a parameter the role binds is its value's slug, `self.system`
+  and `self.service` resolved (`Owner.role_keys`). A wildcard binding is
+  subscribed as configured, its `*` kept, and the consumer's first verdict
+  is met through exact bindings.
+- **Fix:** "A deployment SHOULD bind exact addresses across a constrained
+  face: a wildcard binding declares only its system's prefix", and "a
+  parameter the role binds (R2) is its value".
+- **Changes:** a SHOULD for the deployment, or wording. No verdict of
+  zk2py's moves.
+
+### F-440 · contradiction · observer §7.3 (text 0.18) beside core §8.6 (0.79): a tool that holds no catalog
+
+> Observer §7.3: "**A packed record's `time` fields** are read under the
+> deployment epoch, which no contract carries yet. A tool takes the one
+> its deployment states, and 0, the Unix epoch, where it states none (core
+> §7.6)."
+>
+> Core §8.6: "A reader reads an index, or a time counted from the epoch,
+> through the catalog the owner names." "A reader MUST refuse each of
+> these: an id, when it holds neither that catalog nor one whose `lineage`
+> holds it (`unknown_catalog`)". `succession.json`: "the epoch alone, of a
+> catalog not held" is `unknown_catalog`.
+>
+> Core 0.79's entry: "**No dictionaries**, and `observer.md` is
+> unchanged."
+
+- **The contradiction.** An owner names catalog X in its descriptor, and
+  a tool on the host bus is given none.
+  - By observer §7.3, its deployment stated it none, so it reads every
+    time under E = 0. Under §8.6's example epoch each time is shown
+    1,767,225,600 s early.
+  - By core §8.6, the tool is a reader, and MUST refuse the time:
+    `unknown_catalog`.
+  - A tool that reads no descriptor cannot learn that the owner named a
+    catalog, so it can follow only observer's sentence.
+- **What zk2py does:** its echo tool reads no descriptor. It takes
+  `--catalog` or `--epoch`, else 0, as observer §7.3 says.
+  `catalog.resolve` refuses as core §8.6 says. A tool of zk2py's that
+  read descriptors would refuse.
+- **Fix:** observer §7.3: "A tool reads a time through the catalog the
+  owner's descriptor names (core §8.6), and refuses one it does not hold.
+  Across a face, it takes the one its deployment states. Where the owner
+  names none, it reads 0."
+- **Changes:** observer's sentence. zk2py's tool would read descriptors,
+  or say a time unobservable when it holds no catalog.
+
+### F-441 · changelog · core 0.80: a refusal its entry states and §7.6 does not
+
+> Core 0.80's entry: "A `time` read whose instant would pass 64-bit
+> milliseconds under its epoch is now refused as `epoch`, where it read
+> as `null`." And: "**No rule.** The sentences changed state no keyword,
+> and `RULES.md` is unchanged."
+>
+> §7.6 "Reading": "An implementation that reads a record of a packed type
+> MUST refuse it, naming the refusal, for the first of these that
+> applies, in this order:" `tag`, `length`, `code`, `extension`,
+> `length`, `pad`.
+
+- **The gap.** The entry gives the reader a seventh refusal, `epoch`. The
+  MUST's list does not hold it, and no read vector has one.
+  - §7.6's E is "a whole number of seconds", with no bound. A catalog
+    bounds it at 2^53 − 1, and then no instant passes 2^63 ms:
+    1000 × (2^53 − 1 + 2^32 − 1) + 999 is below it.
+  - "64-bit" leaves signed or unsigned open.
+- **What zk2py does:** it refuses none, and reads a time as an exact
+  integer.
+- **Fix:** put `epoch` in §7.6's reading list at its place, with its bound
+  and a read vector. Or drop it from the entry, as the reference's own
+  behaviour.
+- **Changes:** a rule, if it is kept, or the entry.
+
+### Counts at core 0.80 and observer 0.18
+
+441 entries.
+- **Resolved: F-434 and F-435** (core 0.80), two.
+- **New: F-437 to F-441,** five: an ambiguity (F-437), two gaps (F-438,
+  F-439), a contradiction (F-440) and a changelog entry (F-441). None is a
+  blocker: zk2py takes a reading of each.
+- **Open:** F-436 (the reference's fix not yet run) and F-437 to F-441.
+  F-365 stays open as #965's.
