@@ -1392,6 +1392,17 @@ async fn s11_a_governed_commanders_standby() {
         );
         acts.push(act);
     }
+    // S has heard each actuator's angle under safety, so no angle it put
+    // while it followed another commander is still in flight when the
+    // window opens: S hears one actuator's puts in their order.
+    for act in &acts {
+        eventually("S hears safety's angle", || async {
+            s.angle(act)
+                .last()
+                .is_some_and(|(_, p)| p.starts_with("safety "))
+        })
+        .await;
+    }
     // 1. The standby puts raw samples on safety's key, its own stamps.
     let raw = s2.session.clone();
     let raw_on = Arc::new(AtomicBool::new(true));
