@@ -13,6 +13,43 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.21 — 2026-11-02: §7.6, frames read (#981)
+
+Core 0.83 adds §7.7, frames: one packed type's records under one envelope
+and one time. It states the reader's field states, `known`, `within`,
+`unknown` and `absent`, for a consumer and a tool. This text says how a
+tool shows them, and is written against core 0.85.
+
+**Added: §7.6, "Frames".**
+- **The records.** A tool shows a frame as its records, each at its seq
+  and time, every field in its state. An `unknown` or `absent` field shows
+  no value.
+- **Scheduled time.** A tool MUST show a scheduled record's time as
+  scheduled, with its `jitter_ms`, never as measured or exact.
+  `[F: frame/apply.json]` `[Sc: frames.md §3]`
+- **Within.** A tool MUST show a `within` field with its `delta`.
+  `[F: frame/apply.json]` `[Sc: frames.md §4]`
+- **Measured time** is the owner's: its wall clock for record 0, its
+  monotonic clock for an offset. An unknown clock is shown as unknown,
+  never as the epoch.
+- **Why a field is unknown,** one frame read alone as a reader's first, a
+  recording replayed through the same reader, and a frame the tool cannot
+  read, shown by its envelope and never sniffed.
+
+**Changed: §7.3.** Its decode order points a frame to §7.6.
+
+**Added: `conformance/frame/apply.json`.** One key's frames, each its
+run, seq and body, read into each record's time and field states. Written
+by an independent reading of core §7.7, checked, never blessed. Appendix
+B lists it against §7.6.
+
+**Deliberately not changed.**
+- **The core.** §7.7 states the reader's rules, and this text reads them.
+  One reading is the fixture's, from §7.7's owner rule: a field omitted
+  with no deadband holds what it held before, absent included.
+- **No MUST for why.** A field's state is the core's MUST. Why it is
+  unknown helps a person, and no reader is wrong without it.
+
 ## 0.20 — 2026-11-01: §7.3, a heartbeat's body (#978)
 
 zk2py's round 96 found two readings of one heartbeat (F-444). `zenctl
