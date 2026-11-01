@@ -39,8 +39,9 @@ reading: the rest is a later revision's, and holds at least one bit.
 does not name (it says only what a writer MUST NOT write): ``unknown`` (a
 member the type does not have), ``missing`` (a field not given), ``value``
 (a value of the wrong JSON type, a name not declared, a decimal that does not
-read), ``range`` (a value with no code) and ``epoch`` (a time field and no
-epoch in hand).
+read) and ``range`` (a value with no code). Since core 0.80 a ``time`` field
+given no epoch is written and read under E = 0, so the writer's ``epoch``
+token is gone (F-435).
 """
 
 from __future__ import annotations
@@ -415,10 +416,9 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
         if not 0 <= v < 1 << 64:
             raise Refused("range", f"{f.name}: a count from 0 to 2^64 − 1")
         return v % (1 << f.width)
-    # time
+    # time: core 0.80 §7.6, no epoch given is E = 0 (F-435).
     _integer_input(f, v, "a time is an integer of Unix milliseconds")
-    if epoch is None:
-        raise Refused("epoch", f"{f.name}: a time field and no deployment epoch")
+    epoch = deployment_epoch(epoch)
     # ⌊(t − 1000E) / 1000⌋ from 0 to 2^32 − 1 is t from 1000E to 1000(E +
     # 2^32) − 1: compared before any arithmetic on t.
     if not 1000 * epoch <= v < 1000 * (epoch + (1 << 32)):
@@ -428,25 +428,36 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
     return (seconds << 10) | (since % 1000) if f.ms else seconds
 
 
-#: core 0.76 §7.6 "A number of magnitude 2^63 or more is outside every
-#: range, however it is written." zk2py cuts there only a number written
-#: with a fraction or an exponent (a Python float), as ``vectors.json``
-#: reads it. An integer of that magnitude is judged by its field's own
-#: range: an ``int``'s bounds, a counter's 0 to 2^64 − 1, a time's 2^32
-#: seconds (F-434).
+#: core 0.80 §7.6 "A binary64 of magnitude 2^63 or more given for one of
+#: them is out of range, not of the wrong type." (F-434, resolved.)
 _BEYOND = 1 << 63
+
+#: core 0.80 §7.6: "A JSON number with no fraction and no exponent, from
+#: −2^63 to 2^64 − 1, is read as that integer, exactly. Any other is read as
+#: the binary64 a JSON reader holds for it".
+_EXACT = (-(1 << 63), (1 << 64) - 1)
+
+
+def json_number(v: Any) -> Any:
+    """A writer's JSON number as core 0.80 §7.6 reads it: integer text from
+    −2^63 to 2^64 − 1 as that integer, any other as its binary64."""
+    if jcs.is_json_integer(v) and not _EXACT[0] <= v <= _EXACT[1]:
+        try:
+            return float(v)
+        except OverflowError:  # past every double: no code at any magnitude
+            return math.copysign(math.inf, v)
+    return v
 
 
 def _integer_input(f: Field, v: Any, why: str) -> None:
-    """An ``int``, ``counter`` or ``time`` value (core 0.76 §7.6 "What a
+    """An ``int``, ``counter`` or ``time`` value (core 0.80 §7.6 "What a
     writer takes"): a JSON number written with no fraction and no exponent,
-    so ``5.0`` is ``value``; one written so whose magnitude is 2^63 or more
-    is ``range``, as ``packed/vectors.json`` reads the text ("one with a
-    fraction or an exponent is `value`, unless its magnitude is 2^63 or
-    more"). Integer text is read by its exact value at any magnitude and
-    left to its field's range, so a 64-bit counter takes 2^64 − 1 and
-    refuses 2^64 ``range`` (the vectors' writes 21 and 24; F-434 asks the
-    text to say so)."""
+    so ``5.0`` is ``value``. Integer text from −2^63 to 2^64 − 1 is read as
+    that integer, exactly, and left to its field's range, so a 64-bit
+    counter takes 2^64 − 1. Any other number is a binary64
+    (:func:`json_number`), and one of magnitude 2^63 or more is ``range``:
+    2^64 written as integer text, and ``1e19``, alike."""
+    v = json_number(v)
     if isinstance(v, float) and abs(v) >= _BEYOND:
         raise Refused("range", f"{f.name}: a number of magnitude 2^63 or more")
     if not jcs.is_json_integer(v):
@@ -479,9 +490,10 @@ def decode(f: Field, code: int, epoch: int | None) -> Any:
     seconds, ms = (code >> 10, code & 0x3FF) if f.ms else (code, 0)
     if ms >= 1000:
         raise Refused("code", f"{f.name}: a millisecond code of {ms}")
-    if epoch is None:
-        raise Refused("epoch", f"{f.name}: a time field and no deployment epoch")
-    return 1000 * (epoch + seconds) + ms
+    # core 0.80 §7.6: no epoch given is E = 0 (F-435). Its reading list
+    # names no refusal for an instant past 64-bit milliseconds, which its
+    # changelog entry gives (F-441): zk2py refuses none.
+    return 1000 * (deployment_epoch(epoch) + seconds) + ms
 
 
 def _decimal_like(v: str) -> bool:
@@ -529,6 +541,9 @@ def writer_decimal(f: Field, v: Any) -> Fraction:
     if isinstance(v, bool):
         raise Refused("value", f"{f.name}: {_show(v)} is not a decimal")
     h, p = _bounds(f)
+    if isinstance(v, int) and abs(v) >= 10 ** h:
+        raise Refused("range", f"{f.name}: an integer of 10^{h} or more has no code")
+    v = json_number(v)  # core 0.80: integer text past the 64-bit span is a binary64
     if isinstance(v, int):
         if abs(v) >= 10 ** h:
             raise Refused("range", f"{f.name}: an integer of 10^{h} or more has no code")
@@ -782,12 +797,11 @@ def seal(rec: Record, value: Any, run: int, seq: int, width: int = 16, epoch: in
     return zk2c.write("mutation", width, run, seq, rec.tag, rec.write(value, epoch))
 
 
-#: Core 0.76 §7.6 "The deployment epoch": "One that states none has E = 0,
-#: the Unix epoch"; observer 0.16 §7.3: a tool "takes the one its deployment
-#: states, and 0, the Unix epoch, where it states none". zk2py's owner and
-#: readers hand the codec this where no epoch is given (F-433); the codec
-#: itself, handed none, still refuses ``epoch`` as ``vectors.json`` asks
-#: (F-435).
+#: Core 0.79 §7.6 "The deployment epoch": "the epoch of the catalog in force
+#: (§8.6). Where none is, E is 0, the Unix epoch"; observer 0.16 §7.3: a tool
+#: "takes the one its deployment states, and 0, the Unix epoch, where it
+#: states none". Since core 0.80 the codec, handed none, writes and reads
+#: under it too (F-435).
 DEPLOYMENT_EPOCH = 0
 
 

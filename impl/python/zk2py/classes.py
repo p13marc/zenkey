@@ -1,4 +1,4 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.79), and its walk of
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.80), and its walk of
 ``spec/RULES.md`` (#609, rounds 89 to 95, the mend after #926 part 5 and the
 mend after round 94).
 
@@ -374,7 +374,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §8.6", "A reader MUST refuse each of these", MET,
      "catalog.resolve: through the named catalog, else the first held whose lineage holds it, below that  "
      "item's count; unknown_catalog and unknown_index (catalog family, succession.json's reads); echo_tool's  "
-     "--catalog reads its epoch so (readings) (round 95, core 0.79; who a reader is: F-437)"),
+     "--catalog reads its epoch so (readings); echo_tool reads no descriptor, so on a host bus it takes the  "
+     "deployment's word as observer §7.3 says (F-440) (round 95, core 0.79; who a reader is: F-437)"),
     ("observer", "core §11.1", "A generator MUST refuse an input that binds", MET,
      "acl.Principal binds by one name: no input can bind one by both"),
     ("observer", "core §11.1", "Under `deny`, a generator MUST NOT compile an", MET,
@@ -552,8 +553,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "packed.Record.write (packed family: every write's bits, pad and bytes) (round 94, core 0.75)"),
     ("static", "core §7.6", "An implementation MUST NOT write a record for a value that has no code", MET,
      "packed.encode's refusals, vectors.json's tokens: a fixed-point value by its rounded code (F-424), a count  "
-     "from 0 to 2^64 − 1 (F-430), a number past 2^63 range (Wide64; F-434) (packed family) (round 94, core  "
-     "0.75; core 0.76, the mend after round 94)"),
+     "from 0 to 2^64 − 1 (F-430), integer text read exactly from −2^63 to 2^64 − 1 and any other number a  "
+     "binary64, range from 2^63 (packed.json_number; core 0.80's answer to F-434) (packed family) (round 94,  "
+     "core 0.75; core 0.76, the mend after round 94; core 0.80, round 95)"),
     # core 0.76 (F-425): the writer's unknown and missing, as a MUST NOT.
     ("static", "core §7.6", "An implementation MUST NOT write a record for an object that holds a member its type", MET,
      "packed.Record.write_bits: unknown, then missing over the whole layout, before any bit (packed family's  "
@@ -666,8 +668,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §7.3", "A tool takes the one its deployment states, and 0, the Unix epoch, where it states",
      MET,
      "packed.deployment_epoch: echo_tool's --epoch, else 0, and the consumer's epoch, else 0; the Rust writer's  "
-     "clock records read as now (packed_live rust-py) (core 0.76's F-433, observer 0.16; the codec handed none  "
-     "refusing epoch is F-435)"),
+     "clock records read as now (packed_live rust-py) (core 0.76's F-433, observer 0.16); since core 0.80 the  "
+     "codec handed none writes and reads under E = 0 too (vectors.json's write 47 and read 22, F-435  "
+     "resolved); a tool on a host bus reads no owner's named catalog (F-440)"),
     ("observer", "observer §7.3", "`packed:<name>` for a packed one", MET,
      "echo_tool's declared_type names packed:<name>, decoded or not (packed_live rust-py; readings) (observer  "
      "0.16, the mend after round 94)"),
