@@ -19,7 +19,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::payload::PayloadRendering;
 
@@ -127,7 +127,11 @@ pub struct Stamp {
 /// An in-band stamp (core §4.3, §7.5): the owner's run and seq. It orders a
 /// key's values within one run, and has no time: shown as a run and a seq,
 /// never as a time (observer §8.3).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// Read back from a file (a `.zsnap` row), only as core §3.3 spells a run
+/// and §7.5 bounds a seq: anything else is refused, never guessed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "InbandWire")]
 pub struct InbandStamp {
     /// The run, as the owner's descriptor states it (core §3.3): 4
     /// lowercase hex digits for a 16-bit run, 8 for a 32-bit one.
@@ -142,6 +146,40 @@ impl From<zenkey_model::wire::Stamp> for InbandStamp {
             run: s.run.hex(),
             seq: s.seq.get(),
         }
+    }
+}
+
+impl InbandStamp {
+    /// The stamp it spells, `None` when its run or seq is not one (a value
+    /// built by hand; a deserialized one always is).
+    pub fn stamp(&self) -> Option<zenkey_model::wire::Stamp> {
+        Some(zenkey_model::wire::Stamp {
+            run: zenkey_model::wire::Run::from_hex(&self.run)?,
+            seq: zenkey_model::wire::Seq::new(self.seq)?,
+        })
+    }
+}
+
+/// [`InbandStamp`] as a file spells it, before its run and seq are checked.
+#[derive(Deserialize)]
+struct InbandWire {
+    run: String,
+    seq: u32,
+}
+
+impl TryFrom<InbandWire> for InbandStamp {
+    type Error = String;
+
+    fn try_from(w: InbandWire) -> Result<Self, String> {
+        let run = zenkey_model::wire::Run::from_hex(&w.run).ok_or_else(|| {
+            format!(
+                "in-band run {:?}: not 4 or 8 lowercase hex digits (core §3.3)",
+                w.run
+            )
+        })?;
+        let seq = zenkey_model::wire::Seq::new(w.seq)
+            .ok_or_else(|| format!("in-band seq {}: above 16777215 (core §7.5)", w.seq))?;
+        Ok(zenkey_model::wire::Stamp { run, seq }.into())
     }
 }
 
@@ -277,5 +315,29 @@ mod tests {
             serde_json::to_value(&wide).unwrap(),
             json!({"run": "000000a1", "seq": 16_777_215})
         );
+    }
+
+    /// A stamp read back from a file reads as it was written, and only a
+    /// run the descriptor could state and a seq of 24 bits read at all.
+    #[test]
+    fn an_inband_stamp_reads_back_only_as_core_spells_it() {
+        for v in [
+            json!({"run": "00a1", "seq": 7}),
+            json!({"run": "000000a1", "seq": 16_777_215}),
+        ] {
+            let back: InbandStamp = serde_json::from_value(v.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&back).unwrap(), v);
+            assert!(back.stamp().is_some());
+        }
+        for bad in [
+            json!({"run": "00A1", "seq": 7}),
+            json!({"run": "a1", "seq": 7}),
+            json!({"run": "00a1", "seq": 16_777_216}),
+        ] {
+            assert!(
+                serde_json::from_value::<InbandStamp>(bad.clone()).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

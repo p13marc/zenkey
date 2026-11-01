@@ -299,6 +299,7 @@ fn the_history_pane_compares_against_a_v2_snapshot_row() {
         encoding: Some("application/json".into()),
         timestamp: Some("2026-10-05T02:59:59Z/a1b2".into()),
         stamper: Some(StamperWire::Owner { id: "a1b2".into() }),
+        inband: None,
         source_zid: Some("a1b2".into()),
         conformance: Conformance::Valid,
         holder: Holder::Live {

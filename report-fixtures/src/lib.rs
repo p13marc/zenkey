@@ -2971,6 +2971,7 @@ fn snapshot_row(key: &str, identity: KeyIdentity, bytes: &str, holder: Holder) -
         encoding: Some("application/json".into()),
         timestamp: Some("7f3b2a1c00000001/ab12".into()),
         stamper: Some(StamperWire::Owner { id: "ab12".into() }),
+        inband: None,
         source_zid: Some("ab12".into()),
         conformance: Conformance::Valid,
         holder,
@@ -3143,6 +3144,132 @@ pub fn snapshot_staging() -> Snapshot {
 /// [`snapshot`] against itself: identical on every facet.
 pub fn snapshot_diff_identity() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
+}
+
+/// A row whose reply carried a zk2c envelope (core §4.3, §7.5): `record`
+/// sealed under run `run` (16-bit) and `seq`, its bytes as the file keeps
+/// them and its in-band stamp beside them. Off core §4.3's table, a
+/// plain state carries no Zenoh timestamp.
+fn sealed_row(key: &str, identity: KeyIdentity, run: u16, seq: u32, record: &str) -> SnapshotRow {
+    use base64::Engine as _;
+    use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+    let stamp = Stamp {
+        run: Run::U16(run),
+        seq: Seq::new(seq).expect("a seq"),
+    };
+    let bytes = Envelope {
+        tag: Tag::NONE,
+        stamp,
+        record: record.as_bytes(),
+    }
+    .write();
+    SnapshotRow {
+        encoding: Some("zenoh/bytes".into()),
+        timestamp: None,
+        stamper: None,
+        inband: Some(stamp.into()),
+        ..snapshot_row(
+            key,
+            identity,
+            &base64::engine::general_purpose::STANDARD.encode(bytes),
+            Holder::Live {
+                address: "host-a/tc".into(),
+                answered_by: AnsweredBy::Owner,
+            },
+        )
+    }
+}
+
+/// `host-a/tc` under core 0.73's wire (#976 A4): every reply in its
+/// envelope, run `0003`. `namespaces` is plain state (seq 4); `eth0` is on
+/// core §4.3's table by its ttl, so its owner's Zenoh timestamp rides it
+/// too (seq 5); and `eth9` is a deletion within the window, whose in-band
+/// stamp (seq 6) came in its `reply_del`'s attachment, which the row keeps
+/// as `inband` alone.
+pub fn snapshot_inband() -> Snapshot {
+    let eth = |iface: &str| {
+        state_identity(
+            "host-a/tc",
+            "state/interfaces/{ns}/{iface}",
+            &[("ns", "default"), ("iface", iface)],
+        )
+    };
+    Snapshot {
+        header: zsnap_header("acme", "2026-11-01T00:00:00Z", 0.5, 3, 0),
+        rows: vec![
+            SnapshotRow {
+                timestamp: Some("7f3b2a1c00000001/ab12".into()),
+                stamper: Some(StamperWire::Owner { id: "ab12".into() }),
+                ..sealed_row(
+                    "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0",
+                    eth("eth0"),
+                    3,
+                    5,
+                    r#"{"name":"eth0","is_up":true}"#,
+                )
+            },
+            SnapshotRow {
+                delete: true,
+                bytes: None,
+                encoding: None,
+                conformance: Conformance::NotChecked {
+                    reason: "a deletion carries no value".into(),
+                },
+                ..sealed_row(
+                    "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9",
+                    eth("eth9"),
+                    3,
+                    6,
+                    "",
+                )
+            },
+            sealed_row(
+                "acme/zk2/host-a/tc/tc.netif.v1/state/namespaces",
+                state_identity("host-a/tc", "state/namespaces", &[]),
+                3,
+                4,
+                r#"["default"]"#,
+            ),
+        ],
+    }
+}
+
+/// [`snapshot_inband`] a minute on: `eth0` went down (seq 10, a value
+/// change, read as its record), `namespaces` was put again unchanged (seq
+/// 9: core §4.2's re-put, the envelope's bytes moved and the record did
+/// not), and `eth9`'s deletion stands.
+pub fn snapshot_inband_b() -> Snapshot {
+    let mut b = snapshot_inband();
+    b.header = zsnap_header("acme", "2026-11-01T00:01:00Z", 0.5, 3, 0);
+    for row in &mut b.rows {
+        let (seq, record) = if row.key.ends_with("/eth0") {
+            (10, r#"{"name":"eth0","is_up":false}"#)
+        } else if row.key.ends_with("/namespaces") {
+            (9, r#"["default"]"#)
+        } else {
+            continue;
+        };
+        *row = SnapshotRow {
+            timestamp: row
+                .timestamp
+                .as_ref()
+                .map(|_| "7f3b2a1c00000002/ab12".to_owned()),
+            stamper: row.stamper.clone(),
+            ..sealed_row(&row.key, row.identity.clone(), 3, seq, record)
+        };
+    }
+    b
+}
+
+/// [`snapshot_inband`] against [`snapshot_inband_b`]: a record changed, a
+/// re-put read as one, and a tombstone unchanged, its in-band stamp read
+/// back from the file.
+pub fn snapshot_diff_inband() -> SnapshotDiff {
+    zenkey_fleet::diff_snapshots(
+        &snapshot_inband(),
+        &snapshot_inband_b(),
+        zenkey_fleet::DiffOpts::default(),
+    )
 }
 
 // --- config.v1 (#768, CC) ---------------------------------------------------

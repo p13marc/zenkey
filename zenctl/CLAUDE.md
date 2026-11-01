@@ -143,7 +143,9 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `Conformance`, `QosMismatch`, `LensScope`, `PayloadCheck` — are in
   `report/observe.rs`. A stamp is the owner's when its id is the descriptor's
   `meta.zid`, by value (O7). `.zsnap` is version 2 and `snapshot diff`
-  aligns by zk2 key (no origin alignment). `check expect`, `check probe` and
+  aligns by zk2 key (no origin alignment), compares records, never
+  envelopes, and names a re-put "re-stamped in band (run r, seq s → …)"
+  (#976 A4, `tests/cmd/fixtures/inband-{a,b}.zsnap`). `check expect`, `check probe` and
   `check schema` take an address, an interface revision and a resource;
   `origin-down` is `instance-gone` — judged per address on FL1's presence
   projection with zenwatch's meaning, and folded into one state per rule

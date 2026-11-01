@@ -289,8 +289,22 @@ fn facets(c: &KeyChange) -> String {
     if let Some((a, b)) = &c.holder {
         parts.push(format!("holder: {} → {}", holder(a), holder(b)));
     }
-    if parts.is_empty() && c.timestamp.0 != c.timestamp.1 {
-        parts.push("re-stamped, same value".into());
+    if parts.is_empty() {
+        if c.inband.0 != c.inband.1 {
+            // A re-put carries a new seq (core §4.2): its run and seq, never
+            // a time (observer §8.3).
+            let side = |s: &Option<zenkey_fleet::report::InbandStamp>| {
+                s.as_ref()
+                    .map_or_else(|| "no envelope".to_owned(), ToString::to_string)
+            };
+            parts.push(format!(
+                "re-stamped in band ({} → {}), same value",
+                side(&c.inband.0),
+                side(&c.inband.1)
+            ));
+        } else if c.timestamp.0 != c.timestamp.1 {
+            parts.push("re-stamped, same value".into());
+        }
     }
     parts.join("; ")
 }

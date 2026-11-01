@@ -60,7 +60,9 @@ pub fn fold_latest(
 }
 
 /// One kept reply as a snapshot row: its identity, its payload checked
-/// against the declared type, its stamp attributed, and its holder.
+/// against the declared type, its Zenoh stamp attributed, its in-band stamp
+/// (a deletion's from its attachment, which the row does not keep), and its
+/// holder.
 pub fn row_of(lens: &Lens<'_>, view: &SampleView, replier: Replier) -> SnapshotRow {
     use crate::tape::ingest::b64;
     let delete = view.kind == zenoh::sample::SampleKind::Delete;
@@ -91,6 +93,7 @@ pub fn row_of(lens: &Lens<'_>, view: &SampleView, replier: Replier) -> SnapshotR
         encoding,
         timestamp: view.timestamp.map(|t| t.to_string()),
         stamper,
+        inband: view.inband().map(crate::report::InbandStamp::from),
         source_zid: replier.map(|z| z.to_string()),
         conformance,
     }

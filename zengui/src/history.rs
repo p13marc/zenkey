@@ -571,6 +571,7 @@ mod tests {
             encoding: Some("application/json".into()),
             timestamp: Some("7f3b/ab12".into()),
             stamper: Some(StamperWire::Unattributable { id: "ab12".into() }),
+            inband: None,
             source_zid: None,
             conformance: Conformance::NotChecked {
                 reason: "no presence read".into(),

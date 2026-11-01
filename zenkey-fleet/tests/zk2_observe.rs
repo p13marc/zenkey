@@ -427,7 +427,8 @@ async fn a_snapshot_takes_the_owners_state_with_its_holders() {
         .state_writer(&netif, "state/interfaces/{ns}/{iface}", &member("eth1"))
         .await
         .expect("state writer");
-    eth0.put_value(&json!({"name": "eth0", "index": 2, "namespace": "default", "is_up": true}))
+    let put0 = eth0
+        .put_value(&json!({"name": "eth0", "index": 2, "namespace": "default", "is_up": true}))
         .await
         .expect("put");
     eth1.put(br#"{"name":"eth1","index":3,"namespace":"default","is_up":"maybe"}"#.to_vec())
@@ -457,7 +458,16 @@ async fn a_snapshot_takes_the_owners_state_with_its_holders() {
     assert_eq!(good.conformance, Conformance::Valid);
     assert!(
         matches!(good.stamper, Some(StamperWire::Owner { .. })),
-        "{good:?}"
+        "the interfaces state is on core §4.3's table by its ttl: {good:?}"
+    );
+    assert_eq!(
+        good.inband,
+        Some(put0.stamp.into()),
+        "the row keeps the owner's in-band stamp, what orders the key"
+    );
+    assert!(
+        good.record().is_some_and(|r| r.starts_with(b"{")),
+        "the row's bytes are the envelope, its record the value: {good:?}"
     );
     assert!(
         matches!(&good.holder, Holder::Live { address, .. } if address == "host-a/tc"),
