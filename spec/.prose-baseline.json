@@ -19,6 +19,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/conformance/catalog/README.md": {
+    "mean": 11.0,
+    "over": 0,
+    "tags": 0
+  },
   "spec/conformance/compat/README.md": {
     "mean": 15.0,
     "over": 0,

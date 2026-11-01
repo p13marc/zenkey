@@ -1,0 +1,10 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "robot/logger",
+ "instance": "0000000000000001",
+ "catalog": null,
+ "interfaces": [],
+ "meta": {
+  "note": "a catalog written null, which is no string: outside the schema, D000. An owner with no catalog leaves the member out (core §3.3)"
+ }
+}

@@ -1415,3 +1415,172 @@ fn packed_records_decode_from_the_bundle() {
     let (_, reason) = undecodable(decode_in(&b, ty, None, &record[..4], Context::tagged(tag)));
     assert!(reason.contains("length:"), "{reason}");
 }
+
+/// `spec/conformance/catalog/documents.json` (core §8.6; #980 C1a): a
+/// catalog's text → its id, or the reader's refusal, the first in §8.6's
+/// order. Every accepted catalog writes back to JCS bytes of the same id,
+/// and reads back from them. Written by hand from the text, checked, never
+/// blessed.
+#[test]
+fn catalog_documents() {
+    use zenkey_model::catalog::Catalog;
+    let doc = read_json(&spec().join("conformance/catalog/documents.json"));
+    let cases = doc["cases"].as_array().expect("cases");
+    let mut refused = std::collections::BTreeSet::new();
+    let mut accepted = 0;
+    for case in cases {
+        let note = &case["note"];
+        let text = case["text"].as_str().expect("text");
+        let got = match Catalog::parse(text) {
+            Ok(c) => {
+                accepted += 1;
+                let again = Catalog::parse(std::str::from_utf8(&c.to_jcs()).unwrap())
+                    .unwrap_or_else(|e| panic!("{note}: its JCS bytes refused: {e}"));
+                assert_eq!(again, c, "{note}: reads back from its JCS bytes");
+                json!({"id": c.id().hex()})
+            }
+            Err(e) => {
+                refused.insert(e.token());
+                json!({"refused": e.token()})
+            }
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+    assert!(accepted > 0, "no accepted case");
+    for token in [
+        "json",
+        "format",
+        "member",
+        "epoch",
+        "entries",
+        "index",
+        "iface",
+        "contract",
+        "duplicate",
+        "lineage",
+    ] {
+        assert!(refused.contains(token), "no case refuses with {token}");
+    }
+}
+
+/// `spec/conformance/catalog/ids.json` (core §8.6): an accepted catalog's
+/// text → its JCS bytes, their sha256 and its id. Written by hand from the
+/// text, checked, never blessed.
+#[test]
+fn catalog_ids() {
+    use zenkey_model::catalog::{Catalog, CatalogId};
+    let doc = read_json(&spec().join("conformance/catalog/ids.json"));
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let note = &case["note"];
+        let c = Catalog::parse(case["text"].as_str().expect("text"))
+            .unwrap_or_else(|e| panic!("{note}: {e}"));
+        let bytes = c.to_jcs();
+        let sha = zenkey_model::schema::sha256_id(&bytes);
+        assert_eq!(
+            case["expect"],
+            json!({
+                "jcs": String::from_utf8(bytes.clone()).unwrap(),
+                "sha256": &sha["sha256:".len()..],
+                "id": c.id().hex(),
+            }),
+            "{note}"
+        );
+        assert_eq!(CatalogId::of_jcs(&bytes), c.id(), "{note}");
+    }
+}
+
+/// `spec/conformance/catalog/succession.json` (core §8.6): pairs of named
+/// catalogs → whether the second succeeds the first, or the checker's
+/// refusal; and the catalogs a reader holds, the id an owner names and an
+/// index → the epoch and the entry, or the reader's refusal. Written by
+/// hand from the text, checked, never blessed.
+#[test]
+fn catalog_succession() {
+    use zenkey_model::catalog::{Catalog, CatalogId, epoch_of, through};
+    let doc = read_json(&spec().join("conformance/catalog/succession.json"));
+    let catalogs: BTreeMap<String, Catalog> = doc["catalogs"]
+        .as_object()
+        .expect("catalogs")
+        .iter()
+        .map(|(name, v)| {
+            let c =
+                Catalog::parse(&v.to_string()).unwrap_or_else(|e| panic!("catalog {name}: {e}"));
+            (name.clone(), c)
+        })
+        .collect();
+    let named = |n: &Value| &catalogs[n.as_str().expect("a catalog's name")];
+    let mut refused = std::collections::BTreeSet::new();
+    for case in doc["successions"].as_array().expect("successions") {
+        let note = &case["note"];
+        let got = match named(&case["next"]).succeeds(named(&case["previous"])) {
+            Ok(()) => json!("succeeds"),
+            Err(s) => {
+                refused.insert(s.token());
+                json!({"refused": s.token()})
+            }
+        };
+        assert_eq!(case["expect"], got, "succession: {note}");
+    }
+    for token in ["epoch_moved", "reassigned", "removed", "lineage"] {
+        assert!(
+            refused.contains(token),
+            "no succession refused with {token}"
+        );
+    }
+    let mut read_refused = std::collections::BTreeSet::new();
+    for case in doc["reads"].as_array().expect("reads") {
+        let note = &case["note"];
+        let held: Vec<Catalog> = case["held"]
+            .as_array()
+            .expect("held")
+            .iter()
+            .map(|n| named(n).clone())
+            .collect();
+        let id: Option<CatalogId> = case["catalog"]
+            .as_str()
+            .map(|s| s.parse().unwrap_or_else(|e| panic!("{note}: {e}")));
+        let index = case["index"]
+            .as_u64()
+            .map(|i| u16::try_from(i).expect("an index"));
+        let got = match (id, index) {
+            (None, Some(_)) => Err(zenkey_model::catalog::ReadRefusal::UnknownCatalog),
+            (_, None) => epoch_of(&held, id).map(|epoch| json!({"epoch": epoch})),
+            (Some(id), Some(i)) => through(&held, id).and_then(|t| {
+                t.entry(i).map(|e| {
+                    json!({
+                        "epoch": t.epoch(),
+                        "iface": e.iface.to_string(),
+                        "contract": e.contract.to_string(),
+                    })
+                })
+            }),
+        };
+        let got = got.unwrap_or_else(|r| {
+            read_refused.insert(r.token());
+            json!({"refused": r.token()})
+        });
+        assert_eq!(case["expect"], got, "read: {note}");
+    }
+    for token in ["unknown_catalog", "unknown_index"] {
+        assert!(read_refused.contains(token), "no read refused with {token}");
+    }
+}
+
+/// `spec/catalog.schema.json` is generated from the catalog's document type.
+#[test]
+fn catalog_schema_is_current() {
+    let path = spec().join("catalog.schema.json");
+    let schema = schemars::schema_for!(zenkey_model::catalog::Document);
+    let text = serde_json::to_string_pretty(&schema).unwrap() + "\n";
+    if bless() {
+        std::fs::write(&path, &text).unwrap();
+    } else {
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap_or_default(),
+            text,
+            "spec/catalog.schema.json is stale: ZK2_BLESS=1 cargo test -p zenkey-model --test conformance"
+        );
+    }
+}

@@ -276,3 +276,48 @@ fn every_example_arbitrated_role_is_valid() {
     assert_eq!(a.deadline, Duration::from_millis(100));
     assert_eq!(a.period, Some(Duration::from_millis(20)));
 }
+
+/// `examples/zk2/zenoh-modem/catalog.json` (core §8.6; #980 C1a): the
+/// deployment catalog zenoh-modem provisions to rf0's host and to the
+/// ground. It reads, is written as its JCS bytes, states its own epoch, and
+/// holds the current revision of each contract the modem side runs:
+/// `modem.v3`, `config.v1` and `health.v1`. Every entry is a published
+/// revision, so a successor that keeps an older one stays checked. After an
+/// intended contract change, append its revision with `zk2 catalog add`.
+#[test]
+fn the_zenoh_modem_catalog_holds_its_contracts() {
+    use zenkey_model::catalog::Catalog;
+    let path = examples().join("zenoh-modem/catalog.json");
+    let bytes = std::fs::read(&path).unwrap();
+    let c = Catalog::parse_bytes(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut jcs = c.to_jcs();
+    jcs.push(b'\n');
+    assert_eq!(bytes, jcs, "catalog.json is its JCS bytes and a newline");
+    // 2026-01-01T00:00:00Z: a `time` field's 32 bits then reach 2162.
+    assert_eq!(c.epoch(), 1_767_225_600);
+    let profiles = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
+    for file in [
+        examples().join("zenoh-modem/modem.v3.toml"),
+        profiles.join("config/config.v1.toml"),
+        profiles.join("health/health.v1.toml"),
+    ] {
+        let k = load_path(&file).contract.expect("validated above");
+        let fp = Fingerprint::of(&k);
+        assert!(
+            c.index_of(&k.iface, &fp).is_some(),
+            "{}: {} {fp} is not in catalog.json; run zk2 catalog add",
+            file.display(),
+            k.iface
+        );
+    }
+    for e in c.entries() {
+        let published = [examples().join(".history"), profiles.join(".history")]
+            .iter()
+            .any(|root| zenkey_model::history::path_for(root, &e.iface, &e.contract).is_file());
+        assert!(
+            published,
+            "{} {} is published in no history",
+            e.iface, e.contract
+        );
+    }
+}

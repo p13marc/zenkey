@@ -121,6 +121,7 @@ pub(crate) fn build(
         service: id.addr.to_string(),
         instance: instance.to_string(),
         run: Some(id.run.hex()),
+        catalog: None,
         interfaces,
         capabilities: held.iter().cloned().collect(),
         requires,

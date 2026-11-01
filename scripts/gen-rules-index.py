@@ -1014,7 +1014,7 @@ def render(rules: list, ids: list) -> str:
     para(w, "**Conformance by role.** An implementation claims one class for each "
          "role it plays ([core §12](core.md#12-conformance-classes)). A class holds "
          "its role's rules and the static rules, listed here under implementation. "
-         "Those are §1's, §7.5's, §7.6's and §9's. So are the contract rules of the "
+         "Those are §1's, §7.5's, §7.6's, §8.6's and §9's. So are the contract rules of the "
          "sections §12 lists, and any rule naming its lint code. §3.3's descriptor "
          "checker is static too. A rule of those sections that names "
          "a role is listed "

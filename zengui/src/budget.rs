@@ -522,6 +522,7 @@ congestion = "block"
                 service: addr.to_string(),
                 instance: instance.to_string(),
                 run: None,
+                catalog: None,
                 interfaces: vec![InterfaceEntry {
                     iface: iface.to_string(),
                     contract: revision.fingerprint().to_string(),

@@ -38,6 +38,11 @@
 //!   templated resource's bound in an instance, what an event's `rate`
 //!   bounds, and the pure judgement of a reading against them. The reads
 //!   are the tools'.
+//! - [`catalog`]: the deployment catalog (core §8.6; #980 C1a): its
+//!   reading with §8.6's refusals, its id, append-only succession, and a
+//!   reader's resolution of the catalog an owner names, through a
+//!   successor below its predecessor's count. It holds the deployment
+//!   epoch and each revision's index; provisioning it is the deployment's.
 //! - [`descriptor`]: the descriptor record an instance serves, checked
 //!   against its contracts; `spec/descriptor.schema.json` is generated
 //!   from it.
@@ -138,6 +143,7 @@ pub mod authoring;
 pub mod budget;
 pub mod bundle;
 pub mod canonical;
+pub mod catalog;
 pub mod chunk;
 pub mod compat;
 pub mod config;

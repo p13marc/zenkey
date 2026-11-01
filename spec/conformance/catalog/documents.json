@@ -1,0 +1,481 @@
+{
+  "description": "core §8.6, reading a deployment catalog. Written by hand from the text, checked, never blessed. Each case is a catalog's `text` → `expect`: `{\"id\": …}`, the 8 hex digits of an accepted catalog's id (ids.json says how it is computed), or `{\"refused\": token}`, the first refusal in §8.6's order: `json` (not strict JSON: RFC 8259, no member twice in one object), `format` (not an object whose `format` is the string `zk2-catalog/1`), `member` (at the top level, `epoch` or `entries` missing, or a member besides `format`, `epoch`, `entries` and `lineage`), `epoch` (not an integer from 0 to 2^53 - 1), `entries` (not an array of objects, or more than 1,024 of them); then, for each entry in order, `member` (not exactly `index`, `iface` and `contract`), `index` (not the integer of its position), `iface` (not a string holding an interface id, core §1.2), `contract` (not a string holding a fingerprint), `duplicate` (an earlier entry's pair); then `lineage` (present and not a non-empty array of objects); then, for each lineage item in order, `member` (not exactly `id` and `entries`) and `lineage` (an `id` not 8 lowercase hex digits, or an earlier item's or the catalog's own; an `entries` not an integer, below the item before it's, or above the catalog's count). An integer is a JSON number written as digits alone, with no sign, fraction or exponent. A catalog whose own id is one of its lineage's needs a 32-bit collision, so no case holds one.",
+  "cases": [
+    {
+      "note": "the smallest catalog: an epoch of 0 and no entries",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "id": "7e895b70"
+      }
+    },
+    {
+      "note": "§8.6's example, without its lineage: three revisions",
+      "text": "{\n  \"format\": \"zk2-catalog/1\",\n  \"epoch\": 1767225600,\n  \"entries\": [\n    {\n      \"index\": 0,\n      \"iface\": \"modem.v3\",\n      \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"\n    },\n    {\n      \"index\": 1,\n      \"iface\": \"config.v1\",\n      \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"\n    },\n    {\n      \"index\": 2,\n      \"iface\": \"health.v1\",\n      \"contract\": \"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\"\n    }\n  ]\n}",
+      "expect": {
+        "id": "0a90fd61"
+      }
+    },
+    {
+      "note": "a successor: its lineage names the catalog of two entries it extends",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 1767225600, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}, {\"index\": 2, \"iface\": \"health.v1\", \"contract\": \"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df\"}], \"lineage\": [{\"id\": \"eddb48d5\", \"entries\": 2}]}",
+      "expect": {
+        "id": "0319128a"
+      }
+    },
+    {
+      "note": "one interface at two revisions, each its own pair",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 1767225600, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}, {\"index\": 2, \"iface\": \"modem.v3\", \"contract\": \"sha256:ea38eab240a4b114b9309b814afad4e77fcda547047fb9d94c062055c6acf119\"}]}",
+      "expect": {
+        "id": "ce722b98"
+      }
+    },
+    {
+      "note": "the largest epoch, 2^53 - 1",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 9007199254740991, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "id": "ed2ed556"
+      }
+    },
+    {
+      "note": "a lineage item of 0 entries: a first catalog that held only an epoch",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}], \"lineage\": [{\"id\": \"0000abcd\", \"entries\": 0}]}",
+      "expect": {
+        "id": "42f740e2"
+      }
+    },
+    {
+      "note": "two lineage items of one count: a successor need not add an entry",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}], \"lineage\": [{\"id\": \"0000abcd\", \"entries\": 1}, {\"id\": \"0000abce\", \"entries\": 1}]}",
+      "expect": {
+        "id": "7ef3c196"
+      }
+    },
+    {
+      "note": "an escaped solidus is the same string: the format matches",
+      "text": "{\"format\": \"zk2-catalog\\/1\", \"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "id": "7e895b70"
+      }
+    },
+    {
+      "note": "members in any order",
+      "text": "{\"entries\": [], \"epoch\": 7, \"format\": \"zk2-catalog/1\"}",
+      "expect": {
+        "id": "679a568e"
+      }
+    },
+    {
+      "note": "a member twice at the top",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "refused": "json"
+      }
+    },
+    {
+      "note": "a member twice in an entry: still not strict JSON, before any other reading",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "json"
+      }
+    },
+    {
+      "note": "text after the document",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": []} x",
+      "expect": {
+        "refused": "json"
+      }
+    },
+    {
+      "note": "not JSON at all",
+      "text": "zk2-catalog/1",
+      "expect": {
+        "refused": "json"
+      }
+    },
+    {
+      "note": "NaN is no JSON number",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": NaN, \"entries\": []}",
+      "expect": {
+        "refused": "json"
+      }
+    },
+    {
+      "note": "a byte order mark before the document",
+      "text": "﻿{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "refused": "json"
+      }
+    },
+    {
+      "note": "an array, not an object",
+      "text": "[]",
+      "expect": {
+        "refused": "format"
+      }
+    },
+    {
+      "note": "no format member",
+      "text": "{\"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "refused": "format"
+      }
+    },
+    {
+      "note": "a later format: refused for its format, whatever else it holds",
+      "text": "{\"format\": \"zk2-catalog/2\", \"epoch\": 0, \"entries\": [], \"dictionaries\": {}}",
+      "expect": {
+        "refused": "format"
+      }
+    },
+    {
+      "note": "the format in capitals",
+      "text": "{\"format\": \"ZK2-CATALOG/1\", \"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "refused": "format"
+      }
+    },
+    {
+      "note": "the format as no string",
+      "text": "{\"format\": 1, \"epoch\": 0, \"entries\": []}",
+      "expect": {
+        "refused": "format"
+      }
+    },
+    {
+      "note": "no epoch",
+      "text": "{\"format\": \"zk2-catalog/1\", \"entries\": []}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "no entries",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "a member this version does not name: a dictionary comes in a later chunk",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"dictionaries\": {}}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "an unknown member before a bad epoch: member comes first",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": -1, \"entries\": [], \"previous\": \"0000abcd\"}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "a negative epoch",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": -1, \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "-0 carries a sign: no integer",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": -0, \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "an epoch with a fraction",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 1767225600.0, \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "an epoch with an exponent",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 1e3, \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "an epoch of 2^53, past the range",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 9007199254740992, \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "an epoch past 2^64",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 36893488147419103232, \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "an epoch as a string",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": \"0\", \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "an epoch of null",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": null, \"entries\": []}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "a bad epoch before bad entries: epoch comes first",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 1.5, \"entries\": {}}",
+      "expect": {
+        "refused": "epoch"
+      }
+    },
+    {
+      "note": "entries as an object",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": {}}",
+      "expect": {
+        "refused": "entries"
+      }
+    },
+    {
+      "note": "an entry that is no object",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, \"health.v1\"]}",
+      "expect": {
+        "refused": "entries"
+      }
+    },
+    {
+      "note": "1,025 entries: refused for the count before any entry is read, even empty ones",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}]}",
+      "expect": {
+        "refused": "entries"
+      }
+    },
+    {
+      "note": "an entry without its contract",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\"}]}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "an entry with a member it does not name",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\", \"minor\": 0}]}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "an entry's index is not its position",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}]}",
+      "expect": {
+        "refused": "index"
+      }
+    },
+    {
+      "note": "two entries at index 0: the second is not at its position",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 0, \"iface\": \"health.v1\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "index"
+      }
+    },
+    {
+      "note": "an index written 0.0",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0.0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "index"
+      }
+    },
+    {
+      "note": "an index as a string",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": \"0\", \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "index"
+      }
+    },
+    {
+      "note": "an iface with no major",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "an iface in capitals",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"Modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "an iface whose major has a leading zero",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v03\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "an iface whose major is past 2^32 - 1",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v4294967296\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "an iface as a number",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": 3, \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "a contract in capitals",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9A3E2859A538A95DAAFC53E7DFFE8C9D0610312F7650F27250B9E6FEE0965953\"}]}",
+      "expect": {
+        "refused": "contract"
+      }
+    },
+    {
+      "note": "a contract without its sha256: prefix",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "contract"
+      }
+    },
+    {
+      "note": "a contract of 63 hex digits",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee096595\"}]}",
+      "expect": {
+        "refused": "contract"
+      }
+    },
+    {
+      "note": "a pair listed twice",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}, {\"index\": 2, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "duplicate"
+      }
+    },
+    {
+      "note": "entries are read in order: the first's iface before the second's unknown member",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\", \"x\": 1}]}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "within an entry, index before iface",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 1, \"iface\": \"modem\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}]}",
+      "expect": {
+        "refused": "index"
+      }
+    },
+    {
+      "note": "within an entry, iface before contract",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem\", \"contract\": \"sha256:\"}]}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "an empty lineage: a first catalog has none, so one spelling",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": []}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "a lineage that is no array",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": {\"id\": \"0000abcd\", \"entries\": 0}}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "a lineage item that is no object",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": [\"0000abcd\"]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "a lineage item without its count",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": [{\"id\": \"0000abcd\"}]}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "a lineage item with a member it does not name",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": [{\"id\": \"0000abcd\", \"entries\": 0, \"epoch\": 0}]}",
+      "expect": {
+        "refused": "member"
+      }
+    },
+    {
+      "note": "a lineage id in capitals",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": [{\"id\": \"0000ABCD\", \"entries\": 0}]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "a lineage id of 7 hex digits",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": [{\"id\": \"000abcd\", \"entries\": 0}]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "two lineage items with one id",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}], \"lineage\": [{\"id\": \"0000abcd\", \"entries\": 0}, {\"id\": \"0000abcd\", \"entries\": 1}]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "a lineage count above the catalog's",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}], \"lineage\": [{\"id\": \"0000abcd\", \"entries\": 2}]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "lineage counts that go down",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}, {\"index\": 1, \"iface\": \"config.v1\", \"contract\": \"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1\"}], \"lineage\": [{\"id\": \"0000abcd\", \"entries\": 2}, {\"id\": \"0000abce\", \"entries\": 1}]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "a lineage count with a fraction",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem.v3\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}], \"lineage\": [{\"id\": \"0000abcd\", \"entries\": 1.0}]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "lineage is read after the entries: the entry's refusal comes first",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [{\"index\": 0, \"iface\": \"modem\", \"contract\": \"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953\"}], \"lineage\": []}",
+      "expect": {
+        "refused": "iface"
+      }
+    },
+    {
+      "note": "lineage items in order: the first's id before the second's unknown member",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": [{\"id\": \"x\", \"entries\": 0}, {\"id\": \"0000abce\", \"entries\": 0, \"x\": 1}]}",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "within a lineage item, its members before its values",
+      "text": "{\"format\": \"zk2-catalog/1\", \"epoch\": 0, \"entries\": [], \"lineage\": [{\"id\": \"x\", \"entries\": 0, \"x\": 1}]}",
+      "expect": {
+        "refused": "member"
+      }
+    }
+  ]
+}

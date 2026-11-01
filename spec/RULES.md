@@ -31,12 +31,12 @@ in the rule ids.
 **Conformance by role.** An implementation claims one class for each role it
 plays ([core §12](core.md#12-conformance-classes)). A class holds its role's
 rules and the static rules, listed here under implementation. Those are
-§1's, §7.5's, §7.6's and §9's. So are the contract rules of the sections §12
-lists, and any rule naming its lint code. §3.3's descriptor checker is
-static too. A rule of those sections that names a role is listed under that
-role. A static rule binds an implementation where it does what the rule
-governs. A class is claimed at the full level or the constrained one. A
-profile is a class of its own, and its rules are in its text.
+§1's, §7.5's, §7.6's, §8.6's and §9's. So are the contract rules of the
+sections §12 lists, and any rule naming its lint code. §3.3's descriptor
+checker is static too. A rule of those sections that names a role is listed
+under that role. A static rule binds an implementation where it does what
+the rule governs. A class is claimed at the full level or the constrained
+one. A profile is a class of its own, and its rules are in its text.
 
 **A stream-only owner's minimum path** is this index filtered to two roles:
 [owner](#owner) and [implementation](#implementation-the-static-rules). A
@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 62 |
+| [Owner](#owner) | 63 |
 | [Consumer](#consumer) | 17 |
 | [Caller](#caller) | 13 |
-| [Deployment](#deployment) | 16 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 56, 24 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 46 |
-| Every rule, once | 195 |
+| [Deployment](#deployment) | 17 |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 57, 25 of them a reader's |
+| [Implementation: the static rules](#implementation-the-static-rules) | 49 |
+| Every rule, once | 201 |
 | [Rule ids](#rule-ids) | 79 |
 
 ## Owner
@@ -65,6 +65,7 @@ The owner, consumer and caller sections each point to them.
 **Where it reads.** Where an owner reads presence, state or the admin space,
 `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
 [§3.7](observer.md#37-the-watch-session) and
@@ -116,6 +117,7 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [§3.3](core.md#33-the-descriptor-record) | The owner's descriptor MUST NOT raise it [a template's bound]. | `[F: descriptors/d007-*]` |
 | [§3.3](core.md#33-the-descriptor-record) | An owner MUST state its run there, and MUST put its descriptor again when the run changes, before it writes under the new run. | `[F: descriptors/ok-run, d002-run-*]` `[Sc: state.md §1, §7]` |
+| [§3.3](core.md#33-the-descriptor-record) | An owner given a catalog MUST state its id there. | `[F: descriptors/ok-catalog, d002-catalog-*]` |
 | [§3.3](core.md#33-the-descriptor-record) | One member is used: an owner SHOULD state its session's zid as `meta.zid`, as the reference does. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner SHOULD write `meta.zid` as zenoh writes it. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. | `[Sc: constrained.md §5]` |
@@ -232,6 +234,7 @@ The owner, consumer and caller sections each point to them.
 **Where it reads.** Where a consumer reads presence, state or the admin
 space, `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
 [§3.7](observer.md#37-the-watch-session) and
@@ -294,6 +297,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 **Where it reads.** Where a caller reads presence, state or the admin space,
 `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
 [§3.7](observer.md#37-the-watch-session) and
@@ -387,6 +391,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§8.5](core.md#85-constrained-faces) | **A deployment SHOULD deny `@stream` keys across the face** unless `link.v1` downsamples them: an `@stream` resource whose contract exposes it, one rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8). | none cited |
 | [§8.5](core.md#85-constrained-faces) | **A far router in a south region needs declarations sent toward it.** … So a deployment MUST grant the far side's principal `declare_queryable` on egress over every queryable its side may query, as the owner declares it. | `[Sc: link.v1 scenarios §2]` |
 
+### [core §8.6 The deployment catalog](core.md#86-the-deployment-catalog)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.6](core.md#86-the-deployment-catalog) | A deployment MUST NOT change a catalog in force other than by provisioning one that succeeds it. | `[F: catalog/succession.json]` |
+
 ### [core §11.2 Compiling grants](core.md#112-compiling-grants)
 
 | Rule | Sentence | Evidence |
@@ -436,6 +446,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: (4 items) | `[Sc: retrieval.md §1–§3]` |
 | [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST set consolidation `None` on both attempts. | `[Sc: retrieval.md §2]` |
 | [§8.4](core.md#84-contract-retrieval) | **The reply.** … A caller or tool MUST NOT depend on the encoding: the hash is the check. | `[Sc: retrieval.md §1]` |
+
+### [core §8.6 The deployment catalog](core.md#86-the-deployment-catalog)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.6](core.md#86-the-deployment-catalog), *reader* | A reader MUST refuse each of these: (3 items) | `[F: catalog/succession.json]` |
 
 ### [core §11.1 Grant shapes](core.md#111-grant-shapes)
 
@@ -670,6 +686,14 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.6](core.md#76-packed-records) | **Writing.** … An implementation MUST NOT write a record for an object that holds a member its type does not have, or lacks a field that is not optional. | `[F: packed/vectors.json]` |
 | [§7.6](core.md#76-packed-records) | An implementation that reads a record of a packed type MUST refuse it, naming the refusal, for the first of these that applies, in this order: (5 items) | `[F: packed/vectors.json]` |
 | [§7.6](core.md#76-packed-records) | **A later revision's fields.** … That rest MUST hold at least one bit (`length`). | `[F: packed/vectors.json]` |
+
+### [core §8.6 The deployment catalog](core.md#86-the-deployment-catalog)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.6](core.md#86-the-deployment-catalog) | An implementation that reads a catalog MUST refuse it, naming the refusal, for the first of these that applies, in this order: (8 items) | `[F: catalog/documents.json]` |
+| [§8.6](core.md#86-the-deployment-catalog) | **The id.** … An implementation MUST compute it so. | `[F: catalog/ids.json]` |
+| [§8.6](core.md#86-the-deployment-catalog) | A checker of succession MUST refuse a B that does not succeed A, naming the first of these that applies, in this order: (4 items) | `[F: catalog/succession.json]` |
 
 ### [core §9.1 The authoring format](core.md#91-the-authoring-format)
 

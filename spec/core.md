@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.78** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.79** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -43,7 +43,7 @@ RFC 2119 and RFC 8174, when written in capitals.
   application source (explorers, CI, generators);
 - **implementation**: any software claiming conformance. The static rules
   bind it, whichever of the roles above it plays. They are the rules of §1,
-  §7.5, §7.6 and §9 that name no role, and the others §12 lists: those on what a
+  §7.5, §7.6, §8.6 and §9 that name no role, and the others §12 lists: those on what a
   contract states, those naming their lint code, and §3.3's rule for a
   descriptor checker. Each binds it where it does what the rule governs
   (§12).
@@ -612,6 +612,7 @@ reply, and waits for it as long as it chooses (§8.1).
   "service": "vehicle-01/navigation",
   "instance": "3fa9c2d41b7e0012",
   "run": "0003",
+  "catalog": "0319128a",
   "interfaces": [
     {"iface": "nav.v2", "contract": "sha256:…", "minor": 1, "token": true,
      "unavailable": [{"resource": "state/covariance", "cause": "config", "reason": "calibrating"}],
@@ -720,6 +721,15 @@ gate does not name.
   - A checker reads `run` as optional, so a descriptor that states none is
     not D000. Any other spelling than 4 or 8 lowercase hex digits is D002.
     `[F: descriptors/ok-run-wide, d000-run-*]`
+- **`catalog`** is the id of the catalog the instance writes under (§8.6),
+  as 8 lowercase hex digits.
+  - An owner given a catalog MUST state its id there.
+    `[F: descriptors/ok-catalog, d002-catalog-*]`
+  - An owner with none leaves the member out, and counts its `time`
+    fields from 0 (§8.6).
+  - A checker reads `catalog` as optional. Any other spelling than 8
+    lowercase hex digits is D002, and `null` is D000.
+    `[F: descriptors/ok-minimal, d002-catalog-*, d000-catalog-null]`
 - **`meta`** is informative: host, process, build, and nothing in it is
   checked. One member is used: an owner SHOULD state its session's zid
   as `meta.zid`, as the reference does. How a tool attributes a state
@@ -749,7 +759,7 @@ and reports these codes. `[F: descriptors/]`
 |---|---|---|---|
 | D000 | not strict JSON (a duplicate member included), or outside [`descriptor.schema.json`](descriptor.schema.json): an unknown or missing member, a value of the wrong type (an integer written with a fraction or an exponent included), an integer outside its `format` (`uint64`: 0 to 2^64−1), a `cause` not `build`, `config` or `capability` | error | once; stops the check |
 | D001 | `format` is not `zk2-descriptor/0.1` | error | once |
-| D002 | `service` is not `<system>/<service>`, two plain chunks; `instance` is not 16 lowercase hex digits; `run` is not 4 or 8 lowercase hex digits | error | per member |
+| D002 | `service` is not `<system>/<service>`, two plain chunks; `instance` is not 16 lowercase hex digits; `run` is not 4 or 8 lowercase hex digits; `catalog` is not 8 lowercase hex digits | error | per member |
 | D003 | an interface entry's `iface` is not an interface id; its `contract` is not a fingerprint (§1.2); or the interface is listed twice | error | per entry and condition |
 | D004 | the entry's interface is among the given contracts, but not at its fingerprint | error | per entry |
 | D005 | `unavailable` names a resource the contract does not declare, or a required one | error | per entry |
@@ -824,7 +834,9 @@ and reports these codes. `[F: descriptors/]`
      `[F: descriptors/ok-optional-unchecked]`
    - that `run` is stated: an owner states it (above), and a descriptor
      that states none is checked as any other is
-     `[F: descriptors/ok-minimal]`.
+     `[F: descriptors/ok-minimal]`;
+   - that `catalog` names a catalog the checker holds: it reads the id's
+     form, and a reader resolves it (§8.6) `[F: descriptors/ok-catalog]`.
 
 ---
 
@@ -1869,10 +1881,9 @@ width.
   epoch E, in 32 bits. With `ms`, (t − 1000 × E) modulo 1000 follows in 10
   bits. Without it, the milliseconds are dropped.
 - **The deployment epoch** E is a whole number of seconds since the Unix
-  epoch. Writer and reader each hold it as an input. This version carries
-  it nowhere, so a deployment states it to its writers and readers. One
-  that states none has E = 0, the Unix epoch: a `time` field's 32 bits
-  are then Unix seconds, to 2106.
+  epoch. Writer and reader each hold it as an input: the epoch of the
+  catalog in force (§8.6). Where none is, E is 0, the Unix epoch, and a
+  `time` field's 32 bits are Unix seconds, to 2106.
 - **Unused codes.** A code that is no value and no declared reserved code
   is unused. So is a millisecond code from 1000 to 1023. An enum with an
   escape has none.
@@ -2344,6 +2355,125 @@ facts.
   router as one principal, carrying the union of the grants the far side's
   sessions need.
 - **A router's timestamping** on the face: §8.2, "Session posture".
+
+### 8.6 The deployment catalog
+
+A **catalog** is a file that a deployment provisions to its owners, and to
+the far side of a constrained face (§8.5). It states the **deployment
+epoch**, which §7.6's `time` fields count from. It also gives each
+contract revision it lists an **index**. A later form can carry that
+small number in place of an interface id and a fingerprint. A catalog is
+never fetched, and no participant serves one on the bus, so no key form
+names one (§1.1).
+
+```json
+{
+  "format": "zk2-catalog/1",
+  "epoch": 1767225600,
+  "lineage": [{"id": "eddb48d5", "entries": 2}],
+  "entries": [
+    {"index": 0, "iface": "modem.v3", "contract": "sha256:…"},
+    {"index": 1, "iface": "config.v1", "contract": "sha256:…"},
+    {"index": 2, "iface": "health.v1", "contract": "sha256:…"}
+  ]
+}
+```
+
+**The document** is strict JSON: RFC 8259, with no member twice in one
+object. Its schema is [`catalog.schema.json`](catalog.schema.json). Its
+top level holds these members, and no other:
+
+| Member | Value |
+|---|---|
+| `format` | Exactly `zk2-catalog/1`. |
+| `epoch` | The deployment epoch: whole seconds since the Unix epoch, an integer from 0 to 2^53 − 1. |
+| `entries` | The revisions: an array of at most 1,024 entries, each an object holding `index`, `iface` and `contract`, and no other member. |
+| `lineage` | Optional, and never empty: every catalog this one succeeds, oldest first. Each item is an object holding that catalog's `id` and its count of `entries`, and no other member. A first catalog has none. |
+
+- **An integer** here is a JSON number written as digits alone, with no
+  sign, fraction or exponent. So `-0`, `1.0` and `1e3` are no integer.
+- **An entry's `index`** is its position in `entries`, from 0. Stating it
+  guards a hand edit. With at most 1,024 entries, an index fits in 10
+  bits.
+- **An entry's `iface`** is an interface id, and its `contract` a
+  fingerprint (§1.2). No two entries hold the same pair. An interface
+  appears once per revision it lists.
+- **A lineage item's `id`** is a catalog id (below), never an earlier
+  item's or the catalog's own. Its `entries` is at least the item
+  before it's, and at most this catalog's count of entries.
+
+**Reading.** An implementation that reads a catalog MUST refuse it,
+naming the refusal, for the first of these that applies, in this order:
+- it is not strict JSON (`json`);
+- its top level is not an object whose `format` is the string
+  `zk2-catalog/1` (`format`);
+- the top level lacks `epoch` or `entries`, or holds another member than
+  the four above (`member`);
+- `epoch` is not an integer from 0 to 2^53 − 1 (`epoch`);
+- `entries` is not an array of objects, or holds more than 1,024 (`entries`);
+- then, for each entry in order:
+  - it lacks `index`, `iface` or `contract`, or holds another member
+    (`member`);
+  - its `index` is not the integer of its position (`index`);
+  - its `iface` is not a string holding an interface id (`iface`);
+  - its `contract` is not a string holding a fingerprint (`contract`);
+  - its pair is an earlier entry's (`duplicate`);
+- then, where `lineage` is present, it is not a non-empty array of
+  objects (`lineage`);
+- then, for each lineage item in order:
+  - it lacks `id` or `entries`, or holds another member (`member`);
+  - its `id` or its `entries` breaks the document's rules above
+    (`lineage`).
+
+`[F: catalog/documents.json]`
+
+**The id.** A catalog's id is the first 4 bytes of the sha256 of its JCS
+bytes (RFC 8785), written as 8 lowercase hex digits. An implementation
+MUST compute it so. JCS reads the document, so neither its spacing nor
+its members' order moves its id. `[F: catalog/ids.json]`
+- **Four bytes** keep the id short where a later form carries it. Two
+  catalogs share an id about once in 2^32 pairs, and nothing in a reading
+  tells such two apart.
+
+**Succession.** A catalog B **succeeds** a catalog A when all three hold:
+- B's `lineage` is A's, followed by A's id and A's count of entries;
+- B's `epoch` is A's;
+- A's entries are B's first ones, each at its own index.
+
+A deployment MUST NOT change a catalog in force other than by provisioning
+one that succeeds it. So it never reassigns or removes an index, and
+never moves the epoch. `[F: catalog/succession.json]`
+
+A checker of succession MUST refuse a B that does not succeed A, naming
+the first of these that applies, in this order:
+- B's `epoch` is not A's (`epoch_moved`);
+- an index below A's count holds another pair in B (`reassigned`);
+- B holds fewer entries than A (`removed`);
+- B's `lineage` is not A's, followed by A's id and count (`lineage`).
+
+`[F: catalog/succession.json]`
+
+**The epoch in force.** An owner given a catalog counts its `time` fields
+from the catalog's epoch, and states its id in its descriptor (§3.3). An
+owner with none counts them from 0, the Unix epoch (§7.6). Across a
+constrained face no descriptor crosses (§8.5). There, which catalog an
+owner writes under is the deployment's word, as its bindings are (R7).
+
+**Reading an index.** A reader reads an index, or a time counted from the
+epoch, through the catalog the owner names.
+- **Through a successor.** A reader may instead read through a catalog
+  whose `lineage` holds that id. It then reads only the indices below
+  that item's count of entries, and the successor's epoch, which is the
+  same.
+- **No catalog named.** An owner that names none writes no index, and a
+  reader counts its times from 0.
+- **Never a guess.** A reader MUST refuse each of these:
+  - an id, when it holds neither that catalog nor one whose `lineage`
+    holds it (`unknown_catalog`);
+  - an index from an owner that names no catalog (`unknown_catalog`);
+  - an index at or above the count it reads through (`unknown_index`).
+
+  `[F: catalog/succession.json]`
 
 ---
 
@@ -3535,9 +3665,9 @@ The format is the generator's own. The reference reads an enrollment file
 
 Conformance is claimed by role. Five of §0's roles have a **class** each:
 that role's rules, and the static rules that bind every implementation
-(§0). The static rules are those of §1, §7.5, §7.6 and §9, and those on what a
+(§0). The static rules are those of §1, §7.5, §7.6, §8.6 and §9, and those on what a
 contract states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of
-any of these sections, §1, §7.5, §7.6 and §9 included, that names a role is that
+any of these sections, §1, §7.5, §7.6, §8.6 and §9 included, that names a role is that
 role's. A rule elsewhere that names the
 lint code checking it (§9.2) is static too, and so is §3.3's rule for a
 descriptor checker. A class holds its role's rules in this text and in
@@ -3545,7 +3675,8 @@ descriptor checker. A class holds its role's rules in this text and in
 
 **How a static rule binds.** A static rule binds an implementation where
 it does what the rule governs. Such acts are parsing or building a key,
-parsing or writing an envelope (§7.5) or a packed record (§7.6), slugging a value, linting a
+parsing or writing an envelope (§7.5) or a packed record (§7.6), reading a
+catalog or checking its succession (§8.6), slugging a value, linting a
 contract, building or verifying a bundle, checking a history and
 classifying a revision. A rule on what a contract
 states binds it through the contracts it writes and the lints it runs.
@@ -4145,6 +4276,7 @@ section each was written against, whose pointer leads on.
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
 | `conformance/errors/` | §5.2 |
 | `conformance/envelope/` | §7.5 |
+| `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover |
 | `scenarios/operations.md` | §5, §6 |
@@ -4316,6 +4448,13 @@ brief:
   and a record's bytes → the JSON reading, or the reader's refusal, the
   first in §7.6's order (`reads`). Every accepted write reads back under
   the type's tag, to its value or to the `reads_as` its case gives.
+- **`catalog/`**: a catalog's text → its id, or the reader's refusal,
+  the first in §8.6's order (`documents.json`). A catalog's text → its
+  JCS bytes, their sha256 and its id (`ids.json`). Named catalogs, each a
+  JSON value, then pairs of them → whether the second succeeds the first,
+  or the checker's refusal (`succession.json`'s `successions`). The
+  catalogs a reader holds, the id an owner names or none, and an index or
+  none → the epoch and the entry, or the reader's refusal (`reads`).
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).

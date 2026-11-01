@@ -1,0 +1,640 @@
+{
+  "description": "core §8.6, succession and a reader's resolution. Written by hand from the text, checked, never blessed. `catalogs` holds named catalogs as JSON values, each accepted as documents.json reads one, each lineage naming ids computed as ids.json says. `successions`: `previous` and `next` name two of them → `expect`, `\"succeeds\"` when next succeeds previous, else `{\"refused\": token}`, the first in §8.6's order: `epoch_moved` (next's epoch is not previous's), `reassigned` (an index below previous's count holds another pair in next), `removed` (next holds fewer entries), `lineage` (next's lineage is not previous's followed by previous's id and count). Succession is one step: a catalog two steps on does not succeed. `reads`: `held` names the catalogs a reader holds, in order; `catalog` is the id an owner names, or null for none; `index` is an index to read, or null for the epoch alone → `expect`: `epoch`, and with an index the entry's `iface` and `contract`; or `{\"refused\": token}`: `unknown_catalog` (no catalog held is it, and none holds it in its lineage; or an index with no catalog named), `unknown_index` (the index is at or above the count read through: the catalog's own, or its lineage item's). A reader reads through the named catalog itself when it holds it, else through the first held whose lineage holds it. An owner that names none dates its times from 0.",
+  "catalogs": {
+    "a": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        }
+      ]
+    },
+    "b": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 2
+        }
+      ]
+    },
+    "c": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        },
+        {
+          "index": 3,
+          "iface": "modem.v3",
+          "contract": "sha256:ea38eab240a4b114b9309b814afad4e77fcda547047fb9d94c062055c6acf119"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 2
+        },
+        {
+          "id": "0319128a",
+          "entries": 3
+        }
+      ]
+    },
+    "b-unchanged": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 2
+        }
+      ]
+    },
+    "b-epoch-moved": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225601,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 2
+        }
+      ]
+    },
+    "b-reassigned": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 1,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 2
+        }
+      ]
+    },
+    "b-removed": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 1
+        }
+      ]
+    },
+    "b-edited-in-place": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        }
+      ]
+    },
+    "b-wrong-count": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 1
+        }
+      ]
+    },
+    "b-wrong-id": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 1,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "00000000",
+          "entries": 2
+        }
+      ]
+    },
+    "b-moved-and-reassigned": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225601,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        },
+        {
+          "index": 1,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        },
+        {
+          "index": 2,
+          "iface": "health.v1",
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 2
+        }
+      ]
+    },
+    "b-reassigned-and-removed": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "config.v1",
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+        }
+      ],
+      "lineage": [
+        {
+          "id": "eddb48d5",
+          "entries": 1
+        }
+      ]
+    },
+    "b-removed-in-place": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "modem.v3",
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+        }
+      ]
+    },
+    "x": {
+      "format": "zk2-catalog/1",
+      "epoch": 0,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "freshness.v2",
+          "contract": "sha256:1593585dced3c8bed732a28e41905c9667fd7600b754cc4f81349a2c0e8fce85"
+        }
+      ]
+    }
+  },
+  "successions": [
+    {
+      "note": "a successor that appends one entry",
+      "previous": "a",
+      "next": "b",
+      "expect": "succeeds"
+    },
+    {
+      "note": "its successor in turn: the lineage grows by one item",
+      "previous": "b",
+      "next": "c",
+      "expect": "succeeds"
+    },
+    {
+      "note": "a successor that appends nothing: its lineage still names a",
+      "previous": "a",
+      "next": "b-unchanged",
+      "expect": "succeeds"
+    },
+    {
+      "note": "no catalog succeeds itself: its lineage does not name it",
+      "previous": "a",
+      "next": "a",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "succession is one step: c's lineage is not a's followed by a",
+      "previous": "a",
+      "next": "c",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "a predecessor never succeeds its successor",
+      "previous": "b",
+      "next": "a",
+      "expect": {
+        "refused": "removed"
+      }
+    },
+    {
+      "note": "the epoch moved",
+      "previous": "a",
+      "next": "b-epoch-moved",
+      "expect": {
+        "refused": "epoch_moved"
+      }
+    },
+    {
+      "note": "index 0 now holds config.v1",
+      "previous": "a",
+      "next": "b-reassigned",
+      "expect": {
+        "refused": "reassigned"
+      }
+    },
+    {
+      "note": "index 1 is gone, the lineage naming a with the count left: a lineage item's count is at most its catalog's, so one naming a's own count would be refused as read",
+      "previous": "a",
+      "next": "b-removed",
+      "expect": {
+        "refused": "removed"
+      }
+    },
+    {
+      "note": "entries appended, the lineage not extended: an edit in place",
+      "previous": "a",
+      "next": "b-edited-in-place",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "the lineage names a with a count it does not have",
+      "previous": "a",
+      "next": "b-wrong-count",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "the lineage names another catalog's id",
+      "previous": "a",
+      "next": "b-wrong-id",
+      "expect": {
+        "refused": "lineage"
+      }
+    },
+    {
+      "note": "the epoch before the entries",
+      "previous": "a",
+      "next": "b-moved-and-reassigned",
+      "expect": {
+        "refused": "epoch_moved"
+      }
+    },
+    {
+      "note": "a reassigned index before a removed one",
+      "previous": "a",
+      "next": "b-reassigned-and-removed",
+      "expect": {
+        "refused": "reassigned"
+      }
+    },
+    {
+      "note": "a removed index before the lineage",
+      "previous": "a",
+      "next": "b-removed-in-place",
+      "expect": {
+        "refused": "removed"
+      }
+    },
+    {
+      "note": "an unrelated catalog",
+      "previous": "a",
+      "next": "x",
+      "expect": {
+        "refused": "epoch_moved"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "the owner names the catalog held",
+      "held": [
+        "b"
+      ],
+      "catalog": "0319128a",
+      "index": 2,
+      "expect": {
+        "epoch": 1767225600,
+        "iface": "health.v1",
+        "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+      }
+    },
+    {
+      "note": "data under a, read through b, which succeeds it",
+      "held": [
+        "b"
+      ],
+      "catalog": "eddb48d5",
+      "index": 1,
+      "expect": {
+        "epoch": 1767225600,
+        "iface": "config.v1",
+        "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+      }
+    },
+    {
+      "note": "b holds index 2, but a did not: data under a cannot carry it",
+      "held": [
+        "b"
+      ],
+      "catalog": "eddb48d5",
+      "index": 2,
+      "expect": {
+        "refused": "unknown_index"
+      }
+    },
+    {
+      "note": "past b's own count",
+      "held": [
+        "b"
+      ],
+      "catalog": "0319128a",
+      "index": 3,
+      "expect": {
+        "refused": "unknown_index"
+      }
+    },
+    {
+      "note": "through c, whose lineage holds a two steps back",
+      "held": [
+        "c"
+      ],
+      "catalog": "eddb48d5",
+      "index": 0,
+      "expect": {
+        "epoch": 1767225600,
+        "iface": "modem.v3",
+        "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+      }
+    },
+    {
+      "note": "through c, for an index b held",
+      "held": [
+        "c"
+      ],
+      "catalog": "0319128a",
+      "index": 2,
+      "expect": {
+        "epoch": 1767225600,
+        "iface": "health.v1",
+        "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df"
+      }
+    },
+    {
+      "note": "a reader that holds only the predecessor cannot read its successor",
+      "held": [
+        "a"
+      ],
+      "catalog": "0319128a",
+      "index": 0,
+      "expect": {
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "a reader that holds b cannot read c",
+      "held": [
+        "b"
+      ],
+      "catalog": "703c0968",
+      "index": 0,
+      "expect": {
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "no catalog held",
+      "held": [],
+      "catalog": "eddb48d5",
+      "index": 0,
+      "expect": {
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "an unrelated catalog held",
+      "held": [
+        "x"
+      ],
+      "catalog": "eddb48d5",
+      "index": 0,
+      "expect": {
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "the epoch alone, through a successor",
+      "held": [
+        "b"
+      ],
+      "catalog": "eddb48d5",
+      "index": null,
+      "expect": {
+        "epoch": 1767225600
+      }
+    },
+    {
+      "note": "the epoch alone, of a catalog not held",
+      "held": [
+        "x"
+      ],
+      "catalog": "0319128a",
+      "index": null,
+      "expect": {
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "the owner names none: times count from 0",
+      "held": [
+        "b"
+      ],
+      "catalog": null,
+      "index": null,
+      "expect": {
+        "epoch": 0
+      }
+    },
+    {
+      "note": "the owner names none, and an index arrives",
+      "held": [
+        "b"
+      ],
+      "catalog": null,
+      "index": 0,
+      "expect": {
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "both held: the named one itself",
+      "held": [
+        "b",
+        "a"
+      ],
+      "catalog": "eddb48d5",
+      "index": 1,
+      "expect": {
+        "epoch": 1767225600,
+        "iface": "config.v1",
+        "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1"
+      }
+    },
+    {
+      "note": "the epoch of an unrelated catalog",
+      "held": [
+        "x"
+      ],
+      "catalog": "54ffdd45",
+      "index": null,
+      "expect": {
+        "epoch": 0
+      }
+    },
+    {
+      "note": "index 1023 is past a catalog of one entry",
+      "held": [
+        "x"
+      ],
+      "catalog": "54ffdd45",
+      "index": 1023,
+      "expect": {
+        "refused": "unknown_index"
+      }
+    }
+  ]
+}

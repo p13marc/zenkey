@@ -124,10 +124,10 @@ section number alone is the core's.
   caller or an owner where it reads
   ([observer §0](observer.md#0-conventions)).
 - **Static rule**: a rule that binds every implementation where it does
-  what the rule governs. Those are §1's, §7.5's, §7.6's, §9's, the
+  what the rule governs. Those are §1's, §7.5's, §7.6's, §8.6's, §9's, the
   contract rules of the sections §12 lists, any naming its lint code, and
-  §3.3's checker's. A rule of any of those sections, §1, §7.5, §7.6 and §9
-  included, that names a role is that role's
+  §3.3's checker's. A rule of any of those sections, §1, §7.5, §7.6, §8.6
+  and §9 included, that names a role is that role's
   ([§12](core.md#12-conformance-classes)).
 - **Expose**: an instance exposes a resource when it serves it, as its
   descriptor says ([§8.2](core.md#82-start-up-order)). It is **active** on
@@ -165,6 +165,14 @@ section number alone is the core's.
 - **Packed record**: bit fields, each as wide as its codes need
   ([§7.6](core.md#76-packed-records)). Its layout gives its envelope's
   tag.
+- **Catalog**: a file a deployment provisions to its owners and its far
+  side. It gives each contract revision it lists an index, and states the
+  deployment epoch. Nothing serves it on the bus
+  ([§8.6](core.md#86-the-deployment-catalog)).
+- **Deployment epoch**: the second since the Unix epoch that a packed
+  record's `time` fields count from ([§7.6](core.md#76-packed-records)).
+  It is the catalog's, or 0 where no catalog is in force
+  ([§8.6](core.md#86-the-deployment-catalog)).
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it
@@ -191,8 +199,9 @@ section number alone is the core's.
 | [`RULES.md`](RULES.md) | **The rule index**, generated from `core.md` and `observer.md`: every MUST, MUST NOT, SHOULD and SHOULD NOT, by the role it binds, then by section, with its rule id and its evidence. A stream-only owner's minimum path is its owner and implementation entries. CI fails when it is stale. | `scripts/gen-rules-index.py` |
 | [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 3. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
+| [`catalog.schema.json`](catalog.schema.json) | JSON Schema of the deployment catalog (core §8.6), generated the same way. The reading rules it cannot state are §8.6's. | `zenkey-model/src/catalog.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
-| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, packed records. | `zenkey-model/tests/conformance.rs` |
+| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, packed records, deployment catalogs. | `zenkey-model/tests/conformance.rs` |
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
 | [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. They are listed, each with its text version, status, who uses it and the core version it is written against, in [the index](profiles/README.md#index), those nobody uses yet (`experimental`) in a table of their own, beside the template and the process. | `zenkey-model/tests/profiles.rs` |
 | [`CHANGELOG.md`](CHANGELOG.md) | The amendments to `core.md` since its first accepted version, newest first | |

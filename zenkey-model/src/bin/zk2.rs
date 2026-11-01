@@ -7,19 +7,33 @@
 //! zk2 contract compat <old> <new>           (each a .toml or a .bundle.json)
 //! zk2 contract compat --history <root> <new.toml>
 //! zk2 contract check-history <root>
+//! zk2 catalog new [--epoch <secs>] [<contract>...]
+//! zk2 catalog add <catalog.json> <contract>...
+//! zk2 catalog id <catalog.json>
+//! zk2 catalog check <catalog.json> [--previous <catalog.json>] [<contract>...]
 //! ```
+//!
+//! A `<contract>` is a `.toml` contract or a `.bundle.json` bundle, as a
+//! history holds one. `catalog new` and `add` write the deployment catalog
+//! (core §8.6) to stdout as its JCS bytes: `new` a first catalog, and `add`
+//! the successor that appends what its input lacks, or that input unchanged
+//! when it lacks nothing.
 //!
 //! Exit codes follow zenctl's contract: 0 asked and clean, 1 asked and a
 //! finding (an invalid contract, a review or breaking change, a history
-//! problem), 2 no verdict (usage, an unreadable input).
+//! problem, a catalog refused, one that does not succeed its predecessor,
+//! or a contract it does not hold), 2 no verdict (usage, an unreadable
+//! input).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use zenkey_model::bundle::Bundle;
 use zenkey_model::canonical::Fingerprint;
+use zenkey_model::catalog::{Catalog, MAX_EPOCH, Pushed};
 use zenkey_model::compat::{Class, Revision, check_history, same_revision};
 use zenkey_model::contract::{Contract, load_path};
+use zenkey_model::grammar::IfaceId;
 use zenkey_model::history;
 
 const USAGE: &str = "usage:
@@ -28,7 +42,11 @@ const USAGE: &str = "usage:
   zk2 contract bundle <file.toml> [--history <root>]
   zk2 contract compat <old> <new>
   zk2 contract compat --history <root> <new.toml>
-  zk2 contract check-history <root>";
+  zk2 contract check-history <root>
+  zk2 catalog new [--epoch <secs>] [<contract>...]
+  zk2 catalog add <catalog.json> <contract>...
+  zk2 catalog id <catalog.json>
+  zk2 catalog check <catalog.json> [--previous <catalog.json>] [<contract>...]";
 
 fn no_verdict(msg: &str) -> ExitCode {
     eprintln!("zk2: {msg}");
@@ -46,6 +64,12 @@ fn main() -> ExitCode {
         ["contract", "compat", "--history", root, file] => compat_history(root, file),
         ["contract", "compat", old, new] => compat(old, new),
         ["contract", "check-history", root] => check(root),
+        ["catalog", "new", rest @ ..] => catalog_new(rest),
+        ["catalog", "add", file, contracts @ ..] if !contracts.is_empty() => {
+            catalog_add(file, contracts)
+        }
+        ["catalog", "id", file] => catalog_id(file),
+        ["catalog", "check", file, rest @ ..] => catalog_check(file, rest),
         ["--help" | "-h" | "help"] => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -199,5 +223,192 @@ fn check(root: &str) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+/// A catalog file, read; its refusal printed (exit 1), or an unreadable file
+/// (exit 2).
+fn read_catalog(file: &str) -> Result<Catalog, ExitCode> {
+    let bytes = std::fs::read(file).map_err(|e| no_verdict(&format!("{file}: {e}")))?;
+    Catalog::parse_bytes(&bytes).map_err(|e| {
+        println!("{file}: refused [{}]: {e}", e.token());
+        ExitCode::from(1)
+    })
+}
+
+/// The interface and fingerprint of a contract or a bundle file.
+fn revision_of(file: &str) -> Result<(IfaceId, Fingerprint), ExitCode> {
+    if file.ends_with(".bundle.json") {
+        let bytes = std::fs::read(file).map_err(|e| no_verdict(&format!("{file}: {e}")))?;
+        let b = Bundle::verify(&bytes).map_err(|e| {
+            eprintln!("{file}: {e}");
+            ExitCode::from(1)
+        })?;
+        let iface = b
+            .contract
+            .get("interface")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<IfaceId>().ok())
+            .ok_or_else(|| {
+                eprintln!("{file}: the bundle names no interface id");
+                ExitCode::from(1)
+            })?;
+        Ok((iface, b.fingerprint()))
+    } else {
+        if !Path::new(file).is_file() {
+            return Err(no_verdict(&format!("{file}: no such file")));
+        }
+        load(file)
+            .map(|c| (c.iface.clone(), Fingerprint::of(&c)))
+            .ok_or(ExitCode::from(1))
+    }
+}
+
+/// Appends each revision, saying on stderr where each one went.
+fn push_all(c: &mut Catalog, files: &[&str]) -> Result<(), ExitCode> {
+    for f in files {
+        let (iface, fp) = revision_of(f)?;
+        match c.push(iface.clone(), fp.clone()) {
+            Ok(Pushed::Added(i)) => eprintln!("index {i}: {iface} {fp}"),
+            Ok(Pushed::Held(i)) => eprintln!("already at index {i}: {iface} {fp}"),
+            Err(e) => {
+                println!("{f}: refused [{}]: {e}", e.token());
+                return Err(ExitCode::from(1));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The catalog's JCS bytes on stdout, and its id on stderr.
+fn write_catalog(c: &Catalog) -> ExitCode {
+    // What a reader refuses is never written: the bytes are read back first.
+    match Catalog::parse_bytes(&c.to_jcs()) {
+        Ok(read) if &read == c => {}
+        other => {
+            eprintln!("refused as written: {other:?}");
+            return ExitCode::from(1);
+        }
+    }
+    println!("{}", String::from_utf8_lossy(&c.to_jcs()));
+    eprintln!(
+        "catalog {}: epoch {}, {} entries",
+        c.id(),
+        c.epoch(),
+        c.entries().len()
+    );
+    ExitCode::SUCCESS
+}
+
+fn catalog_new(args: &[&str]) -> ExitCode {
+    let (epoch, files) = match args {
+        ["--epoch", e, rest @ ..] => match epoch_arg(e) {
+            Some(e) => (e, rest),
+            None => {
+                return no_verdict(&format!(
+                    "--epoch {e}: not whole seconds from 0 to 2^53 - 1\n{USAGE}"
+                ));
+            }
+        },
+        rest => (zenkey_model::catalog::EPOCH_WITHOUT_CATALOG, rest),
+    };
+    if files.iter().any(|f| f.starts_with("--")) {
+        return no_verdict(&format!("unknown arguments\n{USAGE}"));
+    }
+    let mut c = Catalog::new(epoch).expect("the epoch is in range");
+    if let Err(code) = push_all(&mut c, files) {
+        return code;
+    }
+    write_catalog(&c)
+}
+
+/// An epoch argument: digits alone, as the catalog writes them, so `+1`,
+/// `01` and `1e9` are refused, from 0 to 2^53 − 1.
+fn epoch_arg(e: &str) -> Option<i64> {
+    let digits = !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit());
+    let canonical = e == "0" || !e.starts_with('0');
+    let e: i64 = e.parse().ok().filter(|_| digits && canonical)?;
+    (0..=MAX_EPOCH).contains(&e).then_some(e)
+}
+
+fn catalog_add(file: &str, files: &[&str]) -> ExitCode {
+    let old = match read_catalog(file) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let mut new = old.successor();
+    if let Err(code) = push_all(&mut new, files) {
+        return code;
+    }
+    if new.entries().len() == old.entries().len() {
+        eprintln!("nothing to add: {file} is unchanged");
+        return write_catalog(&old);
+    }
+    eprintln!("succeeds {}", old.id());
+    write_catalog(&new)
+}
+
+fn catalog_id(file: &str) -> ExitCode {
+    match read_catalog(file) {
+        Ok(c) => {
+            println!("{}", c.id());
+            ExitCode::SUCCESS
+        }
+        Err(code) => code,
+    }
+}
+
+fn catalog_check(file: &str, args: &[&str]) -> ExitCode {
+    let (previous, files) = match args {
+        ["--previous", p, rest @ ..] => (Some(*p), rest),
+        rest => (None, rest),
+    };
+    if files.iter().any(|f| f.starts_with("--")) {
+        return no_verdict(&format!("unknown arguments\n{USAGE}"));
+    }
+    let c = match read_catalog(file) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let previous = match previous.map(read_catalog).transpose() {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    println!(
+        "{file}: catalog {}, epoch {}, {} entries",
+        c.id(),
+        c.epoch(),
+        c.entries().len()
+    );
+    for (i, e) in c.entries().iter().enumerate() {
+        println!("  {i} {} {}", e.iface, e.contract);
+    }
+    let mut finding = false;
+    if let Some(p) = &previous {
+        match c.succeeds(p) {
+            Ok(()) => println!("succeeds {}", p.id()),
+            Err(s) => {
+                println!("does not succeed {} [{}]: {s}", p.id(), s.token());
+                finding = true;
+            }
+        }
+    }
+    for f in files {
+        let (iface, fp) = match revision_of(f) {
+            Ok(r) => r,
+            Err(code) => return code,
+        };
+        match c.index_of(&iface, &fp) {
+            Some(i) => println!("{f}: {iface} {fp} at index {i}"),
+            None => {
+                println!("{f}: {iface} {fp} is not held");
+                finding = true;
+            }
+        }
+    }
+    if finding {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }

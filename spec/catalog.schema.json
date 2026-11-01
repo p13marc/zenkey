@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Catalog",
+  "description": "A deployment catalog (core §8.6), as `zk2 catalog` writes it. This\nschema cannot state all of §8.6's reading: an entry's index at its\nposition, no pair twice, a lineage's ids and counts, and an integer\nwritten as digits alone are the reading's alone.",
+  "type": "object",
+  "properties": {
+    "entries": {
+      "description": "The revisions, each at the index of its position: at most 1,024, and\nno pair twice. An interface appears once per revision.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DocumentEntry"
+      },
+      "maxItems": 1024
+    },
+    "epoch": {
+      "description": "The deployment epoch: whole seconds since the Unix epoch, which core\n§7.6's `time` fields count from.",
+      "type": "integer",
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "format": {
+      "description": "`zk2-catalog/1`.",
+      "type": "string",
+      "const": "zk2-catalog/1"
+    },
+    "lineage": {
+      "description": "Every catalog this one succeeds, oldest first. Absent for a first\ncatalog, and never empty.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DocumentAncestor"
+      },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "epoch",
+    "entries"
+  ],
+  "$defs": {
+    "DocumentAncestor": {
+      "description": "A catalog this one succeeds.",
+      "type": "object",
+      "properties": {
+        "entries": {
+          "description": "Its count of entries: at least the item before it's, and at most this\ncatalog's.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 1024,
+          "minimum": 0
+        },
+        "id": {
+          "description": "Its id: 8 lowercase hex digits.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "entries"
+      ]
+    },
+    "DocumentEntry": {
+      "description": "One revision at its index.",
+      "type": "object",
+      "properties": {
+        "contract": {
+          "description": "The revision's fingerprint, `sha256:` and 64 lowercase hex digits.",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "iface": {
+          "description": "The interface id, `<name>.v<major>`.",
+          "type": "string"
+        },
+        "index": {
+          "description": "Its position in `entries`, from 0.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 1023,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "iface",
+        "contract"
+      ]
+    }
+  }
+}
