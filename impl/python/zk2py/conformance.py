@@ -3534,7 +3534,7 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "An implementation MUST NOT write a record for an object that holds a member its type does not "
                  "have, or lacks a field that is not optional.")
          + missing(rules, "An implementation MUST NOT write a record for an object that holds a member its type "
-                          "does not have, or lacks a field that is not optional.", "| Every rule, once | 192 |")
+                          "does not have, or lacks a field that is not optional.", "| Every rule, once |")
          + present(core, "a fixed-point value as a string or a number"), []),
         ("F-426: a JSON number is read as the binary64 a JSON reader holds for it, by its shortest text",
          missing(core, "is read as the binary64 a JSON reader holds for it, by that double's shortest decimal "
