@@ -47,6 +47,7 @@ pub mod configure;
 pub mod doctor;
 pub mod echo;
 pub mod expansion;
+pub mod frame;
 pub mod history;
 pub mod keyfacts;
 pub mod link;

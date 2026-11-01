@@ -185,7 +185,13 @@ pub(crate) fn apply_tick(
         } else {
             slot.timing_now = None;
         }
-        slot.refresh_series(identities);
+        slot.refresh_series(identities, &|a| {
+            if live {
+                dep.epoch_of(a)
+            } else {
+                zenkey_fleet::DeploymentEpoch::Assumed
+            }
+        });
     }
     // The tree's shape survived, so point it at this tick's numbers
     // instead of walking 50,000 nodes to move eight of them (#177).

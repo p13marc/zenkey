@@ -434,6 +434,10 @@ pub struct SeriesData {
     /// deadline and lifespan, and the window's own view of its deadline and
     /// period over the recorded history (`crate::timing`).
     pub timing: Option<std::sync::Arc<crate::timing::TimingRead>>,
+    /// The key's frames (core §7.7, #981's K2): its newest frame's records
+    /// and field states, the window's own view over the recorded history
+    /// (`crate::frame`).
+    pub frame: Option<std::sync::Arc<crate::frame::FrameRead>>,
     /// Retained geometry for the two charts (#178).
     ///
     /// A `canvas::Cache` has to outlive the frame to be worth anything, and
@@ -528,6 +532,13 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
     // — Value: the read the key's identity asks (#614, FL8a), hex beside
     // decoded where the read kept bytes.
     col = col.push(value_section(&data));
+
+    // — Frame: a frame resource's newest frame, each record at its seq and
+    // time, every field in its state (core §7.7, observer §7.6): the
+    // stream's value, read over the recorded history.
+    if let Some(f) = data.series.and_then(|s| s.frame.as_deref()) {
+        col = col.push(frame_section(f, sp));
+    }
 
     // — Series: sparklines over the recorded history (issue #64).
     if let Some(series) = data.series
@@ -1476,6 +1487,76 @@ fn timing_badge<'a>(
 /// own view of §5's deadline and period questions, each the model's
 /// answer, the misses with the owner's state the presence link gave, and
 /// the lifespan said not judged here (no ε).
+/// A frame resource's newest frame (core §7.7, observer §7.6; #981's K2):
+/// its head, then a record a block, its seq and time (a scheduled one says
+/// so, with its jitter), and a field a line in its state, an `unknown` or
+/// `absent` field with no value.
+fn frame_section<'a>(f: &'a crate::frame::FrameRead, sp: Spacing) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::eyebrow("FRAME"));
+    col = col.push(
+        row![
+            kit::data_chip(f.declared.clone()),
+            kit::muted(f.table.clone()),
+        ]
+        .spacing(sp.xs)
+        .align_y(iced::Alignment::Center),
+    );
+    let Some(newest) = &f.newest else {
+        col = col.push(match &f.undecodable {
+            Some(why) => kit::error(format!("the newest frame read no value: {why}")),
+            None => kit::muted("no frame read yet — the ring holds none its layout reads"),
+        });
+        return col.into();
+    };
+    if let Some(note) = &f.epoch_note {
+        col = col.push(kit::muted(format!("its time fields: {note}")));
+    }
+    let lines = f.lines();
+    if let Some(head) = lines.first() {
+        col = col.push(kit::caption(format!("newest: {head}")).font(face::MONO));
+    }
+    let records = newest["records"].as_array().cloned().unwrap_or_default();
+    for (r, line) in records.iter().zip(lines.iter().skip(1)) {
+        let (when, _) = line.split_once(": ").unwrap_or((line.as_str(), ""));
+        col = col.push(kit::caption(when.to_owned()).font(face::MONO));
+        if let Some(fields) = r["fields"].as_object() {
+            for (name, v) in fields {
+                let state = match v["state"].as_str() {
+                    Some("known") => format!("known {}", v["value"]),
+                    Some("within") => format!(
+                        "within {} ±{}",
+                        v["value"],
+                        v["delta"].as_str().unwrap_or("?")
+                    ),
+                    Some("absent") => "absent".to_owned(),
+                    _ => format!("unknown ({})", v["why"].as_str().unwrap_or("?")),
+                };
+                col = col.push(
+                    row![
+                        kit::caption(name.clone()).font(face::MONO),
+                        kit::data_chip(state)
+                    ]
+                    .spacing(sp.xs)
+                    .align_y(iced::Alignment::Center),
+                );
+            }
+        }
+    }
+    let mut notes = format!(
+        "{} read from the history, {} refused",
+        kit::plural(f.frames, "frame"),
+        f.refused
+    );
+    if f.evicted {
+        notes.push_str(
+            " — the ring evicted older entries, so its oldest kept frame is the first read",
+        );
+    }
+    col = col.push(kit::muted(notes));
+    col.into()
+}
+
 fn timing_section<'a>(t: &'a crate::timing::TimingRead, sp: Spacing) -> Element<'a, Message> {
     use zenkey_model::timing::Question;
     let mut col = Column::new().spacing(sp.xs);

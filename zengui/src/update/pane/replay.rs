@@ -398,7 +398,8 @@ fn open(
     work.echo.echo.clear();
     for slot in sub.all_mut() {
         slot.history = None;
-        slot.refresh_series(&dep.identity);
+        // A replay's lens holds no catalog: its epoch is assumed.
+        slot.refresh_series(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
     }
     state.resolve_offline(
         dep.namespace(),

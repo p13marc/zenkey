@@ -16,8 +16,8 @@ use zengui::prefs::{Density, LayoutPreset, Prefs, ThemeChoice};
 use zengui::view::palette::{Overlay, PaletteMsg};
 
 use super::{
-    BYTES, DROPS, ETH0, FRAMES, HEALTH, LATENCY, PACKED_READING, PACKED_SENSOR, POSITION,
-    TWIST_CMD, TX_BYTES, USED, World, send, window,
+    BYTES, DROPS, ETH0, FRAME_LINK, FRAME_SAMPLE, FRAMES, HEALTH, LATENCY, PACKED_READING,
+    PACKED_SENSOR, POSITION, TWIST_CMD, TX_BYTES, USED, World, send, window,
 };
 
 pub struct Scene {
@@ -278,6 +278,24 @@ pub const ALL: &[Scene] = &[
         size: DESKTOP,
         build: packed_sensor,
         landmark: "contract-decoded <packed:Sensor>",
+    },
+    // A frame resource in the Inspector (#981 K2, core §7.7, observer
+    // §7.6): its newest frame, hand-written and enveloped, read by the
+    // window's reader over the history ring after a frame was lost, so the
+    // fields it omits are unknown, never their last value.
+    Scene {
+        name: "inspector-frame-lost",
+        size: DESKTOP,
+        build: frame_lost,
+        landmark: "newest: run 0001, seq 14, 1 record lost before it",
+    },
+    // A frame of three records: the second scheduled, shown so with its
+    // jitter, the third measured at its offset.
+    Scene {
+        name: "inspector-frame-scheduled",
+        size: DESKTOP,
+        build: frame_scheduled,
+        landmark: "#25 t=7450.000 scheduled ±500 ms",
     },
     // telemetry.v1 in the Inspector (#819, TD). A Point counter, unit `1`,
     // its epoch in the Point: the plotted leaf is `value.value`, its §2.11
@@ -1352,6 +1370,35 @@ fn packed_sensor(theme: ThemeChoice) -> Zengui {
     world.verdicts(&mut app);
     preset(&mut app, LayoutPreset::Explore);
     app
+}
+
+/// `lab/modem`'s `key` (#981 K2) selected before its traffic, so its
+/// history holds `ticks` of it, in the Explore layout.
+fn framed(theme: ThemeChoice, key: &str, ticks: u32) -> Zengui {
+    let mut app = window(prefs(theme));
+    let mut world = World::framed();
+    world.connect(&mut app);
+    world.tick(&mut app);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(key.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(key.into()))),
+    );
+    world.ticks(&mut app, ticks);
+    world.verdicts(&mut app);
+    preset(&mut app, LayoutPreset::Explore);
+    app
+}
+
+fn frame_lost(theme: ThemeChoice) -> Zengui {
+    framed(theme, FRAME_LINK, 14)
+}
+
+fn frame_scheduled(theme: ThemeChoice) -> Zengui {
+    framed(theme, FRAME_SAMPLE, 8)
 }
 
 fn timing_missed(theme: ThemeChoice) -> Zengui {

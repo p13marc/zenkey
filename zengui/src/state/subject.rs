@@ -155,9 +155,17 @@ impl SubjectSlot {
     /// or a replay's offline one (#614, FL7) — because a metric's kind and
     /// unit are *contract* facts about the key, not something the history
     /// ring knows (`telemetry.v1` §2.5; #819, TD).
-    pub(crate) fn refresh_series(&mut self, identities: &crate::keyfacts::IdentityCache) {
+    ///
+    /// `epoch_of` is the epoch in force for an owner (core §8.6,
+    /// `zenkey_fleet::Lens::epoch_of`), which a frame's record type's
+    /// `time` fields read under ([`crate::frame`]).
+    pub(crate) fn refresh_series(
+        &mut self,
+        identities: &crate::keyfacts::IdentityCache,
+        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::DeploymentEpoch,
+    ) {
         self.advance_metric(identities);
-        self.series = self.series_data(identities);
+        self.series = self.series_data(identities, epoch_of);
     }
 
     /// Fold what the slot's ring appended into its metric member (#819,
@@ -197,6 +205,7 @@ impl SubjectSlot {
     fn series_data(
         &self,
         identities: &crate::keyfacts::IdentityCache,
+        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::DeploymentEpoch,
     ) -> Option<view::detail::SeriesData> {
         let rec = self.history.as_ref()?;
         let resolved = identities.get(&rec.key).and_then(|r| r.resolved.as_ref());
@@ -243,6 +252,9 @@ impl SubjectSlot {
             unit,
             metric,
             timing: self.timing_read(resolved),
+            frame: resolved
+                .and_then(|r| crate::frame::read(r, &rec.key, &rec.ring, epoch_of(&r.address)))
+                .map(std::sync::Arc::new),
         })
     }
 
@@ -380,7 +392,11 @@ impl SubjectState {
     /// landings route by slot id, so a report in flight for the follow slot
     /// must not be awaited by the pin (only the window *input* carries over;
     /// it is the user's, not the fleet's).
-    pub(crate) fn pin_current(&mut self, identities: &crate::keyfacts::IdentityCache) -> SlotId {
+    pub(crate) fn pin_current(
+        &mut self,
+        identities: &crate::keyfacts::IdentityCache,
+        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::DeploymentEpoch,
+    ) -> SlotId {
         let id = self.next_slot;
         self.next_slot = self.next_slot.next();
         let follow = &self.follow;
@@ -421,7 +437,7 @@ impl SubjectState {
             // keeps showing what the follow slot was showing.
             compare_snapshot: follow.compare_snapshot,
         };
-        slot.refresh_series(identities);
+        slot.refresh_series(identities, epoch_of);
         self.pins.push(slot);
         id
     }
@@ -463,7 +479,7 @@ mod tests {
         sub.follow.current = Subject::Key(key.into());
         sub.follow.history = Some(crate::history::HistoryRecorder::new(key, 10));
 
-        let pin = sub.pin_current(&dep.identity);
+        let pin = sub.pin_current(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
         assert!(pin.is_pin());
         let pinned = sub.slot(pin).expect("just minted");
         assert_eq!(pinned.current.key(), Some(key));
@@ -488,9 +504,9 @@ mod tests {
     fn slot_ids_are_not_reused() {
         let dep = dep();
         let mut sub = SubjectState::default();
-        let first = sub.pin_current(&dep.identity);
+        let first = sub.pin_current(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
         assert!(sub.unpin(first));
-        let second = sub.pin_current(&dep.identity);
+        let second = sub.pin_current(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
         assert_ne!(first, second);
         assert!(sub.slot(first).is_none());
     }
