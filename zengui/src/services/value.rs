@@ -195,19 +195,25 @@ pub(crate) fn replies(
     lens: &LensInputs,
     kind: ReadKind,
     selector: String,
-    mut answers: Vec<zenkey_fleet::FleetAnswer>,
+    answers: Vec<zenkey_fleet::FleetAnswer>,
     elided: u64,
     retention_s: Option<u64>,
     now: std::time::SystemTime,
 ) -> Replies {
-    // Newest first; `None` sorts last and the sort is stable, so the
-    // unstamped keep their arrival order behind the stamped.
-    answers.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
-        (Some(a), Some(b)) => b.cmp(a),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => std::cmp::Ordering::Equal,
-    });
+    // Newest first by each reply's mark (core §7.5): by seq within a run
+    // of zk2c envelopes, by stamp among Zenoh stamps, each run and the
+    // Zenoh-stamped in the order they first arrived, since nothing orders
+    // two of them; the unstamped keep their arrival order behind.
+    let marks: Vec<_> = answers
+        .iter()
+        .map(zenkey_fleet::FleetAnswer::mark)
+        .collect();
+    let mut answers: Vec<Option<zenkey_fleet::FleetAnswer>> =
+        answers.into_iter().map(Some).collect();
+    let answers: Vec<zenkey_fleet::FleetAnswer> = zenkey_fleet::model::inband::newest_first(&marks)
+        .into_iter()
+        .filter_map(|i| answers[i].take())
+        .collect();
     let over = lens.lens();
     let horizon = retention_s.and_then(|s| now.checked_sub(Duration::from_secs(s)));
     let mut errors = 0;
@@ -368,7 +374,9 @@ pub fn decode_then(
             // thread, rather than re-serialized on every redraw.
             (
                 fetched_key,
-                Arc::new(crate::value::DecodedValue::new(checked, &bytes)),
+                Arc::new(crate::value::DecodedValue::of_wire(
+                    checked, &wire_key, encoding, &bytes,
+                )),
             )
         },
         move |(k, d)| land(k, d),
@@ -612,5 +620,77 @@ mod tests {
         assert!(got.replies[0].delete, "the newest reply is the tombstone");
         assert!(got.replies[0].payload.is_empty());
         assert!(!got.replies[1].delete, "the put before it is a value");
+    }
+
+    /// A history's replies under a zk2c envelope (core §7.5; #976's A2)
+    /// sort newest first by seq within their run, whatever their Zenoh
+    /// stamps; a run arriving after them sorts after them, since nothing
+    /// orders two runs; and a refused envelope, never ordered, goes last.
+    #[test]
+    fn enveloped_replies_sort_by_seq_within_a_run() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let lens = LensInputs {
+            namespace: String::new(),
+            catalog: None,
+            store: zenkey_fleet::BundleStore::new(Duration::from_secs(1)),
+            contracts: None,
+            generation: 0,
+            feed: None,
+        };
+        let key = "zk2/lab/m/m.v1/state/level";
+        let at = |seconds: u64, payload: Vec<u8>| zenkey_fleet::FleetAnswer {
+            key: key.into(),
+            encoding: Some("zenoh/bytes".into()),
+            attachment: None,
+            timestamp: Some(zenoh::time::Timestamp::new(
+                zenoh::time::NTP64(seconds << 32),
+                "a1b2".parse().expect("an id"),
+            )),
+            kind: Some(zenoh::sample::SampleKind::Put),
+            answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(payload)),
+        };
+        let enveloped = |run: u16, seq: u32| {
+            Envelope {
+                tag: Tag::NONE,
+                stamp: Stamp {
+                    run: Run::U16(run),
+                    seq: Seq::new(seq).expect("a seq"),
+                },
+                record: format!("{run}.{seq}").as_bytes(),
+            }
+            .write()
+        };
+        let got = replies(
+            &lens,
+            ReadKind::Raw,
+            key.into(),
+            vec![
+                at(9, enveloped(1, 2)),
+                at(1, b"legacy".to_vec()),
+                at(5, enveloped(1, 7)),
+                at(7, enveloped(2, 1)),
+            ],
+            0,
+            None,
+            std::time::SystemTime::now(),
+        );
+        let order: Vec<String> = got
+            .replies
+            .iter()
+            .map(|r| {
+                match zenkey_fleet::model::inband::payload(
+                    &r.key,
+                    Some(&r.encoding),
+                    &r.payload.to_bytes(),
+                ) {
+                    zenkey_fleet::model::inband::Payload::Record { record, .. } => {
+                        String::from_utf8_lossy(record).into_owned()
+                    }
+                    p => format!("{p:?}"),
+                }
+            })
+            .collect();
+        assert_eq!(order[..3], ["1.7", "1.2", "2.1"], "{order:?}");
+        assert!(order[3].starts_with("Refused"), "{order:?}");
     }
 }

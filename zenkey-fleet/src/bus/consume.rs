@@ -170,7 +170,8 @@ pub async fn get_state_answer(
                 value: StateValue::Value {
                     payload: Box::new(payload(revision, &key, &sample, Member::Type)),
                 },
-                // The owner's reply as it arrived (#765): a refcount bump.
+                // The owner's reply as it arrived (#765): a refcount bump;
+                // a zk2c envelope's record, which the runtime stripped.
                 bytes: Some(sample.payload().clone()),
                 key,
                 confirmed: None,
@@ -328,7 +329,9 @@ fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateR
                     revision,
                     &lk.origin,
                     Member::Type,
-                    encoding.as_deref(),
+                    encoding
+                        .as_deref()
+                        .and_then(crate::model::inband::delivered_encoding),
                     &bytes,
                 )),
             };
@@ -346,7 +349,9 @@ fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateR
     }
 }
 
-/// A sample's payload, rendered through `member`'s type.
+/// A sample the runtime read, its payload rendered through `member`'s
+/// type: a zk2c envelope's record is never stripped twice
+/// ([`crate::model::inband::delivered_encoding`]).
 fn payload(
     revision: &Revision,
     key: &str,
@@ -358,7 +363,7 @@ fn payload(
         revision,
         key,
         member,
-        Some(&encoding),
+        crate::model::inband::delivered_encoding(&encoding),
         &sample.payload().to_bytes(),
     )
 }

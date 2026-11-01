@@ -872,6 +872,9 @@ async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
                     "zk2/h5/fake/tc.netif.v1/state/interfaces/default/eth0",
                     "{}",
                 )
+                // Its type's predefined Encoding (core §7.2): under
+                // `zenoh/bytes` the reply would be a refused zk2c envelope.
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
                 .wait();
         })
         .await

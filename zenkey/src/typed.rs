@@ -322,7 +322,12 @@ pub struct Received<T> {
     /// The template's parameters, unslugged.
     pub values: Bindings,
     pub value: std::result::Result<T, String>,
+    /// The sample: its payload is an envelope's record, when it carried a
+    /// zk2c envelope (core §7.5).
     pub sample: Sample,
+    /// Its envelope's run and seq, when it carried one: what orders it
+    /// ([`crate::consumer::Delivery::inband`]).
+    pub inband: Option<zenkey_model::wire::Stamp>,
 }
 
 fn received<C: Codec>(d: Delivery, wire: Option<WireEncoding>) -> Received<C::Value> {
@@ -332,6 +337,7 @@ fn received<C: Codec>(d: Delivery, wire: Option<WireEncoding>) -> Received<C::Va
         resource: d.resource,
         values: d.values,
         sample: d.sample,
+        inband: d.inband,
     }
 }
 

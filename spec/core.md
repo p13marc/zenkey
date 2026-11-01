@@ -3727,6 +3727,9 @@ brief:
   in §7.5's order (`cases`). The parse is the form, the run's width in
   bits, the run, the seq, the tag, and the record in hex, `null` for a
   delete. Every header and every accepted case writes back to its bytes.
+  A key, as a session hears it, and the sample's `Encoding` → whether the
+  sample carries an envelope (`carries.json`, read by
+  [`observer.md`](observer.md) §7.3).
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).

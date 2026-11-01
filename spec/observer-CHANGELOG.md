@@ -13,6 +13,50 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.14 — 2026-11-01: §7.3 reads the zk2c envelope first (#976)
+
+Core 0.72 (#1000) defines the zk2c envelope (§7.5), and no rule adopts it
+yet. #976's flip will make owners write it. This text makes a tool read
+it first, so that the flip leaves every reader reading. It is written
+against core 0.72.
+
+**Changed: §7.3 gains a first step, "The envelope first," a MUST and a
+MUST NOT.** `RULES.md` lists both under observer.
+- **Which sample.** One on a zk2 data key whose kind is a stream, state
+  or an event, whose `Encoding` is `zenoh/bytes`. The key and the
+  `Encoding` tell it, with no contract.
+- **What it reads.** The envelope's record is the payload the later
+  steps decode, render or judge. A refused envelope is undecodable, with
+  the refusal named, and never read as a payload with no envelope.
+- **The bullet on an `Encoding` that names neither JSON nor CBOR.** It
+  still reads a type on its contract's `encoding`, an envelope's record
+  included. It no longer covers a stream, state or event sample under
+  `zenoh/bytes` with no envelope, which the new step reads.
+- **Evidence:** `conformance/envelope/carries.json`, a key and an
+  `Encoding` → whether the sample carries an envelope. Appendix B lists
+  it.
+
+**Why a reading rule changes now.** Zenoh's default `Encoding` is
+`zenoh/bytes`: a put that sets none carries it. Before 0.14, a tool read
+such a sample's bytes on its contract's `encoding`. Core §7.2 already
+asks an owner for its type's predefined `Encoding`, so no conforming
+owner sends a stream, state or event sample under `zenoh/bytes`. Only a
+put that broke §7.2 is read differently: as an envelope, and refused
+when it is none. That keeps the two wires apart during the flip: a
+sample under `zenoh/bytes` is never read both ways.
+
+**Deliberately not changed.**
+- **The core,** which stays 0.72. §7.5 already says how an envelope's
+  bytes parse and that its sample's `Encoding` is `zenoh/bytes`, and
+  §7.2 already asks the predefined `Encoding` of an owner. What a tool
+  does with such a sample is this text's.
+- **The order of a key's values.** §4.1 and core §4.2 and §4.3 state it
+  by the Zenoh timestamp, the only stamp a conforming owner's sample
+  carries before the flip. The reference already orders an envelope's
+  values by seq within one run, and across runs keeps the later arrival.
+  The flip states that order as a rule.
+- **No other rule, and no section number.**
+
 ## 0.13 — 2026-10-31: §3.8's note restated: a read on a token's own session can answer it (#992)
 
 Core 0.71 (#992) found that a session's read through a refusing router

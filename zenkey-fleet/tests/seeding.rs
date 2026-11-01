@@ -506,6 +506,11 @@ struct HeldOwner {
     id: TimestampId,
 }
 
+/// `mission_plan.v1.Plan`'s predefined Encoding (core §7.2): a put of
+/// a plan under zenoh's default, `zenoh/bytes`, would carry a zk2c
+/// envelope (§7.5) and read as a refused one, never merged.
+const PLAN: zenoh::bytes::Encoding = zenoh::bytes::Encoding::APPLICATION_PROTOBUF;
+
 impl HeldOwner {
     /// Declares the queryable, then a ready-probe after it, and waits until
     /// `joiner` reaches the probe: same-session declarations propagate in
@@ -578,6 +583,7 @@ impl HeldOwner {
     async fn put(&self, plan: &str, value: &str, n: u64) {
         self.session
             .put(self.key(plan), value.to_owned())
+            .encoding(PLAN)
             .timestamp(self.stamp(n))
             .await
             .expect("the owner's put");
@@ -662,6 +668,7 @@ async fn s10_a_late_joiners_seed() {
     o.put("c", "c-v1", 5).await;
     // 5. The answer, then the GET's end.
     q.reply(o.key("a"), "a-v1")
+        .encoding(PLAN)
         .timestamp(o.stamp(1))
         .await
         .expect("reply");
@@ -670,6 +677,7 @@ async fn s10_a_late_joiners_seed() {
         .await
         .expect("reply_del");
     q.reply(o.key("d"), "d-v1")
+        .encoding(PLAN)
         .timestamp(o.stamp(3))
         .await
         .expect("reply");
@@ -756,6 +764,7 @@ async fn s10_a_late_joiners_seed() {
     // answer is sent.
     ctl.put("c", "c-v1", 5).await;
     q.reply(ctl.key("a"), "a-v1")
+        .encoding(PLAN)
         .timestamp(ctl.stamp(1))
         .await
         .expect("reply");
@@ -1396,4 +1405,223 @@ async fn a_seeded_watchs_merge_counts_what_its_bound_forgot() {
         (1, 2),
         "a, then b, forgotten to admit c and a"
     );
+}
+
+/// An owner's state key under the zk2c envelope (core §7.5; #976's A2):
+/// a writer with no HLC that puts each value as an envelope under
+/// `zenoh/bytes` and answers GETs on its keys when the test chooses.
+struct Enveloping {
+    session: zenoh::Session,
+    queries: tokio::sync::mpsc::UnboundedReceiver<zenoh::query::Query>,
+    _queryable: zenoh::query::Queryable<()>,
+}
+
+const ENVELOPED: &str = "zk2/lab/env/m.v1/state";
+
+/// An envelope of run `run` and seq `seq` around `record`.
+fn enveloped(run: u16, seq: u32, record: &str) -> Vec<u8> {
+    use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+    Envelope {
+        tag: Tag::NONE,
+        stamp: Stamp {
+            run: Run::U16(run),
+            seq: Seq::new(seq).expect("a seq"),
+        },
+        record: record.as_bytes(),
+    }
+    .write()
+}
+
+impl Enveloping {
+    async fn new(writer: &zenoh::Session, joiner: &zenoh::Session) -> Self {
+        let (tx, queries) = tokio::sync::mpsc::unbounded_channel();
+        let ready = format!("{ENVELOPED}/ready");
+        let queryable = writer
+            .declare_queryable(format!("{ENVELOPED}/**"))
+            .callback({
+                let ready = ready.clone();
+                move |q| {
+                    if q.key_expr().as_str() == ready {
+                        let ready = ready.clone();
+                        tokio::spawn(async move {
+                            q.reply(ready, "ok").await.ok();
+                        });
+                    } else {
+                        let _ = tx.send(q);
+                    }
+                }
+            })
+            .await
+            .expect("the writer's queryable");
+        let deadline = tokio::time::Instant::now() + util::SETTLE;
+        loop {
+            let replies = joiner
+                .get(&ready)
+                .timeout(Duration::from_millis(300))
+                .await
+                .expect("probe get");
+            if replies.recv_async().await.is_ok() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "routing never converged"
+            );
+        }
+        Enveloping {
+            session: writer.clone(),
+            queries,
+            _queryable: queryable,
+        }
+    }
+
+    /// A live put of `bytes` on `key` under `zenoh/bytes`, zenoh's default.
+    async fn put(&self, key: &str, bytes: Vec<u8>) {
+        self.session
+            .put(format!("{ENVELOPED}/{key}"), bytes)
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+            .await
+            .expect("the writer's put");
+    }
+
+    async fn matched(&self) {
+        let publisher = self
+            .session
+            .declare_publisher(format!("{ENVELOPED}/probe"))
+            .await
+            .expect("publisher");
+        let deadline = tokio::time::Instant::now() + util::SETTLE;
+        while !publisher
+            .matching_status()
+            .await
+            .expect("matching status")
+            .matching()
+        {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the subscription never reached the writer"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn next_query(&mut self) -> zenoh::query::Query {
+        tokio::time::timeout(util::SETTLE, self.queries.recv())
+            .await
+            .expect("the GET reaches the writer")
+            .expect("queryable alive")
+    }
+}
+
+/// The next sample an enveloped seeded subscription admits: its key's last
+/// chunk, its record (or its refusal's reason) and its in-band stamp.
+async fn next_enveloped(
+    sub: &mut zenkey_fleet::SeededSubscriber,
+) -> (String, String, Option<(u32, u32)>) {
+    loop {
+        let item = tokio::time::timeout(util::SETTLE, sub.recv())
+            .await
+            .expect("a sample")
+            .expect("stream alive");
+        match item {
+            SeedItem::Sample(v) => {
+                let key = v.key.rsplit('/').next().unwrap_or_default().to_owned();
+                let record = match v.record() {
+                    Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+                    Err(r) => r.reason(),
+                };
+                let stamp = v.inband().map(|s| (s.run.value(), s.seq.get()));
+                return (key, record, stamp);
+            }
+            SeedItem::Dropped(n) => panic!("this fixture never outruns the channel ({n})"),
+            SeedItem::SeedComplete(_) => {}
+        }
+    }
+}
+
+/// A tool's late joiner over the zk2c envelope (core §7.5, observer §4.1;
+/// #976's A2): its seed's replies and its live samples are merged by run
+/// and seq. Within one run an older seq is superseded and an equal seq is
+/// the same value, kept once; across two runs nothing orders them, so the
+/// later arrival is kept; a refused envelope is delivered undecodable and
+/// moves nothing its key holds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_tools_seed_merges_enveloped_samples_by_run_and_seq() {
+    let (writer, joiner) = util::peer_pair().await;
+    let mut w = Enveloping::new(&writer, &joiner).await;
+    let mut sub = seed_subscribe(
+        &joiner,
+        &format!("{ENVELOPED}/**"),
+        SeedPolicy {
+            history: false,
+            state: true,
+            timeout: util::SETTLE,
+        },
+    )
+    .await
+    .expect("seed subscribe");
+    // 1. The writer holds the GET; live puts of `a` (run 1, seq 5) and `b`
+    //    (run 1, seq 2).
+    let q = w.next_query().await;
+    w.matched().await;
+    w.put("a", enveloped(1, 5, "a-5")).await;
+    w.put("b", enveloped(1, 2, "b-2")).await;
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("a".into(), "a-5".into(), Some((1, 5)))
+    );
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("b".into(), "b-2".into(), Some((1, 2)))
+    );
+    // 2. The answer: `a` at seq 4, older; `b` at seq 2, the same value
+    //    (S2: a reply is the stored bytes); `c` new.
+    for (key, bytes) in [
+        ("a", enveloped(1, 4, "a-4")),
+        ("b", enveloped(1, 2, "b-2")),
+        ("c", enveloped(1, 7, "c-7")),
+    ] {
+        q.reply(format!("{ENVELOPED}/{key}"), bytes)
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+            .await
+            .expect("reply");
+    }
+    drop(q);
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("c".into(), "c-7".into(), Some((1, 7))),
+        "a's older seq and b's equal one were not kept"
+    );
+    // 3. Live, after the seed: `a` under run 2 (across runs, kept), then
+    //    under run 1 again (across runs once more: the later arrival, kept);
+    //    a refused envelope on `a` (delivered, moving nothing); then run
+    //    1's seq 3 again (the same value as held, not kept), and a
+    //    sentinel.
+    w.put("a", enveloped(2, 1, "a-r2")).await;
+    w.put("a", enveloped(1, 3, "a-r1")).await;
+    w.put("a", br#"{"legacy":true}"#.to_vec()).await;
+    w.put("a", enveloped(1, 3, "a-r1")).await;
+    w.put("z", enveloped(1, 1, "sentinel")).await;
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("a".into(), "a-r2".into(), Some((2, 1))),
+        "another run: the later arrival"
+    );
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("a".into(), "a-r1".into(), Some((1, 3))),
+        "another run again: the later arrival, though its seq is lower"
+    );
+    let (key, reason, stamp) = next_enveloped(&mut sub).await;
+    assert_eq!((key.as_str(), stamp), ("a", None));
+    assert!(
+        reason.starts_with("zk2c envelope refused: "),
+        "a refused envelope is shown undecodable: {reason}"
+    );
+    assert_eq!(
+        next_enveloped(&mut sub).await,
+        ("z".into(), "sentinel".into(), Some((1, 1))),
+        "a's held run 1 seq 3 stood through the refusal: its copy was not kept"
+    );
+    assert_eq!(sub.superseded(), 3, "a-4, b-2's reply, and a-r1's copy");
 }

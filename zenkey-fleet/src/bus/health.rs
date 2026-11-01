@@ -170,11 +170,16 @@ impl StatusValue {
                 reason: s.reason,
                 since_ns: s.since_ns,
             },
-            Err(_) => StatusValue {
-                level: Read::Undecodable,
-                reason: String::new(),
-                since_ns: 0,
-            },
+            Err(_) => StatusValue::undecodable(),
+        }
+    }
+
+    /// A payload that does not decode: [`Read::Undecodable`].
+    pub fn undecodable() -> StatusValue {
+        StatusValue {
+            level: Read::Undecodable,
+            reason: String::new(),
+            since_ns: 0,
         }
     }
 }
@@ -194,10 +199,15 @@ impl CheckValue {
                 level: c.read(),
                 detail: c.detail,
             },
-            Err(_) => CheckValue {
-                level: Read::Undecodable,
-                detail: String::new(),
-            },
+            Err(_) => CheckValue::undecodable(),
+        }
+    }
+
+    /// A payload that does not decode: [`Read::Undecodable`].
+    pub fn undecodable() -> CheckValue {
+        CheckValue {
+            level: Read::Undecodable,
+            detail: String::new(),
         }
     }
 }
@@ -581,12 +591,17 @@ pub async fn get(
             continue;
         };
         let stamp = Stamped::of(sample);
-        let bytes = (sample.kind() == SampleKind::Put).then(|| sample.payload().to_bytes());
+        // The envelope first (core §7.5): a payload is its record, a refused
+        // envelope undecodable.
+        let bytes = (sample.kind() == SampleKind::Put)
+            .then(|| crate::model::inband::record_of(sample).ok());
         let got = out.services.entry(addr).or_default();
         match resource.as_slice() {
             [s] if s == hm::STATUS => {
                 got.status = Some(Replied {
-                    value: bytes.map(|b| StatusValue::decode(&b)),
+                    value: bytes.map(|b| {
+                        b.map_or_else(StatusValue::undecodable, |b| StatusValue::decode(&b))
+                    }),
                     stamp,
                 });
             }
@@ -594,7 +609,9 @@ pub async fn get(
                 got.checks.insert(
                     name.clone(),
                     Replied {
-                        value: bytes.map(|b| CheckValue::decode(&b)),
+                        value: bytes.map(|b| {
+                            b.map_or_else(CheckValue::undecodable, |b| CheckValue::decode(&b))
+                        }),
                         stamp,
                     },
                 );

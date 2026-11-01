@@ -99,7 +99,13 @@ impl EchoLine {
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(zenkey_fleet::structural(&view.payload.to_bytes()))
+            // The envelope first (core §7.5, observer §7.3): the record is
+            // sniffed, a refused envelope never is.
+            truncate(zenkey_fleet::model::inband::structural_text(
+                &view.key,
+                Some(&view.encoding),
+                &view.payload.to_bytes(),
+            ))
         };
         let attachment = view.attachment.as_ref().map(|a| {
             let alen = a.len();
@@ -309,6 +315,44 @@ mod tests {
         let gone = EchoLine::render(3, &view(b"", zenoh::sample::SampleKind::Delete));
         assert!(gone.spans.is_empty());
         assert_eq!(gone.preview, "<delete>");
+    }
+
+    /// The envelope first (core §7.5, observer §7.3; #976's A2): a zk2
+    /// state sample under `zenoh/bytes` previews its zk2c envelope's
+    /// record, and a refused one its refusal, never its bytes sniffed.
+    #[test]
+    fn a_line_previews_an_envelopes_record() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let view = |payload: Vec<u8>| zenkey_fleet::SampleView {
+            key: "zk2/lab/m/m.v1/state/level".into(),
+            payload: zenoh::bytes::ZBytes::from(payload),
+            encoding: "zenoh/bytes".into(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: std::time::Instant::now(),
+        };
+        let envelope = Envelope {
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U16(1),
+                seq: Seq::new(1).expect("a seq"),
+            },
+            record: br#"{"value":1}"#,
+        }
+        .write();
+        assert_eq!(
+            EchoLine::render(1, &view(envelope)).preview,
+            r#"{"value":1}"#
+        );
+        let refused = EchoLine::render(2, &view(br#"{"value":1}"#.to_vec())).preview;
+        assert!(refused.contains("zk2c envelope refused: "), "{refused}");
     }
 
     fn line(seq: u64, key: &str, preview_len: usize) -> EchoLine {

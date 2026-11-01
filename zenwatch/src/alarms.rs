@@ -1245,6 +1245,64 @@ mod tests {
         (n.state, n.prior, n.severity.as_deref())
     }
 
+    /// An alarm under a zk2c envelope (core §7.5; #976's A2), read by the
+    /// fleet's book: a raise fires; within its run a lower seq is older and
+    /// says nothing, whatever its document; another run's escalation is
+    /// news; a refused envelope is never read as a document.
+    #[test]
+    fn an_enveloped_alarm_is_merged_by_run_and_seq() {
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let at = |run: u16, seq: u32| {
+            Some(Ok(Stamp {
+                run: Run::U16(run),
+                seq: Seq::new(seq).unwrap(),
+            }))
+        };
+        let mut b = book(false);
+        let mut r = rule();
+        let sub = AlarmVia::Subscription;
+        let mut feed = |b: &mut AlarmBook, s: AlarmSample, e| {
+            let t = b.sample_enveloped(s, e)?;
+            r.judge(&t, b, false, "t")
+        };
+        let n = feed(
+            &mut b,
+            put(doc("warning", "firing", 1, "down"), sub),
+            at(1, 5),
+        )
+        .unwrap();
+        assert_eq!(says(&n), (CondState::Firing, None, Some("warning")));
+        assert!(
+            feed(
+                &mut b,
+                put(doc("critical", "firing", 2, "down"), sub),
+                at(1, 4)
+            )
+            .is_none(),
+            "a lower seq within the run is older"
+        );
+        let n = feed(
+            &mut b,
+            put(doc("critical", "firing", 2, "down"), sub),
+            at(2, 1),
+        )
+        .unwrap();
+        assert_eq!(
+            says(&n),
+            (CondState::Firing, Some(CondState::Firing), Some("critical"))
+        );
+        let refused = zenkey_model::wire::Envelope::parse(b"").unwrap_err();
+        let n = feed(
+            &mut b,
+            put(doc("critical", "resolved", 3, "up"), sub),
+            Some(Err(refused)),
+        );
+        assert!(
+            n.as_ref().is_none_or(|n| n.state != CondState::Ok),
+            "a refused envelope resolves nothing: {n:?}"
+        );
+    }
+
     /// §2.6 as notices: a raise fires at its document's severity, a refresh
     /// and a confirmation say nothing, an escalation is news in its own
     /// words, a resolve resolves, and its delete says nothing more; a

@@ -8,7 +8,13 @@
 //! - **It answers GETs only,** with a JSON attachment
 //!   `{"iface", "contract", "type", "confirmed"}`.
 //! - **It refuses a put older than what it holds**, a delete included: the
-//!   storage manager of zenoh 1.10.1 does not, and resurrects keys.
+//!   storage manager of zenoh 1.10.1 does not, and resurrects keys. A
+//!   mutation under a zk2c envelope (core §7.5) is ordered by its run and
+//!   seq ([`crate::inband`]), so an outdated one is refused only within a
+//!   run: nothing orders two runs, nor a run beside a Zenoh timestamp
+//!   (`zenkey_model::seed::versus`). It records the owner's bytes as they
+//!   arrived, envelope and all, and answers with them; a delete's in-band
+//!   stamp rides its `reply_del` as the attachment it arrived with.
 //! - **Alignment:** when an owner becomes reachable, it re-reads the owner's
 //!   recorded collection; while the owner is absent, it re-reads an archive
 //!   on the owner's side. It drops a key only on a `reply_del`; a key the
@@ -32,6 +38,7 @@ use zenkey_model::bundle::Bundle;
 use zenkey_model::contract::{Contract, load_str};
 use zenkey_model::decode::type_of;
 use zenkey_model::grammar::{Addr, IfaceId, ZkKey, parse};
+use zenkey_model::seed::{Mark, Versus, versus};
 use zenkey_model::slug::{chunk_slug, chunk_unslug};
 use zenkey_model::template::Bindings;
 use zenoh::Wait;
@@ -114,10 +121,34 @@ pub struct ArchiveConfig {
 #[derive(Debug, Clone)]
 struct Rec {
     value: Option<(Vec<u8>, Encoding)>,
-    ts: Timestamp,
+    stamp: Stamped,
     confirmed: bool,
     identity: Value,
     at: Instant,
+}
+
+/// A mutation's stamps as recorded: its Zenoh timestamp, its in-band stamp
+/// when it carried an envelope (core §7.5), and at least one of them.
+#[derive(Debug, Clone, Copy)]
+struct Stamped {
+    ts: Option<Timestamp>,
+    inband: Option<zenkey_model::wire::Stamp>,
+}
+
+impl Stamped {
+    /// A received mutation's stamps, `None` when it carried neither.
+    fn of(s: &Sample) -> Option<Stamped> {
+        let stamped = Stamped {
+            ts: s.timestamp().copied(),
+            inband: crate::inband::stamp(s),
+        };
+        (stamped.ts.is_some() || stamped.inband.is_some()).then_some(stamped)
+    }
+
+    fn mark(self) -> Mark {
+        Mark::of(self.inband, self.ts.as_ref().map(crate::inband::stamp_of))
+            .expect("a recorded mutation carries a stamp")
+    }
 }
 
 struct Source {
@@ -245,31 +276,35 @@ impl Inner {
     }
 
     /// Records a mutation if it is newer than what is held: an older put,
-    /// even one arriving after a delete, is refused (§4.4).
+    /// even one arriving after a delete, is refused (§4.4). Two in-band
+    /// stamps of one run compare by seq; across runs, or beside a Zenoh
+    /// timestamp, nothing is older, and the mutation is recorded.
     fn record(
         &self,
         origin: &str,
         value: Option<(Vec<u8>, Encoding)>,
-        ts: Timestamp,
+        stamp: Stamped,
         confirmed: bool,
     ) -> bool {
         let Some(identity) = self.identity(origin) else {
             return false;
         };
         let mut store = self.store.lock().expect("not poisoned");
-        if let Some(held) = store.get_mut(origin)
-            && ts <= held.ts
-        {
-            if ts == held.ts {
-                held.confirmed |= confirmed;
+        if let Some(held) = store.get_mut(origin) {
+            match versus(held.stamp.mark(), stamp.mark()) {
+                Versus::Older => return false,
+                Versus::Same => {
+                    held.confirmed |= confirmed;
+                    return false;
+                }
+                Versus::Newer | Versus::Unordered => {}
             }
-            return false;
         }
         store.insert(
             origin.to_owned(),
             Rec {
                 value,
-                ts,
+                stamp,
                 confirmed,
                 identity,
                 at: Instant::now(),
@@ -279,7 +314,11 @@ impl Inner {
     }
 
     fn on_sample(&self, s: &Sample) {
-        let Some(ts) = s.timestamp().copied() else {
+        if let Some(why) = crate::inband::refusal(s) {
+            tracing::warn!(key = %s.key_expr(), reason = %why.reason(), "an undecodable mutation is not recorded");
+            return;
+        }
+        let Some(stamp) = Stamped::of(s) else {
             tracing::warn!(key = %s.key_expr(), "an unstamped state mutation is not recorded (S1)");
             return;
         };
@@ -287,7 +326,7 @@ impl Inner {
             SampleKind::Put => Some((s.payload().to_bytes().into_owned(), s.encoding().clone())),
             SampleKind::Delete => None,
         };
-        self.record(s.key_expr().as_str(), value, ts, true);
+        self.record(s.key_expr().as_str(), value, stamp, true);
     }
 
     fn answer(&self, q: &zenoh::query::Query) {
@@ -306,11 +345,21 @@ impl Inner {
                     att["confirmed"] = Value::Bool(r.confirmed);
                     q.reply(ke, bytes.clone())
                         .encoding(enc.clone())
-                        .timestamp(r.ts)
+                        .timestamp(r.stamp.ts)
                         .attachment(serde_json::to_vec(&att).expect("JSON"))
                         .wait()
                 }
-                None => q.reply_del(ke).timestamp(r.ts).wait(),
+                // A delete's in-band stamp rides as the attachment it
+                // arrived with (core §7.5).
+                None => q
+                    .reply_del(ke)
+                    .timestamp(r.stamp.ts)
+                    .attachment(
+                        r.stamp
+                            .inband
+                            .map(|stamp| zenkey_model::wire::DeleteStamp { stamp }.write()),
+                    )
+                    .wait(),
             };
         }
     }
@@ -391,7 +440,10 @@ impl Inner {
                     }
                     _ => (key.to_owned(), true),
                 };
-                let Some(ts) = s.timestamp().copied() else {
+                if crate::inband::refusal(s).is_some() {
+                    continue;
+                }
+                let Some(stamp) = Stamped::of(s) else {
                     continue;
                 };
                 let value = match s.kind() {
@@ -403,7 +455,7 @@ impl Inner {
                         None
                     }
                 };
-                self.record(&origin, value, ts, confirmed);
+                self.record(&origin, value, stamp, confirmed);
                 if confirmed {
                     a.confirmed += 1;
                 }
@@ -671,7 +723,9 @@ pub async fn last_known(
         .map_err(zenoh)?;
     while let Ok(r) = rx.recv_async().await {
         let Ok(s) = r.into_result() else { continue };
-        return Ok(Some(recorded(origin.to_owned(), &s)));
+        if let Some((lk, _)) = recorded(origin.to_owned(), s) {
+            return Ok(Some(lk));
+        }
     }
     Ok(None)
 }
@@ -698,40 +752,57 @@ pub async fn last_known_all(
         .with(flume::unbounded::<Reply>())
         .await
         .map_err(zenoh)?;
-    let mut out: BTreeMap<String, LastKnown> = BTreeMap::new();
+    let mut out: BTreeMap<String, (LastKnown, Option<Mark>)> = BTreeMap::new();
     while let Ok(r) = rx.recv_async().await {
         let Ok(s) = r.into_result() else { continue };
         let Some(origin) = peer_origin(&selector, s.key_expr().as_str()) else {
             continue;
         };
-        let lk = recorded(origin.clone(), &s);
+        let Some((lk, mark)) = recorded(origin.clone(), s) else {
+            continue;
+        };
         // Two archive replies for one origin (one archive reached twice):
-        // keep the newer stamp.
+        // keep the newer stamp, the later one where nothing orders them.
         let newer = out
             .get(&origin)
-            .is_none_or(|have| lk.timestamp > have.timestamp);
+            .is_none_or(|(_, have)| match (*have, mark) {
+                (Some(h), Some(m)) => matches!(versus(h, m), Versus::Newer | Versus::Unordered),
+                (None, Some(_)) => true,
+                (_, None) => false,
+            });
         if newer {
-            out.insert(origin, lk);
+            out.insert(origin, (lk, mark));
         }
     }
-    Ok(out.into_values().collect())
+    Ok(out.into_values().map(|(lk, _)| lk).collect())
 }
 
-/// What an archive's reply records for `origin`.
-fn recorded(origin: String, s: &Sample) -> LastKnown {
+/// What an archive's reply records for `origin`, and what orders it: a
+/// value under a zk2c envelope (core §7.5) as its record, by its in-band
+/// stamp. `None` for a reply whose envelope was refused: undecodable,
+/// never read as last-known.
+fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
+    let read = crate::inband::read(s);
+    if let Some(why) = read.refusal() {
+        tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable last-known value");
+        return None;
+    }
+    let mark = read.mark();
+    let s = read.into_sample();
     let att: Value = s
         .attachment()
         .and_then(|a| serde_json::from_slice(&a.to_bytes()).ok())
         .unwrap_or(Value::Null);
     let put = s.kind() == SampleKind::Put;
-    LastKnown {
+    let lk = LastKnown {
         origin,
         value: put.then(|| s.payload().to_bytes().into_owned()),
         encoding: put.then(|| s.encoding().clone()),
         timestamp: s.timestamp().copied(),
         confirmed: att["confirmed"].as_bool().unwrap_or(false),
         identity: json!({"iface": att["iface"], "contract": att["contract"], "type": att["type"]}),
-    }
+    };
+    Some((lk, mark))
 }
 
 #[cfg(test)]

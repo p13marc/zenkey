@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.13 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.14 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.71 ([`core.md`](core.md)) |
+| **Written against** | core 0.72 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1028,6 +1028,20 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   which a contract declares as `raw` with a media type, tools MAY decode
   through a plugin.
   `[Sc: types.md §2]`
+- **The envelope first.** A tool that shows or judges a payload MUST
+  read a sample on a zk2 data key whose kind is a stream, state or an
+  event, and whose `Encoding` is `zenoh/bytes`, as core §7.5's envelope.
+  It tells such a sample by its key and its `Encoding` alone, with no
+  contract. The envelope's record is the payload that every later step
+  decodes, renders or judges. A refused envelope is undecodable, and the
+  tool names the refusal. The tool MUST NOT decode or sniff a refused
+  envelope's bytes as a payload with no envelope.
+  - **Why this reads no other sample.** Zenoh's default `Encoding` is
+    `zenoh/bytes`, and core §7.2 asks an owner for its type's predefined
+    one. So no conforming owner sends a stream, state or event sample
+    under `zenoh/bytes` without an envelope.
+  - **Every other sample** is read as the steps below say.
+  `[F: envelope/carries.json]`
 - **Decode order** for a tool: a payload whose declared type the tool
   holds is decoded by that type, on the wire its sample's `Encoding`
   names (below). Any other payload is sniffed.
@@ -1037,6 +1051,9 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   - **An `Encoding` that names neither JSON nor CBOR**, zenoh's default
     `zenoh/bytes` or another type's, does not pick a JSON Schema type's
     wire. The type is then read on its contract's `encoding` (core §7.2).
+    That covers an envelope's record. It no longer covers a stream, state
+    or event sample under `zenoh/bytes` with no envelope: the envelope
+    step above reads that sample as an envelope.
   - **A profile's reader.** A profile that says how its reader reads a
     sample's bytes decides for that reader. So a
     [`telemetry.v1`](profiles/telemetry/v1.md) reader reads a sample on
@@ -1178,6 +1195,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 |---|---|
 | `conformance/budget/` (`population.json`, `rate.json`, `lossless.json`) | §1, §2, §5 |
 | `conformance/keys.json` | §8.1 |
+| `conformance/envelope/carries.json` | §7.3, the envelope first |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
 | `scenarios/state.md` §1, §7, §11, §12 | §4.1 (§7 step 2: a tool's merge for as long as it follows), §4.3, §8.1, §8.3 |
 | `scenarios/security.md` §3 | §4.2 |

@@ -140,7 +140,7 @@ impl AlarmSpec {
 
 /// What a subscription called back with.
 enum Delivery {
-    Sample(AlarmSample),
+    Sample(AlarmSample, crate::model::inband::Envelope),
     Instance { key: ZkKey, held: bool, at: Instant },
 }
 
@@ -315,6 +315,7 @@ pub async fn get(session: &Session, selector: &str, timeout: Duration) -> Result
         complete: true,
         replies: Vec::new(),
         discarded: 0,
+        envelopes: Default::default(),
     };
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
@@ -325,21 +326,36 @@ pub async fn get(session: &Session, selector: &str, timeout: Duration) -> Result
             out.discarded += 1;
             continue;
         }
-        out.replies.push(sample_of(sample, AlarmVia::Get));
+        let (reply, envelope) = sample_of(sample, AlarmVia::Get);
+        if let Some(e) = envelope {
+            out.envelopes.insert(reply.key.clone(), e);
+        }
+        out.replies.push(reply);
     }
     Ok(out)
 }
 
-fn sample_of(sample: &Sample, via: AlarmVia) -> AlarmSample {
-    AlarmSample {
-        key: sample.key_expr().as_str().to_owned(),
-        delete: sample.kind() == SampleKind::Delete,
-        payload: sample.payload().to_bytes().into_owned(),
-        stamp: sample.timestamp().copied(),
-        at: Instant::now(),
-        wall: SystemTime::now(),
-        via,
-    }
+/// A received sample, its zk2c envelope read first (core §7.5): the
+/// record is the document alarms.v1 reads, strictly (observer §7.3's
+/// profile reader), the run and seq what orders it, the Zenoh stamp its
+/// time. A refused envelope's payload is its bytes as they came, which the
+/// book never decodes.
+fn sample_of(sample: &Sample, via: AlarmVia) -> (AlarmSample, crate::model::inband::Envelope) {
+    let read = crate::model::inband::read(sample.clone());
+    let envelope = crate::model::inband::envelope_of(&read);
+    let sample = read.sample();
+    (
+        AlarmSample {
+            key: sample.key_expr().as_str().to_owned(),
+            delete: sample.kind() == SampleKind::Delete,
+            payload: sample.payload().to_bytes().into_owned(),
+            stamp: sample.timestamp().copied(),
+            at: Instant::now(),
+            wall: SystemTime::now(),
+            via,
+        },
+        envelope,
+    )
 }
 
 /// Every archive presence shows (by token or by descriptor), each asked
@@ -512,7 +528,8 @@ impl AlarmFeed {
                         discarded.fetch_add(1, Ordering::Relaxed);
                         return;
                     }
-                    q.send(Delivery::Sample(sample_of(&s, AlarmVia::Subscription)));
+                    let (s, envelope) = sample_of(&s, AlarmVia::Subscription);
+                    q.send(Delivery::Sample(s, envelope));
                 }),
         )
         .await?;
@@ -689,7 +706,7 @@ impl AlarmFeed {
         };
         let mut out = self.take_refused(now, wall);
         match d {
-            Delivery::Sample(s) => out.extend(self.book.sample(s)),
+            Delivery::Sample(s, envelope) => out.extend(self.book.sample_enveloped(s, envelope)),
             Delivery::Instance { key, held, at } => {
                 if let ZkKey::Instance { addr, instance } = key {
                     self.book.instance(&addr, &instance, held, at);

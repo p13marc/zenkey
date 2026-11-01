@@ -72,6 +72,73 @@ impl FleetAnswer {
     pub fn is_delete(&self) -> bool {
         self.kind == Some(zenoh::sample::SampleKind::Delete)
     }
+
+    /// What its zk2c envelope says (core §7.5, [`crate::model::inband`]):
+    /// `None` for a reply that carries none (an error reply among them),
+    /// else its in-band stamp (a put's from its payload, a delete's from
+    /// its attachment) or why its envelope was refused. The answer keeps
+    /// its bytes as they arrived.
+    ///
+    /// A put is read by its Encoding, as observer §7.3 says: an `encoding`
+    /// of `None` carries no envelope. Only an error reply has none, since
+    /// `answer_of` records every sample's, and zenoh spells its default
+    /// `zenoh/bytes` (`zenkey/tests/inband.rs` pins it).
+    pub fn envelope(&self) -> crate::model::inband::Envelope {
+        use crate::model::inband::{self, Payload};
+        let Answer::Value(bytes) = &self.answer else {
+            return None;
+        };
+        if self.is_delete() {
+            let attachment = self.attachment.as_ref().map(|a| a.to_bytes());
+            return inband::delete_stamp(&self.key, attachment.as_deref()).map(Ok);
+        }
+        let encoding = self.encoding.as_deref()?;
+        if !zenkey_model::wire::carries(&self.key, encoding) {
+            return None;
+        }
+        match inband::payload(&self.key, Some(encoding), &bytes.to_bytes()) {
+            Payload::Plain(_) => None,
+            Payload::Record { stamp, .. } => Some(Ok(stamp)),
+            Payload::Refused(r) => Some(Err(r)),
+        }
+    }
+
+    /// Its in-band stamp, when it carried an envelope.
+    pub fn inband(&self) -> Option<zenkey_model::wire::Stamp> {
+        self.envelope()?.ok()
+    }
+
+    /// Why its envelope was refused: undecodable, never read as today's
+    /// payload, nor ordered.
+    pub fn refusal(&self) -> Option<zenkey_model::wire::Refusal> {
+        self.envelope()?.err()
+    }
+
+    /// What orders it among its key's values: its in-band stamp, else its
+    /// Zenoh timestamp. `None` for a refused envelope and an error reply.
+    pub fn mark(&self) -> Option<zenkey_model::seed::Mark> {
+        crate::model::inband::mark_of(self.envelope(), self.timestamp.as_ref())
+    }
+
+    /// The value's payload as every later step reads it: an envelope's
+    /// record, the bytes of any other reply, or why its envelope was
+    /// refused; `None` for an error reply.
+    pub fn record(
+        &self,
+    ) -> Option<std::result::Result<std::borrow::Cow<'_, [u8]>, zenkey_model::wire::Refusal>> {
+        let Answer::Value(bytes) = &self.answer else {
+            return None;
+        };
+        let bytes = bytes.to_bytes();
+        if self.is_delete() {
+            return Some(Ok(bytes));
+        }
+        Some(crate::model::inband::record(
+            &self.key,
+            self.encoding.as_deref(),
+            bytes,
+        ))
+    }
 }
 
 /// What one GET may vary — everything the fan-in discipline does **not** fix.

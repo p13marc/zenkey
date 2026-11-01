@@ -526,17 +526,28 @@ impl MetricFold {
             return;
         };
         let before = book.member(key).map(counts).unwrap_or_default();
-        let pair = book.sample(
+        // The envelope first (core §7.5): the record is what telemetry.v1
+        // reads, its run and seq what merge a state member.
+        let attachment = entry.attachment.as_ref().map(|a| a.to_bytes().into_owned());
+        let (payload, envelope) = zenkey_fleet::model::inband::read_parts(
+            key,
+            entry.is_delete,
+            Some(&entry.encoding),
+            entry.payload.to_bytes(),
+            attachment.as_deref(),
+        );
+        let pair = book.sample_enveloped(
             &self.metric,
             MetricSample {
                 key: key.to_owned(),
                 delete: entry.is_delete,
-                payload: entry.payload.to_bytes().into_owned(),
-                attachment: entry.attachment.as_ref().map(|a| a.to_bytes().into_owned()),
+                payload: payload.into_owned(),
+                attachment,
                 stamp: entry.stamp,
                 at: entry.received,
                 via: MetricVia::Subscription,
             },
+            envelope,
         );
         self.decoded += 1;
         let member = book.member(key);

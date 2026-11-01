@@ -352,8 +352,17 @@ pub struct ArchiveKeys {
 /// them: `None` for an unstamped reply.
 #[derive(Debug, Clone, Default)]
 pub struct StateStamps {
-    /// Per clock: how many replies, and the first keys.
+    /// Per clock: how many replies, and the first keys. A reply carrying
+    /// a zk2c envelope (core §7.5) is ordered by its in-band stamp, not by
+    /// the clock that stamped it, and is counted apart ([`StateStamps::inband`]).
     pub by_clock: BTreeMap<Option<String>, (usize, Vec<String>)>,
+    /// The replies carrying a zk2c envelope that parsed: each stamped in
+    /// band by its owner (core §7.5), with no clock to attribute. How
+    /// many, and the first keys.
+    pub inband: (usize, Vec<String>),
+    /// The replies whose zk2c envelope was refused: undecodable, their
+    /// stamp unread. How many, and the first keys with the refusal's reason.
+    pub refused: (usize, Vec<String>),
     /// Every key answered with a value, not a `reply_del`: the members
     /// `population-over-bound` counts (§2.7, 0.24).
     pub values: BTreeSet<String>,
@@ -450,7 +459,8 @@ fn metric_revision(
     }
 }
 
-/// One value reply of an owner's state GET, as it came.
+/// One value reply of an owner's state GET, as it came: a zk2c envelope's
+/// record when it carried one (core §7.5).
 #[derive(Debug, Clone, Default)]
 pub struct StateReply {
     /// The key, base-relative.
@@ -1367,14 +1377,34 @@ async fn state_stamps(
                 out.complete = false;
                 continue;
             };
-            let clock = sample.timestamp().map(|t| t.get_id().to_string());
-            let (n, keys) = out.by_clock.entry(clock).or_default();
+            // The envelope first (core §7.5): an in-band stamp is the
+            // owner's own, a refused envelope undecodable.
+            let read = crate::model::inband::read(sample.clone());
+            let key = sample.key_expr().as_str();
+            let (n, keys) = match &read {
+                crate::model::inband::Read::Plain(_) => out
+                    .by_clock
+                    .entry(sample.timestamp().map(|t| t.get_id().to_string()))
+                    .or_default(),
+                crate::model::inband::Read::Enveloped { .. } => &mut out.inband,
+                crate::model::inband::Read::Refused { refusal, .. } => {
+                    let (n, keys) = &mut out.refused;
+                    *n += 1;
+                    if keys.len() < crate::judge::common::EXPANSION_CAP {
+                        keys.push(format!("{key} ({})", refusal.reason()));
+                    }
+                    if sample.kind() == SampleKind::Put {
+                        out.values.insert(key.to_owned());
+                    }
+                    continue;
+                }
+            };
             *n += 1;
             if keys.len() < crate::judge::common::EXPANSION_CAP {
-                keys.push(sample.key_expr().as_str().to_owned());
+                keys.push(key.to_owned());
             }
             if sample.kind() == SampleKind::Put {
-                let key = sample.key_expr().as_str();
+                let sample = read.sample();
                 out.values.insert(key.to_owned());
                 let size = sample.payload().len() + sample.attachment().map_or(0, |a| a.len());
                 keep.offer(&mut out, key, size, || StateReply {
@@ -2614,6 +2644,9 @@ fn archive_unaligned(p: &Presence<'_>) -> CheckReport {
 
 /// §4.2 S1–S2: each owner's state replies, by the clock that stamped them,
 /// against the owner's own session — the `meta.zid` its descriptors name.
+/// A reply carrying a zk2c envelope (core §7.5) is stamped in band by its
+/// owner, with no clock to attribute and no S1 premise to stand on; one
+/// whose envelope was refused is a finding, its stamp unread.
 fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
     const C: CheckId = CheckId::StateStampForeign;
     let mut zids: BTreeMap<&Addr, BTreeSet<String>> = BTreeMap::new();
@@ -2624,7 +2657,7 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
     }
     let mut findings = Vec::new();
     let mut undecided = Vec::new();
-    let (mut replies, mut owners) = (0usize, 0usize);
+    let (mut replies, mut owners, mut inband) = (0usize, 0usize, 0usize);
     for ((addr, iface), read) in &p.obs.stamps {
         let subject = format!("{addr} {iface}");
         let stamps = match read {
@@ -2638,13 +2671,25 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
             }
         };
         let n: usize = stamps.by_clock.values().map(|(n, _)| n).sum();
-        if n == 0 {
+        let (k, r) = (stamps.inband.0, stamps.refused.0);
+        if n + k + r == 0 {
             if !stamps.complete {
                 undecided.push(unjudged(subject, "the GET ended at its timeout"));
             }
             continue;
         }
-        let Some(own) = zids.get(addr) else {
+        let mut wrong = Vec::new();
+        if r > 0 {
+            wrong.push(format!(
+                "{r} whose zk2c envelope was refused (e.g. {}): undecodable, its stamp unread",
+                stamps.refused.1.join(", ")
+            ));
+        }
+        // A refused envelope is a finding on its own. A Zenoh-stamped reply
+        // is judged only against the owner's `meta.zid`: with no descriptor
+        // naming it and nothing refused, the check is not made.
+        let own = zids.get(addr);
+        if own.is_none() && n > 0 && wrong.is_empty() {
             undecided.push(unjudged(
                 subject,
                 format!(
@@ -2653,9 +2698,12 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
                 ),
             ));
             continue;
-        };
-        let mut wrong = Vec::new();
-        for (clock, (count, keys)) in &stamps.by_clock {
+        }
+        let empty = BTreeSet::new();
+        let own = own.unwrap_or(&empty);
+        // Each Zenoh-stamped reply against the owner's sessions; with none
+        // known, only a refusal above can be the finding.
+        for (clock, (count, keys)) in stamps.by_clock.iter().filter(|_| !own.is_empty()) {
             match clock {
                 None => wrong.push(format!(
                     "{count} unstamped (e.g. {}): a reply MUST carry its mutation's timestamp",
@@ -2672,19 +2720,32 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
         // finding whatever else was read, since an owner that is its own
         // router stamps with its own `meta.zid`.
         if !wrong.is_empty() {
+            let session = if own.is_empty() {
+                "no descriptor names the owner's session".to_owned()
+            } else {
+                format!(
+                    "the owner's session is {}",
+                    own.iter().cloned().collect::<Vec<_>>().join(", ")
+                )
+            };
             findings.push(finding(
                 C,
                 DoctorSeverity::Error,
                 subject,
                 format!(
-                    "of {n} state repl(y|ies), {}; the owner's session is {}",
+                    "of {} state repl(y|ies), {}; {session}",
+                    n + k + r,
                     wrong.join("; "),
-                    own.iter().cloned().collect::<Vec<_>>().join(", ")
                 ),
             ));
             continue;
         }
-        if let Err(why) = s1_premise(p.obs.admin.as_ref(), own) {
+        let premise = if n > 0 {
+            s1_premise(p.obs.admin.as_ref(), own)
+        } else {
+            Ok(())
+        };
+        if let Err(why) = premise {
             undecided.push(unjudged(subject, why));
         } else if !stamps.complete {
             undecided.push(unjudged(
@@ -2694,21 +2755,26 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
         } else {
             owners += 1;
             replies += n;
+            inband += k;
         }
     }
-    CheckReport::of(
-        C,
-        findings,
-        undecided,
-        if replies == 0 {
-            "no owner answered a state GET with a value: no stamp to attribute".to_owned()
-        } else {
-            format!(
-                "{replies} state repl(y|ies) from {owners} owner interface(s), each stamped by \
-                 its owner's own session"
-            )
-        },
-    )
+    let clean = match (replies, inband) {
+        (0, 0) => "no owner answered a state GET with a value: no stamp to attribute".to_owned(),
+        (r, 0) => format!(
+            "{r} state repl(y|ies) from {owners} owner interface(s), each stamped by its \
+             owner's own session"
+        ),
+        (0, k) => format!(
+            "{k} state repl(y|ies) from {owners} owner interface(s), each stamped in band by its \
+             owner (core §7.5)"
+        ),
+        (r, k) => format!(
+            "{} state repl(y|ies) from {owners} owner interface(s): {r} stamped by its owner's \
+             own session, {k} stamped in band by its owner (core §7.5)",
+            r + k
+        ),
+    };
+    CheckReport::of(C, findings, undecided, clean)
 }
 
 /// §2.7 (0.24; #735): each owner interface's templated state resources,
@@ -5400,6 +5466,37 @@ mod tests {
         }));
         assert!(unseen(&read(&mut o, &[Some(&own)])).contains("A tool's S1 check"));
         assert!(foreign(&read(&mut o, &[Some("feed")])));
+        // Core §7.5 (#976's A2): a reply stamped in band is its owner's,
+        // with no clock to attribute and no S1 premise to stand on, so the
+        // router that is the owner proves nothing against it; a refused
+        // envelope is a finding, its stamp unread.
+        let enveloped = |o: &mut DoctorObservation, inband: usize, refused: usize| {
+            let s = StateStamps {
+                complete: true,
+                inband: (inband, vec!["zk2/h1/tc/tc.v1/state/x".into()]),
+                refused: (
+                    refused,
+                    vec!["zk2/h1/tc/tc.v1/state/y (zk2c envelope refused: form)".into()],
+                ),
+                ..Default::default()
+            };
+            o.stamps = [(at.clone(), Ok(s))].into();
+            check(o, CheckId::StateStampForeign)
+        };
+        assert!(
+            clean(&enveloped(&mut o, 2, 0))
+                .contains("2 state repl(y|ies) from 1 owner interface(s), each stamped in band")
+        );
+        o.admin = None;
+        clean(&enveloped(&mut o, 1, 0));
+        let r = enveloped(&mut o, 1, 1);
+        assert!(
+            found(&r)
+                .evidence
+                .contains("1 whose zk2c envelope was refused"),
+            "{}",
+            found(&r).evidence
+        );
     }
 
     // ── population-over-bound (§2.7, 0.24) ───────────────────────────────
@@ -6307,6 +6404,7 @@ mod tests {
             asked_at: at,
             complete: true,
             discarded: 0,
+            envelopes: Default::default(),
             replies: replies
                 .iter()
                 .map(|(key, doc, age)| AlarmSample {

@@ -17,6 +17,7 @@
 //! | [`telemetry`]: a metric's writer refuses what `telemetry.v1` forbids, and writes the epoch: the instance's, or a member's | `telemetry.v1` §2.6–§2.9; §1.5, §8.1 |
 //! | [`qos`]: the contract's QoS as zenoh spells it | §2.4 |
 //! | [`consumer`]: data through a role's bindings | §3.2 R1–R7 |
+//! | [`inband`]: a received sample read beside today's wire: an envelope stripped, its in-band stamp what orders it | §7.5 |
 //! | [`operation`]: serving calls; [`client`]: calling them, one address or a fleet; [`ownership`]: the split-brain diagnosis | §5.1 O1–O7, §5.2, §6 |
 //! | [`call`]: what a handler receives and a caller gets back, without a session | §5.1 O3, O5–O7, §5.2 |
 //! | [`shm`]: the memlock limit SHM falls back under | §7.4 |
@@ -121,6 +122,8 @@ pub mod health;
 #[cfg(feature = "hostid")]
 pub mod hostid;
 pub mod implementation;
+#[cfg(feature = "zenoh")]
+pub mod inband;
 #[cfg(feature = "zenoh")]
 pub mod operation;
 #[cfg(feature = "zenoh")]

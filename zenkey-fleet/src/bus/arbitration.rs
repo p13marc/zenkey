@@ -556,6 +556,17 @@ async fn listen(
                     {
                         return;
                     }
+                    // Core §7.5: a refused zk2c envelope is undecodable,
+                    // never an arrival, as the runtime's arbitration reads it.
+                    // The report has no field for it yet, so it is logged.
+                    if let Some(refusal) = crate::model::inband::refusal(&sample) {
+                        tracing::debug!(
+                            key = sample.key_expr().as_str(),
+                            refusal = refusal.token(),
+                            "arbitration: a refused zk2c envelope is no arrival"
+                        );
+                        return;
+                    }
                     q.send(Delivery::Sample {
                         key: sample.key_expr().as_str().to_owned(),
                         delete: sample.kind() == SampleKind::Delete,

@@ -24,7 +24,9 @@
 //! declared keyspace, from the same lens, merged with what was observed and
 //! what is watched into one typed tree ([`skeleton`]), and each wire key's
 //! identity resolved once, bounded and dropped when the lens's inputs move
-//! ([`identity`]).
+//! ([`identity`]). A sample carrying a zk2c envelope (core §7.5) is told
+//! by its key and Encoding, and its record read, its run and seq what
+//! orders it, in one place every reader goes through ([`inband`]).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -70,6 +72,7 @@ pub mod diff;
 pub mod examples;
 pub mod health;
 pub mod identity;
+pub mod inband;
 pub mod jsonschema;
 pub mod lens;
 pub mod namespace;

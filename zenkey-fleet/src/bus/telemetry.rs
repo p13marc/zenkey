@@ -59,6 +59,7 @@ use zenoh::sample::{Sample, SampleKind};
 use crate::bus::contracts::BundleStore;
 use crate::bus::stall::{StallSeen, StallWatch};
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Observed};
+use crate::model::inband::Envelope;
 use crate::model::lens::Lens;
 use crate::model::telemetry::{
     MAX_MEMBERS, MetricResource, MetricSample, SampleVia, TelemetryBook, TelemetryScope,
@@ -173,7 +174,7 @@ pub struct TelemetryObservation {
 
 /// What a subscription called back with.
 enum Delivery {
-    Sample(MetricSample),
+    Sample(MetricSample, Envelope),
     Token { key: String, held: bool },
 }
 
@@ -192,16 +193,25 @@ impl Queue {
     }
 }
 
-fn sample_of(s: &Sample, via: SampleVia) -> MetricSample {
-    MetricSample {
-        key: s.key_expr().as_str().to_owned(),
-        delete: s.kind() == SampleKind::Delete,
-        payload: s.payload().to_bytes().into_owned(),
-        attachment: s.attachment().map(|a| a.to_bytes().into_owned()),
-        stamp: s.timestamp().copied(),
-        at: Instant::now(),
-        via,
-    }
+/// A received sample, its zk2c envelope read first (core §7.5): the
+/// record is the payload `telemetry.v1` reads, the run and seq what orders
+/// a state member, the Zenoh stamp its time.
+fn sample_of(s: &Sample, via: SampleVia) -> (MetricSample, Envelope) {
+    let read = crate::model::inband::read(s.clone());
+    let envelope = crate::model::inband::envelope_of(&read);
+    let s = read.sample();
+    (
+        MetricSample {
+            key: s.key_expr().as_str().to_owned(),
+            delete: s.kind() == SampleKind::Delete,
+            payload: s.payload().to_bytes().into_owned(),
+            attachment: s.attachment().map(|a| a.to_bytes().into_owned()),
+            stamp: s.timestamp().copied(),
+            at: Instant::now(),
+            via,
+        },
+        envelope,
+    )
 }
 
 /// The metric resources in scope: every revision the descriptors in scope
@@ -502,7 +512,8 @@ pub async fn observe(
                         discarded.fetch_add(1, Ordering::Relaxed);
                         return;
                     }
-                    q.send(Delivery::Sample(sample_of(&s, SampleVia::Subscription)));
+                    let (s, envelope) = sample_of(&s, SampleVia::Subscription);
+                    q.send(Delivery::Sample(s, envelope));
                 }),
         )
         .await;
@@ -840,7 +851,7 @@ async fn state_replies(
     session: &Session,
     selector: &str,
     timeout: Duration,
-) -> Result<(Vec<MetricSample>, GetEnd), String> {
+) -> Result<(Vec<(MetricSample, Envelope)>, GetEnd), String> {
     let replies =
         crate::bus::query::state_get(session, selector, &crate::bus::query::GetOpts::new(timeout))
             .await
@@ -931,10 +942,10 @@ impl Reader<'_> {
         m
     }
 
-    fn fold_sample(&mut self, book: &mut TelemetryBook, s: MetricSample) {
+    fn fold_sample(&mut self, book: &mut TelemetryBook, (s, envelope): (MetricSample, Envelope)) {
         match self.metric_of(&s.key) {
             Some(m) => {
-                book.sample(&m, s);
+                book.sample_enveloped(&m, s, envelope);
             }
             None => self.unresolved += 1,
         }
@@ -945,7 +956,7 @@ impl Reader<'_> {
     fn fold(&mut self, book: &mut TelemetryBook, d: Delivery) {
         self.losses(book);
         match d {
-            Delivery::Sample(s) => self.fold_sample(book, s),
+            Delivery::Sample(s, e) => self.fold_sample(book, (s, e)),
             Delivery::Token { key, held } => book.token(&key, held),
         }
     }
@@ -1096,7 +1107,7 @@ impl Reader<'_> {
                 while let Ok(d) = rx.try_recv() {
                     match d {
                         Delivery::Token { key, held } => then.push((key, held)),
-                        Delivery::Sample(s) => samples.push(s),
+                        Delivery::Sample(s, e) => samples.push((s, e)),
                     }
                 }
                 let refused = self.refused.swap(0, Ordering::Relaxed);
