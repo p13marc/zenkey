@@ -292,6 +292,38 @@ pub fn kind_selector(
     .join("/")
 }
 
+/// Every member of one resource of one service, as one selector:
+/// `zk2/<system>/<service>/<iface>/<kind>/<template…>`, each literal of the
+/// template its chunk, each parameter `*` and a rest parameter `**`.
+/// Base-relative, like every key of this module; a session's namespace adds
+/// the prefix on egress and strips it from what it receives, so a reply's
+/// key reads base-relative too. A GET on it reaches the resource's members
+/// and no other's but a template that shares its pattern (§2.2): a reader
+/// sorts them by [`crate::template::resolve`].
+#[must_use]
+pub fn template_selector(
+    addr: &Addr,
+    iface: &IfaceId,
+    kind: KindToken,
+    template: &crate::template::Template,
+) -> String {
+    use crate::template::Segment;
+    let iface = iface.to_string();
+    let mut chunks: Vec<&str> = vec![
+        GRAMMAR,
+        addr.system.as_str(),
+        addr.service.as_str(),
+        &iface,
+        kind.as_str(),
+    ];
+    chunks.extend(template.segments().iter().map(|s| match s {
+        Segment::Literal(l) => l.as_str(),
+        Segment::Param(_) => "*",
+        Segment::Rest(_) => "**",
+    }));
+    chunks.join("/")
+}
+
 /// The verbatim chunks of [`VERBATIM`] that `selector` can never reach, in
 /// that order (§1.3's guard): a frontend's line saying what a watch does
 /// not show, rather than letting its silence read as nothing there.
@@ -668,6 +700,37 @@ mod tests {
 
     fn addr() -> Addr {
         Addr::new("vehicle-01", "navigation").unwrap()
+    }
+
+    /// A template's selector: literals kept, a parameter `*`, a rest
+    /// `**`, and every key it builds matched by it.
+    #[test]
+    fn a_template_selector_matches_its_members() {
+        use crate::template::Template;
+        let iface: IfaceId = "modem.v3".parse().unwrap();
+        let t = Template::parse("sdu/endpoint/{endpoint}").unwrap();
+        let sel = template_selector(&addr(), &iface, KindToken::State, &t);
+        assert_eq!(
+            sel,
+            "zk2/vehicle-01/navigation/modem.v3/state/sdu/endpoint/*"
+        );
+        let one = Template::parse("radio").unwrap();
+        assert_eq!(
+            template_selector(&addr(), &iface, KindToken::ExplicitState, &one),
+            "zk2/vehicle-01/navigation/modem.v3/@state/radio"
+        );
+        let rest = Template::parse("logs/{path...}").unwrap();
+        assert!(template_selector(&addr(), &iface, KindToken::State, &rest).ends_with("/logs/**"));
+        let key = data_key(
+            &addr(),
+            &iface,
+            KindToken::State,
+            &["sdu", "endpoint", "e1"],
+        )
+        .unwrap()
+        .to_string();
+        let sel = zenoh_keyexpr::keyexpr::new(sel.as_str()).unwrap();
+        assert!(sel.includes(zenoh_keyexpr::keyexpr::new(key.as_str()).unwrap()));
     }
 
     #[test]

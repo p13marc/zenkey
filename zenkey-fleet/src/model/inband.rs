@@ -568,10 +568,15 @@ pub fn on_the_table(
 ) -> bool {
     use zenkey_model::grammar::KindToken;
     let state = matches!(r.token, KindToken::State | KindToken::ExplicitState);
-    let horizon = matches!(
-        zenkey_model::freshness::horizon_of(r),
-        zenkey_model::freshness::Horizon::Within(_)
-    );
+    // Row 1 is freshness.v1's: under freshness.v2 a heartbeat confirms the
+    // state, its puts carry no Zenoh timestamp, and only its replies carry
+    // one, the last confirmation (core 0.82's second row), which no S1
+    // check reads (#978's F3).
+    let horizon = !zenkey_model::freshness::uses_v2(contract)
+        && matches!(
+            zenkey_model::freshness::horizon_of(r),
+            zenkey_model::freshness::Horizon::Within(_)
+        );
     let desired = matches!(
         zenkey_model::desired::declaration_of(r),
         zenkey_model::desired::Declaration::Declared(_)

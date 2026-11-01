@@ -92,6 +92,12 @@ pub struct StateRow {
     /// reply off the table does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Stamp>,
+    /// A member a `freshness.v2` heartbeat confirms (#978's F3): its last
+    /// confirmation, the later of its last mutation and the last heartbeat
+    /// that vouched for it, as the owner's reply carries it (core §4.3's
+    /// table, S2). Absent elsewhere, and on a deletion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_confirmation: Option<Stamp>,
     /// Last-known reads only: whether the archive's alignment confirmed
     /// the key (§4.4). `false` is kept, served, and not confirmed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -252,6 +258,7 @@ mod tests {
                     time: "2026-10-08T12:00:00.000000000Z".into(),
                     clock: "a1b2".into(),
                 }),
+                last_confirmation: None,
                 confirmed: Some(false),
                 identity: Some(json!({"iface": "tc.netif.v1"})),
             }],
@@ -284,6 +291,7 @@ mod tests {
             bytes: None,
             inband: None,
             timestamp: None,
+            last_confirmation: None,
             confirmed: None,
             identity: None,
         };

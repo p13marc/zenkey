@@ -137,7 +137,8 @@
 //!   F1): a revision's collections (its `state` and `@state` resources with
 //!   a horizon above 0) as a [`heartbeat::Layout`] with its tag, a body
 //!   read and written with them and §7.5's refusals, and a collection's
-//!   [`heartbeat::Digest`]. No rule adopts it yet.
+//!   [`heartbeat::Digest`]. `freshness.v2` adopts it (core 0.82; #978's
+//!   F3): [`freshness::uses_v2`], and a reader's [`freshness::View`].
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.

@@ -1,0 +1,22 @@
+# freshness.v2's standard contract (spec/profiles/freshness/v2.md §3): the
+# heartbeat an owner sends for each interface it serves whose contract uses
+# freshness.v2, one key per covered interface. Published in
+# spec/profiles/.history/freshness.v2/ (revision 2.0). An owner implements
+# it beside every interface it covers; the reference runtime does so
+# itself. Doc strings are outside the fingerprint (core §9.5), and so are
+# comments.
+[interface]
+name    = "freshness"
+major   = 2
+minor   = 0
+summary = "Heartbeats that confirm an owner's state without putting it again"
+
+[resources."heartbeat/{iface}"]
+kind        = "stream"
+type        = { raw = "application/octet-stream" }
+params      = { iface = "string" }
+cardinality = 256
+reliability = "reliable"
+congestion  = "drop"
+priority    = "data"
+doc         = "One heartbeat for the covered interface {iface}, an interface id: core §7.5's form 6, its body read with the covered revision. At most half the shortest horizon of its collections apart, while the owner serves the interface (freshness.v2 §2.4)."

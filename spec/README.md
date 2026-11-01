@@ -176,7 +176,9 @@ section number alone is the core's.
 - **Heartbeat**: a put that vouches, by a bit for each member, for the
   state an owner holds for one interface
   ([§7.5](core.md#75-the-zk2c-envelope)). A digest of each collection
-  lets a reader see that its view differs. No rule adopts it yet.
+  lets a reader see that its view differs.
+  [`freshness.v2`](profiles/freshness/v2.md) adopts it. It replaces
+  re-puts.
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it

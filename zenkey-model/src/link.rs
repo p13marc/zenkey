@@ -1887,11 +1887,19 @@ pub struct Deployment {
     /// one deployment may run either (core §3.3). The plan reads them
     /// together, failing closed where they disagree (§2.3).
     pub interfaces: BTreeMap<String, Vec<Vec<Res>>>,
+    /// The interface ids a revision given of which uses `freshness.v2`:
+    /// their owners send a heartbeat covering them (`freshness.v2` §2.4),
+    /// which crosses where a collection it covers does (§2.9).
+    pub heartbeats: BTreeSet<String>,
 }
 
 impl Deployment {
-    /// Adds a contract's resources as a revision of its interface id.
+    /// Adds a contract's resources as a revision of its interface id, and
+    /// its heartbeat when it uses `freshness.v2`.
     pub fn add_contract(&mut self, c: &Contract) {
+        if freshness::uses_v2(c) {
+            self.heartbeats.insert(c.iface.to_string());
+        }
         self.add_revision(
             c.iface.to_string(),
             c.resources.iter().map(Res::from).collect(),
@@ -2148,31 +2156,83 @@ fn plan_face(
     ];
     // The name (§0) of every overlapped resource.
     let mut overlapped: BTreeSet<String> = BTreeSet::new();
-    for token in PUSH_TOKENS {
-        let any = listed.iter().any(|i| {
-            resources_of(i)
+    // Each token's denies, computed with every stream last: a heartbeat
+    // crosses where a collection it covers crosses, overlapped ones set
+    // aside (§2.9), so the state tokens are carved first.
+    let mut by_token: BTreeMap<usize, Vec<Deny>> = BTreeMap::new();
+    let mut heartbeat_crosses: BTreeMap<String, bool> = BTreeMap::new();
+    let order = [2usize, 3, 4, 0, 1];
+    for t in order {
+        let token = PUSH_TOKENS[t];
+        if token == KindToken::Stream {
+            heartbeat_crosses = heartbeats_of(deployment, listed, view, &|i: &str, r: &Res| {
+                crossing_of(r).crosses() && !overlapped.contains(&res_name(i, r))
+            });
+        }
+        // The listed interfaces' templates of the token, and, for
+        // streams, each covered interface's heartbeat as a template of
+        // `freshness.v2` of its own, in place of the profile's own
+        // templated one (§2.9).
+        // Each template with its own heartbeat's crossing, paired as one:
+        // an interface id is a plain chunk, so every one parses, and one
+        // that did not would drop out whole, never shift a pairing.
+        let pseudo: Vec<(Template, bool)> = if token == KindToken::Stream {
+            heartbeat_crosses
                 .iter()
-                .any(|r| r.token == token && crossing_of(r).crosses())
-        });
+                .filter_map(|(i, crosses)| {
+                    Template::parse(&format!("heartbeat/{i}"))
+                        .ok()
+                        .map(|t| (t, *crosses))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut groups: BTreeMap<String, Vec<Item<'_>>> = BTreeMap::new();
+        for iface in listed {
+            if !pseudo.is_empty() && *iface == freshness::PROFILE_V2 {
+                continue;
+            }
+            groups.insert(
+                (*iface).to_owned(),
+                resources_of(iface)
+                    .iter()
+                    .filter(|r| r.token == token)
+                    .map(|r| Item {
+                        template: &r.template,
+                        crosses: crossing_of(r).crosses(),
+                    })
+                    .collect(),
+            );
+        }
+        if !pseudo.is_empty() {
+            groups.insert(
+                freshness::PROFILE_V2.to_owned(),
+                pseudo
+                    .iter()
+                    .map(|(template, crosses)| Item {
+                        template,
+                        crosses: *crosses,
+                    })
+                    .collect(),
+            );
+        }
+        let any = groups.values().flatten().any(|i| i.crosses);
         if !any {
-            deny.push(push_deny(
-                token.as_str().to_owned(),
-                vec![format!("zk2/*/*/*/{}/**", token.as_str())],
-            ));
+            by_token.insert(
+                t,
+                vec![push_deny(
+                    token.as_str().to_owned(),
+                    vec![format!("zk2/*/*/*/{}/**", token.as_str())],
+                )],
+            );
             continue;
         }
-        for iface in listed {
-            let items: Vec<Item<'_>> = resources_of(iface)
-                .iter()
-                .filter(|r| r.token == token)
-                .map(|r| Item {
-                    template: &r.template,
-                    crosses: crossing_of(r).crosses(),
-                })
-                .collect();
+        let mut denies = Vec::new();
+        for (iface, items) in &groups {
             let root = format!("zk2/*/*/{iface}/{}", token.as_str());
             let keys = if items.iter().any(|i| i.crosses) {
-                let (keys, exact) = carve(&root, &items);
+                let (keys, exact) = carve(&root, items);
                 for c in items.iter().filter(|i| i.crosses) {
                     let hit = exact.iter().any(|&t| {
                         let t = items[t].template;
@@ -2189,10 +2249,12 @@ fn plan_face(
                 vec![format!("{root}/**")]
             };
             if !keys.is_empty() {
-                deny.push(push_deny(format!("{}:{iface}", token.as_str()), keys));
+                denies.push(push_deny(format!("{}:{iface}", token.as_str()), keys));
             }
         }
+        by_token.insert(t, denies);
     }
+    deny.extend(by_token.into_values().flatten());
 
     // The resources that cross, overlapped ones set aside.
     let crosses = |iface: &str, r: &Res| {
@@ -2266,6 +2328,14 @@ fn plan_face(
             .filter(|(i, r)| crosses(i, r) && horizon(r).ttl().is_some())
             .map(|(i, r)| res_name(i, r))
             .collect();
+        // A crossing heartbeat is evidence too (§2.12): its horizon is the
+        // shortest of the collections it covers (`freshness.v2` §2.4).
+        evidence.extend(
+            ifaces
+                .iter()
+                .filter(|i| heartbeat_crosses.get(i.as_str()) == Some(&true))
+                .map(|i| format!("{}/stream/heartbeat/{i}", freshness::PROFILE_V2)),
+        );
         evidence.sort();
         evidence.dedup();
         liveness.push(Liveness {
@@ -2296,6 +2366,38 @@ fn plan_face(
 
 fn horizon(r: &Res) -> Horizon {
     freshness::horizon(kind_of(r.token), &r.annotations)
+}
+
+/// Each listed interface whose owners send a heartbeat covering it
+/// (`freshness.v2` §2.4: a revision uses the profile, and it has a
+/// collection, a state with a horizon above 0), and whether that heartbeat
+/// crosses the face: where a collection it covers crosses (§2.9). Never
+/// downsampled (§2.8): no rule is derived for it.
+fn heartbeats_of(
+    deployment: &Deployment,
+    listed: &BTreeSet<&str>,
+    view: &View,
+    crosses: &dyn Fn(&str, &Res) -> bool,
+) -> BTreeMap<String, bool> {
+    let mut out = BTreeMap::new();
+    for iface in listed {
+        if !deployment.heartbeats.contains(*iface) {
+            continue;
+        }
+        let collections: Vec<&Res> = view[*iface]
+            .0
+            .iter()
+            .filter(|r| is_state(r.token) && horizon(r).ttl().is_some())
+            .collect();
+        if collections.is_empty() {
+            continue;
+        }
+        out.insert(
+            (*iface).to_owned(),
+            collections.iter().any(|r| crosses(iface, r)),
+        );
+    }
+    out
 }
 
 fn plane(id: &str, key: &str) -> Deny {

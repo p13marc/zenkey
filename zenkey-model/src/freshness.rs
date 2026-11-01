@@ -22,8 +22,11 @@
 //! owner's heartbeats (core §7.5, [`crate::heartbeat`]) confirmed. A
 //! heartbeat whose section's digest is the view's confirms each member it
 //! vouches for at its arrival, so [`View::observation`] ages a member from
-//! the later of its last put and its last confirmation. No rule adopts the
-//! heartbeat yet: the judgement is §2.5's, unchanged.
+//! the later of its last put and its last confirmation. `freshness.v2`
+//! (`spec/profiles/freshness/v2.md`, #978's F3) adopts the heartbeat: a
+//! contract that uses it is confirmed by its owner's heartbeats, never by
+//! re-puts ([`uses_v2`]), and its reader's rule is [`View::apply`]'s
+//! (`conformance/apply.json`). The judgement is §2.5's, unchanged.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -37,6 +40,21 @@ use crate::wire::Stamp;
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "freshness.v1";
+
+/// `freshness.v2`'s id (#978's F3): a contract that lists it in `uses` is
+/// confirmed by its owner's heartbeats (core §7.5's form 6), one per
+/// interface, and its owner re-puts nothing to confirm it (v2 §2.4).
+pub const PROFILE_V2: &str = crate::heartbeat::PROFILE;
+
+/// Whether `c` uses `freshness.v2` (v2 §1): its owner confirms its
+/// collections by heartbeats, re-puts none of them, and puts them without
+/// a Zenoh timestamp, its replies carrying each member's last confirmation
+/// (core §4.3's table, row 1). A contract listing both texts is read
+/// under v2.
+#[must_use]
+pub fn uses_v2(c: &crate::contract::Contract) -> bool {
+    c.uses.iter().any(|u| u.to_string() == PROFILE_V2)
+}
 
 /// The profile's name, as an annotation key's prefix carries it.
 pub const NAME: &str = "freshness";
@@ -840,6 +858,42 @@ impl<T: Arrival> View<T> {
         }
     }
 
+    /// A re-read of the collection at `index` (`freshness.v2` §2.5): its
+    /// answer, asked at `asked` and arrived at `at`, merged with what the
+    /// view heard of the collection from `asked` on, as core §4.2 merges a
+    /// late joiner's seed. The answer replaces the collection
+    /// ([`View::replace`]); then each member heard live since `asked` is
+    /// kept where the answer has none of it, or holds a lower seq of its
+    /// run. Across two runs the answer's stands, as core §4.3's consumer
+    /// rule accepts another run.
+    pub fn reread<'k>(
+        &mut self,
+        index: usize,
+        live: impl IntoIterator<Item = (&'k str, Option<Stamp>)>,
+        asked: T,
+        at: T,
+    ) {
+        let heard: Vec<(String, Held<T>)> = self
+            .members
+            .iter()
+            .filter(|(_, h)| h.collection == index && h.at >= asked)
+            .map(|(k, h)| (k.clone(), *h))
+            .collect();
+        self.replace(index, live, at);
+        for (k, h) in heard {
+            let keep = match self.members.get(&k) {
+                None => true,
+                Some(answered) => match (h.stamp, answered.stamp) {
+                    (Some(mine), Some(theirs)) => mine.run == theirs.run && mine.seq > theirs.seq,
+                    _ => false,
+                },
+            };
+            if keep {
+                self.members.insert(k, h);
+            }
+        }
+    }
+
     /// The live members of a collection the view holds, in key order.
     fn live(&self, index: usize) -> impl Iterator<Item = (&String, &Held<T>)> {
         self.members
@@ -998,11 +1052,14 @@ impl<T: Arrival> View<T> {
 /// A subscription's last delivery of a member and, where a [`View`]
 /// holds it, the last heartbeat that vouched for it: the later is its
 /// last confirmation (§2.5). `delivered` is the subscription's own
-/// [`Last`]; a delete stays a delete.
+/// [`Last`]; a delete stays a delete. A member never delivered that a
+/// heartbeat confirmed, one a late joiner's read seeded (`freshness.v2`
+/// §2.5), is confirmed then.
 #[must_use]
 pub fn confirmed_last(delivered: Option<Last>, heartbeat: Option<Duration>) -> Option<Last> {
     match (delivered, heartbeat) {
         (Some(Last::Put(a)), Some(h)) => Some(Last::Put(a.min(h))),
+        (None, Some(h)) => Some(Last::Put(h)),
         (d, _) => d,
     }
 }

@@ -76,6 +76,51 @@ with 4 for SF12, and zenoh-modem's tuned 3,600 s with 2 for SBD.
   first 4 bytes of the sha256 of the document's JCS bytes), since core
   §8.6 has not landed. §2.19 states it, and will cite §8.6 once it does.
 
+## 0.11 — 2026-11-01: a heartbeat crosses where a collection it covers does, never downsampled (#978)
+
+Core 0.82 and `freshness.v2` text 0.1 (#978's F3) replace `freshness.v1`'s
+re-puts with one heartbeat per interface, a stream on the key
+`zk2/<system>/<service>/freshness.v2/stream/heartbeat/<iface>`. Under 0.10
+the plan read it as any templated stream: denied, and a rule at the
+face's interval would thin it had it crossed. At RF's `interval_s` of 60
+against a heartbeat every 28.5 s, a far reader would wait a whole horizon
+between two. #988's link.v2 takes these rules over.
+
+**Added: §2.9, a heartbeat crosses where a collection it covers does.** A
+listed interface has a heartbeat when a revision given uses
+`freshness.v2` and it has a collection. A generator MUST let it cross a
+face exactly when a collection of that interface crosses, overlapped
+ones set aside. `[F: plan.json]` §2.9 is now "Events, heartbeats and
+requests".
+
+**Added: §2.8, never downsampled.** A generator MUST NOT emit a
+downsampling rule for a heartbeat's key. `[F: plan.json]`
+
+**Added: §2.7, heartbeats in the denies.** For the token `stream`,
+`freshness.v2` is carved from its heartbeats, each listed interface's a
+template `heartbeat/<I>` of its own, in place of the profile's templated
+resource. A crossing heartbeat is in no deny, and one that does not cross
+is denied by its own key.
+
+**Added: §2.12, a crossing heartbeat is liveness evidence,** listed as
+`freshness.v2/stream/heartbeat/<iface>` for each listed service
+implementing its interface. §2.3's `liveness` says so.
+
+**Fixtures.** `plan.json` gains two cases: a face that exposes, where
+`beacon.v2`'s heartbeat crosses, is no rule and is `lab/b1`'s evidence,
+`notes.v2`'s is denied by its own key, and `old.v1` (`freshness.v1`) and
+`quiet.v2` (no collection) have none; and the same deployment on a face
+that exposes none. Blessed, every earlier case unchanged. An inline
+revision may now be `{uses, resources}`.
+
+**Deliberately not changed.**
+- **No plan of the adopters moves.** No state of zenoh-modem crosses its
+  RF face, so modem.v3's heartbeat would not cross it either, once it uses
+  `freshness.v2`.
+- **The consumer's grants** (core §11.1) are unchanged. A far consumer of
+  a covered interface needs its heartbeat key granted under `deny`, which
+  a later core version adds.
+
 ## 0.10 — 2026-10-30: editorial: round 86's F-332 to F-335, no rule changed (#935)
 
 zk2py round 86 (PR #959) read 0.9 cold, beside core 0.62 and

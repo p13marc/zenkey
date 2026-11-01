@@ -1,0 +1,44 @@
+# freshness.v2's scenarios (#978's F3), as
+# `spec/profiles/freshness/scenarios-v2.md` states the contract: two
+# collections, one of one member and one templated, a collection the owner
+# may not expose, a state of each other kind of horizon, and a stream.
+[interface]
+name  = "beacon"
+major = 2
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources.status]                         # a collection of one member: a heartbeat every 0.95 s
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
+
+[resources."peer/{peer}"]                  # a templated collection, best_effort under loss
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { peer = "string" }
+cardinality = 8
+reliability = "best_effort"
+congestion  = "drop"
+annotations = { "freshness.ttl_s" = 4 }
+
+[resources.route]                          # a collection behind a capability: its map bit 0 without it
+kind        = "state"
+type        = { raw = "text/plain" }
+optional    = true
+gate        = ["capability:routing"]
+annotations = { "freshness.ttl_s" = 4 }
+
+[resources.intent]                         # never stale: no collection
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 0 }
+
+[resources.note]                           # no horizon: no collection
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.level]                          # a stream confirms by sampling, ttl 1 s
+kind        = "stream"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 1 }

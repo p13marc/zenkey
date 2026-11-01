@@ -1,7 +1,8 @@
-//! A consumer reads heartbeats (core §7.5's form 6; #978's F2): no rule
-//! adopts the heartbeat yet and no owner sends one, so these tests write
-//! one by hand, raw, on the key F3's `freshness.v2` will declare, from the
-//! member's own in-band stamp.
+//! A consumer reads heartbeats (core §7.5's form 6; #978's F2):
+//! `beacon.v1` uses `freshness.v1`, so its owner sends none, and these
+//! tests write one by hand, raw, on the key `freshness.v2` declares, from
+//! the member's own in-band stamp. `profile_freshness_v2.rs` runs an
+//! owner that sends them.
 //!
 //! Setup: R1 a router; the owner `lab/beacon` implements `beacon.v1` as a
 //! client of R1, its status's re-puts off; S a tool's consumer of it on
@@ -190,7 +191,13 @@ async fn a_subscription_folds_a_heartbeat_into_its_freshness() {
             sub.heartbeats() == u64::from(seq)
         })
         .await;
-        assert_eq!(sub.reread_due(&provider), seq == 3);
+        // freshness.v2 §2.5: due at the second, and the subscription
+        // re-reads at once, so the view may already be whole again.
+        assert_eq!(
+            sub.reread_due(&provider) || sub.rereads() > 0,
+            seq == 3,
+            "seq {seq}"
+        );
         // 0 then 2: a heartbeat lost, the observation incomplete until 3
         // comes in sequence.
         let complete = matches!(
@@ -213,5 +220,124 @@ async fn a_subscription_folds_a_heartbeat_into_its_freshness() {
     assert_eq!(
         (j.verdict, j.reason),
         (Verdict::Stale, Reason::BeyondHorizon)
+    );
+}
+
+/// `freshness.v2` under a namespace (#978's F3): an owner of `beacon.v2`
+/// and its readers, each a session in `site`, so the heartbeat travels on
+/// `site/zk2/…/freshness.v2/stream/heartbeat/beacon.v2`; a late joiner that
+/// does not GET re-reads its collection by a base-relative selector the
+/// session namespaces, and one that seeds from its own GET is confirmed
+/// with no re-read: the replies come back base-relative, as the view reads
+/// them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_re_read_and_a_seed_under_a_namespace() {
+    use common::{T, client_ns};
+    let (_r1, ep) = router(None).await;
+    let os = client_ns(&ep, Some("site")).await;
+    let rs = client_ns(&ep, Some("site")).await;
+    let wire = client(&ep).await;
+    let raw: Arc<Mutex<Vec<String>>> = Arc::default();
+    let w = Arc::clone(&raw);
+    let _raw = wire
+        .declare_subscriber("site/zk2/lab/beacon/freshness.v2/stream/heartbeat/*")
+        .callback(move |s| w.lock().unwrap().push(s.key_expr().as_str().to_owned()))
+        .await
+        .unwrap();
+
+    let v2: IfaceId = "beacon.v2".parse().unwrap();
+    let none = Bindings::new();
+    let peer = |p: &str| -> Bindings { [("peer".to_owned(), vec![p.to_owned()])].into() };
+    let mut b = ServiceBuilder::new(&os, config("lab/beacon"));
+    b.implement(imp("beacon.v2")).unwrap();
+    let _status = b
+        .declare_state_writer(&v2, "state/status", &none)
+        .await
+        .unwrap();
+    let a = b
+        .declare_state_writer(&v2, "state/peer/{peer}", &peer("a"))
+        .await
+        .unwrap();
+    let bw = b
+        .declare_state_writer(&v2, "state/peer/{peer}", &peer("b"))
+        .await
+        .unwrap();
+    let _intent = b
+        .declare_state_writer(&v2, "state/intent", &none)
+        .await
+        .unwrap();
+    let _note = b
+        .declare_state_writer(&v2, "state/note", &none)
+        .await
+        .unwrap();
+    let _level = b.declare_writer(&v2, "stream/level", &none).await.unwrap();
+    let _svc = b.start().await.unwrap();
+    a.put("1").await.unwrap();
+    bw.put("1").await.unwrap();
+    let both = vec![
+        "zk2/lab/beacon/beacon.v2/state/peer/a".to_owned(),
+        "zk2/lab/beacon/beacon.v2/state/peer/b".to_owned(),
+    ];
+
+    let c = Consumer::for_tool(
+        &rs,
+        Arc::new(contract("beacon.v2")),
+        &["lab/beacon"],
+        &Default::default(),
+    )
+    .unwrap()
+    .with_reread_timeout(T);
+    let listen = |confirmed: Arc<Mutex<Vec<Confirmation>>>| {
+        let c = c.clone();
+        async move {
+            c.subscribe_confirmed(
+                "state/peer/{peer}",
+                |_: Delivery| {},
+                move |x: Confirmation| confirmed.lock().unwrap().push(x),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let late_confirmed: Arc<Mutex<Vec<Confirmation>>> = Arc::default();
+    let late = listen(Arc::clone(&late_confirmed)).await;
+    let seeded_confirmed: Arc<Mutex<Vec<Confirmation>>> = Arc::default();
+    let seeded = listen(Arc::clone(&seeded_confirmed)).await;
+    let asked = Instant::now();
+    let answer = c.get_answer("state/peer/{peer}", None, T).await.unwrap();
+    assert_eq!(answer.current.len(), 2, "{answer:?}");
+    assert!(
+        answer.current.iter().all(|x| !x.key().starts_with("site/")),
+        "the replies come back base-relative"
+    );
+    seeded.seed(&answer, asked);
+
+    eventually("the seeded subscription confirms both", || async {
+        seeded_confirmed
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|x| x.keys == both)
+    })
+    .await;
+    assert_eq!(seeded.rereads(), 0, "seeded: no re-read");
+    eventually("the late joiner re-reads once", || async {
+        late.rereads() == 1
+    })
+    .await;
+    eventually("then confirms both", || async {
+        late_confirmed
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|x| x.keys == both)
+    })
+    .await;
+    assert!(
+        raw.lock()
+            .unwrap()
+            .iter()
+            .any(|k| k == "site/zk2/lab/beacon/freshness.v2/stream/heartbeat/beacon.v2"),
+        "the heartbeat's wire key carries the namespace"
     );
 }

@@ -1,8 +1,65 @@
-# `freshness.v1` changelog
+# `freshness` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) and [`v2.md`](v2.md), each
+entry naming its text. Each entry records what changed, what deliberately
+did not, and why. A breaking change is a new major, a new file, never an
+entry here ([`../README.md`](../README.md)).
+
+## `v2.md` 0.1 — 2026-11-01: `freshness.v2`, confirmed by a heartbeat (#978)
+
+Epic #975, zk2c, makes the wire bandwidth-first. `freshness.v1` confirms
+a state member by putting it again, whole and freshly stamped, at most
+every ttl/2. On W2 that is about 6.2 MB a day of unchanged documents,
+config.v1's view and status most of it (#989). Core 0.81 defined a
+heartbeat, §7.5's form 6, that vouches for each member by a bit. This
+text, #978's F3, adopts it, as a new major: `freshness.v1` stays defined
+for the contracts that use it. It is experimental: no adopter's mapping
+uses it yet. F4 moves health.v1, alarms.v1 and config.v1 onto it.
+
+**What it restates.** v1 §2.1–§2.3 and §2.5–§2.11 by reference, word for
+word: the horizon, its kinds, the judgements, the combination, archives,
+the face and "stale is never down". Only what counts as a confirmation
+grows.
+
+**What it replaces: v1 §2.4.**
+- **The heartbeat.** An owner MUST publish one per interface it serves
+  whose contract uses `freshness.v2` and has a collection, at most half
+  the shortest horizon among its collections apart. `[Sc: §1]`
+- **The bits.** It MUST set a member's bit only while it vouches for the
+  value, and a member that is not live has none. `[Sc: §1, §2]`
+- **No re-put.** It SHOULD NOT put a member again to confirm it.
+  `[Sc: §1]`
+- **Its stamps.** Its puts carry no Zenoh timestamp, and its replies the
+  last confirmation (core §4.3's table and S2, 0.82). `[Sc: §3]`
+- **When.** From the owner's tokens on, never from a standby, with no
+  member live too.
+
+**Added: §2.5, the reader's rule.** A subscriber MUST confirm a member by
+a heartbeat only as the rule says: another revision's tag, a refused
+body and an older seq confirm nothing; then, per collection, a map bit of
+0 nothing, a digest or live count not the view's nothing, and otherwise
+each member vouched for. A gap in the heartbeat key's seqs MUST be read
+as a lost delivery until one arrives in sequence. After two divergences
+in a row a subscriber SHOULD re-read the collection, and the answer MUST
+replace its view. `[F: apply.json]` `[Sc: §4, §5, §6]`
+
+**Added: §2.10, the clock guard.** While it holds, an owner MUST NOT
+vouch for any member, and its heartbeat's time is unknown. `[Sc: §2]`
+
+**Added: §3, the standard contract.** `freshness.v2.toml`, one stream,
+`heartbeat/{iface}`: reliable, `drop`, priority `data`, cardinality 256.
+Published in `../.history/freshness.v2/`, fingerprint `8756e6a6…`.
+
+**Fixtures and scenarios.** `conformance/apply.json`, written by an
+independent reading of §2.5 (Python, standard library), checked and never
+blessed: 14 cases over the core's `heartbeat/layouts.json`.
+`scenarios-v2.md` §1–§7, which the reference runs in process.
+
+**The defaults #978's design took.** A new id, not `freshness.v1`
+amended in place. One heartbeat per interface, not per owner. A digest per
+collection, not one per exposure group. A cleared bit is no confirmation,
+not stale at once. A re-read after two divergences, not one plus a grace.
+The key a resource of the standard contract, not a verbatim kind.
 
 ## 0.5 — 2026-10-30: editorial: inline history taken out of the rules and long sentences split, no rule changed (#935)
 

@@ -1525,6 +1525,7 @@ impl World {
                     time: "2026-10-05T09:12:44.250000000Z".into(),
                     clock: "a1b2c3d4e5f60718".into(),
                 }),
+                last_confirmation: None,
                 confirmed: archive.map(|_| true),
                 identity: None,
             })

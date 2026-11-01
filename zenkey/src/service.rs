@@ -89,6 +89,9 @@ pub(crate) struct ImplState {
     /// A governed interface's gate (`redundancy.v1` §2.4, #841): every
     /// resource of it declared only while the instance serves it.
     pub(crate) gate: Option<Arc<Gate>>,
+    /// Its collections, when its contract uses `freshness.v2` and has one:
+    /// what its heartbeat covers (#978's F3, [`crate::heartbeat`]).
+    pub(crate) heartbeat: Option<Arc<zenkey_model::heartbeat::Layout>>,
 }
 
 impl ImplState {
@@ -726,7 +729,23 @@ impl ServiceBuilder {
 
     /// Implements an interface. Its contract's requirements become roles of
     /// this service, `declared_by` it (§3.3).
+    ///
+    /// A contract that uses `freshness.v2` and has a collection (a state
+    /// with a horizon above 0) brings the profile's standard contract with
+    /// it, implemented once ([`crate::heartbeat`]): its heartbeat covering
+    /// the interface is exposed, and sent from [`ServiceBuilder::start`]'s
+    /// tokens on. Implementing `freshness.v2` again after that is no
+    /// change.
     pub fn implement(&mut self, imp: Implementation) -> Result<&mut Self> {
+        let fv2 = crate::heartbeat::iface();
+        if imp.iface() == &fv2
+            && self
+                .impls
+                .iter()
+                .any(|s| s.imp.iface() == &fv2 && s.imp.fingerprint() == imp.fingerprint())
+        {
+            return Ok(self);
+        }
         if self.impls.iter().any(|s| s.imp.iface() == imp.iface()) {
             return Err(Error::Duplicate(imp.iface().clone()));
         }
@@ -754,6 +773,15 @@ impl ServiceBuilder {
         // governs its interface, whose resources are born standing by.
         let gate = zenkey_model::redundancy::is_governed(imp.contract())
             .then(|| Gate::new(imp.iface().clone()));
+        // freshness.v2 §2.4 (#978's F3): its collections are vouched for by
+        // a heartbeat, and its states with a horizon leave §4.3's table.
+        let heartbeat = zenkey_model::freshness::uses_v2(imp.contract())
+            .then(|| Arc::new(zenkey_model::heartbeat::Layout::of(imp.contract())))
+            .filter(|l| !l.collections.is_empty());
+        if let Some(l) = &heartbeat {
+            self.store.cover(Arc::clone(l));
+            self.minter.cover(imp.iface());
+        }
         self.impls.push(ImplState {
             imp,
             exposed: BTreeSet::new(),
@@ -762,7 +790,14 @@ impl ServiceBuilder {
             budgets,
             metrics,
             gate,
+            heartbeat: heartbeat.clone(),
         });
+        if heartbeat.is_some() {
+            if !self.implements(&fv2) {
+                self.implement(crate::heartbeat::implementation())?;
+            }
+            self.expose(&fv2, crate::heartbeat::HEARTBEAT)?;
+        }
         Ok(self)
     }
 
@@ -1134,6 +1169,7 @@ impl ServiceBuilder {
         self.minter
             .listen(Arc::downgrade(&served) as std::sync::Weak<dyn crate::state::RunListener>);
         let mut svc = Service {
+            heartbeats: crate::heartbeat::Tasks::default(),
             _guard: self.redundancy.clone().map(RedundancyGuard),
             alive: BTreeMap::new(),
             instance_token: None,
@@ -1216,6 +1252,9 @@ impl ServiceBuilder {
         for t in &svc.desired_targets {
             t.start(svc.closed.subscribe());
         }
+        // freshness.v2 §2.4 (#978's F3): each covered interface's heartbeat,
+        // from here on, after the tokens.
+        svc.start_heartbeats().await?;
         Ok(svc)
     }
 }
@@ -1388,8 +1427,10 @@ fn resource_key(
 /// A running service. Dropping it undeclares its tokens first, then its
 /// queryables; [`Service::close`] does the same and waits for it.
 pub struct Service {
-    // Tokens first: fields drop in declaration order. The elections' guard
-    // before them: a governed interface's token goes first.
+    // Tokens first: fields drop in declaration order. The heartbeats before
+    // them (freshness.v2 §2.4: none after the tokens go), and the
+    // elections' guard: a governed interface's token goes first.
+    heartbeats: crate::heartbeat::Tasks,
     _guard: Option<RedundancyGuard>,
     alive: BTreeMap<IfaceId, LivelinessToken>,
     instance_token: Option<LivelinessToken>,
@@ -1979,9 +2020,11 @@ impl Service {
         Ok(())
     }
 
-    /// Stops its state writers' re-puts (`freshness.v1` §2.4), then
-    /// undeclares the tokens, then the queryables, and waits for each.
+    /// Stops its heartbeats (`freshness.v2` §2.4) and its state writers'
+    /// re-puts (`freshness.v1` §2.4), then undeclares the tokens, then the
+    /// queryables, and waits for each.
     pub async fn close(mut self) -> Result<()> {
+        self.heartbeats.stop().await;
         self.closed.send_replace(true);
         // redundancy.v1 (#841): every election stopped, its writes, then
         // each governed interface's tokens, before the rest.
@@ -2011,6 +2054,71 @@ impl Service {
         for q in std::mem::take(&mut self.contract_qs) {
             q.undeclare().await.map_err(zenoh)?;
         }
+        Ok(())
+    }
+
+    /// Starts one heartbeat task per covered interface (`freshness.v2`
+    /// §2.4): its writer declared through the interface's gate, so a
+    /// standby sends none; its map bits the collections this instance
+    /// exposes.
+    async fn start_heartbeats(&mut self) -> Result<()> {
+        let fv2 = crate::heartbeat::iface();
+        let Ok(hb) = find(&self.impls, &fv2) else {
+            return Ok(());
+        };
+        let r = hb.imp.resource(crate::heartbeat::HEARTBEAT)?.clone();
+        let mut tasks = Vec::new();
+        for s in &self.impls {
+            let Some(layout) = &s.heartbeat else {
+                continue;
+            };
+            let Some(period) = crate::heartbeat::period(layout) else {
+                continue;
+            };
+            let exposed = layout
+                .collections
+                .iter()
+                .map(|c| {
+                    let name = c.resource();
+                    s.exposed.contains(&name)
+                        && !s.unavailable.contains_key(&name)
+                        && s.imp.resource(&name).is_ok_and(|r| {
+                            missing_capability(r, &self.config.capabilities).is_none()
+                        })
+                })
+                .collect();
+            let values: Bindings = [(
+                crate::heartbeat::PARAM.to_owned(),
+                vec![s.imp.iface().to_string()],
+            )]
+            .into();
+            let key = resource_key(
+                &self.addr,
+                &self.impls,
+                &fv2,
+                crate::heartbeat::HEARTBEAT,
+                &values,
+            )?;
+            let writer = Writer::declare_gated(
+                &self.session,
+                &self.minter,
+                key.into_keyexpr(),
+                &r,
+                &values,
+                s.gate.clone(),
+            )
+            .await?;
+            let beat = crate::heartbeat::Beat {
+                writer,
+                layout: Arc::clone(layout),
+                exposed,
+                store: Arc::clone(&self.store),
+                minter: Arc::clone(&self.minter),
+                period,
+            };
+            tasks.push(tokio::spawn(beat.run(self.closed.subscribe())));
+        }
+        self.heartbeats.0.extend(tasks);
         Ok(())
     }
 

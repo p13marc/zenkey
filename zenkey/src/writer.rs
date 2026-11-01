@@ -291,16 +291,20 @@ pub struct Writer {
 }
 
 /// Whether `r` is a resource core §4.3's table lists for every mutation of
-/// it: a state with a horizon above 0 (`freshness.v1`), a `desired.v1`
+/// it: a state with a horizon above 0 whose contract does not use
+/// `freshness.v2` (`v2`: its heartbeats confirm it instead), a `desired.v1`
 /// desired resource, or a stream that declares a `timing.v1` lifespan. A
 /// `telemetry.v1` state metric resource is the fourth, known once its
 /// writer is metered ([`Writer::metered`]).
-fn in_table(r: &Resource) -> bool {
+fn in_table(r: &Resource, v2: bool) -> bool {
     let state = matches!(r.token, KindToken::State | KindToken::ExplicitState);
-    let horizon = matches!(
-        zenkey_model::freshness::horizon_of(r),
-        zenkey_model::freshness::Horizon::Within(_)
-    );
+    // Row 1 is freshness.v1's: under freshness.v2 a heartbeat confirms the
+    // state, and its puts carry no Zenoh timestamp (#978's F3).
+    let horizon = !v2
+        && matches!(
+            zenkey_model::freshness::horizon_of(r),
+            zenkey_model::freshness::Horizon::Within(_)
+        );
     let desired = matches!(
         zenkey_model::desired::declaration_of(r),
         zenkey_model::desired::Declaration::Declared(_)
@@ -361,6 +365,7 @@ impl Writer {
         if r.token == KindToken::ExplicitStream {
             crate::shm::warn_if_memlock_low();
         }
+        let timed = in_table(r, minter.covers(key.as_str())) || minter.session_timestamping();
         Ok(Self {
             owned: key.clone(),
             key: zenoh::key_expr::KeyExpr::from(key),
@@ -376,7 +381,7 @@ impl Writer {
             timing: zenkey_model::timing::declaration_of(r).declared().copied(),
             minter: Arc::clone(minter),
             token: r.token,
-            timed: in_table(r) || minter.session_timestamping(),
+            timed,
             order: tokio::sync::Mutex::new(()),
         })
     }

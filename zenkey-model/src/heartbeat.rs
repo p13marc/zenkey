@@ -25,11 +25,12 @@
 //! run's width bit, the run and the seq. It is free of order, so an owner
 //! keeps it at each mutation and a reader computes it over its own view.
 //!
-//! No rule adopts the heartbeat yet (core 0.81): no owner sends one, and
-//! `freshness.v2` (#978's F3) will name its key, its period and what a
-//! reader concludes. A reader's view of the members and how a heartbeat
-//! confirms them is [`crate::freshness::View`] (#978's F2). The refusals'
-//! tokens are `spec/conformance/heartbeat/bodies.json`'s.
+//! `freshness.v2` (#978's F3, core 0.82) adopts it: an owner of a
+//! contract that uses it sends one heartbeat per interface it serves that
+//! has a collection, on [`key`], at most half the shortest horizon apart
+//! (v2 §2.4), and a reader confirms by it as [`crate::freshness::View`]
+//! reads it (v2 §2.5, `spec/profiles/freshness/conformance/apply.json`).
+//! The refusals' tokens are `spec/conformance/heartbeat/bodies.json`'s.
 
 use std::time::Duration;
 
@@ -44,12 +45,12 @@ use crate::packed::{BitReader, BitWriter, ReadRefusal};
 use crate::template::Template;
 use crate::wire::{self, Run, Stamp, Tag};
 
-/// The profile that will adopt the heartbeat (#978's F3), as its key's
+/// The profile that adopts the heartbeat (#978's F3), as its key's
 /// interface chunk spells it.
 pub const PROFILE: &str = "freshness.v2";
 
-/// The resource F3's `freshness.v2` declares, its parameter the covered
-/// interface's id.
+/// The resource `freshness.v2`'s standard contract declares, its
+/// parameter the covered interface's id (v2 §3).
 pub const RESOURCE: &str = "heartbeat/{iface}";
 
 /// The width of a heartbeat's time: 32 bits of seconds, then 10 of
@@ -58,7 +59,7 @@ pub const TIME_BITS: u32 = 42;
 
 /// The base-relative key a heartbeat covering `iface` travels on from the
 /// service at `system/service`: `zk2/<system>/<service>/freshness.v2/stream/heartbeat/<iface>`
-/// (#978's design §1.1; F3's `freshness.v2` declares it). An interface id
+/// (`freshness.v2` §3 declares it). An interface id
 /// is a plain chunk, so it needs no slug.
 #[must_use]
 pub fn key(system: &str, service: &str, iface: &IfaceId) -> String {

@@ -2525,3 +2525,71 @@ async fn the_owner_example_takes_its_runs_from_a_run_file() {
     assert_eq!(run.len(), 8, "no record: a 32-bit run, {run}");
     o.stop().await;
 }
+
+/// `freshness.v2` in the owner example (#978's F3): `beacon.v2` brings the
+/// profile's standard contract, the owner sends a heartbeat covering it,
+/// its raw `status` put before the tokens and vouched for, and `vouch …
+/// off` clears its bit, so later heartbeats vouch for nothing there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_sends_freshness_v2_heartbeats() {
+    use zenkey::model::heartbeat::{Heartbeat, Layout, Members};
+    use zenkey::model::wire::Envelope;
+
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let beats = tool
+        .declare_subscriber("zk2/ex/beacon/freshness.v2/stream/heartbeat/beacon.v2")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/beacon.v2.toml");
+    let file = file.display().to_string();
+    let o = spawn_owner(&["--connect", &ep, "ex/beacon", &file]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    line(&o.lines).await;
+    let layout = Layout::of(&common::contract("beacon.v2"));
+    let next = || async {
+        let s = tokio::time::timeout(SETTLE, beats.recv_async())
+            .await
+            .expect("a heartbeat")
+            .unwrap();
+        let bytes = s.payload().to_bytes();
+        let e = Envelope::parse(&bytes).unwrap();
+        assert_eq!(e.tag, layout.tag);
+        Heartbeat::parse(e.record, &layout).unwrap()
+    };
+    let status = |hb: &Heartbeat| hb.sections[2].as_ref().unwrap().members.clone();
+    let hb = next().await;
+    assert_eq!(
+        status(&hb),
+        Members::One { vouched: true },
+        "status vouched for"
+    );
+    assert_eq!(
+        o.ask("vouch beacon.v2 state/status off").await,
+        "vouch zk2/ex/beacon/beacon.v2/state/status off"
+    );
+    let mut cleared = false;
+    for _ in 0..4 {
+        if status(&next().await) == (Members::One { vouched: false }) {
+            cleared = true;
+            break;
+        }
+    }
+    assert!(cleared, "a heartbeat vouches for nothing of status");
+    assert_eq!(
+        o.ask("vouch beacon.v2 state/status on").await,
+        "vouch zk2/ex/beacon/beacon.v2/state/status on"
+    );
+    assert!(
+        o.ask("vouch beacon.v2 state/intent maybe")
+            .await
+            .starts_with("refused vouch beacon.v2 state/intent maybe: usage")
+    );
+    assert!(
+        o.ask("vouch beacon.v2 state/peer/{peer} x on")
+            .await
+            .contains("is no state member written here")
+    );
+    o.stop().await;
+}

@@ -102,7 +102,18 @@
 //! put <iface> <resource> [<value>...]    one write on a member (core §2.7)
 //! delete <iface> <resource> [<value>...] a state member's delete
 //! fill <iface> <resource> <n>            put members m0 … m<n−1>, one write each
+//! vouch <iface> <resource> [<value>...] on|off
+//!                                        a state member's bit in its heartbeat
+//!                                        (freshness.v2 §2.4), or its re-puts (v1)
 //! ```
+//!
+//! **`freshness.v2`** (#978's F3): a contract file that uses it brings the
+//! profile's standard contract with it, implemented by the runtime, and the
+//! owner sends one heartbeat per such interface with a collection, on
+//! `zk2/<system>/<service>/freshness.v2/stream/heartbeat/<iface>`, from its
+//! tokens on (`zenkey/tests/contracts/beacon.v2.toml` is the scenarios').
+//! `vouch … off` clears a member's bit, so its readers judge it stale; `on`
+//! sets it again.
 //!
 //! **The budget** (core §2.7, #741), for a runner to reach each bound:
 //! `put` writes once on the member of a stream, state or event resource
@@ -743,6 +754,9 @@ Command words:
   seq <n>                                 the next state and event seq (core §4.3):
                                           `seq <n> run <run>`
   put, delete, fill                       one write on a member (core §2.7)
+  vouch <iface> <resource> [<value>...] on|off
+                                          a state member's bit in its owner's
+                                          heartbeat (freshness.v2 §2.4)
   config ...                              config.v1 (--config)
   alarm ...                               alarms.v1 (--alarms), below
   telemetry ...                           telemetry.v1's writers, below
@@ -2644,6 +2658,44 @@ impl Members {
         Ok((i.clone(), r.clone()))
     }
 
+    /// Sets the bit of the state member of `resource` the values bind
+    /// (`freshness.v2` §2.4; under `freshness.v1`, its re-puts): one put at
+    /// the start (`states`), or by a `put`. Answers its key.
+    fn vouch(
+        &self,
+        svc: &Service,
+        states: &[(IfaceId, Arc<StateWriter>)],
+        iface: &str,
+        resource: &str,
+        values: &[String],
+        on: bool,
+    ) -> Result<String, String> {
+        let iface: IfaceId = iface.parse().map_err(|e| format!("{e}"))?;
+        let r = self
+            .contracts
+            .get(&iface)
+            .ok_or_else(|| format!("{iface} is not implemented here"))?
+            .resources
+            .iter()
+            .find(|r| zenkey::implementation::resource_name(r) == resource)
+            .ok_or_else(|| format!("{iface} has no resource {resource:?}"))?;
+        let key = svc
+            .key(&iface, resource, &bind(r, values)?)
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let w = states
+            .iter()
+            .map(|(_, w)| w.as_ref())
+            .find(|w| w.key_expr().as_str() == key)
+            .or_else(|| match self.writers.get(&key) {
+                Some(Held::State(w)) => Some(w),
+                _ => None,
+            })
+            .ok_or_else(|| format!("{key} is no state member written here"))?;
+        w.set_vouched(on);
+        Ok(key)
+    }
+
     /// One write on the member of `resource` the values bind (§2.7), or why
     /// not; for `delete`, the state member's delete. Answers its key.
     async fn write(
@@ -3422,6 +3474,22 @@ async fn command(
                 format!("clock-offset {ms}")
             }
             Err(e) => refuse(&e.to_string()),
+        };
+    }
+    // freshness.v2 §2.4 (#978's F3): a state member's bit in its owner's
+    // heartbeat, or freshness.v1's re-puts.
+    if let ["vouch", iface, resource, rest @ ..] = words.as_slice()
+        && let Some((on, values)) = rest.split_last()
+    {
+        let on = match *on {
+            "on" => true,
+            "off" => false,
+            _ => return refuse("usage: vouch <iface> <resource> [<value>...] on|off"),
+        };
+        let values: Vec<String> = values.iter().map(|v| (*v).to_owned()).collect();
+        return match members.vouch(svc, &up._states, iface, resource, &values, on) {
+            Ok(key) => format!("vouch {key} {}", if on { "on" } else { "off" }),
+            Err(why) => refuse(&why),
         };
     }
     // Core §2.7: one write on a member, its delete, or a run of members.

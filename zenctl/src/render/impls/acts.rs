@@ -379,6 +379,16 @@ impl Render for StateReport {
             if let Some(i) = &r.inband {
                 more.push(format!("  stamped in band: {i}"));
             }
+            // freshness.v2 (#978's F3): the reply's stamp is the member's
+            // last confirmation, its last put or its owner's last
+            // heartbeat that vouched for it, never a change.
+            if let Some(c) = &r.last_confirmation {
+                more.push(format!(
+                    "  last confirmed {} (freshness.v2: its last put, or the last heartbeat \
+                     that vouched for it)",
+                    stamp_text(c)
+                ));
+            }
             if let Some(c) = r.confirmed {
                 more.push(if c {
                     "  confirmed by the archive's alignment".to_owned()

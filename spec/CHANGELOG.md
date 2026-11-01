@@ -3,6 +3,64 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.82 — 2026-11-01: `freshness.v2` adopts the heartbeat (#978)
+
+0.81 defined §7.5's form 6, the heartbeat, and no rule adopted it. This
+version is #978's F3, the flip. A new profile, `freshness.v2` (text 0.1),
+says who sends a heartbeat, on which key, how often, and what a reader
+concludes. Its owners confirm their state by it, and re-put nothing.
+The core takes the parts that are its own: the table of Zenoh
+timestamps, S2's replies, the tokenless set and the constrained face.
+`link.v1` text 0.11 lets a heartbeat cross. F4 moves health.v1, alarms.v1
+and config.v1 onto it, F5 every other contract, and F6 narrows the clock
+guard.
+
+**Changed: §4.3's table, row 1, split in two.**
+- **A state with a horizon whose contract does not use `freshness.v2`**
+  keeps the row as it was: a Zenoh timestamp on each mutation and reply
+  (S1, S2), for `freshness.v1`'s GET reader.
+- **One whose contract uses `freshness.v2`** carries none on its puts.
+  Its replies carry its last confirmation: the later of its last
+  mutation's time and the last heartbeat's that vouched for it. A GET
+  reader ages a reply from it, as it aged a `freshness.v1` re-put.
+- The sentence over the table says so.
+
+**Changed: S2.** The owner's reply of a member a `freshness.v2` heartbeat
+confirms MUST carry that member's last confirmation instead of its
+mutation's Zenoh timestamp. `[Sc: profiles/freshness/scenarios-v2.md §3]`
+joins S2's evidence. `RULES.md` lists 198 rules.
+
+**Added: §4.2, "A heartbeat is no mutation."** Under `freshness.v2` an
+owner puts no member again to confirm it, and its heartbeat moves no seq
+of its state. A reply represents the member's latest put, stamped with its
+last confirmation.
+
+**Changed: §7.5.** The heartbeat's paragraph no longer says that no rule
+says who sends one: `freshness.v2` says it.
+
+**Changed: §8.1, the tokenless set.** `freshness.v2` joins `health.v1`
+and `alarms.v1` among the interfaces the set SHOULD hold: every owner of
+a contract that uses it implements its standard contract.
+
+**Changed: §8.5, liveness across a face.** A heartbeat that crosses is
+liveness evidence, one put per covered interface each period, never
+downsampled (`link.v1` §2.8, §2.12).
+
+**Added: Appendix B.** A link carries each priority in a transmission
+queue of its own (`zenoh-transport`'s `common/pipeline.rs`), so two puts of
+different priorities can arrive in the other order. `freshness.v2` §2.5
+re-reads only after two divergences for that reason.
+
+**Deliberately not changed.**
+- **§7.5's bytes,** its refusals and its fixtures: 0.81's, unchanged.
+- **`freshness.v1`**, and the row it keeps. A contract that uses it is
+  confirmed by re-puts, as before.
+- **The clock guard** ("Ahead") still holds every state write. F6
+  narrows it. `freshness.v2` §2.10 says what a heartbeat does meanwhile:
+  it vouches for nothing, and its time is unknown.
+- **No fingerprint moves.** A contract moves to `freshness.v2` by its
+  `uses`, a review-class change (§9.8), in F4 and F5.
+
 ## 0.81 — 2026-11-01: the heartbeat defined (#978)
 
 Epic #975, zk2c, makes the wire bandwidth-first. Today `freshness.v1`

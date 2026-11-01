@@ -202,7 +202,7 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `FileRunStore`, refused beside a governed interface before any session,
   exit 2 (#976 A3); `get state`'s rows and `watch`'s samples carry
   `inband`, the run and seq, beside `timestamp`, which the table's detail
-  line and the watch's head line say (`stamped in band: run 0003, seq 12`); since #978 F2 `watch` of a collection prints each heartbeat's confirmation as a `confirmation` row (`report::WatchConfirmation`, "confirmed by heartbeat: <key>"), never counted as a sample. #840's DD added `desired [SYSTEM/SERVICE] [--role R] [--for SECS]
+  line and the watch's head line say (`stamped in band: run 0003, seq 12`); since #978 F2 `watch` of a collection prints each heartbeat's confirmation as a `confirmation` row (`report::WatchConfirmation`, "confirmed by heartbeat: <key>"), never counted as a sample; since F3 (core 0.82) `get state` of a `freshness.v2` collection says each row's last confirmation, the reply's stamp (`StateRow::last_confirmation`, "last confirmed <time> (freshness.v2: …)"), and `acl gen --face-policy`'s plan lets a heartbeat cross where a collection it covers does, never downsampled (link.v1 0.11). #840's DD added `desired [SYSTEM/SERVICE] [--role R] [--for SECS]
   [--clocks-synced] [--contracts PATH]`, a root judgement over
   `desired.v1` (exit 1 a refused or failed act, or a target "not yet" on
   one version of its author's for the whole window, by the readings or a
