@@ -72,6 +72,21 @@ async fn a_subscription_folds_a_heartbeat_into_its_freshness() {
         .await
         .unwrap();
     status.set_refresh(false);
+    // Every resource exposed, as the contract requires; only the status is
+    // written.
+    let none = Bindings::new();
+    let _intent = b
+        .declare_state_writer(&beacon(), "state/intent", &none)
+        .await
+        .unwrap();
+    let _note = b
+        .declare_state_writer(&beacon(), "state/note", &none)
+        .await
+        .unwrap();
+    let _level = b
+        .declare_writer(&beacon(), "stream/level", &none)
+        .await
+        .unwrap();
     let _svc = b.start().await.unwrap();
 
     let c = Consumer::for_tool(
