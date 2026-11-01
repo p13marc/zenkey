@@ -395,12 +395,15 @@ impl<'a> Lens<'a> {
                     refusal,
                 );
                 return Checked {
-                    conformance: inband::refused_conformance(&rendering),
+                    conformance: inband::refused_conformance(&rendering, refusal),
                     rendering,
                     identity: resolution.identity,
                 };
             }
-            p => (p.bytes().expect("not refused"), p.encoding(encoding)),
+            // A record is read on its contract's `encoding`, never on
+            // `zenoh/bytes` (observer §7.3).
+            inband::Payload::Plain(b) => (b, encoding),
+            inband::Payload::Record { record, .. } => (record, None),
         };
         match &resolution.resolved {
             Some(r) => {

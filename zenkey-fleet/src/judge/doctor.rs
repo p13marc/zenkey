@@ -2685,6 +2685,9 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
                 stamps.refused.1.join(", ")
             ));
         }
+        // A refused envelope is a finding on its own. A Zenoh-stamped reply
+        // is judged only against the owner's `meta.zid`: with no descriptor
+        // naming it and nothing refused, the check is not made.
         let own = zids.get(addr);
         if own.is_none() && n > 0 && wrong.is_empty() {
             undecided.push(unjudged(
@@ -2698,6 +2701,8 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
         }
         let empty = BTreeSet::new();
         let own = own.unwrap_or(&empty);
+        // Each Zenoh-stamped reply against the owner's sessions; with none
+        // known, only a refusal above can be the finding.
         for (clock, (count, keys)) in stamps.by_clock.iter().filter(|_| !own.is_empty()) {
             match clock {
                 None => wrong.push(format!(

@@ -291,14 +291,16 @@ pub fn refused_rendering(
     }
 }
 
-/// A refused envelope's conformance: undecodable, as its rendering says.
-pub fn refused_conformance(rendering: &PayloadRendering) -> Conformance {
-    match &rendering.rendered {
-        Rendered::Undecodable { declared, reason } => Conformance::Undecodable {
-            declared: declared.clone(),
-            reason: reason.clone(),
-        },
-        _ => unreachable!("a refused envelope renders undecodable"),
+/// A refused envelope's conformance: undecodable, declared as its
+/// rendering says ([`refused_rendering`]), with the refusal's reason.
+pub fn refused_conformance(rendering: &PayloadRendering, refusal: Refusal) -> Conformance {
+    let declared = match &rendering.rendered {
+        Rendered::Undecodable { declared, .. } => declared.clone(),
+        _ => ENVELOPE.to_owned(),
+    };
+    Conformance::Undecodable {
+        declared,
+        reason: refusal.reason(),
     }
 }
 
@@ -308,7 +310,7 @@ pub fn refused_conformance(rendering: &PayloadRendering) -> Conformance {
 pub fn structural_text(key: &str, encoding: Option<&str>, bytes: &[u8]) -> String {
     match payload(key, encoding, bytes) {
         Payload::Refused(r) => format!("<undecodable: {}>", r.reason()),
-        p => structural::structural(p.bytes().expect("not refused")),
+        Payload::Plain(b) | Payload::Record { record: b, .. } => structural::structural(b),
     }
 }
 

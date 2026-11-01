@@ -358,3 +358,18 @@ async fn the_archive_refuses_an_outdated_put_only_within_a_run() {
         "the archive answers the owner's delete stamp"
     );
 }
+
+/// Observer §7.3 reads `zenoh/bytes` by its spelling. A put that sets no
+/// Encoding carries zenoh's default, so the default must spell the same,
+/// or a reader would miss every envelope put that way.
+#[test]
+fn zenohs_default_encoding_is_spelled_as_the_envelopes() {
+    assert_eq!(
+        Encoding::default().to_string(),
+        zenkey::model::wire::ENCODING
+    );
+    assert_eq!(
+        Encoding::ZENOH_BYTES.to_string(),
+        zenkey::model::wire::ENCODING
+    );
+}

@@ -78,6 +78,11 @@ impl FleetAnswer {
     /// else its in-band stamp (a put's from its payload, a delete's from
     /// its attachment) or why its envelope was refused. The answer keeps
     /// its bytes as they arrived.
+    ///
+    /// A put is read by its Encoding, as observer §7.3 says: an `encoding`
+    /// of `None` carries no envelope. Only an error reply has none, since
+    /// `answer_of` records every sample's, and zenoh spells its default
+    /// `zenoh/bytes` (`zenkey/tests/inband.rs` pins it).
     pub fn envelope(&self) -> crate::model::inband::Envelope {
         use crate::model::inband::{self, Payload};
         let Answer::Value(bytes) = &self.answer else {

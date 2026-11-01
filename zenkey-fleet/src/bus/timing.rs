@@ -466,7 +466,13 @@ pub async fn observe(
                     }
                     // Core §7.5: a refused zk2c envelope is undecodable,
                     // never an arrival, as the runtime's timing reads it.
-                    if crate::model::inband::refusal(&s).is_some() {
+                    // The report has no field for it yet, so it is logged.
+                    if let Some(refusal) = crate::model::inband::refusal(&s) {
+                        tracing::debug!(
+                            key = s.key_expr().as_str(),
+                            refusal = refusal.token(),
+                            "timing: a refused zk2c envelope is no arrival"
+                        );
                         return;
                     }
                     q.send(Delivery::Sample(TimedSample {

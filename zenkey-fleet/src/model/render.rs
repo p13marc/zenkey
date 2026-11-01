@@ -165,7 +165,7 @@ fn fallback_rendering(
 ) -> PayloadRendering {
     match payload {
         Payload::Refused(refusal) => inband::refused_rendering(key, size, None, None, refusal),
-        p => structural_rendering(key, why, p.bytes().expect("not refused")),
+        Payload::Plain(b) | Payload::Record { record: b, .. } => structural_rendering(key, why, b),
     }
 }
 
@@ -245,7 +245,7 @@ fn render_read(
                 refusal,
             );
         }
-        p => p.bytes().expect("not refused"),
+        Payload::Plain(b) | Payload::Record { record: b, .. } => b,
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
     // the contract speaks next (§7.2's order).

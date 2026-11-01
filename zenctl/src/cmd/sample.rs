@@ -70,27 +70,24 @@ impl Line {
             let checked = (!delete).then(|| match read {
                 inband::Payload::Refused(refusal) => {
                     let r = inband::refused_rendering(key, bytes.len(), None, None, refusal);
-                    let c = inband::refused_conformance(&r);
+                    let c = inband::refused_conformance(&r, refusal);
                     (r, c)
                 }
-                p => {
-                    let record = p.bytes().expect("not refused");
-                    (
-                        PayloadRendering {
-                            key: key.to_owned(),
-                            size: record.len(),
-                            resource: None,
-                            rendered: Rendered::Structural {
-                                why: Unresolved::DecodeNotAsked,
-                                value: zenkey_fleet::structural_value(record),
-                                text: zenkey_fleet::structural(record),
-                            },
+                inband::Payload::Plain(record) | inband::Payload::Record { record, .. } => (
+                    PayloadRendering {
+                        key: key.to_owned(),
+                        size: record.len(),
+                        resource: None,
+                        rendered: Rendered::Structural {
+                            why: Unresolved::DecodeNotAsked,
+                            value: zenkey_fleet::structural_value(record),
+                            text: zenkey_fleet::structural(record),
                         },
-                        Conformance::NotChecked {
-                            reason: Unresolved::DecodeNotAsked.words(),
-                        },
-                    )
-                }
+                    },
+                    Conformance::NotChecked {
+                        reason: Unresolved::DecodeNotAsked.words(),
+                    },
+                ),
             });
             return Line {
                 identity: lens.identity(key),

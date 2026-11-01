@@ -131,7 +131,7 @@ fn envelope(sample: &Sample) -> Option<Result<wire::Stamp, Refusal>> {
             Some(match wire::read_put(key, wire::ENCODING, &bytes) {
                 Reading::Enveloped(e) => Ok(e.stamp),
                 Reading::Refused(refusal) => Err(refusal),
-                Reading::Plain => unreachable!("`carries` said it does"),
+                Reading::Plain => return None,
             })
         }
     }
