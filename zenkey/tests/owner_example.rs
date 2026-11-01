@@ -2389,11 +2389,13 @@ async fn the_owner_example_arbitrates() {
     let _raw = tool
         .declare_subscriber("zk2/lab/safety/steer.v1/stream/cmd")
         .callback(move |x: Sample| {
-            // Each put's record, under core §7.5's envelope (F-422).
+            // Each put's record, under core §7.5's envelope (F-422): a put
+            // that is not one is named, so a bare put fails the test.
             let bytes = x.payload().to_bytes();
-            if let Ok(env) = zenkey::model::wire::Envelope::parse(&bytes) {
-                let _ = raw_tx.send(String::from_utf8_lossy(env.record).into_owned());
-            }
+            let _ = raw_tx.send(match zenkey::model::wire::Envelope::parse(&bytes) {
+                Ok(env) => String::from_utf8_lossy(env.record).into_owned(),
+                Err(r) => format!("<not an envelope: {}>", r.reason()),
+            });
         })
         .await
         .unwrap();
@@ -2401,6 +2403,7 @@ async fn the_owner_example_arbitrates() {
     assert_eq!(ask_json(&s, "commander resume").await["on"], true);
     tokio::time::timeout(SETTLE, async {
         while let Ok(p) = raw_rx.recv_async().await {
+            assert!(!p.starts_with("<not an envelope"), "{p}");
             if p.starts_with("standby ") {
                 return;
             }
