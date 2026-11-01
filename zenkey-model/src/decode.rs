@@ -7,6 +7,9 @@
 //! - **protobuf** decodes through the bundle's `FileDescriptorSet`
 //!   (prost-reflect), without codegen; **jsonschema** types are JSON or CBOR.
 //!   Both render field by field, as JSON.
+//! - **packed** (core §7.6) reads through the bundle's layout, under the
+//!   tag the record's envelope carried ([`Context`]): a record with no
+//!   tag, or one its layout refuses, is undecodable with the refusal named.
 //! - **Honest rendering:** a `raw` type renders as its declared media type
 //!   and the sample's size, and bytes that do not decode as their declared
 //!   type render as that type, the size and the reason. Neither garbage nor
@@ -17,6 +20,7 @@ use prost_reflect::{DescriptorPool, DynamicMessage};
 use serde_json::Value;
 
 use crate::bundle::Bundle;
+use crate::wire::Tag;
 
 /// What a payload renders as.
 #[derive(Debug, Clone, PartialEq)]
@@ -90,12 +94,52 @@ fn contract_encoding(bundle: &Bundle, ty: &Value) -> Option<String> {
         })
 }
 
+/// What a reader holds of a payload beside its bytes and its `Encoding`:
+/// what a packed record is read with (core §7.6).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Context {
+    /// The tag its envelope's CH carried (core §7.5), when it came in one.
+    /// A packed record that came in none has no tag, and does not decode.
+    pub tag: Option<Tag>,
+    /// The deployment epoch in seconds, for a packed record's `time`
+    /// fields; `None` reads them under [`crate::packed::DEFAULT_EPOCH`],
+    /// since nothing carries one yet (#980).
+    pub epoch: Option<i64>,
+}
+
+impl Context {
+    /// A record that came in an envelope whose CH carried `tag`.
+    #[must_use]
+    pub fn tagged(tag: Tag) -> Self {
+        Self {
+            tag: Some(tag),
+            epoch: None,
+        }
+    }
+}
+
 /// Decodes `bytes` of the type `ty` (a canonical type reference of
 /// `bundle`). `encoding` is the sample's `Encoding` as zenoh spells it
 /// (`application/json`, `application/cbor`, `application/protobuf`, …), if
-/// any.
+/// any. A packed type decodes only with its envelope's tag in hand:
+/// [`decode_in`].
 #[must_use]
 pub fn decode(bundle: &Bundle, ty: &Value, encoding: Option<&str>, bytes: &[u8]) -> Rendered {
+    decode_in(bundle, ty, encoding, bytes, Context::default())
+}
+
+/// [`decode`], with what the reader holds beside the bytes: a packed
+/// record is read through the bundle's layout under its envelope's tag and
+/// the deployment epoch (core §7.6), refused by name as the layout refuses
+/// it.
+#[must_use]
+pub fn decode_in(
+    bundle: &Bundle,
+    ty: &Value,
+    encoding: Option<&str>,
+    bytes: &[u8],
+    cx: Context,
+) -> Rendered {
     let size = bytes.len();
     let name = ty["name"].as_str().unwrap_or_default();
     match ty["kind"].as_str() {
@@ -156,17 +200,34 @@ pub fn decode(bundle: &Bundle, ty: &Value, encoding: Option<&str>, bytes: &[u8])
                 },
             }
         }
-        // A packed record is read under its envelope's tag, and its time
-        // fields from the deployment's epoch (core §7.6): this decoder is
-        // handed neither, so it shows no value it could not check.
-        // `crate::packed::Layout::read` is the reader that is (B2 wires it).
-        Some("packed") => Rendered::Undecodable {
-            declared: declared(ty),
-            size,
-            reason: "a packed record is read with its envelope's tag, which this decoder is not \
-                     given"
-                .to_owned(),
-        },
+        // A packed record is read under its envelope's tag, its time
+        // fields from the deployment's epoch (core §7.6), refused by name.
+        Some("packed") => {
+            let fail = |reason: String| Rendered::Undecodable {
+                declared: declared(ty),
+                size,
+                reason,
+            };
+            let Some(tag) = cx.tag else {
+                return fail(
+                    "a packed record travels in an envelope, and this one came in none, so it \
+                     has no tag to read it by"
+                        .to_owned(),
+                );
+            };
+            let layout = match artifact(bundle, ty)
+                .ok_or_else(|| "the bundle carries no such packed artifact".to_owned())
+                .and_then(|doc| crate::packed::layout_in(doc, name))
+            {
+                Ok(l) => l,
+                Err(reason) => return fail(reason),
+            };
+            let epoch = cx.epoch.unwrap_or(crate::packed::DEFAULT_EPOCH);
+            match layout.read(tag.get(), bytes, Some(epoch)) {
+                Ok(v) => Rendered::Value(v),
+                Err(r) => fail(format!("refused by its layout, {}", r.reason())),
+            }
+        }
         _ => Rendered::Undecodable {
             declared: ty.to_string(),
             size,

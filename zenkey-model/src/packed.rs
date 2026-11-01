@@ -218,6 +218,45 @@ impl std::fmt::Display for Decimal {
     }
 }
 
+impl std::str::FromStr for Decimal {
+    type Err = WriteRefusal;
+
+    /// A writer's decimal ([`Decimal::parse_input`]): `value` when it does
+    /// not read.
+    fn from_str(s: &str) -> Result<Self, WriteRefusal> {
+        Self::parse_input(s).ok_or(WriteRefusal::Value)
+    }
+}
+
+impl From<i64> for Decimal {
+    fn from(v: i64) -> Self {
+        Self {
+            m: BigInt::from(v),
+            e: 0,
+        }
+    }
+}
+
+impl Decimal {
+    /// A binary float, read by its shortest round-trip text, as a JSON
+    /// writer spells it (so `0.15` is the decimal 0.15); `None` for a NaN
+    /// or an infinity.
+    #[must_use]
+    pub fn from_f64(x: f64) -> Option<Self> {
+        if !x.is_finite() {
+            return None;
+        }
+        Self::parse_input(&format!("{x}"))
+    }
+
+    /// The nearest binary float: for display and arithmetic outside the
+    /// codec, never for a code.
+    #[must_use]
+    pub fn to_f64(&self) -> f64 {
+        self.to_string().parse().unwrap_or(f64::NAN)
+    }
+}
+
 fn pow10(n: u32) -> BigInt {
     num_traits::pow(BigInt::from(10), n as usize)
 }
@@ -790,17 +829,42 @@ impl Field {
     }
 
     fn top(&self) -> u64 {
-        if self.width == 64 {
-            u64::MAX
-        } else {
-            (1u64 << self.width) - 1
-        }
+        top_code(self.width)
     }
 
     fn reserved_code(&self, i: usize) -> u64 {
         self.top() - i as u64
     }
 }
+
+/// The all-ones code of a width from 1 to 64: the first reserved code, an
+/// enum's escape.
+#[must_use]
+pub const fn top_code(width: u32) -> u64 {
+    if width >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << width) - 1
+    }
+}
+
+/// The reserved code `name` takes in a field of `width` whose `reserved`
+/// lists `declared` (core §7.6: the top codes, from all ones down, in
+/// [`RESERVED`]'s order), `None` when it does not declare it.
+#[must_use]
+pub fn reserved_code(width: u32, declared: &[&str], name: &str) -> Option<u64> {
+    RESERVED
+        .iter()
+        .filter(|r| declared.contains(r))
+        .position(|r| *r == name)
+        .map(|i| top_code(width) - i as u64)
+}
+
+/// The deployment epoch the reference reads and writes `time` fields
+/// under while nothing carries one (core §7.6: "This version carries it
+/// nowhere"; #980's catalog will): 0, the Unix epoch, so a `time` field's
+/// 32 bits are Unix seconds, to 2106.
+pub const DEFAULT_EPOCH: i64 = 0;
 
 /// Why a writer refused a value (core §7.6, the vectors' tokens).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -829,7 +893,27 @@ impl WriteRefusal {
             Self::Epoch => "epoch",
         }
     }
+
+    /// The refusal in words, its token first.
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Missing => "missing: a field that is not optional is not given",
+            Self::Unknown => "unknown: a member the type does not have",
+            Self::Value => "value: the wrong JSON type, a name not declared, or no decimal",
+            Self::Range => "range: a value that has no code",
+            Self::Epoch => "epoch: a time field, and no deployment epoch",
+        }
+    }
 }
+
+impl std::fmt::Display for WriteRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.reason())
+    }
+}
+
+impl std::error::Error for WriteRefusal {}
 
 /// Why a reader refused a record (core §7.6's order).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -862,7 +946,28 @@ impl ReadRefusal {
             Self::Epoch => "epoch",
         }
     }
+
+    /// The refusal in words, its token first.
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Tag => "tag: the envelope's tag is not the type's",
+            Self::Length => "length: the record is not as long as the layout reads it",
+            Self::Code => "code: a field's code is unused",
+            Self::Extension => "extension: a marker read as 1, and no field present after it",
+            Self::Pad => "pad: a bit of the pad is 1",
+            Self::Epoch => "epoch: a time field, and no deployment epoch",
+        }
+    }
 }
+
+impl std::fmt::Display for ReadRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.reason())
+    }
+}
+
+impl std::error::Error for ReadRefusal {}
 
 /// A record as a writer wrote it: its bytes, and how many of their bits
 /// are the record's (the rest is the pad).
@@ -891,13 +996,23 @@ impl Record {
     }
 }
 
-struct Bits {
+/// A record being written, most significant bit first, with no padding
+/// between fields (core §7.6's layout). [`BitWriter::finish`] adds the pad.
+#[derive(Debug, Clone, Default)]
+pub struct BitWriter {
     bytes: Vec<u8>,
     len: u64,
 }
 
-impl Bits {
-    fn push(&mut self, v: u64, width: u32) {
+impl BitWriter {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Writes the low `width` bits of `v`, the most significant first: a
+    /// code in its width (so a counter's count modulo 2^`width`).
+    pub fn push(&mut self, v: u64, width: u32) {
         for i in (0..width).rev() {
             if self.len.is_multiple_of(8) {
                 self.bytes.push(0);
@@ -909,19 +1024,46 @@ impl Bits {
             self.len += 1;
         }
     }
+
+    /// Writes one bit: a presence bit, or an extension marker.
+    pub fn bit(&mut self, set: bool) {
+        self.push(u64::from(set), 1);
+    }
+
+    /// The record: its bits, then the zero pad up to a whole byte.
+    #[must_use]
+    pub fn finish(self) -> Record {
+        Record {
+            bytes: self.bytes,
+            bits: self.len,
+        }
+    }
 }
 
-struct Reader<'a> {
+/// A record being read under its layout, with core §7.6's length and pad
+/// checks.
+#[derive(Debug, Clone)]
+pub struct BitReader<'a> {
     bytes: &'a [u8],
     pos: u64,
 }
 
-impl Reader<'_> {
+impl<'a> BitReader<'a> {
+    #[must_use]
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, pos: 0 }
+    }
+
     fn total(&self) -> u64 {
         self.bytes.len() as u64 * 8
     }
 
-    fn take(&mut self, width: u32) -> Result<u64, ReadRefusal> {
+    /// The next `width` bits, as an unsigned integer: `length` when the
+    /// record ends before them.
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Length`].
+    pub fn take(&mut self, width: u32) -> Result<u64, ReadRefusal> {
         if self.pos + u64::from(width) > self.total() {
             return Err(ReadRefusal::Length);
         }
@@ -933,10 +1075,52 @@ impl Reader<'_> {
         }
         Ok(v)
     }
+
+    /// The next bit: a presence bit, or an extension marker.
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Length`].
+    pub fn bit(&mut self) -> Result<bool, ReadRefusal> {
+        self.take(1).map(|b| b == 1)
+    }
+
+    /// After a marker read as 1 that ends the reader's layout: the rest is
+    /// a later revision's, and holds at least one bit.
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Length`].
+    pub fn later(&self) -> Result<(), ReadRefusal> {
+        if self.total() <= self.pos {
+            Err(ReadRefusal::Length)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// The record's end: no byte after its pad (`length`), then every pad
+    /// bit 0 (`pad`).
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Length`], then [`ReadRefusal::Pad`].
+    pub fn end(mut self) -> Result<(), ReadRefusal> {
+        if self.bytes.len() as u64 != self.pos.div_ceil(8) {
+            return Err(ReadRefusal::Length);
+        }
+        while self.pos < self.total() {
+            if self.take(1)? == 1 {
+                return Err(ReadRefusal::Pad);
+            }
+        }
+        Ok(())
+    }
 }
 
-/// A JSON number or a decimal string, as a writer's decimal.
-fn input_decimal(v: &Value) -> Result<Decimal, WriteRefusal> {
+/// A JSON number or a decimal string, as a writer's decimal (`value` when
+/// it does not read).
+///
+/// # Errors
+/// [`WriteRefusal::Value`].
+pub fn json_decimal(v: &Value) -> Result<Decimal, WriteRefusal> {
     match v {
         Value::String(s) => Decimal::parse_input(s).ok_or(WriteRefusal::Value),
         // serde_json writes a float in its shortest round-trip text (ryu),
@@ -948,8 +1132,11 @@ fn input_decimal(v: &Value) -> Result<Decimal, WriteRefusal> {
 
 /// A JSON integer. A float that is integral and beyond 64 bits is how a
 /// JSON reader without big integers holds integer text past them: such a
-/// value is out of range, never of the wrong type.
-fn input_integer(v: &Value) -> Result<i128, WriteRefusal> {
+/// value is out of range (`range`), never of the wrong type (`value`).
+///
+/// # Errors
+/// [`WriteRefusal::Value`] or [`WriteRefusal::Range`].
+pub fn json_integer(v: &Value) -> Result<i128, WriteRefusal> {
     match v {
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
@@ -967,6 +1154,145 @@ fn input_integer(v: &Value) -> Result<i128, WriteRefusal> {
         }
         _ => Err(WriteRefusal::Value),
     }
+}
+
+/// An `int` field's code for `x`: `x − minimum` (`range` outside
+/// [`minimum`, `maximum`]).
+///
+/// # Errors
+/// [`WriteRefusal::Range`].
+pub fn int_code(x: i128, minimum: i64, maximum: i64) -> Result<u64, WriteRefusal> {
+    if x < i128::from(minimum) || x > i128::from(maximum) {
+        return Err(WriteRefusal::Range);
+    }
+    u64::try_from(x - i128::from(minimum)).map_err(|_| WriteRefusal::Range)
+}
+
+/// An `int` field's value for a code that is no reserved one: `minimum +
+/// code` (`code` past `maximum`).
+///
+/// # Errors
+/// [`ReadRefusal::Code`].
+pub fn int_value(code: u64, minimum: i64, maximum: i64) -> Result<i128, ReadRefusal> {
+    let span = i128::from(maximum) - i128::from(minimum);
+    if i128::from(code) > span {
+        return Err(ReadRefusal::Code);
+    }
+    Ok(i128::from(minimum) + i128::from(code))
+}
+
+/// A `fixed` field's code for `x`: round((x − `minimum`) / `resolution`),
+/// a tie to the even code, in exact decimal arithmetic (`range` when it is
+/// not one of the field's `values` codes).
+///
+/// # Errors
+/// [`WriteRefusal::Range`].
+pub fn fixed_code(
+    x: &Decimal,
+    minimum: &Decimal,
+    resolution: &Decimal,
+    values: u128,
+) -> Result<u64, WriteRefusal> {
+    match x.sub(minimum).div_round_even(resolution).to_u128() {
+        Some(c) if c < values => u64::try_from(c).map_err(|_| WriteRefusal::Range),
+        _ => Err(WriteRefusal::Range),
+    }
+}
+
+/// A `fixed` field's value for a code that is no reserved one: `minimum +
+/// code × resolution` (`code` from `values` up).
+///
+/// # Errors
+/// [`ReadRefusal::Code`].
+pub fn fixed_value(
+    code: u64,
+    minimum: &Decimal,
+    resolution: &Decimal,
+    values: u128,
+) -> Result<Decimal, ReadRefusal> {
+    if u128::from(code) >= values {
+        return Err(ReadRefusal::Code);
+    }
+    Ok(minimum.add(&resolution.mul_int(&BigInt::from(code))))
+}
+
+/// A `fixed` field's declaration, read once: what generated code keeps in
+/// a static, so its decimals are parsed once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fixed {
+    pub minimum: Decimal,
+    pub resolution: Decimal,
+    /// `(maximum − minimum) / resolution + 1`.
+    pub values: u128,
+}
+
+impl Fixed {
+    /// # Panics
+    /// When `minimum` or `resolution` is not a decimal string: a
+    /// declaration the lints passed never is.
+    #[must_use]
+    pub fn new(minimum: &str, resolution: &str, values: u128) -> Self {
+        Self {
+            minimum: Decimal::parse(minimum).expect("a linted decimal"),
+            resolution: Decimal::parse(resolution).expect("a linted decimal"),
+            values,
+        }
+    }
+
+    /// [`fixed_code`].
+    ///
+    /// # Errors
+    /// [`WriteRefusal::Range`].
+    pub fn code(&self, x: &Decimal) -> Result<u64, WriteRefusal> {
+        fixed_code(x, &self.minimum, &self.resolution, self.values)
+    }
+
+    /// [`fixed_value`].
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Code`].
+    pub fn value(&self, code: u64) -> Result<Decimal, ReadRefusal> {
+        fixed_value(code, &self.minimum, &self.resolution, self.values)
+    }
+}
+
+/// A `time` field's code for an instant `t`, in milliseconds since the
+/// Unix epoch, under the deployment epoch in seconds: its seconds since
+/// the epoch, then with `ms` its milliseconds in 10 bits (`range` outside
+/// the epoch's 2^32 seconds, `epoch` with none).
+///
+/// # Errors
+/// [`WriteRefusal::Epoch`] or [`WriteRefusal::Range`].
+pub fn time_code(t: i128, epoch: Option<i64>, ms: bool) -> Result<u64, WriteRefusal> {
+    let e = epoch.ok_or(WriteRefusal::Epoch)?;
+    let delta = t - 1000 * i128::from(e);
+    let (s, m) = (delta.div_euclid(1000), delta.rem_euclid(1000));
+    let s = u32::try_from(s).map_err(|_| WriteRefusal::Range)?;
+    let m = u64::try_from(m).unwrap_or(0);
+    Ok(if ms {
+        (u64::from(s) << 10) | m
+    } else {
+        u64::from(s)
+    })
+}
+
+/// A `time` field's instant for a code, in milliseconds since the Unix
+/// epoch (`code` for a millisecond code from 1000 up, then `epoch` with
+/// none).
+///
+/// # Errors
+/// [`ReadRefusal::Code`], then [`ReadRefusal::Epoch`].
+pub fn time_value(code: u64, epoch: Option<i64>, ms: bool) -> Result<i128, ReadRefusal> {
+    let (s, m) = if ms {
+        (code >> 10, code & 0x3ff)
+    } else {
+        (code, 0)
+    };
+    if m >= 1000 {
+        return Err(ReadRefusal::Code);
+    }
+    let e = epoch.ok_or(ReadRefusal::Epoch)?;
+    Ok(1000 * i128::from(e) + 1000 * i128::from(s) + i128::from(m))
 }
 
 impl Layout {
@@ -1075,6 +1401,14 @@ impl Layout {
             .sum()
     }
 
+    /// Its fields, the extension markers left out.
+    pub fn fields(&self) -> impl Iterator<Item = &Field> {
+        self.items.iter().filter_map(|it| match it {
+            Item::Field(f) => Some(f),
+            Item::Marker => None,
+        })
+    }
+
     /// Writes a value, the JSON object core §7.6's reading spells, with the
     /// deployment epoch in seconds where a time field needs one.
     ///
@@ -1084,21 +1418,13 @@ impl Layout {
         let Value::Object(obj) = value else {
             return Err(WriteRefusal::Value);
         };
-        let names: BTreeSet<&str> = self
-            .items
-            .iter()
-            .filter_map(|it| match it {
-                Item::Field(f) => Some(f.name.as_str()),
-                Item::Marker => None,
-            })
-            .collect();
-        if obj.keys().any(|k| !names.contains(k.as_str())) {
+        if obj
+            .keys()
+            .any(|k| !self.fields().any(|f| f.name == k.as_str()))
+        {
             return Err(WriteRefusal::Unknown);
         }
-        let mut bits = Bits {
-            bytes: Vec::new(),
-            len: 0,
-        };
+        let mut bits = BitWriter::new();
         for (i, it) in self.items.iter().enumerate() {
             match it {
                 Item::Marker => {
@@ -1106,33 +1432,25 @@ impl Layout {
                         Item::Field(f) => obj.contains_key(&f.name),
                         Item::Marker => false,
                     });
-                    bits.push(u64::from(later), 1);
+                    bits.bit(later);
                     if !later {
                         break;
                     }
                 }
                 Item::Field(f) => match obj.get(&f.name) {
-                    None if f.optional => bits.push(0, 1),
+                    None if f.optional => bits.bit(false),
                     None => return Err(WriteRefusal::Missing),
                     Some(v) => {
                         let code = f.code(v, epoch)?;
                         if f.optional {
-                            bits.push(1, 1);
+                            bits.bit(true);
                         }
-                        if let FieldKind::Time { ms: true } = f.kind {
-                            bits.push(code >> 10, 32);
-                            bits.push(code & 0x3ff, 10);
-                        } else {
-                            bits.push(code, f.width);
-                        }
+                        bits.push(code, f.width);
                     }
                 },
             }
         }
-        Ok(Record {
-            bytes: bits.bytes,
-            bits: bits.len,
-        })
+        Ok(bits.finish())
     }
 
     /// Reads a record under the tag its envelope's CH carries, refusing it
@@ -1141,36 +1459,57 @@ impl Layout {
     /// # Errors
     /// The reader's refusal: [`ReadRefusal`].
     pub fn read(&self, tag: u8, bytes: &[u8], epoch: Option<i64>) -> Result<Value, ReadRefusal> {
+        let mut out = Map::new();
+        self.walk(tag, bytes, |f, code| {
+            out.insert(f.name.clone(), f.value(code, epoch)?);
+            Ok(())
+        })?;
+        Ok(Value::Object(out))
+    }
+
+    /// [`Layout::read`]'s checks, with no value made and no epoch needed: a
+    /// writer's or a reader's admission of a record (#979 B2's runtime).
+    ///
+    /// # Errors
+    /// The reader's refusal, never [`ReadRefusal::Epoch`].
+    pub fn check(&self, tag: u8, bytes: &[u8]) -> Result<(), ReadRefusal> {
+        self.walk(tag, bytes, |f, code| f.check_code(code))
+    }
+
+    /// Core §7.6's reading, in its order, each present field's code handed
+    /// to `each` where it is read.
+    fn walk(
+        &self,
+        tag: u8,
+        bytes: &[u8],
+        mut each: impl FnMut(&Field, u64) -> Result<(), ReadRefusal>,
+    ) -> Result<(), ReadRefusal> {
         if tag != self.tag() {
             return Err(ReadRefusal::Tag);
         }
-        let mut r = Reader { bytes, pos: 0 };
-        let mut out = Map::new();
+        let mut r = BitReader::new(bytes);
         let mut set_marker = false;
         let mut present_after = false;
         let last = self.items.len().saturating_sub(1);
         for (i, it) in self.items.iter().enumerate() {
             match it {
                 Item::Marker => {
-                    if r.take(1)? == 0 {
+                    if !r.bit()? {
                         break;
                     }
                     if i == last {
                         // A later revision's bits: at least one of them.
-                        if r.total() <= r.pos {
-                            return Err(ReadRefusal::Length);
-                        }
-                        return Ok(Value::Object(out));
+                        return r.later();
                     }
                     set_marker = true;
                     present_after = false;
                 }
                 Item::Field(f) => {
-                    if f.optional && r.take(1)? == 0 {
+                    if f.optional && !r.bit()? {
                         continue;
                     }
                     let code = r.take(f.width)?;
-                    out.insert(f.name.clone(), f.value(code, epoch)?);
+                    each(f, code)?;
                     present_after = true;
                 }
             }
@@ -1178,25 +1517,14 @@ impl Layout {
         if set_marker && !present_after {
             return Err(ReadRefusal::Extension);
         }
-        if bytes.len() as u64 != r.pos.div_ceil(8) {
-            return Err(ReadRefusal::Length);
-        }
-        while r.pos < r.total() {
-            if r.take(1)? == 1 {
-                return Err(ReadRefusal::Pad);
-            }
-        }
-        Ok(Value::Object(out))
+        r.end()
     }
 }
 
 impl Field {
     fn code(&self, v: &Value, epoch: Option<i64>) -> Result<u64, WriteRefusal> {
         let reserved = |list: &[&'static str], s: &str| {
-            list.iter()
-                .position(|r| *r == s)
-                .map(|i| self.reserved_code(i))
-                .ok_or(WriteRefusal::Value)
+            reserved_code(self.width, list, s).ok_or(WriteRefusal::Value)
         };
         match &self.kind {
             FieldKind::Int {
@@ -1209,11 +1537,7 @@ impl Field {
                 {
                     return reserved(res, s);
                 }
-                let x = input_integer(v)?;
-                if x < i128::from(*minimum) || x > i128::from(*maximum) {
-                    return Err(WriteRefusal::Range);
-                }
-                u64::try_from(x - i128::from(*minimum)).map_err(|_| WriteRefusal::Range)
+                int_code(json_integer(v)?, *minimum, *maximum)
             }
             FieldKind::Fixed {
                 minimum,
@@ -1227,12 +1551,7 @@ impl Field {
                 {
                     return reserved(res, s);
                 }
-                let x = input_decimal(v)?;
-                let n = x.sub(minimum).div_round_even(resolution);
-                match n.to_u128() {
-                    Some(c) if c < *values => u64::try_from(c).map_err(|_| WriteRefusal::Range),
-                    _ => Err(WriteRefusal::Range),
-                }
+                fixed_code(&json_decimal(v)?, minimum, resolution, *values)
             }
             FieldKind::Enum { values, escape } => match v {
                 Value::Null if *escape => Ok(self.top()),
@@ -1245,69 +1564,42 @@ impl Field {
             },
             FieldKind::Bool => v.as_bool().map(u64::from).ok_or(WriteRefusal::Value),
             FieldKind::Counter => {
-                let c = input_integer(v)?;
-                let c = u64::try_from(c).map_err(|_| WriteRefusal::Range)?;
-                Ok(if self.width == 64 {
-                    c
-                } else {
-                    c & ((1u64 << self.width) - 1)
-                })
+                let c = json_integer(v)?;
+                u64::try_from(c).map_err(|_| WriteRefusal::Range)
             }
-            FieldKind::Time { ms } => {
-                let t = input_integer(v)?;
-                let e = epoch.ok_or(WriteRefusal::Epoch)?;
-                let delta = t - 1000 * i128::from(e);
-                let (s, m) = (delta.div_euclid(1000), delta.rem_euclid(1000));
-                let s = u32::try_from(s).map_err(|_| WriteRefusal::Range)?;
-                let m = u64::try_from(m).unwrap_or(0);
-                Ok(if *ms {
-                    (u64::from(s) << 10) | m
-                } else {
-                    u64::from(s)
-                })
-            }
+            FieldKind::Time { ms } => time_code(json_integer(v)?, epoch, *ms),
         }
     }
 
-    fn value(&self, code: u64, epoch: Option<i64>) -> Result<Value, ReadRefusal> {
-        let named = |list: &[&'static str]| {
-            list.iter()
-                .enumerate()
-                .find(|(i, _)| code == self.reserved_code(*i))
-                .map(|(_, r)| Value::from(*r))
+    /// The reserved code's name, when `code` is one this field declares.
+    fn reserved_name(&self, code: u64) -> Option<&'static str> {
+        let list = match &self.kind {
+            FieldKind::Int { reserved, .. } | FieldKind::Fixed { reserved, .. } => reserved,
+            _ => return None,
         };
+        list.iter()
+            .enumerate()
+            .find(|(i, _)| code == self.reserved_code(*i))
+            .map(|(_, r)| *r)
+    }
+
+    fn value(&self, code: u64, epoch: Option<i64>) -> Result<Value, ReadRefusal> {
+        if let Some(r) = self.reserved_name(code) {
+            return Ok(Value::from(r));
+        }
         match &self.kind {
             FieldKind::Int {
-                minimum,
-                maximum,
-                reserved,
+                minimum, maximum, ..
             } => {
-                if let Some(r) = named(reserved) {
-                    return Ok(r);
-                }
-                let span = i128::from(*maximum) - i128::from(*minimum);
-                if i128::from(code) > span {
-                    return Err(ReadRefusal::Code);
-                }
-                let v = i128::from(*minimum) + i128::from(code);
+                let v = int_value(code, *minimum, *maximum)?;
                 Ok(i64::try_from(v).map_or(Value::Null, Value::from))
             }
             FieldKind::Fixed {
                 minimum,
                 resolution,
-                reserved,
                 values,
                 ..
-            } => {
-                if let Some(r) = named(reserved) {
-                    return Ok(r);
-                }
-                if u128::from(code) >= *values {
-                    return Err(ReadRefusal::Code);
-                }
-                let x = minimum.add(&resolution.mul_int(&BigInt::from(code)));
-                Ok(Value::String(x.to_string()))
-            }
+            } => fixed_value(code, minimum, resolution, *values).map(|x| Value::String(x.to_string())),
             FieldKind::Enum { values, escape } => match usize::try_from(code) {
                 Ok(i) if i < values.len() => Ok(Value::String(values[i].clone())),
                 _ if *escape => Ok(Value::Null),
@@ -1316,19 +1608,54 @@ impl Field {
             FieldKind::Bool => Ok(Value::Bool(code == 1)),
             FieldKind::Counter => Ok(Value::from(code)),
             FieldKind::Time { ms } => {
-                let (s, m) = if *ms {
-                    (code >> 10, code & 0x3ff)
-                } else {
-                    (code, 0)
-                };
-                if m >= 1000 {
-                    return Err(ReadRefusal::Code);
-                }
-                let e = epoch.ok_or(ReadRefusal::Epoch)?;
-                let t = 1000 * i128::from(e) + 1000 * i128::from(s) + i128::from(m);
+                let t = time_value(code, epoch, *ms)?;
                 Ok(i64::try_from(t).map_or(Value::Null, Value::from))
             }
         }
+    }
+
+    /// Whether `code` is one this field reads: [`Field::value`]'s `code`
+    /// check alone.
+    fn check_code(&self, code: u64) -> Result<(), ReadRefusal> {
+        if self.reserved_name(code).is_some() {
+            return Ok(());
+        }
+        let used = match &self.kind {
+            FieldKind::Int {
+                minimum, maximum, ..
+            } => int_value(code, *minimum, *maximum).is_ok(),
+            FieldKind::Fixed { values, .. } => u128::from(code) < *values,
+            FieldKind::Enum { values, escape } => *escape || code < values.len() as u64,
+            FieldKind::Bool | FieldKind::Counter => true,
+            FieldKind::Time { ms } => !*ms || code & 0x3ff < 1000,
+        };
+        if used {
+            Ok(())
+        } else {
+            Err(ReadRefusal::Code)
+        }
+    }
+}
+
+/// One type's layout in a packed document (an artifact's data): `Err`
+/// names why there is none, a type the document does not define or one
+/// whose declaration has a finding.
+///
+/// # Errors
+/// The reason, in words.
+pub fn layout_in(doc: &Value, name: &str) -> Result<Layout, String> {
+    let read = PackedDoc::read(doc);
+    match read.types.get(name) {
+        Some(Some(layout)) => Ok(layout.clone()),
+        Some(None) => Err(format!(
+            "packed:{name}'s declaration does not read ({})",
+            read.findings
+                .iter()
+                .map(|f| f.code)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        None => Err(format!("the packed document defines no types/{name}")),
     }
 }
 
