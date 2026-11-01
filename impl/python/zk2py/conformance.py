@@ -3449,8 +3449,151 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
-        + _mend_after_round93_readings(root)
+        + _mend_after_round93_readings(root) + _round94_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.75, the ``packed`` type kind (#609, round 94; #979 B1): each
+    sentence round 94's findings F-423 to F-432 quote, as it reads, and the
+    reading zk2py takes of each, shown through :mod:`zk2py.packed` and the
+    lints. No session is opened.
+
+    - **F-423**: a value outside an ``int``'s range is refused ``range``, even
+      where the field declares ``out_of_range``; the name is written as given.
+    - **F-424**: a fixed-point value's range is its codes': below the minimum
+      by half a resolution rounds to code 0, above the maximum at an even last
+      code too, and at an odd last code is refused.
+    - **F-425**: a writer's string reads as a JSON number's text, an exponent
+      included; ``+0.5``, ``.5`` and ``1.`` do not read.
+    - **F-426**: a JSON number reads by its double's shortest text.
+    - **F-427**: an integer is a JSON number with no fraction and no exponent.
+    - **F-428**: JSON Schema files load before packed ones.
+    - **F-429**: a type whose name is not a type name is not read further.
+    - **F-430**: a count is from 0 to 2^64 − 1.
+    - **F-431**, **F-432**: the glossary's static rules and RULES.md's §7.6
+      reading entry, as they read.
+    - **F-433**: observer §7.3's decoding MUST, beside §7.6's epoch.
+    - Beside them, not a finding: reserved names take the top codes in
+      §7.6's order whichever are declared, so ``error`` alone is all ones."""
+    import tempfile
+
+    from . import jcs, packed
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, rules, readme = flat("core.md"), flat("RULES.md"), flat("README.md")
+
+    def rec(*fields: Any) -> packed.Record:
+        return packed.record({"types": {"T": {"fields": list(fields)}}}, "T")
+
+    def write(r: packed.Record, value: Any, epoch: int | None = None) -> Any:
+        try:
+            return r.write_bits(value, epoch)
+        except packed.Refused as e:
+            return {"refused": e.token}
+
+    level = rec({"name": "v", "type": "int", "minimum": -40, "maximum": 85, "reserved": ["out_of_range"]})
+    temp = rec({"name": "v", "type": "fixed", "minimum": "-40", "maximum": "85", "resolution": "0.1"})
+    half = rec({"name": "v", "type": "fixed", "minimum": "0", "maximum": "10", "resolution": "0.5"})
+    odd = rec({"name": "v", "type": "fixed", "minimum": "0", "maximum": "9.5", "resolution": "0.5"})
+    count = rec({"name": "v", "type": "counter", "width": 7})
+    small = rec({"name": "v", "type": "int", "minimum": 0, "maximum": 5})
+    out: list[tuple[str, Any, Any]] = [
+        ("#979 B1: core 0.75 with its entry", entry("CHANGELOG.md", "0.75", "the `packed` type kind"), []),
+        ("F-423: §7.6's out_of_range sentence as it reads; zk2py refuses 86 where out_of_range is declared, and "
+         "writes the name as given (vectors.json's reading)",
+         [missing(core, "A writer whose value is outside the range writes `out_of_range`, where the field "
+                        "declares it."),
+          write(level, {"v": 86}), write(level, {"v": "out_of_range"})],
+         [[], {"refused": "range"}, "1111111"]),
+        ("F-424: §7.6's MUST NOT as it reads; a fixed-point value's range is its codes': -40.05 is code 0, 10.25 "
+         "code 20, 9.75 refused where 9.5 is the maximum",
+         [missing(core, "An implementation MUST NOT write a record for a value that has no code: a value outside "
+                        "its range, a name that is not declared, or an instant outside the epoch's 2^32 seconds."),
+          write(temp, {"v": "-40.05"}), write(half, {"v": "10.25"}), write(odd, {"v": "9.75"})],
+         [[], "00000000000", "10100", {"refused": "range"}]),
+        ("F-425: the writer's sentence as it reads; a writer's string reads as a JSON number's text: 5e-1 is 0.5, "
+         "and +0.5, .5, 1. and 43,5 are refused value; an unknown member and a field not given are vectors.json's",
+         [missing(core, "A writer takes the same object, a fixed-point value as a string or a number."),
+          [write(half, {"v": x}) for x in ("5e-1", "+0.5", ".5", "1.", "43,5")],
+          write(half, {"v": "1", "w": 1}), write(half, {})],
+         [[], ["00001", *[{"refused": "value"}] * 4], {"refused": "unknown"}, {"refused": "missing"}]),
+        ("F-426: a JSON number reads by its double's shortest text: 0.2500000000000000000000000001 as a number is "
+         "the tie 0.25, code 0; as a string, just above it, code 1",
+         [write(half, jcs.loads('{"v": 0.2500000000000000000000000001}')),
+          write(half, {"v": "0.2500000000000000000000000001"})],
+         ["00000", "00001"]),
+        ("F-427: §7.6's integers as they read; 5.0 for an int's maximum is E038, and a writer's 5.0 for an int is "
+         "refused value",
+         [missing(core, "| `int` | `minimum`, `maximum`: integers; `reserved` |"),
+          [c for c, _ in packed.lint({"types": {"T": {"fields": [
+              {"name": "v", "type": "int", "minimum": 0, "maximum": 5.0}]}}}).findings],
+          write(small, jcs.loads('{"v": 5.0}'))],
+         [[], ["E038"], {"refused": "value"}]),
+    ]
+
+    # F-428: one document listed under both kinds, JSON Schema first.
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "a.json").write_text('{"description": "x"}')
+        (Path(tmp) / "b.json").write_text('{"description": "x"}')
+        c = load_contract(Path(tmp) / "m.v1.toml", text='[interface]\nname = "m"\nmajor = 1\nminor = 0\n'
+                          '[schemas]\njsonschema = ["a.json"]\npacked = ["b.json"]\n'
+                          '[resources.s]\nkind = "state"\ntype = { raw = "text/plain" }\n')
+        codes = c.codes
+    out.append(("F-428: §9.4's stems and ids as they read; one document under both kinds is E024 alone, the "
+                "JSON Schema file loading first",
+                [missing(core, "A stem MUST be unique among the listed packed files, and an id among the listed "
+                               "JSON Schema and packed files (E024). A later file whose stem or id is taken is not "
+                               "loaded."), codes],
+                [[], ["E024"]]))
+    out.append(("F-429: cascade 7's sentence as it reads; a type named lower holding a bad field is E038 once",
+                [missing(core, "a type whose name is not a type name is E038, and defines no type."),
+                 [c for c, _ in packed.lint({"types": {"lower": {"fields": [{"type": "nope"}]}}}).findings]],
+                [[], ["E038"]]))
+    out.append(("F-430: §7.6's counter as it reads; a count of -1 or 2^64 is refused range",
+                [missing(core, "a count c is written as c modulo 2^`width`. A width below 64 is a declared loss."),
+                 write(count, {"v": -1}), write(count, {"v": 2 ** 64}), write(count, {"v": 2 ** 64 - 1})],
+                [[], {"refused": "range"}, {"refused": "range"}, "1111111"]))
+    out.append(("F-431: the glossary's Static rule names §1's, §7.5's and §9's, where §0, §12 and RULES.md name "
+                "§7.6's too",
+                [missing(readme, "Those are §1's, §7.5's, §9's, the contract rules",
+                         "A rule of any of those sections, §1, §7.5 and §9 included, that names a role is that "
+                         "role's"),
+                 missing(core, "They are the rules of §1, §7.5, §7.6 and §9 that name no role",
+                         "The static rules are those of §1, §7.5, §7.6 and §9"),
+                 missing(rules, "§1's, §7.5's, §7.6's and §9's.")],
+                [[], [], []]))
+    out.append(("F-432: RULES.md's §7.6 reading entry ends at \"in this order.\" with no list length, beside §7.5's "
+                "\"(6 items)\"",
+                missing(rules, "An implementation that reads a record of a packed type MUST refuse it for the first "
+                               "of these that applies, in this order. | `[F: packed/vectors.json]` |",
+                        "An implementation MUST refuse an envelope for the first of these that applies, in this "
+                        "order: (6 items)"), []))
+    obs = flat("observer.md")
+    out.append(("F-433: observer §7.3's decoding MUST names protobuf, jsonschema and raw, and §7.6's epoch is "
+                "carried nowhere",
+                [missing(obs, "Such a tool MUST decode each payload by its declared type: `protobuf` (proto2 and "
+                              "proto3) and `jsonschema` (the zk2 subset of JSON Schema 2020-12, core §7.3), and a "
+                              "`raw` type by its media type only."),
+                 missing(core, "Writer and reader each hold it as an input. This version carries it nowhere.")],
+                [[], []]))
+    # Not a finding: reserved names in §7.6's order, whichever are declared.
+    err = rec({"name": "v", "type": "int", "minimum": 0, "maximum": 2, "reserved": ["out_of_range", "error"]})
+    out.append(("§7.6 \"from all ones down, in that order\": error alone above out_of_range takes all ones",
+                [err.field("v").width, err.field("v").reserved_codes(), write(err, {"v": "error"})],
+                [3, {"error": 7, "out_of_range": 6}, "111"]))
+    return out
 
 
 def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:

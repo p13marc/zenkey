@@ -23010,3 +23010,294 @@ readers refuse a sample. #1009 resolved F-422 in the reference, by reading
   **F-422** (#1009), nine.
 - **Open:** none from round 93 or this pass.
 - **F-365** stays open as #965's.
+
+## At core 0.75 (#979 B1)
+
+Round 94 read, cold, on `chunk-b1` 8e810d52 (PR #1012): core 0.75's §7.6
+whole; the edited paragraphs of §7.1, §7.2, §7.5, §9.1, §9.2 (E038 to
+E045, cascade 7), §9.4 to §9.8 and Appendix E; §0's and §12's static-rule
+lists; `RULES.md`'s new entries; and the glossary's new term (Packed
+record). It read the changelog's 0.75 entry first. Its evidence:
+`conformance/packed/vectors.json`, the lint fixtures e023-packed,
+e024-packed-ambiguous, e038 to e045, ok-packed and w103-packed-encoding,
+the packed bundle and its tampered twin, and the compat cases
+`payload/packed/` and `transitive/packed-group-reused`. `observer.md`, the
+profiles and `examples/zk2/` did not change (but for the examples'
+README).
+
+### The rules changed
+
+zk2py extracted every sentence holding MUST, MUST NOT, SHOULD, SHOULD NOT,
+MAY, REQUIRED or RECOMMENDED from `core.md` at main (0.74, 4e5c2829) and at
+8e810d52, by section, and diffed the two sets. The diff is §7.1's E024 MUST
+split into its JSON Schema and packed halves and its E044 MUST, §7.6's six
+MUSTs, and §9.4's packed stems and ids. Without a keyword: §7.2's W103 on a
+packed type, §7.5's tag sentence, §9.2's eight codes and cascade 7, E023,
+E024, E028 and E029 over packed files, §9.5's kind, §9.6 and §9.7 by JCS
+bytes, §9.8's packed rules, and §0's and §12's lists. Each is in the 0.75
+entry. **No rule changed beyond what the changelog states,** and no
+existing fixture's expectation moved.
+
+### What zk2py implements
+
+See README, "Core 0.75: the `packed` type kind". In short: `packed` reads
+and lints a packed file, computes each layout and its tag, writes and reads
+a record with exact decimals, and seals and opens it in §7.5's envelope;
+`schemas`, `contract`, `bundle` and `compat` take the kind in. **`just
+py-conformance`: 4132 of 4132**, `packed` 193 among them (13 layouts, 48
+writes, 34 reads, each accepted write sealed and read back, each read
+through the envelope too), `contracts` 126 (the 12 packed fixtures, two
+with canonical bytes), `bundles` 28, `compat` 120 (20 packed). The
+reference CLI, `zk2` built from main plus #1009, refuses every packed
+fixture with E000 (`unknown field packed`); on the other 87 contract
+fixtures its codes and fingerprints are zk2py's. Nothing is live: there is
+no packed writer in a runtime yet (B2).
+
+### F-423 · ambiguity · core §7.6 (0.75) "Reserved codes": who writes `out_of_range`
+
+> "A writer whose value is outside the range writes `out_of_range`, where
+> the field declares it."
+>
+> §7.6 "Writing": "An implementation MUST NOT write a record for a value
+> that has no code: a value outside its range, …"
+
+- **The readings:**
+  - **(a)** the implementation's writer, handed a value outside the range,
+    writes the `out_of_range` code in its place where the field declares
+    one;
+  - **(b)** the application, which holds a value outside the range, gives
+    the name `out_of_range`; the implementation refuses the number.
+- **The vector** takes (b): `writes`' "a value outside the range, where
+  out_of_range is declared, is still refused: the writer says
+  out_of_range" (`Reserved`, `level` 86, `range`).
+- **Took (b),** the vector, which I believe: under (a) the value would have
+  a code, against the MUST NOT's own example, and a codec that replaced it
+  would lose it unsaid.
+- **Fix:** "An application whose value is outside the range writes
+  `out_of_range`, where the field declares it; the writer refuses the
+  value itself."
+- **Changes:** wording, and B2's codec, which must pick one.
+
+### F-424 · ambiguity · core §7.6 (0.75) "Writing": a fixed-point value's range, by value or by code
+
+> "An implementation MUST NOT write a record for a value that has no code:
+> a value outside its range, a name that is not declared, or an instant
+> outside the epoch's 2^32 seconds."
+>
+> "**`fixed`:** a value x is written as round((x − `minimum`) /
+> `resolution`), rounding a tie to the even integer."
+
+- **The readings:**
+  - **(a)** the range is [`minimum`, `maximum`]: −40.05 is outside
+    −40 to 85, so it has no code;
+  - **(b)** a value has a code when its rounded code is a value's: the
+    range reaches half a resolution past each bound, its ends by ties to
+    even.
+- **The vector** takes (b): `Sensor`'s −40.05 is code 0 ("code −0.5 rounds
+  to 0, its even neighbour"), `Ties`' 10.25 is code 20 under `half`'s
+  maximum 10, and `odd_top`'s 9.75 is refused under its maximum 9.5,
+  "the tie goes out of range". So which values just past a bound are
+  written depends on the parity of the last code, which the text never
+  says.
+- **Took (b),** the vector, which I believe: "a value that has no code" is
+  the test, and the list after its colon names cases of it.
+- **Fix:** "A fixed-point value has a code when its rounded code is from 0
+  to (`maximum` − `minimum`) / `resolution`: up to half a resolution past
+  each bound, a tie there by its parity."
+- **Changes:** wording. Under (a) two of the vector's writes change, −40.05
+  and 10.25, to refusals.
+
+### F-425 · gap · core §7.6 (0.75) "The JSON reading": what a writer takes
+
+> "A writer takes the same object, a fixed-point value as a string or a
+> number."
+>
+> "**A decimal string** is `-?(0|[1-9][0-9]*)(\.[0-9]+)?`, read as the
+> exact decimal it writes."
+
+- **The gap.** The decimal string is the declaration's spelling of a
+  bound. The text gives no syntax for a writer's string, and names no
+  refusal of an object that does not fit the type.
+- **The readings of the string:** (a) §7.6's decimal string, so `5e-1` is
+  refused; (b) a JSON number's text, an exponent included; (c) whatever an
+  implementation's decimal parser takes, `+0.5`, `.5` or `1.` among them.
+- **The vector** takes (b): "an exponent in a writer's decimal" writes
+  `5e-1` as 0.5, and "a fixed-point value that is not a decimal" refuses
+  `43,5`. It also refuses a member the type does not have (`unknown`) and a
+  field not given (`missing`), which the MUST NOT does not name: a writer
+  that ignored an unknown member would write bytes where the vector
+  refuses.
+- **Took the vector:** (b), and `unknown` and `missing`. `+0.5`, `.5` and
+  `1.` are refused `value`.
+- **Fix:** "A writer's fixed-point string is a JSON number's text. A writer
+  refuses an object holding a member its type does not have, or missing a
+  field that is not optional."
+- **Changes:** wording. A vector for `+0.5` or `.5` would pin (b).
+
+### F-426 · ambiguity · core §7.6 (0.75): a writer's JSON number, by its text or by its double
+
+> "A writer takes the same object, a fixed-point value as a string or a
+> number."
+>
+> "**Exact arithmetic.** An implementation MUST compute a fixed-point code,
+> and the value it reads back, in exact decimal arithmetic, never in binary
+> floating point."
+
+- **The readings of a number:** (a) the exact decimal its JSON text
+  writes; (b) the shortest decimal text of the binary64 a JSON parser holds
+  for it; (c) that binary64's exact value.
+- **The vector** rules out (c): "a binary float's shortest text is read,
+  not its binary value: 0.15 is a tie". Its note on 21.5, "a JSON number
+  for a fixed-point value is read by its shortest decimal text", names
+  (b). Its three numbers are equal under (a) and (b). They part past 17
+  significant digits: `0.2500000000000000000000000001`, written as a
+  number under `half`, is code 1 by its text and code 0 by its double, a
+  tie.
+- **Beside it,** `desired.v1` §2.7 settled the same question the other way
+  (F-181): "the value its text denotes, never the double". The MUST above
+  leans to (a).
+- **Took (b):** zk2py's strict JSON reader holds a number as a binary64,
+  read by `repr`.
+- **Fix:** say which. A vector with a long number would pin it.
+- **Changes:** an implementation under the other reading; a vector.
+
+### F-427 · ambiguity · core §7.6 (0.75) "Field types": what an integer is in a packed file
+
+> "| `int` | `minimum`, `maximum`: integers; `reserved` |"
+>
+> §9.1, for TOML: "A float where an integer is due (`major = 1.0`) is a
+> value of the wrong type."
+
+- **The readings:** (a) a JSON number with no fraction and no exponent,
+  so `5.0` is a value of the wrong type (E038); (b) any number whose value
+  is an integer, as JSON Schema's `integer` reads it, and as `desired.v1`
+  §2.10 does ("`3.0` is `3`").
+- **Why it matters:** JCS writes `5.0` as `5`, so two packed files a lint
+  apart have one artifact id. The same question holds for an enum's or a
+  counter's `width`, and for a writer's `int`, `counter` and `time`
+  values.
+- **Took (a),** §9.1's rule carried over: `"maximum": 5.0` is E038, and a
+  writer's `5.0` for an `int` is refused `value`.
+- **Fix:** say which, beside §9.1's sentence or in §7.6.
+- **Changes:** a lint fixture and a writer's refusal, under the other
+  reading.
+
+### F-428 · ambiguity · core §9.4 (0.75) "Packed": "a later file" across the two lists
+
+> "**Stems and ids.** A stem MUST be unique among the listed packed files,
+> and an id among the listed JSON Schema and packed files (E024). A later
+> file whose stem or id is taken is not loaded."
+>
+> §9.2 "Order": "since TOML gives a table's keys no order".
+
+- **The ambiguity.** Within one list, "later" is the list's order. Across
+  `jsonschema` and `packed`, two keys of `[schemas]`, TOML gives none.
+- **Why it matters:** one document can be listed under both kinds, and
+  which one loads decides the codes. `{"description": "x"}` under both is
+  E024 alone when the JSON Schema file loads first: the packed file is not
+  loaded, so not linted. It is E024 and E038 when the packed file does,
+  since a packed file with no `types` is outside §7.6's shape.
+- **Took:** the JSON Schema files first, the order §9.1's table lists the
+  two keys in.
+- **Fix:** "… JSON Schema files are taken before packed files."
+- **Changes:** a lint fixture's codes. None covers it.
+
+### F-429 · ambiguity · core §9.2 (0.75) cascade 7: a type that defines no type
+
+> "**In a packed file,** a type whose name is not a type name is E038, and
+> defines no type."
+
+- **The readings:** (a) its record is not read further: one E038; (b) it
+  defines no type, but its record is still linted, E038 to E045 inside it.
+- **The fixture** does not decide: e038-packed-shape's `lower` holds one
+  clean field.
+- **Took (a):** "once per object" and "defines no type" read together.
+- **Fix:** "… is E038, and defines no type; nothing in it is linted."
+- **Changes:** a lint fixture's codes.
+
+### F-430 · gap · core §7.6 (0.75) "`counter`": a count's domain
+
+> "**`counter`:** a count c is written as c modulo 2^`width`. A width below
+> 64 is a declared loss."
+
+- **The gap.** A counter declares no range, so the MUST NOT's "a value
+  outside its range" does not reach it, and modulo 2^width writes any
+  integer.
+- **The vector** refuses a count of −1 and one of 2^64, both `range`
+  ("a negative count", "a count beyond 64 bits").
+- **Took the vector,** which I believe: "a width below 64 is a declared
+  loss" says 64 bits lose nothing, so a count is from 0 to 2^64 − 1.
+- **Fix:** "A count is an integer from 0 to 2^64 − 1, written as c modulo
+  2^`width`."
+- **Changes:** wording.
+
+### F-431 · contradiction · spec/README.md's glossary "Static rule"
+
+> "**Static rule**: a rule that binds every implementation where it does
+> what the rule governs. Those are §1's, §7.5's, §9's, the contract rules
+> of the sections §12 lists, any naming its lint code, and §3.3's
+> checker's. A rule of any of those sections, §1, §7.5 and §9 included,
+> that names a role is that role's"
+>
+> Core §0 (0.75): "They are the rules of §1, §7.5, §7.6 and §9 that name no
+> role"; §12: "The static rules are those of §1, §7.5, §7.6 and §9".
+
+- **The contradiction.** The glossary leaves §7.6 out, where §0, §12 and
+  `RULES.md`'s header now name it.
+- **Fix:** "Those are §1's, §7.5's, §7.6's, §9's, …", and the same in the
+  second sentence.
+- **Changes:** wording.
+
+### F-432 · index · spec/RULES.md (0.75): §7.6's reading rule shows no list length
+
+> `RULES.md`, implementation, §7.6: "An implementation that reads a record
+> of a packed type MUST refuse it for the first of these that applies, in
+> this order."
+>
+> Its header: "A lead-in ends with its list's length, "(3 items)", or its
+> table's."
+
+- **The defect.** The entry is a lead-in whose "these" are §7.6's five
+  refusals, and it shows no length, where §7.5's twin rule shows "(6
+  items)". The text puts "Each refusal is named." between the lead-in and
+  its list, so the index does not see a lead-in. A reader of the index is
+  not told the rule is a list.
+- **Fix:** end the sentence with a colon before the list, "Each refusal is
+  named" moved after it, or let the generator read past it.
+- **Changes:** wording. No verdict: zk2py's walk keys the rule by its
+  sentence.
+
+### F-433 · ambiguity · observer §7.3 (text 0.15) beside core §7.6 (0.75): a tool and a packed payload
+
+> Observer §7.3: "Such a tool MUST decode each payload by its declared
+> type: `protobuf` (proto2 and proto3) and `jsonschema` (the zk2 subset of
+> JSON Schema 2020-12, core §7.3), and a `raw` type by its media type
+> only." … "**Decode order** for a tool: a payload whose declared type the
+> tool holds is decoded by that type".
+>
+> Core §7.6: "**The deployment epoch** E … Writer and reader each hold it
+> as an input. This version carries it nowhere."
+
+- **The readings:** (a) the MUST lists three kinds, so a tool renders a
+  packed payload by its type and size (honest rendering) until a text says
+  more; (b) the decode order binds every held type, so a tool decodes a
+  packed record, and a type with a `time` field, whose epoch it cannot
+  have, is one it cannot decode.
+- **Beside them,** the changelog says "A tool's decoder does not yet read
+  a packed record", and observer.md did not change. But a record with no
+  `time` field needs nothing the envelope does not carry.
+- **Took:** nothing to take. zk2py's echo tool sniffs every payload, so
+  its §7.3 verdicts stay not met.
+- **Fix:** name `packed` in §7.3's list, and say what a tool shows of a
+  record whose epoch it does not hold.
+- **Changes:** no verdict, no test of zk2py's.
+
+### Counts at core 0.75
+
+433 entries.
+- **New: F-423 to F-433,** eleven. Six are ambiguities (F-423, F-424,
+  F-426 to F-429), two gaps (F-425, F-430), one a contradiction (F-431),
+  one the index's (F-432), and one observer.md's beside the new kind
+  (F-433). None is a blocker: zk2py took a reading of each, and the
+  vectors decide F-423 to F-425 and F-430.
+- **Open:** F-423 to F-433. F-365 stays open as #965's.

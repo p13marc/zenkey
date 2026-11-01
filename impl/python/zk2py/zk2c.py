@@ -19,7 +19,9 @@ order, each with its token (:class:`Refused`): ``short`` (no CH), ``form``
 stamp), ``trailing`` (a delete's). "Every envelope an implementation
 accepts MUST write back to the same bytes": :func:`write` does, and the
 envelope family checks each accepted case (``conformance/envelope/
-vectors.json``).
+vectors.json``). It reports a mutation's tag, and "checks it against no
+type: §7.6's reader does" (0.75): :func:`zk2py.packed.open_put` reads a
+packed record under the tag CH carries.
 
 **Which sample carries one (observer §7.3, text 0.14).** "A tool that shows
 or judges a payload MUST read a sample on a zk2 data key whose kind is a

@@ -64,13 +64,14 @@ case name. It exits with:
 | templates | §2.2 | `templates` | match, then rank, with unslugged bindings |
 | contracts | §9.1–§9.5, App. D | `contract`, `schemas`, `shape`, `protoc`, `jcs` | the exact sorted codes, the canonical JCS bytes and the fingerprint of every fixture. The protobuf well-known types, the five `e000-toml11-*` cases (0.4) and `cardinality = "unbounded"` (0.57, 4294967295 from resolution on) are included. |
 | sets | §9.2 | `sets` | E035, E036 |
-| bundles | §9.6 | `bundle` | the twelve verification steps and their tags. `seed.toml` also **builds** to `valid.bundle.json` byte for byte. |
+| bundles | §9.6 | `bundle` | the twelve verification steps and their tags. `seed.toml` also **builds** to `valid.bundle.json` byte for byte, and `contracts/ok-packed.toml` to `packed.bundle.json` (0.75). |
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
 | seed | §4.2 (0.27) | `seed` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not). An unknown file there fails. |
-| compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
+| compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). The packed cases (0.75) are wrapped as `packed` artifacts. |
+| packed | §7.6, §7.5 (0.75) | `packed`, `zk2c` | `packed/vectors.json`: each layout's form, sha256, tag, items and bit bounds; each write's bits, pad and bytes, or the writer's refusal; each read's JSON reading, or the first refusal in §7.6's order. Every accepted write is sealed in the envelope, opened and read back; every read is made through the envelope too. |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
@@ -4923,6 +4924,101 @@ control on `--hlc`. See "At core 0.74 and desired.v1 0.13" in
 `SPEC-FINDINGS.md`. The observation of a forged reply on a wildcard GET
 sits beside the findings.
 
+## Core 0.75: the `packed` type kind (round 94)
+
+Core 0.75 (#979 B1, PR #1012) adds a type kind whose record is bit fields
+sized from the contract's declared ranges (§7.6), and the tag it gives
+§7.5's envelope. Authoring draft 3 lists packed files under `[schemas]
+packed`, and a reference reads `packed:Name` or `packed:stem#Name` (§9.1,
+§9.4). Eight lints, E038 to E045, and cascade 7 read a packed file (§9.2).
+Bundles, retention and the classifier take the kind in (§9.5 to §9.8).
+`observer.md` and the profiles did not change.
+
+zk2py diffed every RFC 2119 sentence of `core.md` between 0.74 and 0.75, by
+section. **No rule changed beyond what the changelog states,** and no
+existing fixture's expectation moved.
+
+### The classes zk2py claims
+
+Unchanged since round 89: the **owner**, **consumer**, **caller** and
+**observer** classes, each at the full level, and not the deployment class.
+§7.6's rules are static, so they are in every class.
+
+### Its walk of `RULES.md` at 8e810d52
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 62 | 51 | 3 | 8 |
+| consumer | 15 | 12 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 55 | 51 | 2 | 2 |
+| static, in every class | 45 | 43 | 0 | 2 |
+
+- **190 rows walked, none without a verdict.** §7.1's uniqueness MUST, now
+  two rows, is re-keyed to "the listed JSON Schema files" beside its packed
+  twin. The nine new static rows (§7.1's packed uniqueness and E044, §7.6's
+  six, §9.4's packed stems and ids) were "not yet" in the walk's commit,
+  and each is met now.
+- **Beyond the index:** round 93's seventeen, all met.
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's two
+  decoding MUSTs.
+
+### What round 94 changed in zk2py
+
+- **`packed`** (core §7.6, §9.2):
+  - a packed file read and linted, E038 to E045 under cascade 7: E043 before
+    E038, one of E038 and E043 per field, one of E039, E040 and E041 in the
+    cascade's order, E042 and E045 over the fields with neither;
+  - each type's widths, item offsets, shortest and longest record, layout
+    form, its sha256 and tag;
+  - the writer: exact decimals over `fractions.Fraction`, a tie to the even
+    code, reserved codes from all ones down in §7.6's order, a counter
+    modulo 2^width, a time from the deployment epoch, and the vector's
+    refusals (`unknown`, `missing`, `value`, `range`, `epoch`);
+  - the reader, refusing in §7.6's order (`tag`, then field by field
+    `length` and `code`, `extension`, `length`, `pad`), a marker read as 1
+    at its layout's end reading the rest as a later revision's;
+  - `seal` and `open_put`: a record in §7.5's envelope, CH's tag bits the
+    type's tag, and read back under the tag CH carries.
+- **`schemas`:** `[schemas] packed` loaded after the JSON Schema files,
+  E024 for a taken packed stem and for an id either kind took, E028 and
+  E029 at load, E029 suppressing a packed reference's E023; `packed:Name`
+  and `packed:stem#Name` resolved, E023 and E024.
+- **`contract`:** E044 on each resolved packed reference that is an explicit
+  stream's type, an attachment or an operation's type; W103 on a packed
+  type.
+- **`bundle`**, **`compat`:** a packed document carried as a JSON Schema
+  one, hashed and kept by its JCS bytes; §9.8's packed rules field by
+  field (`fields_changed`, `type_changed`, `presence_changed`,
+  `bound_changed`, `resolution_changed`, `width_changed`,
+  `reserved_changed`, `enum_changed` breaking; `field_renamed`,
+  `enum_value_renamed`, `enum_value_removed` review; growth behind a
+  marker compatible).
+- **The runner:** a `packed` family over `packed/vectors.json` (13 layouts,
+  48 writes, 34 reads; each accepted write sealed, opened and read back, and
+  refused under another tag; each read through the envelope too); the
+  packed bundle built from `contracts/ok-packed.toml` byte for byte, and its
+  tampered twin one packed document apart; transitive packed revisions
+  wrapped as `packed`.
+- **`readings`:** round 94's eleven findings, each sentence as it reads and
+  the reading zk2py takes, shown through `packed` and the lints.
+
+**`readings`: 781, up from 768.** **`just py-conformance`: 4132 of 4132**,
+`packed` 193 among them, `contracts` 126 (12 packed fixtures, two with
+canonical bytes), `bundles` 28 and `compat` 120 (20 packed).
+
+**The black box.** `zk2 contract lint` and `zk2 contract fingerprint`,
+built from main plus #1009, refuse every packed fixture with E000
+(`unknown field packed`): B1's model is not in them. On the other 87
+contract fixtures their codes (W107 aside) and fingerprints are zk2py's.
+
+**Not run:** anything live. No runtime writes a packed record yet (B2), and
+no tool reads one.
+
+Round 94 found F-423 to F-433, eleven, none a blocker. The vectors decide
+F-423 to F-425 and F-430, and zk2py follows them. See "At core 0.75" in
+`SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -4955,6 +5051,10 @@ sits beside the findings.
     §1.4's canonical form, §1.5's new session at a re-mint and §3.3's 1 KB.
     S7's consumer rule is kept from the first value since round 91. The
     deployment class is not claimed.
+  - a packed record on a bus (core 0.75, §7.6): zk2py's owner writes none
+    and its tools decode none. `packed` writes and reads records off the
+    bus, with the deployment epoch as an argument, which nothing carries
+    yet (F-433).
   - of a `config.v1` owner fed through `desired.v1` (§2.16, round 88): a
     watch session (it reads its author's presence every 500 ms), an
     archive's last-known, and the reference's "wait that cannot end"
@@ -5021,7 +5121,7 @@ impl/python/
     jcs.py                      strict JSON, RFC 8785, sha256 ids, §9.5 restrictions
     shape.py                    checks documents against contract/descriptor.schema.json
     protoc.py         §9.4      protoc invocation, well-known types
-    schemas.py        §7.3 §9.4 artifacts, the subset, $ref, type references
+    schemas.py        §7.3 §9.4 artifacts (JSON Schema, protobuf, packed), the subset, $ref, type references
     contract.py       §9.1–§9.5 lints, defaults, canonical form, fingerprint
     sets.py           §9.2      E035, E036
     bundle.py         §9.6      build, verify
@@ -5030,6 +5130,8 @@ impl/python/
     cbor.py, envelope.py §5.2   the error envelope
     zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
                                 envelope first (round 93)
+    packed.py         §7.6 §9.2 the packed kind: a file's lints (E038–E045), layouts, the tag, the writer and the
+                                reader in exact decimals, a record in the envelope (round 94)
     compat.py         §9.7 §9.8 the classifier, retention identity
     conformance.py              the runner
     classes.py        §12       the classes zk2py claims, and its walk of spec/RULES.md (round 89)

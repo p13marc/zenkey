@@ -54,7 +54,6 @@ from typing import Any
 
 from . import jcs
 
-KIND = "packed"
 MARKER = "..."
 FIELD_TYPES = ("int", "fixed", "enum", "bool", "counter", "time")
 #: §7.6 "Reserved codes": they take the top codes, from all ones down, "in
