@@ -4059,6 +4059,7 @@ mod tests {
                 bytes: Some(zenoh::bytes::ZBytes::from(value.to_vec())),
                 inband: Some(inband(9)),
                 timestamp: clock.and_then(stamp),
+                last_confirmation: None,
                 confirmed: None,
                 identity: None,
             }],

@@ -1026,9 +1026,18 @@ fn owner_value<'a>(answer: &'a StateAnswer, data: &DetailData<'a>) -> Element<'a
             row.timestamp.as_ref(),
             answer.provenance,
         ));
+    if row.last_confirmation.is_some() {
+        chips = chips.push(kit::data_chip("confirmed by heartbeat (freshness.v2)"));
+    }
     col = col.push(chips.wrap());
     if let Some(line) = stamp_line(row.timestamp.as_ref()) {
         col = col.push(line);
+    }
+    if let Some(c) = &row.last_confirmation {
+        col = col.push(kit::mono(format!(
+            "last confirmed {} · its last put, or its owner's last heartbeat vouching for it",
+            c.time
+        )));
     }
     match size {
         None => {

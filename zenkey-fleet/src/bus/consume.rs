@@ -166,6 +166,13 @@ pub async fn get_state_answer(
     let inband = got.inband;
     let tags = got.tags;
     let inband_of = |key: &str| inband.get(key).copied().map(InbandStamp::from);
+    // freshness.v2 (#978's F3): a collection's reply carries its member's
+    // last confirmation as its Zenoh timestamp.
+    let confirmed_by_heartbeat = zenkey::model::freshness::uses_v2(revision.contract())
+        && matches!(
+            zenkey::model::freshness::horizon_of(r),
+            zenkey::model::freshness::Horizon::Within(_)
+        );
     let mut rows: Vec<StateRow> = got
         .current
         .into_iter()
@@ -173,6 +180,9 @@ pub async fn get_state_answer(
             zenkey::state::Current::Value { key, sample } => StateRow {
                 inband: inband_of(&key),
                 timestamp: sample.timestamp().map(stamp),
+                last_confirmation: confirmed_by_heartbeat
+                    .then(|| sample.timestamp().map(stamp))
+                    .flatten(),
                 value: StateValue::Value {
                     payload: Box::new(payload(
                         revision,
@@ -195,6 +205,7 @@ pub async fn get_state_answer(
                 value: StateValue::Deleted,
                 bytes: None,
                 timestamp: timestamp.as_ref().map(stamp),
+                last_confirmation: None,
                 confirmed: None,
                 identity: None,
             },
@@ -358,6 +369,7 @@ fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateR
         bytes,
         inband: lk.inband.map(InbandStamp::from),
         timestamp: lk.timestamp.as_ref().map(stamp),
+        last_confirmation: None,
         confirmed: Some(lk.confirmed),
         identity: Some(lk.identity),
     }

@@ -351,6 +351,7 @@ fn an_owner_read_shows_its_bytes_in_hex() {
                 bytes: bytes.map(|b| b.to_vec().into()),
                 inband: None,
                 timestamp: None,
+                last_confirmation: None,
                 confirmed: None,
                 identity: None,
             }],
