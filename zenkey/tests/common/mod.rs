@@ -349,3 +349,20 @@ pub async fn peer(endpoint: &str, listen: bool, gossip: bool) -> zenoh::Session 
     .unwrap();
     zenoh::open(c).await.expect("peer")
 }
+
+/// A sample read as a reader reads it (core §4.3, §7.5): a put that
+/// carries the zk2c envelope with its record as its payload, every other
+/// sample unchanged.
+pub fn strip(s: zenoh::sample::Sample) -> zenoh::sample::Sample {
+    zenkey::inband::read(s).into_sample()
+}
+
+/// A sample's payload as its record: [`strip`]'s.
+pub fn record(s: &zenoh::sample::Sample) -> Vec<u8> {
+    strip(s.clone()).payload().to_bytes().into_owned()
+}
+
+/// A sample's in-band stamp, when it carries the envelope.
+pub fn inband(s: &zenoh::sample::Sample) -> Option<zenkey::model::wire::Stamp> {
+    zenkey::inband::stamp(s)
+}

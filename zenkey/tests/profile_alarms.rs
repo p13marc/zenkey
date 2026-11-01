@@ -36,6 +36,7 @@ use zenkey::model::alarms::{
 };
 use zenkey::model::freshness::{ClockTrust, DEFAULT_DELTA, Observation};
 use zenkey::model::grammar::{InstanceId, ZkKey};
+use zenkey::model::seed::Mark;
 use zenkey::state::{Current, StateAnswer};
 use zenkey::{Implementation, ServiceBuilder, ServiceConfig, presence};
 use zenoh::sample::{Sample, SampleKind};
@@ -124,7 +125,7 @@ fn push(log: &Log, x: &Sample) {
         at: Instant::now(),
         key: x.key_expr().as_str().to_owned(),
         delete: x.kind() == SampleKind::Delete,
-        payload: x.payload().to_bytes().into_owned(),
+        payload: common::record(x),
         stamp: x.timestamp().copied(),
     });
 }
@@ -1103,6 +1104,53 @@ async fn a_re_mint_puts_every_alarm_again() {
         [Transition::Raised, Transition::Confirmed]
     );
     assert!(svc.alarms().is_some());
+    svc.close().await.unwrap();
+}
+
+/// Core §1.5, §4.3 (#976): a new epoch takes a new run, which the new
+/// instance's descriptor states, and the alarms it puts again from the new
+/// instance (§2.9) go under that run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_epoch_takes_a_new_run() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let s = record(&rs).await;
+    let (b, a) = owner(
+        &os,
+        config(SVC),
+        alarms::implementation(),
+        Startup::default(),
+    )
+    .await;
+    let mut svc = b.start().await.unwrap();
+    presence_of(&rs, None).await;
+    seen_by(&os).await;
+    a.raise(alarm_a(Severity::Warning)).await.unwrap();
+    let g = reader(&rs);
+    let before = get(&g).await;
+    let c = reply(&before, A_KEY).expect("A answered");
+    let Some(Mark::InBand(old)) = before.mark(c) else {
+        panic!("an in-band stamp (S1): {c:?}")
+    };
+    assert_eq!(old.run, svc.minter().run());
+    let n = snapshot(&s.log).len();
+    svc.new_epoch().await.unwrap();
+    let run = svc.minter().run();
+    assert_ne!(run, old.run, "a new instance, a new run");
+    let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+    assert_eq!(d["run"], run.hex(), "the new descriptor states it");
+    at_new_token(&s.log, n).await;
+    let at_token = get(&g).await;
+    let c = reply(&at_token, A_KEY).expect("A answered at the token");
+    assert_eq!(
+        at_token.mark(c),
+        Some(Mark::InBand(zenkey::model::wire::Stamp {
+            run,
+            seq: zenkey::model::wire::Seq::new(0).unwrap(),
+        })),
+        "the re-put, the new run's first mutation"
+    );
     svc.close().await.unwrap();
 }
 

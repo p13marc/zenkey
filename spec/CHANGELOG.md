@@ -173,6 +173,8 @@ makes that moot, since nothing orders two runs.
 - **`scenarios/state.md`** is rewritten for runs: §1 through a router that
   stamps nothing and one that stamps, §2, §4, §7 the runs, §9 an archive
   across two runs, §10 by seq, and a new §13, a stream key's seq wrapping.
+- **`scenarios/types.md` §1** expects `zenoh/bytes` on each sample, which
+  carries the envelope, and its record encoded as its type says.
 - Appendix C indexes them, Appendix E describes `inband.json`, and
   `conformance/README.md` lists it.
 

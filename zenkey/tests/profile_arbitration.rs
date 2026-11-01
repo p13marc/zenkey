@@ -373,7 +373,7 @@ impl Tool {
                 if s.kind() != SampleKind::Put {
                     return;
                 }
-                let payload = String::from_utf8_lossy(&s.payload().to_bytes()).into_owned();
+                let payload = String::from_utf8_lossy(&common::record(&s)).into_owned();
                 g.lock()
                     .unwrap()
                     .entry(s.key_expr().as_str().to_owned())

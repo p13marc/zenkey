@@ -225,7 +225,7 @@ async fn reader(s: &zenoh::Session) -> Reader {
             w.lock().unwrap().samples.push(Rec {
                 at: since(),
                 resource,
-                payload: x.payload().to_bytes().into_owned(),
+                payload: common::record(&x),
                 attachment: x.attachment().map(|a| a.to_bytes().into_owned()),
             });
         })
@@ -1102,7 +1102,7 @@ async fn s9_state_counter_seeded() {
         .callback(move |x: Sample| {
             w.lock().unwrap().push(Got {
                 at: since(),
-                payload: x.payload().to_bytes().into_owned(),
+                payload: common::record(&x),
                 stamp: *x.timestamp().expect("the owner's stamp (S1)"),
             });
         })
@@ -1129,7 +1129,7 @@ async fn s9_state_counter_seeded() {
     let reply = replies.recv_async().await.unwrap().into_result().unwrap();
     log.lock().unwrap().push(Got {
         at: since(),
-        payload: reply.payload().to_bytes().into_owned(),
+        payload: common::record(&reply),
         stamp: *reply.timestamp().expect("the stored stamp (S2)"),
     });
     tokio::time::sleep(SPACING).await;
@@ -1382,7 +1382,7 @@ async fn a_cbor_point_takes_its_epoch() {
     let g = Arc::clone(&got);
     let _sub = rs
         .declare_subscriber(format!("zk2/{SVC}/gauges.v1/stream/packed"))
-        .callback(move |x: Sample| g.lock().unwrap().push(x.payload().to_bytes().into_owned()))
+        .callback(move |x: Sample| g.lock().unwrap().push(common::record(&x)))
         .await
         .unwrap();
     let mut b = ServiceBuilder::new(&s, config(SVC));

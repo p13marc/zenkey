@@ -698,11 +698,28 @@ pub struct LastKnown {
     /// The value, or `None` for a tombstone.
     pub value: Option<Vec<u8>>,
     pub encoding: Option<Encoding>,
+    /// Its Zenoh timestamp: on a resource core §4.3's table lists, the
+    /// owner's; elsewhere none, or a router's.
     pub timestamp: Option<Timestamp>,
+    /// Its in-band stamp, the run and seq its envelope carried (core §4.3):
+    /// what orders it.
+    pub inband: Option<zenkey_model::wire::Stamp>,
     /// `{"iface", "contract", "type"}`: the value's type identity (§7.1).
     pub identity: Value,
     /// `false` while alignment has not confirmed the key.
     pub confirmed: bool,
+}
+
+impl LastKnown {
+    /// What orders it among its key's values: its in-band stamp, else its
+    /// Zenoh timestamp ([`crate::state::ValueOrder::accept_mark`]).
+    #[must_use]
+    pub fn mark(&self) -> Option<Mark> {
+        Mark::of(
+            self.inband,
+            self.timestamp.as_ref().map(crate::inband::stamp_of),
+        )
+    }
 }
 
 /// Reads `origin`'s last-known state from the archive at `archive`,
@@ -788,6 +805,7 @@ fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
         return None;
     }
     let mark = read.mark();
+    let inband = read.stamp();
     let s = read.into_sample();
     let att: Value = s
         .attachment()
@@ -799,6 +817,7 @@ fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
         value: put.then(|| s.payload().to_bytes().into_owned()),
         encoding: put.then(|| s.encoding().clone()),
         timestamp: s.timestamp().copied(),
+        inband,
         confirmed: att["confirmed"].as_bool().unwrap_or(false),
         identity: json!({"iface": att["iface"], "contract": att["contract"], "type": att["type"]}),
     };

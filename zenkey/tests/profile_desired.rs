@@ -173,6 +173,25 @@ async fn get(s: &zenoh::Session, key: &str) -> Vec<Sample> {
     let mut out = Vec::new();
     while let Ok(r) = rx.recv_async().await {
         if let Ok(s) = r.into_result() {
+            out.push(common::strip(s));
+        }
+    }
+    out
+}
+
+/// [`get`], each reply as it arrived, its envelope kept.
+async fn get_raw(s: &zenoh::Session, key: &str) -> Vec<Sample> {
+    let rx = s
+        .get(key)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::Latest)
+        .timeout(T)
+        .with(flume::unbounded::<Reply>())
+        .await
+        .unwrap();
+    let mut out = Vec::new();
+    while let Ok(r) = rx.recv_async().await {
+        if let Ok(s) = r.into_result() {
             out.push(s);
         }
     }
@@ -188,6 +207,9 @@ struct Rec {
     delete: bool,
     payload: Vec<u8>,
     stamp: Option<Timestamp>,
+    /// Its in-band stamp (core §4.3): what a resource off §4.3's table is
+    /// told by.
+    inband: Option<zenkey::model::wire::Stamp>,
     token: bool,
 }
 
@@ -219,8 +241,9 @@ async fn record(ep: &str) -> Recorder {
         log.lock().unwrap().push(Rec {
             key: x.key_expr().as_str().to_owned(),
             delete: x.kind() == SampleKind::Delete,
-            payload: x.payload().to_bytes().into_owned(),
+            payload: common::record(x),
             stamp: x.timestamp().copied(),
+            inband: common::inband(x),
             token,
         });
     };
@@ -824,7 +847,6 @@ async fn s5_a_restart_acts_again() {
         true,
     )
     .await;
-    let zid = w.session.zid().to_string();
     loop {
         let t = tokio::time::timeout(SETTLE, tokens.recv_async())
             .await
@@ -838,24 +860,27 @@ async fn s5_a_restart_acts_again() {
             break;
         }
     }
-    let at_token = get(&g, RP).await;
+    let at_token = get_raw(&g, RP).await;
     assert_eq!(at_token.len(), 1);
     assert_eq!(
-        zenkey::model::desired::decode(&at_token[0].payload().to_bytes()).unwrap(),
+        zenkey::model::desired::decode(&common::record(&at_token[0])).unwrap(),
         Report::baseline(Some(D.to_owned())),
         "the new instance holds nothing of its previous one's acts"
     );
+    // The report carries no Zenoh timestamp of its owner's (no horizon):
+    // the new instance is told by its run (core §4.3).
+    let run = w.svc.minter().run();
     assert_eq!(
-        at_token[0].timestamp().unwrap().get_id().to_string(),
-        zid,
-        "under the new instance's stamp"
+        common::inband(&at_token[0]).map(|s| s.run),
+        Some(run),
+        "under the new instance's run"
     );
     let mark = s.mark();
     w.drive.release();
     s.until("converged on v1 again", |r| converged_on(r, &s1, 1))
         .await;
     s.until_on(RUN, mark, "v1 put on Run by the new instance", |r| {
-        r.value() == v(1) && r.stamp.unwrap().get_id().to_string() == zid
+        r.value() == v(1) && r.inband.is_some_and(|s| s.run == run)
     })
     .await;
     assert_eq!(w.target.acts(), 1, "it acted on v1 again");

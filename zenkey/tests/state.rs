@@ -1,4 +1,6 @@
-//! `spec/scenarios/state.md` §1–§9 (spec §4, §2.6).
+//! `spec/scenarios/state.md` §1–§9 (spec §4, §2.6), over core 0.73's runs
+//! and seqs: every mutation carries its in-band stamp (§7.5's envelope),
+//! and a Zenoh timestamp only on §4.3's table.
 //!
 //! Common setup: an owner `ground/fleet-mgr` with the state template
 //! `plans/{vehicle}`; a consumer `vehicle-01/executor` bound with
@@ -11,17 +13,27 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use common::{T, client, config, contract, eventually, imp, link_to, router, router_via};
+use common::{
+    T, client, config, contract, eventually, imp, link_to, router, router_via, router_with,
+};
 use zenkey::archive::{self, Archive, ArchiveConfig, Recorded};
 use zenkey::consumer::Consumer;
+use zenkey::health::Level;
 use zenkey::model::grammar::IfaceId;
+use zenkey::model::seed::{Held, Mark, admits_mark};
 use zenkey::model::template::Bindings;
-use zenkey::state::{Current, StateGet, StateWriter, ValueOrder};
+use zenkey::model::wire::{self, DeleteStamp, Envelope, Run, Stamp as InBand};
+use zenkey::run::{FileRunStore, RunStore};
+use zenkey::state::{Current, StateAnswer, StateGet, StateWriter, ValueOrder};
 use zenkey::{Service, ServiceBuilder};
 use zenoh::Wait;
 use zenoh::bytes::Encoding;
 use zenoh::key_expr::OwnedKeyExpr;
-use zenoh::sample::Sample;
+use zenoh::query::{ConsolidationMode, QueryTarget};
+use zenoh::sample::{Sample, SampleKind};
+
+/// What a union storage holds: each key's bytes and `Encoding`.
+type Stored = Arc<Mutex<BTreeMap<String, (Vec<u8>, Encoding)>>>;
 
 /// A union storage on `zk2/*/*/*/events/**` whose backend ignores `_time`,
 /// like the storage manager's memory backend (spike S5).
@@ -30,16 +42,21 @@ async fn union_storage(
 ) -> (
     zenoh::pubsub::Subscriber<()>,
     zenoh::query::Queryable<()>,
-    Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    Stored,
 ) {
-    let store: Arc<Mutex<BTreeMap<String, Vec<u8>>>> = Arc::default();
+    let store: Stored = Arc::default();
     let w = Arc::clone(&store);
     let sub = s
         .declare_subscriber("zk2/*/*/*/events/**")
         .callback(move |smp: Sample| {
+            // As a storage keeps a sample: its bytes, envelope included,
+            // and its Encoding.
             w.lock().unwrap().insert(
                 smp.key_expr().as_str().to_owned(),
-                smp.payload().to_bytes().into_owned(),
+                (
+                    smp.payload().to_bytes().into_owned(),
+                    smp.encoding().clone(),
+                ),
             );
         })
         .await
@@ -48,10 +65,10 @@ async fn union_storage(
     let q = s
         .declare_queryable("zk2/*/*/*/events/**")
         .callback(move |q| {
-            for (k, v) in r.lock().unwrap().iter() {
+            for (k, (v, enc)) in r.lock().unwrap().iter() {
                 let ke = OwnedKeyExpr::try_from(k.clone()).unwrap();
                 if q.key_expr().intersects(&ke) {
-                    let _ = q.reply(ke, v.clone()).encoding(Encoding::TEXT_PLAIN).wait();
+                    let _ = q.reply(ke, v.clone()).encoding(enc.clone()).wait();
                 }
             }
         })
@@ -134,15 +151,44 @@ fn vehicle(v: &str) -> Bindings {
 
 const ORIGIN: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01";
 
+/// How an owner comes up: its run store and its clock's offset.
+#[derive(Default)]
+struct Up {
+    window_s: Option<u64>,
+    store: Option<Arc<dyn RunStore>>,
+    offset_ms: i64,
+}
+
 /// The owner, serving `plans/{vehicle}`, with writers for `vehicles`.
 async fn fleet_mgr(
     s: &zenoh::Session,
     window_s: Option<u64>,
     vehicles: &[&str],
 ) -> (Service, BTreeMap<String, StateWriter>) {
+    fleet_mgr_up(
+        s,
+        Up {
+            window_s,
+            ..Up::default()
+        },
+        vehicles,
+    )
+    .await
+}
+
+/// [`fleet_mgr`], brought up as `up` says.
+async fn fleet_mgr_up(
+    s: &zenoh::Session,
+    up: Up,
+    vehicles: &[&str],
+) -> (Service, BTreeMap<String, StateWriter>) {
     let mut cfg = config("ground/fleet-mgr");
-    cfg.tombstone_window_s = window_s;
+    cfg.tombstone_window_s = up.window_s;
     let mut b = ServiceBuilder::new(s, cfg);
+    if let Some(store) = up.store {
+        b.run_store(store).unwrap();
+    }
+    b.minter().simulate_offset(up.offset_ms);
     b.implement(imp("mission_plan.v1")).unwrap();
     b.expose(&plan(), "state/plans/{vehicle}").unwrap();
     b.serve_state(&plan()).unwrap();
@@ -157,6 +203,15 @@ async fn fleet_mgr(
         );
     }
     (svc, w)
+}
+
+/// The run a running service's descriptor states (core §3.3).
+fn described_run(svc: &Service) -> String {
+    let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+    d["run"]
+        .as_str()
+        .expect("a descriptor states its run")
+        .to_owned()
 }
 
 /// A consumer of `plan`, bound to the fleet manager, with `{vehicle} =
@@ -179,152 +234,281 @@ async fn executor(s: &zenoh::Session, own_slice: bool) -> (Service, Consumer) {
     (svc, c)
 }
 
-async fn answered(c: &Consumer, values: Option<&Bindings>) -> Vec<Current> {
-    match c.get("state/plans/{vehicle}", values, T).await.unwrap() {
-        StateGet::Answered(v) => v,
-        StateGet::Silent => panic!("the owner did not answer"),
-    }
-}
-
-/// §1: the owner and the consumer are clients of R1, which stamps. Every
-/// mutation, the delete included, carries the owner's stamp, increasing; a
-/// GET after v2 returns v2 with v2's stamp. The control: an unstamped put
-/// through R1 carries R1's zid, so the check tells the two apart (core
-/// §4.2, "Observing S1", F-69). Two puts back to back step by at least one
-/// tick (§4.3, F-66).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s1_stamped_mutations() {
-    let (r1, ep) = router(None).await;
-    let owner = client(&ep).await;
-    let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
-    let consumer = client(&ep).await;
-    let (_ex, c) = executor(&consumer, true).await;
-    let got: Arc<Mutex<Vec<Sample>>> = Arc::default();
-    let g = Arc::clone(&got);
-    let _sub = c
-        .subscribe("state/plans/{vehicle}", move |d| {
-            g.lock().unwrap().push(d.sample)
-        })
+/// The owner's answer with its in-band stamps (S2): what orders each key.
+async fn answer(c: &Consumer, values: Option<&Bindings>) -> StateAnswer {
+    let a = c
+        .get_answer("state/plans/{vehicle}", values, T)
         .await
         .unwrap();
-    let w = &w["vehicle-01"];
+    assert!(!a.current.is_empty(), "the owner did not answer");
+    a
+}
+
+/// Every sample a raw subscriber on `selector` hears, as it arrived: its
+/// envelope, Encoding and Zenoh timestamp untouched.
+type Raw = Arc<Mutex<Vec<Sample>>>;
+
+async fn capture(s: &zenoh::Session, selector: &str) -> (zenoh::pubsub::Subscriber<()>, Raw) {
+    let raw: Raw = Arc::default();
+    let into = Arc::clone(&raw);
+    let sub = s
+        .declare_subscriber(selector.to_owned())
+        .callback(move |smp: Sample| into.lock().unwrap().push(smp))
+        .await
+        .unwrap();
+    (sub, raw)
+}
+
+/// A raw GET of `selector`, `All` + `Latest` as S4 asks: each reply as it
+/// arrived.
+async fn raw_get(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
+    let rx = s
+        .get(selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::Latest)
+        .timeout(T)
+        .await
+        .unwrap();
+    let mut out = Vec::new();
+    while let Ok(r) = rx.recv_async().await {
+        if let Ok(smp) = r.into_result() {
+            out.push(smp);
+        }
+    }
+    out
+}
+
+/// A put's in-band stamp and record, read from its raw payload.
+fn sealed(s: &Sample) -> (InBand, Vec<u8>) {
+    assert_eq!(
+        s.encoding().to_string(),
+        "zenoh/bytes",
+        "an envelope's Encoding (core §7.2)"
+    );
+    let bytes = s.payload().to_bytes();
+    let e = Envelope::parse(&bytes).expect("a mutation envelope");
+    assert_eq!(e.header().form, wire::Form::Mutation);
+    (e.stamp, e.record.to_vec())
+}
+
+/// A delete's in-band stamp, read from its raw attachment.
+fn delete_stamp(s: &Sample) -> InBand {
+    assert_eq!(s.kind(), SampleKind::Delete);
+    let a = s.attachment().expect("a delete's envelope").to_bytes();
+    DeleteStamp::parse(&a).expect("a delete envelope").stamp
+}
+
+/// §1: in-band stamps (S1, S2, core §4.3), and no per-put Zenoh timestamp
+/// outside §4.3's table. Played twice: through R1, whose timestamping is
+/// disabled, nothing of `plans/{vehicle}` carries a Zenoh timestamp,
+/// which is #976's capture; through R2, which stamps, each put arrives
+/// with R2's zid, its delete and its reply with none. `status`
+/// (`health.v1`, `freshness.ttl_s` 60, on the table) carries the owner's
+/// zid through either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s1_in_band_stamps_and_no_per_put_hlc() {
+    in_band_stamps(false).await;
+    in_band_stamps(true).await;
+}
+
+async fn in_band_stamps(stamping: bool) {
+    let through = if stamping {
+        "R2, which stamps"
+    } else {
+        "R1, which does not"
+    };
+    let (r, ep) = router_with(
+        None,
+        &[(
+            "timestamping/enabled",
+            if stamping { "true" } else { "false" },
+        )],
+    )
+    .await;
+    let owner = client(&ep).await;
+    let consumer = client(&ep).await;
+    let third = client(&ep).await;
+    let (_plans, plans) = capture(&consumer, "zk2/ground/fleet-mgr/mission_plan.v1/**").await;
+    let (_status, status) = capture(&consumer, "zk2/ground/fleet-mgr/health.v1/**").await;
+    let (_control, control) = capture(&consumer, "control/**").await;
+
+    let mut b = ServiceBuilder::new(&owner, config("ground/fleet-mgr"));
+    b.implement(imp("mission_plan.v1")).unwrap();
+    let health = b.health().await.unwrap();
+    let w = b
+        .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    let run = described_run(&svc);
+    assert_ne!(
+        owner.zid().to_string(),
+        r.zid().to_string(),
+        "the owner's session is not the router"
+    );
     eventually("subscribed", || async {
         w.writer().matching().await.unwrap()
     })
     .await;
-    let t1 = w.put("v1").await.unwrap().time.expect("stamped");
-    let t2 = w.put("v2").await.unwrap().time.expect("stamped");
-    let now = answered(&c, None).await;
-    assert_eq!(now.len(), 1);
-    assert!(
-        matches!(&now[0], Current::Value { sample, .. } if &*sample.payload().to_bytes() == b"v2")
+
+    // 1. v1, v2, the GET after v2, then the delete.
+    let v1 = w.put("v1").await.unwrap();
+    let v2 = w.put("v2").await.unwrap();
+    let replies = raw_get(&consumer, ORIGIN).await;
+    assert_eq!(replies.len(), 1, "{through}: one reply");
+    assert_eq!(
+        &*replies[0].payload().to_bytes(),
+        &v2.seal(b"v2")[..],
+        "{through}: 2. the GET returns v2's bytes, its envelope included"
     );
-    assert_eq!(now[0].timestamp(), Some(t2), "v2 with v2's stamp");
-    let t3 = w.delete().await.unwrap().time.expect("stamped");
-    eventually("three mutations", || async {
-        got.lock().unwrap().len() == 3
+    assert_eq!(
+        replies[0].timestamp(),
+        None,
+        "{through}: 3. a reply carries no Zenoh timestamp"
+    );
+    let del = w.delete().await.unwrap();
+    // 2. The control: an unstamped put of a third client's.
+    third.put("control/x", "c").await.unwrap();
+    // 3. v3 and v4 back to back.
+    let v3 = w.put("v3").await.unwrap();
+    let v4 = w.put("v4").await.unwrap();
+    // 4. `status` twice, then its GET.
+    let mark = status.lock().unwrap().len();
+    health.set_status(Level::Ok, "one").await.unwrap();
+    health.set_status(Level::Ok, "two").await.unwrap();
+
+    eventually("every mutation arrives", || async {
+        plans.lock().unwrap().len() >= 5
+            && status.lock().unwrap().len() >= mark + 2
+            && !control.lock().unwrap().is_empty()
     })
     .await;
-    {
-        let got = got.lock().unwrap();
-        let stamps: Vec<_> = got
-            .iter()
-            .map(|s| *s.timestamp().expect("stamped"))
-            .collect();
-        assert_eq!(stamps, [t1, t2, t3]);
-        assert!(stamps.windows(2).all(|p| p[0] < p[1]));
-        let zid = owner.zid().to_string();
-        assert_ne!(zid, r1.zid().to_string(), "the owner is not R1");
-        assert!(
-            stamps.iter().all(|t| t.get_id().to_string() == zid),
-            "the owner's zid, not a router's"
-        );
-        assert_eq!(got[2].kind(), zenoh::sample::SampleKind::Delete);
+    let got = plans.lock().unwrap().clone();
+    assert_eq!(got.len(), 5, "{through}: {got:?}");
+
+    // 1. Each put an envelope of the descriptor's run, the delete's
+    //    attachment one too, each seq above the one before.
+    let mut stamps = Vec::new();
+    for (s, value) in got.iter().zip(["v1", "v2", "", "v3", "v4"]) {
+        let stamp = if value.is_empty() {
+            delete_stamp(s)
+        } else {
+            let (stamp, record) = sealed(s);
+            assert_eq!(record, value.as_bytes(), "{through}: the record");
+            stamp
+        };
+        assert_eq!(stamp.run.hex(), run, "{through}: the descriptor's run");
+        stamps.push(stamp);
+    }
+    assert_eq!(
+        stamps,
+        [v1.stamp, v2.stamp, del.stamp, v3.stamp, v4.stamp],
+        "{through}: the stamps the owner minted"
+    );
+    assert!(
+        stamps.windows(2).all(|p| p[0].seq < p[1].seq),
+        "{through}: each seq above the one before"
+    );
+    for v in [v1, v2, del, v3, v4] {
+        assert_eq!(v.time, None, "the owner sets no Zenoh timestamp here");
     }
 
-    // 2. The control: a third client puts without a timestamp; R1 stamps it.
-    let third = client(&ep).await;
-    let control = consumer
-        .declare_subscriber("control/s1")
-        .with(flume::unbounded::<Sample>())
-        .await
-        .unwrap();
-    let deadline = tokio::time::Instant::now() + common::SETTLE;
-    let sample = loop {
-        third.put("control/s1", "x").await.unwrap();
-        if let Ok(Ok(s)) =
-            tokio::time::timeout(Duration::from_millis(100), control.recv_async()).await
-        {
-            break s;
+    // 3. No per-put HLC through R1; R2's zid on each put through R2.
+    for s in &got {
+        let ts = s.timestamp().map(|t| t.get_id().to_string());
+        if stamping && s.kind() == SampleKind::Put {
+            assert_eq!(ts, Some(r.zid().to_string()), "{through}: the router's zid");
+        } else {
+            assert_eq!(ts, None, "{through}: no Zenoh timestamp on {:?}", s.kind());
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "never: the control's put"
-        );
-    };
-    let stamp = sample.timestamp().expect("R1 stamps an unstamped put");
-    assert_eq!(stamp.get_id().to_string(), r1.zid().to_string());
-    assert_ne!(stamp.get_id().to_string(), third.zid().to_string());
-
-    // 3. v3 and v4 back to back. Whether they fell within one clock
-    //    reading cannot be seen from here (F-73); the order can.
-    let t3 = w.put("v3").await.unwrap().time.expect("stamped");
-    let t4 = w.put("v4").await.unwrap().time.expect("stamped");
-    assert!(
-        t4.get_time().as_u64() > t3.get_time().as_u64(),
-        "at least one tick (one NTP64 unit) apart"
+    }
+    let c = control.lock().unwrap()[0].clone();
+    assert_eq!(
+        c.timestamp().map(|t| t.get_id().to_string()),
+        stamping.then(|| r.zid().to_string()),
+        "{through}: the control's put"
     );
-    assert_eq!(t4.get_id(), t3.get_id());
+
+    // 4. v4's seq is v3's plus 1.
+    assert_eq!(v4.stamp.seq.get(), v3.stamp.seq.get() + 1);
+
+    // 5. `status` carries the owner's own Zenoh timestamp, increasing.
+    let puts: Vec<Sample> = status.lock().unwrap()[mark..].to_vec();
+    let times: Vec<_> = puts
+        .iter()
+        .map(|s| *s.timestamp().expect("a table resource's stamp"))
+        .collect();
+    assert!(
+        times
+            .iter()
+            .all(|t| t.get_id().to_string() == owner.zid().to_string()),
+        "{through}: the owner's zid"
+    );
+    assert!(times[1] > times[0], "{through}: the second above the first");
+    for s in &puts {
+        assert_eq!(sealed(s).0.run.hex(), run, "{through}: status's run");
+    }
+    let reply = raw_get(&consumer, "zk2/ground/fleet-mgr/health.v1/state/status").await;
+    assert_eq!(
+        reply[0].timestamp().map(|t| t.get_id().to_string()),
+        Some(owner.zid().to_string()),
+        "{through}: the reply carries the mutation's stamp (S2)"
+    );
+    drop(w);
+    svc.close().await.unwrap();
 }
 
-/// §2: within the window, a deleted key answers `reply_del` with the
-/// deletion's stamp, alone and inside the collection.
+/// §2: within the window, a deleted key answers `reply_del` whose
+/// attachment is the delete's envelope, alone and inside the collection;
+/// the live key answers the bytes the owner put.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s2_deletes_inside_the_window_and_the_collection() {
+async fn s2_a_reply_del_carries_the_delete_envelope() {
     let (_r1, ep) = router(None).await;
     let (_mgr, w) = fleet_mgr(&client(&ep).await, None, &["a", "b"]).await;
+    let tool = client(&ep).await;
     let (_ex, c) = executor(&client(&ep).await, false).await;
-    w["a"].put("pa").await.unwrap();
+    let a = w["a"].put("pa").await.unwrap();
     w["b"].put("pb").await.unwrap();
-    let del = w["b"].delete().await.unwrap().time.expect("stamped");
-    let b = answered(&c, Some(&vehicle("b"))).await;
-    assert!(
-        matches!(&b[..], [Current::Deleted { timestamp: Some(t), .. }] if *t == del),
-        "{b:?}"
-    );
-    let all = answered(&c, None).await;
-    let by_key: BTreeMap<&str, &Current> = all.iter().map(|c| (c.key(), c)).collect();
+    let del = w["b"].delete().await.unwrap();
+    const A: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/a";
+    const B: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/b";
+
+    let b = raw_get(&tool, B).await;
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert_eq!(delete_stamp(&b[0]), del.stamp, "the delete's envelope");
+    assert_eq!(b[0].timestamp(), None);
+    let all = raw_get(&tool, "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*").await;
+    let by_key: BTreeMap<&str, &Sample> = all.iter().map(|s| (s.key_expr().as_str(), s)).collect();
     assert_eq!(by_key.len(), 2);
-    assert!(matches!(
-        by_key["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/a"],
-        Current::Value { .. }
-    ));
-    assert!(matches!(
-        by_key["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/b"],
-        Current::Deleted { .. }
-    ));
+    assert_eq!(&*by_key[A].payload().to_bytes(), &a.seal(b"pa")[..]);
+    assert_eq!(delete_stamp(by_key[B]), del.stamp);
+
+    // The consumer reads the same: the deletion with its in-band stamp.
+    let got = answer(&c, None).await;
+    assert_eq!(got.inband.get(B), Some(&del.stamp));
+    assert_eq!(got.inband.get(A), Some(&a.stamp));
+    assert!(
+        got.current
+            .iter()
+            .any(|c| c.key() == B && matches!(c, Current::Deleted { .. }))
+    );
 }
 
 /// §3 (step 2): the consumer's GET (`All` + `Latest`, set explicitly by
-/// `Consumer::get`) is answered by the owner alone. Step 1, the storage
-/// finding read from the routers' admin space, is a tool's (`zenctl
-/// doctor`, #612).
+/// `Consumer::get`) is answered by the owner alone, under its in-band
+/// stamp. Step 1, the storage finding read from the routers' admin space,
+/// is a tool's (`zenctl doctor`, #612).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s3_the_owner_is_authoritative() {
     let (_r1, ep) = router(None).await;
     let owner = client(&ep).await;
-    let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
+    let (mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
     let (_ex, c) = executor(&client(&ep).await, true).await;
-    let t = w["vehicle-01"]
-        .put("mine")
-        .await
-        .unwrap()
-        .time
-        .expect("stamped");
-    let now = answered(&c, None).await;
-    assert_eq!(now.len(), 1, "one answer: the owner's");
-    assert_eq!(now[0].timestamp(), Some(t));
-    assert_eq!(t.get_id().to_string(), owner.zid().to_string());
+    let t = w["vehicle-01"].put("mine").await.unwrap();
+    let now = answer(&c, None).await;
+    assert_eq!(now.current.len(), 1, "one answer: the owner's");
+    assert_eq!(now.inband.get(ORIGIN), Some(&t.stamp));
+    assert_eq!(t.stamp.run.hex(), described_run(&mgr));
 }
 
 /// Two sites: the ground (R1) with the owner, the vehicle (R2) with its
@@ -395,8 +579,9 @@ async fn wait_owner_seen(s: &zenoh::Session, present: bool) {
     .await;
 }
 
-/// §4: with the link cut, the owner is silent; the archive gives v3 with
-/// its stamp and type identity, as last-known.
+/// §4: with the link cut, the owner is silent; the archive gives v3's
+/// bytes as the owner put them, its envelope included, with its type
+/// identity, as last-known.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s4_last_known_from_an_archive() {
     let x = sites().await;
@@ -410,12 +595,13 @@ async fn s4_last_known_from_an_archive() {
     })
     .await;
     // v3, once, and the archive holding exactly it before the cut.
-    let t3 = w["vehicle-01"].put("v3").await.unwrap().time;
+    let t3 = w["vehicle-01"].put("v3").await.unwrap();
+    let archived = archive::archive_key(&common::addr("vehicle-01/archive"), ORIGIN);
     eventually("the archive recorded v3", || async {
-        archive::last_known(&x.vehicle, &common::addr("vehicle-01/archive"), ORIGIN, T)
+        raw_get(&x.vehicle, &archived)
             .await
-            .unwrap()
-            .is_some_and(|l| l.timestamp == t3)
+            .first()
+            .is_some_and(|s| *s.payload().to_bytes() == t3.seal(b"v3")[..])
     })
     .await;
     x.link.cut();
@@ -424,12 +610,21 @@ async fn s4_last_known_from_an_archive() {
         c.get("state/plans/{vehicle}", None, T).await.unwrap(),
         StateGet::Silent
     ));
+    // The archive's reply: v3's bytes verbatim, envelope included (§4.4).
+    let raw = raw_get(&x.vehicle, &archived).await;
+    assert_eq!(raw.len(), 1);
+    assert_eq!(sealed(&raw[0]), (t3.stamp, b"v3".to_vec()));
     let lk = archive::last_known(&x.vehicle, &common::addr("vehicle-01/archive"), ORIGIN, T)
         .await
         .unwrap()
         .expect("the archive answers");
-    assert_eq!(lk.value.as_deref(), Some(&b"v3"[..]));
-    assert_eq!(lk.timestamp, t3);
+    assert_eq!(lk.value.as_deref(), Some(&b"v3"[..]), "its record");
+    assert_eq!(lk.inband, Some(t3.stamp), "the owner's in-band stamp");
+    assert_ne!(
+        lk.timestamp.map(|t| t.get_id().to_string()),
+        Some(x.ground.zid().to_string()),
+        "plain state carries no Zenoh timestamp of its owner's (a router's at most)"
+    );
     assert_eq!(lk.identity["iface"], "mission_plan.v1");
     assert_eq!(
         lk.identity["contract"],
@@ -451,7 +646,6 @@ async fn s4_last_known_from_an_archive() {
     assert_eq!(all.len(), 1, "{all:?}");
     assert_eq!(all[0].origin, ORIGIN);
     assert_eq!(all[0].value.as_deref(), Some(&b"v3"[..]));
-    assert_eq!(all[0].timestamp, t3);
 }
 
 /// §5: alignment after reconnect drops a key only on a `reply_del`, keeps
@@ -602,303 +796,358 @@ async fn s6_a_window_shorter_than_the_outage() {
 }
 
 /// A session with a pinned zid, as an owner that must catch up uses.
-async fn pinned(ep: &str, id: &str) -> zenoh::Session {
-    let mut c = zenoh::Config::default();
-    c.insert_json5("mode", "\"client\"").unwrap();
-    c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
-        .unwrap();
-    c.insert_json5("scouting/multicast/enabled", "false")
-        .unwrap();
-    c.insert_json5("id", &format!("\"{id}\"")).unwrap();
-    zenoh::open(c).await.unwrap()
+/// One put's arrival at a raw subscriber on `ORIGIN`, the first sample
+/// after `from`: its stamp and its first byte, CH.
+async fn heard(raw: &Raw, from: usize, what: &str) -> (InBand, u8) {
+    eventually(what, || async { raw.lock().unwrap().len() > from }).await;
+    let s = raw.lock().unwrap()[from].clone();
+    let ch = s.payload().to_bytes()[0];
+    (sealed(&s).0, ch)
 }
 
-/// §7: catch-up keeps one id's stamps increasing across a restart with the
-/// clock behind; a new epoch is accepted under its new id; an owner ahead of
-/// its router stops writing state.
+/// §7 step 1, a record: rev 10 under run n; the owner restarts with its
+/// clock 5 s behind and reads its record; rev 11 comes under run n + 1,
+/// which the record holds before rev 11 is put and the new descriptor
+/// states; the consumer accepts it as another run's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s7_clocks() {
+async fn s7_a_run_record_persists_across_a_restart() {
     let (_r1, ep) = router(None).await;
-    let key = ORIGIN;
-    // 1. Catch-up: rev 10, a restart 5 s behind, the record read, rev 11.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet-mgr.run");
+    let store = || -> Arc<dyn RunStore> { Arc::new(FileRunStore::new(&path)) };
     let mut order = ValueOrder::new();
-    let (t10, record) = {
-        let s = pinned(&ep, "a1b2c3d4e5f60718").await;
-        let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-        let t = w["vehicle-01"]
-            .put("rev10")
-            .await
-            .unwrap()
-            .time
-            .expect("stamped");
-        let rec = mgr.minter().last().unwrap();
-        drop(w);
-        mgr.close().await.unwrap();
-        s.close().await.unwrap();
-        (t, rec)
-    };
-    assert!(order.accept(key, &t10));
-    let t11 = {
-        let s = pinned(&ep, "a1b2c3d4e5f60718").await;
-        let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-        mgr.minter().simulate_offset(-5000);
-        mgr.minter().catch_up(record);
-        let t = w["vehicle-01"]
-            .put("rev11")
-            .await
-            .unwrap()
-            .time
-            .expect("stamped");
-        drop(w);
-        mgr.close().await.unwrap();
-        t
-    };
-    assert_eq!(t11.get_id(), t10.get_id());
-    assert!(t11 > t10, "above rev 10's stamp");
-    // The clock reads behind the record, so the mint is the record plus
-    // one tick exactly (§4.3): the step state.md §1 cannot show (F-73).
-    assert_eq!(
-        t11.get_time().as_u64(),
-        record.get_time().as_u64() + 1,
-        "one NTP64 unit above the record"
-    );
-    assert!(order.accept(key, &t11), "the consumer applies it");
 
-    // 2. New epoch: no record, a fresh zid, 5 s behind.
     let s = client(&ep).await;
-    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-    mgr.minter().simulate_offset(-5000);
-    let t11b = w["vehicle-01"]
-        .put("rev11")
-        .await
-        .unwrap()
-        .time
-        .expect("stamped");
-    assert_ne!(t11b.get_id(), t10.get_id(), "a new timestamp id");
-    assert!(t11b.get_time() < t11.get_time(), "older by the clock");
-    assert!(
-        order.accept(key, &t11b),
-        "the first value under a new id is accepted"
-    );
-    drop(w);
-    mgr.close().await.unwrap();
-
-    // 3. Ahead: 2 s ahead of the router, which stamps a heartbeat.
-    let hb = client(&ep).await;
-    let s = client(&ep).await;
-    let mut cfg = config("ground/fleet-mgr");
-    cfg.clock_reference = Some("clock/heartbeat".to_owned());
-    let mut b = ServiceBuilder::new(&s, cfg);
-    b.implement(imp("mission_plan.v1")).unwrap();
-    b.minter().simulate_offset(2000);
-    let w = b
-        .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
-        .await
-        .unwrap();
-    let mgr = b.start().await.unwrap();
-    eventually("the drift is detected", || async {
-        hb.put("clock/heartbeat", "tick").await.unwrap();
-        mgr.minter().is_ahead()
-    })
+    let (mgr, w) = fleet_mgr_up(
+        &s,
+        Up {
+            store: Some(store()),
+            ..Up::default()
+        },
+        &["vehicle-01"],
+    )
     .await;
-    assert!(
-        matches!(w.put("late").await, Err(zenkey::Error::ClockAhead)),
-        "state writes stop"
-    );
-}
-
-/// What a late joiner received of one key, in arrival order: each value
-/// and its stamp, whichever path brought it.
-type Arrivals = Arc<Mutex<Vec<(String, zenoh::time::Timestamp)>>>;
-
-fn arrived(into: &Arrivals, sample: &Sample) {
-    into.lock().unwrap().push((
-        String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned(),
-        *sample
-            .timestamp()
-            .expect("an owner stamps every mutation (S1)"),
-    ));
-}
-
-/// §7 step 2's late joiners (core §4.2, §4.3). A consumer subscribes, then
-/// seeds rev 10 by S4's GET. The owner restarts with no record, a fresh zid
-/// and its clock 5 s behind, and writes rev 11, then rev 12. The consumer
-/// orders every value by §4.3's consumer rule from its first value on, its
-/// seed's reply included ([`ValueOrder`]): it accepts rev 11, under an id
-/// other than its held value's though its time is lower, then rev 12. A
-/// tool's late joiner, the control, judges the same arrivals by §4.2's
-/// merge for as long as it follows (observer §4.1), and keeps rev 10: the
-/// fleet's seeded subscriptions do so on the bus
-/// (`zenkey-fleet/tests/seeding.rs`, `s7_a_tools_late_joiner_…`).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s7_a_late_joiner_across_a_new_epoch() {
-    use zenkey::model::seed::{Held, Stamp, admits};
-    let (_r1, ep) = router(None).await;
-    let (_ex, c) = executor(&client(&ep).await, true).await;
-    let s = client(&ep).await;
-    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-    let t10 = w["vehicle-01"]
-        .put("rev10")
-        .await
-        .unwrap()
-        .time
-        .expect("stamped");
-
-    // The late joiner: the subscription first, then S4's GET (core §4.2).
-    let got: Arrivals = Arc::default();
-    let live = Arc::clone(&got);
-    let _sub = c
-        .subscribe("state/plans/{vehicle}", move |d| arrived(&live, &d.sample))
-        .await
-        .unwrap();
-    for cur in answered(&c, None).await {
-        if let Current::Value { sample, .. } = cur {
-            arrived(&got, &sample);
-        }
-    }
-    // The seed's reply, and the subscription's copy of rev 10 when its put
-    // reached the router after the subscription did: one mutation, one
-    // stamp, whichever path brought it.
-    let seeded = got.lock().unwrap().len();
-    assert!(seeded >= 1, "the seed's reply");
-    assert!(
-        got.lock()
-            .unwrap()
-            .iter()
-            .all(|(v, ts)| v == "rev10" && *ts == t10),
-        "rev 10 alone, with its stamp"
-    );
-
-    // The new epoch: no record, a fresh zid, 5 s behind.
+    let rev10 = w["vehicle-01"].put("rev10").await.unwrap();
+    let n = match rev10.stamp.run {
+        Run::U16(n) => n,
+        other => panic!("a counter's run, not {other:?}"),
+    };
+    assert_eq!(described_run(&mgr), rev10.stamp.run.hex());
+    assert_eq!(std::fs::read(&path).unwrap(), n.to_be_bytes());
+    assert!(order.accept_mark(ORIGIN, Mark::InBand(rev10.stamp)));
     drop(w);
     mgr.close().await.unwrap();
     s.close().await.unwrap();
+
+    // The restart: 5 s behind, its record read.
     let s = client(&ep).await;
-    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-    mgr.minter().simulate_offset(-5000);
-    let t11 = w["vehicle-01"]
-        .put("rev11")
-        .await
-        .unwrap()
-        .time
-        .expect("stamped");
-    let t12 = w["vehicle-01"]
-        .put("rev12")
-        .await
-        .unwrap()
-        .time
-        .expect("stamped");
-    assert_ne!(t11.get_id(), t10.get_id(), "a new timestamp id");
-    assert!(t12.get_time() < t10.get_time(), "both behind rev 10's time");
-    eventually("rev 11 and rev 12 arrive", || async {
-        got.lock().unwrap().len() == seeded + 2
-    })
+    let (mgr, w) = fleet_mgr_up(
+        &s,
+        Up {
+            store: Some(store()),
+            offset_ms: -5000,
+            ..Up::default()
+        },
+        &["vehicle-01"],
+    )
     .await;
-    let arrivals = got.lock().unwrap().clone();
-
-    // The consumer: §4.3's consumer rule over every arrival, the seed's first.
-    let mut order = ValueOrder::new();
-    let consumer: Vec<&str> = arrivals
-        .iter()
-        .filter(|(_, ts)| order.accept(ORIGIN, ts))
-        .map(|(v, _)| v.as_str())
-        .collect();
-    assert_eq!(
-        consumer,
-        ["rev10", "rev11", "rev12"],
-        "a value under another id is accepted, and ordered by time within it"
+    // Durable before anything is written under it, and stated.
+    assert_eq!(std::fs::read(&path).unwrap(), (n + 1).to_be_bytes());
+    assert_eq!(described_run(&mgr), Run::U16(n + 1).hex());
+    let rev11 = w["vehicle-01"].put("rev11").await.unwrap();
+    assert_eq!(rev11.stamp.run, Run::U16(n + 1), "run n + 1");
+    assert!(
+        order.accept_mark(ORIGIN, Mark::InBand(rev11.stamp)),
+        "the consumer accepts rev 11, another run's, whatever the clock"
     );
-
-    // The control: a tool's late joiner, by §4.2's merge throughout.
-    let mut held = Held::Nothing;
-    let tool: Vec<&str> = arrivals
-        .iter()
-        .filter(|(_, ts)| {
-            let incoming = Some(Stamp {
-                time: ts.get_time().as_u64(),
-                id: u128::from_le_bytes(ts.get_id().to_le_bytes()),
-            });
-            let kept = admits(held, incoming);
-            if kept {
-                held = held.after(incoming);
-            }
-            kept
-        })
-        .map(|(v, _)| v.as_str())
-        .collect();
-    assert_eq!(tool, ["rev10"], "the merge keeps the later time across ids");
+    let rev12 = w["vehicle-01"].put("rev12").await.unwrap();
+    assert!(order.accept_mark(ORIGIN, Mark::InBand(rev12.stamp)));
+    assert!(
+        !order.accept_mark(ORIGIN, Mark::InBand(rev11.stamp)),
+        "by seq within run n + 1 from then on"
+    );
     drop(w);
     mgr.close().await.unwrap();
+}
+
+/// §7 step 2, no record: each start draws a 32-bit run, its envelopes'
+/// CH `0x10` and the descriptor's `run` 8 hex digits, the two starts' runs
+/// apart, and the consumer accepts rev 11 whatever the clock. Likewise a
+/// record at 0xFFFF, spent, left as it is, and one that cannot be read,
+/// never reset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_no_record_takes_a_random_32_bit_run() {
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let (_sub, raw) = capture(&tool, ORIGIN).await;
+    let dir = tempfile::tempdir().unwrap();
+    let spent = dir.path().join("spent.run");
+    std::fs::write(&spent, [0xff, 0xff]).unwrap();
+    let unreadable = dir.path().join("unreadable.run");
+    std::fs::write(&unreadable, b"abc").unwrap();
+
+    let mut order = ValueOrder::new();
+    let mut runs = Vec::new();
+    for (i, (record, offset_ms)) in [
+        (None, 0),
+        (None, -5000),
+        (Some(&spent), 0),
+        (Some(&unreadable), 0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let s = client(&ep).await;
+        let (mgr, w) = fleet_mgr_up(
+            &s,
+            Up {
+                store: record.map(|p| Arc::new(FileRunStore::new(p)) as Arc<dyn RunStore>),
+                offset_ms,
+                ..Up::default()
+            },
+            &["vehicle-01"],
+        )
+        .await;
+        eventually("subscribed", || async {
+            w["vehicle-01"].writer().matching().await.unwrap()
+        })
+        .await;
+        let from = raw.lock().unwrap().len();
+        let rev = w["vehicle-01"].put(format!("rev{}", 10 + i)).await.unwrap();
+        let (stamp, ch) = heard(&raw, from, "the put arrives").await;
+        assert_eq!(stamp, rev.stamp);
+        assert!(matches!(stamp.run, Run::U32(_)), "a 32-bit run: {stamp:?}");
+        assert_eq!(ch, 0x10, "CH: a mutation, a 32-bit run, tag 0");
+        let described = described_run(&mgr);
+        assert_eq!(described.len(), 8, "8 hex digits: {described}");
+        assert_eq!(described, stamp.run.hex());
+        assert!(
+            order.accept_mark(ORIGIN, Mark::InBand(stamp)),
+            "start {i}: the consumer accepts it, whatever the clock"
+        );
+        runs.push(stamp.run);
+        drop(w);
+        mgr.close().await.unwrap();
+        s.close().await.unwrap();
+    }
+    assert_ne!(runs[0], runs[1], "two starts, two runs");
+    assert_eq!(
+        std::fs::read(&spent).unwrap(),
+        [0xff, 0xff],
+        "left as it is"
+    );
+    assert_eq!(std::fs::read(&unreadable).unwrap(), b"abc", "never reset");
+}
+
+/// §7 step 3, before the wrap: the next seq set to 2^24 − 2, three writes,
+/// the third under a new run at seq 0, the descriptor stating it put
+/// before it; the consumer accepts the third as another run's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_the_run_changes_before_the_seq_wraps() {
+    let (_r1, ep) = router(None).await;
+    let s = client(&ep).await;
+    let tool = client(&ep).await;
+    let (_desc, descriptors) = capture(&tool, "zk2/ground/fleet-mgr/@zk/instance/*").await;
+    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+    let w = &w["vehicle-01"];
+    let n = mgr.minter().run();
+    mgr.minter().simulate_seq(16_777_214);
+    let mut order = ValueOrder::new();
+    let first = w.put("a").await.unwrap();
+    let second = w.put("b").await.unwrap();
+    assert_eq!(
+        (first.stamp.run, first.stamp.seq.get()),
+        (n, 16_777_214),
+        "the first at 2^24 − 2 of run n"
+    );
+    assert_eq!(
+        (second.stamp.run, second.stamp.seq.get()),
+        (n, 16_777_215),
+        "the second at 2^24 − 1"
+    );
+    let third = w.put("c").await.unwrap();
+    assert_ne!(third.stamp.run, n, "a new run");
+    assert_eq!(third.stamp.seq.get(), 0, "from seq 0");
+    // The owner's order: its descriptor states the new run once the third
+    // is put, since the run changes, and the descriptor is put, before the
+    // third's stamp is handed out.
+    assert_eq!(described_run(&mgr), third.stamp.run.hex());
+    eventually("the descriptor stating the new run arrives", || async {
+        descriptors.lock().unwrap().iter().any(|d| {
+            serde_json::from_slice::<serde_json::Value>(&d.payload().to_bytes())
+                .is_ok_and(|v| v["run"] == third.stamp.run.hex())
+        })
+    })
+    .await;
+    for (v, accepted) in [(first, true), (second, true), (third, true)] {
+        assert_eq!(
+            order.accept_mark(ORIGIN, Mark::InBand(v.stamp)),
+            accepted,
+            "{v:?}"
+        );
+    }
+    assert_eq!(mgr.minter().run(), third.stamp.run);
+}
+
+/// What a late joiner received of one key, in arrival order: each value
+/// and its mark, whichever path brought it.
+type Arrivals = Arc<Mutex<Vec<(String, Mark)>>>;
+
+fn arrived(into: &Arrivals, sample: &Sample, mark: Option<Mark>) {
+    into.lock().unwrap().push((
+        String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned(),
+        mark.expect("an owner stamps every mutation in band (S1)"),
+    ));
+}
+
+/// The late joiner's seed: S4's GET, each value with its in-band mark.
+fn seeded(into: &Arrivals, got: &StateAnswer) {
+    for cur in &got.current {
+        if let Current::Value { sample, .. } = cur {
+            arrived(into, sample, got.mark(cur));
+        }
+    }
 }
 
 /// What a consumer holds of [`ORIGIN`] after `arrivals`: §4.3's consumer
 /// rule over each in order, from the first ([`ValueOrder`]).
-fn consumer_holds(arrivals: &[(String, zenoh::time::Timestamp)]) -> &str {
+fn consumer_holds(arrivals: &[(String, Mark)]) -> &str {
     let mut order = ValueOrder::new();
     let mut held = "";
-    for (v, ts) in arrivals {
-        if order.accept(ORIGIN, ts) {
+    for (v, m) in arrivals {
+        if order.accept_mark(ORIGIN, *m) {
             held = v.as_str();
         }
     }
     held
 }
 
-/// What a tool holds of [`ORIGIN`] after `arrivals`: §4.2's merge by the
-/// owner's stamp over each in order (observer §4.1).
-fn tool_holds(arrivals: &[(String, zenoh::time::Timestamp)]) -> &str {
-    use zenkey::model::seed::{Held, Stamp, admits};
+/// What a tool holds of [`ORIGIN`] after `arrivals`: §4.2's merge by each
+/// value's in-band stamp, over each in order (observer §4.1): by seq within
+/// one run, the later arrival across two.
+fn tool_holds(arrivals: &[(String, Mark)]) -> Vec<&str> {
     let mut held = Held::Nothing;
-    let mut value = "";
-    for (v, ts) in arrivals {
-        let incoming = Some(Stamp {
-            time: ts.get_time().as_u64(),
-            id: u128::from_le_bytes(ts.get_id().to_le_bytes()),
-        });
-        if admits(held, incoming) {
-            held = held.after(incoming);
-            value = v.as_str();
+    let mut kept = Vec::new();
+    for (v, m) in arrivals {
+        if admits_mark(held, Some(*m)) {
+            held = held.after_mark(Some(*m));
+            kept.push(v.as_str());
         }
     }
-    value
+    kept
 }
 
-/// §7 step 2's new epoch inside a late joiner's seed (core §4.2, §4.3).
-/// The owner writes rev 10. A second session holds a queryable on the
-/// plans that is not `complete`, and keeps each query it takes, so the
-/// consumer's S4 GET stays open after the owner answered it. While it is
-/// open, the owner restarts with no record and a fresh zid, and writes rev
-/// 11, which the subscription hears. Then the holder lets the query go,
-/// and the GET ends. Its reply of rev 10 comes after rev 11's live sample:
-/// `Latest` delivers at the GET's end (core §4.1), and the runtime's GET
-/// returns there. The consumer orders by §4.3's rule from its first value
-/// on, so it holds rev 10, the old epoch's, whatever the two clocks, until
-/// rev 12. A tool's merge, the control, keeps the later time: rev 10 with
-/// the new clock 5 s behind, rev 11 on the host's clock. Run both ways.
+/// §7 step 4's late joiners across a restart (core §4.2, §4.3). A consumer
+/// and a tool each seeded rev 10, in §10's order. The owner restarts, a
+/// new instance with no record, and writes rev 11, then rev 12, under its
+/// new run. The consumer orders by S7 from its first value on, its seed's
+/// reply included: it accepts rev 11, another run's, then rev 12. The tool
+/// keeps the later arrival across two runs: rev 11, then rev 12 (the
+/// fleet's seeded subscriptions do so on the bus,
+/// `zenkey-fleet/tests/seeding.rs`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s7_a_new_epoch_inside_a_late_joiners_seed() {
-    new_epoch_inside_the_seed(true).await;
-    new_epoch_inside_the_seed(false).await;
-}
-
-async fn new_epoch_inside_the_seed(behind: bool) {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use zenoh::query::{ConsolidationMode, Query, QueryTarget};
-    let clock = if behind {
-        "5 s behind"
-    } else {
-        "on the host's clock"
-    };
+async fn s7_late_joiners_across_runs() {
     let (_r1, ep) = router(None).await;
     let (_ex, c) = executor(&client(&ep).await, true).await;
     let s = client(&ep).await;
     let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-    let t10 = w["vehicle-01"]
-        .put("rev10")
+    let rev10 = w["vehicle-01"].put("rev10").await.unwrap();
+
+    // The late joiner: the subscription first, then S4's GET (core §4.2).
+    let got: Arrivals = Arc::default();
+    let live = Arc::clone(&got);
+    let _sub = c
+        .subscribe("state/plans/{vehicle}", move |d| {
+            arrived(&live, &d.sample, d.mark());
+        })
         .await
-        .unwrap()
-        .time
-        .expect("stamped");
+        .unwrap();
+    seeded(&got, &answer(&c, None).await);
+    // The seed's reply, and the subscription's copy of rev 10 when its put
+    // reached the router after the subscription did: one mutation, one
+    // stamp, whichever path brought it.
+    let seeds = got.lock().unwrap().len();
+    assert!(seeds >= 1, "the seed's reply");
+    assert!(
+        got.lock()
+            .unwrap()
+            .iter()
+            .all(|(v, m)| v == "rev10" && *m == Mark::InBand(rev10.stamp)),
+        "rev 10 alone, with its stamp"
+    );
+
+    // The restart: a new instance, no record, its clock 5 s behind.
+    drop(w);
+    mgr.close().await.unwrap();
+    s.close().await.unwrap();
+    let s = client(&ep).await;
+    let (mgr, w) = fleet_mgr_up(
+        &s,
+        Up {
+            offset_ms: -5000,
+            ..Up::default()
+        },
+        &["vehicle-01"],
+    )
+    .await;
+    let rev11 = w["vehicle-01"].put("rev11").await.unwrap();
+    let rev12 = w["vehicle-01"].put("rev12").await.unwrap();
+    assert_ne!(rev11.stamp.run, rev10.stamp.run, "a new run");
+    assert_eq!(rev12.stamp.run, rev11.stamp.run, "one run");
+    eventually("rev 11 and rev 12 arrive", || async {
+        got.lock().unwrap().len() == seeds + 2
+    })
+    .await;
+    let arrivals = got.lock().unwrap().clone();
+    assert_eq!(
+        arrivals[seeds..]
+            .iter()
+            .map(|(v, _)| v.as_str())
+            .collect::<Vec<_>>(),
+        ["rev11", "rev12"]
+    );
+
+    // The consumer: §4.3's consumer rule over every arrival, the seed's first.
+    let mut order = ValueOrder::new();
+    let consumer: Vec<&str> = arrivals
+        .iter()
+        .filter(|(_, m)| order.accept_mark(ORIGIN, *m))
+        .map(|(v, _)| v.as_str())
+        .collect();
+    assert_eq!(
+        consumer,
+        ["rev10", "rev11", "rev12"],
+        "another run's value is accepted, and ordered by seq within it"
+    );
+    // The tool: §4.2's merge, the later arrival across two runs.
+    assert_eq!(
+        tool_holds(&arrivals),
+        ["rev10", "rev11", "rev12"],
+        "the merge keeps the later arrival across two runs"
+    );
+    drop(w);
+    mgr.close().await.unwrap();
+}
+
+/// §7 step 5, a restart inside a late joiner's seed (core §4.2, §4.3).
+/// The owner writes rev 10. A second session holds a queryable on the
+/// plans that is not `complete`, and keeps each query it takes, so the
+/// consumer's S4 GET stays open after the owner answered it. While it is
+/// open, the owner restarts under a new run and writes rev 11, which the
+/// subscription hears. Then the holder lets the query go, and the GET
+/// ends. Its reply of rev 10 comes after rev 11's live sample: `Latest`
+/// delivers at the GET's end (core §4.1). The consumer accepts it, another
+/// run's, and a tool keeps it, the later arrival: both hold rev 10 until
+/// rev 12.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_late_joiners_across_runs_inside_the_seed() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use zenoh::query::Query;
+    let (_r1, ep) = router(None).await;
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let s = client(&ep).await;
+    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+    let rev10 = w["vehicle-01"].put("rev10").await.unwrap();
 
     // The holder: a queryable on the plans that is not `complete`. It
     // answers no query it takes and keeps each one: dropping it is its
@@ -933,13 +1182,15 @@ async fn new_epoch_inside_the_seed(behind: bool) {
     let got: Arrivals = Arc::default();
     let live = Arc::clone(&got);
     let _sub = c
-        .subscribe("state/plans/{vehicle}", move |d| arrived(&live, &d.sample))
+        .subscribe("state/plans/{vehicle}", move |d| {
+            arrived(&live, &d.sample, d.mark());
+        })
         .await
         .unwrap();
     let open = AtomicBool::new(true);
     let seed = async {
         let answer = c
-            .get("state/plans/{vehicle}", None, common::SETTLE)
+            .get_answer("state/plans/{vehicle}", None, common::SETTLE)
             .await
             .unwrap();
         open.store(false, Ordering::SeqCst);
@@ -965,113 +1216,101 @@ async fn new_epoch_inside_the_seed(behind: bool) {
         assert!(first.result().is_ok(), "the owner answers the probe");
         drop(rx);
 
-        // The new epoch, inside the seed: no record, a fresh zid.
+        // The restart, inside the seed: a new instance, a new run.
         drop(w);
         mgr.close().await.unwrap();
         s.close().await.unwrap();
         let s = client(&ep).await;
         let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-        if behind {
-            mgr.minter().simulate_offset(-5000);
-        }
-        let t11 = w["vehicle-01"]
-            .put("rev11")
-            .await
-            .unwrap()
-            .time
-            .expect("stamped");
+        let rev11 = w["vehicle-01"].put("rev11").await.unwrap();
         eventually("rev 11 arrives live, inside the seed", || async {
             got.lock().unwrap().iter().any(|(v, _)| v == "rev11")
         })
         .await;
-        assert!(
-            open.load(Ordering::SeqCst),
-            "{clock}: the GET is still open"
-        );
+        assert!(open.load(Ordering::SeqCst), "the GET is still open");
         // The holder lets its queries go: the GET ends.
         held.lock().unwrap().clear();
-        (s, mgr, w, t11)
+        (s, mgr, w, rev11)
     };
-    let (answer, (_s, mgr, w, t11)) = tokio::join!(seed, restart);
-    assert_ne!(t11.get_id(), t10.get_id(), "{clock}: a new timestamp id");
-    if behind {
-        assert!(
-            t11.get_time() < t10.get_time(),
-            "{clock}: older by the clock"
-        );
-    } else {
-        assert!(
-            t11.get_time() > t10.get_time(),
-            "{clock}: later by the clock"
-        );
-    }
+    let (answer, (_s, mgr, w, rev11)) = tokio::join!(seed, restart);
+    assert_ne!(rev11.stamp.run, rev10.stamp.run, "a new run");
 
     // The consumer hands the seed's replies over at the GET's end, after
     // what the subscription heard during it.
-    let StateGet::Answered(answer) = answer else {
-        panic!("{clock}: the owner did not answer");
-    };
-    for cur in answer {
-        if let Current::Value { sample, .. } = cur {
-            arrived(&got, &sample);
-        }
-    }
-    let seeded = got.lock().unwrap().clone();
+    seeded(&got, &answer);
+    let arrivals = got.lock().unwrap().clone();
     assert_eq!(
-        seeded.last(),
-        Some(&("rev10".to_owned(), t10)),
-        "{clock}: the owner's reply of rev 10 arrives last"
+        arrivals.last(),
+        Some(&("rev10".to_owned(), Mark::InBand(rev10.stamp))),
+        "the owner's reply of rev 10 arrives last"
     );
     assert!(
-        seeded.iter().any(|(v, ts)| v == "rev11" && *ts == t11),
-        "{clock}: rev 11 arrived live before it"
+        arrivals
+            .iter()
+            .any(|(v, m)| v == "rev11" && *m == Mark::InBand(rev11.stamp)),
+        "rev 11 arrived live before it"
     );
     assert_eq!(
-        consumer_holds(&seeded),
+        consumer_holds(&arrivals),
         "rev10",
-        "{clock}: the consumer accepts the reply under the old id, which arrived last"
+        "the consumer accepts the reply of the old run, which arrived last"
     );
     assert_eq!(
-        tool_holds(&seeded),
-        if behind { "rev10" } else { "rev11" },
-        "{clock}: the tool keeps the later time"
+        tool_holds(&arrivals).last(),
+        Some(&"rev10"),
+        "the tool keeps the later arrival too"
     );
 
-    // Until the key's next value: rev 12, under the new id.
-    let t12 = w["vehicle-01"]
-        .put("rev12")
-        .await
-        .unwrap()
-        .time
-        .expect("stamped");
-    if behind {
-        // The step's premise: rev 12 comes within 5 s of rev 10, so the
-        // clock behind stamps it below rev 10's time.
-        assert!(
-            t12.get_time() < t10.get_time(),
-            "{clock}: rev 12 comes within 5 s of rev 10, older by the clock"
-        );
-    }
+    // Until the key's next value: rev 12, under the new run.
+    let rev12 = w["vehicle-01"].put("rev12").await.unwrap();
     eventually("rev 12 arrives", || async {
-        got.lock().unwrap().iter().any(|(_, ts)| *ts == t12)
+        got.lock()
+            .unwrap()
+            .iter()
+            .any(|(_, m)| *m == Mark::InBand(rev12.stamp))
     })
     .await;
     let arrivals = got.lock().unwrap().clone();
-    assert_eq!(
-        consumer_holds(&arrivals),
-        "rev12",
-        "{clock}: the consumer accepts the new epoch's next value"
-    );
-    assert_eq!(
-        tool_holds(&arrivals),
-        if behind { "rev10" } else { "rev12" },
-        "{clock}: the tool keeps the later time"
-    );
+    assert_eq!(consumer_holds(&arrivals), "rev12", "the consumer");
+    assert_eq!(tool_holds(&arrivals).last(), Some(&"rev12"), "the tool");
     drop(w);
     mgr.close().await.unwrap();
 }
 
-/// §9: an archive that holds a delete refuses an older put arriving late.
+/// §7 step 6, ahead: an owner 2 s ahead of its router, which stamps a
+/// heartbeat, detects the drift and stops writing state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_an_owner_ahead_stops_writing_state() {
+    let (_r1, ep) = router(None).await;
+    let hb = client(&ep).await;
+    let s = client(&ep).await;
+    let mut cfg = config("ground/fleet-mgr");
+    cfg.clock_reference = Some("clock/heartbeat".to_owned());
+    let mut b = ServiceBuilder::new(&s, cfg);
+    b.implement(imp("mission_plan.v1")).unwrap();
+    b.minter().simulate_offset(2000);
+    let w = b
+        .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
+        .await
+        .unwrap();
+    let mgr = b.start().await.unwrap();
+    eventually("the drift is detected", || async {
+        hb.put("clock/heartbeat", "tick").await.unwrap();
+        mgr.minter().is_ahead()
+    })
+    .await;
+    assert!(
+        matches!(w.put("late").await, Err(zenkey::Error::ClockAhead)),
+        "state writes stop, whether or not they carry a Zenoh timestamp"
+    );
+    assert!(matches!(w.delete().await, Err(zenkey::Error::ClockAhead)));
+}
+
+/// §9: an archive that holds v1 (seq a of run n) and its delete (seq b of
+/// run n) refuses a late put of the same run at an older seq, answering
+/// the tombstone; and records a late put of another run, answering it:
+/// nothing orders two runs (core §4.3's residual risk, as an archive
+/// meets it).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s9_an_archives_backend_refuses_an_outdated_put() {
     let (_r1, ep) = router(None).await;
@@ -1081,30 +1320,69 @@ async fn s9_an_archives_backend_refuses_an_outdated_put() {
     let arch_watch = client(&ep).await;
     let arch = vehicle_archive(&arch_s, &arch_watch, &[]).await;
     let w = &w["vehicle-01"];
-    let t1 = Arc::new(Mutex::new(None));
     eventually("recorded v1", || async {
-        *t1.lock().unwrap() = Some(w.put("v1").await.unwrap());
+        w.put("v1").await.unwrap();
         arch.confirmed(ORIGIN) == Some(true)
     })
     .await;
-    let t1 = t1.lock().unwrap().unwrap().time.expect("stamped");
-    w.delete().await.unwrap();
-    eventually("recorded the delete", || async {
+    let del = w.delete().await.unwrap();
+    let last_known = || async {
         archive::last_known(&arch_s, &common::addr("vehicle-01/archive"), ORIGIN, T)
             .await
             .unwrap()
-            .is_some_and(|l| l.value.is_none())
+    };
+    eventually("recorded the delete", || async {
+        last_known().await.is_some_and(|l| l.value.is_none())
     })
     .await;
-    // An older put (T0 < T2) reaches the archive late.
-    let t0 = zenoh::time::Timestamp::new(*t1.get_time() - 1, *t1.get_id());
-    owner.put(ORIGIN, "v0").timestamp(t0).await.unwrap();
+    let late = |stamp: InBand, record: &'static [u8]| {
+        let owner = owner.clone();
+        async move {
+            let bytes = Envelope {
+                tag: wire::Tag::NONE,
+                stamp,
+                record,
+            }
+            .write();
+            owner
+                .put(ORIGIN, bytes)
+                .encoding(Encoding::ZENOH_BYTES)
+                .await
+                .unwrap();
+        }
+    };
+    // 1. An older put of the delete's run, v0 at seq 0, reaches it late.
+    assert!(del.stamp.seq.get() > 0);
+    late(
+        InBand {
+            run: del.stamp.run,
+            seq: wire::Seq::new(0).unwrap(),
+        },
+        b"v0",
+    )
+    .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let l = archive::last_known(&arch_s, &common::addr("vehicle-01/archive"), ORIGIN, T)
-        .await
-        .unwrap()
-        .unwrap();
+    let l = last_known().await.unwrap();
     assert!(l.value.is_none(), "a tombstone, never the older value");
+    // 2. A put of another run, v9 under run m, reaches it late: recorded.
+    let m = match del.stamp.run {
+        Run::U32(v) => Run::U32(v ^ 1),
+        Run::U16(v) => Run::U16(v ^ 1),
+    };
+    late(
+        InBand {
+            run: m,
+            seq: wire::Seq::new(0).unwrap(),
+        },
+        b"v9",
+    )
+    .await;
+    eventually("the other run's put is recorded and answered", || async {
+        last_known()
+            .await
+            .is_some_and(|l| l.value.as_deref() == Some(&b"v9"[..]))
+    })
+    .await;
 }
 
 /// #698 (§2.3, S2): a state value and an event occurrence carry the
@@ -1133,7 +1411,7 @@ async fn state_and_events_carry_their_attachments() {
         .declare_subscriber("zk2/h1/notes/notes.v1/**")
         .callback(move |sample: Sample| {
             s.lock().unwrap().push((
-                String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned(),
+                String::from_utf8_lossy(&common::record(&sample)).into_owned(),
                 sample.attachment().map(|a| a.to_bytes().into_owned()),
             ));
         })
@@ -1174,7 +1452,7 @@ async fn state_and_events_carry_their_attachments() {
         .unwrap();
     let reply = rx.recv_async().await.expect("an answer");
     let sample = reply.result().expect("a value");
-    assert_eq!(&*sample.payload().to_bytes(), b"hello");
+    assert_eq!(common::record(sample), b"hello");
     assert_eq!(
         sample.attachment().map(|a| a.to_bytes().into_owned()),
         Some(b"by-alice".to_vec())
@@ -1230,4 +1508,114 @@ async fn an_archive_refuses_its_own_session_as_its_watch() {
         "{refused}"
     );
     assert!(!zenkey::presence::watching(&s));
+}
+
+/// Core §2.5 (#976): an owner's advanced publisher numbers its samples, so
+/// a `history` resource declares on a session without timestamping (zenoh-ext
+/// refuses a cache whose samples carry neither a number nor a timestamp),
+/// and a late subscriber gets its history once, each sample under its
+/// envelope.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_history_resource_declares_without_timestamping() {
+    use zenoh_ext::{AdvancedSubscriberBuilderExt, HistoryConfig};
+    let (_r1, ep) = router_with(None, &[("timestamping/enabled", "false")]).await;
+    let owner = client(&ep).await;
+    let tool = client(&ep).await;
+    let ticker: IfaceId = "ticker.v1".parse().unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("lab/ticker"));
+    b.implement(imp("ticker.v1")).unwrap();
+    let w = b
+        .declare_writer(&ticker, "stream/tick", &Bindings::new())
+        .await
+        .expect("declared on a session without timestamping");
+    assert!(!b.minter().session_timestamping());
+    let _svc = b.start().await.unwrap();
+    for v in ["t0", "t1", "t2"] {
+        w.put(v).await.unwrap();
+    }
+    let got: Raw = Arc::default();
+    let into = Arc::clone(&got);
+    let _late = tool
+        .declare_subscriber("zk2/lab/ticker/ticker.v1/stream/tick")
+        .history(HistoryConfig::default().detect_late_publishers())
+        .callback(move |s: Sample| into.lock().unwrap().push(s))
+        .await
+        .unwrap();
+    eventually("the history arrives", || async {
+        got.lock().unwrap().len() >= 3
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let got = got.lock().unwrap().clone();
+    let read: Vec<(Vec<u8>, u32)> = got
+        .iter()
+        .map(|s| {
+            let (stamp, record) = sealed(s);
+            (record, stamp.seq.get())
+        })
+        .collect();
+    assert_eq!(
+        read,
+        [
+            (b"t0".to_vec(), 0),
+            (b"t1".to_vec(), 1),
+            (b"t2".to_vec(), 2)
+        ],
+        "each sample once, in order, under the key's seqs"
+    );
+    assert!(
+        got.iter().all(|s| s.timestamp().is_none()),
+        "no Zenoh timestamp"
+    );
+}
+
+/// Core §8.2's posture, as the runtime reads it from the session's
+/// configuration: a client's and a peer's timestamping off by default, a
+/// router's on, and a stated value for the session's mode wins. A session
+/// that stamps has every write given the owner's Zenoh timestamp, so its
+/// GET answers carry the one its put did (S2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_session_posture_is_read_from_its_config() {
+    let (r, ep) = router(None).await;
+    let open = |extra: &'static [(&'static str, &'static str)]| {
+        let ep = ep.clone();
+        async move {
+            let mut c = zenoh::Config::default();
+            c.insert_json5("mode", "\"client\"").unwrap();
+            c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
+                .unwrap();
+            c.insert_json5("scouting/multicast/enabled", "false")
+                .unwrap();
+            for (k, v) in extra {
+                c.insert_json5(k, v).unwrap();
+            }
+            zenoh::open(c).await.unwrap()
+        }
+    };
+    let stamps = |s: &zenoh::Session| {
+        ServiceBuilder::new(s, config("ground/fleet-mgr"))
+            .minter()
+            .session_timestamping()
+    };
+    assert!(!stamps(&open(&[]).await), "a client's default: off");
+    assert!(stamps(&r), "a router's default: on");
+    let on = open(&[("timestamping/enabled", "true")]).await;
+    assert!(stamps(&on), "stated");
+    let by_mode = open(&[(
+        "timestamping/enabled",
+        "{ router: false, peer: false, client: true }",
+    )])
+    .await;
+    assert!(stamps(&by_mode), "stated for its mode");
+
+    // A stamping session: the put and the reply carry one timestamp.
+    let (mgr, w) = fleet_mgr(&on, None, &["vehicle-01"]).await;
+    let tool = client(&ep).await;
+    let put = w["vehicle-01"].put("v1").await.unwrap();
+    let t = put.time.expect("every write given the owner's timestamp");
+    assert_eq!(t.get_id().to_string(), on.zid().to_string());
+    let reply = raw_get(&tool, ORIGIN).await;
+    assert_eq!(reply[0].timestamp(), Some(&t), "S2");
+    drop(w);
+    mgr.close().await.unwrap();
 }

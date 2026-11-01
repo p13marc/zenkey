@@ -1,0 +1,22 @@
+# core §4.3 (#976): a stream key's seq continues across a takeover within
+# one instance, and across a templated member's writer made again
+# (spec/scenarios/state.md §13 step 3). Governed, its election external, so
+# that a test steps it down and up again through a lock it holds.
+[interface]
+name  = "gauge"
+major = 1
+minor = 0
+uses  = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "external" }
+
+[resources.level]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources."axis/{axis}"]
+kind        = "stream"
+type        = { raw = "text/plain" }
+params      = { axis = "string" }
+cardinality = 4

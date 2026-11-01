@@ -90,7 +90,7 @@ fn push(log: &Log, x: &Sample) {
         at: Instant::now(),
         key: x.key_expr().as_str().to_owned(),
         delete: x.kind() == SampleKind::Delete,
-        payload: x.payload().to_bytes().into_owned(),
+        payload: common::record(x),
     });
 }
 
@@ -314,7 +314,7 @@ async fn get(s: &zenoh::Session, key: &str) -> Option<Json> {
         if let Ok(sample) = r.into_result()
             && sample.kind() == SampleKind::Put
         {
-            out = Some(serde_json::from_slice(&sample.payload().to_bytes()).unwrap());
+            out = Some(serde_json::from_slice(&common::record(&sample)).unwrap());
         }
     }
     out

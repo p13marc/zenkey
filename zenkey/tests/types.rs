@@ -67,9 +67,11 @@ async fn watch(
         .declare_subscriber("zk2/lab/sensor/sensor.v1/**")
         .callback(move |smp: Sample| {
             if let Ok(ZkKey::Data { kind, resource, .. }) = parse(smp.key_expr().as_str()) {
+                // Its record read out of its envelope (core §4.3, §7.5),
+                // its Encoding the sample's.
                 g.lock()
                     .unwrap()
-                    .insert(format!("{kind}/{}", resource.join("/")), smp);
+                    .insert(format!("{kind}/{}", resource.join("/")), common::strip(smp));
             }
         })
         .await
@@ -96,8 +98,9 @@ async fn publish_all(w: &BTreeMap<&'static str, Writer>) {
     w["state/slow"].put("s").await.unwrap();
 }
 
-/// §1: every sample carries its predefined `Encoding`, without a schema
-/// suffix.
+/// §1: every sample under an envelope carries `zenoh/bytes` (core §7.2's
+/// exception), and its record the predefined `Encoding` of its type,
+/// without a schema suffix.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_encoding_on_every_sample() {
     let (_r1, ep) = router(None).await;
@@ -112,7 +115,10 @@ async fn s1_encoding_on_every_sample() {
     })
     .await;
     let g = got.lock().unwrap();
-    let enc = |r: &str| g[r].encoding().to_string();
+    for r in g.keys() {
+        assert_eq!(g[r].encoding().to_string(), "zenoh/bytes", "{r}");
+    }
+    let enc = |r: &str| w[r].record_encoding().to_string();
     assert_eq!(enc("stream/pose"), "application/protobuf");
     assert_eq!(enc("state/status"), "application/cbor");
     assert_eq!(enc("stream/frames"), "image/jpeg");

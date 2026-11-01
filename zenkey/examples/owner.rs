@@ -488,7 +488,8 @@
 //! (§4's skewed owner), and `timing stamp none` puts raw through the
 //! session with no stamp set, its payload a wall clock 10 s old (§5's
 //! unstamped owner). `--no-hlc` leaves the session's HLC off with
-//! `--connect`: an HLC follows the stamps its own session puts (core §4.1),
+//! `--connect`, as it is by default since core 0.73 (§8.2), `--standby`
+//! included: an HLC follows the stamps its own session puts (core §4.1),
 //! so an offset would grow under one. Each command is answered by one JSON
 //! line; `--help` lists them. The reader is `consume --timing`.
 //!
@@ -998,7 +999,8 @@ timing.v1 (spec/profiles/timing/v1.md)
                                   it on, redundancy.v1 §2.10)
   --run-file <path>               each instance's 16-bit run from this record (core
                                   §4.3), else a random 32-bit run
-  --no-hlc                        with --connect, the session's HLC off: the
+  --no-hlc                        with --connect, the session's HLC off (the
+                                  default, --standby included): the
                                   stamps are the session's wall clock with its
                                   zid, so `timing offset` shifts them alone (an
                                   HLC would follow them, core §4.1); and `timing

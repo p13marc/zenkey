@@ -6,9 +6,11 @@
 (`encoding = "cbor"`) and a raw `image/jpeg` stream.
 
 **Expected.**
-- Every sample carries the predefined Zenoh `Encoding`: protobuf, CBOR and
-  `image/jpeg`.
-- No sample carries a schema suffix.
+- Each sample carries core §7.5's envelope, so its `Encoding` is
+  `zenoh/bytes` (core §7.2).
+- Each record is encoded as its type says: protobuf, CBOR and
+  `image/jpeg`. The owner's writer names that predefined `Encoding`.
+- No `Encoding` carries a schema suffix.
 
 ## §2 Decoding and honest rendering
 

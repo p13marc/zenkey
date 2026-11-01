@@ -373,3 +373,62 @@ fn zenohs_default_encoding_is_spelled_as_the_envelopes() {
         zenkey::model::wire::ENCODING
     );
 }
+
+/// A refused envelope is no arrival (core §7.5, observer §7.3): it does not
+/// refresh a consumer's freshness of its member (`freshness.v1` §2.5), and
+/// a member that only ever sent one is not one the subscription heard.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_envelope_does_not_refresh_a_consumers_freshness() {
+    use zenkey::model::freshness::{Last, Observation};
+    let (_r, ep) = router(None).await;
+    let raw = client(&ep).await;
+    let reader = client(&ep).await;
+    let got: Delivered = Arc::default();
+    let sink = Arc::clone(&got);
+    let consumer = tool(&reader);
+    let sub = consumer
+        .subscribe(PLANS, move |d| sink.lock().unwrap().push(d))
+        .await
+        .unwrap();
+    eventually("the subscription is heard", || async {
+        put(&raw, OTHER, Run::U16(1), 0, "probe").await;
+        !got.lock().unwrap().is_empty()
+    })
+    .await;
+    put(&raw, ORIGIN, Run::U16(7), 3, "a plan").await;
+    eventually("the plan delivered", || async {
+        of_origin(&got).len() == 1
+    })
+    .await;
+    let age = |o: Observation| match o {
+        Observation::Subscribed {
+            last: Some(Last::Put(d)),
+            ..
+        } => d,
+        other => panic!("a put heard: {other:?}"),
+    };
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    // An envelope refused (`{` is a reserved form), on the member and on a
+    // member never heard.
+    const NEVER: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-03";
+    for key in [ORIGIN, NEVER] {
+        raw.put(key, r#"{"plan":2}"#)
+            .encoding(Encoding::ZENOH_BYTES)
+            .await
+            .unwrap();
+    }
+    eventually("both refused", || async { sub.undecodable() == 2 }).await;
+    assert!(
+        age(sub.freshness(ORIGIN)) >= Duration::from_millis(400),
+        "the refused envelope did not refresh it"
+    );
+    assert!(
+        !sub.members().iter().any(|m| m == NEVER),
+        "a member only refused is not heard"
+    );
+    assert!(matches!(
+        sub.freshness(NEVER),
+        Observation::Subscribed { last: None, .. }
+    ));
+    assert_eq!(of_origin(&got).len(), 1, "nothing more delivered");
+}

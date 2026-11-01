@@ -184,8 +184,8 @@ async fn s1_bring_up_order_and_tokens() {
                     .unwrap();
                 let r = state.recv_async().await.expect("the state is answered");
                 let v = r.result().expect("the value it started with");
-                assert_eq!(&*v.payload().to_bytes(), b"here");
-                assert!(v.timestamp().is_some(), "stamped (S2)");
+                assert_eq!(common::record(v), b"here");
+                assert!(common::inband(v).is_some(), "stamped in band (S2)");
                 called = true;
             }
             ZkKey::Instance { addr, instance } if !described => {

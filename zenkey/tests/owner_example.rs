@@ -60,8 +60,9 @@ async fn get(
 /// `--connect <R1>`: the owner is a client of R1, with the two output lines
 /// (`connected`, `ready`). Its state value was put before its tokens, so a
 /// GET made the moment the interface token appears finds it (presence.md
-/// §1, F-68), stamped with the owner's own zid, not R1's, where an
-/// unstamped put through R1 carries R1's (state.md §1, F-69). Its
+/// §1, F-68), under the owner's in-band stamp of the run its descriptor
+/// states, with no Zenoh timestamp: a reply carries none, where an
+/// unstamped put through R1 carries R1's (state.md §1, core 0.73). Its
 /// operations echo, or refuse `app` without a detail (F-65), templated
 /// ones included (#670).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -123,21 +124,26 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
             .await;
             let values: Vec<_> = replies.iter().filter_map(|r| r.result().ok()).collect();
             assert_eq!(values.len(), 1, "the value it started with is there");
-            assert_eq!(&*values[0].payload().to_bytes(), b"ok");
-            break (instance, *values[0].timestamp().expect("stamped (S2)"));
+            assert_eq!(common::record(values[0]), b"ok");
+            assert_eq!(values[0].timestamp(), None, "no Zenoh timestamp (S2)");
+            break (
+                instance,
+                common::inband(values[0]).expect("an in-band stamp (S2)"),
+            );
         }
     };
     let ready = line(&lines).await;
     assert_eq!(ready, format!("ready zk2/ex/owner/@zk/instance/{instance}"));
 
-    // S1, observed through R1: the stamp is the owner's, not the router's.
+    // S1: the stamp is the owner's, in band, under the run its descriptor
+    // states (core §3.3, §4.3).
     let d = presence::descriptor(&tool, &"ex/owner".parse().unwrap(), &instance, T)
         .await
         .unwrap()
         .into_descriptor()
         .unwrap();
     let owner_zid = d.meta["zid"].as_str().unwrap().to_owned();
-    assert_eq!(stamp.get_id().to_string(), owner_zid);
+    assert_eq!(d.stated_run(), Some(stamp.run), "the descriptor's run");
     assert_ne!(
         owner_zid,
         r1.zid().to_string(),
@@ -348,7 +354,7 @@ async fn state(tool: &zenoh::Session, key: &str) -> Vec<Vec<u8>> {
         .await
         .into_iter()
         .filter_map(|r| r.into_result().ok())
-        .map(|s| s.payload().to_bytes().into_owned())
+        .map(|s| common::record(&s))
         .collect()
 }
 
@@ -427,7 +433,7 @@ async fn the_owner_example_implements_health() {
         .await
         .unwrap()
         .unwrap();
-    let f = v1::Fault::decode(&*f.payload().to_bytes()).unwrap();
+    let f = v1::Fault::decode(common::record(&f).as_slice()).unwrap();
     assert_eq!(
         (f.code.as_str(), f.level, f.detail.as_str()),
         ("ex_restart", 2, "the poller restarted")
@@ -499,7 +505,7 @@ async fn the_owner_example_reports_a_clock_ahead() {
             break s;
         }
     };
-    let f = v1::Fault::decode(&*fault.payload().to_bytes()).unwrap();
+    let f = v1::Fault::decode(common::record(&fault).as_slice()).unwrap();
     assert_eq!((f.code.as_str(), f.level), ("clock_ahead", 3));
     assert_eq!(
         fault.timestamp().unwrap().get_id().to_string(),
@@ -1068,7 +1074,7 @@ async fn the_owner_example_implements_telemetry() {
         let attachment = s.attachment().map(|a| a.to_bytes().into_owned());
         (
             s.key_expr().as_str().to_owned(),
-            s.payload().to_bytes().into_owned(),
+            common::record(&s),
             attachment,
         )
     };
@@ -2477,4 +2483,32 @@ fn the_help_documents_the_arbitration_surface() {
     ] {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
+}
+
+/// Core §4.3 (#976): `--run-file` takes each start's run from a
+/// `FileRunStore`, the record's next counter, and `seq <n>` sets the next
+/// seq, so the owner takes a new run before its seq would pass 2^24 − 1
+/// (`state.md` §7 steps 1 and 3).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_takes_its_runs_from_a_run_file() {
+    let (_r1, ep) = router(None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("owner.run");
+    let record = record.to_str().unwrap();
+    for n in ["0000", "0001"] {
+        let o = spawn_owner(&["--connect", &ep, "--run-file", record, "ex/plain"]);
+        assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+        line(&o.lines).await;
+        assert_eq!(o.ask("seq 16777215").await, format!("seq 16777215 run {n}"));
+        o.stop().await;
+    }
+    assert_eq!(std::fs::read(dir.path().join("owner.run")).unwrap(), [0, 1]);
+    // Without a record, a random 32-bit run.
+    let o = spawn_owner(&["--connect", &ep, "ex/plain"]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    line(&o.lines).await;
+    let first = o.ask("seq 0").await;
+    let run = first.strip_prefix("seq 0 run ").unwrap().to_owned();
+    assert_eq!(run.len(), 8, "no record: a 32-bit run, {run}");
+    o.stop().await;
 }

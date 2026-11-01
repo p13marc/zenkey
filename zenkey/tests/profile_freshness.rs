@@ -211,7 +211,9 @@ async fn s1_the_re_put_cadence() {
     }
     for r in &ups {
         assert_eq!((r.value.as_str(), r.delete), ("up", false), "unchanged");
-        assert_eq!(r.encoding, "text/plain");
+        // The record of an envelope, whose sample's Encoding is
+        // `zenoh/bytes` (core §7.2's exception).
+        assert_eq!(r.encoding, "zenoh/bytes");
         assert_eq!(
             r.stamp.unwrap().get_id().to_string(),
             owner_zid,
