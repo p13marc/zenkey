@@ -3449,8 +3449,137 @@ def family_readings(root: Path) -> list[Result]:
         + _observer_05_readings(root) + _observer_06_readings(root) + _observer_07_readings(root) \
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
-        + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root)
+        + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
+        + _round95_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round95_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.77 to 0.80 and observer text 0.17 and 0.18 (#609, round 95;
+    #1011, #980 C1a and C1b, #1021). Each text at its version or later with
+    its entry; the sentences F-437 to F-441 quote, as they read; then
+    zk2py's readings of what they leave open, shown through
+    :mod:`zk2py.face`, :mod:`zk2py.catalog`, the owner and the echo tool.
+    No session is opened."""
+    import re
+    import tempfile
+
+    from . import catalog, echo_tool, face
+    from .contract import load_contract
+    from .owner import Owner
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, rules, readme = flat("core.md"), flat("observer.md"), flat("RULES.md"), flat("README.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+) \(", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    face_c = load_contract(Path(__file__).resolve().parent.parent / "interop" / "constrained" / "zk2py_face.v1.toml")
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.80 or later and observer text 0.18 or later, each with its entries",
+         [core_v >= (0, 80), obs_v >= (0, 18)]
+         + entry("CHANGELOG.md", "0.77", "1.10.1") + entry("CHANGELOG.md", "0.78", "keys across a face")
+         + entry("CHANGELOG.md", "0.79", "the deployment catalog")
+         + entry("CHANGELOG.md", "0.80", "the epoch none states")
+         + entry("observer-CHANGELOG.md", "0.17", "1.10.1") + entry("observer-CHANGELOG.md", "0.18", "across a face"),
+         [True, True]),
+        ("F-437: §8.6's reader, beside observer §0's and the glossary's reader and RULES.md's pointer",
+         missing(core, "**Never a guess.** A reader MUST refuse each of these:")
+         + missing(obs, "It is normative too for any other participant where it reads presence, state or the admin "
+                        "space and concludes from what it read")
+         + missing(readme, "**Reader**: any participant that reads presence, state or the admin space, and concludes "
+                           "from it.")
+         + missing(rules, "Where a consumer reads presence, state or the admin space, `observer.md`'s reader rules "
+                          "bind it (core §12). They are under [observer](#observer-the-tool-role-and-a-reader), "
+                          "marked *reader*: [§8.6](core.md#86-the-deployment-catalog),"), []),
+        ("F-438: a template's selector names no wildcard for a rest parameter, and an event's ULID chunk only "
+         "beside a template",
+         missing(core, "**A template's selector** is its key with each parameter a wildcard, and an event's ULID "
+                       "chunk too. Its literal prefix is what is declared.",
+                 "**`{name...}`** is a **rest** parameter: one or more chunks, each slugged.")
+         + missing(obs, "Each concrete resource is its exact key, and each template its key with every parameter a "
+                        "wildcard. An event's ULID chunk is a wildcard too."), []),
+        ("F-438 (zk2py's reading): a rest parameter is */**, an event's ULID chunk * with or without a parameter, "
+         "and the literal prefix is what precedes the first wildcard",
+         [face.scope("stream", "path/{path...}"), face.scope("events", "alarm"), face.scope("events", "fault/{k}"),
+          face.scope("stream", "axis/{axis}/rate"), face.nonwild_prefix("zk2/a/b/i.v1/stream/axis/*/rate"),
+          face.scope("state", "mode")],
+         ["stream/path/*/**", "events/alarm/*", "events/fault/*/*", "stream/axis/*/rate", "zk2/a/b/i.v1/stream/axis",
+          "state/mode"]),
+        ("F-439: §8.5's two SHOULDs beside R1's wildcard binding and R2's bound parameter",
+         missing(core, "A consumer across a constrained face SHOULD subscribe to each concrete resource it reads by "
+                       "its exact key, and to a template by its literal prefix up to the first parameter.",
+                 "A consumer across a constrained face SHOULD NOT use a selector wider than what it reads.",
+                 "or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface)",
+                 "Across a constrained face, a consumer binds statically"), []),
+        ("F-439 (zk2py's reading): a parameter the role binds is its value, never a wildcard; a wildcard binding's "
+         "selector keeps its *",
+         [face.resource_scope("state/fleet/{vehicle}/plan", {"vehicle": "v01"}),
+          face.resource_scope("stream/axis/{axis}"), face.nonwild_prefix("zk2/site/*/zk2py_face.v1/stream/level")],
+         ["state/fleet/v01/plan", "stream/axis/*", "zk2/site"]),
+        ("F-440: observer §7.3's epoch the deployment states, beside core §8.6's reader that refuses a catalog it "
+         "does not hold",
+         missing(obs, "A tool takes the one its deployment states, and 0, the Unix epoch, where it states none (core "
+                      "§7.6).")
+         + missing(core, "A reader reads an index, or a time counted from the epoch, through the catalog the owner "
+                         "names.",
+                   "an id, when it holds neither that catalog nor one whose `lineage` holds it (`unknown_catalog`);",
+                   "- **No catalog named.** An owner that names none writes no index, and a reader counts its times "
+                   "from 0."), []),
+        ("F-441: 0.80's entry refuses a time read past 64-bit milliseconds as epoch; §7.6's reading names no epoch",
+         missing(flat("CHANGELOG.md"), "A `time` read whose instant would pass 64-bit milliseconds under its epoch "
+                                       "is now refused as `epoch`, where it read as `null`.")
+         + missing(core, "- The record holds a byte after its pad (`length`). - A bit of the pad is 1 (`pad`).")
+         + [w for w in ("past 64-bit milliseconds", "(`epoch`)") if w in core.split("**Reading.** An implementation "
+                                                                                  "that reads a record")[1][:900]],
+         []),
+        ("§7.5 and §8.5's scopes for zk2py_face.v1 at site/rig: each concrete resource's key, each template's "
+         "selector, no operation",
+         face.scopes([face_c], ["site/rig"]),
+         ["zk2/site/rig/zk2py_face.v1/events/alarm/*", "zk2/site/rig/zk2py_face.v1/state/mode",
+          "zk2/site/rig/zk2py_face.v1/stream/axis/*", "zk2/site/rig/zk2py_face.v1/stream/level",
+          "zk2/site/rig/zk2py_face.v1/stream/path/*/**"]),
+    ]
+
+    # -- the owner given a catalog, and the echo tool's --catalog -------------
+    doc = {"format": "zk2-catalog/1", "epoch": 1767225600,
+           "entries": [{"index": 0, "iface": face_c.interface, "contract": face_c.fingerprint}]}
+    cat = catalog.read(json.dumps(doc))
+    o = Owner("site", "rig", [face_c])
+    before = o.writing_epoch()
+    o.packed_epoch = 5
+    stated = o.writing_epoch()
+    o.catalog = cat
+    out.append(("core §8.6: an owner given a catalog counts its time fields from its epoch, over an epoch stated; "
+                "one with none from the one stated, else 0",
+                [before, stated, o.writing_epoch(), cat.id == catalog.catalog_id(doc)], [0, 5, 1767225600, True]))
+    with tempfile.TemporaryDirectory() as d:
+        bad, good = Path(d) / "bad.json", Path(d) / "good.json"
+        bad.write_text('{"format": "zk2-catalog/1", "epoch": -0, "entries": []}')
+        good.write_text(json.dumps(doc))
+        codes = [echo_tool.main(["-c", "tcp/127.0.0.1:1", "--catalog", str(bad)]),
+                 echo_tool.main(["-c", "tcp/127.0.0.1:1", "--catalog", str(good), "--epoch", "5"]),
+                 echo_tool.main(["-c", "tcp/127.0.0.1:1", "--across-face", "site/rig"]),
+                 echo_tool.main(["-c", "tcp/127.0.0.1:1", "--across-face", "site/rig", "--contracts",
+                                 str(face_c.path), "zk2/**"])]
+    out.append(("the echo tool: a refused catalog, a catalog beside --epoch, --across-face without --contracts or "
+                "beside a SELECTOR, each refused input before any session",
+                codes, [2, 2, 2, 2]))
+    scope = echo_tool.face_scope(face.scopes([face_c], ["site/rig"]), ["site/rig"])
+    out.append(("observer §8.2 across a face: the scope names what it watches and what it excludes",
+                [scope["watched"], scope["excluded"], "observer §7.5" in scope["says"]],
+                [["events", "state", "stream"], ["@op", "@zk", "@adv"], True]))
+    return out
 
 
 def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -3540,12 +3669,18 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
          missing(core, "is read as the binary64 a JSON reader holds for it, by that double's shortest decimal "
                        "text. So `0.15` is the decimal `0.15`. A value with more digits than a double keeps is given "
                        "as a string."), []),
+        # Re-read under core 0.80 (round 95, #1021): F-434's answer, a
+        # binary64 of magnitude 2^63 or more out of range, integer text
+        # read exactly from −2^63 to 2^64 − 1; the 0.76 form gone.
         ("F-427: an integer in the file and a writer's int, counter or time value have no fraction and no "
-         "exponent; a magnitude of 2^63 or more outside every range",
+         "exponent; a binary64 of magnitude 2^63 or more out of range; the 0.76 form gone",
          missing(core, "is a JSON number written with no fraction and no exponent. So `5.0` there is E038, as a "
                        "float is in §9.1's TOML.",
-                 "is a JSON number written with no fraction and no exponent. So `5.0` is a value of the wrong type.",
-                 "is outside every range, however it is written."), []),
+                 "no fraction and no exponent. So `5.0` is a value of the wrong type, and a 64-bit counter takes "
+                 "18446744073709551615.",
+                 "**A binary64 of magnitude 2^63 or more** given for one of them is out of range, not of the "
+                 "wrong type.")
+         + present(core, "is outside every range, however it is written."), []),
         ("F-428: the JSON Schema files taken before the packed files",
          missing(core, "The JSON Schema files are taken before the packed files, each list in its order."), []),
         ("F-429: nothing in a misnamed type's record is linted",
@@ -3556,8 +3691,10 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                        "it has no code.")
          + present(core, "a count c is written as c modulo"), []),
         ("F-431: the glossary's Static rule names §7.6; the 0.75 form gone",
-         missing(readme, "Those are §1's, §7.5's, §7.6's, §9's, the contract rules",
-                 "A rule of any of those sections, §1, §7.5, §7.6 and §9 included, that names a role is that role's")
+         # Re-read under core 0.79 (round 95, #980 C1a): §8.6 joins them.
+         missing(readme, "Those are §1's, §7.5's, §7.6's, §8.6's, §9's, the contract rules",
+                 "A rule of any of those sections, §1, §7.5, §7.6, §8.6 and §9 included, that names a role is that "
+                 "role's")
          + present(readme, "Those are §1's, §7.5's, §9's, the contract rules"), []),
         ("F-432: RULES.md's §7.6 reading entry ends its lead-in with a colon and its list's length; the 0.75 form "
          "gone",
@@ -3566,8 +3703,10 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + present(rules, "MUST refuse it for the first of these that applies, in this order. |"), []),
         ("F-433: the epoch 0 where a deployment states none, and observer §7.3 naming packed, a record its layout "
          "refuses or in no envelope undecodable, its time fields under that epoch; the 0.75 forms gone",
-         missing(core, "so a deployment states it to its writers and readers. One that states none has E = 0, the "
-                       "Unix epoch")
+         # Re-read under core 0.79 (round 95, #980 C1a): the epoch is the
+         # catalog's in force, else 0.
+         missing(core, "Writer and reader each hold it as an input: the epoch of the catalog in force (§8.6). Where "
+                       "none is, E is 0, the Unix epoch")
          + missing(obs, "`jsonschema` (core §7.3's subset) and `packed` (core §7.6), and a `raw` type by its media "
                         "type only.",
                    "One its layout refuses is undecodable, and the tool names the refusal. One that came in no "
@@ -3592,22 +3731,32 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
     c64 = rec({"name": "v", "type": "counter", "width": 64})
     big_fixed = rec({"name": "v", "type": "fixed", "minimum": "0", "maximum": "10000000000000000000",
                      "resolution": "1"})
-    out.append(("F-434 (zk2py's reading, the vectors'): integer text by its exact value, so a 64-bit counter takes "
-                "2^64 − 1 and an int 2^62; a number with a fraction or an exponent past 2^63 is range, and below it "
-                "value; a fixed-point value by its code, 2^63 written in a field whose range reaches it",
+    # Re-read under core 0.80 (round 95, #1021): F-434 resolved, the
+    # vectors' reading now the text's; integer text past 2^64 − 1, or below
+    # −2^63, is a binary64, so range.
+    out.append(("F-434 (resolved by core 0.80): integer text from −2^63 to 2^64 − 1 read exactly, so a 64-bit "
+                "counter takes 2^64 − 1 and an int 2^62 − 1; a binary64 of 2^63 or more is range, and below it "
+                "value; integer text past the span a binary64, so range; a fixed-point value by its code",
                 [write(c64, {"v": 2 ** 64 - 1}) == "1" * 64, write(c64, {"v": 2 ** 64}),
+                 write(c64, {"v": -(2 ** 63) - 1}),
                  write(c64, jcs.loads('{"v": 1e19}')), write(c64, jcs.loads('{"v": 9e18}')),
-                 write(wide, {"v": 2 ** 62}) == "1" + "0" * 63, write(big_fixed, {"v": str(2 ** 63)})[:2]],
-                [True, {"refused": "range"}, {"refused": "range"}, {"refused": "value"}, True, "10"]))
+                 write(wide, {"v": 2 ** 62}) == "1" + "0" * 63, write(big_fixed, {"v": str(2 ** 63)})[:2],
+                 packed.json_number(2 ** 64), packed.json_number(2 ** 64 - 1), packed.json_number(-(2 ** 63))],
+                [True, {"refused": "range"}, {"refused": "range"}, {"refused": "range"}, {"refused": "value"}, True,
+                 "10", float(2 ** 64), 2 ** 64 - 1, -(2 ** 63)]))
 
     # -- F-435: the epoch's two readings --------------------------------------
     clock = rec({"name": "at", "type": "time"})
-    out.append(("F-435 (zk2py's reading): the codec handed no epoch refuses epoch (vectors.json's write 46); the "
-                "owner, the consumer and the tool hand it the deployment's, 0 where none is stated, so 1700000000000 "
-                "writes 1700000000 seconds",
-                [write(clock, {"at": 1700000000000}), packed.deployment_epoch(None), packed.deployment_epoch(5),
+    # Re-read under core 0.80 (round 95, #1021): F-435 resolved, the codec
+    # handed no epoch writing and reading under E = 0 (write 47, read 22).
+    out.append(("F-435 (resolved by core 0.80): the codec handed no epoch writes and reads under E = 0, so "
+                "1700000000000 writes 1700000000 seconds and reads back; the owner, the consumer and the tool hand it "
+                "the deployment's, 0 where none is stated",
+                [write(clock, {"at": 1700000000000}) == format(1700000000, "032b"),
+                 clock.read(clock.tag, clock.write({"at": 1700000000000})), packed.deployment_epoch(None),
+                 packed.deployment_epoch(5),
                  write(clock, {"at": 1700000000000}, packed.deployment_epoch(None)) == format(1700000000, "032b")],
-                [{"refused": "epoch"}, 0, 5, True]))
+                [True, {"at": 1700000000000}, 0, 5, True]))
 
     # -- observer §7.3 at 0.16: a tool's packed record -------------------------
     held = echo_tool.Held([load_contract(spec.parent / "zenkey/tests/contracts/packed/packed.v1.toml")])
@@ -4712,8 +4861,9 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          "\"order differently\", \"no instant\", \"holds a value under the id\"; the old forms gone",
          # Re-read under core 0.72 and 0.73 (round 93, #976): §7.5 joins the
          # static sections, and §4.2's merge is by the in-band stamp. Under
-         # core 0.75 (round 94, #979 B1): §7.6 joins them too.
-         missing(core, "They are the rules of §1, §7.5, §7.6 and §9 that name no role",
+         # core 0.75 (round 94, #979 B1): §7.6 joins them too, and under
+         # core 0.79 (round 95, #980 C1a) §8.6.
+         missing(core, "They are the rules of §1, §7.5, §7.6, §8.6 and §9 that name no role",
                  "A holder on the retrieving session answers too, so a caller or tool can get its own reply",
                  "so that a caller or tool following the steps would report the contract unavailable",
                  "or at the timeout the caller or tool gave it (§8.1).",
@@ -4750,14 +4900,16 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  # among the static sections, and the glossary's Epoch over
                  # runs, 0.73 having removed the new epoch's MUST. Under core
                  # 0.75 (round 94, #979 B1) the index lists §7.6's too and
-                 # names no section in the sentence.
-                 "§1's, §7.5's, §7.6's and §9's.",
+                 # names no section in the sentence; under core 0.79 (round
+                 # 95, #980 C1a) §8.6's too.
+                 "§1's, §7.5's, §7.6's, §8.6's and §9's.",
                  "A rule of those sections that names a role is listed under that role.")
          + missing(readme, "Each new instance writes under a new run",
                    # Re-read under core 0.76 (the mend after round 94):
-                   # F-431's glossary names §7.6 too.
-                   "A rule of any of those sections, §1, §7.5, §7.6 and §9 included, that names a role is that "
-                   "role's")
+                   # F-431's glossary names §7.6 too, and under core 0.79
+                   # (round 95, #980 C1a) §8.6.
+                   "A rule of any of those sections, §1, §7.5, §7.6, §8.6 and §9 included, that names a role is "
+                   "that role's")
          + present(rules, "It is listed only beside a rule it excepts.", "So is one of §1 or §9.")
          + present(readme, "With no record of its last stamp, §4.3 requires a fresh zid"), []),
     ]
@@ -7311,11 +7463,84 @@ def family_packed(root: Path) -> list[Result]:
     return out
 
 
+def family_catalog(root: Path) -> list[Result]:
+    """``catalog/`` (core §8.6, 0.79; #980 C1a), every file, an unknown one
+    failing. ``documents.json``: a catalog's text -> its id, or the first
+    refusal in §8.6's order. ``ids.json``: an accepted catalog's text -> its
+    JCS bytes, their sha256 and its id. ``succession.json``: named catalogs,
+    each read as ``documents.json`` reads one; two of them -> whether the
+    second succeeds the first, or the checker's refusal; the catalogs a
+    reader holds, the id an owner names and an index -> the epoch and the
+    entry, or the reader's refusal."""
+    import hashlib
+
+    from . import catalog
+
+    def reading(text: str) -> Any:
+        try:
+            return {"id": catalog.read(text).id}
+        except catalog.Refused as e:
+            return {"refused": e.token}
+
+    out: list[Result] = []
+    for path in sorted((root / "catalog").iterdir()):
+        if path.name == "README.md":
+            continue
+        data = _load_json(path)
+        if path.name == "documents.json":
+            for i, c in enumerate(data["cases"]):
+                out.append(_check(f"catalog: document {i}: {c['note']}", reading(c["text"]), c["expect"]))
+        elif path.name == "ids.json":
+            for i, c in enumerate(data["cases"]):
+                try:
+                    cat = catalog.read(c["text"])
+                except catalog.Refused as e:
+                    got: Any = {"refused": e.token}
+                else:
+                    got = {"jcs": cat.jcs.decode("utf-8"), "sha256": hashlib.sha256(cat.jcs).hexdigest(),
+                           "id": cat.id}
+                out.append(_check(f"catalog: id {i}: {c['note']}", got, c["expect"]))
+        elif path.name == "succession.json":
+            named: dict[str, catalog.Catalog] = {}
+            for name, value in data["catalogs"].items():
+                text = json.dumps(value)
+                try:
+                    named[name] = catalog.read(text)
+                except catalog.Refused as e:
+                    out.append((f"catalog: catalog {name}", False, f"refused {e.token}: {e}"))
+                    continue
+                out.append((f"catalog: catalog {name} is read", True, ""))
+            for i, c in enumerate(data["successions"]):
+                if c["previous"] not in named or c["next"] not in named:
+                    out.append((f"catalog: succession {i}", False, "a catalog it names was refused"))
+                    continue
+                try:
+                    catalog.succession(named[c["previous"]], named[c["next"]])
+                    got = "succeeds"
+                except catalog.Refused as e:
+                    got = {"refused": e.token}
+                out.append(_check(f"catalog: succession {i}: {c['note']}", got, c["expect"]))
+            for i, c in enumerate(data["reads"]):
+                held = [named[n] for n in c["held"] if n in named]
+                try:
+                    r = catalog.resolve(held, c["catalog"], c["index"])
+                    got = {"epoch": r.epoch}
+                    if r.entry is not None:
+                        got.update(iface=r.entry[0], contract=r.entry[1])
+                except catalog.Refused as e:
+                    got = {"refused": e.token}
+                out.append(_check(f"catalog: read {i}: {c['note']}", got, c["expect"]))
+        else:
+            out.append((f"catalog/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
 #: Every entry of spec/conformance/ that a family reads. Appendix E lists
 #: the fixture formats; an entry no family reads fails ``layout``, so a new
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
-                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed"}
+                 "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed",
+                 "catalog"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -7349,6 +7574,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "seed": family_seed,
     "envelope": family_envelope,
     "packed": family_packed,
+    "catalog": family_catalog,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,

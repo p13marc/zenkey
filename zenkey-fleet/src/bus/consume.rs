@@ -14,7 +14,8 @@
 //! a concrete key that resolves to no member of the resource through a
 //! bound provider is counted as unresolved (#671); samples this tool could
 //! not keep up with are counted separately as lagged (the tooling guide's
-//! O6). None is folded into another.
+//! O6). None is folded into another. A sample the runtime refused as
+//! undecodable is a row of its own, its refusal named (observer §7.3).
 //!
 //! **Each sample is judged against its contract** (#612, FJ8b): its payload
 //! against the declared type (`conformance`, spec §7.2–§7.3), and the QoS it
@@ -36,7 +37,8 @@ use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sam
 use crate::model::render::{Member, render_record, render_with};
 use crate::model::target::Target;
 use crate::report::{
-    InbandStamp, Stamp, StateReading, StateReport, StateRow, StateValue, WatchEvent, WatchSample,
+    Conformance, InbandStamp, Stamp, StateReading, StateReport, StateRow, StateValue, WatchEvent,
+    WatchSample,
 };
 use crate::{Error, Result};
 
@@ -402,7 +404,9 @@ pub struct Watch {
 /// Subscribes to `r` across `target` (R1: at once, without presence), the
 /// values given bound as R2 bindings and every other parameter a wildcard.
 /// Each delivered sample is rendered through `revision` (R4: any revision
-/// of the major reads the interface).
+/// of the major reads the interface), and so is each one the runtime
+/// refused as undecodable (core §7.5, §7.6): a row of its own, its
+/// refusal named, never dropped silently (observer §7.3).
 pub async fn watch(
     session: &Session,
     revision: &Revision,
@@ -413,70 +417,54 @@ pub async fn watch(
     let name = zenkey::implementation::resource_name(r);
     let address = target.address.as_str();
     let params = r2_params(values)?;
+    let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+    let lagged = Arc::new(AtomicU64::new(0));
+    // The QoS the resource declares (§2.4), once: every sample is judged
+    // against it as it arrives.
+    let declared = declared_qos(r);
+    let on_refused = {
+        let (rev, lag, tx, declared) = (
+            revision.clone(),
+            Arc::clone(&lagged),
+            tx.clone(),
+            declared.clone(),
+        );
+        move |refused: zenkey::consumer::Refused| {
+            let sample = refused_sample(&rev, declared.as_ref(), refused);
+            if tx.try_send(sample).is_err() {
+                lag.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    };
     let consumer = zenkey::consumer::Consumer::for_tool(
         session,
         revision.shared_contract(),
         &[address],
         &params,
     )
-    .map_err(|e| runtime("subscribe", address, e))?;
+    .map_err(|e| runtime("subscribe", address, e))?
+    .with_refused(on_refused);
     let selectors = consumer
         .selectors(&name)
         .map_err(|e| runtime("subscribe", address, e))?
         .iter()
         .map(|k| k.as_str().to_owned())
         .collect();
-    let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
-    let lagged = Arc::new(AtomicU64::new(0));
     let (rev, lag) = (revision.clone(), Arc::clone(&lagged));
-    // The QoS the resource declares (§2.4), once: every sample is judged
-    // against it as it arrives.
-    let declared = declared_qos(r);
     let sub = consumer
         .subscribe(&name, move |d: zenkey::consumer::Delivery| {
             let key = d.sample.key_expr().as_str().to_owned();
-            let event = match d.sample.kind() {
-                SampleKind::Delete => WatchEvent::Delete,
-                SampleKind::Put => {
-                    let rendered =
-                        payload(&rev, &key, &d.sample, Member::Type, d.inband.zip(d.tag));
-                    let attachment = d.sample.attachment().map(|a| a.to_bytes());
-                    WatchEvent::Put {
-                        conformance: sample_conformance(
-                            &rev,
-                            &rendered,
-                            &d.sample.payload().to_bytes(),
-                            attachment.as_deref(),
-                        ),
-                        payload: Box::new(rendered),
-                        attachment: d.sample.attachment().map(|a| {
-                            Box::new(render_with(
-                                &rev,
-                                &key,
-                                Member::Attachment,
-                                None,
-                                &a.to_bytes(),
-                            ))
-                        }),
-                    }
-                }
-            };
-            let observed = observed_qos(
-                d.sample.priority(),
-                d.sample.congestion_control(),
-                d.sample.express(),
+            let rendered = (d.sample.kind() == SampleKind::Put)
+                .then(|| payload(&rev, &key, &d.sample, Member::Type, d.inband.zip(d.tag)));
+            let sample = watch_sample(
+                &rev,
+                declared.as_ref(),
+                &d.provider,
+                d.values,
+                &d.sample,
+                d.inband,
+                rendered.map(|p| (p, None)),
             );
-            let sample = WatchSample {
-                provider: d.provider.to_string(),
-                inband: d.inband.map(InbandStamp::from),
-                timestamp: d.sample.timestamp().map(stamp),
-                qos_mismatch: declared
-                    .as_ref()
-                    .and_then(|declared| qos_mismatch(declared, &observed)),
-                key,
-                values: d.values,
-                event,
-            };
             if tx.try_send(sample).is_err() {
                 lag.fetch_add(1, Ordering::Relaxed);
             }
@@ -489,6 +477,113 @@ pub async fn watch(
         lagged,
         selectors,
     })
+}
+
+/// One sample as a watch's row: a put's `rendered` payload judged against
+/// its type (an undecodable one's refusal given, which stands whatever the
+/// rendering read), its attachment, its stamps, and the QoS it rode
+/// against `declared`; `None` for a delete.
+fn watch_sample(
+    rev: &Revision,
+    declared: Option<&crate::report::QosAxes>,
+    provider: &Addr,
+    values: Bindings,
+    sample: &Sample,
+    inband: Option<zenkey_model::wire::Stamp>,
+    rendered: Option<(crate::report::PayloadRendering, Option<String>)>,
+) -> WatchSample {
+    let key = sample.key_expr().as_str().to_owned();
+    let event = match rendered {
+        None => WatchEvent::Delete,
+        Some((rendered, refused)) => {
+            let attachment = sample.attachment().map(|a| a.to_bytes());
+            let conformance = sample_conformance(
+                rev,
+                &rendered,
+                &sample.payload().to_bytes(),
+                attachment.as_deref(),
+            );
+            let conformance = match refused {
+                Some(reason) if !matches!(conformance, Conformance::Undecodable { .. }) => {
+                    Conformance::Undecodable {
+                        declared: declared_name(&rendered.rendered),
+                        reason,
+                    }
+                }
+                _ => conformance,
+            };
+            WatchEvent::Put {
+                conformance,
+                payload: Box::new(rendered),
+                attachment: attachment
+                    .map(|a| Box::new(render_with(rev, &key, Member::Attachment, None, &a))),
+            }
+        }
+    };
+    let observed = observed_qos(
+        sample.priority(),
+        sample.congestion_control(),
+        sample.express(),
+    );
+    WatchSample {
+        provider: provider.to_string(),
+        inband: inband.map(InbandStamp::from),
+        timestamp: sample.timestamp().map(stamp),
+        qos_mismatch: declared.and_then(|declared| qos_mismatch(declared, &observed)),
+        key,
+        values,
+        event,
+    }
+}
+
+/// A sample the runtime refused as undecodable (core §7.5, §7.6), as a
+/// watch's row: its payload rendered through `rev` as the type it does not
+/// decode as (a refused envelope's reason, a packed record's layout's), and
+/// the runtime's refusal named where that rendering read it otherwise.
+fn refused_sample(
+    rev: &Revision,
+    declared: Option<&crate::report::QosAxes>,
+    refused: zenkey::consumer::Refused,
+) -> WatchSample {
+    use zenkey::inband::Read;
+    let sample = refused.read.sample();
+    let key = sample.key_expr().as_str().to_owned();
+    let rendered = match &refused.read {
+        // An envelope's record, its layout's refusal read under CH's tag.
+        Read::Enveloped { sample, stamp, tag } => {
+            render_record(rev, &key, &sample.payload().to_bytes(), *stamp, *tag)
+        }
+        // A refused envelope, or a packed record in none: read as it
+        // arrived, under its own Encoding.
+        Read::Refused { sample, .. } | Read::Plain(sample) => render_with(
+            rev,
+            &key,
+            Member::Type,
+            Some(&sample.encoding().to_string()),
+            &sample.payload().to_bytes(),
+        ),
+    };
+    watch_sample(
+        rev,
+        declared,
+        &refused.provider,
+        refused.values,
+        sample,
+        refused.read.stamp(),
+        Some((rendered, Some(refused.why.reason()))),
+    )
+}
+
+/// The type a rendering names, for a refusal it did not read itself.
+fn declared_name(r: &crate::report::Rendered) -> String {
+    use crate::report::Rendered;
+    match r {
+        Rendered::Value { declared, .. } | Rendered::Undecodable { declared, .. } => {
+            declared.clone()
+        }
+        Rendered::Opaque { media_type } => media_type.clone(),
+        Rendered::Structural { .. } => crate::model::inband::ENVELOPE.to_owned(),
+    }
 }
 
 impl Watch {

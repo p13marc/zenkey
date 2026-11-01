@@ -3043,6 +3043,226 @@ async fn echo_renders_an_enveloped_samples_record() {
     );
 }
 
+/// `packed.v1`, the contract zenkey's packed vectors run on (core §7.6),
+/// a stream per type of `spec/conformance/packed/vectors.json`.
+fn packed_contract_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/packed/packed.v1.toml")
+}
+
+/// The key the refused records of [`refused_packed_records`] ride.
+const TIES: &str = "zk2/lab/packed/packed.v1/stream/ties";
+
+/// A put's payload: a zk2c envelope whose CH carries `tag` (core §7.5).
+fn packed_envelope(tag: u8, seq: u32, record: &[u8]) -> Vec<u8> {
+    use zenkey_model::wire::{Envelope, Run as WireRun, Seq, Stamp, Tag};
+    Envelope {
+        tag: Tag::new(tag).expect("a 4-bit tag"),
+        stamp: Stamp {
+            run: WireRun::U16(1),
+            seq: Seq::new(seq).expect("a seq"),
+        },
+        record,
+    }
+    .write()
+}
+
+/// A `packed.v1` owner at `lab/packed`, and a principal that is not the
+/// owner putting three records on its `stream/ties` every 50 ms, each one
+/// `packed:Ties`'s layout refuses (core §7.6): a `Sensor` record under
+/// Sensor's tag (`tag`), a `Ties` record cut to one byte (`length`), and a
+/// `Ties` record in no envelope, under `application/octet-stream`, which
+/// has no tag to read it by. zk2py's `packed_live` (F-436).
+async fn refused_packed_records(bus: &mut Bus) {
+    let l = load_path(&packed_contract_path());
+    let c = l
+        .contract
+        .unwrap_or_else(|| panic!("packed.v1 does not load:\n{}", l.report));
+    let doc: Value = serde_json::from_slice(
+        &std::fs::read(packed_contract_path().with_file_name("vectors.json"))
+            .expect("the packed document"),
+    )
+    .expect("JSON");
+    let tag = |ty: &str| {
+        zenkey_model::packed::layout_in(&doc, ty)
+            .expect("a packed type")
+            .tag()
+    };
+    let (sensor, ties) = (tag("Sensor"), tag("Ties"));
+    assert_ne!(sensor, ties, "Sensor's record is refused by its tag");
+    let id = c.iface.clone();
+    let names: Vec<String> = c
+        .resources
+        .iter()
+        .map(zenkey::implementation::resource_name)
+        .collect();
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("lab/packed".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(c)).expect("implement");
+    for n in names {
+        let _ = b.expose(&id, &n);
+    }
+    bus.services
+        .push(b.start().await.expect("the packed owner"));
+    let principal = client(&bus.endpoint, None).await;
+    bus.keep(Task(tokio::spawn(async move {
+        use zenoh::bytes::Encoding;
+        // Sensor's report record, 40 bits (the vectors' first write).
+        let sensor_record = [0x4c, 0xea, 0xfb, 0xdc, 0xaa];
+        let mut seq = 0u32;
+        loop {
+            seq += 2;
+            let _ = principal
+                .put(TIES, packed_envelope(sensor, seq, &sensor_record))
+                .encoding(Encoding::ZENOH_BYTES)
+                .await;
+            let _ = principal
+                .put(TIES, packed_envelope(ties, seq + 1, &[0x12]))
+                .encoding(Encoding::ZENOH_BYTES)
+                .await;
+            let _ = principal
+                .put(TIES, vec![0x02, 0x80])
+                .encoding(Encoding::APPLICATION_OCTET_STREAM)
+                .await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })));
+    wait_for(bus, &["lab/packed"]).await;
+}
+
+/// What tells [`refused_packed_records`]' three records apart in a
+/// refusal's words.
+const PACKED_REFUSALS: [&str; 3] = ["tag:", "length:", "came in none"];
+
+/// Observer §7.3 (F-436): `watch` shows each packed record its layout
+/// refuses as a row, undecodable as `packed:Ties` with its refusal named,
+/// and counts it among the nonconforming, never dropping it silently; a
+/// watch that heard one exits 0, never 2 as for silence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn watch_shows_a_packed_record_its_layout_refuses() {
+    let mut bus = Bus::bare(None).await;
+    refused_packed_records(&mut bus).await;
+    let contracts = packed_contract_path();
+    let contracts = contracts.to_str().expect("a UTF-8 path");
+    let lines = |r: &Run| -> Vec<Value> {
+        r.stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .collect()
+    };
+    let refused = |lines: &[Value], word: &str| -> Option<Value> {
+        lines
+            .iter()
+            .find(|s| {
+                s["row"] == "sample"
+                    && s["conformance"]["state"] == "undecodable"
+                    && s["conformance"]["reason"]
+                        .as_str()
+                        .is_some_and(|r| r.contains(word))
+            })
+            .cloned()
+    };
+    let run = bus
+        .until(
+            &[
+                "watch",
+                "lab/packed",
+                "packed.v1",
+                "ties",
+                "--contracts",
+                contracts,
+                "--for",
+                "2",
+                "--format",
+                "ndjson",
+            ],
+            |r| {
+                let lines = lines(r);
+                r.code == 0 && PACKED_REFUSALS.iter().all(|w| refused(&lines, w).is_some())
+            },
+        )
+        .await;
+    exits(&run, 0);
+    let lines = lines(&run);
+    for word in PACKED_REFUSALS {
+        let s = refused(&lines, word).unwrap_or_else(|| panic!("no row refused by {word}: {run}"));
+        assert_eq!(s["provider"], "lab/packed", "{s}");
+        assert_eq!(s["key"], TIES, "{s}");
+        assert_eq!(s["kind"], "put", "{s}");
+        assert_eq!(s["conformance"]["declared"], "packed:Ties", "{s}");
+        assert_eq!(s["payload"]["as"], "undecodable", "{s}");
+        assert_eq!(s["payload"]["declared"], "packed:Ties", "{s}");
+    }
+    let samples = lines.iter().filter(|l| l["row"] == "sample").count() as u64;
+    let summary = lines
+        .iter()
+        .find(|l| l["row"] == "summary")
+        .expect("a summary");
+    assert_eq!(summary["received"], samples, "every row counted: {summary}");
+    assert_eq!(
+        summary["nonconforming"], samples,
+        "every refused record is nonconforming: {summary}"
+    );
+    assert_eq!(summary["ended"], "window", "{summary}");
+}
+
+/// Observer §7.3 (F-436): `echo` shows each packed record its layout
+/// refuses undecodable as `packed:Ties`, its refusal named, and its value
+/// the type, the size and the refusal, never its bytes sniffed: a one-byte
+/// record is never shown as the control character it would read as.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn echo_never_sniffs_a_packed_record_its_layout_refuses() {
+    let mut bus = Bus::bare(None).await;
+    refused_packed_records(&mut bus).await;
+    let contracts = packed_contract_path();
+    let contracts = contracts.to_str().expect("a UTF-8 path");
+    let refused = |r: &Run, word: &str| -> Option<Value> {
+        r.stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|l| {
+                l["key"] == TIES
+                    && l["verdict"] == "undecodable"
+                    && l["decode_error"].as_str().is_some_and(|e| e.contains(word))
+            })
+    };
+    let run = bus
+        .until(
+            &[
+                "echo",
+                TIES,
+                "--contracts",
+                contracts,
+                "--count",
+                "30",
+                "--format",
+                "ndjson",
+            ],
+            |r| r.code == 0 && PACKED_REFUSALS.iter().all(|w| refused(r, w).is_some()),
+        )
+        .await;
+    exits(&run, 0);
+    for word in PACKED_REFUSALS {
+        let row = refused(&run, word).unwrap_or_else(|| panic!("no row refused by {word}: {run}"));
+        assert_eq!(row["type"], "packed:Ties", "{row}");
+        assert_eq!(row["typed"], false, "{row}");
+        let error = row["decode_error"].as_str().expect("a refusal");
+        let value = row["value"].as_str().expect("a value's text");
+        assert!(
+            value.starts_with('<') && value.contains("packed:Ties") && value.contains(error),
+            "its type, its size and its refusal, never its bytes: {row}"
+        );
+    }
+    let short = refused(&run, "length:").expect("the one-byte record");
+    assert!(
+        short["value"]
+            .as_str()
+            .is_some_and(|v| v.starts_with("<1 B ") && !v.contains('\u{12}')),
+        "a one-byte record is never sniffed as text: {short}"
+    );
+}
+
 /// `rate` and `field` over the same raw window: rate groups its keys by zk2
 /// address and resource, a key that is not zk2 its own group; field judges
 /// each path against the declared type, a path the type never declares

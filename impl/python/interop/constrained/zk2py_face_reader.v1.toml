@@ -1,0 +1,16 @@
+# zk2py's consumer across a constrained face (core §8.5, 0.78; #609, round
+# 95): a role bound to the owner of `zk2py_face.v1`, whose resources it
+# reads by their exact keys and its template by the template's selector. It
+# must load with no finding at all.
+[interface]
+name    = "zk2py_face_reader"
+major   = 1
+minor   = 0
+summary = "zk2py's reader across a constrained face"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[requires.src]
+interface = "zk2py_face.v1"

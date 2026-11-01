@@ -2,7 +2,9 @@
 //! runtime's `Consumer::for_tool`.
 //!
 //! A stream has rows and no envelope: one [`WatchSample`] per delivered
-//! sample, and one [`WatchSummary`] when it ends. R6's discards — samples
+//! sample, and per sample the runtime refused as undecodable (core §7.5,
+//! §7.6), its payload undecodable with its refusal named (observer §7.3);
+//! and one [`WatchSummary`] when it ends. R6's discards — samples
 //! put on a wildcard key, which a consumer drops by rule — are counted
 //! apart from every loss (the tooling guide's O6): they are the rule
 //! working, not the observer falling behind.
@@ -15,7 +17,8 @@ use super::observe::{Conformance, QosMismatch};
 use super::payload::PayloadRendering;
 use super::state::{InbandStamp, Stamp};
 
-/// One delivered sample.
+/// One sample: delivered, or refused as undecodable, its conformance
+/// `undecodable` and its refusal named.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WatchSample {
     /// `<system>/<service>` whose key carried it: R3's edge, observed.
@@ -75,7 +78,7 @@ pub struct WatchSummary {
     /// The key expressions subscribed, base-relative: what the watch could
     /// see, and no wider.
     pub selectors: Vec<String>,
-    /// Samples delivered.
+    /// Samples shown: delivered, or refused as undecodable.
     pub received: u64,
     /// Samples put on a wildcard key and discarded by rule (R6). Not
     /// losses.
@@ -86,8 +89,8 @@ pub struct WatchSummary {
     pub unresolved: u64,
     /// Delivered samples whose QoS differed from the resource's (§2.4).
     pub qos_mismatched: u64,
-    /// Delivered puts that failed their declared type: invalid, or
-    /// undecodable.
+    /// Puts that failed their declared type: invalid, or undecodable,
+    /// which a refused one is.
     pub nonconforming: u64,
     /// Samples dropped because this tool fell behind its own buffer:
     /// losses, which make `received` a lower bound (O6).

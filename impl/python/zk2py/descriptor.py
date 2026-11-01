@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import jcs
+from .catalog import CATALOG_ID
 from .contract import Contract
 from .lexical import FINGERPRINT, GATE_NAME, IDENT, INSTANCE_ID, is_interface_id, is_plain_chunk
 from .shape import Checker, load_schema
@@ -75,6 +76,11 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
     # Core §3.3 (0.73): "Any other spelling than 4 or 8 lowercase hex digits
     # is D002"; a descriptor that states no run is checked as any other.
     if "run" in doc and RUN.fullmatch(doc["run"]) is None:
+        codes.append("D002")
+    # Core §3.3 (0.79): "A checker reads `catalog` as optional. Any other
+    # spelling than 8 lowercase hex digits is D002, and `null` is D000" (the
+    # schema's string type). That it names a catalog held is not checked.
+    if "catalog" in doc and CATALOG_ID.fullmatch(doc["catalog"]) is None:
         codes.append("D002")
 
     caps = doc.get("capabilities", [])

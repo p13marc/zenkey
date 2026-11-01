@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.79** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.80** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1988,14 +1988,18 @@ marker read as 0. `[F: packed/vectors.json]`
 - **A fixed-point value** is a string or a JSON number. A string is a
   JSON number's text (RFC 8259 §6). So `5e-1` reads as `0.5`, and `+0.5`,
   `.5`, `1.` and `05` are no value.
-- **A JSON number** is read as the binary64 a JSON reader holds for it,
-  by that double's shortest decimal text. So `0.15` is the decimal `0.15`.
-  A value with more digits than a double keeps is given as a string.
+- **A JSON number** with no fraction and no exponent, from −2^63 to
+  2^64 − 1, is read as that integer, exactly. Any other is read as the
+  binary64 a JSON reader holds for it, by that double's shortest decimal
+  text. So `0.15` is the decimal `0.15`. A value with more digits than a
+  double keeps is given as a string.
 - **An `int`, `counter` or `time` value** is a JSON number written with
-  no fraction and no exponent. So `5.0` is a value of the wrong type.
-- **A number of magnitude 2^63 or more** is outside every range, however
-  it is written. A JSON reader with no big integers holds such integer
-  text as a double, so the two cannot be told apart.
+  no fraction and no exponent. So `5.0` is a value of the wrong type, and
+  a 64-bit counter takes 18446744073709551615.
+- **A binary64 of magnitude 2^63 or more** given for one of them is out
+  of range, not of the wrong type. A JSON reader with no big integers
+  holds integer text past 64 bits as such a double, so the two cannot be
+  told apart.
 
 `[F: packed/vectors.json]`
 

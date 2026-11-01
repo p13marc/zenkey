@@ -1,5 +1,5 @@
 {
-  "description": "core §7.6, packed records. Written by an independent reading of the text (Python, standard library), checked, never blessed. `schema` is one packed document; every case names one of its types. `layouts`: a type → its layout form (the root's fields before the first marker, without names, then \"...\" where the root ends at one), the sha256 of the form's JCS bytes in hex, the tag (the low four bits of that hash's last byte), each item's `width` and `offset` (the bit where it starts, null once an optional field or a marker before it makes it vary), and `min_bits` and `max_bits`, the shortest and longest record this revision writes, before the pad. `writes`: a type, the deployment `epoch` in seconds where its fields need one, and a value → the record's `bits` before the pad, the `pad` and the bytes in `hex`, or `{\"refused\": token}` (the writer's: `missing`, a field not given; `unknown`, a member the type does not have; `value`, a value of the wrong JSON type, a name not declared or a decimal that does not read; `range`, a value with no code; `epoch`, a time field and no epoch). A fixed-point string is a JSON number's text (RFC 8259 §6), and a JSON number is read as the binary64 a JSON reader holds for it, by that double's shortest decimal text. An `int`, `counter` or `time` value is a JSON number written as an integer: one with a fraction or an exponent is `value`, unless its magnitude is 2^63 or more, which is `range`, since a JSON reader without big integers holds integer text past 64 bits that way (core §7.6, \"What a writer takes\"). An accepted write reads back, under the type's tag, to `reads_as` where given, else to its value. `reads`: a type, a tag, the record's bytes in hex and the epoch → `{\"value\": the JSON reading}` or `{\"refused\": token}`, the first in §7.6's order: `tag`; then, field by field, `length` (the record ends before a bit the layout needs) and `code` (an unused code); `extension` (a marker read as 1 and no field present after it); `length` (a byte after the pad); `pad` (a pad bit set). A marker read as 1 at the end of the reader's layout ends the reading: the rest is a later revision's, and must hold at least one bit (`length`).",
+  "description": "core §7.6, packed records. Written by an independent reading of the text (Python, standard library), checked, never blessed. `schema` is one packed document; every case names one of its types. `layouts`: a type → its layout form (the root's fields before the first marker, without names, then \"...\" where the root ends at one), the sha256 of the form's JCS bytes in hex, the tag (the low four bits of that hash's last byte), each item's `width` and `offset` (the bit where it starts, null once an optional field or a marker before it makes it vary), and `min_bits` and `max_bits`, the shortest and longest record this revision writes, before the pad. `writes`: a type, the deployment `epoch` in seconds (0 where none is given, as a deployment that states none has E = 0), and a value → the record's `bits` before the pad, the `pad` and the bytes in `hex`, or `{\"refused\": token}` (the writer's: `missing`, a field not given; `unknown`, a member the type does not have; `value`, a value of the wrong JSON type, a name not declared or a decimal that does not read; `range`, a value with no code). A fixed-point string is a JSON number's text (RFC 8259 §6). A JSON number with no fraction and no exponent, from −2^63 to 2^64 − 1, is read as that integer, exactly, and any other as the binary64 a JSON reader holds for it, by that double's shortest decimal text. An `int`, `counter` or `time` value is a JSON number written as an integer: one with a fraction or an exponent is `value`, unless its magnitude is 2^63 or more, which is `range`, since a JSON reader without big integers holds integer text past 64 bits that way; no such cut applies to a fixed-point value (core §7.6, \"What a writer takes\"). An accepted write reads back, under the type's tag, to `reads_as` where given, else to its value. `reads`: a type, a tag, the record's bytes in hex and the epoch (0 where none is given) → `{\"value\": the JSON reading}` or `{\"refused\": token}`, the first in §7.6's order: `tag`; then, field by field, `length` (the record ends before a bit the layout needs) and `code` (an unused code); `extension` (a marker read as 1 and no field present after it); `length` (a byte after the pad); `pad` (a pad bit set). A marker read as 1 at the end of the reader's layout ends the reading: the rest is a later revision's, and must hold at least one bit (`length`).",
   "schema": {
     "description": "core §7.6's vectors: every type the cases read",
     "types": {
@@ -1592,6 +1592,19 @@
       }
     },
     {
+      "note": "a count written with an exponent, a binary64 of magnitude 2^63 or more: out of range, though its integer text would be a count",
+      "type": "Counters",
+      "value": {
+        "c1": 0,
+        "c7": 0,
+        "c33": 0,
+        "c64": 1e19
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
       "note": "ties to even: 0.25 / 0.5 is 0.5, so code 0",
       "type": "Ties",
       "value": {
@@ -1938,7 +1951,7 @@
       }
     },
     {
-      "note": "a time field with no epoch in hand",
+      "note": "a time field with no epoch given: the deployment states none, so E = 0, and its 32 bits are Unix seconds",
       "type": "Clock",
       "value": {
         "at": 1700000000000,
@@ -1946,7 +1959,9 @@
         "valid": true
       },
       "expect": {
-        "refused": "epoch"
+        "hex": "6553f1006553f1000020",
+        "bits": "011001010101001111110001000000000110010101010011111100010000000000000000001",
+        "pad": 5
       }
     },
     {
@@ -2111,6 +2126,18 @@
       "expect": {
         "hex": "ffffffffffffffff",
         "bits": "1111111111111111111111111111111111111111111111111111111111111111",
+        "pad": 0
+      }
+    },
+    {
+      "note": "a 64-bit int: 2^62 - 1, integer text read as that integer exactly, never as the binary64 2^62",
+      "type": "Wide64",
+      "value": {
+        "v": 4611686018427387903
+      },
+      "expect": {
+        "hex": "7fffffffffffffff",
+        "bits": "0111111111111111111111111111111111111111111111111111111111111111",
         "pad": 0
       }
     },
@@ -2396,6 +2423,19 @@
         "value": {
           "at": 1762000123000,
           "at_ms": 1762000123456,
+          "valid": true
+        }
+      }
+    },
+    {
+      "note": "no epoch given: E = 0, so the 32 bits are Unix seconds",
+      "type": "Clock",
+      "tag": 10,
+      "hex": "6553f1006553f1000020",
+      "expect": {
+        "value": {
+          "at": 1700000000000,
+          "at_ms": 1700000000000,
           "valid": true
         }
       }

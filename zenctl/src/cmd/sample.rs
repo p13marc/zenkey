@@ -153,6 +153,12 @@ impl Line {
             Rendered::Opaque { media_type } => {
                 serde_json::Value::String(format!("<{media_type}, {} B>", r.size))
             }
+            // A packed record is bits, never text (core §7.6): one its
+            // layout refuses, or that came in no envelope, is its declared
+            // type, its size and its refusal, never sniffed (observer §7.3).
+            Rendered::Undecodable { declared, .. } if declared.starts_with("packed:") => {
+                serde_json::Value::String(crate::render::payload_text(r))
+            }
             // The record's text, never a refused envelope's bytes sniffed.
             Rendered::Undecodable { .. } => {
                 serde_json::Value::String(zenkey_fleet::model::inband::structural_text(

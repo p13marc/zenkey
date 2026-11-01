@@ -5122,6 +5122,138 @@ gives E = 0. **F-436** (bug): the reference's `zenctl watch` and `zenctl
 echo` beside observer §7.3's honest rendering. See "At core 0.76 and
 observer 0.16" in `SPEC-FINDINGS.md`.
 
+## Core 0.77 to 0.80 and `observer.md` 0.17 and 0.18: the catalog and keys across a face (round 95)
+
+Four core versions and two observer texts landed since the mend after
+round 94:
+- **core 0.77 and observer 0.17** (#1011) label zenoh's defaults as
+  1.10.1's, beside the fork `zm-1.10.2-r1`'s, and add a stall bound to
+  `budget/lossless.json`;
+- **core 0.78 and observer 0.18** (#980 C1b) add §8.5's "Keys across the
+  face", its tool's half in observer §7.5, and Appendix B's facts on how
+  zenoh 1.10.1 shortens a put's key, measured by `constrained.md` §7;
+- **core 0.79** (#980 C1a) adds §8.6's deployment catalog, §3.3's
+  descriptor `catalog`, and §7.6's epoch, the catalog's else 0;
+- **core 0.80** (#1021, on `fix-packed-followups`) answers F-434 and
+  F-435.
+
+zk2py diffed every keyword sentence of `core.md` and `observer.md` between
+69af15a6 and af59a1ae, and read 0.80's diff. None is gone or reworded,
+and each new one is its changelog's. **No rule changed beyond what the
+changelogs state.** `lossless.json`'s new case, the fork's 10 s
+`wait_before_close` beside a 10 s lease, gives 7.5 s and passes.
+
+### The classes zk2py claims
+
+Unchanged since round 89: the **owner**, **consumer**, **caller** and
+**observer** classes, each at the full level, and not the deployment
+class. §8.6's rules that name no role are static, so they are in every
+class.
+
+### Its walk of `RULES.md` at 0.80
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 63 | 52 | 3 | 8 |
+| consumer | 17 | 14 | 0 | 3 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 57 | 53 | 2 | 2 |
+| static, in every class | 49 | 47 | 0 | 2 |
+
+- **199 rows walked of `RULES.md`'s 201, none without a verdict.** The
+  eight new rows were "not yet" in the walk's commit, and each is met
+  now: §3.3's catalog id (owner), §8.5's two SHOULDs (consumer), §8.6's
+  reader and observer §7.5 (observer), and §8.6's reading, id and
+  succession (static). §7.6's E = 0, beyond the index, is re-keyed to
+  0.79's "Where none is, E is 0".
+- **Beyond the index:** twenty-three, all met. Two are new: §8.6's owner
+  counting its `time` fields from its catalog's epoch, and observer §8.2's
+  "Across a constrained face the three are too wide".
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's two
+  decoding MUSTs.
+
+### What round 95 changed in zk2py
+
+- **`catalog`** (core §8.6): `read` reads `zk2-catalog/1` strictly, each
+  number kept as its text, and refuses in §8.6's order. `catalog_id` is
+  the first 4 bytes of the sha256 of its JCS bytes. `succession` refuses
+  `epoch_moved`, `reassigned`, `removed` and `lineage`, one step only.
+  `resolve` reads an index or the epoch through the named catalog, or the
+  first held whose lineage holds it, below that item's count:
+  `unknown_catalog`, `unknown_index`.
+- **The descriptor checker:** §3.3's `catalog`, D002 for any spelling but
+  8 lowercase hex digits, and the schema's D000 for `null`.
+- **The owner:** `Owner.catalog` states its id in the descriptor, and
+  `Owner.writing_epoch` dates packed `time` fields from its epoch.
+- **`face`** (core §8.5, observer §7.5): a resource's scope, its exact key
+  or its template's selector, a rest parameter `*/**` and an event's ULID
+  chunk `*` (F-438), a parameter its role binds its value (F-439).
+  - The consumer: `Owner.role_keys` subscribes a template named with its
+    parameters (`stream/axis/{axis}`) by that selector, nothing wider.
+  - The tool: `echo_tool --across-face SYSTEM/SERVICE` with `--contracts`
+    subscribes by the contracts' scopes, a subscriber each, refused beside
+    a SELECTOR. Its scope names what it excludes: `@op`, `@zk`, `@adv` and
+    every key no held contract declares there.
+- **`echo_tool --catalog FILE`:** the catalog's epoch for packed `time`
+  fields, a refused catalog or one beside `--epoch` refused input, exit 2.
+- **`packed`** at core 0.80: integer text from −2^63 to 2^64 − 1 read
+  exactly, any other number a binary64 (`json_number`). The codec, handed
+  no epoch, writes and reads under E = 0, and the writer's `epoch` token is
+  gone (F-434, F-435 resolved).
+- **The runner:** a `catalog` family over `catalog/`'s three files, 123
+  cases.
+- **`readings`:** F-427's pin reads 0.80's sentence, and F-434 and F-435
+  read as resolved. Round 95's own pin the sentences F-437 to F-441
+  quote, and show zk2py's readings through `face`, `catalog`, the owner's
+  writing epoch and the echo tool's refusals.
+
+**`readings`: 813, up from 801.** **`just py-conformance`: 4351 of
+4351**, `catalog` 123 among them, `descriptors` 58 and `packed` 250.
+
+**Live** (`python -m zk2py.constrained_live`), `constrained.md` §7 with
+zk2py alone, three runs: one router (timestamping disabled, core §8.2),
+zk2py's owner at `site/rig` its client, and each step's far client
+through `CountingProxy`, a TCP relay that reads the bytes toward the far
+client as zenoh's batches. Each put's record is 8 bytes. Bytes are a
+batch's, without the TCP framing's two:
+
+| Step | Subscription | A put | Its key's text |
+|---|---|---|---|
+| 0 | the owner given a catalog | descriptor states `0d389b8e`, no D code | |
+| 1 | `…/stream/level`, exact | **25 B** | none |
+| 2 | `…/stream/axis/*`, the template's selector | **31 B** | `/roll` |
+| 3 | `zk2/**` | **61–62 B** | its 36 B after `zk2`, and a length byte |
+| 4 | `…/state/mode`, exact, then a GET | 27 B a put, **87–91 B the reply** | the reply's whole key |
+| 5 | zk2py's tool, `face.scopes` at `site/rig` | 25, 31 and 27 B | none past the scope |
+| 6 | zk2py's consumer bound to `site/rig` | 25 and 31 B | none past the scope |
+| 7 | zk2py's consumer bound to `site/*` | 57 and 61 B | all after `zk2/site` (F-439) |
+| 8 | `…/stream/path/*/**`, `…/events/alarm/*` | 30 B, 55 B | `/a/b`; the `/<ulid>` (F-438) |
+
+- **§7's four expectations hold,** and step 3 exceeds step 1 by the key's
+  text after `zk2` and its length byte. A batch's frame carries its
+  sequence number as a varint, so a batch differs by a byte between
+  sessions, as the reference's 45–46 B do. zk2py's payload is smaller than
+  the reference's, so its bytes differ by a constant.
+- **§8.5's two SHOULDs are met** by zk2py's consumer through an exact
+  binding (step 6), and **observer §7.5's** by its tool (step 5), each at
+  the steps' own sizes. A wildcard binding cannot meet the first without
+  presence (step 7, F-439).
+
+**The black boxes** (69af15a6) predate core 0.77: their `zk2` knows no
+`catalog`, and their `zenctl` takes no `--across-face`, so nothing of
+this round ran against the reference.
+
+**Not run:**
+- `constrained.md` §7 against the reference, and F-436's fix in #1021,
+  for the same reason;
+- `budget.md` §1 again: its routers now state `wait_before_close` 5 s,
+  where zk2py's run 1.10.1's 5 s default without stating it;
+- §8.5's fourth step, a router-declared prefix lost on a lossy link, which
+  needs #989's lab, as 0.78 says.
+
+Round 95 found F-437 to F-441, five, none a blocker. See "At core 0.79
+and observer 0.18" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -5155,10 +5287,12 @@ observer 0.16" in `SPEC-FINDINGS.md`.
     §1.4's canonical form, §1.5's new session at a re-mint and §3.3's 1 KB.
     S7's consumer rule is kept from the first value since round 91. The
     deployment class is not claimed.
-  - a packed record's deployment epoch other than 0: no contract carries
-    one yet (core 0.76, §7.6; #980's catalog will), so zk2py's owner and
-    readers take 0 unless given one (`Owner.packed_epoch`, the echo tool's
-    `--epoch`), and the live pairings run at 0 alone.
+  - a packed record's deployment epoch other than 0, live: the catalog
+    states one since core 0.79 (§8.6), and zk2py's owner takes one
+    (`Owner.catalog`, `Owner.packed_epoch`) and its echo tool too
+    (`--catalog`, `--epoch`), but the live packed pairings run at 0 alone.
+    zk2py's echo tool reads no descriptor, so on a host bus it cannot
+    resolve the catalog an owner names (F-440).
   - of a `config.v1` owner fed through `desired.v1` (§2.16, round 88): a
     watch session (it reads its author's presence every 500 ms), an
     archive's last-known, and the reference's "wait that cannot end"
@@ -5231,6 +5365,7 @@ impl/python/
     bundle.py         §9.6      build, verify
     history.py        §9.7      the history check
     descriptor.py     §3.3      the D codes
+    catalog.py        §8.6      the deployment catalog: its reading, id, succession and a reader's resolution (round 95)
     cbor.py, envelope.py §5.2   the error envelope
     zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
                                 envelope first (round 93)
@@ -5322,7 +5457,12 @@ impl/python/
                                 and the verbatim kinds it excludes, in its report and on stderr; NDJSON rows with the
                                 scope on stderr alone; each payload sniffed, its row saying which case and where it
                                 stopped resolving the key (observer §7.3, 0.12); with --contracts, a packed record
-                                decoded or named undecodable (0.16)
+                                decoded or named undecodable (0.16); --across-face by observer §7.5's scopes, and
+                                --catalog's epoch (round 95)
+    face.py           §8.5, observer §7.5 a resource's scope across a constrained face: its exact key or its
+                                template's selector (round 95)
+    constrained_live.py §8.5   constrained.md §7 live, zk2py's owner, tool and consumer through a byte-counting
+                                proxy, and an owner given a catalog (round 95)
     decoding.py       observer §7.3 the decode order: a held JSON Schema type on its Encoding's wire, sniffing, and what a
                                 tool says of a payload whose declared type it does not hold (0.12)
     judgement.py      observer §1 the judgement shape: a profile's answer read as Established, NotAsked, Unobservable or not
@@ -5349,7 +5489,8 @@ impl/python/
                       and the role of zk2py's config.v1 owner; classes/ zk2py_replica.v1, three operations
                       for the owner rules round 89's walk found (§5.1, §5.2, O6); state/ zk2py_ground.v1,
                       state.md's plans, status and streams at 0.73, and zk2py_relay.v1, §13's governed stream;
-                      packed/ zk2py_packed_reader.v1, the consumer of the Rust tests' packed.v1
+                      packed/ zk2py_packed_reader.v1, the consumer of the Rust tests' packed.v1;
+                      constrained/ zk2py_face.v1 and zk2py_face_reader.v1, constrained.md §7's owner and consumer
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.

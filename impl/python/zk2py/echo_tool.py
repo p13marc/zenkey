@@ -1,7 +1,8 @@
 """A generic watcher: ``python -m zk2py.echo_tool -c ENDPOINT [--for SECS]
-[--count N] [--format json|ndjson] [--contracts FILE]… [--epoch SECS]
-[SELECTOR]`` (#609, rounds 83 and 84; packed records since the mend after
-round 94).
+[--count N] [--format json|ndjson] [--contracts FILE]… [--epoch SECS |
+--catalog FILE] [--across-face SYSTEM/SERVICE]… [SELECTOR]`` (#609, rounds
+83 and 84; packed records since the mend after round 94; across a face and
+the catalog since round 95).
 
 Written from ``spec/observer.md`` §8.1 and §8.2 (text 0.2; the medium, text
 0.3, F-292) and ``spec/scenarios/grammar.md`` §1 step 5 (core 0.59, F-287),
@@ -66,6 +67,22 @@ still sniffed, and ``declared_type`` says so: decoding protobuf and JSON
 Schema types field by field needs more than zk2py's echo holds (README,
 "What it does not cover").
 
+**Across a constrained face** (core §8.5, 0.78; observer §7.5, text 0.18).
+``--across-face SYSTEM/SERVICE``, repeatable, needs ``--contracts`` and no
+``SELECTOR``: the tool subscribes by the scopes the contracts in hand give
+for those addresses, each concrete resource by its exact key and each
+template by its selector, an event's ULID chunk a wildcard
+(:func:`zk2py.face.scopes`), one subscriber each. No descriptor crosses, so
+the addresses and their contracts are the deployment's word. The scope says
+what it excludes: operations, control keys, ``@adv``, and every key no held
+contract declares there (observer §8.2).
+
+**A catalog** (core §8.6, 0.79). ``--catalog FILE`` is the deployment's
+catalog, read as §8.6 reads one; a refused one is refused input, exit 2,
+naming the refusal. Its epoch is the one packed ``time`` fields are read
+under, in place of ``--epoch``: across a face, which catalog an owner writes
+under is the deployment's word.
+
 It judges nothing, so it exits 0 once it has watched, and 2 when it could
 not (the session did not open, the selector is not a key expression, or
 its standard output refused a write).
@@ -109,6 +126,18 @@ def scope_of(selector: str) -> dict[str, Any]:
     else:
         says = f"{selector} excludes no verbatim kind (observer §8.2)"
     return {"selector": selector, "watched": watched, "excluded": excluded, "says": says}
+
+
+def face_scope(selectors: list[str], addresses: list[str]) -> dict[str, Any]:
+    """Observer §8.2 for observer §7.5's scopes: what they watch and what
+    they exclude."""
+    watched = sorted({sel.split("/")[4] for sel in selectors if len(sel.split("/")) > 4})
+    says = (f"across a constrained face, {len(selectors)} scopes from the contracts in hand at "
+            f"{', '.join(addresses)}: each concrete resource by its exact key and each template by its selector "
+            "(observer §7.5); they exclude operations (@op), control keys (@zk), @adv sidecars, and every key no "
+            "held contract declares at those addresses (observer §8.2)")
+    return {"selector": None, "selectors": selectors, "across_face": addresses, "watched": watched,
+            "excluded": ["@op", "@zk", "@adv"], "says": says}
 
 
 def scope_line(scope: dict[str, Any]) -> str:
@@ -306,7 +335,7 @@ def writer(out: TextIO) -> Callable[[dict[str, Any]], None]:
     return line
 
 
-def watch(session: Any, selector: str, window_s: float, count: int = 0,
+def watch(session: Any, selector: str | list[str], window_s: float, count: int = 0,
           listening: Any = None, each: Any = None, held: Held | None = None,
           epoch: int | None = None) -> list[dict[str, Any]]:
     """Every sample the selector delivers within the window, or until
@@ -314,7 +343,8 @@ def watch(session: Any, selector: str, window_s: float, count: int = 0,
     subscriber is declared, the window's start, and ``each`` with every
     row in arrival order, on the caller's thread, never in zenoh's
     callback (:class:`Rows`). What ``each`` raises ends the window and
-    reaches the caller."""
+    reaches the caller. A list of selectors, observer §7.5's scopes, is a
+    subscriber each."""
     import zenoh
 
     rows = Rows(count)
@@ -325,20 +355,22 @@ def watch(session: Any, selector: str, window_s: float, count: int = 0,
         rows.offer(row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(payload), str(s.encoding),
                           payload, att, held, epoch))
 
-    sub = session.declare_subscriber(selector, zenoh.handlers.Callback(received))
+    subs = [session.declare_subscriber(sel, zenoh.handlers.Callback(received))
+            for sel in ([selector] if isinstance(selector, str) else selector)]
     if listening is not None:
         listening()
     try:
         rows.pump(each, time.monotonic() + window_s)
     finally:
-        sub.undeclare()
+        for sub in subs:
+            sub.undeclare()
     rows.rest(each)
     return rows.rows()
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.echo_tool", description=__doc__.split("\n")[0])
-    ap.add_argument("selector", nargs="?", default="zk2/**")
+    ap.add_argument("selector", nargs="?", default=None)
     ap.add_argument("-c", "--connect", required=True)
     ap.add_argument("--for", dest="window", type=float, default=5.0)
     ap.add_argument("--count", type=int, default=0)
@@ -347,7 +379,35 @@ def main(argv: list[str] | None = None) -> int:
                     help="a contract file the tool holds, one revision per interface (repeatable)")
     ap.add_argument("--epoch", type=int, default=None,
                     help="the deployment epoch, Unix seconds, for packed time fields (default 0, core §7.6)")
+    ap.add_argument("--catalog", default=None,
+                    help="the deployment's catalog, whose epoch packed time fields count from (core §8.6)")
+    ap.add_argument("--across-face", dest="across_face", action="append", default=[],
+                    help="an address across a constrained face, subscribed by the scopes of the contracts held "
+                         "(observer §7.5; repeatable, needs --contracts, not with a SELECTOR)")
     args = ap.parse_args(argv)
+    if args.across_face and (args.selector is not None or not args.contracts):
+        print("echo: --across-face needs --contracts and no SELECTOR: its scopes are the contracts' (observer §7.5)",
+              file=sys.stderr)
+        return 2
+    catalog_epoch: int | None = None
+    if args.catalog is not None:
+        from pathlib import Path
+
+        from . import catalog
+
+        if args.epoch is not None:
+            print("echo: --catalog states the epoch: not with --epoch (core §8.6)", file=sys.stderr)
+            return 2
+        try:
+            held_catalog = catalog.read(Path(args.catalog).read_bytes())
+        except OSError as e:
+            print(f"echo: --catalog: {e}", file=sys.stderr)
+            return 2
+        except catalog.Refused as e:
+            print(f"echo: --catalog: refused, {e.token}: {e} (core §8.6)", file=sys.stderr)
+            return 2
+        catalog_epoch = catalog.resolve([held_catalog], held_catalog.id).epoch
+    selector = args.selector if args.selector is not None else "zk2/**"
     held = None
     if args.contracts:
         from pathlib import Path
@@ -363,11 +423,22 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as e:  # noqa: BLE001 - a contract it cannot hold is refused input
             print(f"echo: --contracts: {e}", file=sys.stderr)
             return 2
-    try:
-        scope = scope_of(args.selector)
-    except Exception as e:  # noqa: BLE001 - a selector zenoh refuses is no scope
-        print(f"echo: {args.selector!r}: not a key expression: {e}", file=sys.stderr)
-        return 2
+    # The epoch packed time fields are read under, once every input is
+    # checked: the catalog's, else --epoch, else 0 (core §7.6, §8.6).
+    epoch = catalog_epoch if catalog_epoch is not None else args.epoch
+    watched: str | list[str] = selector
+    if args.across_face:
+        from . import face
+
+        assert held is not None
+        watched = face.scopes(held.by_iface.values(), args.across_face)
+        scope = face_scope(watched, args.across_face)
+    else:
+        try:
+            scope = scope_of(selector)
+        except Exception as e:  # noqa: BLE001 - a selector zenoh refuses is no scope
+            print(f"echo: {selector!r}: not a key expression: {e}", file=sys.stderr)
+            return 2
     try:
         session = live.open_client(args.connect)
     except Exception as e:  # noqa: BLE001 - no session, no watch
@@ -378,12 +449,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"echo: {live.memlock_said()}", file=sys.stderr, flush=True)
     try:
         start = time.monotonic()
-        samples = watch(session, args.selector, args.window, args.count,
+        samples = watch(session, watched, args.window, args.count,
                         lambda: print("echo: listening", file=sys.stderr, flush=True),
-                        writer(sys.stdout) if args.format == "ndjson" else None, held, args.epoch)
+                        writer(sys.stdout) if args.format == "ndjson" else None, held, epoch)
         watched_s = round(time.monotonic() - start, 3)
         if args.format == "json":
-            doc = {"report": "echo", "selector": args.selector, "scope": scope, "window_s": watched_s,
+            doc = {"report": "echo", "selector": scope["selector"], "scope": scope, "window_s": watched_s,
                    "samples": samples, "notes": [scope["says"], SNIFFED if held is None else HELD], "exit": 0}
             try:
                 sys.stdout.write(json.dumps(doc, indent=2) + "\n")
