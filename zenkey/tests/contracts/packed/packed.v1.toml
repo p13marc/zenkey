@@ -82,5 +82,5 @@ cardinality = 8
 [resources.mode_change]           # an event
 kind      = "event"
 type      = "packed:Mode"
-rate      = "low"
+rate      = "burst(1000/h)"
 retention = "1d"
