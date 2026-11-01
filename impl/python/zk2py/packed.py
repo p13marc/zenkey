@@ -197,6 +197,14 @@ class Field:
 Item = Field | str  # a field, or MARKER
 
 
+def _as_jcs_numbers(form: list[Any]) -> list[Any]:
+    """A layout form with each integer outside JCS's exact domain made the
+    binary64 RFC 8785 writes for it (``packed/vectors.json``'s ``Wide64``)."""
+    def num(v: Any) -> Any:
+        return float(v) if jcs.is_json_integer(v) and abs(v) > jcs.INT_MAX else v
+    return [{k: num(v) for k, v in it.items()} if isinstance(it, dict) else it for it in form]
+
+
 @dataclass
 class Record:
     """One packed type: its items in order."""
@@ -217,7 +225,10 @@ class Record:
         return out
 
     def layout_sha256(self) -> str:
-        return hashlib.sha256(jcs.dumps(self.layout_form())).hexdigest()
+        """The sha256 of the layout form's JCS bytes. An ``int``'s bound
+        past ±(2^53 − 1) is written as RFC 8785 writes a double (core 0.76's
+        ``Wide64``: such a type is in no contract, E028, but has a tag)."""
+        return hashlib.sha256(jcs.dumps(_as_jcs_numbers(self.layout_form()))).hexdigest()
 
     @property
     def tag(self) -> int:
@@ -376,8 +387,7 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
             return f.reserved_codes()[v]
         raise Refused("value", f"{f.name}: {_show(v)} is no value and no reserved code it declares")
     if f.type == "int":
-        if not jcs.is_json_integer(v):
-            raise Refused("value", f"{f.name}: an int's value is an integer")
+        _integer_input(f, v, "an int's value is an integer")
         if not f.minimum <= v <= f.maximum:
             raise Refused("range", f"{f.name}: {_show(v)} is outside {f.minimum} to {f.maximum}")
         return v - f.minimum
@@ -401,14 +411,12 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
             raise Refused("value", f"{f.name}: a bool's value is true or false")
         return int(v)
     if f.type == "counter":
-        if not jcs.is_json_integer(v):
-            raise Refused("value", f"{f.name}: a counter's value is an integer")
+        _integer_input(f, v, "a counter's value is an integer")
         if not 0 <= v < 1 << 64:
             raise Refused("range", f"{f.name}: a count from 0 to 2^64 − 1")
         return v % (1 << f.width)
     # time
-    if not jcs.is_json_integer(v):
-        raise Refused("value", f"{f.name}: a time is an integer of Unix milliseconds")
+    _integer_input(f, v, "a time is an integer of Unix milliseconds")
     if epoch is None:
         raise Refused("epoch", f"{f.name}: a time field and no deployment epoch")
     # ⌊(t − 1000E) / 1000⌋ from 0 to 2^32 − 1 is t from 1000E to 1000(E +
@@ -418,6 +426,25 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
     since = v - 1000 * epoch
     seconds = since // 1000
     return (seconds << 10) | (since % 1000) if f.ms else seconds
+
+
+#: core 0.76 §7.6 "A number of magnitude 2^63 or more is outside every
+#: range, however it is written."
+_BEYOND = 1 << 63
+
+
+def _integer_input(f: Field, v: Any, why: str) -> None:
+    """An ``int``, ``counter`` or ``time`` value (core 0.76 §7.6 "What a
+    writer takes"): a JSON number written with no fraction and no exponent,
+    so ``5.0`` is ``value``; one written so whose magnitude is 2^63 or more
+    is ``range``, as ``packed/vectors.json`` reads the text ("one with a
+    fraction or an exponent is `value`, unless its magnitude is 2^63 or
+    more"). Integer text is read by its exact value, so a 64-bit counter
+    takes 2^64 − 1 (the vectors' write 21; F-434 asks the text to say so)."""
+    if isinstance(v, float) and abs(v) >= _BEYOND:
+        raise Refused("range", f"{f.name}: a number of magnitude 2^63 or more")
+    if not jcs.is_json_integer(v):
+        raise Refused("value", f"{f.name}: {why}")
 
 
 def decode(f: Field, code: int, epoch: int | None) -> Any:
@@ -747,6 +774,21 @@ def seal(rec: Record, value: Any, run: int, seq: int, width: int = 16, epoch: in
     from . import zk2c
 
     return zk2c.write("mutation", width, run, seq, rec.tag, rec.write(value, epoch))
+
+
+#: Core 0.76 §7.6 "The deployment epoch": "One that states none has E = 0,
+#: the Unix epoch"; observer 0.16 §7.3: a tool "takes the one its deployment
+#: states, and 0, the Unix epoch, where it states none". zk2py's owner and
+#: readers hand the codec this where no epoch is given (F-433); the codec
+#: itself, handed none, still refuses ``epoch`` as ``vectors.json`` asks
+#: (F-435).
+DEPLOYMENT_EPOCH = 0
+
+
+def deployment_epoch(stated: int | None) -> int:
+    """The epoch a writer or reader holds: the one its deployment states,
+    else 0 (core 0.76 §7.6)."""
+    return DEPLOYMENT_EPOCH if stated is None else stated
 
 
 def open_put(rec: Record, payload: bytes, epoch: int | None = None) -> tuple[Any, dict[str, Any]]:

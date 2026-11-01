@@ -1,5 +1,6 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.75), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 94, and the mend after #926 part 5).
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.76), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 94, the mend after #926 part 5 and the
+mend after round 94).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
 verdict, with what shows it, and on standard error the counts and every
@@ -431,12 +432,14 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "timing_tool and telemetry_scenarios across a face: owners unseen, never down (link_scenarios §6)"),
     ("observer", "observer §7.1", "A tool that is not a service MUST", MET,
      "owner.resolve_providers with no system raises"),
+    # observer 0.16 (#979 B2): the kinds name `packed`.
     ("observer", "observer §7.3", "Such a tool MUST decode each payload by its declared", NOT_MET,
      "observer 0.10 asks each payload decoded by its own declared type (F-379's reading (b)): the profiles' readers "
      "(alarms, telemetry, desired_tool, health, config) meet it, each payload they judge being their profile's "
      "type, which they decode; echo_tool holds no contract, so since 0.12 it sniffs each payload as a zk2 key's "
      "whose contract is not in hand (F-406), but zk2py has no tool that holds a contract per key and decodes "
-     "protobuf or a JSON Schema type field by field, so types.md §2 is not run"),
+     "protobuf or a JSON Schema type field by field, so types.md §2 is not run. Observer 0.16 names packed too, "
+     "which no zk2py tool decodes yet"),
     # observer 0.14 (#976): the envelope first.
     ("observer", "observer §7.3", "A tool that shows or judges a payload MUST read a sample on a zk2 data key", MET,
      "zk2c.carries and zk2c.read_sample, in every reader of a data sample: seed.LateJoiner, live.get_state,  "
@@ -521,7 +524,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("static", "core §7.6", "An implementation that writes a record MUST write the bits above", MET,
      "packed.Record.write (packed family: every write's bits, pad and bytes) (round 94, core 0.75)"),
     ("static", "core §7.6", "An implementation MUST NOT write a record for a value that has no code", MET,
-     "packed.encode's refusals, vectors.json's tokens (packed family) (round 94, core 0.75)"),
+     "packed.encode's refusals, vectors.json's tokens: a fixed-point value by its rounded code (F-424), a count  "
+     "from 0 to 2^64 − 1 (F-430), a number past 2^63 range (Wide64; F-434) (packed family) (round 94, core  "
+     "0.75; core 0.76, the mend after round 94)"),
+    # core 0.76 (F-425): the writer's unknown and missing, as a MUST NOT.
+    ("static", "core §7.6", "An implementation MUST NOT write a record for an object that holds a member its type", MET,
+     "packed.Record.write_bits: unknown, then missing over the whole layout, before any bit (packed family's  "
+     "unknown and missing writes; readings) (core 0.76's F-425, the mend after round 94)"),
     ("static", "core §7.6", "An implementation that reads a record of a packed type MUST refuse it", MET,
      "packed.Record.read, in §7.6's order (packed family: every read, through the envelope too) "
      "(round 94, core 0.75)"),
