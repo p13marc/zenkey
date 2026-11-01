@@ -3,6 +3,39 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.86 — 2026-11-01: §11.1's Consume grants a `freshness.v2` heartbeat (#978)
+
+Epic #975 makes the wire bandwidth-first. `freshness.v2` confirms a
+state member by its owner's heartbeat, never by a re-put (core 0.82,
+#978's F3). The heartbeat is a put on
+`zk2/<system>/<service>/freshness.v2/stream/heartbeat/<iface>`. #978's F4
+moves `health.v1`, `alarms.v1` and `config.v1` onto it. A far consumer
+under `deny` held no grant on that key. It heard each member put once,
+then no confirmation, and each member it followed went stale. This
+version is F4's core half, after #980's C1c (0.84) and zk2py
+round 96's answers (0.85).
+
+**Changed: §11.1's Consume.** It adds each heartbeat a binding needs.
+Take a bound interface whose contract uses `freshness.v2`, and a binding
+that consumes one of its collections (§7.5). Consume then holds the
+subscription to each named provider's
+`…/freshness.v2/stream/heartbeat/<iface>`. Own already covers the
+owner's put: the key is under its prefix.
+
+**The reference.** `zenctl acl gen` grants it with the binding's other
+data keys (`zenkey_fleet::model::acl`). Each owner of a covered interface
+serves it, for the fan-in and the `allow` posture's complement. The plans
+in `zenkey-fleet/tests/fixtures/acl/` carry it. The walkthrough's
+`zenwatch` binding over `*/*` holds
+`zk2/*/*/freshness.v2/stream/heartbeat/health.v1`.
+
+**Deliberately not changed.**
+- **No keyword rule.** §11.1's table states grant shapes, and RULES.md
+  lists no row of it.
+- **No GET of the heartbeat key.** A re-read is S4's GET of the
+  collection (`freshness.v2` §2.5), which Consume already holds.
+- **Call and Tool** follow Consume, as before: a tool holds the heartbeat
+  of what it binds.
 ## 0.85 — 2026-11-01: zk2py round 96's findings answered (#978, #981)
 
 zk2py's round 96 read core 0.81 to 0.83, `freshness.v2` 0.1, `link.v1`

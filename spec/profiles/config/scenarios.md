@@ -33,9 +33,9 @@ that reads `config.v1`.
   `state/status`, `Op(x)` its `@op/x`, and `Ev` its
   `events/change/*`.
 - **S** subscribes to `zk2/lab/rf0/config.v1/**` and `zk2/lab/rf0/@zk/**`
-  before the owner starts, and to its heartbeat key covering `config.v1`,
+  before the owner starts. It subscribes to its heartbeat key too,
   `zk2/lab/rf0/freshness.v2/stream/heartbeat/config.v1`. It records each
-  delivery's arrival, key, kind and payload, and reads each heartbeat as
+  delivery's arrival, key, kind and payload. It reads each heartbeat as
   `freshness.v2` §2.5 says. **C** calls as core O1 says, with the call metadata
   `{"actor": "ops", "request_id": …}` (core O7), and GETs as core S4 says.
 - **"The fixture's step"** names a step of `lifecycle.json` whose replies,
@@ -62,10 +62,9 @@ that reads `config.v1`.
    10000 → 20000, `actor` `"ops"`, before or after `V` and `St`, which S
    receives once each with revision 1.
 3. `V` and `St` answer revision 1, and agree (§2.19).
-4. S receives no put of `V` or `St` (`freshness.v2` §2.4), and no delete
-   of either. It receives a heartbeat at least every 30 s, whose sections
-   vouch for both. At 65 s, past the horizon, S judges both fresh: the
-   heartbeats confirmed them.
+4. S receives no put or delete of `V` or `St` (`freshness.v2` §2.4). It
+   receives a heartbeat at least every 30 s, which vouches for both. At
+   65 s, past the horizon, S judges both fresh.
 
 ## §2 A reach set, confirmed (§2.8, §2.9, §2.10)
 

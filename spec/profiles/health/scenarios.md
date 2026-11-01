@@ -26,28 +26,28 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 - **S** subscribes to `zk2/lab/svc/health.v1/**` before the owner starts,
   and to its heartbeat key covering `health.v1`,
   `zk2/lab/svc/freshness.v2/stream/heartbeat/health.v1`. It records each
-  delivery's arrival on its monotonic clock, its key, kind, payload and
-  stamp, and reads each heartbeat as `freshness.v2` §2.5 says. **G** GETs
+  delivery's arrival on its monotonic clock. It records its key, kind,
+  payload and stamp too. It reads each heartbeat as `freshness.v2` §2.5
+  says. **G** GETs
   `zk2/lab/svc/health.v1/state/**` as core S4 says. "Judges" applies
   v1.md §2.11 to the reading at that instant, the descriptor read as core
   §3.3 says.
-- **G's and T's clock.** G and T read by GET, and a GET reader ages a
-  reply only with a trusted clock (`freshness.v2` §2.6). They take the
-  deployment's word, `freshness.v1` §2.6's ground 1: every session of a
+- **G's and T's clock.** G and T read by GET. A GET reader ages a reply
+  only with a trusted clock (`freshness.v2` §2.6). G and T take the
+  deployment's word, `freshness.v1` §2.6's ground 1. Every session of a
   scenario runs on one host, whose one clock keeps the word. They measure
   nothing, and T's verdicts rest on no subscription.
   - A tool in a deployment takes that word only as its operator's option
     (`freshness.v1` §2.6). Without it, a tool measures its clock from the
-    owner's stamped puts it hears during its reading. Under `freshness.v2`
-    the status's puts carry no Zenoh timestamp of the owner's (core §4.3's
-    table), so such a tool measures from what else the owner stamps.
-  - These scenarios check health's reading, not the grounds of a clock's
-    trust, which `freshness.v1`'s scenarios check (its §4 and §6).
-- **The horizon** is the contract's, 60 s, so the owner's heartbeat
-  confirms its status at least every 30 s, the reference's every 28.5 s.
-  §1, §2, §4 and §8 wait it out, §1 for about 70 s, §2 for about 135 s,
-  §4 for about 100 s and §8 for about 200 s, and a runner MAY keep them in
-  a slow tier.
+    owner's stamped puts it hears. The status's puts carry no Zenoh
+    timestamp of the owner's (core §4.3's table). Such a tool measures from
+    what else the owner stamps.
+  - These scenarios check health's reading. `freshness.v1`'s scenarios
+    check the grounds of a clock's trust (its §4 and §6).
+- **The horizon** is the contract's, 60 s. The owner's heartbeat confirms
+  its status at least every 30 s, the reference's every 28.5 s. §1, §2,
+  §4 and §8 wait it out: §1 about 70 s, §2 about 135 s, §4 about 100 s
+  and §8 about 200 s. A runner MAY keep them in a slow tier.
 - **Jitter.** A gap between deliveries is measured at S, which adds the
   bus's jitter to what the owner sent. The reference allows 200 ms on
   loopback.
@@ -76,10 +76,9 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 3. G's reply is `OK`, `"serving"`, with `since_ns` later than the first
    status's.
 4. S receives no put of the status (`freshness.v2` §2.4). It receives a
-   heartbeat at least every 30 s, of form 6 with the tag of `health.v1`'s
-   revision 1.1, whose status section vouches for the status. At 65 s,
-   past the horizon, S judges **healthy**, `ok`: the heartbeats confirmed
-   the status.
+   heartbeat at least every 30 s, of form 6. Its tag is that of
+   `health.v1`'s revision 1.1, and its section vouches for the status. At
+   65 s, past the horizon, S judges **healthy**, `ok`.
 5. S receives no delete of the status, before or after the close (§2.3).
 
 ## §2 A stale status (§2.4)
@@ -88,20 +87,19 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 1. The owner puts status `OK`, and goes on confirming it for 65 s. S and
    G judge (G with the descriptor read, and the owner present).
 2. The owner stops vouching for its status (the reference:
-   `Health::set_confirming(false)`), and keeps its service up: its tokens
+   `Health::set_confirming(false)`). Its service stays up: its tokens
    held, its heartbeats sent, its GETs answered.
-3. 65 s after the last heartbeat that vouched for the status, S judges,
-   and G GETs and judges.
+3. 65 s after the last heartbeat that vouched for the status, S judges.
+   G GETs and judges.
 
 **Expected.**
-1. Both: **healthy**, `ok`, past the horizon: S has received no put of the
-   status since step 1's, and G's reply is stamped with the status's last
-   confirmation, its last vouching heartbeat (`freshness.v2` §2.4).
-2. S receives heartbeats on, each with the status's bit clear, and no put
-   of the status.
+1. Both: **healthy**, `ok`, past the horizon. S has received no put of
+   the status since step 1's. G's reply is stamped with the status's last
+   confirmation (`freshness.v2` §2.4).
+2. S receives heartbeats, each with the status's bit clear, and no put.
 3. Presence: the owner's instance and interface tokens are present.
    S: **stale**, `beyond_horizon`. G: **stale**, `beyond_horizon`, the
-   reply's stamp, the status's last confirmation, more than 60.5 s old. Neither
+   reply's stamp more than 60.5 s old. Neither
    reports the service unhealthy or `FAILED`, and neither reports `OK` as
    current (§2.4, `freshness.v1` §2.11).
 
@@ -173,9 +171,9 @@ conventions say.
    - Without root, the fault's stamp is the owner's honest one, set or
      re-stamped by its own session (v1.md §2.5), and is not checked.
 3. Within 30 s of the correction, S receives a heartbeat that vouches for
-   the status again, and no put of it (`freshness.v2` §2.10), and no
-   `clock_ahead` fault after it. S judges **healthy**, `ok`, and the clock
-   question no: the heartbeat confirmed the status after the last fault.
+   the status again (`freshness.v2` §2.10). It receives no put of the
+   status, and no `clock_ahead` fault after it. S judges **healthy**,
+   `ok`, and the clock question no.
 4. **[moved clock]** S receives neither the fault nor the status put
    while the owner was ahead: R1 dropped both (v1.md §2.5). G's reply
    holds the status, under the owner's stamp, since a router never drops
@@ -260,9 +258,8 @@ from its configuration that `vehicle-01/nav` implements `health.v1`.
 - **Run A:**
   1. G receives nothing, and judges **unobservable**, `nothing_crossed`:
      it knows of no status yet, and does not call one stale (§2.8).
-  2. G receives the status, and the heartbeats covering `health.v1` that
-     vouch for it, which cross with it (`link.v1` §2.9). G judges
-     **healthy**, `ok`.
+  2. G receives the status, and the heartbeats that vouch for it
+     (`link.v1` §2.9). G judges **healthy**, `ok`.
   3. G judges **stale**: never down, never `FAILED`, and never absent,
      since presence does not cross.
 - **Run B:** nothing of the status crosses at any step. G judges

@@ -45,9 +45,25 @@ puts none again.
 - **The order** gains step 7: a window out of step, or one that heard no
   heartbeat, is **unobservable**, `window_unconfirmed`. `window` is step 8.
 - **A `freshness.v1` owner's window** reads as before.
-- **`conclusions.json`** gains four cases (`in_step` on a window: in
-  step, out of step, none heard, and a `freshness.v1` owner's), checked
-  by `zenkey-model/tests/profiles.rs`.
+- **`conclusions.json`** gains four cases, `in_step` on a window: in
+  step, out of step, none heard, and a short window out of step, which
+  `window_short` answers first. Its earlier cases, with no `in_step`, are
+  a `freshness.v1` owner's, read as before.
+
+**Changed: §2.14 step 5, whose stamp is attributed.** `previous_instance`
+compares a put's stamp with the descriptor's `meta.zid`. Under
+`freshness.v2` an alarm's put carries no Zenoh timestamp of its owner's
+(core §4.3's table), so a subscription's delivery arrives under a
+router's stamp, or none. Read as before, every live alarm behind a router
+with timestamping on would read `previous_instance`.
+- **Now:** only a stamp its owner set is attributed. A subscription's
+  delivery of a `freshness.v2` owner's alarm is unattributable, and the
+  reader goes on to step 6. A GET's reply carries the alarm's last
+  confirmation, which its owner stamps, and is read as before.
+- **What it costs.** A subscriber no longer tells an earlier instance's
+  last put by its stamp. An alarm the new instance did not put again is
+  left out of the GET that establishes its owner's alarms, and reads
+  `not_held` (step 5), or goes stale.
 
 **Restated over the heartbeat, no rule changed.** §1, §2.11, §2.14, §3,
 §5 and Appendix A name `freshness.v2`. The cost in §2.7 is one heartbeat
