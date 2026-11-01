@@ -38,7 +38,9 @@
 //! [`StateAnswer::undecodable`]). So is a record of a packed type (core
 //! §7.6) its layout refuses under the tag its CH carried
 //! ([`crate::inband::admit`]): another revision's, by its tag or its
-//! length. A sample with no envelope, an `@stream` sample's or a foreign
+//! length. A tool that shows samples is handed each one a subscription
+//! refuses, with its refusal ([`Consumer::with_refused`]), so it never
+//! drops one silently (observer §7.3). A sample with no envelope, an `@stream` sample's or a foreign
 //! key's, is delivered as it arrived, ordered by its Zenoh timestamp where
 //! it carries one.
 
@@ -212,6 +214,33 @@ impl Delivery {
     }
 }
 
+/// A sample a subscription refused as undecodable (core §7.5, §7.6): its
+/// envelope refused, or a packed record its type's layout refuses. Never
+/// delivered nor ordered, and counted ([`Subscription::undecodable`]);
+/// handed to [`Consumer::with_refused`]'s callback, for a tool that shows
+/// it with its refusal named (observer §7.3).
+#[derive(Debug, Clone)]
+pub struct Refused {
+    /// The provider whose key carried it.
+    pub provider: Addr,
+    /// `<kind token>/<template>`.
+    pub resource: String,
+    /// The template's parameters, unslugged.
+    pub values: Bindings,
+    /// The sample as [`crate::inband::read`] read it: an envelope's record
+    /// with its run, seq and tag, a refused envelope's sample as it
+    /// arrived, or a sample with no envelope.
+    pub read: crate::inband::Read,
+    /// Why it is undecodable.
+    pub why: crate::inband::Undecodable,
+    /// When it arrived, on this host's monotonic clock, read in the
+    /// subscriber's callback.
+    pub arrival: Instant,
+}
+
+/// What [`Consumer::with_refused`] hands each refused sample to.
+type OnRefused = Arc<dyn Fn(Refused) + Send + Sync>;
+
 /// A role's consumer, compiled against the required interface's contract
 /// (R4: any revision of the major is fine).
 #[derive(Clone)]
@@ -234,6 +263,9 @@ pub struct Consumer {
     /// role a component's manifest declares, and for a tool's consumer
     /// until [`Consumer::declared_by`].
     declaring: Option<Arc<Contract>>,
+    /// Where a subscription hands each sample it refuses as undecodable
+    /// ([`Consumer::with_refused`]). `None`: counted alone.
+    refused: Option<OnRefused>,
 }
 
 /// A live subscription through a role. Dropping it undeclares it, and
@@ -301,6 +333,7 @@ impl Consumer {
             watch: None,
             epsilon: None,
             declaring: None,
+            refused: None,
         })
     }
 
@@ -359,6 +392,18 @@ impl Consumer {
     pub fn declared_by(mut self, declaring: Arc<Contract>, role: &str) -> Self {
         self.declaring = Some(declaring);
         role.clone_into(&mut self.role);
+        self
+    }
+
+    /// Hands `on_refused` each sample this consumer's subscriptions refuse
+    /// as undecodable ([`Refused`]), beside its count
+    /// ([`Subscription::undecodable`]), from the subscriber's callback. A
+    /// tool that shows samples shows such a one, its refusal named, and
+    /// never drops it silently (observer §7.3). Without it the sample is
+    /// counted alone.
+    #[must_use]
+    pub fn with_refused(mut self, on_refused: impl Fn(Refused) + Send + Sync + 'static) -> Self {
+        self.refused = Some(Arc::new(on_refused));
         self
     }
 
@@ -548,6 +593,7 @@ impl Consumer {
             );
             let iface = self.contract.iface.clone();
             let providers = self.providers.clone();
+            let on_refused = self.refused.clone();
             subs.push(
                 self.session
                     .declare_subscriber(ke)
@@ -595,6 +641,16 @@ impl Consumer {
                                 reason = %why.reason(),
                                 "an undecodable sample"
                             );
+                            if let Some(f) = &on_refused {
+                                f(Refused {
+                                    provider: addr,
+                                    resource: name.clone(),
+                                    values,
+                                    read,
+                                    why,
+                                    arrival,
+                                });
+                            }
                             return;
                         }
                         let sample = read.into_sample();
@@ -1062,7 +1118,9 @@ impl Subscription {
 
     /// Samples dropped as undecodable: a stream, state or event sample
     /// under `zenoh/bytes` whose zk2c envelope was refused (core §7.5),
-    /// never read as a payload with no envelope, nor delivered.
+    /// never read as a payload with no envelope, nor delivered, and a
+    /// packed record its type's layout refuses (§7.6). Each is handed to
+    /// [`Consumer::with_refused`]'s callback, when it has one.
     #[must_use]
     pub fn undecodable(&self) -> u64 {
         self.seen.undecodable.load(Ordering::Relaxed)

@@ -7,7 +7,8 @@
 //! write is put by the owner's writer and read back by a tool's consumer,
 //! byte for byte under its type's tag; every read is put as an envelope
 //! carrying its case's tag, and the consumer delivers it or counts it
-//! undecodable, `zenkey::inband::admit` naming the vector's refusal. The
+//! undecodable, `zenkey::inband::admit` naming the vector's refusal and
+//! the consumer handing it, with that refusal, to `with_refused`. The
 //! contract is `tests/contracts/packed/packed.v1.toml`, a stream per type of
 //! the vectors but `Wide64`, which no contract may list (E028).
 
@@ -125,7 +126,10 @@ async fn every_vector_through_the_runtime() {
     }
     let _svc = b.start().await.unwrap();
 
-    let consumer = tool(&reader, &c);
+    // Each refused record, handed over with its refusal (observer §7.3).
+    let handed: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+    let h = Arc::clone(&handed);
+    let consumer = tool(&reader, &c).with_refused(move |r| h.lock().unwrap().push(r.why.token()));
     let mut subs = BTreeMap::new();
     let got: Got = Arc::default();
     for (ty, (resource, _)) in &types {
@@ -193,6 +197,7 @@ async fn every_vector_through_the_runtime() {
         let record = unhex(case["hex"].as_str().unwrap());
         let key = format!("zk2/{ADDR}/packed.v1/{resource}");
         let (delivered, refused) = (got.lock().unwrap().len(), undecodable(&subs));
+        let was_handed = handed.lock().unwrap().len();
         let n = heard.lock().unwrap().len();
         raw.put(&key, enveloped(tag, u32::try_from(i).unwrap(), &record))
             .encoding(Encoding::ZENOH_BYTES)
@@ -216,7 +221,15 @@ async fn every_vector_through_the_runtime() {
             (None, Some(token)) => {
                 assert_eq!(admitted.map_err(|e| e.token()), Err(token), "{note}");
                 refusals.insert(token);
-                eventually(note, || async { undecodable(&subs) > refused }).await;
+                eventually(note, || async {
+                    undecodable(&subs) > refused && handed.lock().unwrap().len() > was_handed
+                })
+                .await;
+                assert_eq!(
+                    handed.lock().unwrap().last().copied(),
+                    Some(token),
+                    "{note}: handed over with its refusal"
+                );
                 // The owner's writer refuses the same record under its own
                 // tag, nothing published.
                 if tag == layout.tag() {

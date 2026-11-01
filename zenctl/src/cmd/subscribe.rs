@@ -14,10 +14,13 @@
 //! from a sample whose key resolved to no member of the resource
 //! (`unresolved`, #671). Each sample carries its payload's conformance to
 //! the declared type and, when it differs, the QoS it rode against the
-//! resource's (spec §2.4, #612 FJ8b).
+//! resource's (spec §2.4, #612 FJ8b). A sample the runtime refuses as
+//! undecodable, a refused envelope or a packed record its layout refuses
+//! (core §7.5, §7.6), is a row too, its refusal named, and counted among
+//! the nonconforming: never dropped silently (observer §7.3).
 //! It ends at `--count` samples, after `--for` seconds, or on ctrl-c, and
-//! exits 0 when a sample arrived, 2 when none did: silence is never a
-//! verdict (O5).
+//! exits 0 when a sample arrived, a refused one included, 2 when none did:
+//! silence is never a verdict (O5).
 
 use std::time::Instant;
 
