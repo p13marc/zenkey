@@ -3624,14 +3624,62 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                          (b"\xe0", zk2c.ENCODING))]
     out.append(("observer §7.3 (0.16) in zk2py's echo tool: a packed record decoded under its tag and named "
                 "packed:Sensor; one under another tag, one with a byte after its pad, one in no envelope and a "
-                "refused envelope undecodable, the refusal named, never sniffed",
+                "refused envelope undecodable as packed:Sensor, the refusal named (the envelope's own token for "
+                "the last; review-bot on PR #1019), never sniffed",
                 [[r["declared_type"]["name"] for r in rows], rows[0]["decoded"],
                  [(r["undecodable"] or "").split(" (")[0] for r in rows[1:]], [r["sniffed"] for r in rows]],
                 [["packed:Sensor"] * 5, {"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2",
                                          "battery": "3.7"},
                  ["undecodable as packed:Sensor: tag", "undecodable as packed:Sensor: length",
-                  "undecodable as packed:Sensor: no_envelope", "undecodable: a refused zk2c envelope"],
+                  "undecodable as packed:Sensor: no_envelope", "undecodable as packed:Sensor: form"],
                  [None] * 5]))
+    # review-bot on PR #1019, 1: zk2c.Read's three cases, each through
+    # packed.read_sample: an accepted envelope (enveloped, its tag), a
+    # refused one (enveloped, its token) and a sample that carries none (not
+    # enveloped, its bytes), which alone reads no_envelope.
+    reads = [zk2c.read_put(key, zk2c.ENCODING, good), zk2c.read_put(key, zk2c.ENCODING, b"\xe0"),
+             zk2c.read_put(key, "application/octet-stream", sensor.write(v))]
+    out.append(("review-bot on PR #1019, 1: zk2c.Read is enveloped for an envelope accepted or refused and not for a "
+                "sample that carries none; read_sample gives the value, the envelope's token, and no_envelope",
+                [[(r.enveloped, r.refusal, r.tag, r.record) for r in reads],
+                 [(x.value, x.refusal) for x in (packed.read_sample(sensor, r) for r in reads)]],
+                [[(True, None, sensor.tag, sensor.write(v)), (True, "form", None, None),
+                  (False, None, None, sensor.write(v))],
+                 [({"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2", "battery": "3.7"}, None),
+                  (None, "form"), (None, "no_envelope")]]))
+
+    # review-bot on PR #1019, 3: a consumer reading through a packed record
+    # hands a delete's sink None, never bytes; a put its value.
+    from .owner import Owner
+
+    class _Sample:
+        def __init__(self, k: str, kind: Any, payload: bytes, attachment: bytes | None) -> None:
+            self.key_expr, self.kind, self.encoding = k, kind, zk2c.ENCODING
+            self.payload = type("P", (), {"to_bytes": lambda _s, b=payload: b})()
+            self.attachment = None if attachment is None else type(
+                "A", (), {"to_bytes": lambda _s, b=attachment: b})()
+
+    class _Session:
+        def __init__(self) -> None:
+            self.callbacks: list[Any] = []
+
+        def declare_subscriber(self, k: str, handler: Any) -> None:
+            self.callbacks.append(handler.callback)
+
+    import zenoh
+
+    reader = Owner("lab", "reader", [load_contract(spec.parent / "impl/python/interop/packed/"
+                                                   "zk2py_packed_reader.v1.toml")])
+    reader.session, reader.resolved_bindings = _Session(), {"src": ["lab/p"]}
+    sunk: list[tuple[str, Any]] = []
+    reader.subscribe_role("src", "packed.v1", "stream/sensor", lambda k, x: sunk.append((k, x)), record=sensor)
+    deliver = reader.session.callbacks[0]
+    deliver(_Sample(key, zenoh.SampleKind.PUT, good, None))
+    deliver(_Sample(key, zenoh.SampleKind.DELETE, b"", zk2c.deletion(zk2c.InBand(16, 7, 3))))
+    out.append(("review-bot on PR #1019, 3: Owner.subscribe_role with a packed record hands a put's JSON reading and "
+                "a delete's None, never bytes",
+                [x for _, x in sunk], [{"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2",
+                                        "battery": "3.7"}, None]))
     try:
         echo_tool.Held([load_contract(spec.parent / "zenkey/tests/contracts/packed/packed.v1.toml"),
                         load_contract(spec.parent / "zenkey/tests/contracts/packed-wide.v1.toml")])

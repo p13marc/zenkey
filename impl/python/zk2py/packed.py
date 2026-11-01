@@ -429,7 +429,11 @@ def encode(f: Field, v: Any, epoch: int | None) -> int:
 
 
 #: core 0.76 §7.6 "A number of magnitude 2^63 or more is outside every
-#: range, however it is written."
+#: range, however it is written." zk2py cuts there only a number written
+#: with a fraction or an exponent (a Python float), as ``vectors.json``
+#: reads it. An integer of that magnitude is judged by its field's own
+#: range: an ``int``'s bounds, a counter's 0 to 2^64 − 1, a time's 2^32
+#: seconds (F-434).
 _BEYOND = 1 << 63
 
 
@@ -439,8 +443,10 @@ def _integer_input(f: Field, v: Any, why: str) -> None:
     so ``5.0`` is ``value``; one written so whose magnitude is 2^63 or more
     is ``range``, as ``packed/vectors.json`` reads the text ("one with a
     fraction or an exponent is `value`, unless its magnitude is 2^63 or
-    more"). Integer text is read by its exact value, so a 64-bit counter
-    takes 2^64 − 1 (the vectors' write 21; F-434 asks the text to say so)."""
+    more"). Integer text is read by its exact value at any magnitude and
+    left to its field's range, so a 64-bit counter takes 2^64 − 1 and
+    refuses 2^64 ``range`` (the vectors' writes 21 and 24; F-434 asks the
+    text to say so)."""
     if isinstance(v, float) and abs(v) >= _BEYOND:
         raise Refused("range", f"{f.name}: a number of magnitude 2^63 or more")
     if not jcs.is_json_integer(v):

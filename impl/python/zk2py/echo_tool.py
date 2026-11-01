@@ -180,8 +180,10 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
 
     **A packed type held** (``held``, observer §7.3 at 0.16): its put is
     read through the type's layout under its envelope's tag, ``decoded``
-    its JSON reading, or ``undecodable`` naming the refusal; never sniffed.
-    ``time`` fields under ``epoch``, 0 where none is given."""
+    its JSON reading, or ``undecodable``, ``undecodable as packed:<name>:
+    <token> (<why>)``, where the token is the layout's refusal, or
+    ``no_envelope``, or a refused envelope's own (core §7.5); never
+    sniffed. ``time`` fields under ``epoch``, 0 where none is given."""
     from . import keys, packed, zk2c
 
     parsed = keys.parse(key)
@@ -200,7 +202,11 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
     if rec is not None and not delete and payload is not None and read is not None:
         got = packed.read_sample(rec, read, epoch)
         if got.undecodable:
-            undecodable = got.says(rec.name) if not read.refused else undecodable
+            # Every refusal under a packed type is named as that type's: its
+            # layout's, no envelope, and a refused envelope's own token
+            # (``read_sample`` hands that token on), so a row always says
+            # ``undecodable as packed:<name>: <token> (<why>)``.
+            undecodable = got.says(rec.name)
         else:
             decoded = got.value
     elif not delete and payload is not None and not (read is not None and read.refused):

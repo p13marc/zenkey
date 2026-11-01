@@ -5089,8 +5089,15 @@ they ran live for the first time.
 - **`readings`:** round 94's sentence pins read 0.76's answers, the 0.75
   forms gone. Also new: #1012's three cases, zk2py's readings of F-434 and
   F-435, and the echo tool's packed rows.
+- **Review-bot on PR #1019:** a reading pins `zk2c.Read`'s three cases
+  (accepted, refused, no envelope) through `read_sample`. The echo tool
+  names a refused envelope under a packed type as that type's
+  (`undecodable as packed:<name>: <token>`). `subscribe_role` hands a
+  delete's sink `None` under a packed record, never bytes. The 2^63
+  comment says the cut is a float's alone, and `packed_live` waits on
+  signals.
 
-**`readings`: 799, up from 785.** **`just py-conformance`: 4200 of 4200**,
+**`readings`: 801, up from 785.** **`just py-conformance`: 4202 of 4202**,
 `packed` 242 among them (15 layouts, 63 writes, 43 reads) and `contracts`
 127.
 
@@ -5104,8 +5111,8 @@ fingerprints are zk2py's, and both give E028 for a contract listing
 
 | Pairing | Result |
 |---|---|
-| rust-py: `zenctl gen` writes, zk2py reads | **11 of 11.** 514 records on 14 streams, 2 states and an event read through zk2py's layouts, and zk2py's writer writes each reading back to the same bytes. The Rust clock records read as now under E = 0. S4's GET reads both states. zk2py's consumer and echo tool refuse the records zk2py put on the sensor key itself: by `tag` (`SensorWide`), by `length` (`SensorCollide`), and with no envelope. Consumers holding `packed-wide` and `packed-collide` refuse every Rust sensor record by `tag` and by `length`. |
-| py-rust: zk2py's owner writes, Rust reads | **11 of 13.** `zenctl get state`, `zenctl watch` (four streams and the event; the clock under `epoch_assumed` 0) and `zenctl echo` show zk2py's packed fields. Holding `packed-wide` or `packed-collide`, `zenctl watch` delivers none of zk2py's sensor records. The two failures are F-436. `zenctl watch` drops three records the `Ties` layout refuses, with no row and no count. `zenctl echo` names each refusal, but renders a one-byte record as the text `"\u0012"`. |
+| rust-py: `zenctl gen` writes, zk2py reads | **12 of 12.** Each step waits on a signal (the tap hearing the owner, the tool's "listening"), not a sleep. About 510 records on 14 streams, 2 states and an event read through zk2py's layouts, and zk2py's writer writes each reading back to the same bytes. The Rust clock records read as now under E = 0. S4's GET reads both states. zk2py's consumer and echo tool refuse the records zk2py put on the sensor key itself: by `tag` (`SensorWide`), by `length` (`SensorCollide`), and with no envelope. Consumers holding `packed-wide` and `packed-collide` refuse every Rust sensor record by `tag` and by `length`. |
+| py-rust: zk2py's owner writes, Rust reads | **13 of 15.** `zenctl watch` is waited for by a publisher's matching status, and `zenctl echo` by its "echoing" line. `zenctl get state`, `zenctl watch` (four streams and the event; the clock under `epoch_assumed` 0) and `zenctl echo` show zk2py's packed fields. Holding `packed-wide` or `packed-collide`, `zenctl watch` delivers none of zk2py's sensor records. The two failures are F-436. `zenctl watch` drops three records the `Ties` layout refuses, with no row and no count. `zenctl echo` names each refusal, but renders a one-byte record as the text `"\u0012"`. |
 
 The mend found three findings. **F-434** (contradiction): "a number of
 magnitude 2^63 or more is outside every range, however it is written",

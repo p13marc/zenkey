@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from . import packed, zk2c
-from .state_pairings import BLACKBOX, Report, Tap
+from .state_pairings import BLACKBOX, Report, Tap, _wait
 
 REPO = Path(__file__).resolve().parents[3]
 CONTRACTS = REPO / "zenkey" / "tests" / "contracts"
@@ -106,6 +106,8 @@ class Consumer:
             self.o.subscribe_role("src", IFACE, sel, self._take, record=record_of(holds, rid))
 
     def _take(self, key: str, value: Any) -> None:
+        if value is None:
+            return  # a delete: no record (Owner.subscribe_role)
         with self.lock:
             self.got.append((key, value))
 
@@ -193,7 +195,13 @@ def rust_py(report: Report) -> None:
         if not report.check(sec, "zk2py's echo tool is listening", tool.listening()):
             return
         gen = _gen(ep, "lab/packed", 8.0)
-        time.sleep(4.0)
+        # Up once the tap has heard the Rust owner's sensor and both states.
+        up = _wait(lambda: all(tap.of(f"/{rid}") for rid in ("stream/sensor", "state/reading/a",
+                                                               "state/status/a")), 30.0)
+        if not report.check(sec, "zenctl gen is up: the tap heard its sensor stream and both states", up):
+            gen.terminate()
+            gen.communicate(timeout=30)
+            return
         wrong = wrong_records(holds)
         for _, payload, enc, _ in wrong:
             session.put(f"{base}/stream/sensor", payload, encoding=enc)
@@ -337,6 +345,19 @@ class PyOwner:
         self.o.close()
 
 
+def _said(p: subprocess.Popen, words: str, limit: float) -> bool:
+    """Wait until a process's standard error holds a line with ``words``."""
+    assert p.stderr is not None
+    end = time.monotonic() + limit
+    while time.monotonic() < end:
+        line = p.stderr.readline()
+        if not line:
+            return False
+        if words in line:
+            return True
+    return False
+
+
 def _zenctl(*args: str, timeout: float = 60.0) -> subprocess.CompletedProcess:
     return subprocess.run([str(BLACKBOX / "zenctl"), *args], capture_output=True, text=True, timeout=timeout)
 
@@ -363,7 +384,16 @@ def py_rust(report: Report) -> None:
         owner = PyOwner(ep)
         sensor = _expected(record_of(holds, "stream/sensor"), PyOwner.SENSOR)
         status = _expected(record_of(holds, "stream/status"), PyOwner.STATUS)
-        time.sleep(1.0)
+        # Up once a tap on the router hears the owner's pump.
+        probe = live.open_client(ep)
+        tap = Tap(probe, [f"{owner.base}/stream/sensor"])
+        try:
+            up = _wait(lambda: bool(tap.of("/stream/sensor")), 30.0)
+        finally:
+            tap.close()
+            live.close(probe)
+        if not report.check(sec, "zk2py's owner is up: a tap heard its sensor stream", up):
+            return
         for res, want in (("reading/{unit}", sensor), ("status/{unit}", status)):
             p = _zenctl("get", "state", "-c", ep, "--format", "json", "--contracts", str(PACKED), "lab/pyp", IFACE,
                         res)
@@ -416,18 +446,28 @@ def py_rust(report: Report) -> None:
                    ("a Ties record cut to one byte", zk2c.mutation(zk2c.InBand(16, 0xBAD0, 2), ties.write(tv)[:1],
                                                                     ties.tag), zk2c.ENCODING),
                    ("a Ties record in no envelope", ties.write(tv), "application/octet-stream")]
-        watch = subprocess.Popen([str(BLACKBOX / "zenctl"), "watch", "-c", ep, "--format", "ndjson", "--contracts",
-                                  str(PACKED), "--for", "5", "lab/pyp", IFACE, "stream/ties"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        echo = subprocess.Popen([str(BLACKBOX / "zenctl"), "echo", "-c", ep, "--format", "ndjson", "--contracts",
-                                 str(PACKED), "--count", "3", ties_key],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        time.sleep(2.5)
+        # Each reader is waited for by a signal, not a sleep: zenctl watch
+        # says nothing on stderr when it listens, so a publisher's matching
+        # status on the key, which no one else subscribes, tells its
+        # subscriber; zenctl echo then says "echoing" on stderr.
         session = live.open_client(ep)
         try:
+            matcher = session.declare_publisher(ties_key)
+            watch = subprocess.Popen([str(BLACKBOX / "zenctl"), "watch", "-c", ep, "--format", "ndjson",
+                                      "--contracts", str(PACKED), "--for", "6", "lab/pyp", IFACE, "stream/ties"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            watching = _wait(lambda: matcher.matching_status.matching, 30.0)
+            echo = subprocess.Popen([str(BLACKBOX / "zenctl"), "echo", "-c", ep, "--format", "ndjson",
+                                     "--contracts", str(PACKED), "--count", "3", ties_key],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            echoing = _said(echo, "echoing", 30.0)
+            report.check(sec, "zenctl watch and zenctl echo are listening on stream/ties (a matching subscriber, "
+                              "then echo's \"echoing\")", watching and echoing,
+                         f"watch matched {watching}, echo said echoing {echoing}")
             for _, payload, enc in refused:
                 session.put(ties_key, payload, encoding=enc)
                 time.sleep(0.2)
+            matcher.undeclare()
         finally:
             live.close(session)
         out, err = watch.communicate(timeout=60)

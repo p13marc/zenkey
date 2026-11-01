@@ -1814,7 +1814,9 @@ class Owner:
         JSON reading, and one the layout refuses, or that came in no
         envelope, is undecodable, counted with its refusal named and never
         handed on. Its ``time`` fields are read under ``epoch``, the
-        deployment's, 0 where none is stated."""
+        deployment's, 0 where none is stated. A delete carries no record, so
+        it hands ``sink`` (key, None), never bytes; its envelope, in the
+        delete's attachment, is read as every delete's is."""
         from . import packed
 
         assert self.session is not None
@@ -1829,7 +1831,10 @@ class Owner:
                 if read.refused:
                     self.undecodable.append((key, read.refusal))
                     return
-                if record is not None and sample.kind != zenoh.SampleKind.DELETE:
+                if record is not None:
+                    if sample.kind == zenoh.SampleKind.DELETE:
+                        sink(key, None)
+                        return
                     got = packed.read_sample(record, read, epoch)
                     if got.undecodable:
                         self.undecodable.append((key, got.refusal))
