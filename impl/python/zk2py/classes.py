@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.80), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 95, the mend after #926 part 5 and the
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.82), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 96, the mend after #926 part 5 and the
 mend after round 94).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
@@ -78,6 +78,8 @@ HEADINGS = {"Owner": "owner", "Consumer": "consumer", "Caller": "caller", "Deplo
 PROFILES = {
     "hostid.v1": ("owner (a minted system), tool (the duplicate check)", ""),
     "freshness.v1": ("owner (re-puts), consumer and tool (the judgements)", ""),
+    "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the judgements)",
+                     "round 96: not yet followed"),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
     "link.v1": ("tool (the generator and the checks)", ""),
@@ -159,6 +161,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("owner", "core §4.2", "The owner's reply MUST also carry the mutation's Zenoh timestamp", MET,
      "owner.Owner.answer_state: the held Zenoh timestamp, where the mutation carried one (state_pairings §1  "
      "expected 5) (round 93, core 0.73)"),
+    # core 0.82 (#978 F3): a freshness.v2 member's reply carries its last
+    # confirmation (round 96).
+    ("owner", "core §4.2", "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead",
+     NOT_MET, "round 96: zk2py's owner sends no heartbeat yet (re-keyed to core 0.82)"),
     ("owner", "core §4.2", "It MUST answer a selector over them with", MET,
      "owner.Owner.state_answer, reply_del within the window (state_scenarios §10)"),
     ("owner", "core §4.2", "Owner: for a key it deleted within the", MET,
@@ -542,6 +548,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "zk2c.parse, in §7.5's order, each token (envelope family, vectors.json) (round 93, core 0.72)"),
     ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
      "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
+    # core 0.81 (#978 F1): the heartbeat's five static rules (round 96).
+    ("static", "core §7.5", "An implementation that writes a heartbeat MUST write its covered revision's tag", NOT_MET,
+     "round 96: zk2py writes no heartbeat yet (re-keyed to core 0.81)"),
+    ("static", "core §7.5", "An implementation that writes a templated section MUST write the list only where",
+     NOT_MET, "round 96: zk2py writes no heartbeat body yet (re-keyed to core 0.81)"),
+    ("static", "core §7.5", "An implementation MUST compute a digest so", NOT_MET,
+     "round 96: zk2py computes no digest yet (re-keyed to core 0.81)"),
+    ("static", "core §7.5", "An implementation MUST refuse a body for the first of these", NOT_MET,
+     "round 96: zk2py reads no heartbeat body yet (re-keyed to core 0.81)"),
+    ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", NOT_MET,
+     "round 96: zk2py reads no heartbeat body yet (re-keyed to core 0.81)"),
     # core 0.75 (#979 B1): §7.6's six static rules.
     ("static", "core §7.6", "An implementation MUST compute a fixed-point code, and the value it reads back", MET,
      "packed.encode and decode over fractions.Fraction, ties to even (packed family: the Ties and Sensor writes) "
