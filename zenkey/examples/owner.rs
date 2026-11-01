@@ -16,7 +16,7 @@
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
-//!     [--timing] [--no-hlc]
+//!     [--timing] [--no-hlc] [--hlc] [--run-file <path>]
 //!     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
 //!     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
 //!     <address> <contract.toml>...
@@ -98,6 +98,7 @@
 //! fault <code> <LEVEL> [<detail>...]     fault: an application's code (§2.10)
 //! confirm on|off                         set_confirming: off lets the status go stale (§2.4)
 //! clock-offset <ms>                      the clock's simulated offset (0: set right)
+//! seq <n>                                the next state and event seq (core §4.3)
 //! put <iface> <resource> [<value>...]    one write on a member (core §2.7)
 //! delete <iface> <resource> [<value>...] a state member's delete
 //! fill <iface> <resource> <n>            put members m0 … m<n−1>, one write each
@@ -122,7 +123,10 @@
 //! A `health.v1` command is answered `health status=<LEVEL> declared=<LEVEL>
 //! raised_by=<name>` (`UNSPECIFIED` for no level, `-` for none): the status
 //! as published, the level declared, and the check that raised it (§2.2).
-//! `clock-offset` is answered `clock-offset <ms>`. Anything refused, by the
+//! `clock-offset` is answered `clock-offset <ms>`, and `seq <n>` with
+//! `seq <n> run <run>`, the run as the descriptor states it (state.md §7
+//! step 3: the owner takes a new run before its seq would pass
+//! 16,777,215). Anything refused, by the
 //! runtime or here, is answered `refused <command>: <why>`, and changes
 //! nothing the runtime did not report.
 //!
@@ -652,8 +656,15 @@ pub struct Options {
     /// `--timing`: `pace.v1`, `timing.v1`'s scenarios' contract,
     /// implemented and driven (#908), unless a contract file implements it.
     pub timing: bool,
-    /// `--no-hlc`: with `--connect`, the session's HLC off.
+    /// `--no-hlc`: with `--connect`, the session's HLC off, as it is by
+    /// default (core §8.2), `--standby` included.
     pub no_hlc: bool,
+    /// `--hlc`: with `--connect`, the session's timestamping on (core §8.2
+    /// asks an owner's off; `--standby` turns it on, redundancy.v1 §2.10).
+    pub hlc: bool,
+    /// `--run-file <path>`: the record each instance's 16-bit run is taken
+    /// from (core §4.3), else a random 32-bit run.
+    pub run_file: Option<PathBuf>,
     /// `--arbitrate <entry>,…`: `rudder.v1` implemented, its role `cmd`
     /// bound to the entries in their order and arbitrated
     /// (`arbitration.v1`, #909), unless a contract file implements it.
@@ -711,7 +722,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
-    [--timing] [--no-hlc]
+    [--timing] [--no-hlc] [--hlc] [--run-file <path>]
     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
@@ -728,6 +739,8 @@ that word's usage.
 Command words:
   status, check, retire, fault, confirm   health.v1 (--health)
   clock-offset <ms>                       the clock's simulated offset
+  seq <n>                                 the next state and event seq (core §4.3):
+                                          `seq <n> run <run>`
   put, delete, fill                       one write on a member (core §2.7)
   config ...                              config.v1 (--config)
   alarm ...                               alarms.v1 (--alarms), below
@@ -980,6 +993,11 @@ timing.v1 (spec/profiles/timing/v1.md)
   axis starts on once added.
 
   --timing                        implement and drive pace.v1
+  --hlc                           with --connect, the session's timestamping on
+                                  (core §8.2 asks an owner's off; --standby turns
+                                  it on, redundancy.v1 §2.10)
+  --run-file <path>               each instance's 16-bit run from this record (core
+                                  §4.3), else a random 32-bit run
   --no-hlc                        with --connect, the session's HLC off: the
                                   stamps are the session's wall clock with its
                                   zid, so `timing offset` shifts them alone (an
@@ -1127,7 +1145,7 @@ impl Options {
              [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
-             [--timing] [--no-hlc] \
+             [--timing] [--no-hlc] [--hlc] [--run-file <path>] \
              [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] \
              [--watch-connect <endpoint>] [--clock-bound-ms <ms>] \
              [--commander] [--commander-lead-ms <ms>] \
@@ -1178,6 +1196,8 @@ impl Options {
             wait_go: false,
             timing: false,
             no_hlc: false,
+            hlc: false,
+            run_file: None,
             arbitrate: None,
             arbitrate_watch: true,
             watch_connect: None,
@@ -1450,6 +1470,14 @@ impl Options {
                 }
                 [flag, tail @ ..] if flag == "--no-hlc" => {
                     o.no_hlc = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--hlc" => {
+                    o.hlc = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--run-file" => {
+                    o.run_file = Some(PathBuf::from(value));
                     rest = tail;
                 }
                 [flag, value, tail @ ..] if flag == "--arbitrate" => {
@@ -1744,10 +1772,12 @@ pub async fn run_with(
         }
         Some(endpoint) => {
             side(&mut z, &opts, endpoint)?;
-            // §4.3: a session that serves state enables its HLC. A simulated
-            // offset leaves it off (the module doc): the HLC would re-stamp
-            // the offset clock's stamps before they leave.
-            if opts.clock_offset_ms == 0 && !opts.no_hlc {
+            // Core §8.2: an owner's session runs without timestamping,
+            // unless `--hlc`, or a candidate's (`--standby`: redundancy.v1
+            // §2.10). A simulated offset leaves it off (the module doc):
+            // the HLC would re-stamp the offset clock's stamps before they
+            // leave.
+            if (opts.hlc || opts.standby) && opts.clock_offset_ms == 0 && !opts.no_hlc {
                 z.insert_json5("timestamping/enabled", "true")?;
             }
             let session = zenoh::open(z).await?;
@@ -2107,6 +2137,11 @@ impl Ctx<'_> {
         let opts = self.opts;
         let mut b = ServiceBuilder::with_hostid(self.session, self.config.clone(), self.minter);
         b.minter().simulate_offset(opts.clock_offset_ms);
+        // Core §4.3: each instance's 16-bit run from the record, before
+        // anything is written.
+        if let Some(path) = &opts.run_file {
+            b.run_store(Arc::new(zenkey::run::FileRunStore::new(path)))?;
+        }
         if self
             .first_up
             .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -3367,6 +3402,16 @@ async fn command(
     let health = up.health.as_ref();
     let svc = &mut up.svc;
     let members = &mut up.members;
+    // Core §4.3: the next state and event seq, for state.md §7 step 3.
+    if let ["seq", n] = words.as_slice() {
+        return match n.parse::<u32>() {
+            Ok(n) => {
+                svc.minter().simulate_seq(n);
+                format!("seq {n} run {}", svc.minter().run())
+            }
+            Err(e) => refuse(&e.to_string()),
+        };
+    }
     if let ["clock-offset", ms] = words.as_slice() {
         return match ms.parse::<i64>() {
             Ok(ms) => {

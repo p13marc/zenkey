@@ -316,12 +316,23 @@ struct AuthorUp {
 /// `lab/author` on a client of `ep`: `tasking.v1` in its tokenless set, its
 /// window `window_s` (60 s unless given).
 async fn author_up(ep: &str, startup: AuthorStartup, window_s: Option<u64>) -> AuthorUp {
+    author_up_at(ep, startup, window_s, 0).await
+}
+
+/// [`author_up`] with its clock `offset_ms` off (negative: behind).
+async fn author_up_at(
+    ep: &str,
+    startup: AuthorStartup,
+    window_s: Option<u64>,
+    offset_ms: i64,
+) -> AuthorUp {
     let session = client(ep).await;
     let tasking = imp("tasking.v1");
     let iface = tasking.iface().clone();
     let mut cfg = config(AUTHOR).tokenless(iface.clone());
     cfg.tombstone_window_s = window_s;
     let mut b = ServiceBuilder::new(&session, cfg);
+    b.minter().simulate_offset(offset_ms);
     b.implement(tasking).unwrap();
     let author = b.desired_author(&iface, TASKS, startup).await.unwrap();
     let svc = b.start().await.unwrap();
@@ -872,16 +883,17 @@ async fn s6_the_authors_restart_moves_no_target_to_act_again() {
     )
     .await;
     a.author.put("lab/spare", bytes(&v(9))).await.unwrap();
-    a.author.delete("lab/spare").await.unwrap();
+    // The last stamp the author issued, before its restart.
+    let last = put_stamp(a.author.delete("lab/spare").await.unwrap());
     let record: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert!(record["deletes"]["lab/spare"].is_object(), "{record}");
     let acts = w.target.acts();
 
     // 1. The author's process ends, and restarts from its record: a fresh
-    //    zid.
+    //    zid, its clock 5 s behind.
     a.kill().await;
     let mark = s.mark();
-    let a = author_up(&bus.ep1, with_record(), None).await;
+    let a = author_up_at(&bus.ep1, with_record(), None, -5000).await;
     let zid = a.session.zid().to_string();
     let found = a.author.adoption();
     assert_eq!(found.found, Found::Record);
@@ -933,6 +945,12 @@ async fn s6_the_authors_restart_moves_no_target_to_act_again() {
         "the re-delete, under the new zid"
     );
     let reput = log[put_at].stamp.unwrap();
+    // §2.11, "Its stamps": above the last stamp the author issued, though
+    // its clock is behind (core §4.3's catch-up, from its record).
+    assert!(
+        reput.get_time() > last.get_time(),
+        "the re-put's stamp is above the last one issued: {reput} vs {last}"
+    );
     assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
     let adopted = s.on(RP, mark);
     assert!(converged_on(&adopted.last().unwrap().report(), &reput, 1));

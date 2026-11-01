@@ -137,6 +137,8 @@ pub mod redundancy;
 #[cfg(feature = "zenoh")]
 pub mod retrieval;
 #[cfg(feature = "zenoh")]
+pub mod run;
+#[cfg(feature = "zenoh")]
 pub mod service;
 #[cfg(feature = "zenoh")]
 pub mod shm;

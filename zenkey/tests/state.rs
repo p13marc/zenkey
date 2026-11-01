@@ -212,15 +212,15 @@ async fn s1_stamped_mutations() {
         w.writer().matching().await.unwrap()
     })
     .await;
-    let t1 = w.put("v1").await.unwrap();
-    let t2 = w.put("v2").await.unwrap();
+    let t1 = w.put("v1").await.unwrap().time.expect("stamped");
+    let t2 = w.put("v2").await.unwrap().time.expect("stamped");
     let now = answered(&c, None).await;
     assert_eq!(now.len(), 1);
     assert!(
         matches!(&now[0], Current::Value { sample, .. } if &*sample.payload().to_bytes() == b"v2")
     );
     assert_eq!(now[0].timestamp(), Some(t2), "v2 with v2's stamp");
-    let t3 = w.delete().await.unwrap();
+    let t3 = w.delete().await.unwrap().time.expect("stamped");
     eventually("three mutations", || async {
         got.lock().unwrap().len() == 3
     })
@@ -268,8 +268,8 @@ async fn s1_stamped_mutations() {
 
     // 3. v3 and v4 back to back. Whether they fell within one clock
     //    reading cannot be seen from here (F-73); the order can.
-    let t3 = w.put("v3").await.unwrap();
-    let t4 = w.put("v4").await.unwrap();
+    let t3 = w.put("v3").await.unwrap().time.expect("stamped");
+    let t4 = w.put("v4").await.unwrap().time.expect("stamped");
     assert!(
         t4.get_time().as_u64() > t3.get_time().as_u64(),
         "at least one tick (one NTP64 unit) apart"
@@ -286,7 +286,7 @@ async fn s2_deletes_inside_the_window_and_the_collection() {
     let (_ex, c) = executor(&client(&ep).await, false).await;
     w["a"].put("pa").await.unwrap();
     w["b"].put("pb").await.unwrap();
-    let del = w["b"].delete().await.unwrap();
+    let del = w["b"].delete().await.unwrap().time.expect("stamped");
     let b = answered(&c, Some(&vehicle("b"))).await;
     assert!(
         matches!(&b[..], [Current::Deleted { timestamp: Some(t), .. }] if *t == del),
@@ -315,7 +315,12 @@ async fn s3_the_owner_is_authoritative() {
     let owner = client(&ep).await;
     let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
     let (_ex, c) = executor(&client(&ep).await, true).await;
-    let t = w["vehicle-01"].put("mine").await.unwrap();
+    let t = w["vehicle-01"]
+        .put("mine")
+        .await
+        .unwrap()
+        .time
+        .expect("stamped");
     let now = answered(&c, None).await;
     assert_eq!(now.len(), 1, "one answer: the owner's");
     assert_eq!(now[0].timestamp(), Some(t));
@@ -405,7 +410,7 @@ async fn s4_last_known_from_an_archive() {
     })
     .await;
     // v3, once, and the archive holding exactly it before the cut.
-    let t3 = Some(w["vehicle-01"].put("v3").await.unwrap());
+    let t3 = w["vehicle-01"].put("v3").await.unwrap().time;
     eventually("the archive recorded v3", || async {
         archive::last_known(&x.vehicle, &common::addr("vehicle-01/archive"), ORIGIN, T)
             .await
@@ -620,7 +625,12 @@ async fn s7_clocks() {
     let (t10, record) = {
         let s = pinned(&ep, "a1b2c3d4e5f60718").await;
         let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-        let t = w["vehicle-01"].put("rev10").await.unwrap();
+        let t = w["vehicle-01"]
+            .put("rev10")
+            .await
+            .unwrap()
+            .time
+            .expect("stamped");
         let rec = mgr.minter().last().unwrap();
         drop(w);
         mgr.close().await.unwrap();
@@ -633,7 +643,12 @@ async fn s7_clocks() {
         let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
         mgr.minter().simulate_offset(-5000);
         mgr.minter().catch_up(record);
-        let t = w["vehicle-01"].put("rev11").await.unwrap();
+        let t = w["vehicle-01"]
+            .put("rev11")
+            .await
+            .unwrap()
+            .time
+            .expect("stamped");
         drop(w);
         mgr.close().await.unwrap();
         t
@@ -653,7 +668,12 @@ async fn s7_clocks() {
     let s = client(&ep).await;
     let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
     mgr.minter().simulate_offset(-5000);
-    let t11b = w["vehicle-01"].put("rev11").await.unwrap();
+    let t11b = w["vehicle-01"]
+        .put("rev11")
+        .await
+        .unwrap()
+        .time
+        .expect("stamped");
     assert_ne!(t11b.get_id(), t10.get_id(), "a new timestamp id");
     assert!(t11b.get_time() < t11.get_time(), "older by the clock");
     assert!(
@@ -717,7 +737,12 @@ async fn s7_a_late_joiner_across_a_new_epoch() {
     let (_ex, c) = executor(&client(&ep).await, true).await;
     let s = client(&ep).await;
     let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-    let t10 = w["vehicle-01"].put("rev10").await.unwrap();
+    let t10 = w["vehicle-01"]
+        .put("rev10")
+        .await
+        .unwrap()
+        .time
+        .expect("stamped");
 
     // The late joiner: the subscription first, then S4's GET (core §4.2).
     let got: Arrivals = Arc::default();
@@ -751,8 +776,18 @@ async fn s7_a_late_joiner_across_a_new_epoch() {
     let s = client(&ep).await;
     let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
     mgr.minter().simulate_offset(-5000);
-    let t11 = w["vehicle-01"].put("rev11").await.unwrap();
-    let t12 = w["vehicle-01"].put("rev12").await.unwrap();
+    let t11 = w["vehicle-01"]
+        .put("rev11")
+        .await
+        .unwrap()
+        .time
+        .expect("stamped");
+    let t12 = w["vehicle-01"]
+        .put("rev12")
+        .await
+        .unwrap()
+        .time
+        .expect("stamped");
     assert_ne!(t11.get_id(), t10.get_id(), "a new timestamp id");
     assert!(t12.get_time() < t10.get_time(), "both behind rev 10's time");
     eventually("rev 11 and rev 12 arrive", || async {
@@ -858,7 +893,12 @@ async fn new_epoch_inside_the_seed(behind: bool) {
     let (_ex, c) = executor(&client(&ep).await, true).await;
     let s = client(&ep).await;
     let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
-    let t10 = w["vehicle-01"].put("rev10").await.unwrap();
+    let t10 = w["vehicle-01"]
+        .put("rev10")
+        .await
+        .unwrap()
+        .time
+        .expect("stamped");
 
     // The holder: a queryable on the plans that is not `complete`. It
     // answers no query it takes and keeps each one: dropping it is its
@@ -934,7 +974,12 @@ async fn new_epoch_inside_the_seed(behind: bool) {
         if behind {
             mgr.minter().simulate_offset(-5000);
         }
-        let t11 = w["vehicle-01"].put("rev11").await.unwrap();
+        let t11 = w["vehicle-01"]
+            .put("rev11")
+            .await
+            .unwrap()
+            .time
+            .expect("stamped");
         eventually("rev 11 arrives live, inside the seed", || async {
             got.lock().unwrap().iter().any(|(v, _)| v == "rev11")
         })
@@ -993,7 +1038,12 @@ async fn new_epoch_inside_the_seed(behind: bool) {
     );
 
     // Until the key's next value: rev 12, under the new id.
-    let t12 = w["vehicle-01"].put("rev12").await.unwrap();
+    let t12 = w["vehicle-01"]
+        .put("rev12")
+        .await
+        .unwrap()
+        .time
+        .expect("stamped");
     if behind {
         // The step's premise: rev 12 comes within 5 s of rev 10, so the
         // clock behind stamps it below rev 10's time.
@@ -1037,7 +1087,7 @@ async fn s9_an_archives_backend_refuses_an_outdated_put() {
         arch.confirmed(ORIGIN) == Some(true)
     })
     .await;
-    let t1 = t1.lock().unwrap().unwrap();
+    let t1 = t1.lock().unwrap().unwrap().time.expect("stamped");
     w.delete().await.unwrap();
     eventually("recorded the delete", || async {
         archive::last_known(&arch_s, &common::addr("vehicle-01/archive"), ORIGIN, T)

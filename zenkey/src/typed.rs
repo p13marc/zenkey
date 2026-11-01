@@ -40,6 +40,7 @@ use crate::consumer::{Consumer, Delivery, Subscription};
 use crate::error::{Error, Result};
 use crate::operation::{Call, OperationServer};
 use crate::service::{ImplState, Service, ServiceBuilder};
+use crate::state::Stamped;
 
 fn kind_check<C: Codec>(ty: Option<&TypeId>, what: &str) -> Result<()> {
     if C::KIND.carries(ty) {
@@ -224,17 +225,17 @@ impl<C: Codec> StateWriter<C> {
         Self::new(w, &r)
     }
 
-    /// Puts a value, stamped; returns the stamp.
+    /// Puts a value under the owner's stamps (S1, core §4.3); returns them.
     pub fn put(
         &self,
         value: &C::Value,
-    ) -> impl Future<Output = Result<Timestamp>> + Send + use<'_, C> {
+    ) -> impl Future<Output = Result<Stamped>> + Send + use<'_, C> {
         let bytes = C::encode(value, self.wire).map_err(Error::Payload);
         async move { self.inner.put(bytes?).await }
     }
 
-    /// Deletes the member, stamped (S3).
-    pub async fn delete(&self) -> Result<Timestamp> {
+    /// Deletes the member under the owner's stamps (S1, S3).
+    pub async fn delete(&self) -> Result<Stamped> {
         self.inner.delete().await
     }
 

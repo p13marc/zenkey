@@ -4,6 +4,28 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.12 — 2026-11-01: editorial: §2.11's catch-up cites this profile's own scenario, no rule changed (#976)
+
+Core 0.73 orders state by an owner's run and seq, carried in band. Its
+`spec/scenarios/state.md` §7 no longer plays a catch-up: a restart takes a
+new run, which a consumer accepts whatever its clock. §2.11's MUST that an
+author never stamp at or below the last timestamp it issued cited that
+step. The rule stands: a desired resource keeps its Zenoh timestamp
+(core §4.3's table), and §2.6 orders an author's versions by it.
+
+**Editorial: §2.11, "Its stamps",** cites `scenarios.md` §6, where it
+cited core `state.md` §7. §6's step 1 restarts the author with its clock
+5 s behind, and its Expected 1 has the re-put's stamp above the last one
+the author issued. The reference runs it in
+`s6_the_authors_restart_moves_no_target_to_act_again`.
+
+**Written against core 0.73,** where it said 0.39: the citation moved
+with core 0.73's `state.md`. The index's row follows.
+
+**Deliberately not changed.** No rule: the MUST, its catch-up from core
+§4.3's definition and §2.11's sources stand. No fixture, section number
+or label.
+
 ## 0.11 — 2026-10-31: a re-mint that is a restart seeds (F-347) (#935)
 
 zk2py round 88 (#609) read 0.10 cold. It found F-336's rule as the

@@ -945,9 +945,15 @@ impl Alarms {
             .map_err(|e| Error::Contract(format!("alarms.v1 {ALARMS:?}: {e}")))?;
         let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
         let key = data_key(&i.addr, &i.iface, i.resource.token, &refs)?;
-        let w = Writer::declare(&i.session, key.into_keyexpr(), &i.resource, &values)
-            .await?
-            .bounded(i.budget.clone());
+        let w = Writer::declare(
+            &i.session,
+            &i.minter,
+            key.into_keyexpr(),
+            &i.resource,
+            &values,
+        )
+        .await?
+        .bounded(i.budget.clone());
         Ok(StateWriter::new(
             w,
             Arc::clone(&i.store),
