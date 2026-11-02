@@ -13,6 +13,52 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.24 — 2026-11-02: §7.3, a call's forms read first (#980, #985)
+
+Core 0.94 moves every call onto core §7.5's forms, #985's C4c: a request,
+a value and an error, each under `zenoh/bytes`. This text says how a tool
+reads them, and is written against core 0.94.
+
+**Added: §7.3, "A call's forms first."**
+- **A MUST.** A tool that shows or judges a call's reply reads a reply
+  under `zenoh/bytes` as the value form, and a reply error as core §5.2
+  reads it, with no contract. The value's record is the payload every
+  later step decodes, as the `response` or the `summary` type.
+- **A MUST NOT.** A refused value is undecodable, named by its refusal,
+  and never decoded or sniffed as a bare record. "The envelope first"
+  says the same of a refused envelope.
+- **An error** is shown by its code, its cause and its message. Its
+  detail is decoded by the `error` type where the tool holds it, and
+  shown as bytes otherwise.
+- **The transport's** reply error is shown so, with its `Encoding` and
+  its bytes, never as an owner's error.
+- **The as-of mark** may be shown. Its run names an instance only through
+  a descriptor that states it.
+- **The bare wire,** where a tool reads it (core §5.1): a bare value by
+  the decode order, and an envelope as core §5.2 says.
+
+**Changed: words.** §2's "Envelopes in a fan-out" and §7.2's "a value or
+an envelope" say "error". §7.3's decode order covers a form's record
+beside an envelope's.
+
+**Changed: the header** is written against core 0.94, where it said
+0.91. Appendix A's §7.3 row names the forms. Appendix B lists
+`envelope/vectors.json` and `errors/forms.json` against §7.3, and
+`scenarios/operations.md` §9.
+
+**Deliberately not changed.**
+- **"The envelope first"** still reads a stream's, a state's and an
+  event's samples. `carries.json` keeps its cases: an operation's key
+  carries no envelope, and a call's form is told by its sample.
+- **A tool that calls** is a caller, and core §5.1's caller rule binds
+  it. This text adds nothing to it.
+- **How a tool shows silence** is §2's and §7.2's, unchanged. A reply
+  error that is the transport's is one more of its instances.
+
+**The evidence** is the core's: `envelope/vectors.json`,
+`errors/forms.json`, `envelope/calls.json` and `scenarios/operations.md`
+§9.
+
 ## 0.23 — 2026-11-02: §7.5, a tool across a face declares again (#988 L4)
 
 Core 0.91 adds §8.1's reply timeout across a face and §8.5's declaring
