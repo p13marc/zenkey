@@ -25,7 +25,6 @@ and fails when a row's is stale.
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
 | [`hostid.v1`](hostid/v1.md) | 0.9 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.40 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
-| [`freshness.v1`](freshness/v1.md) | 0.5 | draft | zensight, zenoh-modem, tcgui | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 | [`freshness.v2`](freshness/v2.md) | 0.3 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.85 | 1: [`freshness.v2.toml`](freshness/freshness.v2.toml); 2: `freshness.ttl_s`, as `freshness.v1`'s; 4 through `uses` | `freshness.v1`'s horizon, confirmed by one heartbeat per interface in place of re-puts: core §7.5's form 6 every half the shortest horizon, a bit per member while its owner vouches for it, puts with no Zenoh timestamp and replies carrying the last confirmation; a reader confirms a member only where a section's digest is its view's, reads a gap in the heartbeat's seqs as a lost delivery, and re-reads a collection after two divergences; a crossing heartbeat is never downsampled and is liveness evidence (core §4.3, §7.5, §8.5, R7) |
 | [`health.v1`](health/v1.md) | 0.8 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.82 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v2`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
 | [`config.v1`](config/v1.md) | 0.9 | draft | zenoh-modem | 0.82 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v2`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
@@ -37,13 +36,15 @@ and fails when a row's is stale.
 
 ### Experimental: no adopter yet
 
-No adopter's mapping and no shipped service uses these yet. Their texts,
-fixtures, runtimes and tools are as complete as the others', and only
-the walkthrough exercises them. A profile leaves this table when one
-does (the process, below).
+No adopter's mapping and no shipped service uses these, yet or any
+longer. Their texts, fixtures, runtimes and tools are as complete as the
+others'. Only the walkthrough exercises them, or for `freshness.v1` its
+scenarios' own contracts. A profile leaves this table when one does
+(the process, below).
 
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
+| [`freshness.v1`](freshness/v1.md) | 0.5 | experimental | none | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 | [`timing.v1`](timing/v1.md) | 0.10 | experimental | none | 0.83 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
 | [`arbitration.v1`](arbitration/v1.md) | 0.6 | experimental | none | 0.83 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
 | [`link.v2`](link/v2.md) | 0.2 | experimental | none | 0.85 | 2: `link.v1`'s `link.exposure`; 4 through `uses` | `link.v1` with the face's transport: a router-wide `[transport]` (lease, keep-alives, `wait_before_close` at least the lease, sequence width, batch, timeouts) that a generator writes into the router's configuration and for the far end, linted per medium for keep-alives that flap, a sequence window one lease can fill and timeouts below the handshake; the binding the router runs, naming its link protocols; the catalog the far side decodes with; and per face the loss, the ARQ and the reply timeout. A tool checks a router's transport against the policy, read at the binding's defaults where omitted, and the two ends against each other (core §8.5, §11.3) |

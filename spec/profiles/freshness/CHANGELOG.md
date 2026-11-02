@@ -5,6 +5,36 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v1.md` experimental — 2026-11-02: no user left (#978)
+
+The text's status moves from `draft` to `experimental`, the status of a
+profile that no adopter's mapping and no shipped service uses
+([`../README.md`](../README.md), "The process"). #978's F5 moves the
+adopters' contracts onto `freshness.v2`: ZenSight's, zenoh-modem's
+`modem.v3` and tcgui's, with the walkthrough's `nav.v2`, each a
+review-class `uses_changed` revision published in `examples/zk2/.history`.
+F4 had moved `health.v1`, `alarms.v1`, `config.v1` and zenwatch. No
+contract of an adopter's mapping lists `freshness.v1` any longer, and
+zenwatch does not follow it.
+
+**Changed: the status alone.** The index lists `freshness.v1` in its
+second table, "Experimental: no adopter yet", and the header's status
+reads `experimental`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.5, written against core 0.22, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **It stays defined.** `freshness.v2` restates its rules by reference,
+  and an owner still re-puts a contract that lists it.
+- **The contracts that keep it,** each stated by a text that reads it so:
+  its own scenarios' `beacon.v1`, the `status` of the core's state
+  scenarios (`../../scenarios/state.md` §1), `link.v1`'s scenarios'
+  `radio.v1`, whose §6 judges liveness by its re-puts, and `desired.v1`'s
+  scenarios' `tasking.v1`. So do the conformance corpus's contracts,
+  the core's lint cases and `link.v1`'s `sampler.v1`, whose horizons are
+  on streams alone, confirmed by sampling under either major. zk2py's
+  interop contracts move in its round.
+
 ## `v2.md` 0.3 — 2026-11-02: draft, used by the adopters and zenwatch (#978)
 
 #978's F4 moves `health.v1`, `alarms.v1` and `config.v1` onto this text,
