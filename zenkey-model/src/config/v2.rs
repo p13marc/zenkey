@@ -2220,6 +2220,15 @@ impl Owner {
     #[must_use]
     pub fn restart(&self, mint: &mut dyn Mint) -> (Self, Output) {
         mint.next_run();
+        self.restart_in(mint)
+    }
+
+    /// [`Owner::restart`] in a new instance that took its run already, as a
+    /// re-mint does (v1 §2.12, "A re-mint is a restart"; core §1.5, §4.3):
+    /// its instance number is the run `mint` writes under now, under which
+    /// nothing was written yet.
+    #[must_use]
+    pub fn restart_in(&self, mint: &mut dyn Mint) -> (Self, Output) {
         let instance = mint.run().value();
         let mut owner = Self {
             iface: self.iface.clone(),
@@ -2235,6 +2244,18 @@ impl Owner {
         };
         let out = owner.settle(super::Done::default(), false, mint);
         (owner, out)
+    }
+
+    /// What a re-mint returns the device to first (v1 §2.12, "A re-mint is
+    /// a restart"): config.v1's [`super::Owner::restart_plan`] of the owner
+    /// this one runs.
+    ///
+    /// # Errors
+    ///
+    /// `(group, parameter)` of a parameter with a running value and no
+    /// startup value.
+    pub fn restart_plan(&self) -> Result<Vec<super::Restore>, (String, String)> {
+        self.inner.restart_plan()
     }
 
     /// The config interface.
