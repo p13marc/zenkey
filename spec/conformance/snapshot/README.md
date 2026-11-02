@@ -1,0 +1,31 @@
+# `snapshot/`: a collection's snapshot
+
+These fixtures check [`core.md`](../../core.md) §7.5's snapshot: a page's
+bytes, how they are read, and how a snapshot is cut into pages. The file
+states its format in its `description` member. It was written by an
+independent reading of the text, in Python with the standard library. A
+second reading, written apart from the first, agrees with every case. They
+are checked, never blessed.
+
+| File | Input → expected |
+|---|---|
+| [`bodies.json`](bodies.json) | A page → its bytes and their size, or the writer's refusal (`writes`). A page's bytes → the page, or the reader's refusal, the first in §7.5's order (`reads`). A snapshot and a page size → its pages' bytes and sizes, or the writer's refusal (`pages`). |
+
+**A page's bytes** are the whole reply's payload, from CH to the last
+tombstone. Every case's envelope parses as a snapshot on a put. The
+envelope's own refusals are [`envelope/vectors.json`](../envelope/vectors.json)'s.
+A snapshot on a key that is no state key is
+[`envelope/carries.json`](../envelope/carries.json)'s `key_kind`.
+
+**zenoh-modem's endpoints.** `sdu/endpoint/{endpoint}` is collection 4 of
+modem.v3's state, in the canonical form's order. Its records here are
+JSON documents of about 110 bytes, and its horizon is 60 s. So each live
+entry carries a confirmation. Under 1,024-byte pages, 24 endpoints take
+4 pages. Under 220-byte pages, one RF SDU each, every endpoint takes a
+page of its own.
+
+**What they cannot reach.** Which key answers which GET, what an owner
+promises with asof and a confirmation, and what a reader concludes from a
+complete snapshot are §4.2's. No rule adopts them at this version, and
+their evidence comes with the owners. These fixtures read one page at a
+time, so assembling pages into a complete snapshot is not among them.
