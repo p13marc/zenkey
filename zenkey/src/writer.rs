@@ -592,7 +592,8 @@ impl Writer {
     }
 
     /// The stamps of its next write: a stream key's seq, or the owner's
-    /// state seq, which the clock guard holds (core §4.3).
+    /// state seq, which the clock guard holds where the write carries a
+    /// Zenoh timestamp (core §4.3).
     pub(crate) fn mint(&self) -> Result<crate::state::Stamped> {
         match self.token {
             KindToken::State | KindToken::ExplicitState => self.minter.mint_state(self.timed),

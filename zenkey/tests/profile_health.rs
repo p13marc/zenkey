@@ -23,7 +23,8 @@
 //!
 //! The horizon is the contract's 60 s: §1, §2 and §4 wait it out (about
 //! 70 s, 135 s and 100 s), and the status is never re-put: its owner's
-//! heartbeat confirms it every 28.5 s (`freshness.v2` §2.4, text 0.8).
+//! heartbeat confirms it every 28.5 s (`freshness.v2` §2.4, text 0.8), a
+//! clock ahead included (text 0.9, #978's F6).
 
 mod common;
 
@@ -37,6 +38,7 @@ use zenkey::health::{self, Health, Level, Read, v1};
 use zenkey::model::freshness::{ClockTrust, DEFAULT_DELTA, Observation, StampAge};
 use zenkey::model::grammar::{IfaceId, ZkKey, parse};
 use zenkey::model::health::{self as hm, Judged, Listing, Presence, Reading, Reason, Verdict};
+use zenkey::model::heartbeat::Time;
 use zenkey::model::template::Bindings;
 use zenkey::prost::Message as _;
 use zenkey::state::Current;
@@ -355,13 +357,13 @@ fn is_health_token(k: &ZkKey) -> bool {
 }
 
 /// v1.md §5's last question, "is this service's clock ahead?", from S's
-/// log and the heartbeats that vouched for the status, `confirmed`, in
-/// arrival order, by `zenkey_model::health::clock_ahead` (text 0.3, its
-/// fixture `clock.json`): yes on a `clock_ahead` fault with no confirmation
-/// of the status heard since; no when the status was confirmed after the
-/// last one, or with none heard. A heartbeat that vouched for the status
-/// confirms it, as a put does (`freshness.v2` §2.5, text 0.8).
-fn clock_ahead(log: &[Rec], confirmed: &[Instant]) -> bool {
+/// log and H's heartbeats, in arrival order, by
+/// `zenkey_model::health::clock_ahead` (text 0.9, its fixture
+/// `clock.json`): yes on a `clock_ahead` fault with no heartbeat whose time
+/// is known heard since; no when the last heartbeat has its time known and
+/// came after the last one, or with none heard. A put of the status says
+/// nothing of the clock: the guard does not hold it (#978's F6).
+fn clock_ahead(log: &[Rec], beats: &Beats) -> bool {
     let mut heard: Vec<(Instant, hm::Heard)> = log
         .iter()
         .filter_map(|r| {
@@ -369,7 +371,7 @@ fn clock_ahead(log: &[Rec], confirmed: &[Instant]) -> bool {
                 if r.delete {
                     hm::Heard::StatusDeleted
                 } else {
-                    hm::Heard::Status
+                    hm::Heard::StatusPut
                 }
             } else if r.is_fault() {
                 if r.fault().code == health::CLOCK_AHEAD {
@@ -383,7 +385,14 @@ fn clock_ahead(log: &[Rec], confirmed: &[Instant]) -> bool {
             Some((r.at, h))
         })
         .collect();
-    heard.extend(confirmed.iter().map(|at| (*at, hm::Heard::Status)));
+    heard.extend(beats.lock().unwrap().iter().map(|b| {
+        let h = if b.hb.time == Time::Unknown {
+            hm::Heard::HeartbeatHeld
+        } else {
+            hm::Heard::Heartbeat
+        };
+        (b.at, h)
+    }));
     heard.sort_by_key(|(at, _)| *at);
     let heard: Vec<hm::Heard> = heard.into_iter().map(|(_, h)| h).collect();
     let present = Presence::Present(Listing::Listed { token: true });
@@ -863,9 +872,11 @@ async fn s3_the_checks_bound() {
 }
 
 /// §4, steps 1 to 3: a clock 2 s ahead: `clock_ahead` at the first hold,
-/// re-stamped by R1 ([moved clock], the module doc), again within a status
-/// interval; the status stale, never FAILED; after the correction, the
-/// status re-put and no more faults.
+/// re-stamped by R1 ([moved clock], the module doc), again within a
+/// heartbeat period; the status not held (#978's F6): put while the guard
+/// holds, vouched for by every heartbeat, their time unknown, and healthy
+/// at 65 s; after the correction, a heartbeat with its time known and no
+/// more faults.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s4_clock_ahead() {
     let (r1, ep) = router(None).await;
@@ -891,7 +902,8 @@ async fn s4_clock_ahead() {
     at_least(&log, 1).await;
     assert!(snapshot(&log)[0].is_status());
 
-    // 2. The heartbeat until the owner reports itself ahead.
+    // 2. The heartbeat until the owner reports itself ahead; the status put
+    // while the guard holds.
     eventually("the drift is detected", || async {
         hb.put("clock/heartbeat", "tick").await.unwrap();
         h.is_clock_ahead()
@@ -919,13 +931,17 @@ async fn s4_clock_ahead() {
         "[moved clock] R1 re-stamped the future-dated fault (core §4.1)"
     );
     assert_ne!(first.stamp_id(), owner_zid);
-    assert!(set_status_refused(&h).await, "the guard holds state writes");
+    h.set_status(Level::Ok, "ahead")
+        .await
+        .expect("the guard does not hold the status");
+    eventually("S hears the status put while held", || async {
+        snapshot(&log)
+            .iter()
+            .any(|r| r.is_status() && r.at > detected && r.status().reason == "ahead")
+    })
+    .await;
     tokio::time::sleep_until((detected + Duration::from_secs(65)).into()).await;
     let held = snapshot(&log);
-    assert!(
-        !held.iter().any(|r| r.is_status() && r.at > detected),
-        "no status put from the detection on"
-    );
     let faults: Vec<&Rec> = held.iter().filter(|r| r.is_fault()).collect();
     assert!(faults.len() >= 2, "repeated while held: {faults:#?}");
     for w in faults.windows(2) {
@@ -945,24 +961,27 @@ async fn s4_clock_ahead() {
     let present = presence_of(&rs, "lab/ahead").await;
     assert_eq!(
         verdict(judge_s(&sub, &held, present)),
-        (
-            Verdict::Stale,
-            Reason::Freshness(zenkey::model::freshness::Reason::BeyondHorizon),
-            None
-        ),
-        "stale at 65 s, never FAILED"
+        (Verdict::Healthy, Reason::Ok, Some(Level::Ok)),
+        "the status confirmed at 65 s, never stale"
     );
+    let during: Vec<common::Beat> = beats
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|b| b.at > detected + JITTER)
+        .cloned()
+        .collect();
+    assert!(during.len() >= 2, "heartbeats go on: {}", during.len());
     assert!(
-        !vouched_at(&beats).iter().any(|at| *at > detected + JITTER),
-        "no heartbeat vouches for it while the guard holds (freshness.v2 §2.10)"
+        during
+            .iter()
+            .all(|b| vouches(b) && b.hb.time == Time::Unknown),
+        "each vouches for the status, its time unknown (freshness.v2 §2.10)"
     );
-    assert!(
-        clock_ahead(&held, &vouched_at(&beats)),
-        "is its clock ahead? yes"
-    );
+    assert!(clock_ahead(&held, &beats), "is its clock ahead? yes");
 
-    // 3. The clock set right, the clock reference on: the next heartbeat
-    // vouches for the status again, it is not re-put, and no clock_ahead
+    // 3. The clock set right, the clock reference on: the next heartbeat's
+    // time is known again, the status is not re-put, and no clock_ahead
     // comes after it.
     svc.minter().simulate_offset(0);
     eventually("the guard releases", || async {
@@ -974,36 +993,42 @@ async fn s4_clock_ahead() {
     // A heartbeat period, 28.5 s, may pass before the next: longer than an
     // `eventually`'s net.
     tokio::time::sleep_until((released + BEAT + JITTER).into()).await;
-    let again = vouched_at(&beats)
-        .into_iter()
-        .find(|at| *at > released)
-        .expect("a heartbeat vouches for the status again");
+    let again = beats
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|b| b.at > released && b.hb.time != Time::Unknown)
+        .map(|b| b.at)
+        .expect("a heartbeat with its time known again");
     assert!(
         again <= released + BEAT + JITTER,
         "within 30 s of the correction"
     );
     tokio::time::sleep_until((released + Duration::from_secs(35)).into()).await;
     let after = snapshot(&log);
+    let last_put = after
+        .iter()
+        .rfind(|r| r.is_status())
+        .expect("the status")
+        .at;
     assert!(
-        !after.iter().any(|r| r.is_status() && r.at > detected),
-        "the status is not re-put (freshness.v2 §2.10)"
+        !after.iter().any(|r| r.is_status() && r.at > last_put),
+        "the status is not re-put"
     );
     assert!(
         !after.iter().any(|r| r.is_fault() && r.at > again),
-        "no clock_ahead after the heartbeat that vouched again"
+        "no clock_ahead after the heartbeat with its time known"
     );
     assert_eq!(
         verdict(judge_s(&sub, &after, present)),
         (Verdict::Healthy, Reason::Ok, Some(Level::Ok))
     );
-    assert!(
-        !clock_ahead(&after, &vouched_at(&beats)),
-        "is its clock ahead? no"
-    );
+    assert!(!clock_ahead(&after, &beats), "is its clock ahead? no");
     svc.close().await.unwrap();
 }
 
-/// Whether the guard refuses a status put (core §4.3).
+/// Whether the guard refuses a status put (core §4.3): never since #978's
+/// F6, unless the owner's session stamps every put (§8.2).
 async fn set_status_refused(h: &Health) -> bool {
     matches!(
         h.set_status(Level::Degraded, "probe").await,
@@ -1015,10 +1040,12 @@ async fn set_status_refused(h: &Health) -> bool {
 /// drops the fault from a clock ahead, so S hears no fault. The status put
 /// while ahead carries no Zenoh timestamp of the owner's (`freshness.v2`
 /// §2.4, text 0.8), so R1 stamps it itself and S hears it. G's GET still
-/// answers the status under the owner's stamp. Then v1.md §2.5's "a simulated offset is not a drift"
-/// (text 0.2), measured: an owner whose own session runs its HLC has that
-/// session re-stamp the offset clock's stamp before R1 sees it, so without
-/// root the fault arrives under the owner's honest stamp.
+/// answers the status under the owner's stamp. Then v1.md §2.5's "a
+/// simulated offset is not a drift" (text 0.2), measured: an owner whose
+/// own session runs its HLC has that session re-stamp the offset clock's
+/// stamp before R1 sees it, so without root the fault arrives under the
+/// owner's honest stamp. On that session every put carries a Zenoh
+/// timestamp, so the guard holds the status there (core §4.3, §8.2).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s4_the_faults_stamp_measured() {
     // drop_future_timestamp: nothing of the owner ahead reaches S.
@@ -1086,6 +1113,12 @@ async fn s4_the_faults_stamp_measured() {
         h.is_clock_ahead()
     })
     .await;
+    // Core §4.3, "Ahead": a session that stamps every put gives the status
+    // a Zenoh timestamp too (§8.2), so the guard holds it there.
+    assert!(
+        set_status_refused(&h).await,
+        "on a session that stamps, the status carries a Zenoh timestamp"
+    );
     eventually("the fault arrives", || async {
         snapshot(&log).iter().any(Rec::is_fault)
     })

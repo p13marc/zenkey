@@ -43,8 +43,12 @@ pub enum Error {
     #[error("not started: {0}")]
     NotExposed(String),
     /// This owner's clock is ahead of its router beyond the HLC delta: it
-    /// stops writing state until the drift is gone (spec §4.3, S7).
-    #[error("this owner's clock is ahead of its router: state writes stop (spec §4.3)")]
+    /// stops the state writes that carry a Zenoh timestamp until the drift
+    /// is gone (spec §4.3, S7).
+    #[error(
+        "this owner's clock is ahead of its router: its state writes that carry a Zenoh \
+         timestamp stop (spec §4.3)"
+    )]
     ClockAhead,
     /// A write core §2.7 forbids, refused with nothing published: a new
     /// member while the resource's live members are at its bound, an event
