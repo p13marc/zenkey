@@ -497,6 +497,20 @@ pub async fn router_with(
 /// default, by which peers that listen learn of each other through a
 /// router.
 pub async fn peer(endpoint: &str, listen: bool, gossip: bool) -> zenoh::Session {
+    zenoh::open(peer_config(endpoint, listen, gossip))
+        .await
+        .expect("peer")
+}
+
+/// [`peer`], its session stamping every write: a `redundancy.v1`
+/// candidate's (§2.10), which the runtime refuses otherwise (F-467).
+pub async fn stamping_peer(endpoint: &str, listen: bool, gossip: bool) -> zenoh::Session {
+    let mut c = peer_config(endpoint, listen, gossip);
+    c.insert_json5("timestamping/enabled", "true").unwrap();
+    zenoh::open(c).await.expect("a candidate's peer")
+}
+
+fn peer_config(endpoint: &str, listen: bool, gossip: bool) -> zenoh::Config {
     let mut c = base_config();
     c.insert_json5("mode", "\"peer\"").unwrap();
     c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
@@ -517,7 +531,7 @@ pub async fn peer(endpoint: &str, listen: bool, gossip: bool) -> zenoh::Session 
         if gossip { "true" } else { "false" },
     )
     .unwrap();
-    zenoh::open(c).await.expect("peer")
+    c
 }
 
 /// A sample read as a reader reads it (core §4.3, §7.5): a put that

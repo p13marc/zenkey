@@ -1164,9 +1164,9 @@ fn free_port() -> u16 {
 /// A peer instance's sessions (§5): each a peer whose only endpoint is
 /// `ep`, listening on loopback and gossiping, as core §8.1 asks of peers
 /// that read each other (0.40, F-206), its connect retry period 0.5 s at
-/// most (F-205).
+/// most (F-205); the claim's stamping every write (§2.10).
 async fn peer_candidate(ep: &str, o: Opts) -> Candidate {
-    let claim = common::peer(ep, true, true).await;
+    let claim = common::stamping_peer(ep, true, true).await;
     let watch = common::peer(ep, true, true).await;
     let reader = common::peer(ep, true, true).await;
     with_sessions(claim, watch, reader, o).await.unwrap()
