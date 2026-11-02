@@ -1,5 +1,5 @@
 {
-  "description": "core §7.5, the zk2c envelope and a call's forms. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's or a form's bytes in hex, and `sample`, what carries them (`put`: a put's payload, or a GET reply's that represents a put; `delete`: a delete's attachment, or a `reply_del`'s; `query`, `reply` and `reply_err`: a call's query, reply and reply error, each one's payload) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex (a mutation's or a value's record, a heartbeat's or a frame's body), or after a request's CH, or `null` for a delete and an error. A request, a value on a query, has `run_width`, `run` and `seq` `null`. An error's parse adds `error`: `code` and `cause` (§5.2's names, `cause` `null` for none), `message` (a string, or `null` when its bit is 0) and `detail` (the bytes after the message in hex, or `null` when its bit is 0). A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form, 4 or 7), `sample_kind` (a form its sample does not carry: a put carries a mutation, a heartbeat or a frame, a delete's attachment a delete, a query and a reply a value, a reply_err an error), `tag` (a delete whose tag is not 0), `request_run` (a request whose width bit is 1), `short` (fewer bytes than CH, the run and the seq need, and an error's byte after them), `trailing` (a byte after a delete's seq), then on an error's byte and what follows it: `cause` (a cause on a code other than `unavailable`, or none on it), `detail` (a detail on a code other than `app`), `extension` (bit 0 set), `short` (a message with no length byte, or fewer bytes than it states), `utf8` (a message that is not UTF-8), and `trailing` (a byte after the message, or after the error's byte without one, where no detail follows). The parse reads no contract and no key, so the tag of every form but a delete is reported, never checked against a type, a revision or a declaration, and a frame is parsed whatever its key: `key_kind`, which reads the key, is `carries.json`'s `reads`. An error's detail is never read. Every accepted case writes back to its bytes.",
+  "description": "core §7.5, the zk2c envelope, a call's forms and a snapshot's envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's or a form's bytes in hex, and `sample`, what carries them (`put`: a put's payload, or a GET reply's that represents a put or carries a snapshot; `delete`: a delete's attachment, or a `reply_del`'s; `query`, `reply` and `reply_err`: a call's query, reply and reply error, each one's payload) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire; a snapshot's `seq` is its asof), `tag`, and `record`: the bytes after the seq in hex (a mutation's or a value's record, a heartbeat's, a frame's or a snapshot's body), or after a request's CH, or `null` for a delete and an error. A request, a value on a query, has `run_width`, `run` and `seq` `null`. An error's parse adds `error`: `code` and `cause` (§5.2's names, `cause` `null` for none), `message` (a string, or `null` when its bit is 0) and `detail` (the bytes after the message in hex, or `null` when its bit is 0). A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form, 4), `sample_kind` (a form its sample does not carry: a put carries a mutation, a heartbeat, a frame or a snapshot, a delete's attachment a delete, a query and a reply a value, a reply_err an error), `tag` (a delete whose tag is not 0), `request_run` (a request whose width bit is 1), `short` (fewer bytes than CH, the run and the seq need, and an error's byte after them), `trailing` (a byte after a delete's seq), then on an error's byte and what follows it: `cause` (a cause on a code other than `unavailable`, or none on it), `detail` (a detail on a code other than `app`), `extension` (bit 0 set), `short` (a message with no length byte, or fewer bytes than it states), `utf8` (a message that is not UTF-8), and `trailing` (a byte after the message, or after the error's byte without one, where no detail follows). The parse reads no contract and no key, so the tag of every form but a delete is reported, never checked against a type, a revision or a declaration, and a frame and a snapshot are parsed whatever their key: `key_kind`, which reads the key, is `carries.json`'s `reads`. An error's detail is never read, and neither is a snapshot's body, which `snapshot/bodies.json` reads. Every accepted case writes back to its bytes.",
   "headers": [
     {
       "note": "a mutation with a 16-bit run",
@@ -128,7 +128,7 @@
       }
     },
     {
-      "note": "form 4, reserved",
+      "note": "form 4, reserved: the only one left",
       "byte": "80",
       "expect": {
         "form": "event",
@@ -164,7 +164,7 @@
       }
     },
     {
-      "note": "form 7, reserved",
+      "note": "form 7, a snapshot",
       "byte": "e0",
       "expect": {
         "form": "snapshot",
@@ -173,7 +173,25 @@
       }
     },
     {
-      "note": "every bit set",
+      "note": "111 0 1101: a snapshot with a 16-bit run and tag 13, a packed collection's",
+      "byte": "ed",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 16,
+        "tag": 13
+      }
+    },
+    {
+      "note": "111 1 0000: a snapshot with a 32-bit run",
+      "byte": "f0",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 32,
+        "tag": 0
+      }
+    },
+    {
+      "note": "every bit set: a snapshot with a 32-bit run and tag 15",
       "byte": "ff",
       "expect": {
         "form": "snapshot",
@@ -501,27 +519,37 @@
       }
     },
     {
-      "note": "snapshot, reserved",
+      "note": "a snapshot on a put: CH, a 16-bit run and asof 7, and an empty body, which this parse does not read",
       "sample": "put",
       "hex": "e00001000007",
       "expect": {
-        "refused": "form"
+        "form": "snapshot",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": ""
       }
     },
     {
-      "note": "every bit set: snapshot, reserved",
+      "note": "every bit set: a snapshot with a 32-bit run at its maximum, asof 16,777,215 and tag 15, and an empty body",
       "sample": "put",
       "hex": "ffffffffffffffff",
       "expect": {
-        "refused": "form"
+        "form": "snapshot",
+        "run_width": 32,
+        "run": 4294967295,
+        "seq": 16777215,
+        "tag": 15,
+        "record": ""
       }
     },
     {
-      "note": "a reserved form is refused before a short stamp",
+      "note": "a snapshot's CH alone",
       "sample": "put",
       "hex": "e0",
       "expect": {
-        "refused": "form"
+        "refused": "short"
       }
     },
     {
@@ -653,11 +681,11 @@
       }
     },
     {
-      "note": "a reserved form",
+      "note": "a snapshot as a delete's attachment",
       "sample": "delete",
       "hex": "e00001000008",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -841,11 +869,11 @@
       }
     },
     {
-      "note": "111 1 0000: a reserved form, refused before its width bit",
+      "note": "111 1 0000: a snapshot on a query, refused before its width bit",
       "sample": "query",
       "hex": "f0",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -1023,11 +1051,11 @@
       }
     },
     {
-      "note": "a snapshot on a reply, reserved",
+      "note": "a snapshot on a call's reply: a GET's reply that carries one is `put`, never `reply`",
       "sample": "reply",
       "hex": "e00001000007",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -1699,11 +1727,11 @@
       }
     },
     {
-      "note": "a snapshot on a reply_err, reserved",
+      "note": "a snapshot on a reply_err",
       "sample": "reply_err",
       "hex": "e00001000007a0",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -1728,6 +1756,127 @@
       "hex": "a264636f64656462757379676d65737361676560",
       "expect": {
         "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a snapshot's page with no entry: 6 bytes of envelope and a 10-byte body, 16 bytes in all",
+      "sample": "put",
+      "hex": "e0000100000900000e1000fa00000000",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 16,
+        "run": 1,
+        "seq": 9,
+        "tag": 0,
+        "record": "00000e1000fa00000000"
+      }
+    },
+    {
+      "note": "the same with a 32-bit run: 18 bytes",
+      "sample": "put",
+      "hex": "f0deadbeef00000900000e1000fa00000000",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 9,
+        "tag": 0,
+        "record": "00000e1000fa00000000"
+      }
+    },
+    {
+      "note": "a snapshot with tag 13, a packed collection's: reported, never checked",
+      "sample": "put",
+      "hex": "ed000100000900000e1000fa00040106706565722d622000002a04a5c00f8000",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 16,
+        "run": 1,
+        "seq": 9,
+        "tag": 13,
+        "record": "00000e1000fa00040106706565722d622000002a04a5c00f8000"
+      }
+    },
+    {
+      "note": "run 0 and asof 0, and a one-byte body: the body is not read here, and snapshot/bodies.json refuses it",
+      "sample": "put",
+      "hex": "e0000000000000",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 16,
+        "run": 0,
+        "seq": 0,
+        "tag": 0,
+        "record": "00"
+      }
+    },
+    {
+      "note": "a 16-bit run and asof at their maxima, and an empty body",
+      "sample": "put",
+      "hex": "e0ffffffffff",
+      "expect": {
+        "form": "snapshot",
+        "run_width": 16,
+        "run": 65535,
+        "seq": 16777215,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "a 16-bit run's snapshot one byte short of its asof",
+      "sample": "put",
+      "hex": "e000010000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 32-bit run's snapshot one byte short of its asof",
+      "sample": "put",
+      "hex": "f0000123450000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "the width bit decides: 6 bytes are short of a 32-bit run's asof",
+      "sample": "put",
+      "hex": "f00001000009",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a snapshot's CH alone as a delete's attachment: the wrong kind before a short stamp",
+      "sample": "delete",
+      "hex": "e0",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a snapshot's CH on a query",
+      "sample": "query",
+      "hex": "e0",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a whole snapshot page on a call's reply",
+      "sample": "reply",
+      "hex": "f0deadbeef00000900000e1000fa00000000",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a snapshot's body under form 4's CH: an event, reserved",
+      "sample": "put",
+      "hex": "80000100000900000e1000fa00000000",
+      "expect": {
+        "refused": "form"
       }
     }
   ]
