@@ -24103,3 +24103,239 @@ beyond what the changelogs state.**
   contradiction (F-453) and a gap (F-454). None is a blocker.
 - **Open:** F-436 (not re-run), F-437 to F-454. F-365 stays open as
   #965's.
+
+## At core 0.87 and observer 0.21 (#981, #978 F4)
+
+Round 97 read, cold, the texts at main 13cd65c4: core 0.84 to 0.87,
+observer 0.20 and 0.21, `link.v1` 0.12 and 0.13, `link.v2` 0.2,
+`freshness.v2` 0.2 and 0.3, `timing.v1` 0.10, `health.v1` 0.8,
+`alarms.v1` 0.11 and `config.v1` 0.9, each changelog entry first. Then core
+§7.7 whole, observer §7.6, `scenarios/frames.md`, `link.v1` §2.7 to §2.12,
+core §11.1, `alarms.v1` §2.14 and §2.15, and `health.v1`'s and
+`config.v1`'s confirmation sentences. Its evidence: `frame/apply.json`,
+`contracts/w108-frame-horizon`, `e050-frame-timing`'s `frames/unread`,
+`compat/frame/deadband-field-renamed`, `plan.json`'s two new cases and
+`conformance/contracts/`, `alarms.v1`'s four `in_step` cases,
+`freshness.v2`'s new `apply.json` case, the profiles' revisions 1.1 in
+`spec/profiles/.history/`, and the scenarios of `frames.md` and of the
+three profiles, run live.
+
+**Round 96's answers hold.** Each of F-442 to F-454 is answered as its
+entry says, and zk2py's readings show it: 0.82's entry counts 207 rules
+(F-442); `beacon.v2` marks `status` and `level` and lists `link.v1`, and
+zk2py's copy is the reference's test contract, fingerprint for
+fingerprint (F-443); a heartbeat carries a body, never a record (F-444,
+observer 0.20); S2 names every member of a `freshness.v2` state and §4.3
+mints at each mutation and heartbeat (F-445, F-446); every vouched bit
+clear (F-447); only a read heartbeat counts (F-448); `transport.json`'s
+catalogs are §8.6 documents (F-449); the heartbeat over several revisions
+(F-450); a deadband compared by its field's place (F-451: zk2py's
+classifier moved, and `deadband-field-renamed` is review); E050 reading a
+declaration (F-452: zk2py's linter moved, and `frames/unread` gives none);
+`timing.v1` §2.2's sentence (F-453); and `frames.md` (F-454).
+
+**The rules changed.** zk2py diffed every keyword sentence of `core.md`,
+`observer.md`, `link.v1`, `link.v2`, `freshness.v2`, `timing.v1`,
+`health.v1`, `alarms.v1` and `config.v1` between 7d58513b (round 96's
+texts) and 13cd65c4. None is gone but those the entries reword: S2's
+`freshness.v2` sentence (0.85), `freshness.v2` §2.5's re-read and §2.10's
+guard (0.2), and the three profiles' `freshness.v1` sentences (0.8, 0.11,
+0.9). The new ones are core §7.7's MUST NOT, its MAY to end a frame early
+and its "History" MAY (0.87), W108's row (0.87), observer §7.3's heartbeat
+MUST (0.20) and §7.6's two (0.21), and `link.v1` §2.8's frame MUST NOT
+(0.13). **No rule changed beyond what the changelogs state.** One remark,
+not filed: 0.87's entry says the "History" paragraph "states no keyword",
+though its first sentence is "A frame resource MAY declare `history`";
+`RULES.md` lists no MAY, so its counts stand.
+
+### F-455 · gap · `link.v1` §2.7: `freshness.v2`'s deny where the deployment does not list it
+
+> `link.v1` §2.7: "2. **Otherwise**, one deny per listed interface *I*, id
+> `K:I`, sorted by the interface id"; "**Interfaces no listed service
+> implements** are in step 1's whole denies, and in no step 2 deny";
+> "**Heartbeats in the denies.** For the token `stream`, the interface
+> `freshness.v2` is carved from its heartbeats (§2.9), in place of its own
+> templated resource."
+>
+> §2.9: "A generator MUST let a listed interface's heartbeat cross a face
+> exactly when a collection of that interface crosses it".
+>
+> `health.v1` 0.8's entry: "zenoh-modem's RF face denies the heartbeats
+> covering `health.v1` and `config.v1`, `stream:freshness.v2`, as
+> `link.v1` §2.9 says … no rule of `link.v1` changed."
+
+- **The gap.** `plan.json`'s first case lists `rf0` implementing
+  `modem.v3`, `config.v1` and `health.v1`, not `freshness.v2`. By §2.7,
+  `freshness.v2` is no listed interface, so step 2 gives it no deny, and
+  `rf0`'s two heartbeats cross under `allow`, against §2.9's MUST. The
+  expectation denies `stream:freshness.v2`, `zk2/*/*/freshness.v2/stream/**`,
+  as a listed interface's. No sentence makes it one.
+- **What zk2py does:** it adds `freshness.v2` to the listed interfaces
+  wherever a listed interface has a heartbeat, its resources the standard
+  contract's where none is given: its owners implement it beside the
+  covered interface (`freshness.v2` §3, `health.v1` §2.7). The case
+  passes. Before, zk2py denied nothing of `freshness.v2` there.
+- **Fix:** §2.7 or §2.9: "An interface with a heartbeat makes
+  `freshness.v2` a listed interface of its services: they implement it
+  (`freshness.v2` §3)." Or list `freshness.v2` in the case's `implements`,
+  as cases 12 to 14 do.
+- **Changes:** the plan of a deployment that leaves `freshness.v2` out.
+
+### F-456 · gap · core §9.7, §9.8: a published review
+
+> §9.8: "**Review:** a human MUST accept it before publication."
+>
+> §9.7: "A contract's CI keeps every published bundle under a **history
+> root** it configures … The root is append-only."
+>
+> `health.v1` 0.8's entry (and `alarms.v1` 0.11's, `config.v1` 0.9's):
+> "Its `uses` is `freshness.v2`, where 1.0's was `freshness.v1`: a review
+> (core §9.8, `uses_changed`), no resource changed."
+
+- **The gap.** `spec/profiles/.history/` holds revisions 1.0 and 1.1 of
+  each of the three. Checked against its history, FULL_TRANSITIVE, each
+  standard contract is a review against its 1.0, at every run. The root
+  records no acceptance, and no text says what a check of a revision
+  already published concludes of its review.
+- **What zk2py does:** its `examples` family read "compatible with its
+  history" strictly, and failed the three contracts. It now reads a review
+  of a revision whose own bundle is published as accepted by that
+  publication, and says so in the result's name. A breaking class still
+  fails.
+- **Fix:** §9.7: "A revision in the history root was accepted: a check
+  of it reports its review, and does not refuse it."
+- **Changes:** a CI's verdict on its own history.
+
+### F-457 · ambiguity · W108 and `link.v1` §2.8: a frame's interval beside an invalid timing declaration
+
+> §9.2, cascade 8: "E050 waits for the values it reads … Where one of them
+> does not read, the declaration is invalid. E050 then reads none of its
+> values, as `timing.v1` judges none." / "W108 waits for E048's none too.
+> It reads the horizon as `freshness.v1` §2.1 reads one, and an unstated
+> interval gives none."
+>
+> §7.7: "Otherwise it is the `timing.period_ms` its resource declares
+> (`timing.v1` §2.3), and with none it is unstated."
+>
+> `link.v1` §2.8: "`frame_over_interval`: its interval (core §7.7: its
+> span, else its `timing.period_ms`) is shorter than `interval_s`."
+
+- **The ambiguity.** A one-record frame resource declares
+  `timing.period_ms = 60000` beside `timing.deadline_ms = "x"` and a
+  horizon of 100 s. E050 reads none of that declaration. W108 says how it
+  reads the horizon, not the period: read alone, the period is 60 s and
+  W108 warns; read as E050 reads it, the interval is unstated and W108
+  gives none. `link.v1`'s `frame_over_interval` and §2.12's
+  `interval_over_horizon` read the same interval.
+- **What zk2py does:** none, in all three, as E050 reads the declaration
+  (and `timing.v1` §2.2: "A reader MUST NOT judge a period … of a resource
+  whose declaration is invalid"). The reference CLI agrees for W108:
+  `zk2 contract lint` warns of the same period beside no deadline, and not
+  beside a deadline of `"x"`.
+- **Fix:** §7.7's interval: "the `timing.period_ms` of a declaration
+  `timing.v1` §2.2 reads valid".
+- **Changes:** none observed, a sentence.
+
+### F-458 · ambiguity · observer §7.6: whose GET answers a frame
+
+> Observer §7.6: "**One frame alone.** A tool that reads a frame with
+> nothing before it reads it as a reader's first frame. That is one reply
+> of a GET, or one row of a recording read alone."
+>
+> Core §2.5: an advanced publisher "declares its own queryable and token
+> under `<key>/@adv/…`".
+
+- **The ambiguity.** A frame resource is a stream. No rule has its owner
+  answer a GET on its key, and a history cache answers under `@adv`, not
+  on the key. `zenctl get` of the owner example's frame key draws no reply
+  (exit 2). So a GET's reply of a frame is an archive's, a recorder's, or
+  a cache's read through `@adv`, and the text names none.
+- **What zk2py does:** for `frames.md` §1 step 5's "A reader holding
+  nothing reads each frame … alone", its runner answers a GET on the
+  frame key with the frames it captured, one reply each: `zenctl get`
+  reads each alone, a first frame, and zk2py's reader reads each captured
+  frame with a reader that held nothing.
+- **Fix:** "That is one reply of a GET, an archive's or a history
+  cache's, or one row of a recording read alone."
+- **Changes:** none, a sentence.
+
+### F-459 · contradiction · `alarms.v1` scenarios §1, §3 and §5 under `freshness.v2`
+
+> Scenarios §1, Expected 2: "S receives one put on
+> `…/state/alarms/a659f813308ad1da`, stamped by the owner (core S1) … G's
+> reply holds the same document under the same stamp (core S2)".
+>
+> §3, Expected 2: "G's reply holds a `reply_del` for the key, with the
+> delete's stamp".
+>
+> §5, Expected 3: "A firing, unchanged, `timestamp` *t₀* kept, under the
+> new instance's stamp id. S reads it **confirmed**."
+>
+> Core §4.3's table, the `freshness.v2` row: "on its replies alone, never
+> on a put". `alarms.v1` 0.11 §2.14 step 5: "Under `freshness.v2` an
+> alarm's put carries none (core §4.3's table), so a subscription's
+> delivery arrives under a router's stamp, or none".
+
+- **The contradiction.** 0.11's entry changed the scenarios' §2, §6 and
+  §10. §1 and §5 still expect S's deliveries under the owner's stamp, §5
+  under "the new instance's stamp id", and §3 G's `reply_del` under the
+  delete's. A revision 1.1 alarm's put and delete carry no Zenoh timestamp
+  of the owner's, so S's delivery is R1's, and G's reply carries the
+  alarm's last confirmation, not the mutation's stamp. Read as the Zenoh
+  timestamp, §1 step 2, §3 step 2 and §5 step 3 fail against any owner
+  that keeps §4.3's table, and zk2py's runner failed them so.
+- **What zk2py does:** it reads "stamped by the owner" as the in-band
+  stamp under the run the descriptor states, and "under the new
+  instance's stamp id" for S as the new instance's run. G's reply is
+  checked by its in-band stamp and by the owner's Zenoh timestamp, the
+  last confirmation. A `reply_del` of a `freshness.v2` member carries the
+  timestamp minted at its delete (§4.3 "Minting": "at each mutation of
+  such a member"), so §5's "a `reply_del` of R's key and of P's key,
+  stamped by it" holds.
+- **Fix:** §1: "stamped in band by the owner (core S1) … G's reply holds
+  the same document under the same in-band stamp, and its last
+  confirmation (core S2)". §3: "with the delete's in-band stamp". §5:
+  "under the new instance's run".
+- **Changes:** three scenario steps.
+
+### F-460 · ambiguity · S2 and §4.3: a `reply_del`'s last confirmation
+
+> S2: "a GET reply MUST carry the in-band stamp of the mutation it
+> represents: a reply as the bytes the mutation put, a `reply_del` as the
+> delete's attachment. The owner's reply MUST also carry the mutation's
+> Zenoh timestamp, where the mutation carried one. The owner's reply of a
+> member of a state that §4.3's table lists under `freshness.v2` MUST carry
+> instead that member's last confirmation, as the table says."
+>
+> §4.3, "Minting": "An owner mints one at each mutation of such a member,
+> though its put carries none."
+>
+> `alarms.v1` scenarios §5, Expected 3: "a `reply_del` of R's key and of
+> P's key, stamped by it".
+
+- **The ambiguity.** A deleted key of a `freshness.v2` state is answered
+  by a `reply_del`. Its delete carried no Zenoh timestamp, so S2's second
+  sentence asks none. Whether the third binds it turns on "a member": a
+  key deleted within the window may or may not be one, and "Minting" mints
+  at each mutation, a delete among them, for a reply to carry.
+- **The two implementations disagree.** zk2py's owner mints at the delete
+  and its `reply_del` carries that timestamp. The owner example's carries
+  none: against it, §5 step 3's `reply_del`s had no Zenoh timestamp, and
+  zk2py's reader called them foreign until it read a reply with no stamp
+  as unattributable (§2.14 step 5, 0.11).
+- **What zk2py does:** it keeps minting, and its runner reads "stamped by
+  it" in band (F-459), with a Zenoh timestamp, where one comes, the
+  owner's.
+- **Fix:** S2: "That holds of a `reply_del` too: its last confirmation is
+  the timestamp minted at the delete", or "A `reply_del` carries none".
+- **Changes:** a reply's timestamp, and a reader's attribution.
+
+### Counts at core 0.87
+
+460 entries.
+- **New: F-455 to F-460,** six: two gaps (F-455, F-456), three
+  ambiguities (F-457, F-458, F-460) and a contradiction (F-459). None is a
+  blocker.
+- **Resolved: F-442 to F-454**, as the answers above say.
+- **Open:** F-436 (not re-run), F-437 to F-441, F-455 to F-460. F-365
+  stays open as #965's.

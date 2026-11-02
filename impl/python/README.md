@@ -76,7 +76,8 @@ case name. It exits with:
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
-| link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
+| frame | §7.7, observer §7.6 | `frame` | every file of `frame/`: `layouts.json` (the frame form, its tag, the widths and the span), `bodies.json` (each write's bits, pad and bytes or its refusal, each read's value or its first refusal, every accepted one written back and sealed in form 5) and `apply.json` (round 97: one key's frames through `frame.Reader`, from each body's value and as a sealed put, envelope first). An unknown file there fails. |
+| link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`, `contracts/` (0.13: each contract there valid, each artifact listed) among them: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
 | telemetry | profiles/telemetry §2.1–§2.11, §3 | `telemetry` | every file of `spec/profiles/telemetry/conformance/`: `schema.json` (the standard schema's published ids, the file's header against zk2py's tables, and each case's document by path, inside a bundle, or inline), `declarations.json` (a resolved resource's declaration), `samples.json` (one sample's conformance, and the member's kind and unit; since 0.2 a sample may come as its bytes, `json_text` read as strict JSON, `cbor_hex` as CBOR, `attachment_text` as JSON) and `continuity.json` (a pair's continuity, its epoch's evidence and its rate, compared exactly; `stamp_ntp64` read as zenoh's `as_nanos`, 0.2). An unknown file there fails. |
 | desired | profiles/desired §2.2–§2.10, §2.17, §3 | `desired` | every file of `spec/profiles/desired/conformance/`: `schema.json` (the standard schema's two published ids, the file's header against zk2py's tables, each case's document by path or inline), `declarations.json` (a resolved resource with its parameters' types -> its declaration, or its reasons in order, `not_string` since 0.2), `bindings.json` (a requirement as a descriptor lists it -> the slice's key, the kill switch, or its findings), `order.json` (one role's steps through the target's state machine, a put's payload decoded, as its text or as its bytes: each step's word and the report after the last, which must itself read with no finding), `reports.json` (a report decoded or as its bytes: readable, and its findings in order), `conclusions.json` (§5's four questions over one reading, the deployment's word across a face since 0.2) and `slices.json` (0.5: a tool's reading of one role before §2.17 answers -> its candidate slices, where they came from, §2.3's and §2.2's problems, and which reply is the report). An unknown file there fails. |
@@ -5428,9 +5429,169 @@ gains `key_kind`. **No rule changed beyond what the changelogs state.**
 
 **Not run:** frames on a bus. No owner writes one at 0.83, and
 `scenarios/frames.md`, which §7.7 cites, does not exist yet (F-454).
+Round 97 runs them (below).
 
 The extension found F-451 to F-454, four, none a blocker. See "At core
 0.83" in `SPEC-FINDINGS.md`.
+
+## Core 0.84 to 0.87, observer 0.20 and 0.21, `link.v1` 0.12 and 0.13, and the profiles onto `freshness.v2`: frames read and written (round 97)
+
+Since round 96 main took:
+- **core 0.84** (#980 C1c), the owner's catalog in `presence.md` §2, no
+  rule changed;
+- **core 0.85**, observer 0.20, `freshness.v2` 0.2, `link.v1` 0.12,
+  `link.v2` 0.2 and `timing.v1` 0.10: round 96's F-442 to F-454 answered;
+- **observer 0.21** (#981 K2): §7.6, a tool's frames, with
+  `frame/apply.json`;
+- **core 0.86** (#978 F4): §11.1's Consume grants each bound provider's
+  heartbeat; and `health.v1` 0.8, `alarms.v1` 0.11 and `config.v1` 0.9
+  onto `freshness.v2`, their contracts' revisions 1.1 published, with
+  `alarms.v1` §2.15's `window_unconfirmed` and §2.14 step 5;
+  `freshness.v2` 0.3 is draft;
+- **core 0.87** and **`link.v1` 0.13** (#981 K3): frames written,
+  `scenarios/frames.md` §1 to §6, §7.7's never a mutation, its MAY to end
+  a frame early and its "History", W108, and a frame never downsampled.
+
+zk2py diffed every keyword sentence of the changed texts between 7d58513b
+and 13cd65c4. **No rule changed beyond what the changelogs state** (0.87's
+entry says "History" states no keyword, though it opens with a MAY;
+`RULES.md` lists no MAY, so its counts stand). Each of round 96's answers
+holds, as its reading shows.
+
+### The classes zk2py claims
+
+Unchanged: the **owner**, **consumer**, **caller** and **observer**
+classes, at the full level. `freshness.v2` now covers zk2py's `health.v1`,
+`alarms.v1` and `config.v1` owners and readers.
+
+### Its walk of `RULES.md` at 0.87
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 75 | 64 | 3 | 8 |
+| consumer | 21 | 17 | 0 | 4 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 83 | 79 | 2 | 2 |
+| static, in every class | 62 | 60 | 0 | 2 |
+
+- **228 rows walked of 228, none without a verdict.** The walk was
+  re-keyed first, in its own commit: S2's re-worded `freshness.v2`
+  sentence (met), §7.7's never a mutation (n/a until the owner wrote
+  frames), observer §7.3's heartbeat (not met: the echo tool sniffed its
+  body) and §7.6's two (n/a). Each is met now, with §7.7's six owner rules
+  and its three reader rules, in the consumer and observer classes.
+- **Beyond the index:** 26. New: §7.7's MAY to end a frame early (met)
+  and "History"'s late joiner (n/a: zk2py's owner publishes no stream
+  with history).
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's
+  two decoding MUSTs.
+
+### What round 97 changed in zk2py
+
+- **`frame.Reader`** (core §7.7, observer §7.6): one state per field of a
+  frame key, `known`, `within` with its delta, `unknown` with why
+  (`first`, `run`, `gap`, `rewind`, `deadband`, `no_value`) or `absent`;
+  every field `unknown` at a gap, a rewind and another run; a deadband
+  field `unknown` at its `max_records`-th record; no value shown for an
+  unknown or absent field; a mutation, a heartbeat or a refused body on a
+  frame key undecodable, named, its seqs uncounted.
+- **`frame.Framer`** and **`Owner.record_frame`**, `end_frame`,
+  `lose_frame`: an owner's records gathered into frames, put at `records`
+  records, at the span, or early (the MAY); a run's first frame full, a
+  full record every `keyframe_every`, deltas of what moved, a deadband
+  field omitted only while valued, within its delta and under
+  `max_records`, a record scheduled only within `jitter_ms`; record 0 the
+  key's next seq, the seq advanced by the count; open frames put before a
+  new run. `publish` and `stream_envelope` refuse a frame key.
+- **`frame_live`**: `FrameSubscriber`, the consumer of an owner's frame
+  keys, and `RawFrames`, `frames.md` §4's X.
+- **The echo tool**: a held frame resource's frames read through one
+  reader per key, each record with whose clock its time is on; an unheld
+  one by its envelope; a heartbeat by its covered revision's collections
+  or its envelope (form, interface, size); neither ever sniffed.
+- **The linter**: W108 (cascade 8); E050 reads a declaration (F-452's
+  answer); `compat` compares a deadband by its field's place (F-451's).
+- **`link`** (0.13): a frame resource's interval, largest frame and
+  history read from its contract; no downsampling rule for one;
+  `frame_over_interval`, `frame_over_batch`, `history_on_frame`, and
+  `interval_over_horizon` by its interval. `freshness.v2` a listed
+  interface wherever a listed interface has a heartbeat (F-455).
+- **`acl`** (core 0.86): Consume grants each bound provider's heartbeat
+  where the binding consumes a `freshness.v2` collection, and each covered
+  owner's heartbeat joins the `allow` posture's keys.
+- **`health.v1`, `alarms.v1` and `config.v1`** on their revisions 1.1:
+  their owners confirm by heartbeat, never by a re-put; a closed writer
+  clears its member's bit and a reopened one sets it; an alarm confirmed
+  again sets its bit and puts nothing; a resolved alarm's bit is clear
+  from its resolved put; a `reply_del` of a covered member carries the
+  timestamp minted at its delete. `freshness.Subscriber.follow` reads the
+  owner's heartbeats by `freshness.v2` §2.5, each confirmation a delivery
+  of the member's last put, a gap read as a lost delivery, a complete GET
+  a read of the view. `AlarmsReader` follows an owner whose descriptor
+  names a revision using `freshness.v2` (read from a history root, else
+  retrieved), and its window needs the latest heartbeat in step
+  (`window_unconfirmed`); §2.14 step 5 attributes no subscription
+  delivery of such an owner.
+- **The runner:** `frame/apply.json` (195 checks: each frame's body, its
+  reading from its value and as a sealed put), `link`'s
+  `conformance/contracts/`, the `in_step` cases, and a published
+  revision's review accepted by its publication (F-456). `beacon.v2` is
+  the scenarios' 0.2 listing; round 96's `beacon-face.v2` is gone.
+- **`readings`: 840, up from 827**: round 96's readings re-keyed to the
+  answers, and round 97's thirteen.
+
+**`just py-conformance`: 5018 of 5018**, on main 7597efb8: `frame` 315,
+`link` 230, `alarms` 320, `contracts` 138, `compat` 135, `readings` 840,
+and `telemetry` 283. Main moved during the round to add `telemetry.v2` 0.1
+(#983 T1): its `conformance/v2/` and `conformance/contracts/` are keyed
+present and not read, and the walk lists it as not followed; #983's own
+round reads it, and round 97 files nothing on it.
+
+### Live
+
+`python -m zk2py.frames_scenarios`, `frames.md` §1 to §6 against the black
+boxes of main 13cd65c4, over `linkframes.v1` as `frames.md` writes it:
+
+| Section | zk2py owner, zk2py reader | Rust owner, zk2py reader | zk2py owner, zenctl |
+|---|---|---|---|
+| §1 each frame decodes alone | 12/12 | 12/12 | 12/12 |
+| §2 a lost delta frame | 6/6 | 6/6 | 6/6 |
+| §3 scheduled and measured time | 8/8 | 8/8 | 7/7 |
+| §4 the deadband | 9/9 | 9/9 | 7/7 |
+| §5 a new run | 4/4 | 4/4 | 4/4 |
+| §6 a late joiner | 4/4 | 4/4 | 4/4 |
+
+- **The owner example** loses a frame on demand (`frame lose`), so every
+  section ran against it.
+- **zenctl** reads frames as zk2py does, field for field: `watch` for S,
+  and `get` for §1 step 5's frames read alone, the runner answering the
+  GET with the frames it captured (F-458).
+- **The echo tool** is the observer in `py-py` §3 and §4: scheduled time
+  with its jitter, `within` with its delta, an unheld frame by its
+  envelope.
+
+The profiles' scenarios on their revisions 1.1:
+
+| Scenarios | zk2py's owner | The owner example |
+|---|---|---|
+| `health.v1` 0.8, §1 to §8 | 30/30 | not run: the runner drives zk2py's owners |
+| `alarms.v1` 0.11, its short-ttl copy (4 s) for §2, §4, §6, §10 | 79/79 | 77/79, then §5's 11/11 after F-460's reader fix |
+| `config.v1` 0.9 | 51/51 | 51/51 |
+| `freshness.v2` `scenarios-v2.md` §1 to §7 (`beacon.v2` 0.2) | 32/32, and 25/25 with zenctl | 32/32 |
+
+- **No re-put** in any of them: S hears each member put once, then
+  heartbeats; a stopped vouch, a closed writer or the clock guard clears
+  the bit, and the member goes stale past the horizon.
+- **`alarms.v1` §10** establishes `lab/b` by a window whose latest
+  heartbeat is in step with T's view, and §2.14 step 5 reads no
+  subscription delivery as an earlier instance's.
+
+**Not run:** `link.v2`'s scenarios §1 and F-436's fix, as in round 96;
+`alarms.v1`'s §2, §6 and §10 at 900 s (`--full`); a frame resource with
+`history`, which zk2py's owner does not publish.
+
+Round 97 found F-455 to F-460, six, none a blocker. See "At core 0.87
+and observer 0.21" in `SPEC-FINDINGS.md`.
 
 ## What it does not cover
 
