@@ -1,0 +1,21 @@
+# core §10 point 2: W105 reads the table of the major the contract uses.
+# `telemetry.v2`'s adds `series` to `telemetry.v1`'s four keys (its §4), so
+# the frame's `telemetry.series` draws no W105; `w105-telemetry-series` is
+# the same contract under `telemetry.v1`, and draws it.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["telemetry.v2"]
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources."frames/link"]
+kind  = "stream"
+type  = "packed:frames#Link"
+frame = { records = 1 }
+
+[resources."frames/link".annotations."telemetry.series"]
+dropped     = { kind = "counter", unit = "1" }
+queue_depth = { kind = "gauge", unit = "1" }

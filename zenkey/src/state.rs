@@ -24,8 +24,12 @@
 //! toggled at each mutation, and each live member's bit; and each member's
 //! last confirmation, the later of its last mutation and the last
 //! heartbeat that vouched for it, which its GET replies carry as their
-//! Zenoh timestamp (S2). The clock guard holds none of its writes, since
-//! they carry no Zenoh timestamp (§4.3, "Ahead"; #978's F6).
+//! Zenoh timestamp (S2). On a session without timestamping the clock
+//! guard holds none of its writes, since they carry no Zenoh timestamp
+//! (§4.3, "Ahead"; #978's F6). On a session that stamps every write, a
+//! `redundancy.v1` candidate's (§8.2), it holds them all, and a held write
+//! clears its member's bit until a write of it goes through (`freshness.v2`
+//! §2.10, F-461).
 //!
 //! **The refresher** (`freshness.v1` §2.4, #720). A state resource whose
 //! contract declares `freshness.ttl_s` above 0 is confirmed at least every
@@ -156,8 +160,9 @@ struct Runs {
 /// - **The clock guard** ("Ahead", #978's F6): while it holds, a state
 ///   write that carries a Zenoh timestamp is refused, [`Error::ClockAhead`]:
 ///   one on §4.3's table (`timed`), or any on a session that stamps. Every
-///   other state write goes on, a `freshness.v2` member's among them,
-///   since a router has no time of the owner's to re-stamp on it.
+///   other state write goes on, a `freshness.v2` member's among them on a
+///   session without timestamping, since a router has no time of the
+///   owner's to re-stamp on it.
 ///
 /// **Session posture** (core §8.2): a session with timestamping enabled
 /// stamps every put and delete it is not given a timestamp for, so on one
@@ -1206,6 +1211,22 @@ impl StateWriter {
         }
     }
 
+    /// A write's stamps (S1), from [`Minter::mint_state`]. Where the clock
+    /// guard holds the write of a covered member, its bit is cleared until
+    /// a write of it goes through (`freshness.v2` §2.10, F-461): only a
+    /// session that stamps every write, a `redundancy.v1` candidate's (core
+    /// §8.2), has such a write held, and the heartbeat that goes on must
+    /// not vouch for the value the owner asked to replace or delete. The
+    /// next put that goes through sets the bit as
+    /// [`StateWriter::set_vouched`] left it, and so does that call itself.
+    fn mint(&self) -> Result<Stamped> {
+        let minted = self.minter.mint_state(self.writer.is_stamped());
+        if self.covered && matches!(minted, Err(Error::ClockAhead)) {
+            self.store.vouch(self.key.as_str(), false);
+        }
+        minted
+    }
+
     /// The Zenoh timestamp a covered member's replies carry from a
     /// mutation stamped so (`freshness.v2` §2.4, S2): the mutation's own
     /// where it set one, else the owner's clock now. `None` for a member no
@@ -1277,7 +1298,9 @@ impl StateWriter {
     /// turns the re-puts on and off ([`StateWriter::set_refresh`]): one
     /// switch, which the refresher reads alone, the store's bit being kept
     /// only for a member a heartbeat covers. On by default, and kept
-    /// across puts.
+    /// across puts. A write of a covered member that the clock guard holds
+    /// clears its bit, not this switch, until a write of it goes through
+    /// (`freshness.v2` §2.10).
     pub fn set_vouched(&self, on: bool) {
         self.member.refresh.store(on, Ordering::Relaxed);
         self.store.vouch(self.key.as_str(), on);
@@ -1327,7 +1350,7 @@ impl StateWriter {
         // Core §7.6 (#979): a packed record its layout refuses is refused
         // before anything is minted, stored or published.
         self.writer.admit_record(&payload.to_bytes())?;
-        let stamped = self.minter.mint_state(self.writer.is_stamped())?;
+        let stamped = self.mint()?;
         // §2.7 (#741): a new live member at the bound is refused, nothing
         // stored or published. After the mint, so a stopped clock never
         // leaves a member counted live without a value.
@@ -1393,7 +1416,7 @@ impl StateWriter {
         let Some((record, attachment)) = held.value.clone() else {
             return Ok(None);
         };
-        let stamped = self.minter.mint_state(self.writer.is_stamped())?;
+        let stamped = self.mint()?;
         let bytes = stamped.seal_tagged(self.writer.tag(), &record);
         self.store.put(
             &self.key,
@@ -1435,7 +1458,7 @@ impl StateWriter {
     pub(crate) async fn delete_aged(&self, age: Duration) -> Result<Stamped> {
         let admitted = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
-        let stamped = self.minter.mint_state(self.writer.is_stamped())?;
+        let stamped = self.mint()?;
         // A deleted member is not re-put (`freshness.v1` §2.4).
         held.value = None;
         held.at = tokio::time::Instant::now();

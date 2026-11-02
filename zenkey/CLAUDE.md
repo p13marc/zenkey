@@ -99,7 +99,10 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   above the last, catch-up included; the clock guard stops only a state
   write that carries a Zenoh timestamp since #978 F6 (`mint_state`
   refuses when `timed` or the session stamps; `new_epoch` refuses early
-  only for desired's authors, or alarms on a stamping session); `start()` reads the session's timestamping for its mode,
+  only for desired's authors, or alarms on a stamping session; a covered
+  member's held write clears its store bit, not `set_vouched`'s switch,
+  until a put goes through, core 0.90's F-461, a candidate's stamping
+  session the case: `s2_a_candidates_held_put_clears_its_bit`); `start()` reads the session's timestamping for its mode,
   `Minter::session_timestamping`, and warns naming core §8.2) and answers
   GETs with the bytes put, a `reply_del` whose attachment is the delete's
   envelope, each with the mutation's Zenoh timestamp where it had one,

@@ -1209,9 +1209,124 @@
       ],
       "layout": "totals",
       "note": "two instants equal: no rate (elapsed)"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "unobservable",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": null,
+          "epoch": null,
+          "field": "rx",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": "kind",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": null,
+          "why": "incomparable"
+        },
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 1,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": null,
+          "later": {
+            "frame": 2,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 600.0,
+          "rate_unit": "By/s",
+          "time_basis": "measured",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "00001c200008001f40",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 1000
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 7200
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "00001c2100200000bb80",
+          "layout": "bytes_wide",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 1500
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 7201
+            }
+          }
+        },
+        {
+          "arrival_ns": 2000000000,
+          "hex": "00001c22002000010680",
+          "layout": "bytes_wide",
+          "run": "0001",
+          "seq": 2,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 2100
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 7202
+            }
+          }
+        }
+      ],
+      "layout": "bytes",
+      "note": "two revisions of the key, rx at 24 bits then at 32: the pair across is incomparable, its epoch not asked (null), no rate (kind); the next pair under the 32-bit revision is same_epoch, 600 By/s"
     }
   ],
-  "description": "telemetry.v2 §2.19 to §2.21: one key's frames, read in the order they arrive by one reader that held nothing before the first, each with its arrival on the reader's monotonic clock (`arrival_ns`) → every pair its counter series form, in order. `schema`, `resources` and `layouts` are as readings.json writes them, and each frame as there, without `expect`. A pair is two consecutive samples of one counter series (readings.json's `sample`), whatever was omitted, unknown or lost between them; a gauge, a boolean or a text forms none. Its epoch is the run: the two are of one epoch when no frame from the earlier to the later was read as the reader's first, as another run's or as a rewind (core's frame/apply.json `follows`), and of two otherwise, established in band either way. Each pair: `field`; `earlier` and `later`, each {frame, record}, the frame's index in the case and the record's in its frame; `continuity`, `epoch` and `via` as telemetry.v1's continuity.json spells them; `why` (`incomparable` or `wrap_or_decrease`, for unobservable only); a counter of width w below 64 read in its serial window (d = (later - earlier) mod 2^w: below 2^(w-1) an increase of d, else unobservable, wrap_or_decrease), at 64 as telemetry.v1 reads it. `rate` (telemetry.v1 §2.11's formula over d and the elapsed time), `rate_unit`, `elapsed_ns`, `time_basis` and `jitter_ms`, or `no_rate` (`reset`, `decreased`, `elapsed`, `wrap_or_decrease`). The elapsed time is, first that applies: in one frame, the later record's after_ms less the earlier's (frame/apply.json's after_ms, 0 for record 0); in two frames with both instants known (`at`), the later less the earlier; else the later frame's arrival less the earlier's. Its `time_basis` is `scheduled` when either record is scheduled, with `jitter_ms` the scheduled records' jitter_ms summed, else `measured`, and `arrival` for the last base. Elapsed milliseconds are times 10^6 nanoseconds.",
+  "description": "telemetry.v2 §2.19 to §2.21: one key's frames, read in the order they arrive by one reader that held nothing before the first, each with its arrival on the reader's monotonic clock (`arrival_ns`) → every pair its counter series form, in order. `schema`, `resources` and `layouts` are as readings.json writes them, and each frame as there, without `expect`. A pair is two consecutive samples of one counter series (readings.json's `sample`), whatever was omitted, unknown or lost between them; a gauge, a boolean or a text forms none. Its epoch is the run: the two are of one epoch when no frame from the earlier to the later was read as the reader's first, as another run's or as a rewind (core's frame/apply.json `follows`), and of two otherwise, established in band either way. A frame names its own `layout` where it is read under another than the case's, as a tool holding two revisions of the resource reads them, a series being its field's name across the two. Each pair: `field`; `earlier` and `later`, each {frame, record}, the frame's index in the case and the record's in its frame; `continuity`, `epoch` and `via` as telemetry.v1's continuity.json spells them; `why` (`incomparable` or `wrap_or_decrease`, for unobservable only); two counter samples of two widths are incomparable, its epoch not asked (`epoch` and `via` null) and its `no_rate` `kind`, before any epoch or window is read; a counter of width w below 64 read in its serial window (d = (later - earlier) mod 2^w: below 2^(w-1) an increase of d, else unobservable, wrap_or_decrease), at 64 as telemetry.v1 reads it. `rate` (telemetry.v1 §2.11's formula over d and the elapsed time), `rate_unit`, `elapsed_ns`, `time_basis` and `jitter_ms`, or `no_rate` (`reset`, `decreased`, `elapsed`, `wrap_or_decrease`). The elapsed time is, first that applies: in one frame, the later record's after_ms less the earlier's (frame/apply.json's after_ms, 0 for record 0); in two frames with both instants known (`at`), the later less the earlier; else the later frame's arrival less the earlier's. Its `time_basis` is `scheduled` when either record is scheduled, with `jitter_ms` the scheduled records' jitter_ms summed, else `measured`, and `arrival` for the last base. Elapsed milliseconds are times 10^6 nanoseconds.",
   "layouts": [
     {
       "frame": {
@@ -1268,6 +1383,19 @@
           "unit": "By"
         }
       }
+    },
+    {
+      "frame": {
+        "records": 1
+      },
+      "name": "bytes_wide",
+      "record": "BytesWide",
+      "series": {
+        "rx": {
+          "kind": "counter",
+          "unit": "By"
+        }
+      }
     }
   ],
   "resources": [
@@ -1292,7 +1420,7 @@
     }
   ],
   "schema": {
-    "description": "telemetry.v2's frames: modem.v3's link readings, a 64-bit total beside a temperature, a 24-bit byte counter, and a record of every carrier",
+    "description": "telemetry.v2's frames: modem.v3's link readings, a 64-bit total beside a temperature, a 24-bit byte counter and the same counter at 32 bits, and a record of every carrier",
     "types": {
       "Bytes": {
         "fields": [
@@ -1300,6 +1428,15 @@
             "name": "rx",
             "type": "counter",
             "width": 24
+          }
+        ]
+      },
+      "BytesWide": {
+        "fields": [
+          {
+            "name": "rx",
+            "type": "counter",
+            "width": 32
           }
         ]
       },

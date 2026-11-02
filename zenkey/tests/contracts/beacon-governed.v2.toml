@@ -1,0 +1,15 @@
+# beacon.v2, minor 1: its status governed by redundancy.v1, for
+# freshness.v2's scenarios §2 step 5 (F-461): a candidate's session stamps
+# every write (core §8.2), so its clock guard holds its members' writes, and
+# a held write clears the member's bit until a write of it goes through
+# (freshness.v2 §2.10). The election is the profile's `claim`.
+[interface]
+name  = "beacon"
+major = 2
+minor = 1
+uses  = ["freshness.v2", "redundancy.v1"]
+
+[resources.status]                         # one member: a heartbeat every 0.95 s
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }

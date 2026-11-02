@@ -1,5 +1,6 @@
 //! `spec/profiles/freshness/scenarios-v2.md` §1–§7 (`freshness.v2`, #978's
-//! F3), one test per section, named after it.
+//! F3), one test per section, named after it, and §2's step 6, a
+//! candidate's, in a test of its own.
 //!
 //! Common setup: R1 is a router (timestamping on, a router's default); the
 //! owner `lab/beacon` implements `beacon.v2` with every resource exposed
@@ -15,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use common::{
-    T, client, config, contract, eventually, imp, link_to, retrying_client, router, router_via,
-    router_with,
+    SETTLE, T, client, config, contract, eventually, imp, link_to, retrying_client, router,
+    router_via, router_with,
 };
 use zenkey::consumer::{Confirmation, Consumer, Delivery, Subscription};
 use zenkey::model::freshness::{
@@ -26,8 +27,9 @@ use zenkey::model::grammar::IfaceId;
 use zenkey::model::heartbeat::{Digest, Heartbeat, Layout, Members, Time};
 use zenkey::model::template::Bindings;
 use zenkey::model::wire::{Envelope, Form, Stamp, Tag};
+use zenkey::redundancy::{RedundancyStartup, Role};
 use zenkey::state::{StateGet, StateWriter};
-use zenkey::{Service, ServiceBuilder};
+use zenkey::{Error, Service, ServiceBuilder};
 use zenoh::sample::SampleKind;
 
 const STATUS: &str = "state/status";
@@ -129,9 +131,17 @@ type Beats = Arc<Mutex<Vec<Beat>>>;
 /// H: a raw subscriber on `key`, each heartbeat read with `beacon.v2`'s
 /// collections.
 async fn heartbeats(s: &zenoh::Session, key: &str) -> (zenoh::pubsub::Subscriber<()>, Beats) {
+    heartbeats_of(s, key, layout()).await
+}
+
+/// H on `key`, each heartbeat read with `l`'s collections.
+async fn heartbeats_of(
+    s: &zenoh::Session,
+    key: &str,
+    l: Layout,
+) -> (zenoh::pubsub::Subscriber<()>, Beats) {
     let beats: Beats = Arc::default();
     let w = Arc::clone(&beats);
-    let l = layout();
     let sub = s
         .declare_subscriber(key)
         .callback(move |sample| {
@@ -139,7 +149,7 @@ async fn heartbeats(s: &zenoh::Session, key: &str) -> (zenoh::pubsub::Subscriber
             let bytes = sample.payload().to_bytes();
             let e = Envelope::parse(&bytes).expect("an envelope");
             assert_eq!(e.form, Form::Heartbeat, "core §7.5's form 6");
-            let hb = Heartbeat::parse(e.record, &l).expect("a body of beacon.v2's");
+            let hb = Heartbeat::parse(e.record, &l).expect("a body of the layout's");
             w.lock().unwrap().push(Beat {
                 at,
                 tag: e.tag,
@@ -462,6 +472,144 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     let closed = Instant::now();
     until(closed, Duration::from_secs(3)).await;
     assert_eq!(judged(), (Verdict::Stale, Reason::BeyondHorizon));
+}
+
+/// A client of `ep` whose session stamps every write, as a candidate's
+/// does (core §8.2, `redundancy.v1` §2.10).
+async fn stamping(ep: &str) -> zenoh::Session {
+    common::panic_watchdog::install();
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", "\"client\"").unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .unwrap();
+    c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
+        .unwrap();
+    c.insert_json5("timestamping/enabled", "true").unwrap();
+    zenoh::open(c).await.expect("a candidate's session")
+}
+
+/// §2 step 6 (F-461): a candidate's session stamps every write (core
+/// §8.2), so its clock guard holds a put of `status`. Its heartbeats go on,
+/// the time unknown, and clear `status`'s bit from the held put until a
+/// put goes through (§2.10), the guard's release alone setting nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s2_a_candidates_held_put_clears_its_bit() {
+    const KEY: &str = "zk2/lab/candidate/freshness.v2/stream/heartbeat/beacon.v2";
+    const STATUS_OF: &str = "zk2/lab/candidate/beacon.v2/state/status";
+    let (_r1, ep) = router(None).await;
+    let tick = client(&ep).await;
+    let hs = client(&ep).await;
+    let governed = contract("beacon-governed.v2");
+    let (_h3, beats) = heartbeats_of(&hs, KEY, Layout::of(&governed)).await;
+    let (claim, watch, read) = (
+        stamping(&ep).await,
+        stamping(&ep).await,
+        stamping(&ep).await,
+    );
+    let mut cfg = config("lab/candidate");
+    cfg.clock_reference = Some("clock/heartbeat".to_owned());
+    let mut b = ServiceBuilder::new(&claim, cfg);
+    b.implement(zenkey::Implementation::new(governed)).unwrap();
+    b.minter().simulate_offset(2000);
+    let status = b
+        .declare_state_writer(&beacon(), STATUS, &Bindings::new())
+        .await
+        .unwrap();
+    let red = b
+        .redundancy(RedundancyStartup::new(read).with_watch(watch))
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    tokio::time::timeout(SETTLE, red.until(&beacon(), Role::Serving))
+        .await
+        .expect("the candidate serves");
+    assert!(
+        svc.minter().session_timestamping(),
+        "a candidate's session stamps every write (core §8.2)"
+    );
+    let section = |b: &Beat| b.hb.sections[0].clone().expect("status's section");
+
+    // Its put of `up`, then the drift detected: no write held yet, so the
+    // heartbeats vouch for it, the time unknown.
+    let up = status.put("up").await.unwrap().stamp;
+    eventually("the drift is detected", || async {
+        tick.put("clock/heartbeat", "tick").await.unwrap();
+        svc.minter().is_ahead()
+    })
+    .await;
+    let detected = Instant::now();
+    eventually("a heartbeat while the guard holds", || async {
+        beats_after(&beats, detected + JITTER)
+            .iter()
+            .any(|b| b.hb.time == Time::Unknown)
+    })
+    .await;
+    for b in beats_after(&beats, detected + JITTER) {
+        assert_eq!(b.hb.time, Time::Unknown, "the time unknown while held");
+        assert_eq!(
+            section(&b).members,
+            Members::One { vouched: true },
+            "no write held yet"
+        );
+    }
+
+    // The put of `still up` held: each heartbeat from it on vouches for
+    // nothing, its digest over the value the owner still holds.
+    assert!(
+        matches!(status.put("still up").await, Err(Error::ClockAhead)),
+        "held: the candidate's session stamps it"
+    );
+    let held = Instant::now();
+    until(held, Duration::from_millis(2500)).await;
+    let after_hold = beats_after(&beats, held + JITTER);
+    assert!(
+        after_hold.len() >= 2,
+        "heartbeats go on: {}",
+        after_hold.len()
+    );
+    for b in &after_hold {
+        assert_eq!(b.hb.time, Time::Unknown, "the time unknown while held");
+        let s = section(b);
+        assert_eq!(
+            s.members,
+            Members::One { vouched: false },
+            "its bit cleared"
+        );
+        assert_eq!(s.digest, Digest::of([(STATUS_OF, up)]), "the value held");
+    }
+
+    // The guard releases: the time is known again, the bit still clear.
+    svc.minter().simulate_offset(0);
+    eventually("the drift is gone", || async {
+        tick.put("clock/heartbeat", "tick").await.unwrap();
+        !svc.minter().is_ahead()
+    })
+    .await;
+    let released = Instant::now();
+    until(released, Duration::from_millis(2500)).await;
+    let after_release = beats_after(&beats, released + JITTER);
+    assert!(after_release.len() >= 2, "{}", after_release.len());
+    for b in &after_release {
+        assert_ne!(b.hb.time, Time::Unknown, "the time known again");
+        assert_eq!(
+            section(b).members,
+            Members::One { vouched: false },
+            "clear until a write goes through"
+        );
+    }
+
+    // A put goes through: its bit is set again, over the new value.
+    let put = Instant::now();
+    let again = status.put("still up").await.unwrap().stamp;
+    eventually("the next heartbeat vouches for the put", || async {
+        beats_after(&beats, put + JITTER).iter().any(|b| {
+            let s = section(b);
+            s.members == (Members::One { vouched: true })
+                && s.digest == Digest::of([(STATUS_OF, again)])
+        })
+    })
+    .await;
+    svc.close().await.unwrap();
 }
 
 /// §3: the put carries no owner's Zenoh timestamp; the reply carries the

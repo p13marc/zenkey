@@ -25,10 +25,14 @@
 //! - **A standby sends none**: the writer is declared through the covered
 //!   interface's gate, so a governed interface's heartbeat goes out only
 //!   while its instance serves it (`redundancy.v1` §2.4).
-//! - **The clock guard** (v2 §2.10, #978's F6): it holds no write of a
-//!   covered member, which carries no Zenoh timestamp, so each heartbeat
-//!   vouches as at any other time. Its time is unknown while the guard
-//!   holds: the owner's clock is ahead, and the time is its word of it.
+//! - **The clock guard** (v2 §2.10, #978's F6): on a session without
+//!   timestamping it holds no write of a covered member, which carries no
+//!   Zenoh timestamp, so each heartbeat vouches as at any other time. On a
+//!   session that stamps every write, a `redundancy.v1` candidate's (core
+//!   §8.2), it holds them all, and a held write clears its member's bit
+//!   until a write of it goes through (F-461). Its time is unknown while
+//!   the guard holds: the owner's clock is ahead, and the time is its word
+//!   of it.
 //! - **The time** is under the deployment epoch, 0 until #980's catalog
 //!   carries one (core §7.6), as a packed record's `time` fields are.
 

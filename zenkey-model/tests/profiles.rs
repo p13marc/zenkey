@@ -3282,7 +3282,9 @@ fn telemetry_v2_readings() {
 /// `telemetry/conformance/v2/continuity.json`: a layout and one key's
 /// frames, each with its arrival → every pair its counter series form, in
 /// order: the two samples, the pair's continuity, how its epoch was had,
-/// and its rate with its time basis (telemetry.v2 §2.19 to §2.21).
+/// and its rate with its time basis (telemetry.v2 §2.19 to §2.21). A frame
+/// that names its own layout is read under it, as a tool holding two
+/// revisions of the resource reads it, its series the same field's.
 #[test]
 fn telemetry_v2_continuity() {
     let path = profiles().join("telemetry/conformance/v2/continuity.json");
@@ -3291,7 +3293,7 @@ fn telemetry_v2_continuity() {
     let mut seen = BTreeSet::new();
     for case in doc["cases"].as_array_mut().expect("cases") {
         let note = case["note"].to_string();
-        let (l, series) = &layouts[case["layout"].as_str().expect("layout")];
+        let named = case["layout"].as_str().expect("layout").to_owned();
         let mut fold = telemetry::frames::Fold::new();
         let mut pairs = Vec::new();
         for (i, f) in case["frames"]
@@ -3301,6 +3303,8 @@ fn telemetry_v2_continuity() {
             .enumerate()
         {
             let what = format!("{note}, frame {i}");
+            let own = f["layout"].as_str().map_or(named.clone(), str::to_owned);
+            let (l, series) = &layouts[&own];
             let (stamp, frame) = telemetry_v2_frame(f, l, &what);
             let arrival = f["arrival_ns"].as_i64().map_or(0, i128::from);
             let folded = fold.apply(l, series, stamp, &frame, arrival);
@@ -3316,6 +3320,7 @@ fn telemetry_v2_continuity() {
                     };
                     let rate = p.rate.as_ref().ok();
                     seen.insert(p.continuity.as_str());
+                    seen.extend(p.unobservable());
                     seen.extend(rate.and_then(|r| r.basis).map(|b| b.as_str()));
                     seen.extend(p.rate.as_ref().err().map(|n| n.as_str()));
                     pairs.push(json!({
@@ -3350,6 +3355,8 @@ fn telemetry_v2_continuity() {
         "scheduled",
         "arrival",
         "wrap_or_decrease",
+        "incomparable",
+        "kind",
         "elapsed",
     ] {
         assert!(seen.contains(token), "no pair reads {token}");
