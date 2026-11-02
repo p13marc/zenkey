@@ -26,7 +26,9 @@ each list one, and two of their routers run a longer lease.
     frame's. The reference's SF12 example keeps its 1,080 s row.
   - SF12's `interval_over_horizon`, `horizon_under_face` and
     `keep_alive_not_suppressed` are gone. SF9 draws `frame_over_batch`:
-    the 207 B full record is above its 117 B batch.
+    `frames/fast`'s largest frame, 216 B by `link.v1` 0.16's delta
+    records, is above its 117 B batch, and its 207 B full record
+    fragments.
   - Every face's frame is liveness evidence, SBD's among them.
 
 **Deliberately not changed.**
