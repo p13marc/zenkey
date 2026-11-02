@@ -3,6 +3,79 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.95 — 2026-11-02: an owner on a first hop holds its instance token alone (#982 H1)
+
+A session that is its router's client sends each token and queryable it
+declares to the router unasked. It sends them all again at each
+transport it opens. A router's access control reads them on ingress,
+once they have crossed. So `link.v1`'s `zk` deny hides a first-hop
+owner's presence, and spares its air none of it. The design memo on
+#982 counts W2's five-interface device: 1,174 B of presence in 6 SDUs per
+reconnect, against 94 B in 1 once it holds its instance token alone. At
+SF12 that is about 62 s of air against about 5 s, of a day's 864 s.
+This version is #982's H1, the core half. Observer 0.25 is the reader's
+half, `link.v2` 0.6 gives the face its device kind, and `config.v1` 0.10
+its exception.
+
+**Added: §8.1, "On a first hop".** An owner is on a first hop when its
+session reaches its router only across a constrained face, as that
+router's client.
+- Such an owner SHOULD put every interface it implements in its
+  tokenless set. It then holds its instance token, and no interface
+  token. `[Sc: constrained.md §10]` `[F: descriptors/ok-tokenless]`
+- Such an owner MUST NOT implement `archive.v1`, nor an interface whose
+  contract uses `redundancy.v1`. Each needs presence on its peers' side
+  of the face. Step 2 already refused both in a tokenless set, so a
+  runtime that fills the set for a first hop refuses them there.
+  `[Sc: constrained.md §10]`
+- What the near side reads is the instance token and the descriptor,
+  where the face lets them cross. Observer §3.11 says how it reads them.
+- Its member tokens are unchanged. A device face denies them, and
+  `link.v2` warns of one (`epoch_on_device`).
+- The tokenless set's "At scale" names the first hop as its exception.
+
+**Added: §8.4, "On a first hop".** An owner on a first hop SHOULD NOT
+hold its bundles: each holder's queryable crosses the hop at every
+transport. A deployment with one SHOULD hold its bundles on the near
+side, in a holder there or provisioned to each reader. Both cite
+`[Sc: constrained.md §10]`. §8.2's step 3 declares no contract
+queryable for such an owner.
+
+**Added: §8.5, a MAY on the client shape.** Where the client is an owner
+on a first hop, the deployment MAY leave the owner's instance key out of
+the `@zk` deny, so that the near side finds it (`link.v2` §2.6). The rest
+of `@zk` stays denied.
+
+**Added: Appendix B, "A first hop's declarations".** Three facts of
+zenoh 1.10.1, each with its file and line. A client's runtime sends its
+tokens and queryables to its router unasked, and again at each transport
+it opens. The router's ingress access control reads a message it has
+received.
+
+**Changed: wording that states no rule.** §12's constrained table: a
+first-hop owner's bundles are held on the near side, and its instance
+token and descriptor cross where its face lets them. §13's U22 names the
+first hop. Appendix C's `constrained.md` row names §10.
+
+**`scenarios/constrained.md` §10**, new: a first-hop device through a
+byte-counting proxy, its bring-up, a reconnect, a descriptor change, the
+whole `zk` and a device at its defaults as controls, and a governed
+interface refused. The reference runs it with H2 and H3, not yet.
+
+**Deliberately not changed.**
+- **No MUST on the tokenless set.** Only the deployment knows which face
+  a session crosses, so the shape is configuration: two SHOULDs, and
+  the MUST NOT that step 2 already enforced for a tokenless set.
+- **Member tokens.** An `epoch` template's owner holds them on a first
+  hop too (the memo's question 3, its default).
+- **No first-hop mark** in the descriptor. Every entry marked
+  `"token": false` says what a reader needs, and the face policy says
+  where the owner is.
+- **C5's compact descriptor** is not needed. A descriptor's GET across RF
+  costs about 760 B with today's JSON, and about 110 B once C5 lands.
+- **`RULES.md`** lists 237 rules: 230, these four and observer 0.25's
+  three.
+
 ## 0.91 — 2026-11-02: the far side's caller and reader (#988 L4)
 
 `link.v2` gives each face a `reply_timeout_ms` and an `arq` (link.v2

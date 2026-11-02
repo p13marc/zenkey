@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 71 |
+| [Owner](#owner) | 76 |
 | [Consumer](#consumer) | 22 |
 | [Caller](#caller) | 14 |
-| [Deployment](#deployment) | 17 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 66, 25 of them a reader's |
+| [Deployment](#deployment) | 18 |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 69, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 61 |
-| Every rule, once | 230 |
+| Every rule, once | 237 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -218,6 +218,8 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
 | [§8.1](core.md#81-tokens) | An owner MUST hold one per interface **of which it currently exposes at least one resource**, and none otherwise, except for its **tokenless set**. | `[Sc: presence.md §1]` `[Sc: profiles/redundancy/scenarios.md §1]` |
+| [§8.1](core.md#81-tokens) | Such an owner SHOULD put every interface it implements in its tokenless set. | `[Sc: constrained.md §10]` `[F: descriptors/ok-tokenless]` |
+| [§8.1](core.md#81-tokens) | Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses `redundancy.v1`. | `[Sc: constrained.md §10]` |
 | [§8.1](core.md#81-tokens) | The owner MUST hold one member token per member, and cycle it whenever that member's continuity breaks. | `[Sc: presence.md §3]` |
 | [§8.1](core.md#81-tokens) | An owner that starts a new instance id while running MUST declare the new descriptor and tokens first, in §8.2's order (the descriptor's queryable and first put, then the tokens), then undeclare the old ones. | `[Sc: presence.md §3]` |
 
@@ -235,12 +237,20 @@ The owner, consumer and caller sections each point to them.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
+| [§8.4](core.md#84-contract-retrieval) | An owner on a first hop (§8.1) SHOULD NOT hold its bundles. | `[Sc: constrained.md §10]` |
+| [§8.4](core.md#84-contract-retrieval) | A deployment with such an owner SHOULD hold each of its bundles on the near side of the hop: in a holder there, or provisioned to each reader. | `[Sc: constrained.md §10]` |
 
 ### [core §12 Conformance classes](core.md#12-conformance-classes)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§12](core.md#12-conformance-classes) | An owner's descriptor MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) | `[Sc: constrained.md §5]` |
+
+### [observer §3.11 A first hop](observer.md#311-a-first-hop)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§3.11](observer.md#311-a-first-hop) | A tool that knows an owner is on a first hop MUST NOT report it down from its instance token's absence, even where a complete read establishes that absence. | `[Sc: constrained.md §10]` |
 
 ## Consumer
 
@@ -406,6 +416,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§8.3](core.md#83-the-presence-budget) | A deployment SHOULD keep a domain within about 10–15k tokens. | none cited |
 
+### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.4](core.md#84-contract-retrieval) | A deployment with such an owner SHOULD hold each of its bundles on the near side of the hop: in a holder there, or provisioned to each reader. | `[Sc: constrained.md §10]` |
+
 ### [core §8.5 Constrained faces](core.md#85-constrained-faces)
 
 | Rule | Sentence | Evidence |
@@ -550,6 +566,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§3.6](observer.md#36-absence), *reader* | **A withdrawal heard live is a reason to read again, never absence by itself.** … A reader MUST NOT conclude absence from a withdrawal alone. | `[Sc: presence.md §8]` |
 | [§3.6](observer.md#36-absence), *reader* | A reader that follows presence live SHOULD read again soon after a withdrawal that leaves one of these with nothing held: (3 items) | `[Sc: presence.md §8]` |
 | [§3.6](observer.md#36-absence), *reader* | The reader SHOULD report what that read establishes: absent when the read is complete and shows no such token held, present when it shows one. | `[Sc: presence.md §8]` |
+| [§3.6](observer.md#36-absence), *reader* | A reader MUST find an interface's providers by instance tokens and their descriptors. | `[Sc: presence.md §5; constrained.md §10]` |
+| [§3.6](observer.md#36-absence), *reader* | **A provider is found by its instance token.** … A reader MUST NOT conclude a provider absent for want of an interface token. | `[Sc: presence.md §5; constrained.md §10]` |
 
 ### [observer §3.7 The watch session](observer.md#37-the-watch-session)
 
@@ -575,6 +593,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§3.9](observer.md#39-what-a-complete-read-covers), *reader* | A reader that concludes absence of a token a peer holds SHOULD be a client of a router, or a peer linked to that peer. | `[Sc: profiles/redundancy/scenarios.md §5]` |
+
+### [observer §3.11 A first hop](observer.md#311-a-first-hop)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§3.11](observer.md#311-a-first-hop) | A tool that knows an owner is on a first hop MUST NOT report it down from its instance token's absence, even where a complete read establishes that absence. | `[Sc: constrained.md §10]` |
 
 ### [observer §4.3 What a tool does not ask of the admin space](observer.md#43-what-a-tool-does-not-ask-of-the-admin-space)
 

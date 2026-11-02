@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.23 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.25 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.91 ([`core.md`](core.md)) |
+| **Written against** | core 0.95 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -182,7 +182,7 @@ Its instances, each normative where it lives:
 ## 3. Reading presence
 
 This is core §8.1's "Reading presence". The tokens, the tokenless set,
-re-minting and the caller's timeouts stay in core §8.1.
+a first hop, re-minting and the caller's timeouts stay in core §8.1.
 
 ### 3.1 Handlers
 
@@ -201,7 +201,9 @@ re-minting and the caller's timeouts stay in core §8.1.
   tool that decides a fault from the shape of presence (two holders, §6.1;
   a token its descriptor does not list, or an exposed interface with no
   token) MUST see it in two reads a grace apart, the grace longer than
-  the deployment's longest re-mint overlap. Start-up, re-mint and
+  the deployment's longest re-mint overlap. An interface in the
+  instance's tokenless set holds no token by design, and is no such
+  shape (§3.6). Start-up, re-mint and
   teardown pass through such shapes briefly, by design. §6.1 states the
   rule for split-brain, and it holds for every such shape.
   - **The transient half.** An owner within core §8.2's step 4, after
@@ -362,6 +364,19 @@ re-minting and the caller's timeouts stay in core §8.1.
     §2.8). `[Sc: profiles/arbitration/scenarios.md §3, §4, §7]`
 
   `[Sc: presence.md §8]`
+- **A provider is found by its instance token.** A reader MUST find an
+  interface's providers by instance tokens and their descriptors. That
+  holds where it lists them, and where it waits for one (core R5). A
+  reader MUST NOT conclude a provider absent for want of an interface
+  token. `[Sc: presence.md §5; constrained.md §10]`
+  - **Why.** A provider holds no token of an interface its descriptor
+    marks `"token": false` (core §8.1). A selector over interface tokens,
+    `zk2/*/*/@zk/alive/<iface>/**`, misses it.
+  - **No token expected.** Such an interface is none of §3.2's fault
+    shapes. A tokenless entry has no standby (core §3.3, D012), so the
+    instance serves it while it holds its instance token.
+  - **Its absence** is the address's: a complete read that shows none of
+    its instance tokens.
 
 ### 3.7 The watch session
 
@@ -594,6 +609,35 @@ a reader can list, and of those only the ones its selectors and grants
 reach. Another application's tokens under its own verbatim chunks are out
 of reach, and so are subscribers and queryables. A tool's count is a lower
 bound of the domain's declarations, and it reports it as one.
+
+### 3.11 A first hop
+
+This is core §8.1's first hop, as a reader reads it. A reader finds such
+an owner as it finds any provider of a tokenless interface (§3.6).
+
+- **Across a first hop.** An owner on a first hop (core §8.1) holds its
+  instance token and no interface token. A reader on the near side finds
+  it by that token, where its face lets it cross (`link.v2` §2.6). It
+  reads the rest from the descriptor: what the owner implements, each
+  fingerprint, `run`, `catalog` and its exposure (core §3.3).
+  - **The token follows the link.** Each transport the owner's session
+    loses withdraws it, and each it opens declares it again (core
+    Appendix B). Over a radio, that is several times a day.
+  - A tool that knows an owner is on a first hop MUST NOT report it
+    down from its instance token's absence, even where a complete read
+    establishes that absence. It reports the owner's link closed, and its
+    liveness from what crosses (§7.1). `[Sc: constrained.md §10]`
+  - **How a tool knows.** The face policy that lists the owner on a
+    device face says so (`link.v2` §2.5). A tool told nothing reads the
+    token as any instance token.
+  - **Alive implies callable** holds across the hop (core §8.2). The
+    owner declares its queryables before its instance token, over one
+    link, in order. A declaration the medium lost breaks it, as it breaks
+    every declaration (core §8.5).
+  - **A descriptor kept.** A tool MAY keep the descriptor it read across
+    the token's return under the same instance id. It then does not read
+    it again across the hop at each reconnect. A change the owner put
+    while the link was closed is lost to it until the owner's next put.
 
 ---
 
@@ -1003,6 +1047,10 @@ tool's `self.system`.
 - **Liveness across a face** (core R7). Where nothing crosses, liveness is
   *unobservable*, and a tool MUST say so rather than report the provider
   down. `[Sc: constrained.md §3; profiles/link/scenarios.md §6]`
+  - **Across a first hop** the owner's instance token crosses, and shows
+    its link, not its liveness (§3.11). Its liveness is that of what else
+    crosses, its heartbeat among it (`freshness.v2`).
+    `[Sc: constrained.md §10]`
 - **A tool has no system of its own.** A tool that is not a service MUST
   refuse a `self.system` provider, as it refuses a parameter bound to
   `self.system` (R2). `[Sc: bindings.md §5]`
@@ -1325,7 +1373,8 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
 | `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2) |
 | `scenarios/bindings.md` §3, §5 | §7.1 |
-| `scenarios/constrained.md` §3, §7, §9 | §7.1 (§3), §7.5 (§7, §9) |
+| `scenarios/constrained.md` §3, §7, §9, §10 | §7.1 (§3, §10), §7.5 (§7, §9), §3.6 and §3.11 (§10) |
+| `scenarios/presence.md` §5 | §3.6, a provider found by its instance token |
 | `scenarios/types.md` §2 | §7.3 |
 | `scenarios/grammar.md` §1, §2 | §8.2 (§1 step 5) |
 | `profiles/*/conformance/conclusions.json` (`arbitration`, `redundancy`, `timing`) | §1, not this profile's |

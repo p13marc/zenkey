@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.91** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.95** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -2393,7 +2393,8 @@ Liveliness tokens carry no payload; everything is in the key.
 - **The tokenless set** (U22, §13).
   - **At scale.** A deployment needs this only once a presence domain
     nears the presence budget, about 10–15k tokens (§8.3); below that, it
-    leaves the set empty, and every interface keeps its token.
+    leaves the set empty, and every interface keeps its token. An owner on
+    a first hop is the exception, at any scale (below).
   - A deployment MAY configure an owner with interfaces for which it holds
     no interface token. These SHOULD be the interfaces every service of the
     deployment implements: `health.v1`
@@ -2414,6 +2415,36 @@ Liveliness tokens carry no payload; everything is in the key.
     multiplier. ZenSight's shape falls from about 42k tokens to about 12k.
 
   `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]`
+- **On a first hop.** An owner is **on a first hop** when its session
+  reaches its router only across a constrained face (§8.5), as that
+  router's client. Its session sends each token and queryable it
+  declares across that face, and again at each transport it opens. The
+  router's access control reads them only once they have crossed
+  (Appendix B). So a deny on the face hides them, and spares the face
+  none of them. Only the owner declaring less does.
+  - Such an owner SHOULD put every interface it implements in its
+    tokenless set. It then holds its instance token, and no interface
+    token. `[Sc: constrained.md §10]` `[F: descriptors/ok-tokenless]`
+  - Such an owner MUST NOT implement `archive.v1`, nor an interface whose
+    contract uses `redundancy.v1`. Each needs presence on its peers' side
+    of the face. An archive aligns with its peers (§4.4), and a governed
+    interface's incumbent holds its interface token (§6). Step 2 of §8.2
+    refuses both in a tokenless set. `[Sc: constrained.md §10]`
+  - Where it holds no bundle (§8.4), step 3 of §8.2 declares no contract
+    queryable.
+  - Its member tokens stay as below. Where its contract declares `epoch`,
+    they cross the face at each transport too, and a device face denies
+    them ([`link.v2`](profiles/link/v2.md) §2.5).
+  - **What the near side reads** is its instance token and its
+    descriptor, where the face lets them cross (§8.5). The descriptor
+    lists each interface, marked `"token": false`. How a reader finds the
+    owner is [`observer.md`](observer.md) §3.6, and what it concludes from
+    its token §3.11.
+  - **Its replies cross the hop.** A reader on the near side waits for
+    them, its descriptor's included, as "Across a constrained face" says
+    (below).
+  - **A router's own link** is no first hop. A far router in a south
+    region is backhaul, and its sessions reach it before the face.
 - **Member token,** at `…/@zk/member/<iface>/<member>/<epoch>`, for the
   template that declares `epoch`. An interface has at most one such
   template, because the key carries no template
@@ -2452,7 +2483,10 @@ Liveliness tokens carry no payload; everything is in the key.
     observer §3.7;
   - **A read on a token's own session can answer that token itself**:
     observer §3.8;
-  - **What a complete read covers**: observer §3.9.
+  - **What a complete read covers**: observer §3.9;
+  - **A provider is found by its instance token**, a tokenless one
+    included: observer §3.6;
+  - an owner on a first hop: observer §3.11.
 - **Timeouts are the caller's.** How long a liveliness GET, a descriptor
   GET (§3.3) or a retrieval attempt (§8.4) waits, and how long a tool waits
   for presence after an owner starts, are the caller's choices. The
@@ -2487,7 +2521,7 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
    one exposed or absent as its descriptor will say (below);
 3. declare the descriptor's queryable and put the first descriptor (§3.3),
    then a contract queryable (§8.4) for each interface it implements,
-   holding that interface's bundle;
+   holding that interface's bundle, unless it is on a first hop (§8.1);
 4. declare the instance token, then the interface tokens.
 
 `[Sc: presence.md §1]`
@@ -2642,6 +2676,14 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
   by that. There is no retrieval by prefix: a holder declares its
   queryable on full contract keys, and a GET on a wildcard over them is
   not a step of the procedure above.
+- **On a first hop.** An owner on a first hop (§8.1) SHOULD NOT hold
+  its bundles. Each holder's queryable would cross the hop at every
+  transport its session opens. `[Sc: constrained.md §10]`
+  - A deployment with such an owner SHOULD hold each of its bundles on
+    the near side of the hop: in a holder there, or provisioned to each
+    reader. `[Sc: constrained.md §10]`
+  - A reader that finds no holder reports the contract unavailable
+    (step 4), and nothing of the owner.
 
 ### 8.5 Constrained faces
 
@@ -2680,6 +2722,10 @@ facts.
     `[Sc: constrained.md §6]`
   - **One far-side session, or a gateway session, as a client** of the near
     router.
+    - Where that session is an owner on a first hop (§8.1), the
+      deployment MAY leave the owner's instance key out of the deny, so
+      that the near side finds it ([`link.v2`](profiles/link/v2.md)
+      §2.6's device face). The rest of `@zk` stays denied.
 
   A gateway:
   - is the only session on its side that talks across the face;
@@ -4205,8 +4251,8 @@ additions:
 |---|---|
 | Namespace (§1.6) | The deployment prefix written literally in keys |
 | Descriptor (§3.3) | An owner's descriptor MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) `[Sc: constrained.md §5]` |
-| Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on receiving (Appendix B). |
-| Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md)). Presence never crosses. |
+| Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on receiving (Appendix B). On a first hop, held on the near side, never by the owner (§8.4). |
+| Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md)). Presence never crosses, but a first-hop owner's instance token and descriptor where its face lets them (§8.1, §8.5). |
 
 `[Sc: constrained.md]`
 
@@ -4227,7 +4273,7 @@ that changes a rule lands as an amendment.
 
 | # | Question | Lean | Rule affected |
 |---|---|---|---|
-| U22 | Cutting the per-service token multiplier above the presence budget | **Decided:** a deployment-configured tokenless set, recommended for the framework interfaces every service implements; the descriptor records it (§8.1, §3.3) | §8.1 |
+| U22 | Cutting the per-service token multiplier above the presence budget | **Decided:** a deployment-configured tokenless set, recommended for the framework interfaces every service implements, and for every interface of an owner on a first hop; the descriptor records it (§8.1, §3.3) | §8.1 |
 | U23 | The far side of a constrained face when it is more than one session: a site with its own router, or a service commanding many vehicles | **Settled:** the far router is placed in a `gateway.south` region of the near router, with the `@zk` deny (spike S3, U23 addendum; Appendix B) | §8.5 attachment |
 
 ---
@@ -4535,6 +4581,23 @@ Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §8 and
 - one whose `DeclareKeyExpr` the proxy dropped stayed silent, declared
   again.
 
+**A first hop's declarations** (§8.1, §8.4). Read in zenoh 1.10.1's
+`src/`:
+1. **A client's runtime sends its declarations unasked.** A session
+   declares a token by sending it to its own runtime
+   (`declare_liveliness_inner`, `api/session.rs:1997–2012`). A client's
+   runtime sends each token on to its one router, with no interest asked
+   (`propagate_token`, `net/routing/hat/client/token.rs:166–205`). It
+   does the same with each queryable (`propagate_queryable`,
+   `hat/client/queries.rs:280`).
+2. **Again at each transport.** When a transport to its router opens,
+   it sends every interest, subscriber, queryable and token again
+   (`new_transport_unicast_face`, `hat/client/mod.rs:146–163`).
+3. **A router's access control reads what crossed.** Its ingress check
+   runs on a message the router has received from the link
+   (`IngressAclEnforcer`, `net/routing/interceptor/access_control.rs:875–911`).
+   So a deny on a face spares the face none of the bytes it denies.
+
 Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §7
 (`zenkey/tests/constrained.rs`), through a TCP proxy toward a far client:
 - a stream put crossed in 45–46 B under its exact key, with none of its
@@ -4820,7 +4883,7 @@ section each was written against, whose pointer leads on.
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion |
-| `scenarios/constrained.md` | §1.6, R7, §8.5, §12; §7 keys across a face, and Appendix B; §8 a reply across a face (§8.1); §9 a declaration lost across a face, declared again (§8.5) |
+| `scenarios/constrained.md` | §1.6, R7, §8.5, §12; §7 keys across a face, and Appendix B; §8 a reply across a face (§8.1); §9 a declaration lost across a face, declared again (§8.5); §10 an owner on a first hop: its instance token alone, no bundle, what the near side reads, and what a deny spares (§8.1, §8.2, §8.4, Appendix B) |
 | `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7); a stalled reader, and a tool's window over one (§1); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead |
