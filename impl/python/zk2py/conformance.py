@@ -916,6 +916,11 @@ def _telemetry_v2(path: Path) -> list[Result]:
                 rd = t2.SeriesReader(layout, decl)
                 got_r, want_r, bodies = [], [], []
                 for fr_ in c["frames"]:
+                    # telemetry.v2 0.2: "A frame names its own layout where it
+                    # is read under another than the case's".
+                    layout, decl = layouts[fr_.get("layout", c["layout"])]
+                    if layout is not rd.layout:
+                        rd.under(layout, decl)
                     try:
                         read = layout.read(layout.tag, bytes.fromhex(fr_["hex"]))
                     except (frame.Refused, packed.Refused) as e:

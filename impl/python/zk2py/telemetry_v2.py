@@ -388,6 +388,22 @@ class SeriesReader:
         self.samples: dict[str, list[tuple[int, int, Any]]] = {s.field: [] for s in decl.series}
         self.undecodable: list[str] = []
 
+    def under(self, layout: frame.Layout, decl: FrameDeclaration) -> None:
+        """Read the frames that follow under another revision of the
+        resource (telemetry.v2 0.2, ``continuity.json``: "A frame names its
+        own layout where it is read under another than the case's, as a tool
+        holding two revisions of the resource reads them, a series being its
+        field's name across the two"). Each field's state and each series'
+        last sample are kept by name; a pair across two widths is then
+        incomparable (§2.20)."""
+        self.layout, self.decl = layout, decl
+        self.frames.layout = layout
+        for f in layout.fields:
+            self.frames.fields.setdefault(f.name, frame.FieldState())
+        self.fields = {f.name: f for f in layout.fields}
+        for sr in decl.series:
+            self.samples.setdefault(sr.field, [])
+
     def read(self, run: str, seq: int, value: dict[str, Any], arrival_ns: int = 0) -> dict[str, Any]:
         """One frame, its body's value read: ``readings.json``'s ``expect``
         (``follows``, ``lost`` with a gap, and each record's ``seq`` and

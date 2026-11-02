@@ -232,7 +232,10 @@ def keeps_timestamp(c: Contract, r: dict[str, Any]) -> bool:
             return True
         if "desired.target_param" in ann:
             return True
-        if "telemetry.kind" in ann and "telemetry.v1" in c.canonical["uses"]:
+        # Core 0.90 (F-462's answer): "A state that is a metric resource of
+        # telemetry.v1, or of telemetry.v2 and no frame resource". A state is
+        # never a frame resource (core §7.7: a plain stream).
+        if "telemetry.kind" in ann and ({"telemetry.v1", "telemetry.v2"} & set(c.canonical["uses"])):
             return True
     if r["kind"] == "stream":
         d = timing.declaration("stream", ann)
@@ -1974,7 +1977,19 @@ class Owner:
                 with self._writes:
                     held = self._held.get(key)
                     if self._stop.is_set() or self.session is None or held is None or held.payload is None \
-                            or key in self.closed_writers or (self.ahead and self._stamped(key)):
+                            or key in self.closed_writers:
+                        continue
+                    if self.ahead and self._stamped(key):
+                        # Core 0.90 "A candidate's" and freshness.v2 0.5
+                        # §2.10 (F-461's answer): the guard holds the re-put
+                        # as it holds a put, and a covered member's bit is
+                        # cleared until a write of it goes on (review-bot on
+                        # round 98). A freshness.v2 member is never in
+                        # self.horizons (its §2.4: no re-put to confirm it),
+                        # so this clears nothing today; it keeps the three
+                        # held writes alike, as the reference's StateWriter
+                        # does.
+                        self._unvouch_held(key)
                         continue
                     if (time.monotonic() - held.at) * 1e9 < due:
                         continue

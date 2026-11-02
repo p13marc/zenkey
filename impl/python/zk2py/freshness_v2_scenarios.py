@@ -57,6 +57,10 @@ REPO = Path(__file__).resolve().parents[3]
 BEACON = REPO / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml"
 #: §7's contract: beacon.v2 itself since freshness.v2 0.2 (F-443's answer)
 BEACON_FACE = BEACON
+#: §2 step 6 (freshness.v2 0.5, F-461's answer): "The reference keeps it as
+#: zenkey/tests/contracts/beacon-governed.v2.toml", a contract file read as
+#: any contract is
+GOVERNED = REPO / "zenkey" / "tests" / "contracts" / "beacon-governed.v2.toml"
 BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE = "beacon.v2"
 BASE = f"zk2/lab/beacon/{IFACE}"
@@ -102,9 +106,12 @@ class PyOwner:
 
     impl = "zk2py"
 
-    def __init__(self, ep: str, service: str = "beacon", contract: Path = BEACON, *, ahead_beat: str | None = None):
+    def __init__(self, ep: str, service: str = "beacon", contract: Path = BEACON, *, ahead_beat: str | None = None,
+                 governed: bool = False):
         from .owner import Owner
 
+        # governed: a redundancy.v1 contract makes zk2py's owner a candidate,
+        # its session stamping every write (Owner.candidate, Owner.hlc).
         self.c = _contract(contract)
         self.base = f"zk2/lab/{service}/{IFACE}"
         kw: dict[str, Any] = {}
@@ -135,6 +142,17 @@ class PyOwner:
     def ahead(self) -> bool:
         return self.o.ahead
 
+    def clock_right(self) -> None:
+        """Its clock right again: the session's own, no offset."""
+        self.o.clock = None
+
+    def try_put(self, rel: str, value: bytes = b"1") -> str | None:
+        try:
+            self.put(rel, value)
+        except Exception as e:  # noqa: BLE001 - the guard's refusal, named
+            return f"refused {type(e).__name__}: {e}"
+        return "put"
+
     def zid(self) -> str:
         return str(self.o.session.zid())
 
@@ -151,12 +169,17 @@ class RustOwner:
 
     impl = "rust"
 
-    def __init__(self, ep: str, service: str = "beacon", contract: Path = BEACON, *, ahead_beat: str | None = None):
+    def __init__(self, ep: str, service: str = "beacon", contract: Path = BEACON, *, ahead_beat: str | None = None,
+                 governed: bool = False):
         from .live_interop import Owner as Exe
 
         flags: list[str] = []
         if ahead_beat is not None:
             flags += ["--clock-reference", ahead_beat, "--clock-offset-ms", "2000"]
+        if governed:
+            # its usage: --standby takes part in redundancy.v1's election and
+            # turns the session's timestamping on (redundancy.v1 §2.10)
+            flags += ["--standby", "--election", "claim"]
         self.base = f"zk2/lab/{service}/{IFACE}"
         self.p = Exe(BLACKBOX / "owner", f"lab/{service}", [contract], connect=ep, flags=flags)
         got = self.p.wait_for("ready ", 120)
@@ -167,6 +190,10 @@ class RustOwner:
         self.closed_at: int | None = None
         self._zid: str | None = None
         self._ahead = False
+        if governed:
+            got = self.p.command(f"redundancy wait {IFACE} serving 15000", timeout=20)
+            if got is None or '"reached":true' not in got:
+                raise RuntimeError(f"the owner example did not serve: {got!r}")
 
     def key(self, rel: str) -> str:
         return f"{self.base}/state/{rel}"
@@ -185,7 +212,9 @@ class RustOwner:
     def put(self, rel: str, value: bytes = b"1") -> None:
         self.command(f"put {IFACE} {self._resource(rel)}")
 
-    def try_put(self, rel: str) -> str | None:
+    def try_put(self, rel: str, value: bytes = b"1") -> str | None:
+        """Its put command's answer: ``put <key>``, or ``refused …``. It
+        puts ``ok`` whatever ``value`` is (its usage)."""
         return self.p.command(f"put {IFACE} {self._resource(rel)}")
 
     def delete(self, rel: str) -> None:
@@ -193,6 +222,9 @@ class RustOwner:
 
     def vouch(self, rel: str, on: bool) -> None:
         self.command(f"vouch {IFACE} {self._resource(rel)} {'on' if on else 'off'}")
+
+    def clock_right(self) -> None:
+        self.command("clock-offset 0")
 
     def ahead(self) -> bool:
         """Whether its guard holds (core 0.88): it says so on stderr, "this
@@ -732,8 +764,125 @@ def section2(report: Report, pairing: str) -> None:
                      f"{None if v5 is None else v5.pair()}")
         if reader != "py":
             zs.wait()
+        step6(report, pairing, bus, impl, reader, beat)
     finally:
         bus.close()
+
+
+def step6(report: Report, pairing: str, bus: Bus, impl: str, reader: str, beat: str) -> None:
+    """§2 step 6 (freshness.v2 0.5, core 0.90; F-461's answer, round 99): a
+    candidate, its session stamping every write, its clock 2 s ahead. Its
+    held put of ``status`` clears the bit; the release alone sets nothing;
+    the next put that goes through sets it again. H3 reads the heartbeats'
+    bodies (zk2py's reader), or zenctl watch their confirmation rows."""
+    sec = "§2 a vouch withdrawn goes stale"
+    key = "zk2/lab/candidate/beacon.v2/state/status"
+    if reader == "py":
+        s3 = subscriber(bus.s_session, ["state/status"], service="candidate", contract=GOVERNED)
+        h3 = subscriber(bus.h_session, [], service="candidate", contract=GOVERNED)
+        bus.closers += [s3, h3]
+    else:
+        zs3 = ZWatch(bus.endpoint, "lab/candidate", IFACE, "state/status", 24, contract=GOVERNED)
+        zh3 = ZWatch(bus.endpoint, "lab/candidate", fv2.PROFILE, "heartbeat/{iface}", 24, contract=GOVERNED)
+        time.sleep(1.0)
+    stop = threading.Event()
+
+    def beats() -> None:
+        while not stop.wait(0.2):
+            bus.g_session.put(beat, b"beat")  # no timestamp: R1 stamps it
+
+    threading.Thread(target=beats, daemon=True).start()
+    try:
+        oc = make_owner(impl, bus.endpoint, service="candidate", contract=GOVERNED, ahead_beat=beat, governed=True)
+        bus.closers.append(oc)
+        first = oc.try_put("status", b"up")
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline and not oc.ahead():
+            time.sleep(0.1)
+        guard = oc.ahead()
+        held_at = time.monotonic_ns()
+        time.sleep(1.2)
+        before_second = time.monotonic_ns()
+        second = oc.try_put("status", b"still up")
+        second_at = time.monotonic_ns()
+        time.sleep(2.5)
+        oc.clock_right()
+        right_at = time.monotonic_ns()
+        # "once its guard releases": the first heartbeat whose time is known
+        # (zk2py's reader), else the owner's own word; then 2.5 s more.
+        released_at = None
+        deadline = time.monotonic() + 6.0
+        while time.monotonic() < deadline and released_at is None:
+            if reader == "py":
+                known = [x.arrival_ns for x in h3.answers(right_at) if x.value is not None
+                         and x.value["time"] is not None]
+                released_at = known[0] if known else None
+            elif impl == "py" and not oc.ahead():
+                released_at = time.monotonic_ns()
+            time.sleep(0.05)
+        if released_at is None:
+            released_at = time.monotonic_ns()
+        time.sleep(2.5)
+        third_at = time.monotonic_ns()
+        third = oc.try_put("status", b"still up")
+        time.sleep(1.5)
+        end = time.monotonic_ns()
+    finally:
+        stop.set()
+    refused = second is not None and second.startswith("refused")
+    report.check(pairing, sec, "step 6: the candidate's guard holds; its first put went on, and the second is "
+                               "refused, since it would carry a Zenoh timestamp (core §4.3 \"A candidate's\")",
+                 guard and first is not None and first.startswith("put") and refused,
+                 f"guard {guard}, first {first!r}, second {second!r}")
+    if reader == "py":
+        puts = [x for x in s3.samples if x[1] == key and x[2] == "put"]
+        before = [x for x in puts if x[0] <= before_second]
+        stamp1 = before[-1][3] if before else None
+        d1 = None if stamp1 is None else f"{heartbeat.digest([(key, stamp1.width, stamp1.run, stamp1.seq)]):08x}"
+        after3 = [x for x in puts if x[0] >= third_at]
+        stamp3 = after3[0][3] if after3 else None
+        d3 = None if stamp3 is None else f"{heartbeat.digest([(key, stamp3.width, stamp3.run, stamp3.seq)]):08x}"
+
+        def bodies(lo: int, hi: int) -> list[dict[str, Any]]:
+            return [x.value for x in h3.answers(lo) if x.value is not None and x.arrival_ns <= hi
+                    and "state/status" in x.value["sections"]]
+
+        pre = bodies(held_at + 300_000_000, before_second)
+        mid = bodies(second_at + 1_100_000_000, right_at)
+        post = bodies(released_at, third_at)
+        late = bodies(third_at + 1_100_000_000, end)
+        sec_of = lambda b: b["sections"]["state/status"]  # noqa: E731
+        report.check(pairing, sec, "step 6: before the second put, its heartbeats vouch for status, the time unknown",
+                     bool(pre) and all(b["time"] is None and sec_of(b)["vouched"] is True for b in pre),
+                     f"{len(pre)} heartbeats: {pre[-1] if pre else None}")
+        report.check(pairing, sec, "step 6: from the second put on, each heartbeat vouches for nothing, its time "
+                                   "unknown, status's digest still over the first put's stamp",
+                     bool(mid) and all(b["time"] is None and sec_of(b)["vouched"] is False
+                                       and sec_of(b)["digest"] == d1 for b in mid),
+                     f"{len(mid)} heartbeats: {mid[-1] if mid else None} (want digest {d1})")
+        report.check(pairing, sec, "step 6: after the release the time is known, and the bit stays clear",
+                     bool(post) and all(b["time"] is not None and sec_of(b)["vouched"] is False for b in post),
+                     f"{len(post)} heartbeats: {post[-1] if post else None}")
+        report.check(pairing, sec, "step 6: the third put goes on, and a heartbeat after it vouches for status, its "
+                                   "digest over that put's stamp",
+                     third is not None and third.startswith("put") and bool(late)
+                     and all(sec_of(b)["vouched"] is True and sec_of(b)["digest"] == d3 for b in late),
+                     f"third {third!r}; {len(late)} heartbeats: {late[-1] if late else None} (want digest {d3})")
+    else:
+        zs3.wait()
+        zh3.wait()
+        conf = zs3.confirmations(key)
+        pre = [t for t in conf if held_at + 300_000_000 <= t <= before_second]
+        mid = [t for t in conf if second_at + 1_100_000_000 <= t <= third_at]
+        late = [t for t in conf if t >= third_at + 1_100_000_000]
+        n_mid = len([1 for t, _ in zh3.rows if second_at + 1_100_000_000 <= t <= third_at])
+        report.check(pairing, sec, "step 6: zenctl watch: confirmation rows of status before the second put, none "
+                                   "while heartbeats go on from it to the third put (its bit clear), and again "
+                                   "after the third (zenctl shows no body, so no time)",
+                     bool(pre) and not mid and n_mid >= 2 and bool(late) and third is not None
+                     and third.startswith("put"),
+                     f"{len(pre)} before, {len(mid)} between ({n_mid} heartbeat rows), {len(late)} after; third "
+                     f"{third!r}")
 
 
 # -- §3 ---------------------------------------------------------------------------------------
