@@ -1,0 +1,1356 @@
+{
+  "description": "config.v2 §2.15: what the record, a reply, the change event, the error form and a log line carry for a sensitive value, on the test contract `contracts/rfcfg.v1.toml`, whose group sim holds pin, sensitive, beside attempts. Written by an independent reading of the text (Python, standard library), checked, never blessed. A case gives the owner's setup as lifecycle.json writes it, and one call on sim: `fields`, a SetSim or a Control, `hex` its payload, and device_words, what the device says refusing it (or null). expect.sim is sim's part of the Record as the reply, or else the owner's state, carries it: each field of the Record whose name begins `sim__`, by its JSON reading (pin has a source and nothing more: no differs and no value field exist); expect.reply the reply as lifecycle.json writes one; expect.edits the change event's edits, or null when there is no event; expect.log the request as the owner logs it, its JSON reading with each sensitive value written \"<redacted>\". `same_bytes` pairs two setting different PINs, whose records are equal byte for byte: no bit of the record depends on the value.",
+  "contract": "contracts/rfcfg.v1.toml",
+  "cases": [
+    {
+      "note": "a sensitive value set: its source moves to runtime, and no bit carries the value; the edit is redacted; the log writes <redacted>",
+      "setup": {
+        "service": "lab/rf0",
+        "epoch": 0,
+        "runs": [
+          {
+            "width": 16,
+            "run": 4660
+          },
+          {
+            "width": 16,
+            "run": 4661
+          },
+          {
+            "width": 32,
+            "run": 2671520369
+          }
+        ],
+        "counters": [
+          40961,
+          15367,
+          256
+        ],
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "value": 10000,
+              "source": "file"
+            },
+            "period_s": {
+              "value": 3600,
+              "source": "default"
+            },
+            "enforce": {
+              "value": true,
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "value": 868100000,
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "value": 1,
+              "source": "default"
+            }
+          },
+          "sim": {
+            "pin": {
+              "value": 0,
+              "source": "file"
+            },
+            "attempts": {
+              "value": 3,
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "value": 100,
+              "source": "default"
+            }
+          },
+          "modulation": {
+            "spreading_factor": {
+              "value": 9,
+              "source": "file"
+            }
+          }
+        },
+        "overlay": {},
+        "floor_s": 10,
+        "apply_after_ms": 1000,
+        "persist": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "before": [],
+      "op": "set",
+      "fields": {
+        "pin": 1234,
+        "dry_run": false
+      },
+      "hex": "4789a400",
+      "device_words": null,
+      "expect": {
+        "sim": {
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": true,
+          "sim__pin__source": "runtime",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3
+        },
+        "reply": {
+          "value": {
+            "run": 4660,
+            "seq": 1,
+            "record": {
+              "instance": 4660,
+              "revision": 1,
+              "floor_s": 10,
+              "would_be": false,
+              "pending": null,
+              "last": {
+                "token": 305438721,
+                "groups": [
+                  "sim"
+                ]
+              },
+              "desired": null,
+              "groups": {
+                "duty": {
+                  "writable": true,
+                  "params": {
+                    "fraction_ppm": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 10000
+                    },
+                    "period_s": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 3600
+                    },
+                    "enforce": {
+                      "source": "default",
+                      "differs": false,
+                      "value": true
+                    }
+                  }
+                },
+                "radio": {
+                  "writable": true,
+                  "params": {
+                    "frequency_hz": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 868100000
+                    }
+                  }
+                },
+                "link": {
+                  "writable": true,
+                  "params": {
+                    "net_id": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 1
+                    }
+                  }
+                },
+                "sim": {
+                  "writable": true,
+                  "params": {
+                    "pin": {
+                      "source": "runtime"
+                    },
+                    "attempts": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 3
+                    }
+                  }
+                },
+                "queue": {
+                  "writable": false,
+                  "params": {
+                    "tx_queue_len": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 100
+                    }
+                  }
+                },
+                "modulation": {
+                  "params": {
+                    "spreading_factor": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 9
+                    }
+                  }
+                }
+              }
+            },
+            "hex": "4912340000010000123400000001000908000091a5000825409c4220e0f8e56acd56209101be262231d500"
+          }
+        },
+        "edits": [
+          {
+            "group": "sim",
+            "parameter": "pin",
+            "redacted": true
+          }
+        ],
+        "log": {
+          "pin": "<redacted>",
+          "dry_run": false
+        }
+      }
+    },
+    {
+      "note": "a sensitive and a plain value in one set: the plain edit carries old and new",
+      "setup": {
+        "service": "lab/rf0",
+        "epoch": 0,
+        "runs": [
+          {
+            "width": 16,
+            "run": 4660
+          },
+          {
+            "width": 16,
+            "run": 4661
+          },
+          {
+            "width": 32,
+            "run": 2671520369
+          }
+        ],
+        "counters": [
+          40961,
+          15367,
+          256
+        ],
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "value": 10000,
+              "source": "file"
+            },
+            "period_s": {
+              "value": 3600,
+              "source": "default"
+            },
+            "enforce": {
+              "value": true,
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "value": 868100000,
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "value": 1,
+              "source": "default"
+            }
+          },
+          "sim": {
+            "pin": {
+              "value": 0,
+              "source": "file"
+            },
+            "attempts": {
+              "value": 3,
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "value": 100,
+              "source": "default"
+            }
+          },
+          "modulation": {
+            "spreading_factor": {
+              "value": 9,
+              "source": "file"
+            }
+          }
+        },
+        "overlay": {},
+        "floor_s": 10,
+        "apply_after_ms": 1000,
+        "persist": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "before": [],
+      "op": "set",
+      "fields": {
+        "pin": 1234,
+        "attempts": 5,
+        "dry_run": false
+      },
+      "hex": "4789a55000",
+      "device_words": null,
+      "expect": {
+        "sim": {
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": true,
+          "sim__pin__source": "runtime",
+          "sim__attempts__source": "runtime",
+          "sim__attempts__differs": true,
+          "sim__attempts": 5
+        },
+        "reply": {
+          "value": {
+            "run": 4660,
+            "seq": 1,
+            "record": {
+              "instance": 4660,
+              "revision": 1,
+              "floor_s": 10,
+              "would_be": false,
+              "pending": null,
+              "last": {
+                "token": 305438721,
+                "groups": [
+                  "sim"
+                ]
+              },
+              "desired": null,
+              "groups": {
+                "duty": {
+                  "writable": true,
+                  "params": {
+                    "fraction_ppm": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 10000
+                    },
+                    "period_s": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 3600
+                    },
+                    "enforce": {
+                      "source": "default",
+                      "differs": false,
+                      "value": true
+                    }
+                  }
+                },
+                "radio": {
+                  "writable": true,
+                  "params": {
+                    "frequency_hz": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 868100000
+                    }
+                  }
+                },
+                "link": {
+                  "writable": true,
+                  "params": {
+                    "net_id": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 1
+                    }
+                  }
+                },
+                "sim": {
+                  "writable": true,
+                  "params": {
+                    "pin": {
+                      "source": "runtime"
+                    },
+                    "attempts": {
+                      "source": "runtime",
+                      "differs": true,
+                      "value": 5
+                    }
+                  }
+                },
+                "queue": {
+                  "writable": false,
+                  "params": {
+                    "tx_queue_len": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 100
+                    }
+                  }
+                },
+                "modulation": {
+                  "params": {
+                    "spreading_factor": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 9
+                    }
+                  }
+                }
+              }
+            },
+            "hex": "4912340000010000123400000001000908000091a5000825409c4220e0f8e56acd56209101bfea2231d500"
+          }
+        },
+        "edits": [
+          {
+            "group": "sim",
+            "parameter": "pin",
+            "redacted": true
+          },
+          {
+            "group": "sim",
+            "parameter": "attempts",
+            "old": 3,
+            "new": 5
+          }
+        ],
+        "log": {
+          "pin": "<redacted>",
+          "attempts": 5,
+          "dry_run": false
+        }
+      }
+    },
+    {
+      "note": "a dry run of a sensitive value: the would-be record shows the source alone, and no event",
+      "setup": {
+        "service": "lab/rf0",
+        "epoch": 0,
+        "runs": [
+          {
+            "width": 16,
+            "run": 4660
+          },
+          {
+            "width": 16,
+            "run": 4661
+          },
+          {
+            "width": 32,
+            "run": 2671520369
+          }
+        ],
+        "counters": [
+          40961,
+          15367,
+          256
+        ],
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "value": 10000,
+              "source": "file"
+            },
+            "period_s": {
+              "value": 3600,
+              "source": "default"
+            },
+            "enforce": {
+              "value": true,
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "value": 868100000,
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "value": 1,
+              "source": "default"
+            }
+          },
+          "sim": {
+            "pin": {
+              "value": 0,
+              "source": "file"
+            },
+            "attempts": {
+              "value": 3,
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "value": 100,
+              "source": "default"
+            }
+          },
+          "modulation": {
+            "spreading_factor": {
+              "value": 9,
+              "source": "file"
+            }
+          }
+        },
+        "overlay": {},
+        "floor_s": 10,
+        "apply_after_ms": 1000,
+        "persist": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "before": [],
+      "op": "set",
+      "fields": {
+        "pin": 1234,
+        "dry_run": true
+      },
+      "hex": "4789a408",
+      "device_words": null,
+      "expect": {
+        "sim": {
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "runtime",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3
+        },
+        "reply": {
+          "value": {
+            "run": 4660,
+            "seq": 0,
+            "record": {
+              "instance": 4660,
+              "revision": 0,
+              "floor_s": 10,
+              "would_be": true,
+              "pending": null,
+              "last": null,
+              "desired": null,
+              "groups": {
+                "duty": {
+                  "writable": true,
+                  "params": {
+                    "fraction_ppm": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 10000
+                    },
+                    "period_s": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 3600
+                    },
+                    "enforce": {
+                      "source": "default",
+                      "differs": false,
+                      "value": true
+                    }
+                  }
+                },
+                "radio": {
+                  "writable": true,
+                  "params": {
+                    "frequency_hz": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 868100000
+                    }
+                  }
+                },
+                "link": {
+                  "writable": true,
+                  "params": {
+                    "net_id": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 1
+                    }
+                  }
+                },
+                "sim": {
+                  "writable": true,
+                  "params": {
+                    "pin": {
+                      "source": "runtime"
+                    },
+                    "attempts": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 3
+                    }
+                  }
+                },
+                "queue": {
+                  "writable": false,
+                  "params": {
+                    "tx_queue_len": {
+                      "source": "default",
+                      "differs": false,
+                      "value": 100
+                    }
+                  }
+                },
+                "modulation": {
+                  "params": {
+                    "spreading_factor": {
+                      "source": "file",
+                      "differs": false,
+                      "value": 9
+                    }
+                  }
+                }
+              }
+            },
+            "hex": "491234000000000012340000000000098025409c4220e0f8e56acd562091019e262231d500"
+          }
+        },
+        "edits": null,
+        "log": {
+          "pin": "<redacted>",
+          "dry_run": true
+        }
+      }
+    },
+    {
+      "note": "the device refuses a change carrying a sensitive value, in words that repeat it: no message",
+      "setup": {
+        "service": "lab/rf0",
+        "epoch": 0,
+        "runs": [
+          {
+            "width": 16,
+            "run": 4660
+          },
+          {
+            "width": 16,
+            "run": 4661
+          },
+          {
+            "width": 32,
+            "run": 2671520369
+          }
+        ],
+        "counters": [
+          40961,
+          15367,
+          256
+        ],
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "value": 10000,
+              "source": "file"
+            },
+            "period_s": {
+              "value": 3600,
+              "source": "default"
+            },
+            "enforce": {
+              "value": true,
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "value": 868100000,
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "value": 1,
+              "source": "default"
+            }
+          },
+          "sim": {
+            "pin": {
+              "value": 0,
+              "source": "file"
+            },
+            "attempts": {
+              "value": 3,
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "value": 100,
+              "source": "default"
+            }
+          },
+          "modulation": {
+            "spreading_factor": {
+              "value": 9,
+              "source": "file"
+            }
+          }
+        },
+        "overlay": {},
+        "floor_s": 10,
+        "apply_after_ms": 1000,
+        "persist": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "before": [],
+      "op": "set",
+      "fields": {
+        "pin": 1234,
+        "attempts": 5,
+        "dry_run": false
+      },
+      "hex": "4789a55000",
+      "device_words": "PIN 1234 rejected by the SIM",
+      "expect": {
+        "sim": {
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3
+        },
+        "reply": {
+          "error": {
+            "run": 4660,
+            "seq": 0,
+            "code": "app",
+            "cause": null,
+            "app": "device_refused",
+            "message": null,
+            "hex": "6d1234000000e400"
+          }
+        },
+        "edits": null,
+        "log": {
+          "pin": "<redacted>",
+          "attempts": 5,
+          "dry_run": false
+        }
+      }
+    },
+    {
+      "note": "the device refuses a change of attempts alone: its words are the message",
+      "setup": {
+        "service": "lab/rf0",
+        "epoch": 0,
+        "runs": [
+          {
+            "width": 16,
+            "run": 4660
+          },
+          {
+            "width": 16,
+            "run": 4661
+          },
+          {
+            "width": 32,
+            "run": 2671520369
+          }
+        ],
+        "counters": [
+          40961,
+          15367,
+          256
+        ],
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "value": 10000,
+              "source": "file"
+            },
+            "period_s": {
+              "value": 3600,
+              "source": "default"
+            },
+            "enforce": {
+              "value": true,
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "value": 868100000,
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "value": 1,
+              "source": "default"
+            }
+          },
+          "sim": {
+            "pin": {
+              "value": 0,
+              "source": "file"
+            },
+            "attempts": {
+              "value": 3,
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "value": 100,
+              "source": "default"
+            }
+          },
+          "modulation": {
+            "spreading_factor": {
+              "value": 9,
+              "source": "file"
+            }
+          }
+        },
+        "overlay": {},
+        "floor_s": 10,
+        "apply_after_ms": 1000,
+        "persist": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "before": [],
+      "op": "set",
+      "fields": {
+        "attempts": 9,
+        "dry_run": false
+      },
+      "hex": "476400",
+      "device_words": "attempts above the SIM's limit",
+      "expect": {
+        "sim": {
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3
+        },
+        "reply": {
+          "error": {
+            "run": 4660,
+            "seq": 0,
+            "code": "app",
+            "cause": null,
+            "app": "device_refused",
+            "message": "attempts above the SIM's limit",
+            "hex": "6d1234000000e61e617474656d7074732061626f7665207468652053494d2773206c696d697400"
+          }
+        },
+        "edits": null,
+        "log": {
+          "attempts": 9,
+          "dry_run": false
+        }
+      }
+    },
+    {
+      "note": "persist after a sensitive change: forbidden, and the value is never written to the persisted layer",
+      "setup": {
+        "service": "lab/rf0",
+        "epoch": 0,
+        "runs": [
+          {
+            "width": 16,
+            "run": 4660
+          },
+          {
+            "width": 16,
+            "run": 4661
+          },
+          {
+            "width": 32,
+            "run": 2671520369
+          }
+        ],
+        "counters": [
+          40961,
+          15367,
+          256
+        ],
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "value": 10000,
+              "source": "file"
+            },
+            "period_s": {
+              "value": 3600,
+              "source": "default"
+            },
+            "enforce": {
+              "value": true,
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "value": 868100000,
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "value": 1,
+              "source": "default"
+            }
+          },
+          "sim": {
+            "pin": {
+              "value": 0,
+              "source": "file"
+            },
+            "attempts": {
+              "value": 3,
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "value": 100,
+              "source": "default"
+            }
+          },
+          "modulation": {
+            "spreading_factor": {
+              "value": 9,
+              "source": "file"
+            }
+          }
+        },
+        "overlay": {},
+        "floor_s": 10,
+        "apply_after_ms": 1000,
+        "persist": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "before": [
+        {
+          "t": 0,
+          "do": "set",
+          "group": "sim",
+          "fields": {
+            "pin": 1234,
+            "dry_run": false
+          },
+          "hex": "4789a400",
+          "expect": {
+            "acts": [
+              "apply"
+            ],
+            "puts": [
+              {
+                "run": 4660,
+                "seq": 1,
+                "record": {
+                  "instance": 4660,
+                  "revision": 1,
+                  "floor_s": 10,
+                  "would_be": false,
+                  "pending": null,
+                  "last": {
+                    "token": 305438721,
+                    "groups": [
+                      "sim"
+                    ]
+                  },
+                  "desired": null,
+                  "groups": {
+                    "duty": {
+                      "writable": true,
+                      "params": {
+                        "fraction_ppm": {
+                          "source": "file",
+                          "differs": false,
+                          "value": 10000
+                        },
+                        "period_s": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 3600
+                        },
+                        "enforce": {
+                          "source": "default",
+                          "differs": false,
+                          "value": true
+                        }
+                      }
+                    },
+                    "radio": {
+                      "writable": true,
+                      "params": {
+                        "frequency_hz": {
+                          "source": "file",
+                          "differs": false,
+                          "value": 868100000
+                        }
+                      }
+                    },
+                    "link": {
+                      "writable": true,
+                      "params": {
+                        "net_id": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 1
+                        }
+                      }
+                    },
+                    "sim": {
+                      "writable": true,
+                      "params": {
+                        "pin": {
+                          "source": "runtime"
+                        },
+                        "attempts": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 3
+                        }
+                      }
+                    },
+                    "queue": {
+                      "writable": false,
+                      "params": {
+                        "tx_queue_len": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 100
+                        }
+                      }
+                    },
+                    "modulation": {
+                      "params": {
+                        "spreading_factor": {
+                          "source": "file",
+                          "differs": false,
+                          "value": 9
+                        }
+                      }
+                    }
+                  }
+                },
+                "hex": "0912340000010000123400000001000908000091a5000825409c4220e0f8e56acd56209101be262231d500"
+              }
+            ],
+            "reply": {
+              "value": {
+                "run": 4660,
+                "seq": 1,
+                "record": {
+                  "instance": 4660,
+                  "revision": 1,
+                  "floor_s": 10,
+                  "would_be": false,
+                  "pending": null,
+                  "last": {
+                    "token": 305438721,
+                    "groups": [
+                      "sim"
+                    ]
+                  },
+                  "desired": null,
+                  "groups": {
+                    "duty": {
+                      "writable": true,
+                      "params": {
+                        "fraction_ppm": {
+                          "source": "file",
+                          "differs": false,
+                          "value": 10000
+                        },
+                        "period_s": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 3600
+                        },
+                        "enforce": {
+                          "source": "default",
+                          "differs": false,
+                          "value": true
+                        }
+                      }
+                    },
+                    "radio": {
+                      "writable": true,
+                      "params": {
+                        "frequency_hz": {
+                          "source": "file",
+                          "differs": false,
+                          "value": 868100000
+                        }
+                      }
+                    },
+                    "link": {
+                      "writable": true,
+                      "params": {
+                        "net_id": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 1
+                        }
+                      }
+                    },
+                    "sim": {
+                      "writable": true,
+                      "params": {
+                        "pin": {
+                          "source": "runtime"
+                        },
+                        "attempts": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 3
+                        }
+                      }
+                    },
+                    "queue": {
+                      "writable": false,
+                      "params": {
+                        "tx_queue_len": {
+                          "source": "default",
+                          "differs": false,
+                          "value": 100
+                        }
+                      }
+                    },
+                    "modulation": {
+                      "params": {
+                        "spreading_factor": {
+                          "source": "file",
+                          "differs": false,
+                          "value": 9
+                        }
+                      }
+                    }
+                  }
+                },
+                "hex": "4912340000010000123400000001000908000091a5000825409c4220e0f8e56acd56209101be262231d500"
+              }
+            },
+            "events": [
+              {
+                "run": 4660,
+                "seq": 2,
+                "event": {
+                  "service": "lab/rf0",
+                  "instance": 4660,
+                  "revision": 1,
+                  "token": 305438721,
+                  "outcome": "applied",
+                  "edits": [
+                    {
+                      "group": "sim",
+                      "parameter": "pin",
+                      "redacted": true
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "op": "persist",
+      "fields": {
+        "token": 305438721
+      },
+      "hex": "4800001234a00100",
+      "device_words": null,
+      "expect": {
+        "sim": {
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": true,
+          "sim__pin__source": "runtime",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3
+        },
+        "reply": {
+          "error": {
+            "run": 4660,
+            "seq": 2,
+            "code": "forbidden",
+            "cause": null,
+            "app": null,
+            "message": null,
+            "hex": "6d123400000260"
+          }
+        },
+        "edits": null,
+        "log": {
+          "token": 305438721
+        }
+      }
+    },
+    {
+      "note": "a PIN past its maximum is an unused code: invalid_request, and the error names no value, since it carries no message",
+      "setup": {
+        "service": "lab/rf0",
+        "epoch": 0,
+        "runs": [
+          {
+            "width": 16,
+            "run": 4660
+          },
+          {
+            "width": 16,
+            "run": 4661
+          },
+          {
+            "width": 32,
+            "run": 2671520369
+          }
+        ],
+        "counters": [
+          40961,
+          15367,
+          256
+        ],
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "value": 10000,
+              "source": "file"
+            },
+            "period_s": {
+              "value": 3600,
+              "source": "default"
+            },
+            "enforce": {
+              "value": true,
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "value": 868100000,
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "value": 1,
+              "source": "default"
+            }
+          },
+          "sim": {
+            "pin": {
+              "value": 0,
+              "source": "file"
+            },
+            "attempts": {
+              "value": 3,
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "value": 100,
+              "source": "default"
+            }
+          },
+          "modulation": {
+            "spreading_factor": {
+              "value": 9,
+              "source": "file"
+            }
+          }
+        },
+        "overlay": {},
+        "floor_s": 10,
+        "apply_after_ms": 1000,
+        "persist": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "before": [],
+      "op": "set",
+      "fields": null,
+      "hex": "47fffe00",
+      "device_words": null,
+      "expect": {
+        "sim": {
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3
+        },
+        "reply": {
+          "error": {
+            "run": 4660,
+            "seq": 0,
+            "code": "invalid_request",
+            "cause": null,
+            "app": null,
+            "message": null,
+            "hex": "6d123400000000"
+          }
+        },
+        "edits": null,
+        "log": null
+      }
+    }
+  ],
+  "same_bytes": [
+    {
+      "fields": {
+        "pin": 1234,
+        "dry_run": false
+      },
+      "hex": "0912340000010000123400000001000908000091a5000825409c4220e0f8e56acd56209101be262231d500"
+    },
+    {
+      "fields": {
+        "pin": 9999,
+        "dry_run": false
+      },
+      "hex": "0912340000010000123400000001000908000091a5000825409c4220e0f8e56acd56209101be262231d500"
+    }
+  ]
+}

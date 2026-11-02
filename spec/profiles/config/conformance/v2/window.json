@@ -1,0 +1,209 @@
+{
+  "description": "config.v2 §2.8: a set's or an extend's confirm_s, the owner's floor, the instant the owner received the call and the deployment epoch -> the window, the deadline and its code; and a reach set's apply_at as the device states it -> the apply_at the owner writes and its code. Written by an independent reading of the text (Python, standard library), checked, never blessed. confirm_s and floor_s are whole seconds from 1 to 65535; received and device_apply_at are milliseconds since the Unix epoch on the owner's clock; epoch is E in seconds. expect.window_s is max(confirm_s, floor_s); expect.deadline is received plus window_s seconds, rounded up to the next whole second when it falls between two, so a window is never shorter than asked; expect.deadline_code is the Record's time field, (deadline - 1000 E) / 1000 (core §7.6); expect.apply_at and apply_at_code round the device's instant up the same way. The owner acts at the instant it states: the undo at deadline, the apply at apply_at.",
+  "cases": [
+    {
+      "note": "the window asked for, above the floor, received on a second",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1762000000000,
+      "epoch": 0,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1762000120000,
+        "deadline_code": 1762000120
+      }
+    },
+    {
+      "note": "received 300 ms into a second: the deadline rounded up, 120.7 s later",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1762000000300,
+      "epoch": 0,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1762000121000,
+        "deadline_code": 1762000121
+      }
+    },
+    {
+      "note": "received 1 ms into a second: 120.999 s, never 119.999",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1762000000001,
+      "epoch": 0,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1762000121000,
+        "deadline_code": 1762000121
+      }
+    },
+    {
+      "note": "received 999 ms into a second: rounded up by 1 ms",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1762000000999,
+      "epoch": 0,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1762000121000,
+        "deadline_code": 1762000121
+      }
+    },
+    {
+      "note": "below the floor: raised to it",
+      "op": "set",
+      "confirm_s": 5,
+      "floor_s": 10,
+      "received": 1762000000000,
+      "epoch": 0,
+      "expect": {
+        "window_s": 10,
+        "deadline": 1762000010000,
+        "deadline_code": 1762000010
+      }
+    },
+    {
+      "note": "equal to the floor",
+      "op": "set",
+      "confirm_s": 10,
+      "floor_s": 10,
+      "received": 1762000000000,
+      "epoch": 0,
+      "expect": {
+        "window_s": 10,
+        "deadline": 1762000010000,
+        "deadline_code": 1762000010
+      }
+    },
+    {
+      "note": "the largest window",
+      "op": "set",
+      "confirm_s": 65535,
+      "floor_s": 10,
+      "received": 1762000000000,
+      "epoch": 0,
+      "expect": {
+        "window_s": 65535,
+        "deadline": 1762065535000,
+        "deadline_code": 1762065535
+      }
+    },
+    {
+      "note": "the largest floor, a confirm_s of 1",
+      "op": "set",
+      "confirm_s": 1,
+      "floor_s": 65535,
+      "received": 1762000000500,
+      "epoch": 0,
+      "expect": {
+        "window_s": 65535,
+        "deadline": 1762065536000,
+        "deadline_code": 1762065536
+      }
+    },
+    {
+      "note": "a floor of 1 s",
+      "op": "set",
+      "confirm_s": 1,
+      "floor_s": 1,
+      "received": 1762000000001,
+      "epoch": 0,
+      "expect": {
+        "window_s": 1,
+        "deadline": 1762000002000,
+        "deadline_code": 1762000002
+      }
+    },
+    {
+      "note": "an extend: the same rule from the extend's receipt",
+      "op": "extend",
+      "confirm_s": 60,
+      "floor_s": 10,
+      "received": 1762000020250,
+      "epoch": 0,
+      "expect": {
+        "window_s": 60,
+        "deadline": 1762000081000,
+        "deadline_code": 1762000081
+      }
+    },
+    {
+      "note": "a deployment epoch: the code counts from it",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1800000000250,
+      "epoch": 1800000000,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1800000121000,
+        "deadline_code": 121
+      }
+    },
+    {
+      "note": "the same instant with no epoch: Unix seconds",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1800000000250,
+      "epoch": 0,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1800000121000,
+        "deadline_code": 1800000121
+      }
+    },
+    {
+      "note": "a reach set: the device states apply_at 1 s after receipt, at 300 ms into a second; the owner writes the next whole second",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1762000000300,
+      "epoch": 0,
+      "device_apply_at": 1762000001300,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1762000121000,
+        "deadline_code": 1762000121,
+        "apply_at": 1762000002000,
+        "apply_at_code": 1762000002
+      }
+    },
+    {
+      "note": "apply_at on a whole second stays",
+      "op": "set",
+      "confirm_s": 120,
+      "floor_s": 10,
+      "received": 1762000000000,
+      "epoch": 0,
+      "device_apply_at": 1762000001000,
+      "expect": {
+        "window_s": 120,
+        "deadline": 1762000120000,
+        "deadline_code": 1762000120,
+        "apply_at": 1762000001000,
+        "apply_at_code": 1762000001
+      }
+    },
+    {
+      "note": "apply_at at a deployment epoch",
+      "op": "set",
+      "confirm_s": 60,
+      "floor_s": 20,
+      "received": 1800000000000,
+      "epoch": 1800000000,
+      "device_apply_at": 1800000000730,
+      "expect": {
+        "window_s": 60,
+        "deadline": 1800000060000,
+        "deadline_code": 60,
+        "apply_at": 1800000001000,
+        "apply_at_code": 1
+      }
+    }
+  ]
+}
