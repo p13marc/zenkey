@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — owners answer in the forms, callers write them (#985 C4c, for #980)
+
+Core 0.94 adopts §7.5's forms: a caller writes its request as `CH · record`,
+and an owner answers in the value and error forms, each under `zenoh/bytes`
+with its as-of mark. Observer 0.24 §7.3 reads a call's forms first.
+
+| Before | Now | Notes |
+|---|---|---|
+| `call`, `bench call`, `config set\|confirm\|…` and `check conform`'s calls send the request bare, under its type's `Encoding` | `CH · record` under `zenoh/bytes`: CH `0x40` and the `request` type's tag (a packed type's), then the record | core §5.1; an owner of the reference reads a bare request still (the bare wire, until C4d) |
+| `serve`'s mock owner replies bare and refuses in §5.2's envelope | in the value and error forms, with its instance's as-of mark: a reply's JSON gains `mark`, a refusal's `envelope.mark` | core §5.1, §5.2 |
+| `serve`'s log: the request rendered from its bytes | from the request form's record, a packed one by CH's tag; one the parse refuses undecodable, its refusal named | observer §7.3 |
+| `check conform`'s fan-out probe: its request bare | in the request form | it is refused `fanout_forbidden` before any decode, as before |
+| an `app` detail of a raw `error` type: base64 text | its bytes, shown as the type's rendering | core §5.2: a detail is its type's own bytes |
 ## Unreleased (`main`, zk2) — a fork binding's router config is read as data (#1044, #1047)
 
 A `link.v2` policy on `zm-1.10.2-r1`, zenoh-modem's zenoh fork, narrows

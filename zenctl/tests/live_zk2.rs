@@ -1486,11 +1486,19 @@ async fn a_fan_out_is_attributed_by_key_and_one_the_operation_forbids_is_never_s
         heard,
         BTreeSet::from(["h1/tc".to_owned(), "h2/tc".to_owned()])
     );
+    // The error form carries its instance's as-of mark, which attributes
+    // nothing (core §5.1): the run is a random draw.
+    let refusals = doc["replies"]["refusals"].as_array().expect("refusals");
     assert_eq!(
-        doc["replies"]["refusals"],
-        json!([{"code": "busy", "message": "a scan is running"}]),
+        refusals.len(),
+        1,
         "unattributed: a reply_err carries no key"
     );
+    assert_eq!(
+        (&refusals[0]["code"], &refusals[0]["message"]),
+        (&json!("busy"), &json!("a scan is running"))
+    );
+    assert!(refusals[0]["mark"]["run"].is_string(), "{refusals:?}");
     assert_eq!(doc["replies"]["presence"]["complete"], true);
 
     // Over a template: the parameter left out is a wildcard in the key, and
