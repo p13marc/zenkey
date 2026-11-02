@@ -232,7 +232,7 @@ access_control: {
     { id: "own-out:h-0123456789ab/tcgui-frontend", permission: "allow", flows: ["egress"],
       messages: ["query", "declare_subscriber"],
       key_exprs: ["zk2/h-0123456789ab/tcgui-frontend/**", "zk2/h-0123456789ab/tcgui-frontend/*/@stream/**", "zk2/h-0123456789ab/tcgui-frontend/*/@state/**", "zk2/h-0123456789ab/tcgui-frontend/*/@op/**", "zk2/h-0123456789ab/tcgui-frontend/@zk/**"] },
-    // consume (h-0123456789ab/tcgui-frontend): §11.1 Consume: subscribe or GET on what the bindings name, one selector per bound provider (R1), R2's parameter bindings applied
+    // consume (h-0123456789ab/tcgui-frontend): §11.1 Consume: subscribe or GET on what the bindings name, one selector per bound provider (R1), R2's parameter bindings applied, and (0.86) each bound provider's heartbeat covering a bound interface that uses freshness.v2, where the binding consumes one of its collections (§7.5, freshness.v2 §2.5)
     { id: "consume-in:h-0123456789ab/tcgui-frontend", permission: "allow", flows: ["ingress"],
       messages: ["declare_subscriber", "query"],
       key_exprs: ["zk2/*/tc/tc.netem.v1/events/**", "zk2/*/tc/tc.netem.v1/state/**", "zk2/*/tc/tc.netem.v1/stream/**", "zk2/*/tc/tc.netif.v1/state/**", "zk2/*/tc/tc.netif.v1/stream/**", "zk2/*/tc/tc.scenario.v1/state/**"] },

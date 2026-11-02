@@ -356,7 +356,7 @@ pub async fn observe(
     let t = spec.timeout;
     let declared = Instant::now();
     let window = match spec.window {
-        Some(_) => Some(Window::open(session, &address).await),
+        Some(_) => Some(Window::open(session, &address, t).await),
         None => None,
     };
     let presence = match (spec.across_face, presence) {
@@ -422,8 +422,11 @@ fn keep<T: serde::de::DeserializeOwned>(last: &Last<T>, d: &zenkey::consumer::De
 
 impl Window {
     /// Subscribes to the service's view, status and change events through
-    /// the runtime's consumer, at once and without presence (R1).
-    async fn open(session: &Session, address: &Addr) -> Result<Window, String> {
+    /// the runtime's consumer, at once and without presence (R1), then seeds
+    /// the view's and the status's views by S4's GET, as a late joiner does
+    /// (`freshness.v2` §2.5; #978's F4): the owner's next heartbeat then
+    /// confirms what was put before the window.
+    async fn open(session: &Session, address: &Addr, timeout: Duration) -> Result<Window, String> {
         let provider = address.to_string();
         let consumer = zenkey::consumer::Consumer::for_tool(
             session,
@@ -476,6 +479,12 @@ impl Window {
             })
             .await
             .map_err(|e| e.to_string())?;
+        for (r, sub) in [(config_v1::VIEW, &view), (config_v1::STATUS, &status)] {
+            let asked = Instant::now();
+            if let Ok(answer) = consumer.get_answer(r, None, timeout).await {
+                sub.seed(&answer, asked);
+            }
+        }
         Ok(Window {
             view,
             status,
