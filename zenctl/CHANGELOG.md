@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — zk2py round 101's bugs: packed requests, CBOR forms (#609, #985)
+
+Core 0.95 answers zk2py's round 101 (F-472 to F-479).
+
+| Before | Now | Notes |
+|---|---|---|
+| `call`/`bench call` of an operation whose `request` type is packed: refused, exit 2, "which no caller writes yet" | the JSON given written as core §7.6's record, in the request form under the type's tag; its `time` fields under the `--catalog`'s epoch, else 0, assumed: the report's `request_epoch_assumed` and a note say so (`bench call` on stderr) | F-477; an epoch the catalogs refuse refuses a request holding a `time` field, exit 2 |
+| `serve --reply` of a packed `response` type: refused | written as its record, under the catalog's epoch (0 without one) | its `time` fields as the mock's descriptor states |
+| a CBOR operation's value, request and `app` detail shown `undecodable` ("as json: …") where another operation shares its types | read on the operation's own `encoding` | F-478; a data sample with no `Encoding` of its own reads on its own resource's too |
+| a bare-wire envelope its decoding refuses: `malformed`, exit 1, never retried | the transport's: silence, exit 2, retried after for an idempotent operation (`--retries`) | F-473, core 0.95 §5.2 |
+
 ## Unreleased (`main`, zk2) — owners answer in the forms, callers write them (#985 C4c, for #980)
 
 Core 0.94 adopts §7.5's forms: a caller writes its request as `CH · record`,

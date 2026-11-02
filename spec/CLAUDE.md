@@ -433,7 +433,18 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   §7.3 "A call's forms first" (a refused value never sniffed);
   `envelope/calls.json` (`zenkey-model/tests/conformance.rs`'s
   `call_forms`) and `scenarios/operations.md` §9 (`zenkey/tests/
-  operations.rs`'s `s9_a_calls_forms`); 239 rules.
+  operations.rs`'s `s9_a_calls_forms`); 239 rules. Core 0.95 and
+  observer 0.25 answer zk2py round 101's F-472 to F-479, no rule
+  changed: the index reads every role a leading coordination joins ("A
+  caller or a tool", F-472, observer class 70); a bare-wire envelope its
+  decoding refuses is the transport's (F-473); §9's setup gives `h1/tc`
+  a state `status` (F-474); a value is read by §7.5's parse only under
+  `zenoh/bytes`, any other malformed unless the reader takes the bare
+  wire's MAY (F-475, observer §7.3 too); a mark of seq n is at or after
+  the write of n, and seq 0 orders before seq 1, nothing against seq 0
+  (F-476). C4d, the bare wire's removal, is not in: `telemetry.v1` §2.6
+  reads a CBOR map as §5.2's decoding reads one, and `config.v1` §2.5
+  cites the envelope.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

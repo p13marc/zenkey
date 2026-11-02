@@ -181,7 +181,12 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   service's), the typed calls and serving encoding and decoding packed
   records under it (`Sink::new_in`). `Raw::detail` and `Packed::detail`
   changed for the form (bytes; the JSON reading). `operations.rs`'s
-  `s9_a_calls_forms` is `operations.md` §9.
+  `s9_a_calls_forms` is `operations.md` §9. Core 0.95 (round 101's
+  F-473): `classify` reads a bare-wire envelope its decoding refuses as
+  the transport's, so `ErrorReply::Malformed` and `Outcome::Malformed`
+  are produced no more, until C4d removes them; the `consume` example
+  prints a value's record alone (`call_line`, F-479) and runs in process
+  as `consume::run`, which `owner_example.rs` drives.
   Everything session-free stays in `zenkey-model`, including `decode`, the
   bundle-only decoder tools use (§7.2).
   Codegen's runtime half (#611, FI): `codec` (a Rust type and how it is

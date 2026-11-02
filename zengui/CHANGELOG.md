@@ -4,6 +4,16 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — Send calls a packed operation (#609, #985)
+
+Core 0.95 answers zk2py's round 101 (F-472 to F-479).
+
+| Before | Now | Notes |
+|---|---|---|
+| Send to an operation whose `request` type is packed: refused before the call | the JSON given written as core §7.6's record, in the request form under the type's tag | F-477; its `time` fields under 0, assumed: the card does not say so yet, and the catalogs in hand are not read for it |
+| a CBOR operation's reply and `app` detail: undecodable where another operation shares its types | read on the operation's own `encoding` | F-478 |
+| a bare-wire envelope its decoding refuses: a malformed reply | the transport's, silence | F-473 |
+
 ## Unreleased (`main`, zk2) — the Send tool writes the request form (#985 C4c, for #980)
 
 Core 0.94: a caller writes its request as `CH · record` under
