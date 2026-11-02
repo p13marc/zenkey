@@ -16,16 +16,19 @@
 # `wait_before_close`: at 240 s with 4, an idle link carries 2,880
 # keep-alives a day, and at 5 % loss expects 0.36 false closes a day.
 #
-# Across the face: modem.v3's frame resources, each whole at one a minute,
-# never downsampled, and no plain stream (modem.v3 3.2 exposes only its
-# frames). frames/link's 150 s horizon is liveness evidence. frames/message
-# is SBD's, and draws `frame_unlisted` here: rf0 does not publish it. The
-# radio repairs no lost frame, so the linter warns `no_arq`.
+# Across the face: modem.v3's frames/fast, all 73 readings in one record,
+# whole at one a minute and never downsampled, a full record every 15
+# (modem.v3 3.3, #991): 177 KB a day with every reading present and moving,
+# 92 KB for rf0's own. No plain stream crosses (modem.v3 exposes only its
+# frames). Its 300 s horizon is liveness evidence. frames/slow and
+# frames/paid are LoRa SF12's and SBD's, and draw `frame_unlisted` here: rf0
+# does not publish them. The radio repairs no lost frame, so the linter
+# warns `no_arq`.
 profile  = "link.v2"
 system   = "h-3fa9c2d41b7e"
 services = ["rf0"]
 binding  = "zm-1.10.2-r1"           # the zenoh fork zenoh-modem's routers run
-catalog  = "ab76ec37"               # catalog.json, which the ground holds
+catalog  = "c6b5f7d3"               # catalog.json, which the ground holds
 
 [transport]
 lease_ms             = 240000
@@ -52,11 +55,4 @@ reply_timeout_ms = 15000            # 16 full batches take 11.8 s
 horizon_s        = 120              # one frame a minute affords a 120 s horizon
 
 [face.rf.frames]
-"modem.v3/frames/link"   = { every_s = 60 }
-"modem.v3/frames/sdu"    = { every_s = 60 }
-"modem.v3/frames/sched"  = { every_s = 60 }
-"modem.v3/frames/air"    = { every_s = 60 }
-"modem.v3/frames/layer"  = { every_s = 60 }
-"modem.v3/frames/if"     = { every_s = 60 }
-"modem.v3/frames/radio"  = { every_s = 60 }
-"modem.v3/frames/bearer" = { every_s = 60 }
+"modem.v3/frames/fast" = { every_s = 60 }
