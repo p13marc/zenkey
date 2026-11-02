@@ -404,8 +404,24 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   adds §2.16 (the router-wide `[transport]` and its lints), §2.18 (the
   generator writes it, and the far end's) and §2.19 (`check face`'s
   `transport_differs`, `wait_under_lease`, `peer_differs`,
-  `catalog_mismatch`). §2.17, §2.20 and §2.21 are left for #988's L3 and
-  L4. Appendix B's four media are `examples/zk2/link/media/*.face.toml`.
+  `catalog_mismatch`). §2.20 and §2.21 are left for #988's L4. Appendix
+  B's four media are `examples/zk2/link/media/*.face.toml`. Text 0.3
+  (#988 L3) restates `link.v1` 0.13 and adds the contract side: §2.17 (a
+  contract listing `link.v2` exposes only packed resources,
+  `packed_required`, an error, in `v2/exposure.json`; a `link.v1`
+  contract's unpacked crossing resource draws the plan's `not_packed`),
+  §2.7 (a face's `frames`, `<iface>/<template>` → `{every_s,
+  keyframe_s}`: on a face with `frames` only listed frames cross;
+  `frame_unknown`, `keyframe_unreachable` refuse, `frame_unlisted`
+  warns), §2.8 (a stream holding `timing.deadline_ms` is denied,
+  `timed_downsampled`; a listed frame's cadence is `every_s`), §2.12
+  (`horizon_s`, a budget floor: `horizon_under_face`), §2.13 (a frame's
+  counter series reads its run as epoch, `telemetry.v2`), §2.16's
+  `block_over_batch` and `keep_alive_not_suppressed`, and §2.18's
+  `catalog_missing` (a crossing revision the far side's catalog lacks).
+  `conformance/contracts/probe.v1.toml` (with `probe.json`) is the
+  contract of `v2/plan.json`'s cases and `scenarios-v2.md` §2. A code
+  keeps one severity, so the memo's one `not_packed` is two codes.
 - **`telemetry.v2`** (#983 T1, text 0.1, `experimental` until modem.v3
   uses it) sits beside `telemetry.v1` in `spec/profiles/telemetry/`:
   `v2.md`, `scenarios-v2.md`,
